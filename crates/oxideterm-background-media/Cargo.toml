@@ -8,6 +8,7 @@ version.workspace = true
 workspace = true
 
 [dependencies]
+oxideterm-image-decoder = { path = "../oxideterm-image-decoder" }
 async-channel.workspace = true
 image.workspace = true
 image-webp = "0.2.4"

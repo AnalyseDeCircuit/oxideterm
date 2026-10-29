@@ -36,25 +36,15 @@ fn terminal_image_data_from_decoded(
     decoded: DecodedPixels,
     name: Option<String>,
 ) -> TerminalImageData {
-    let rgba: Arc<[u8]> = decoded.rgba.into();
+    let rgba = decoded.rgba;
     let frames: Vec<TerminalImageFrame> = decoded
         .frames
         .into_iter()
-        .enumerate()
-        .map(|(index, frame)| {
-            // Reuse the primary static buffer for the first animation frame so
-            // the always-present still preview does not duplicate frame zero.
-            let frame_rgba = if index == 0 && frame.rgba.as_slice() == rgba.as_ref() {
-                rgba.clone()
-            } else {
-                frame.rgba.into()
-            };
-            TerminalImageFrame {
-                rgba: frame_rgba,
-                delay_ms_numerator: frame.delay_ms_numerator,
-                delay_ms_denominator: frame.delay_ms_denominator,
-                gapless: false,
-            }
+        .map(|frame| TerminalImageFrame {
+            rgba: frame.rgba,
+            delay_ms_numerator: frame.delay_ms_numerator,
+            delay_ms_denominator: frame.delay_ms_denominator,
+            gapless: false,
         })
         .collect();
     let animation = TerminalImageAnimationState {
@@ -92,6 +82,8 @@ impl GraphicsIngress {
             next_image_id: 1,
             kitty_chunks: HashMap::new(),
             kitty_images: HashMap::new(),
+            image_order: VecDeque::new(),
+            storage_bytes: 0,
             sync_buffer: None,
             sync_deadline: None,
         }
@@ -240,7 +232,16 @@ impl GraphicsIngress {
                 // Preserve protocol ordering for callers that must synchronize
                 // graphics state with terminal side effects such as screen swaps.
                 for event in result.events.drain(..) {
+                    self.account_image_event(&event);
                     emit(TerminalGraphicsSegment::Event(event));
+                }
+                // Eviction must release both the parser's animation source and the
+                // consumer's image/placements. Do this after the entire command,
+                // including its placement, so an evicted image cannot be re-placed.
+                for id in self.evict_images_over_budget() {
+                    emit(TerminalGraphicsSegment::Event(
+                        TerminalGraphicsEvent::Delete { id: Some(id) },
+                    ));
                 }
             } else if was_terminal_state
                 && !matches!(self.state, ParserState::Ground | ParserState::Esc)
@@ -262,6 +263,56 @@ impl GraphicsIngress {
         self.sync_deadline
     }
 
+    fn account_image_event(&mut self, event: &TerminalGraphicsEvent) {
+        match event {
+            TerminalGraphicsEvent::ImageReady(image)
+            | TerminalGraphicsEvent::ImageUpdated(image) => {
+                let bytes = if image.frames.is_empty() {
+                    image.rgba.len()
+                } else {
+                    image.frames.iter().map(|frame| frame.rgba.len()).sum()
+                };
+                if let Some(entry) = self.image_order.iter_mut().find(|(id, _)| *id == image.id) {
+                    self.storage_bytes -= entry.1;
+                    entry.1 = bytes;
+                    if matches!(event, TerminalGraphicsEvent::ImageReady(_)) {
+                        self.image_order.retain(|(id, _)| *id != image.id);
+                        self.image_order.push_back((image.id, bytes));
+                    }
+                } else {
+                    self.image_order.push_back((image.id, bytes));
+                }
+                self.storage_bytes += bytes;
+            }
+            TerminalGraphicsEvent::Delete { id: Some(id) } => {
+                if let Some(index) = self.image_order.iter().position(|(entry, _)| entry == id) {
+                    self.storage_bytes -= self.image_order.remove(index).unwrap().1;
+                }
+                self.kitty_images.remove(id);
+            }
+            TerminalGraphicsEvent::Delete { id: None } => {
+                self.image_order.clear();
+                self.storage_bytes = 0;
+                self.kitty_images.clear();
+            }
+            _ => {}
+        }
+    }
+
+    fn evict_images_over_budget(&mut self) -> Vec<TerminalImageId> {
+        let limit = self.options.storage_limit_mb.max(1) as usize * 1024 * 1024;
+        let mut evicted = Vec::new();
+        while self.storage_bytes > limit {
+            let Some((id, bytes)) = self.image_order.pop_front() else {
+                break;
+            };
+            self.storage_bytes -= bytes;
+            self.kitty_images.remove(&id);
+            evicted.push(id);
+        }
+        evicted
+    }
+
     fn commit_synchronized<'a>(
         &mut self,
         emit: &mut impl FnMut(TerminalGraphicsSegment<'a>),
@@ -279,7 +330,9 @@ impl GraphicsIngress {
                 TerminalGraphicsSegment::Terminal(bytes) => {
                     emit(TerminalGraphicsSegment::Terminal(bytes.into_owned().into()))
                 }
-                TerminalGraphicsSegment::Event(event) => emit(TerminalGraphicsSegment::Event(event)),
+                TerminalGraphicsSegment::Event(event) => {
+                    emit(TerminalGraphicsSegment::Event(event))
+                }
             },
             cursor,
         );
@@ -567,15 +620,23 @@ impl GraphicsIngress {
             .get("name")
             .and_then(|value| BASE64.decode(value).ok())
             .and_then(|bytes| String::from_utf8(bytes).ok());
-        let decoded = decode_image_bytes(&payload, self.options.pixel_limit)?;
+        let decoded = decode_image_bytes(
+            &payload,
+            self.options.pixel_limit,
+            self.options.storage_limit_mb,
+        )?;
         let width = params
             .get("width")
             .and_then(|value| parse_pixel_size(value, decoded.width));
         let height = params
             .get("height")
             .and_then(|value| parse_pixel_size(value, decoded.height));
-        let mut image =
-            terminal_image_data_from_decoded(self.next_id(), TerminalImageProtocol::Iterm2, decoded, name);
+        let mut image = terminal_image_data_from_decoded(
+            self.next_id(),
+            TerminalImageProtocol::Iterm2,
+            decoded,
+            name,
+        );
         image.width = width.unwrap_or(image.width);
         image.height = height.unwrap_or(image.height);
         let do_not_move = params
@@ -701,10 +762,22 @@ impl GraphicsIngress {
             &self.options.kitty_file_transmission,
         )?;
 
+        if matches!(params.get("f").map(String::as_str), Some("24" | "32")) {
+            let (width, height) = raw_dimensions(&params)?;
+            enforce_pixel_limit(width, height, self.options.pixel_limit)?;
+            enforce_storage_limit(
+                width as usize * height as usize * 4,
+                self.options.storage_limit_mb,
+            )?;
+        }
         let decoded = match params.get("f").map(String::as_str) {
             Some("24") => decode_raw_rgb(&complete, &params)?,
             Some("32") => decode_raw_rgba(&complete, &params)?,
-            _ => decode_image_bytes(&complete, self.options.pixel_limit)?,
+            _ => decode_image_bytes(
+                &complete,
+                self.options.pixel_limit,
+                self.options.storage_limit_mb,
+            )?,
         };
         if action == "f" {
             let image = self.add_kitty_animation_frame(&params, decoded)?;
@@ -750,6 +823,12 @@ impl GraphicsIngress {
             .ok_or(GraphicsError::UnsupportedImage)?;
         ensure_kitty_animation_root(image);
         let target_frame = parse_kitty_frame_index(params.get("r"));
+        if target_frame.is_none() {
+            enforce_storage_limit(
+                (image.frames.len() + 1) * image.width as usize * image.height as usize * 4,
+                self.options.storage_limit_mb,
+            )?;
+        }
         let mut canvas = if let Some(target_frame) = target_frame {
             image
                 .frames

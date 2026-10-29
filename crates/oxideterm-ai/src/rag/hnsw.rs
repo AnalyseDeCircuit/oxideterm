@@ -5,7 +5,7 @@ use crate::rag::embedding::VectorHit;
 use crate::rag::error::RagError;
 use crate::rag::types::EmbeddingRecord;
 use instant_distance::{Builder, HnswMap, Point, Search};
-use oxideterm_atomic_file::durable_write;
+use oxideterm_atomic_file::durable_write_stream;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::Read;
@@ -92,6 +92,10 @@ impl PersistedHnswIndex {
     /// Build an HNSW index from a set of embedding records.
     /// Returns `None` if the input is empty.
     pub fn build(embeddings: &[EmbeddingRecord]) -> Option<Self> {
+        Self::build_owned(embeddings.to_vec())
+    }
+
+    pub(crate) fn build_owned(embeddings: Vec<EmbeddingRecord>) -> Option<Self> {
         if embeddings.is_empty() {
             return None;
         }
@@ -101,9 +105,9 @@ impl PersistedHnswIndex {
         let model_name = first.model_name.clone();
 
         let (points, values): (Vec<CosinePoint>, Vec<String>) = embeddings
-            .iter()
+            .into_iter()
             .filter(|e| e.dimensions == dimensions)
-            .map(|e| (CosinePoint::new(e.vector.clone()), e.chunk_id.clone()))
+            .map(|e| (CosinePoint::new(e.vector), e.chunk_id))
             .unzip();
 
         if points.is_empty() {
@@ -181,13 +185,14 @@ impl PersistedHnswIndex {
 
     /// Serialize the index to a file (rmp-serde + zstd compression).
     pub fn save(&self, path: &Path) -> Result<(), RagError> {
-        let data =
-            rmp_serde::to_vec(self).map_err(|e| RagError::HnswIndex(format!("serialize: {e}")))?;
-
-        let compressed = zstd::encode_all(data.as_slice(), 3)
-            .map_err(|e| RagError::HnswIndex(format!("compress: {e}")))?;
-
-        durable_write(path, &compressed)?;
+        durable_write_stream(path, |file| {
+            let encoder = zstd::stream::write::Encoder::new(file, 3)?;
+            let mut buffered = std::io::BufWriter::with_capacity(64 * 1024, encoder);
+            rmp_serde::encode::write(&mut buffered, self).map_err(std::io::Error::other)?;
+            let encoder = buffered.into_inner().map_err(|error| error.into_error())?;
+            encoder.finish()?;
+            Ok(())
+        })?;
 
         // Set restrictive permissions on Unix
         #[cfg(unix)]
@@ -199,7 +204,7 @@ impl PersistedHnswIndex {
         info!(
             "HNSW index saved: {} points, {:.1} KB compressed",
             self.meta.point_count,
-            compressed.len() as f64 / 1024.0
+            path.metadata()?.len() as f64 / 1024.0
         );
         Ok(())
     }
@@ -225,7 +230,7 @@ impl PersistedHnswIndex {
             return HnswLoadOutcome::Missing;
         }
 
-        let mut file = match std::fs::File::open(path) {
+        let file = match std::fs::File::open(path) {
             Ok(f) => f,
             Err(e) => {
                 warn!("Failed to open HNSW index file: {}", e);
@@ -249,13 +254,7 @@ impl PersistedHnswIndex {
             }
         }
 
-        let mut compressed = Vec::new();
-        if let Err(e) = file.read_to_end(&mut compressed) {
-            warn!("Failed to read HNSW index file: {}", e);
-            return HnswLoadOutcome::Failed(format!("read: {e}"));
-        }
-
-        let data = match zstd::decode_all(compressed.as_slice()) {
+        let decoder = match zstd::stream::read::Decoder::new(file) {
             Ok(d) => d,
             Err(e) => {
                 warn!("Failed to decompress HNSW index: {}", e);
@@ -263,21 +262,19 @@ impl PersistedHnswIndex {
             }
         };
 
-        if data.len() > MAX_DECOMPRESSED_SIZE {
-            warn!(
-                "HNSW decompressed data too large: {} bytes (max {})",
-                data.len(),
-                MAX_DECOMPRESSED_SIZE
-            );
-            return HnswLoadOutcome::Failed(format!(
-                "decompressed data too large: {} bytes exceeds {}",
-                data.len(),
-                MAX_DECOMPRESSED_SIZE
-            ));
-        }
-
-        match rmp_serde::from_slice::<Self>(&data) {
+        // Bound decompression while reading, rather than after allocating the whole document.
+        let mut data = std::io::BufReader::with_capacity(
+            64 * 1024,
+            decoder.take(MAX_DECOMPRESSED_SIZE as u64 + 1),
+        );
+        match rmp_serde::from_read::<_, Self>(&mut data) {
             Ok(index) => {
+                if let Err(error) = std::io::copy(&mut data, &mut std::io::sink()) {
+                    return HnswLoadOutcome::Failed(format!("decompress: {error}"));
+                }
+                if data.get_ref().limit() == 0 {
+                    return HnswLoadOutcome::Failed("decompressed index exceeds size limit".into());
+                }
                 info!(
                     "HNSW index loaded: {} points, {} dimensions, model={}",
                     index.meta.point_count, index.meta.dimensions, index.meta.model_name
@@ -310,6 +307,92 @@ pub fn hnsw_index_path(data_dir: &Path) -> std::path::PathBuf {
 mod tests {
     use super::*;
 
+    #[test]
+    #[cfg(target_os = "macos")]
+    #[ignore = "manual HNSW serialization/load peak and latency comparison"]
+    fn index_io_memory() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicBool, AtomicUsize, Ordering},
+        };
+        #[repr(C)]
+        #[derive(Default)]
+        struct Stats {
+            blocks: u32,
+            live: usize,
+            peak: usize,
+            allocated: usize,
+        }
+        unsafe extern "C" {
+            fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut Stats);
+        }
+        fn live() -> usize {
+            let mut s = Stats::default();
+            unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut s) };
+            s.live
+        }
+        let mut random = 17u32;
+        let records = (0..1024)
+            .map(|i| {
+                make_embedding(
+                    &format!("chunk-{i}"),
+                    (0..1536)
+                        .map(|_| {
+                            random = random.wrapping_mul(1664525).wrapping_add(1013904223);
+                            (random >> 8) as f32 / 16777216.0
+                        })
+                        .collect(),
+                )
+            })
+            .collect();
+        let index = PersistedHnswIndex::build_owned(records).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        for streamed in [false, true] {
+            let path = directory.path().join(format!("index-{streamed}"));
+            let baseline = live();
+            let peak = Arc::new(AtomicUsize::new(baseline));
+            let stop = Arc::new(AtomicBool::new(false));
+            let sampler = std::thread::spawn({
+                let peak = peak.clone();
+                let stop = stop.clone();
+                move || {
+                    while !stop.load(Ordering::Acquire) {
+                        peak.fetch_max(live(), Ordering::Relaxed);
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                }
+            });
+            let start = std::time::Instant::now();
+            if streamed {
+                index.save(&path).unwrap();
+            } else {
+                let data = rmp_serde::to_vec(&index).unwrap();
+                let compressed = zstd::encode_all(data.as_slice(), 3).unwrap();
+                oxideterm_atomic_file::durable_write(&path, &compressed).unwrap();
+            }
+            let save_ms = start.elapsed().as_secs_f64() * 1000.0;
+            let start = std::time::Instant::now();
+            let loaded = if streamed {
+                PersistedHnswIndex::load(&path).unwrap()
+            } else {
+                let compressed = std::fs::read(&path).unwrap();
+                let data = zstd::decode_all(compressed.as_slice()).unwrap();
+                rmp_serde::from_slice::<PersistedHnswIndex>(&data).unwrap()
+            };
+            let load_ms = start.elapsed().as_secs_f64() * 1000.0;
+            assert_eq!(loaded.meta.point_count, 1024);
+            peak.fetch_max(live(), Ordering::Relaxed);
+            stop.store(true, Ordering::Release);
+            sampler.join().unwrap();
+            eprintln!(
+                "INDEX_IO streamed={streamed} peak_delta={} live_delta={} save_ms={save_ms:.3} load_ms={load_ms:.3}",
+                peak.load(Ordering::Relaxed).saturating_sub(baseline),
+                live().saturating_sub(baseline)
+            );
+            std::hint::black_box(loaded);
+        }
+    }
+
     fn make_embedding(chunk_id: &str, vector: Vec<f32>) -> EmbeddingRecord {
         let dimensions = vector.len();
         EmbeddingRecord {
@@ -333,8 +416,15 @@ mod tests {
         let path = dir.path().join("index.bin");
         index.save(&path).unwrap();
         let loaded = PersistedHnswIndex::load(&path).unwrap();
+        let legacy_path = dir.path().join("legacy.bin");
+        std::fs::write(
+            &legacy_path,
+            zstd::encode_all(rmp_serde::to_vec(&index).unwrap().as_slice(), 3).unwrap(),
+        )
+        .unwrap();
+        let legacy = PersistedHnswIndex::load(&legacy_path).unwrap();
         let allowed = HashSet::from(["c".to_string(), "d".to_string()]);
-        for index in [&index, &loaded] {
+        for index in [&index, &loaded, &legacy] {
             assert_eq!(index.meta.point_count, 4);
             assert_eq!(index.meta.dimensions, 3);
             let hits = index.search(&[0.9, 0.1, 0.0], 2, None);

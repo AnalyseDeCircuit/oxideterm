@@ -14,6 +14,7 @@ fn tab_scroll_viewport(scroll_handle: &ScrollHandle) -> gpui::Stateful<gpui::Div
 
 impl IdeSurface {
     fn render_editor_area(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.sync_tab_render_caches(cx);
         let editor_content = div()
             .debug_selector(|| "ide-editor-content".into())
             .relative()

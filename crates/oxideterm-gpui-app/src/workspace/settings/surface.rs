@@ -727,6 +727,7 @@ impl WorkspaceApp {
                 let ai = self.ai_entity.read(cx);
                 ai.knowledge_selected_collection_id().hash(&mut hasher);
                 ai.knowledge_document_page_index().hash(&mut hasher);
+                ai.knowledge_stats_cache_key().hash(&mut hasher);
                 ai.knowledge_embedding_config_expanded().hash(&mut hasher);
                 ai.knowledge_error().is_some().hash(&mut hasher);
                 ai.knowledge_import_progress().hash(&mut hasher);

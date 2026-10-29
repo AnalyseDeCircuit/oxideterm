@@ -43,7 +43,6 @@
       "loading": "Đang tải thống kê...",
       "idle_timeout": "Rảnh: {{min}} phút",
       "idle_timeout_never": "Rảnh: không giới hạn",
-      "capacity": "Dung lượng: {{capacity}}",
       "active": "Hoạt động",
       "idle": "Rảnh",
       "reconnecting": "Đang kết nối lại",

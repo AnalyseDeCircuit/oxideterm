@@ -169,7 +169,6 @@ impl PlatformAtlas for WgpuAtlas {
         self.0.lock().backend.resource_generation
     }
 
-    #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, key: &AtlasKey) -> bool {
         self.0.lock().contains(key)
     }

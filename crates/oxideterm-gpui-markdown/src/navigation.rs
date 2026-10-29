@@ -24,6 +24,13 @@ struct NavigationState {
 }
 
 impl MarkdownNavigation {
+    /// Drop derived target maps while preserving disclosure and return-link state.
+    pub fn release_targets(&self) {
+        let mut state = self.state.borrow_mut();
+        state.offsets = HashMap::new();
+        state.ancestors = HashMap::new();
+    }
+
     pub fn new(scroll: ScrollHandle) -> Self {
         Self {
             scroll,

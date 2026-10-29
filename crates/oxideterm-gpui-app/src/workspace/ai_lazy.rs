@@ -12,6 +12,13 @@ pub(super) struct LazyAiRagStore {
 }
 
 impl LazyAiRagStore {
+    pub(super) fn release_idle_index(&self) {
+        if let Some(store) = self.store.get()
+            && let Err(error) = store.release_idle_hnsw(std::time::Duration::from_secs(60))
+        {
+            tracing::warn!("Could not release idle knowledge index: {error}");
+        }
+    }
     pub(super) fn new(data_dir: PathBuf) -> Self {
         Self {
             data_dir,

@@ -43,7 +43,6 @@
       "loading": "통계 로딩 중...",
       "idle_timeout": "유휴: {{min}}분",
       "idle_timeout_never": "유휴: 시간 초과 없음",
-      "capacity": "용량: {{capacity}}",
       "active": "활성",
       "idle": "유휴",
       "reconnecting": "재연결 중",

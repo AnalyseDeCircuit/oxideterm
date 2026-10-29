@@ -1582,10 +1582,8 @@ pub trait PlatformAtlas {
 
     fn remove(&self, key: &AtlasKey);
 
-    #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
-    fn contains(&self, _key: &AtlasKey) -> bool {
-        false
-    }
+    /// Returns whether an allocation is resident without decoding or uploading pixels.
+    fn contains(&self, key: &AtlasKey) -> bool;
 }
 
 #[doc(hidden)]
@@ -1715,7 +1713,6 @@ impl PlatformAtlas for HeadlessAtlas {
         self.0.lock().remove(key);
     }
 
-    #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, key: &AtlasKey) -> bool {
         self.0.lock().contains(key)
     }
@@ -3158,7 +3155,7 @@ impl Image {
         let frames = match self.format {
             ImageFormat::Gif => {
                 let decoder = GifDecoder::new(Cursor::new(&self.bytes))?;
-                let mut frames = SmallVec::new();
+                let mut frames = RenderImage::new(SmallVec::<[Frame; 1]>::new());
 
                 for frame in decoder.into_frames() {
                     match frame {
@@ -3167,7 +3164,7 @@ impl Image {
                             for pixel in frame.buffer_mut().chunks_exact_mut(4) {
                                 pixel.swap(0, 2);
                             }
-                            frames.push(frame);
+                            frames.push_animation_frame(frame);
                         }
                         Err(err) => {
                             log::debug!("Skipping GIF frame due to decode error: {err}");
@@ -3175,11 +3172,11 @@ impl Image {
                     }
                 }
 
-                if frames.is_empty() {
+                if frames.frame_count() == 0 {
                     anyhow::bail!("GIF could not be decoded: all frames failed");
                 }
 
-                frames
+                return Ok(Arc::new(frames));
             }
             ImageFormat::Png => decode_static_image(&self.bytes, image::ImageFormat::Png)?,
             ImageFormat::Jpeg => decode_static_image(&self.bytes, image::ImageFormat::Jpeg)?,
@@ -3195,7 +3192,7 @@ impl Image {
             ImageFormat::Pnm => decode_static_image(&self.bytes, image::ImageFormat::Pnm)?,
         };
 
-        Ok(Arc::new(RenderImage::new(frames)))
+        Ok(Arc::new(RenderImage::from_decoded_frames(frames)?))
     }
 
     /// Get the format of the clipboard image
@@ -3276,6 +3273,41 @@ impl From<String> for ClipboardString {
 mod image_tests {
     use super::*;
     use std::sync::Arc;
+
+    #[test]
+    fn decoded_gif_keeps_frame_order_delays_and_bgra_pixels() {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = image::codecs::gif::GifEncoder::new(&mut bytes);
+            for (color, delay) in [([255, 0, 0, 255], 40), ([0, 0, 255, 255], 80)] {
+                encoder
+                    .encode_frame(Frame::from_parts(
+                        image::RgbaImage::from_pixel(256, 128, image::Rgba(color)),
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(delay, 1),
+                    ))
+                    .unwrap();
+            }
+        }
+        let image = Image::from_bytes(ImageFormat::Gif, bytes)
+            .to_image_data(SvgRenderer::new(Arc::new(())))
+            .unwrap();
+        assert_eq!(image.frame_count(), 2);
+        assert_eq!(image.delay(0), image::Delay::from_numer_denom_ms(40, 1));
+        assert_eq!(image.delay(1), image::Delay::from_numer_denom_ms(80, 1));
+        for (index, expected) in [(0, [0, 0, 255, 255]), (1, [255, 0, 0, 255])] {
+            assert_eq!(image.size(index), size(256.into(), 128.into()));
+            assert!(
+                image
+                    .frame_bytes(index)
+                    .unwrap()
+                    .unwrap()
+                    .chunks_exact(4)
+                    .all(|pixel| pixel == expected)
+            );
+        }
+    }
 
     #[test]
     fn test_image_to_image_data_applies_exif_orientation() {

@@ -108,6 +108,7 @@ impl IdeSurface {
         let was_visible = self.mount.is_visible();
         self.finish_tree_resize(cx);
         self.mount = mount;
+        self.sync_tab_render_caches(cx);
         if mount.is_visible() {
             if !was_visible {
                 // Mount visibility controls only page sampling. User operations

@@ -1,6 +1,11 @@
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
-use gpui::{AppContext, BenchAppContext, Entity, VisualContext};
+use gpui::{
+    AppContext, BenchAppContext, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    VisualContext, Window, div,
+};
 use oxideterm_gpui_terminal::{TerminalPane, TerminalPlaybackUpdateTimings, TerminalUiPreferences};
 
 const BENCHMARK_COLS: usize = 120;
@@ -9,6 +14,108 @@ const INITIAL_LINES: usize = 400;
 const OUTPUT_LINES_PER_FRAME: usize = 8;
 const IDLE_STARTUP_SETTLE: Duration = Duration::from_millis(150);
 const PROFILE_SAMPLE_CAPACITY: usize = 16_384;
+
+struct TrackedAllocator;
+static LIVE_HEAP: AtomicUsize = AtomicUsize::new(0);
+
+// Requested Rust heap only: native font objects and GPU allocations are not counted.
+unsafe impl GlobalAlloc for TrackedAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        let ptr = unsafe { System.alloc(layout) };
+        if !ptr.is_null() {
+            LIVE_HEAP.fetch_add(layout.size(), Relaxed);
+        }
+        ptr
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        LIVE_HEAP.fetch_sub(layout.size(), Relaxed);
+        unsafe { System.dealloc(ptr, layout) };
+    }
+    unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+        let result = unsafe { System.realloc(ptr, layout, size) };
+        if !result.is_null() {
+            LIVE_HEAP.fetch_sub(layout.size(), Relaxed);
+            LIVE_HEAP.fetch_add(size, Relaxed);
+        }
+        result
+    }
+}
+#[global_allocator]
+static ALLOCATOR: TrackedAllocator = TrackedAllocator;
+
+struct TerminalTabs {
+    panes: Vec<Entity<TerminalPane>>,
+    selected: usize,
+}
+
+impl TerminalTabs {
+    fn select(&mut self, selected: usize, cx: &mut Context<Self>) {
+        for (index, pane) in self.panes.iter().enumerate() {
+            pane.update(cx, |pane, cx| {
+                pane.set_render_cache_visible(index == selected, cx)
+            });
+        }
+        self.selected = selected;
+        cx.notify();
+    }
+}
+
+impl Render for TerminalTabs {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(self.panes[self.selected].clone())
+    }
+}
+
+#[gpui::bench(fps = 120)]
+fn terminal_tab_switch_frame(cx: &mut BenchAppContext<'_, '_>) {
+    let before = LIVE_HEAP.load(Relaxed);
+    let tabs = cx
+        .add_empty_window()
+        .replace_root_view(|window, cx| {
+            let panes = (0..8)
+                .map(|_| {
+                    cx.new(|cx| {
+                        let mut preferences = TerminalUiPreferences::default();
+                        preferences.cursor_blink = false;
+                        TerminalPane::new_recording_playback(
+                            BENCHMARK_COLS,
+                            BENCHMARK_ROWS,
+                            preferences,
+                            window,
+                            cx,
+                        )
+                        .unwrap()
+                    })
+                })
+                .collect();
+            TerminalTabs { panes, selected: 0 }
+        })
+        .unwrap();
+    cx.settle();
+    for index in 0..8 {
+        tabs.update(cx, |tabs, cx| tabs.select(index, cx));
+        cx.settle();
+        for chunk in 0..32 {
+            let output = terminal_corpus_from((index * 32 + chunk) * 16, 16);
+            tabs.update(cx, |tabs, cx| {
+                tabs.panes[index].update(cx, |pane, cx| pane.feed_recording_output(&output, cx));
+            });
+            cx.settle();
+        }
+    }
+    std::thread::sleep(IDLE_STARTUP_SETTLE);
+    cx.settle();
+    static REPORTED: AtomicBool = AtomicBool::new(false);
+    if !REPORTED.swap(true, Relaxed) {
+        eprintln!(
+            "8 tabs, 7 hidden: requested_heap_bytes={}",
+            LIVE_HEAP.load(Relaxed).saturating_sub(before)
+        );
+    }
+    cx.bench_renderer(tabs, |tabs, _, cx| {
+        tabs.select((tabs.selected + 1) % tabs.panes.len(), cx);
+    });
+}
 
 fn benchmark_semantic_history(
     cx: &mut BenchAppContext<'_, '_>,
@@ -606,6 +713,7 @@ fn terminal_idle_no_frames(cx: &mut BenchAppContext<'_, '_>) {
 
 gpui::bench_group!(
     terminal_render,
+    terminal_tab_switch_frame,
     semantic_history_stream_small,
     semantic_history_stream_2000,
     semantic_history_warm_small,

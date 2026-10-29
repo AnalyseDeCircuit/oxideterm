@@ -110,6 +110,61 @@ fn allocator_bytes() -> usize {
 
 #[cfg(target_os = "macos")]
 #[gpui::test]
+#[ignore = "manual long-line and wrap allocation benchmark"]
+fn editor_layout_memory(cx: &mut TestAppContext) {
+    for (name, source, wrap) in [
+        ("long-ascii", "0123456789 abcdef ".repeat(16_384), false),
+        ("long-unicode", "中文 e\u{301} 👨‍👩‍👧‍👦 ".repeat(4096), false),
+        (
+            "wrapped",
+            "let value = 42; // wrap measurement\n".repeat(16_384),
+            true,
+        ),
+    ] {
+        let baseline = allocator_bytes();
+        let started = Instant::now();
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            let mut editor = TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx);
+            // Integral test advances isolate layout costs from the no-op
+            // shaper's synthetic floating-point accumulation drift.
+            editor.apply_runtime_settings(
+                &oxideterm_theme::default_tokens(),
+                "monospace".into(),
+                10.0,
+                1.2,
+                wrap,
+                false,
+                cx,
+            );
+            editor
+        });
+        cx.simulate_resize(size(px(1000.0), px(700.0)));
+        editor.update(cx, |editor, _| editor.settings.soft_wrap = wrap);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let first_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let opened = allocator_bytes();
+        let started = Instant::now();
+        editor.update(cx, |editor, cx| editor.insert_text("z", cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let edit_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let started = Instant::now();
+        cx.simulate_resize(size(px(600.0), px(700.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let resize_ms = started.elapsed().as_secs_f64() * 1000.0;
+        eprintln!(
+            "EDITOR_LAYOUT name={name} baseline={baseline} opened={opened} final={} first_ms={first_ms:.3} edit_ms={edit_ms:.3} resize_ms={resize_ms:.3}",
+            allocator_bytes()
+        );
+        cx.update(|window, _| window.remove_window());
+        drop(editor);
+        cx.cx.update(|_| {});
+        cx.run_until_parked();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[gpui::test]
 #[ignore = "manual macOS editor live-allocation lifecycle benchmark"]
 fn editor_memory_performance(cx: &mut TestAppContext) {
     for (name, bytes, language, pattern) in [
@@ -147,15 +202,9 @@ fn editor_memory_performance(cx: &mut TestAppContext) {
             editor.set_language(language, cx);
             editor
         });
+        cx.simulate_resize(size(px(1000.0), px(700.0)));
         let draw = |cx: &mut gpui::VisualTestContext| {
-            cx.draw(
-                point(px(0.0), px(0.0)),
-                size(
-                    AvailableSpace::Definite(px(1000.0)),
-                    AvailableSpace::Definite(px(700.0)),
-                ),
-                |_, _| editor.clone().into_element(),
-            );
+            cx.update(|window, cx| window.draw(cx).clear(cx));
         };
         cx.run_until_parked();
         draw(cx);
@@ -179,6 +228,43 @@ fn editor_memory_performance(cx: &mut TestAppContext) {
         });
         draw(cx);
         let scrolled = allocator_bytes();
+        let mut scroll_frames = Vec::new();
+        for page in (0..128).chain((0..128).rev()) {
+            editor.update(cx, |editor, cx| {
+                editor.viewport.scroll_y_px = editor.metrics.line_height * (page * 48) as f32;
+                cx.notify();
+            });
+            let started = Instant::now();
+            draw(cx);
+            scroll_frames.push(started.elapsed().as_secs_f64() * 1000.0);
+        }
+        let traversed = allocator_bytes();
+        let started = Instant::now();
+        editor.update(cx, |editor, cx| {
+            editor.set_find_case_sensitive(true, cx);
+            editor.set_find_query("zzzz", cx);
+            assert_eq!(
+                editor
+                    .find_matches
+                    .iter()
+                    .map(|hit| hit.range.start.0..hit.range.end.0)
+                    .collect::<Vec<_>>(),
+                (3..32).map(|start| start..start + 4).collect::<Vec<_>>()
+            );
+        });
+        let search_ms = started.elapsed().as_secs_f64() * 1000.0;
+        draw(cx);
+        let searched = allocator_bytes();
+        editor.update(cx, |editor, cx| editor.set_find_query("", cx));
+        draw(cx);
+        let search_cleared = allocator_bytes();
+        scroll_frames.sort_by(f64::total_cmp);
+        eprintln!(
+            "EDITOR_SCROLL_SEARCH workload={name} traversed={traversed} searched={searched} search_cleared={search_cleared} search_ms={search_ms:.3} scroll_p50_ms={:.3} scroll_p95_ms={:.3} scroll_max_ms={:.3}",
+            scroll_frames[scroll_frames.len() / 2],
+            scroll_frames[scroll_frames.len() * 95 / 100],
+            scroll_frames.last().unwrap(),
+        );
         if name == "rust" {
             // Release each owner immediately before teardown to measure its retained allocation.
             editor.update(cx, |editor, _| {

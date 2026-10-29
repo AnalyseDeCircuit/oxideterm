@@ -34,7 +34,6 @@ VENDORED_WORKSPACE_PACKAGES = {
     "gpui-pre-macos",
     "gpui-pre-wgpu",
     "gpui-pre-windows",
-    "russh",
     "vte",
 }
 MICROSOFT_TERMINAL_REVISION = "1283c0f5b99a2961673249fa77c6b986efb5086c"

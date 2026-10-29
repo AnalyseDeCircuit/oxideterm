@@ -376,7 +376,7 @@ impl WorkspaceApp {
         fallback_label: String,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        gpui::img(source)
+        let image = gpui::img(source)
             .w_full()
             .h(px(456.0))
             .object_fit(ObjectFit::Contain)
@@ -392,6 +392,9 @@ impl WorkspaceApp {
                     .child(fallback_label.clone())
                     .into_any_element()
             })
+            .into_any_element();
+        gpui::image_cache(gpui::retain_recent("sftp-preview-image", 0))
+            .child(image)
             .into_any_element()
     }
 }

@@ -72,6 +72,8 @@ fn main() {
         ("full400", 400),
         ("color400", 400),
         ("alternating400", 400),
+        ("palette17", 400),
+        ("palette64", 400),
         ("unique400", 400),
         ("unicode400", 400),
     ] {
@@ -90,6 +92,9 @@ fn main() {
                         input.push_str(&format!("\x1b[38;5;{}m", 1 + (col / 40) % 8));
                     } else if name == "alternating400" {
                         input.push_str(if col % 2 == 0 { "\x1b[31m" } else { "\x1b[32m" });
+                    } else if name.starts_with("palette") {
+                        let colors = if name == "palette17" { 17 } else { 64 };
+                        input.push_str(&format!("\x1b[38;5;{}m", col % colors));
                     } else if name == "unique400" {
                         input.push_str(&format!(
                             "\x1b[38;2;{};{};{}m",

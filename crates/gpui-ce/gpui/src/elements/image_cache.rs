@@ -9,6 +9,10 @@ use refineable::Refineable;
 use smallvec::SmallVec;
 use std::{collections::HashMap, fmt, sync::Arc};
 
+mod bounded;
+pub(crate) use bounded::RecentImageCache;
+pub use bounded::retain_recent;
+
 /// An image cache element, all its child img elements will use the cache specified by this element.
 /// Note that this could as simple as passing an `Entity<T: ImageCache>`
 pub fn image_cache(image_cache_provider: impl ImageCacheProvider) -> ImageCacheElement {
@@ -29,6 +33,14 @@ pub struct AnyImageCache {
         window: &mut Window,
         cx: &mut App,
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>>,
+    sized_fn: fn(
+        &AnyEntity,
+        &Resource,
+        Option<crate::Size<crate::DevicePixels>>,
+        ImageFrameRequest,
+        &mut Window,
+        &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>>,
 }
 
 impl<I: ImageCache> From<Entity<I>> for AnyImageCache {
@@ -36,11 +48,22 @@ impl<I: ImageCache> From<Entity<I>> for AnyImageCache {
         Self {
             image_cache: image_cache.into_any(),
             load_fn: any_image_cache::load::<I>,
+            sized_fn: any_image_cache::load_at_size::<I>,
         }
     }
 }
 
 impl AnyImageCache {
+    pub(crate) fn load_at_size(
+        &self,
+        source: &Resource,
+        bounds: Option<crate::Size<crate::DevicePixels>>,
+        frame: ImageFrameRequest,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        (self.sized_fn)(&self.image_cache, source, bounds, frame, window, cx)
+    }
     /// Load an image given a resource
     /// returns the result of loading the image if it has finished loading, or None if it is still loading
     pub fn load(
@@ -55,6 +78,23 @@ impl AnyImageCache {
 
 mod any_image_cache {
     use super::*;
+
+    pub(crate) fn load_at_size<I: 'static + ImageCache>(
+        cache: &AnyEntity,
+        source: &Resource,
+        bounds: Option<crate::Size<crate::DevicePixels>>,
+        frame: ImageFrameRequest,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        cache
+            .clone()
+            .downcast::<I>()
+            .unwrap()
+            .update(cx, |cache, cx| {
+                cache.load_frame_at_size(source, bounds, frame, window, cx)
+            })
+    }
 
     pub(crate) fn load<I: 'static + ImageCache>(
         image_cache: &AnyEntity,
@@ -164,7 +204,29 @@ impl Element for ImageCacheElement {
 ///
 /// Dropping the entry cancels a pending load. Image caches must remove loaded
 /// images from windows before discarding the entry.
-pub struct ImageCacheItem(CachedLoad<Result<Arc<RenderImage>, ImageCacheError>>);
+pub struct ImageCacheItem {
+    load: ImageCacheLoad,
+    players: std::cell::RefCell<HashMap<usize, ImagePlayer>>,
+    last_player: std::cell::Cell<Option<usize>>,
+}
+
+struct ImagePlayer {
+    owner: std::sync::Weak<()>,
+    image: super::img::sized::SizedImage,
+}
+
+/// The requested frame and the lifetime of its independent playback cursor.
+#[derive(Clone, Default)]
+pub struct ImageFrameRequest {
+    /// Logical frame number, independent of decode resolution.
+    pub index: usize,
+    pub(crate) playback: Option<Arc<()>>,
+}
+
+enum ImageCacheLoad {
+    Full(CachedLoad<Result<Arc<RenderImage>, ImageCacheError>>),
+    Sized(std::cell::RefCell<super::img::sized::SizedImage>),
+}
 
 impl std::fmt::Debug for ImageCacheItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -175,26 +237,185 @@ impl std::fmt::Debug for ImageCacheItem {
 }
 
 impl ImageCacheItem {
-    /// Starts loading an image into a new cache entry.
-    pub fn new(source: &Resource, cx: &mut App) -> Self {
-        let future = AssetLogger::<ImageAssetLoader>::load(source.clone(), cx);
-        Self(CachedLoad::new(future, cx))
+    fn from_load(load: ImageCacheLoad) -> Self {
+        Self {
+            load,
+            players: Default::default(),
+            last_player: Default::default(),
+        }
     }
 
-    /// Returns the cached result without subscribing to completion notifications.
+    fn prune_players(&self) {
+        self.players
+            .borrow_mut()
+            .retain(|_, player| player.owner.strong_count() > 0);
+    }
+
+    fn base_image(&self) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        match &self.load {
+            ImageCacheLoad::Full(load) => load.get(),
+            ImageCacheLoad::Sized(load) => load.borrow().get(),
+        }
+    }
+
+    fn contains_image(&self, painted: &std::collections::HashSet<crate::ImageId>) -> bool {
+        self.prune_players();
+        let base = match &self.load {
+            ImageCacheLoad::Full(load) => load
+                .get()
+                .and_then(Result::ok)
+                .is_some_and(|image| painted.contains(&image.id)),
+            ImageCacheLoad::Sized(load) => load.borrow().contains_image(painted),
+        };
+        base || self
+            .players
+            .borrow()
+            .values()
+            .any(|player| player.image.contains_image(painted))
+    }
+
+    /// Starts loading an image into a new cache entry.
+    pub fn new(source: &Resource, cx: &mut App) -> Self {
+        Self::from_load(ImageCacheLoad::Full(CachedLoad::new(
+            AssetLogger::<ImageAssetLoader>::load(source.clone(), cx),
+            cx,
+        )))
+    }
+
+    /// Returns a cached result without subscribing to completion notifications.
     pub fn get(&self) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-        self.0.get()
+        self.prune_players();
+        let players = self.players.borrow();
+        self.last_player
+            .get()
+            .and_then(|id| players.get(&id))
+            .and_then(|player| player.image.get())
+            .or_else(|| self.base_image())
+            .or_else(|| players.values().find_map(|player| player.image.get()))
     }
 
     /// Returns the cached result or subscribes the current view to completion.
     pub fn use_image(&self, window: &Window) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-        self.0.use_by(window.current_view())
+        match &self.load {
+            ImageCacheLoad::Full(load) => load.use_by(window.current_view()),
+            ImageCacheLoad::Sized(_) => self.get(),
+        }
+    }
+
+    pub(crate) fn new_sized(source: &Resource, cx: &App) -> Self {
+        Self::from_load(ImageCacheLoad::Sized(std::cell::RefCell::new(
+            super::img::sized::SizedImage::new(source.clone(), cx),
+        )))
+    }
+
+    pub(crate) fn use_at_size(
+        &self,
+        bounds: Option<crate::Size<crate::DevicePixels>>,
+        window: &Window,
+        cx: &App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        self.use_frame_at_size(bounds, ImageFrameRequest::default(), window, cx)
+    }
+
+    fn use_frame_at_size(
+        &self,
+        bounds: Option<crate::Size<crate::DevicePixels>>,
+        frame: ImageFrameRequest,
+        window: &Window,
+        cx: &App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        self.prune_players();
+        if let ImageCacheLoad::Sized(load) = &self.load
+            && let Some(owner) = frame.playback
+        {
+            let animated = load.borrow().is_animation(window)?;
+            if animated {
+                let id = Arc::as_ptr(&owner) as usize;
+                self.last_player.set(Some(id));
+                let mut players = self.players.borrow_mut();
+                let player = players.entry(id).or_insert_with(|| ImagePlayer {
+                    owner: Arc::downgrade(&owner),
+                    image: load.borrow().fork_player(),
+                });
+                return player.image.use_image(bounds, frame.index, window, cx);
+            }
+        }
+        self.last_player.set(None);
+        match &self.load {
+            ImageCacheLoad::Full(_) => self.use_image(window),
+            ImageCacheLoad::Sized(load) => {
+                load.borrow_mut().use_image(bounds, frame.index, window, cx)
+            }
+        }
+    }
+
+    pub(crate) fn retained_bytes(&self) -> usize {
+        self.prune_players();
+        let base = match &self.load {
+            ImageCacheLoad::Full(_) => self
+                .base_image()
+                .and_then(Result::ok)
+                .map_or(0, |image| image.retained_bytes()),
+            ImageCacheLoad::Sized(load) => load.borrow().retained_bytes(),
+        };
+        // Players share the source load, so count encoded bytes once.
+        base + self
+            .players
+            .borrow()
+            .values()
+            .map(|player| player.image.image_bytes())
+            .sum::<usize>()
+    }
+
+    fn estimated_render_bytes(&self) -> usize {
+        fn cost(image: Option<Result<Arc<RenderImage>, ImageCacheError>>) -> usize {
+            image.and_then(Result::ok).map_or(0, |image| {
+                (0..image.frame_count())
+                    .map(|index| {
+                        let size = image.size(index);
+                        (size.width.0 as usize)
+                            .saturating_mul(size.height.0 as usize)
+                            .saturating_mul(4)
+                    })
+                    .sum()
+            })
+        }
+        self.prune_players();
+        cost(self.base_image())
+            + self
+                .players
+                .borrow()
+                .values()
+                .map(|player| cost(player.image.get()))
+                .sum::<usize>()
     }
 }
 
 /// An object that can handle the caching and unloading of images.
 /// Implementations of this trait should ensure that images are removed from all windows when they are no longer needed.
 pub trait ImageCache: 'static {
+    /// Request a playback frame without expanding the whole animation.
+    fn load_frame_at_size(
+        &mut self,
+        resource: &Resource,
+        bounds: Option<crate::Size<crate::DevicePixels>>,
+        _frame: ImageFrameRequest,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        self.load_at_size(resource, bounds, window, cx)
+    }
+    /// Layout passes None; painting supplies the required device-pixel dimensions.
+    /// Existing cache implementations keep their original loading behavior by default.
+    fn load_at_size(
+        &mut self,
+        resource: &Resource,
+        _bounds: Option<crate::Size<crate::DevicePixels>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        self.load(resource, window, cx)
+    }
     /// Load an image given a resource
     /// returns the result of loading the image if it has finished loading, or None if it is still loading
     fn load(
@@ -259,7 +480,11 @@ impl RetainAllImageCache {
         self.0
             .entry(hash)
             .or_insert_with(|| ImageCacheItem::new(source, cx))
-            .use_image(window)
+            .use_at_size(
+                Some(crate::size(i32::MAX.into(), i32::MAX.into())),
+                window,
+                cx,
+            )
     }
 
     /// Clear the image cache.
@@ -293,6 +518,29 @@ impl RetainAllImageCache {
 }
 
 impl ImageCache for RetainAllImageCache {
+    fn load_at_size(
+        &mut self,
+        source: &Resource,
+        bounds: Option<crate::Size<crate::DevicePixels>>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        self.load_frame_at_size(source, bounds, ImageFrameRequest::default(), window, cx)
+    }
+
+    fn load_frame_at_size(
+        &mut self,
+        source: &Resource,
+        bounds: Option<crate::Size<crate::DevicePixels>>,
+        frame: ImageFrameRequest,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
+        self.0
+            .entry(hash(source))
+            .or_insert_with(|| ImageCacheItem::new_sized(source, cx))
+            .use_frame_at_size(bounds, frame, window, cx)
+    }
     fn load(
         &mut self,
         resource: &Resource,

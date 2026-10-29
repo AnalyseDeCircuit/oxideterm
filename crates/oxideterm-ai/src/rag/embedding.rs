@@ -253,6 +253,19 @@ mod tests {
             reopened.hnsw_status(),
             HnswIndexStatus::Ready { .. }
         ));
+        let active_query = reopened.ensure_hnsw_loaded().unwrap().unwrap();
+        assert!(
+            !reopened
+                .release_idle_hnsw(std::time::Duration::ZERO)
+                .unwrap()
+        );
+        drop(active_query);
+        assert!(
+            reopened
+                .release_idle_hnsw(std::time::Duration::ZERO)
+                .unwrap()
+        );
+        assert_eq!(reopened.hnsw_status(), HnswIndexStatus::Unloaded);
         let filtered = search_vector(&reopened, &[0.9, 0.1], &["col-b".to_string()], 2).unwrap();
         assert_eq!(
             filtered

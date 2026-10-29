@@ -301,6 +301,11 @@ impl TextSystem {
         Ok(())
     }
 
+    /// Revision of the installed fonts, for consumers retaining shaped text across frames.
+    pub fn font_generation(&self) -> usize {
+        self.font_generation.load(Ordering::Acquire)
+    }
+
     /// Takes the receiver for missing-glyph reports.
     ///
     /// Only one receiver is available for each text system. Returns `None` when

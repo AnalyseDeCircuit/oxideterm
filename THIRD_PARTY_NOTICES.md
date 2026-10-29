@@ -2,12 +2,12 @@
 
 This file lists third-party Rust crates and detected licenses, including transitive dependencies.
 It is generated from `cargo deny list -f json -l crate`.
-Generated: 2026-10-09T15:32:42.670353Z
+Generated: 2026-10-28T11:47:41.553948Z
 
 ## Summary
 
-- MIT: 996
-- Apache-2.0: 805
+- MIT: 999
+- Apache-2.0: 807
 - Apache-2.0 WITH LLVM-exception: 58
 - Zlib: 42
 - MPL-2.0: 20
@@ -22,7 +22,6 @@ Generated: 2026-10-09T15:32:42.670353Z
 - LGPL-2.1-or-later: 2
 - 0BSD: 1
 - BSD-1-Clause: 1
-- CDLA-Permissive-2.0: 1
 - GPL-2.0-only: 1
 - GPL-3.0: 1
 - NCSA: 1
@@ -201,7 +200,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | concurrent-queue | 2.5.0 | Apache-2.0, MIT | https://crates.io/crates/concurrent-queue |
 | console_error_panic_hook | 0.1.7 | Apache-2.0, MIT | https://crates.io/crates/console_error_panic_hook |
 | const-oid | 0.10.2 | Apache-2.0, MIT | https://crates.io/crates/const-oid |
-| const-oid | 0.9.6 | Apache-2.0, MIT | https://crates.io/crates/const-oid |
 | const-random | 0.1.18 | MIT, Apache-2.0 | https://crates.io/crates/const-random |
 | const-random-macro | 0.1.16 | MIT, Apache-2.0 | https://crates.io/crates/const-random-macro |
 | constant_time_eq | 0.4.2 | CC0-1.0, MIT-0, Apache-2.0 | https://crates.io/crates/constant_time_eq |
@@ -469,7 +467,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | inout | 0.1.4 | MIT, Apache-2.0 | https://crates.io/crates/inout |
 | inout | 0.2.2 | MIT, Apache-2.0 | https://crates.io/crates/inout |
 | instant-distance | 0.6.1 | MIT, Apache-2.0 | https://crates.io/crates/instant-distance |
-| internal-russh-num-bigint | 0.5.0 | MIT, Apache-2.0 | https://crates.io/crates/internal-russh-num-bigint |
 | interpolate_name | 0.2.4 | MIT | https://crates.io/crates/interpolate_name |
 | inventory | 0.3.24 | MIT, Apache-2.0 | https://crates.io/crates/inventory |
 | io-extras | 0.19.0 | Apache-2.0 WITH LLVM-exception, Apache-2.0, MIT | https://crates.io/crates/io-extras |
@@ -491,6 +488,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | jni-sys | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys |
 | jni-sys-macros | 0.4.1 | MIT, Apache-2.0 | https://crates.io/crates/jni-sys-macros |
 | jobserver | 0.1.34 | MIT, Apache-2.0 | https://crates.io/crates/jobserver |
+| jpeg-decoder | 0.3.2 | MIT, Apache-2.0 | https://crates.io/crates/jpeg-decoder |
 | js-sys | 0.3.99 | MIT, Apache-2.0 | https://crates.io/crates/js-sys |
 | json5 | 1.3.1 | MIT | https://crates.io/crates/json5 |
 | keccak | 0.2.0 | Apache-2.0, MIT | https://crates.io/crates/keccak |
@@ -578,6 +576,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | nu-ansi-term | 0.50.3 | MIT | https://crates.io/crates/nu-ansi-term |
 | num | 0.4.3 | MIT, Apache-2.0 | https://crates.io/crates/num |
 | num-bigint | 0.4.6 | MIT, Apache-2.0 | https://crates.io/crates/num-bigint |
+| num-bigint | 0.5.1 | MIT, Apache-2.0 | https://crates.io/crates/num-bigint |
 | num-bigint-dig | 0.9.1 | MIT, Apache-2.0 | https://crates.io/crates/num-bigint-dig |
 | num-complex | 0.4.6 | MIT, Apache-2.0 | https://crates.io/crates/num-complex |
 | num-conv | 0.2.1 | MIT, Apache-2.0 | https://crates.io/crates/num-conv |
@@ -642,7 +641,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | p384 | 0.14.0-rc.14 | Apache-2.0, MIT | https://crates.io/crates/p384 |
 | p521 | 0.14.0-rc.14 | Apache-2.0, MIT | https://crates.io/crates/p521 |
 | page_size | 0.6.0 | MIT, Apache-2.0 | https://crates.io/crates/page_size |
-| pageant | 0.2.0 | Apache-2.0 | https://crates.io/crates/pageant |
+| pageant | 0.2.5 | Apache-2.0 | https://crates.io/crates/pageant |
 | palette | 0.7.6 | MIT, Apache-2.0 | https://crates.io/crates/palette |
 | palette_derive | 0.7.6 | MIT, Apache-2.0 | https://crates.io/crates/palette_derive |
 | parking | 2.2.1 | Apache-2.0, MIT | https://crates.io/crates/parking |
@@ -780,7 +779,7 @@ This section is a review prompt for binary distribution; it does not replace leg
 | roxmltree | 0.21.1 | MIT, Apache-2.0 | https://crates.io/crates/roxmltree |
 | rsa | 0.10.0-rc.18 | MIT, Apache-2.0 | https://crates.io/crates/rsa |
 | rusqlite | 0.37.0 | MIT | https://crates.io/crates/rusqlite |
-| russh | 0.63.0 | Apache-2.0 | vendored in repository |
+| russh | 0.65.0 | Apache-2.0 | https://github.com/AnalyseDeCircuit/russh?rev=e115f85e095b2f6fb5dc171988e720048fe1dd7c |
 | russh-cryptovec | 0.62.0 | Apache-2.0 | https://crates.io/crates/russh-cryptovec |
 | russh-util | 0.52.0 | Apache-2.0 | https://crates.io/crates/russh-util |
 | rust-embed | 8.11.0 | MIT | https://crates.io/crates/rust-embed |
@@ -1061,7 +1060,6 @@ This section is a review prompt for binary distribution; it does not replace leg
 | web-sys | 0.3.99 | MIT, Apache-2.0 | https://crates.io/crates/web-sys |
 | web-time | 1.1.0 | MIT, Apache-2.0 | https://crates.io/crates/web-time |
 | web_atoms | 0.2.5 | MIT, Apache-2.0 | https://crates.io/crates/web_atoms |
-| webpki-roots | 1.0.7 | CDLA-Permissive-2.0 | https://crates.io/crates/webpki-roots |
 | weezl | 0.1.12 | MIT, Apache-2.0 | https://crates.io/crates/weezl |
 | wgpu | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu |
 | wgpu-core | 29.0.4 | MIT, Apache-2.0 | https://crates.io/crates/wgpu-core |

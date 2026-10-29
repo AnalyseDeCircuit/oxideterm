@@ -61,3 +61,7 @@ gpui_platform = { workspace = true, features = ["font-kit", "bench-support"] }
 name = "terminal_render"
 harness = false
 required-features = ["bench"]
+
+[[bench]]
+name = "image_cache"
+harness = false

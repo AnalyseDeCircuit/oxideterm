@@ -33,10 +33,10 @@ pub(super) struct GraphicsVncFrame {
 }
 
 impl GraphicsVncFrame {
-    pub(super) fn render_image(&self) -> Option<Arc<RenderImage>> {
+    pub(super) fn render_image(self) -> Option<Arc<RenderImage>> {
         // The native RFB client negotiates 32-bit little-endian true color:
         // bytes arrive as B,G,R,unused. GPUI's atlas accepts that BGRA layout.
-        let buffer = RgbaImage::from_raw(self.width, self.height, self.bgra.clone())?;
+        let buffer = RgbaImage::from_raw(self.width, self.height, self.bgra)?;
         Some(Arc::new(RenderImage::new(vec![Frame::new(buffer)])))
     }
 }
@@ -785,8 +785,16 @@ mod tests {
             },
             vec![1, 2, 3, 255, 4, 5, 6, 255],
         )));
+        let frame = fb.frame().unwrap();
+        let allocation = frame.bgra.as_ptr();
+        let image = frame.render_image().unwrap();
         assert_eq!(
-            fb.frame().unwrap().bgra,
+            image.as_bytes(0).unwrap().as_ptr(),
+            allocation,
+            "handing off a frame must not duplicate its pixel allocation"
+        );
+        assert_eq!(
+            image.as_bytes(0).unwrap(),
             vec![0, 0, 0, 0, 1, 2, 3, 255, 0, 0, 0, 0, 4, 5, 6, 255]
         );
     }

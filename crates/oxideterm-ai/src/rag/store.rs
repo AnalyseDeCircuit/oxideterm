@@ -30,6 +30,7 @@ const BM25_META_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("bm25
 const BM25_CONTENT_REVISION_KEY: &str = "content_revision";
 const BM25_INDEXED_REVISION_KEY: &str = "indexed_revision";
 const EMBEDDINGS_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("embeddings");
+const RAG_PAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 const DOC_RAW_CONTENT_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("doc_raw_content");
 
 /// Compression threshold: compress chunks larger than 4 KB.
@@ -128,6 +129,7 @@ struct HnswRuntime {
     ready: Condvar,
     operation: Mutex<()>,
     generation: AtomicU64,
+    last_used: Mutex<Instant>,
 }
 
 impl HnswRuntime {
@@ -137,6 +139,7 @@ impl HnswRuntime {
             ready: Condvar::new(),
             operation: Mutex::new(()),
             generation: AtomicU64::new(0),
+            last_used: Mutex::new(Instant::now()),
         }
     }
 }
@@ -146,6 +149,7 @@ pub struct RagStore {
     data_dir: PathBuf,
     hnsw_index: Arc<HnswRuntime>,
     bm25_index: Arc<Bm25Runtime>,
+    collection_stats_revision: Arc<AtomicU64>,
 }
 
 impl Clone for RagStore {
@@ -155,6 +159,7 @@ impl Clone for RagStore {
             data_dir: self.data_dir.clone(),
             hnsw_index: self.hnsw_index.clone(),
             bm25_index: self.bm25_index.clone(),
+            collection_stats_revision: self.collection_stats_revision.clone(),
         }
     }
 }
@@ -216,10 +221,13 @@ impl RagStore {
         let db_path = data_dir.join("rag_index.redb");
         info!("Opening RAG index database at {:?}", db_path);
 
-        let db = Database::create(&db_path).map_err(|e| {
-            warn!("Failed to open RAG DB, attempting backup recovery: {}", e);
-            e
-        })?;
+        let db = Database::builder()
+            .set_cache_size(RAG_PAGE_CACHE_BYTES)
+            .create(&db_path)
+            .map_err(|e| {
+                warn!("Failed to open RAG DB, attempting backup recovery: {}", e);
+                e
+            })?;
 
         // Set restrictive permissions on Unix
         #[cfg(unix)]
@@ -248,6 +256,7 @@ impl RagStore {
             data_dir: data_dir.to_path_buf(),
             hnsw_index: Arc::new(HnswRuntime::new()),
             bm25_index: Arc::new(Bm25Runtime::new()),
+            collection_stats_revision: Arc::new(AtomicU64::new(0)),
         };
         if store.bm25_rebuild_required()?
             && let Err(error) = store.queue_bm25_rebuild()
@@ -258,6 +267,7 @@ impl RagStore {
     }
 
     pub fn ensure_hnsw_loaded(&self) -> Result<Option<Arc<PersistedHnswIndex>>, RagError> {
+        *lock_with_diagnostics(&self.hnsw_index.last_used, "hnsw.last_used")? = Instant::now();
         let load_generation;
         let mut state =
             lock_with_diagnostics(&self.hnsw_index.state, "hnsw.ensure_loaded.initial")?;
@@ -320,6 +330,22 @@ impl RagStore {
         Ok(resolved)
     }
 
+    /// Release an idle derived index without interrupting queries or invalidating its disk copy.
+    pub fn release_idle_hnsw(&self, idle: std::time::Duration) -> Result<bool, RagError> {
+        let mut state = lock_with_diagnostics(&self.hnsw_index.state, "hnsw.release_idle")?;
+        if let HnswRuntimeState::Ready(index) = &*state
+            && Arc::strong_count(index) == 1
+            && lock_with_diagnostics(&self.hnsw_index.last_used, "hnsw.last_used")?.elapsed()
+                >= idle
+        {
+            let retired = std::mem::replace(&mut *state, HnswRuntimeState::Unloaded);
+            drop(state);
+            drop(retired);
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
     pub fn hnsw_status(&self) -> HnswIndexStatus {
         match lock_with_diagnostics(&self.hnsw_index.state, "hnsw.status") {
             Ok(state) => match &*state {
@@ -356,6 +382,8 @@ impl RagStore {
             )?;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!("Created collection: {}", collection.id);
         Ok(())
     }
@@ -378,6 +406,8 @@ impl RagStore {
             table.insert(collection_id, rmp_serde::to_vec(&collection)?.as_slice())?;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         Ok(())
     }
 
@@ -463,6 +493,8 @@ impl RagStore {
             updated = doc;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         if embeddings_changed && let Err(error) = self.invalidate_hnsw_index() {
             warn!("Note metadata saved but HNSW invalidation failed: {error}");
         }
@@ -545,6 +577,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
 
         // BM25 postings will be cleaned up via reindex
         info!(
@@ -562,6 +596,11 @@ impl RagStore {
         }
 
         Ok(())
+    }
+
+    /// Invalidates derived statistics after committed collection, document or embedding writes.
+    pub fn collection_stats_revision(&self) -> u64 {
+        self.collection_stats_revision.load(Ordering::Acquire)
     }
 
     pub fn get_collection_stats(&self, collection_id: &str) -> Result<CollectionStats, RagError> {
@@ -704,6 +743,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!(
             "Added document {} ({} chunks) to collection {}",
             metadata.id,
@@ -756,6 +797,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!("Removed document {}", doc_id);
 
         // Invalidate HNSW index since embeddings changed
@@ -874,6 +917,8 @@ impl RagStore {
             t.insert(record.chunk_id.as_str(), data.as_slice())?;
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         Ok(())
     }
 
@@ -887,6 +932,8 @@ impl RagStore {
             }
         }
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!("Stored {} embeddings", records.len());
         Ok(())
     }
@@ -983,7 +1030,7 @@ impl RagStore {
         let rebuild_generation = self.hnsw_index.generation.load(Ordering::SeqCst);
         let embeddings = self.get_all_embeddings()?;
 
-        let new_index = PersistedHnswIndex::build(&embeddings);
+        let new_index = PersistedHnswIndex::build_owned(embeddings);
         let hnsw_path = hnsw_index_path(&self.data_dir);
         let _operation_guard = self.hnsw_operation_lock()?;
 
@@ -1528,6 +1575,8 @@ impl RagStore {
             (updated_meta, old_chunk_ids.len())
         };
         txn.commit()?;
+        self.collection_stats_revision
+            .fetch_add(1, Ordering::Release);
         debug!(
             "Updated document {} ({} → {} chunks)",
             doc_id,

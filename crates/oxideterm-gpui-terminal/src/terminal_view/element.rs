@@ -355,6 +355,11 @@ where
         self.insertion_order.push_back(key);
         (value, false)
     }
+
+    fn clear(&mut self) {
+        self.entries = HashMap::new();
+        self.insertion_order = VecDeque::new();
+    }
 }
 
 pub(crate) struct TerminalLayoutCache {
@@ -443,6 +448,15 @@ impl TerminalLayoutCache {
 
     pub(crate) fn performance(&self) -> TerminalLayoutPerformance {
         self.performance
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.rows.clear();
+        self.highlights.clear();
+        self.links.clear();
+        self.performance = TerminalLayoutPerformance::default();
+        self.cache_hits = 0;
+        self.cache_misses = 0;
     }
 }
 
@@ -2275,7 +2289,7 @@ impl Element for TerminalElement {
                     .iter()
                     .filter(|image| image.image.snapshot.z_index < 0)
                 {
-                    paint_terminal_image(image, origin, &self.metrics, window);
+                    paint_terminal_image(image, origin, &self.metrics, window, cx);
                 }
                 for rect in &layout.selection_matches {
                     paint_terminal_rect(rect, origin, &self.metrics, window);
@@ -2337,7 +2351,7 @@ impl Element for TerminalElement {
                     .iter()
                     .filter(|image| image.image.snapshot.z_index >= 0)
                 {
-                    paint_terminal_image(image, origin, &self.metrics, window);
+                    paint_terminal_image(image, origin, &self.metrics, window, cx);
                 }
                 for rect in &layout.highlight_underlines {
                     paint_terminal_underline(rect, origin, &self.metrics, window);
@@ -2606,6 +2620,26 @@ mod cache_tests {
         let changed_layout = changed.layout_for_rows(0..1, Some(&mut cache));
         let changed_cache = &changed_layout.cached_rows[0].layout.text_runs[0].cache;
         assert!(!Arc::ptr_eq(first_cache, changed_cache));
+
+        let retired = Arc::downgrade(first_cache);
+        drop(first);
+        drop(second);
+        drop(changed_layout);
+        cache.clear();
+        assert!(
+            retired.upgrade().is_none(),
+            "hidden rows must release retained glyph data"
+        );
+        let rebuilt = stable.layout_for_rows(0..1, Some(&mut cache));
+        assert_eq!(
+            rebuilt.cached_rows[0]
+                .layout
+                .text_runs
+                .iter()
+                .map(|run| run.text.as_ref())
+                .collect::<String>(),
+            "cached"
+        );
     }
 
     #[test]

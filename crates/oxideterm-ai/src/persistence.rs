@@ -14,6 +14,15 @@ use redb::{Database, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+// Page caching is separate from the decoded history-body budget.
+const HISTORY_PAGE_CACHE_BYTES: usize = 32 * 1024 * 1024;
+
+fn history_database_builder() -> redb::Builder {
+    let mut builder = Database::builder();
+    builder.set_cache_size(HISTORY_PAGE_CACHE_BYTES);
+    builder
+}
+
 mod agent_queries;
 mod agents;
 mod content;
@@ -466,7 +475,7 @@ fn open_ai_chat_database(path: &Path) -> Result<Database> {
             )
         })?;
     }
-    match Database::create(path) {
+    match history_database_builder().create(path) {
         Ok(db) => {
             set_owner_only_permissions(path);
             Ok(db)
@@ -478,7 +487,7 @@ fn open_ai_chat_database(path: &Path) -> Result<Database> {
                 "[AiChatStore] AI chat redb was corrupted ({message}); backed up to {}",
                 backup_path.display()
             );
-            let db = Database::create(path)?;
+            let db = history_database_builder().create(path)?;
             set_owner_only_permissions(path);
             Ok(db)
         }

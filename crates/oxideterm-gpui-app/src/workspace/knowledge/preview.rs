@@ -3,6 +3,30 @@ use oxideterm_gpui_editor::{EditorScrollAnchor, EditorScrollOrigin, EditorViewpo
 use oxideterm_gpui_markdown::scroll_sync::SourceAnchor;
 
 impl KnowledgeDocumentEditor {
+    pub(super) fn set_cache_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        if self.cache_visible == visible {
+            return;
+        }
+        self.cache_visible = visible;
+        self.sync_render_caches(cx);
+    }
+
+    pub(super) fn sync_render_caches(&mut self, cx: &mut Context<Self>) {
+        let source = self.cache_visible && self.mode != KnowledgeEditorMode::Preview;
+        self.editor
+            .update(cx, |editor, cx| editor.set_render_cache_active(source, cx));
+        if !self.cache_visible || self.mode == KnowledgeEditorMode::Source {
+            self.preview_task = None;
+            self.preview_timer = None;
+            self.preview_running = false;
+            self.preview_document = None;
+            self.preview_scroll.release_document_cache();
+            self.preview_navigation.release_targets();
+        } else if self.is_markdown && self.preview_document.is_none() {
+            self.load_preview(cx);
+        }
+    }
+
     pub(super) fn render_source_toolbar(&self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .w_full()
@@ -206,6 +230,7 @@ impl KnowledgeDocumentEditor {
         self.editor.update(cx, |editor, _| {
             editor.set_read_only(self.mode == KnowledgeEditorMode::Preview)
         });
+        self.sync_render_caches(cx);
         self._viewport_subscription = Some(cx.subscribe(
             &self.editor,
             |this, _, event: &EditorViewportChanged, cx| {
@@ -304,8 +329,11 @@ impl KnowledgeDocumentEditor {
     }
 
     pub(super) fn load_preview(&mut self, cx: &mut Context<Self>) {
-        if self.preview_running {
+        if self.preview_running || !self.cache_visible || self.mode == KnowledgeEditorMode::Source {
             return;
+        }
+        if self.preview_document.is_none() && self.preview_version != self.observed_buffer_version {
+            self.preview_scroll.invalidate_document_cache();
         }
         self.preview_running = true;
         let source = self.draft.clone();

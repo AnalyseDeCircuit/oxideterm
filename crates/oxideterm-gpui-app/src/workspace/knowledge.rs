@@ -294,6 +294,7 @@ struct KnowledgeDocumentEditor {
     preview_timer: Option<Task<()>>,
     preview_version: u64,
     preview_running: bool,
+    cache_visible: bool,
     source_ratio: f32,
     split_bounds: Option<gpui::Bounds<gpui::Pixels>>,
     split_dragging: bool,
@@ -320,7 +321,7 @@ impl KnowledgeDocumentEditor {
         has_background_image: bool,
         cx: &mut Context<Self>,
     ) -> Self {
-        let content = loaded.content;
+        let content: Arc<str> = loaded.content.into();
         let is_markdown = loaded.document.format == "markdown";
         let source_path = loaded
             .document
@@ -354,7 +355,7 @@ impl KnowledgeDocumentEditor {
         editor.update(cx, |editor, _| editor.track_edit_changes());
         let preview_scroll = MarkdownVirtualListScrollHandle::new();
         let observed_buffer_version = editor.read(cx).buffer().version();
-        let draft = Arc::<str>::from(content);
+        let draft = content;
         let saved_draft = draft.clone();
         let editor_observer = cx.observe(&editor, |surface, editor, cx| {
             let buffer_version = editor.read(cx).buffer().version();
@@ -363,14 +364,14 @@ impl KnowledgeDocumentEditor {
             }
             surface.observed_buffer_version = buffer_version;
             let (draft, changes) = editor.update(cx, |editor, _| {
-                (
-                    Arc::from(editor.buffer().text()),
-                    editor.take_edit_changes(),
-                )
+                (editor.buffer().text_snapshot(), editor.take_edit_changes())
             });
             surface.draft = draft;
             surface.remap_preview_anchor(&changes);
-            if surface.mode != KnowledgeEditorMode::Source && surface.is_markdown {
+            if surface.cache_visible
+                && surface.mode != KnowledgeEditorMode::Source
+                && surface.is_markdown
+            {
                 surface.schedule_preview(cx);
             }
             if knowledge_save_state_allows_autosave(&surface.save_state) {
@@ -416,6 +417,7 @@ impl KnowledgeDocumentEditor {
             preview_timer: None,
             preview_version: 0,
             preview_running: false,
+            cache_visible: true,
             source_ratio: 0.5,
             split_bounds: None,
             split_dragging: false,
@@ -497,6 +499,7 @@ impl KnowledgeDocumentEditor {
         if self.mode != mode {
             self.previous_mode = self.mode;
             self.mode = mode;
+            self.sync_render_caches(cx);
             self.mode_transition = None;
             if let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) {
                 self.mode_transition = Some(cx.spawn(async move |surface, cx| {
@@ -514,14 +517,15 @@ impl KnowledgeDocumentEditor {
             if mode != KnowledgeEditorMode::Preview {
                 window.focus(&self.editor.read(cx).focus_handle(cx), cx);
             }
-            if mode != KnowledgeEditorMode::Source
+            if self.cache_visible
+                && mode != KnowledgeEditorMode::Source
                 && self.is_markdown
                 && (self.preview_document.is_none()
                     || self.preview_version != self.observed_buffer_version)
             {
                 self.load_preview(cx);
             }
-            if mode == KnowledgeEditorMode::Split {
+            if self.cache_visible && mode == KnowledgeEditorMode::Split {
                 self.sync_from_editor(cx);
             }
             self.emit_preferences(cx);
@@ -1375,6 +1379,17 @@ impl KnowledgeWorkspaceEntity {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn sync_knowledge_cache_visibility(&self, cx: &mut App) {
+        let state = self.knowledge_workspace.read(cx);
+        let visible = !self.app_lock.locked
+            && state
+                .tab_id
+                .is_some_and(|id| self.tab_host.read(cx).surface_is_visible(id));
+        if let Some(editor) = state.editor.clone() {
+            editor.update(cx, |editor, cx| editor.set_cache_visible(visible, cx));
+        }
+    }
+
     pub(in crate::workspace) fn knowledge_text_editor_focused(
         &self,
         window: &Window,
@@ -1962,6 +1977,7 @@ impl WorkspaceApp {
                                 subscription,
                             );
                         });
+                        workspace.sync_knowledge_cache_visibility(cx);
                     }
                     Err(error) => {
                         workspace.knowledge_workspace.update(cx, |knowledge, _cx| {
@@ -2687,6 +2703,105 @@ pub(in crate::workspace) mod tests {
             knowledge_format_wrap(KnowledgeFormatAction::Italic),
             Some(("*", "*"))
         );
+    }
+
+    #[gpui::test]
+    fn background_note_releases_preview_and_restores_unsaved_history(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let directory = tempfile::tempdir().unwrap();
+        let store = Arc::new(oxideterm_ai::RagStore::new(directory.path()).unwrap());
+        let collection = oxideterm_ai::rag_create_collection(
+            &store,
+            oxideterm_ai::RagCreateCollectionRequest {
+                name: "Notes".into(),
+                scope: oxideterm_ai::RagDocScopeRequest::Global,
+            },
+        )
+        .unwrap();
+        let document = oxideterm_ai::rag_create_blank_document(
+            &store,
+            oxideterm_ai::RagCreateBlankDocumentRequest {
+                collection_id: collection.id,
+                title: "Memory".into(),
+                format: "markdown".into(),
+            },
+        )
+        .unwrap();
+        let loaded = oxideterm_ai::rag_get_document(&store, &document.id).unwrap();
+        let (surface, cx) = cx.add_window_view(|_, cx| {
+            KnowledgeDocumentEditor::new(
+                loaded,
+                store,
+                oxideterm_theme::default_tokens(),
+                KnowledgeEditorLabels::new(&oxideterm_i18n::I18n::default()),
+                false,
+                cx,
+            )
+        });
+        let text = "# Heading\n\nUnsaved **paragraph**.\n\n".repeat(2048);
+        surface.update(cx, |surface, cx| {
+            // Keep this draft unsaved without scheduling an unrelated index rebuild.
+            surface.save_state = KnowledgeDocumentSaveState::Conflict;
+            surface
+                .editor
+                .update(cx, |editor, cx| editor.insert_text(&text, cx));
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            surface.update(cx, |surface, cx| {
+                surface.set_mode(KnowledgeEditorMode::Preview, window, cx)
+            })
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        surface.update(cx, |surface, cx| {
+            let before = surface.preview_document.as_ref().unwrap().retained_bytes();
+            surface
+                .preview_scroll
+                .set_offset(gpui::point(px(0.0), px(-400.0)));
+            surface.set_cache_visible(false, cx);
+            eprintln!(
+                "KNOWLEDGE_PREVIEW_BYTES active={before} hidden={}",
+                surface
+                    .preview_document
+                    .as_ref()
+                    .map_or(0, |doc| doc.retained_bytes())
+            );
+            assert!(surface.preview_document.is_none());
+            assert_eq!(surface.draft.as_ref(), text);
+            assert!(surface.is_dirty());
+            surface.set_cache_visible(true, cx);
+        });
+        cx.run_until_parked();
+        surface.read_with(cx, |surface, _| {
+            assert!(surface.preview_document.is_some());
+            assert_eq!(surface.preview_scroll.offset().y, px(-400.0));
+        });
+        cx.update(|window, cx| {
+            surface.update(cx, |surface, cx| {
+                surface.set_mode(KnowledgeEditorMode::Source, window, cx);
+                assert!(surface.preview_document.is_none());
+                surface
+                    .editor
+                    .update(cx, |editor, cx| editor.undo_external(cx));
+            })
+        });
+        cx.run_until_parked();
+        surface.read_with(cx, |surface, _| assert_eq!(surface.draft.as_ref(), ""));
+        cx.update(|window, cx| {
+            surface.update(cx, |surface, cx| {
+                surface.set_mode(KnowledgeEditorMode::Preview, window, cx);
+                surface.set_cache_visible(false, cx);
+            })
+        });
+        cx.run_until_parked();
+        surface.read_with(cx, |surface, _| {
+            assert!(
+                surface.preview_document.is_none(),
+                "late parse repopulated a hidden preview"
+            )
+        });
     }
 
     fn navigator_document(

@@ -31,13 +31,29 @@ pub fn durable_write_with_before_replace<F>(
 where
     F: FnOnce() -> io::Result<()>,
 {
+    write_stream_and_replace(path, |file| file.write_all(contents), before_replace)
+}
+
+/// Streams contents into a private temporary file before durable atomic replacement.
+pub fn durable_write_stream(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+) -> io::Result<()> {
+    write_stream_and_replace(path, write, || Ok(()))
+}
+
+fn write_stream_and_replace(
+    path: &Path,
+    write: impl FnOnce(&mut fs::File) -> io::Result<()>,
+    before_replace: impl FnOnce() -> io::Result<()>,
+) -> io::Result<()> {
     let parent = parent_directory(path);
     fs::create_dir_all(parent)?;
     let (temporary_path, mut temporary_file) = create_temporary_file(path)?;
 
     // The destination remains unchanged until all temporary contents are durable.
     let write_result = (|| {
-        temporary_file.write_all(contents)?;
+        write(&mut temporary_file)?;
         temporary_file.flush()?;
         temporary_file.sync_all()?;
         drop(temporary_file);
@@ -113,6 +129,14 @@ mod tests {
         })
         .unwrap_err();
 
+        assert_eq!(error.kind(), io::ErrorKind::Other);
+        assert_eq!(fs::read(&path).unwrap(), b"new");
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+        let error = durable_write_stream(&path, |writer| {
+            writer.write_all(b"partial")?;
+            Err(io::Error::other("stream failed"))
+        })
+        .unwrap_err();
         assert_eq!(error.kind(), io::ErrorKind::Other);
         assert_eq!(fs::read(&path).unwrap(), b"new");
         assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);

@@ -40,8 +40,15 @@ mod tests {
         for (source, offset, expected) in [
             ("let 名字 = value", 5, "名字"),
             ("const $value = 1", 8, "$value"),
+            ("before\n名字\nend", 8, "名字"),
+            ("before\n名字\nend", 6, "before"),
         ] {
             assert_eq!(word_at(source, BufferOffset(offset)), expected, "{source}");
+            assert_eq!(
+                crate::TextBuffer::new(source).word_at(BufferOffset(offset)),
+                expected,
+                "{source}"
+            );
         }
     }
 }

@@ -19,7 +19,7 @@ mod types;
 pub mod utf16;
 mod word;
 
-pub use buffer::{BufferChange, TextBuffer};
+pub use buffer::{BufferChange, TextBuffer, TextSnapshot};
 pub use cursor::Cursor;
 pub use edit::{EditTransaction, TextEdit};
 pub use error::EditorError;

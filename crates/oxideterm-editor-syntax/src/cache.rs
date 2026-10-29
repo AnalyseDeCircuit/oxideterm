@@ -291,10 +291,21 @@ mod tests {
             unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut stats) };
             stats.live
         }
-        for language in [LanguageId::Rust, LanguageId::Python] {
-            let source = match language {
-                LanguageId::Rust => "fn sample() { let value = 42; }\n".repeat(34000),
-                _ => "value = 42 # sample\n".repeat(56000),
+        for (name, language) in [
+            ("rust", LanguageId::Rust),
+            ("python", LanguageId::Python),
+            ("editor-rust", LanguageId::Rust),
+        ] {
+            let source = if name == "editor-rust" {
+                let pattern = "// memory benchmark\nfn example() { let value = 42; }\n";
+                let mut source = pattern.repeat((1024usize * 1024).div_ceil(pattern.len()));
+                source.insert_str(3, &"z".repeat(32));
+                source
+            } else {
+                match language {
+                    LanguageId::Rust => "fn sample() { let value = 42; }\n".repeat(34000),
+                    _ => "value = 42 # sample\n".repeat(56000),
+                }
             };
             let mut session = crate::grammar_fixture::parse(language.clone(), &source).unwrap();
             let mut cache = HighlightCache::default();
@@ -326,6 +337,21 @@ mod tests {
                     session.highlight_spans(&source)
                 );
             }
+            let before = allocated();
+            drop(std::mem::replace(
+                &mut session.parser,
+                tree_sitter::Parser::new(),
+            ));
+            let without_parser = allocated();
+            drop(session);
+            let without_session = allocated();
+            drop(cache);
+            eprintln!(
+                "SYNTAX_OWNERS name={name} language={language:?} parser_store={} tree_and_session={} highlights={}",
+                before.saturating_sub(without_parser),
+                without_parser.saturating_sub(without_session),
+                without_session.saturating_sub(allocated()),
+            );
         }
     }
 

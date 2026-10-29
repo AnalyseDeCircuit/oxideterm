@@ -2,13 +2,13 @@
 struct DecodedPixels {
     width: u32,
     height: u32,
-    rgba: Vec<u8>,
+    rgba: Arc<[u8]>,
     frames: Vec<DecodedImageFrame>,
 }
 
 #[derive(Clone, Debug)]
 struct DecodedImageFrame {
-    rgba: Vec<u8>,
+    rgba: Arc<[u8]>,
     delay_ms_numerator: u32,
     delay_ms_denominator: u32,
 }
@@ -25,11 +25,19 @@ fn looks_like_sixel(data: &[u8]) -> bool {
         .all(|byte| byte.is_ascii_digit() || *byte == b';')
 }
 
-fn decode_image_bytes(bytes: &[u8], pixel_limit: u32) -> Result<DecodedPixels, GraphicsError> {
+fn decode_image_bytes(
+    bytes: &[u8],
+    pixel_limit: u32,
+    storage_limit_mb: u32,
+) -> Result<DecodedPixels, GraphicsError> {
     let format = image::guess_format(bytes).map_err(|_| GraphicsError::UnsupportedImage)?;
     if format == image::ImageFormat::Gif {
         let decoder = GifDecoder::new(std::io::Cursor::new(bytes))
             .map_err(|error| GraphicsError::Decode(error.to_string()))?;
+        let (width, height) = decoder.dimensions();
+        enforce_pixel_limit(width, height, pixel_limit)?;
+        let frame_bytes = width as usize * height as usize * 4;
+        enforce_storage_limit(frame_bytes, storage_limit_mb)?;
         let mut frames = decoder.into_frames();
         let first_frame = frames
             .next()
@@ -39,7 +47,7 @@ fn decode_image_bytes(bytes: &[u8], pixel_limit: u32) -> Result<DecodedPixels, G
         let first_image = first_frame.into_buffer();
         let (width, height) = first_image.dimensions();
         enforce_pixel_limit(width, height, pixel_limit)?;
-        let first_rgba = first_image.into_raw();
+        let first_rgba: Arc<[u8]> = first_image.into_raw().into();
         let mut decoded_frames = vec![DecodedImageFrame {
             rgba: first_rgba.clone(),
             // GIF zero-delay frames are common in the wild. Normalize them
@@ -50,13 +58,16 @@ fn decode_image_bytes(bytes: &[u8], pixel_limit: u32) -> Result<DecodedPixels, G
         }];
         for frame in frames {
             let frame = frame.map_err(|error| GraphicsError::Decode(error.to_string()))?;
+            // The iterator needs to read the next frame to distinguish EOF. Keep at
+            // most one extra canvas alive, never an unbounded decoded animation.
+            enforce_storage_limit((decoded_frames.len() + 1) * frame_bytes, storage_limit_mb)?;
             let (delay_ms_numerator, delay_ms_denominator) = frame.delay().numer_denom_ms();
             let image = frame.into_buffer();
             if image.dimensions() != (width, height) {
                 return Err(GraphicsError::UnsupportedImage);
             }
             decoded_frames.push(DecodedImageFrame {
-                rgba: image.into_raw(),
+                rgba: image.into_raw().into(),
                 delay_ms_numerator: normalize_gif_frame_delay_ms(delay_ms_numerator),
                 delay_ms_denominator,
             });
@@ -72,18 +83,21 @@ fn decode_image_bytes(bytes: &[u8], pixel_limit: u32) -> Result<DecodedPixels, G
         });
     }
 
-    let image = ImageReader::new(std::io::Cursor::new(bytes))
+    let decoder = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
         .map_err(|error| GraphicsError::Decode(error.to_string()))?
-        .decode()
+        .into_decoder()
+        .map_err(|error| GraphicsError::Decode(error.to_string()))?;
+    let (width, height) = decoder.dimensions();
+    enforce_pixel_limit(width, height, pixel_limit)?;
+    enforce_storage_limit(width as usize * height as usize * 4, storage_limit_mb)?;
+    let image = image::DynamicImage::from_decoder(decoder)
         .map_err(|error| GraphicsError::Decode(error.to_string()))?
         .to_rgba8();
-    let (width, height) = image.dimensions();
-    enforce_pixel_limit(width, height, pixel_limit)?;
     Ok(DecodedPixels {
         width,
         height,
-        rgba: image.into_raw(),
+        rgba: image.into_raw().into(),
         frames: Vec::new(),
     })
 }
@@ -179,17 +193,13 @@ fn decode_raw_rgb(
     Ok(DecodedPixels {
         width,
         height,
-        rgba,
+        rgba: rgba.into(),
         frames: Vec::new(),
     })
 }
 
 fn normalize_gif_frame_delay_ms(delay_ms: u32) -> u32 {
-    if delay_ms == 0 {
-        100
-    } else {
-        delay_ms
-    }
+    if delay_ms == 0 { 100 } else { delay_ms }
 }
 
 fn decode_raw_rgba(
@@ -201,7 +211,7 @@ fn decode_raw_rgba(
     Ok(DecodedPixels {
         width,
         height,
-        rgba: bytes.to_vec(),
+        rgba: bytes.into(),
         frames: Vec::new(),
     })
 }

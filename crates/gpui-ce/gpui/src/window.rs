@@ -987,6 +987,7 @@ pub(crate) struct Frame {
     pub(crate) mouse_listeners: Vec<Option<AnyMouseListener>>,
     pub(crate) dispatch_tree: DispatchTree,
     pub(crate) scene: Scene,
+    image_frames: Vec<RenderImageParams>,
     pub(crate) hitboxes: Vec<Hitbox>,
     pub(crate) window_control_hitboxes: Vec<(WindowControlArea, Hitbox)>,
     pub(crate) deferred_draws: Vec<DeferredDraw>,
@@ -1037,6 +1038,7 @@ pub(crate) struct PrepaintStateIndex {
 #[derive(Clone, Default)]
 pub(crate) struct PaintIndex {
     scene_index: usize,
+    image_frames_index: usize,
     #[cfg(any(test, feature = "test-support"))]
     debug_bounds_index: usize,
     mouse_listeners_index: usize,
@@ -1063,6 +1065,7 @@ impl Frame {
             mouse_listeners: Vec::new(),
             dispatch_tree,
             scene: Scene::default(),
+            image_frames: Vec::new(),
             hitboxes: Vec::new(),
             window_control_hitboxes: Vec::new(),
             deferred_draws: Vec::new(),
@@ -1090,6 +1093,7 @@ impl Frame {
         self.mouse_listeners.clear();
         self.dispatch_tree.clear();
         self.scene.clear();
+        self.image_frames.clear();
         self.input_handlers.clear();
         self.tooltip_requests.clear();
         self.cursor_styles.clear();
@@ -1187,6 +1191,8 @@ pub struct Window {
     is_resizable: bool,
     is_minimizable: bool,
     sprite_atlas: Arc<dyn PlatformAtlas>,
+    animation_tiles: FxHashSet<RenderImageParams>,
+    animation_frame_timers: FxHashMap<EntityId, (Instant, Task<()>)>,
     // Cached scenes may only reference atlas tiles from this resource generation.
     rendered_resource_generation: u64,
     text_system: Arc<WindowTextSystem>,
@@ -2122,6 +2128,8 @@ impl Window {
             is_resizable,
             is_minimizable,
             sprite_atlas,
+            animation_tiles: FxHashSet::default(),
+            animation_frame_timers: FxHashMap::default(),
             rendered_resource_generation,
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),
@@ -2741,6 +2749,34 @@ impl Window {
     pub fn request_animation_frame(&self) {
         let entity = self.current_view();
         self.on_next_frame(move |_, cx| cx.notify(entity));
+    }
+
+    /// Wake the current view when its next animation frame is due, coalescing
+    /// multiple animations in the same view at the earliest deadline.
+    pub fn request_animation_frame_after(&mut self, delay: Duration, cx: &App) {
+        if delay.is_zero() {
+            self.request_animation_frame();
+            return;
+        }
+        let entity = self.current_view();
+        let deadline = Instant::now() + delay;
+        if self
+            .animation_frame_timers
+            .get(&entity)
+            .is_some_and(|(due, _)| *due <= deadline)
+        {
+            return;
+        }
+        let task = self.spawn(cx, async move |cx| {
+            cx.background_executor().timer(delay).await;
+            let _ = cx.update(|window, cx| {
+                window.animation_frame_timers.remove(&entity);
+                if window.is_visible() && window.is_window_active() {
+                    cx.notify(entity);
+                }
+            });
+        });
+        self.animation_frame_timers.insert(entity, (deadline, task));
     }
 
     /// Runs all callbacks scheduled via [`Self::on_next_frame`], returning how many ran.
@@ -3396,6 +3432,7 @@ impl Window {
         if frame_resource_generation != self.rendered_resource_generation {
             // A renderer reset invalidates every tile retained by the cached scene.
             self.refreshing = true;
+            self.animation_tiles.clear();
         }
 
         if self.platform_window.prepare_frame() {
@@ -3472,6 +3509,31 @@ impl Window {
         self.layout_engine.as_mut().unwrap().clear();
         self.text_system().finish_frame();
         self.next_frame.finish(&mut self.rendered_frame);
+        self.animation_frame_timers.retain(|view, _| {
+            self.next_frame
+                .dispatch_tree
+                .view_path_reversed(*view)
+                .next()
+                .is_some()
+        });
+        // Retain frames of visible animations for reuse on the next loop.
+        // Hidden images and superseded resolutions release every retained tile.
+        let used: FxHashSet<_> = self.next_frame.image_frames.iter().cloned().collect();
+        let painted: std::collections::HashSet<_> =
+            used.iter().map(|image| image.image_id).collect();
+        crate::finish_default_image_cache(&painted, self, cx);
+        self.animation_tiles.retain(|params| {
+            if painted.contains(&params.image_id) {
+                return true;
+            }
+            self.sprite_atlas.remove(&params.clone().into());
+            false
+        });
+        for previous in &self.rendered_frame.image_frames {
+            if !used.contains(previous) && !self.animation_tiles.contains(previous) {
+                self.sprite_atlas.remove(&previous.clone().into());
+            }
+        }
 
         self.invalidator.set_phase(DrawPhase::Focus);
         let previous_focus_path = self.rendered_frame.focus_path();
@@ -4015,6 +4077,7 @@ impl Window {
     pub(crate) fn paint_index(&self) -> PaintIndex {
         PaintIndex {
             scene_index: self.next_frame.scene.len(),
+            image_frames_index: self.next_frame.image_frames.len(),
             #[cfg(any(test, feature = "test-support"))]
             debug_bounds_index: self.next_frame.debug_bounds_records.len(),
             mouse_listeners_index: self.next_frame.mouse_listeners.len(),
@@ -4027,6 +4090,10 @@ impl Window {
     }
 
     pub(crate) fn reuse_paint(&mut self, range: Range<PaintIndex>) {
+        self.next_frame.image_frames.extend_from_slice(
+            &self.rendered_frame.image_frames
+                [range.start.image_frames_index..range.end.image_frames_index],
+        );
         // Cached elements still exist in the frame even when their paint methods don't run.
         #[cfg(any(test, feature = "test-support"))]
         for (selector, bounds) in &self.rendered_frame.debug_bounds_records
@@ -5377,16 +5444,25 @@ impl Window {
             image_id: data.id,
             frame_index,
         };
+        self.next_frame.image_frames.push(params.clone());
+        if data.frame_count() > 1 {
+            self.animation_tiles.insert(params.clone());
+        }
 
+        // Load only on an atlas miss, and hold the frame lease until the upload returns.
+        let frame_bytes = std::cell::OnceCell::new();
         let tile = self
             .sprite_atlas
             .get_or_insert_with(params.into(), &mut || {
+                if frame_bytes.get().is_none() {
+                    let bytes = data
+                        .frame_bytes(frame_index)?
+                        .expect("It's the caller's job to pass a valid frame index");
+                    let _ = frame_bytes.set(bytes);
+                }
                 Ok(Some((
                     data.size(frame_index),
-                    Cow::Borrowed(
-                        data.as_bytes(frame_index)
-                            .expect("It's the caller's job to pass a valid frame index"),
-                    ),
+                    Cow::Borrowed(frame_bytes.get().unwrap().as_ref()),
                 )))
             })?
             .expect("Callback above only returns Some");
@@ -5653,6 +5729,7 @@ impl Window {
             };
 
             self.sprite_atlas.remove(&params.clone().into());
+            self.animation_tiles.remove(&params);
         }
 
         Ok(())
@@ -5676,6 +5753,18 @@ impl Window {
         // Generation counters are atlas-local, so the allocation identity prevents
         // reusing tiles after a pane moves to a window backed by another atlas.
         Arc::as_ptr(&self.sprite_atlas) as *const () as usize
+    }
+
+    /// Returns whether a frame can be painted without decoding or uploading it again.
+    #[cfg(test)]
+    pub(crate) fn has_image_frame(&self, image_id: crate::ImageId, frame_index: usize) -> bool {
+        self.sprite_atlas.contains(
+            &RenderImageParams {
+                image_id,
+                frame_index,
+            }
+            .into(),
+        )
     }
 
     /// Returns whether every frame of an image is present in the sprite atlas.
@@ -8495,6 +8584,41 @@ mod tests {
 
     struct EmptyView;
 
+    #[gpui::test]
+    fn animation_deadline_coalesces_requests_without_display_rate_wakeups(cx: &mut TestAppContext) {
+        struct TimedView(bool);
+        impl Render for TimedView {
+            fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                if !self.0 {
+                    self.0 = true;
+                    for delay in [100, 200, 50] {
+                        window.request_animation_frame_after(Duration::from_millis(delay), cx);
+                    }
+                }
+                div()
+            }
+        }
+        let (_, cx) = cx.add_window_view(|_, _| TimedView(false));
+        let native = cx.update(|window, _| window.platform_window.as_test().unwrap().clone());
+        native.simulate_active_status_change(true);
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.simulate_next_frame(cx), 0);
+        });
+        cx.executor().run_until_parked();
+        let before = native.frame_wake_count();
+        cx.executor().advance_clock(Duration::from_millis(49));
+        cx.executor().run_until_parked();
+        assert_eq!(native.frame_wake_count(), before);
+        cx.executor().advance_clock(Duration::from_millis(1));
+        cx.executor().run_until_parked();
+        assert!(native.frame_wake_count() > before);
+        let after = native.frame_wake_count();
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.executor().run_until_parked();
+        assert_eq!(native.frame_wake_count(), after);
+    }
+
     impl Render for EmptyView {
         fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
             div()
@@ -10004,6 +10128,164 @@ mod inspector_tests {
 
     struct InspectorTestRoot {
         child: Entity<InspectorTestView>,
+    }
+
+    #[gpui::test]
+    fn animated_atlas_reuses_frames_while_visible_and_releases_hidden_images(
+        cx: &mut TestAppContext,
+    ) {
+        struct ImageView {
+            image: Arc<RenderImage>,
+            frame: usize,
+        }
+        impl Render for ImageView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let image = self.image.clone();
+                let frame = self.frame;
+                crate::canvas(
+                    |_, _, _| (),
+                    move |bounds, _, window, _| {
+                        window
+                            .paint_image(bounds, bounds, Corners::default(), image, frame, false)
+                            .unwrap();
+                    },
+                )
+                .size_full()
+            }
+        }
+        struct Root {
+            first: Option<Entity<ImageView>>,
+            second: Option<Entity<ImageView>>,
+        }
+        impl Render for Root {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .children(
+                        self.first
+                            .iter()
+                            .cloned()
+                            .map(|view| view.cached(StyleRefinement::default().size(px(10.)))),
+                    )
+                    .children(
+                        self.second
+                            .iter()
+                            .cloned()
+                            .map(|view| view.cached(StyleRefinement::default().size(px(10.)))),
+                    )
+            }
+        }
+        let image = Arc::new(RenderImage::new(SmallVec::from_iter(
+            (0..3).map(|_| image::Frame::new(image::RgbaImage::new(1, 1))),
+        )));
+        let first = cx.new(|_| ImageView {
+            image: image.clone(),
+            frame: 0,
+        });
+        let second = cx.new(|_| ImageView {
+            image: image.clone(),
+            frame: 1,
+        });
+        let (root, cx) = cx.add_window_view(|_, _| Root {
+            first: Some(first),
+            second: Some(second.clone()),
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        second.update(cx, |view, cx| {
+            view.frame = 2;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            for (frame_index, expected) in [(0, true), (1, true), (2, true)] {
+                assert_eq!(
+                    window.sprite_atlas.contains(
+                        &RenderImageParams {
+                            image_id: image.id,
+                            frame_index
+                        }
+                        .into()
+                    ),
+                    expected
+                );
+            }
+        });
+        root.update(cx, |root, cx| {
+            root.second = None;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert!(
+                window.sprite_atlas.contains(
+                    &RenderImageParams {
+                        image_id: image.id,
+                        frame_index: 0
+                    }
+                    .into()
+                )
+            );
+            assert!(
+                window.sprite_atlas.contains(
+                    &RenderImageParams {
+                        image_id: image.id,
+                        frame_index: 2
+                    }
+                    .into()
+                )
+            );
+        });
+        root.update(cx, |root, cx| {
+            root.first = None;
+            cx.notify();
+        });
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            for frame_index in 0..3 {
+                assert!(
+                    !window.sprite_atlas.contains(
+                        &RenderImageParams {
+                            image_id: image.id,
+                            frame_index,
+                        }
+                        .into()
+                    )
+                );
+            }
+        });
+        // Complete playback frames remain reusable beyond the former 64 MiB limit.
+        let pixels: Arc<[u8]> = vec![127; 1024 * 1024 * 4].into();
+        let large = Arc::new(
+            RenderImage::from_rgba_frames(
+                (0..17).map(|_| (pixels.clone(), image::Delay::from_numer_denom_ms(100, 1))),
+                size(1024, 1024),
+                Bounds::new(point(0, 0), size(1024, 1024)),
+            )
+            .unwrap(),
+        );
+        let view = cx.new(|_| ImageView {
+            image: large.clone(),
+            frame: 0,
+        });
+        root.update(cx, |root, cx| {
+            root.first = Some(view.clone());
+            cx.notify();
+        });
+        for frame in 0..17 {
+            view.update(cx, |view, cx| {
+                view.frame = frame;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        cx.update(|window, _| {
+            for frame in 0..17 {
+                assert!(window.has_image_frame(large.id, frame));
+            }
+            window.drop_image(large.clone()).unwrap();
+            for frame in 0..17 {
+                assert!(!window.has_image_frame(large.id, frame));
+            }
+        });
     }
 
     impl Render for InspectorTestRoot {

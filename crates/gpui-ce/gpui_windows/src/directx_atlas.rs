@@ -111,6 +111,10 @@ impl DirectXAtlas {
 }
 
 impl PlatformAtlas for DirectXAtlas {
+    fn contains(&self, key: &AtlasKey) -> bool {
+        self.0.lock().contains(key)
+    }
+
     fn gpu_submission(&self) -> anyhow::Result<gpui::GpuSubmission> {
         let mut query = None;
         unsafe {

@@ -34,12 +34,12 @@ impl Piece {
 /// `original` is immutable and shared until dead ranges are compacted. Inserted text is appended to
 /// `add`, and `pieces` describes the visible document as byte spans into those
 /// two buffers. `TextBuffer` now materializes the full document only for
-/// boundary APIs such as save, syntax, search, and IME; edits themselves keep
+/// boundary APIs such as save, syntax, and regex search; edits themselves keep
 /// the piece table as the source of truth.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PieceTableTextBuffer {
     pub(crate) original: Arc<str>,
-    pub(crate) add: String,
+    pub(crate) add: Arc<String>,
     pub(crate) pieces: Vec<Piece>,
     len: usize,
 }
@@ -52,7 +52,7 @@ impl PieceTableTextBuffer {
             .collect();
         Self {
             original,
-            add: String::new(),
+            add: Arc::new(String::new()),
             pieces,
             len,
         }
@@ -80,6 +80,12 @@ impl PieceTableTextBuffer {
             text.push_str(&source[piece.start..piece.end()]);
         }
         text
+    }
+
+    pub(crate) fn chunks(&self) -> impl Iterator<Item = &str> {
+        self.pieces
+            .iter()
+            .map(|piece| &self.source_text(piece.source)[piece.start..piece.end()])
     }
 
     pub(crate) fn slice_to_string(&self, range: Range<usize>) -> String {
@@ -234,7 +240,7 @@ impl PieceTableTextBuffer {
             }
         }
         if live == 0 {
-            self.add = String::new();
+            self.add = Arc::new(String::new());
         } else if self.add.len().saturating_sub(live) > live {
             // Compact only when discarded bytes outweigh copying the live data.
             // History owns replacement strings, not offsets into this buffer.
@@ -246,16 +252,20 @@ impl PieceTableTextBuffer {
                     piece.start = start;
                 }
             }
-            self.add = compact;
+            self.add = Arc::new(compact);
         } else {
             // An unreferenced suffix can be reused without copying live pieces.
-            self.add.truncate(end);
+            if end < self.add.len() {
+                Arc::make_mut(&mut self.add).truncate(end);
+            }
         }
     }
 
     fn append_add_piece(&mut self, text: &str) -> Option<Piece> {
         let start = self.add.len();
-        self.add.push_str(text);
+        if !text.is_empty() {
+            Arc::make_mut(&mut self.add).push_str(text);
+        }
         Piece::new(PieceSource::Add, start, text.len())
     }
 }

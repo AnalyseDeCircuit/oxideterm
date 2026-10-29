@@ -67,14 +67,43 @@ impl<T: Clone + Send + 'static> CachedLoad<T> {
 }
 
 /// An enum representing
-#[derive(Debug, PartialEq, Eq, Hash, Clone)]
+#[derive(PartialEq, Eq, Hash, Clone)]
 pub enum Resource {
+    /// Encoded image bytes owned by the caller, without a filesystem or network load.
+    Image(Arc<crate::Image>),
     /// This resource is at a given URI
     Uri(SharedUri),
     /// This resource is at a given path in the file system
     Path(Arc<Path>),
+    /// A file preview rotated clockwise after applying its embedded orientation.
+    /// The number of quarter turns is interpreted modulo four.
+    RotatedImage {
+        /// The original encoded file; rotation never replaces it with a thumbnail.
+        path: Arc<Path>,
+        /// Clockwise quarter turns, after the file's EXIF orientation.
+        quarter_turns: u8,
+    },
     /// This resource is embedded in the application binary
     Embedded(SharedString),
+}
+
+impl Debug for Resource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Image(image) => f.debug_tuple("Image").field(&image.id).finish(),
+            Self::Uri(uri) => f.debug_tuple("Uri").field(uri).finish(),
+            Self::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            Self::RotatedImage {
+                path,
+                quarter_turns,
+            } => f
+                .debug_struct("RotatedImage")
+                .field("path", path)
+                .field("quarter_turns", quarter_turns)
+                .finish(),
+            Self::Embedded(path) => f.debug_tuple("Embedded").field(path).finish(),
+        }
+    }
 }
 
 impl From<SharedUri> for Resource {

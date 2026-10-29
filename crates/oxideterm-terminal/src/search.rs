@@ -79,11 +79,80 @@ pub struct TerminalSearchSource {
 struct SearchRow {
     identity: usize,
     start: usize,
-    text: String,
+    len: usize,
+    text_index: usize,
     wrapped: bool,
     history: bool,
     // ASCII columns are implicit; only width/UTF-8 deviations need coordinates.
-    adjustments: Vec<(usize, usize, usize)>,
+    adjustments: Option<Box<ColumnMap>>,
+}
+
+#[derive(PartialEq, Eq)]
+enum ColumnMap {
+    Compact(Vec<[u32; 3]>),
+    Wide(Vec<[usize; 3]>),
+}
+
+impl Default for ColumnMap {
+    fn default() -> Self {
+        Self::Compact(Vec::new())
+    }
+}
+
+impl ColumnMap {
+    fn push(&mut self, (byte, col, end): (usize, usize, usize)) {
+        match self {
+            Self::Compact(entries) => {
+                if let (Ok(byte), Ok(col), Ok(end)) =
+                    (u32::try_from(byte), u32::try_from(col), u32::try_from(end))
+                {
+                    entries.push([byte, col, end]);
+                    return;
+                }
+                // Combining sequences can make a row's UTF-8 offsets exceed its
+                // column count. Promote only that row without truncating offsets.
+                let mut wide = Vec::with_capacity(entries.len() + 1);
+                wide.extend(
+                    entries
+                        .iter()
+                        .map(|entry| entry.map(|value| value as usize)),
+                );
+                wide.push([byte, col, end]);
+                *self = Self::Wide(wide);
+            }
+            Self::Wide(entries) => entries.push([byte, col, end]),
+        }
+    }
+
+    fn shrink_to_fit(&mut self) {
+        match self {
+            Self::Compact(entries) => entries.shrink_to_fit(),
+            Self::Wide(entries) => entries.shrink_to_fit(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Compact(entries) => entries.is_empty(),
+            Self::Wide(entries) => entries.is_empty(),
+        }
+    }
+
+    fn preceding(&self, byte: usize) -> Option<(usize, usize, usize)> {
+        let [start, col, end] = match self {
+            Self::Compact(entries) => {
+                let index = entries.partition_point(|entry| entry[0] as usize <= byte);
+                entries
+                    .get(index.checked_sub(1)?)?
+                    .map(|value| value as usize)
+            }
+            Self::Wide(entries) => {
+                let index = entries.partition_point(|entry| entry[0] <= byte);
+                *entries.get(index.checked_sub(1)?)?
+            }
+        };
+        Some((start, col, end))
+    }
 }
 
 impl SearchRow {
@@ -91,7 +160,9 @@ impl SearchRow {
         row: &alacritty_terminal::grid::Row<Cell>,
         cols: usize,
         across_lines: bool,
+        text: &mut String,
     ) -> Self {
+        let start = text.len();
         let wrapped = row
             .last()
             .is_some_and(|cell| cell.flags.contains(Flags::WRAPLINE));
@@ -102,7 +173,7 @@ impl SearchRow {
         };
         if let Some(prefix) = row.ascii_prefix() {
             let cols = cols.min(row.len());
-            let mut text = String::with_capacity(cols);
+            text.reserve(cols);
             text.push_str(&prefix[..prefix.len().min(cols)]);
             if cols > prefix.len() {
                 text.extend(std::iter::repeat_n(
@@ -112,15 +183,16 @@ impl SearchRow {
             }
             return Self {
                 identity: row.identity(),
-                start: 0,
-                text,
+                start,
+                len: text.len() - start,
+                text_index: 0,
                 wrapped,
                 history: false,
-                adjustments: Vec::new(),
+                adjustments: None,
             };
         }
-        let mut text = String::new();
-        let mut adjustments = Vec::new();
+        text.reserve(cols);
+        let mut adjustments = ColumnMap::default();
         let mut next_col = 0;
         for (col, cell) in row.iter().take(cols).enumerate() {
             if cell
@@ -138,37 +210,43 @@ impl SearchRow {
                 })
             .min(cols);
             if !ch.is_ascii() || col != next_col || end_col != col + 1 {
-                adjustments.push((text.len(), col, end_col));
+                adjustments.push((text.len() - start, col, end_col));
             }
             text.push(ch);
             for ch in cell.zerowidth().into_iter().flatten() {
-                adjustments.push((text.len(), col, end_col));
+                adjustments.push((text.len() - start, col, end_col));
                 text.push(*ch);
             }
             next_col = end_col;
         }
+        adjustments.shrink_to_fit();
         Self {
             identity: row.identity(),
-            start: 0,
-            text,
+            start,
+            len: text.len() - start,
+            text_index: 0,
             wrapped,
             history: false,
-            adjustments,
+            adjustments: (!adjustments.is_empty()).then(|| Box::new(adjustments)),
         }
     }
 
-    fn cell_at(&self, byte: usize) -> (usize, usize) {
-        let index = self
+    fn text<'a>(&self, text: &'a str) -> &'a str {
+        &text[self.start..self.start + self.len]
+    }
+
+    fn cell_at(&self, byte: usize, text: &str) -> (usize, usize) {
+        let Some((start, col, end_col)) = self
             .adjustments
-            .partition_point(|(start, _, _)| *start <= byte);
-        if index == 0 {
+            .as_ref()
+            .and_then(|map| map.preceding(byte))
+        else {
             return (byte, byte + 1);
-        }
-        let (start, col, end_col) = self.adjustments[index - 1];
+        };
         if byte == start {
             return (col, end_col);
         }
-        let char_len = self.text[start..].chars().next().unwrap().len_utf8();
+        let char_len = self.text(text)[start..].chars().next().unwrap().len_utf8();
         let col = end_col + byte - start - char_len;
         (col, col + 1)
     }
@@ -177,6 +255,8 @@ impl SearchRow {
 /// Results retain row identities so output arriving during a scan can be reconciled.
 pub struct TerminalSearchResult {
     rows: Vec<SearchRow>,
+    // Each matched logical line (or complete cross-line subject) owns its text once.
+    text: Vec<Box<str>>,
     matches: Vec<TerminalSearchMatch>,
     cols: usize,
     across_lines: bool,
@@ -186,38 +266,33 @@ pub struct TerminalSearchResult {
 impl TerminalSearchResult {
     fn scan_text(
         &mut self,
-        text: &str,
+        text: &mut String,
         rows: &mut Vec<SearchRow>,
         query: &TerminalSearchQuery,
         is_cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) {
         let base = self.rows.len();
-        let mut retained = false;
+        let previous_matches = self.matches.len();
         let mut add_match = |start: usize, end: usize| {
             if start == end {
                 return;
             }
-            if !retained {
-                self.rows.append(rows);
-                retained = true;
-            }
-            let first =
-                self.rows[base..].partition_point(|row| row.start + row.text.len() <= start);
+            let first = rows.partition_point(|row| row.start + row.len <= start);
             let mut ranges = Vec::new();
-            for (index, row) in self.rows.iter().enumerate().skip(base + first) {
+            for (index, row) in rows.iter().enumerate().skip(first) {
                 if row.start >= end {
                     break;
                 }
                 let from = start.saturating_sub(row.start);
-                let to = end.saturating_sub(row.start).min(row.text.len());
+                let to = end.saturating_sub(row.start).min(row.len);
                 if from >= to {
                     continue;
                 }
-                let last = to - row.text[..to].chars().next_back().unwrap().len_utf8();
+                let last = to - row.text(text)[..to].chars().next_back().unwrap().len_utf8();
                 ranges.push(TerminalSearchRange {
-                    line: index as i32,
-                    start_col: row.cell_at(from).0,
-                    end_col: row.cell_at(last).1,
+                    line: (base + index) as i32,
+                    start_col: row.cell_at(from, text).0,
+                    end_col: row.cell_at(last, text).1,
                 });
             }
             if let Some(first) = ranges.first() {
@@ -243,6 +318,13 @@ impl TerminalSearchResult {
                 }
                 add_match(start, start + matched.len());
             }
+        }
+        if self.matches.len() != previous_matches {
+            for row in rows.iter_mut() {
+                row.text_index = self.text.len();
+            }
+            self.rows.append(rows);
+            self.text.push(std::mem::take(text).into_boxed_str());
         }
     }
 }
@@ -283,6 +365,7 @@ impl TerminalSearchSource {
     ) -> TerminalSearchResult {
         let mut result = TerminalSearchResult {
             rows: Vec::new(),
+            text: Vec::new(),
             matches: Vec::new(),
             cols: self.cols,
             across_lines: query.across_lines,
@@ -300,12 +383,14 @@ impl TerminalSearchSource {
         };
         let mut text = String::new();
         let mut pending_rows = Vec::new();
+        let mut chunk_text = String::new();
         let mut start = top;
         while start < bottom {
             if is_cancelled() {
                 return result;
             }
             let end = (start + TERMINAL_SEARCH_LOCK_CHUNK_LINES).min(bottom);
+            chunk_text.clear();
             let rows = {
                 // Copy bounded chunks; regex evaluation never holds the emulator lock.
                 let term = self.term.lock();
@@ -317,6 +402,7 @@ impl TerminalSearchSource {
                             &term.grid()[Line(line)],
                             self.cols,
                             query.across_lines,
+                            &mut chunk_text,
                         );
                         row.history = line < 0;
                         row
@@ -324,15 +410,16 @@ impl TerminalSearchSource {
                     .collect::<Vec<_>>()
             };
             for mut row in rows {
+                let row_text = row.text(&chunk_text);
                 row.start = text.len();
-                text.push_str(&row.text);
+                text.push_str(row_text);
                 let wrapped = row.wrapped;
                 pending_rows.push(row);
                 if !wrapped {
                     if query.across_lines {
                         text.push('\n');
                     } else {
-                        result.scan_text(&text, &mut pending_rows, query, is_cancelled);
+                        result.scan_text(&mut text, &mut pending_rows, query, is_cancelled);
                         pending_rows.clear();
                         text.clear();
                     }
@@ -345,7 +432,7 @@ impl TerminalSearchSource {
             text.pop();
         }
         if !pending_rows.is_empty() {
-            result.scan_text(&text, &mut pending_rows, query, is_cancelled);
+            result.scan_text(&mut text, &mut pending_rows, query, is_cancelled);
         }
         result
     }
@@ -402,9 +489,14 @@ impl TerminalSearchSource {
                 if row.history && line < 0 {
                     return Some(line);
                 }
-                let current =
-                    SearchRow::from_grid(&term.grid()[Line(line)], self.cols, result.across_lines);
-                (current.text == row.text
+                let mut current_text = String::new();
+                let current = SearchRow::from_grid(
+                    &term.grid()[Line(line)],
+                    self.cols,
+                    result.across_lines,
+                    &mut current_text,
+                );
+                (current.text(&current_text) == row.text(&result.text[row.text_index])
                     && current.wrapped == row.wrapped
                     && current.adjustments == row.adjustments)
                     .then_some(line)
@@ -609,6 +701,20 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn search_columns_preserve_offsets_beyond_u32() {
+        let mut map = ColumnMap::default();
+        map.push((0, 0, 2));
+        map.push((u32::MAX as usize + 1, 2, 3));
+        assert_eq!(map.preceding(0), Some((0, 0, 2)));
+        assert_eq!(map.preceding(u32::MAX as usize), Some((0, 0, 2)));
+        assert_eq!(
+            map.preceding(u32::MAX as usize + 1),
+            Some((4_294_967_296, 2, 3))
+        );
+    }
+
+    #[test]
     fn background_search_preserves_text_history_tails_and_chunk_boundaries() {
         let mut session =
             crate::TerminalSession::recording_playback(400, 3, Default::default(), 100);
@@ -619,9 +725,10 @@ mod tests {
         let source = session.search_source().unwrap();
         {
             let term = source.term.lock();
-            let copied = SearchRow::from_grid(&term.grid()[Line(-36)], 800, false);
+            let mut text = String::new();
+            let copied = SearchRow::from_grid(&term.grid()[Line(-36)], 800, false, &mut text);
             assert_eq!(
-                copied.text,
+                copied.text(&text),
                 format!("row32 {}    ", "abcdefghij".repeat(39))
             );
         }
