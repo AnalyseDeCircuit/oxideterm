@@ -108,10 +108,10 @@ pub struct RenderImage {
 }
 
 enum ImageFrameData {
-    Stream {
-        stream: Arc<crate::AnimationStream>,
-        index: usize,
-        size: Size<DevicePixels>,
+    Rgba {
+        pixels: Arc<[u8]>,
+        width: u32,
+        crop: crate::Bounds<u32>,
         delay: Delay,
         decoded: std::sync::OnceLock<Vec<u8>>,
     },
@@ -125,11 +125,10 @@ enum ImageFrameData {
     },
 }
 
-/// Keeps streamed pixels alive through upload without copying the cache's allocation.
+/// Keeps pixels alive through upload, borrowing fully decoded animation frames.
 pub(crate) enum ImageFrameBytes<'a> {
     Borrowed(&'a [u8]),
     Owned(Vec<u8>),
-    Shared(Arc<Vec<u8>>),
 }
 
 impl std::ops::Deref for ImageFrameBytes<'_> {
@@ -139,7 +138,6 @@ impl std::ops::Deref for ImageFrameBytes<'_> {
         match self {
             Self::Borrowed(bytes) => bytes,
             Self::Owned(bytes) => bytes,
-            Self::Shared(bytes) => bytes,
         }
     }
 }
@@ -159,54 +157,61 @@ impl PartialEq for RenderImage {
 impl Eq for RenderImage {}
 
 impl RenderImage {
-    pub(crate) fn from_animation(
-        stream: Arc<crate::AnimationStream>,
-        delays: Vec<Delay>,
-        size: Size<DevicePixels>,
-    ) -> Self {
+    /// Shares static protocol RGBA canvases and prepares complete BGRA animation frames.
+    pub fn from_rgba_frames(
+        frames: impl IntoIterator<Item = (Arc<[u8]>, Delay)>,
+        dimensions: Size<u32>,
+        crop: crate::Bounds<u32>,
+    ) -> Option<Self> {
+        if crop.size.width == 0
+            || crop.size.height == 0
+            || crop.origin.x.checked_add(crop.size.width)? > dimensions.width
+            || crop.origin.y.checked_add(crop.size.height)? > dimensions.height
+        {
+            return None;
+        }
+        let bytes = (dimensions.width as usize)
+            .checked_mul(dimensions.height as usize)?
+            .checked_mul(4)?;
         let mut image = Self::new(SmallVec::<[Frame; 1]>::new());
-        image.data = delays
-            .into_iter()
-            .enumerate()
-            .map(|(index, delay)| ImageFrameData::Stream {
-                stream: stream.clone(),
-                index,
-                size,
+        for (pixels, delay) in frames {
+            if pixels.len() != bytes {
+                return None;
+            }
+            image.data.push(ImageFrameData::Rgba {
+                pixels,
+                width: dimensions.width,
+                crop,
                 delay,
                 decoded: Default::default(),
-            })
-            .collect();
-        image
+            });
+        }
+        if image.frame_count() > 1 {
+            image.data = image
+                .data
+                .into_iter()
+                .map(|frame| {
+                    let ImageFrameData::Rgba {
+                        pixels,
+                        width,
+                        crop,
+                        delay,
+                        ..
+                    } = frame
+                    else {
+                        unreachable!();
+                    };
+                    let pixels = rgba_frame_pixels(&pixels, width, crop);
+                    let buffer =
+                        image::RgbaImage::from_raw(crop.size.width, crop.size.height, pixels)
+                            .expect("validated RGBA crop dimensions");
+                    ImageFrameData::Pixels(Frame::from_parts(buffer, 0, 0, delay))
+                })
+                .collect();
+        }
+        Some(image)
     }
 
-    pub(crate) fn frame_ready(&self, index: usize) -> bool {
-        match self.data.get(index) {
-            Some(ImageFrameData::Stream {
-                stream, decoded, ..
-            }) => decoded.get().is_some() || stream.ready(index),
-            _ => true,
-        }
-    }
-
-    pub(crate) fn estimated_decode_working_bytes(&self) -> usize {
-        match self.data.first() {
-            Some(ImageFrameData::Stream { stream, .. }) => stream.working_bytes(),
-            _ => 0,
-        }
-    }
-
-    pub(crate) fn prefetch_frame(&self, index: usize) {
-        if let Some(ImageFrameData::Stream { stream, .. }) = self.data.first() {
-            stream.prefetch(index);
-        }
-    }
-
-    pub(crate) async fn prepare_frame(&self, index: usize) -> Result<(), crate::ImageCacheError> {
-        if let Some(ImageFrameData::Stream { stream, .. }) = self.data.get(index) {
-            stream.prepare(index).await?;
-        }
-        Ok(())
-    }
     /// Create a new image from the given data.
     pub fn new(data: impl Into<SmallVec<[Frame; 1]>>) -> Self {
         static NEXT_ID: AtomicUsize = AtomicUsize::new(0);
@@ -251,10 +256,24 @@ impl RenderImage {
         Ok(())
     }
 
+    pub(crate) fn push_animation_frame(&mut self, frame: Frame) {
+        // Animation loops reuse decoded pixels rather than decompressing every cycle.
+        self.data.push(ImageFrameData::Pixels(frame));
+    }
+
     pub(crate) fn from_decoded_frames(frames: impl IntoIterator<Item = Frame>) -> Result<Self> {
         let mut image = Self::new(SmallVec::<[Frame; 1]>::new());
-        for frame in frames {
-            image.push_decoded_frame(frame)?;
+        let mut frames = frames.into_iter();
+        if let Some(first) = frames.next() {
+            if let Some(second) = frames.next() {
+                image.push_animation_frame(first);
+                image.push_animation_frame(second);
+                for frame in frames {
+                    image.push_animation_frame(frame);
+                }
+            } else {
+                image.push_decoded_frame(first)?;
+            }
         }
         Ok(image)
     }
@@ -264,19 +283,9 @@ impl RenderImage {
         self.data
             .iter()
             .map(|frame| match frame {
-                ImageFrameData::Stream {
-                    stream,
-                    index,
-                    decoded,
-                    ..
-                } => {
-                    decoded.get().map_or(0, Vec::capacity)
-                        + if *index == 0 {
-                            stream.retained_bytes()
-                        } else {
-                            0
-                        }
-                }
+                ImageFrameData::Rgba {
+                    pixels, decoded, ..
+                } => pixels.len() + decoded.get().map_or(0, Vec::capacity),
                 ImageFrameData::Pixels(frame) => frame.buffer().as_raw().capacity(),
                 ImageFrameData::Compact { bytes, decoded, .. } => {
                     bytes.capacity() + decoded.get().map_or(0, Vec::capacity)
@@ -287,15 +296,17 @@ impl RenderImage {
 
     pub(crate) fn frame_bytes(&self, index: usize) -> Result<Option<ImageFrameBytes<'_>>> {
         match self.data.get(index) {
-            Some(ImageFrameData::Stream {
-                stream, decoded, ..
-            }) => {
-                if let Some(pixels) = decoded.get() {
-                    Ok(Some(ImageFrameBytes::Borrowed(pixels)))
-                } else {
-                    Ok(Some(ImageFrameBytes::Shared(stream.pixels(index)?)))
-                }
-            }
+            Some(ImageFrameData::Rgba {
+                pixels,
+                width,
+                crop,
+                decoded,
+                ..
+            }) => Ok(Some(if let Some(pixels) = decoded.get() {
+                ImageFrameBytes::Borrowed(pixels)
+            } else {
+                ImageFrameBytes::Owned(rgba_frame_pixels(pixels, *width, *crop))
+            })),
             Some(ImageFrameData::Pixels(frame)) => {
                 Ok(Some(ImageFrameBytes::Borrowed(frame.buffer().as_raw())))
             }
@@ -322,17 +333,16 @@ impl RenderImage {
 
     /// Convert this image into a byte slice.
     pub fn as_bytes(&self, frame_index: usize) -> Option<&[u8]> {
-        if let Some(ImageFrameData::Stream {
-            stream, decoded, ..
-        }) = self.data.get(frame_index)
-        {
-            if decoded.get().is_none() {
-                let _ = decoded.set(stream.pixels(frame_index).ok()?.as_ref().clone());
-            }
-            return decoded.get().map(Vec::as_slice);
-        }
         self.data.get(frame_index).map(|frame| match frame {
-            ImageFrameData::Stream { .. } => unreachable!(),
+            ImageFrameData::Rgba {
+                pixels,
+                width,
+                crop,
+                decoded,
+                ..
+            } => decoded
+                .get_or_init(|| rgba_frame_pixels(pixels, *width, *crop))
+                .as_slice(),
             ImageFrameData::Pixels(frame) => frame.buffer().as_raw().as_slice(),
             ImageFrameData::Compact { bytes, decoded, .. } => decoded
                 .get_or_init(|| {
@@ -350,11 +360,14 @@ impl RenderImage {
         self.data
             .get(frame_index)
             .map(|frame| match frame {
+                ImageFrameData::Rgba { crop, .. } => {
+                    size(crop.size.width.into(), crop.size.height.into())
+                }
                 ImageFrameData::Pixels(frame) => {
                     let (width, height) = frame.buffer().dimensions();
                     size(width.into(), height.into())
                 }
-                ImageFrameData::Compact { size, .. } | ImageFrameData::Stream { size, .. } => *size,
+                ImageFrameData::Compact { size, .. } => *size,
             })
             .unwrap_or_default()
     }
@@ -380,10 +393,9 @@ impl RenderImage {
         self.data
             .get(frame_index)
             .map(|frame| match frame {
+                ImageFrameData::Rgba { delay, .. } => *delay,
                 ImageFrameData::Pixels(frame) => frame.delay(),
-                ImageFrameData::Compact { delay, .. } | ImageFrameData::Stream { delay, .. } => {
-                    *delay
-                }
+                ImageFrameData::Compact { delay, .. } => *delay,
             })
             .unwrap_or(Delay::from_numer_denom_ms(100, 1))
     }
@@ -403,10 +415,56 @@ impl fmt::Debug for RenderImage {
     }
 }
 
+fn rgba_frame_pixels(pixels: &[u8], width: u32, crop: crate::Bounds<u32>) -> Vec<u8> {
+    let row_bytes = crop.size.width as usize * 4;
+    let mut converted = Vec::with_capacity(row_bytes * crop.size.height as usize);
+    for row in crop.origin.y..crop.origin.y + crop.size.height {
+        let start = (row as usize * width as usize + crop.origin.x as usize) * 4;
+        converted.extend_from_slice(&pixels[start..start + row_bytes]);
+    }
+    for pixel in converted.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    converted
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use smallvec::SmallVec;
+
+    #[test]
+    fn shared_rgba_upload_crops_and_converts_without_retaining_bgra() {
+        let pixels: Arc<[u8]> = vec![255, 0, 0, 255, 0, 0, 255, 128].into();
+        let image = RenderImage::from_rgba_frames(
+            [(pixels.clone(), Delay::from_numer_denom_ms(50, 1))],
+            size(2, 1),
+            crate::Bounds::new(crate::point(1, 0), size(1, 1)),
+        )
+        .unwrap();
+        for _ in 0..3 {
+            assert_eq!(
+                image.frame_bytes(0).unwrap().unwrap().as_ref(),
+                &[255, 0, 0, 128]
+            );
+            assert_eq!(image.retained_bytes(), 8);
+        }
+        assert_eq!(image.delay(0).numer_denom_ms(), (50, 1));
+        assert_eq!(image.as_bytes(0), Some([255, 0, 0, 128].as_slice()));
+        assert_eq!(
+            image.frame_bytes(0).unwrap().unwrap().as_ref(),
+            &[255, 0, 0, 128]
+        );
+        assert_eq!(pixels.as_ref(), &[255, 0, 0, 255, 0, 0, 255, 128]);
+        assert!(
+            RenderImage::from_rgba_frames(
+                [(pixels, Delay::from_numer_denom_ms(0, 1))],
+                size(2, 1),
+                crate::Bounds::new(crate::point(1, 0), size(2, 1)),
+            )
+            .is_none()
+        );
+    }
 
     #[test]
     fn compact_frames_preserve_pixels_delays_and_borrowed_reads() {
@@ -469,9 +527,9 @@ mod tests {
                 )
             })
         };
-        for compact in [false, true] {
+        for via_decode in [false, true] {
             let start = std::time::Instant::now();
-            let image = if compact {
+            let image = if via_decode {
                 RenderImage::from_decoded_frames(frames()).unwrap()
             } else {
                 RenderImage::new(frames().collect::<SmallVec<[_; 1]>>())
@@ -482,7 +540,7 @@ mod tests {
                 std::hint::black_box(image.frame_bytes(index).unwrap());
             }
             eprintln!(
-                "IMAGE_MEMORY compact={compact} bytes={} build_ms={load_ms:.3} read_all_ms={:.3}",
+                "IMAGE_MEMORY via_decode={via_decode} bytes={} build_ms={load_ms:.3} read_all_ms={:.3}",
                 image.retained_bytes(),
                 start.elapsed().as_secs_f64() * 1000.0
             );

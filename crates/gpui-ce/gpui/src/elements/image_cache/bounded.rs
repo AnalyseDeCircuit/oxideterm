@@ -267,7 +267,7 @@ mod tests {
                 )
             }
         }
-        let bytes = crate::elements::img::sized::tests::animation_bytes(640, 360, 240);
+        let bytes = crate::elements::img::sized::tests::animation_bytes(32, 16, 240);
         let resource = Resource::Image(Arc::new(crate::Image::from_bytes(
             crate::ImageFormat::Gif,
             bytes,
@@ -290,17 +290,9 @@ mod tests {
         draw(cx);
         let first = images.borrow()[0].clone().unwrap();
         let second = images.borrow()[1].clone().unwrap();
-        assert!(
-            first.estimated_decode_working_bytes() > 0
-                && second.estimated_decode_working_bytes() > 0,
-            "fixture must exercise streaming rather than a fully cached animation"
-        );
-        futures::executor::block_on(first.prepare_frame(4)).unwrap();
-        futures::executor::block_on(second.prepare_frame(200)).unwrap();
-        assert!(
-            first.frame_ready(4),
-            "advancing the second player evicted the first player's visible frame"
-        );
+        assert_eq!(first.retained_bytes(), 32 * 16 * 4 * 240);
+        assert_eq!(second.retained_bytes(), 32 * 16 * 4 * 240);
+        let first_frame = first.frame_bytes(4).unwrap().unwrap();
         assert_eq!(
             &first.frame_bytes(4).unwrap().unwrap()[..4],
             &[196, 84, 28, 255]
@@ -309,6 +301,11 @@ mod tests {
             &second.frame_bytes(200).unwrap().unwrap()[..4],
             &[72, 104, 120, 255]
         );
+        assert_eq!(
+            first.frame_bytes(4).unwrap().unwrap().as_ptr(),
+            first_frame.as_ptr()
+        );
+        drop(first_frame);
         let retired = Arc::downgrade(&first);
         drop(first);
         view.update(cx, |view, cx| {
@@ -319,10 +316,13 @@ mod tests {
         draw(cx);
         assert!(
             retired.upgrade().is_none(),
-            "closing one consumer retained its decoder and frames"
+            "closing one consumer retained its frames"
         );
         assert_eq!(images.borrow()[1].as_ref().unwrap().id, second.id);
-        assert!(second.frame_ready(200));
+        assert_eq!(
+            &second.frame_bytes(200).unwrap().unwrap()[..4],
+            &[72, 104, 120, 255]
+        );
     }
 
     #[gpui::test]

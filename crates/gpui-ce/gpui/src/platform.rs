@@ -1582,10 +1582,8 @@ pub trait PlatformAtlas {
 
     fn remove(&self, key: &AtlasKey);
 
-    #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
-    fn contains(&self, _key: &AtlasKey) -> bool {
-        false
-    }
+    /// Returns whether an allocation is resident without decoding or uploading pixels.
+    fn contains(&self, key: &AtlasKey) -> bool;
 }
 
 #[doc(hidden)]
@@ -1715,7 +1713,6 @@ impl PlatformAtlas for HeadlessAtlas {
         self.0.lock().remove(key);
     }
 
-    #[cfg(any(test, feature = "test-support", feature = "bench-support"))]
     fn contains(&self, key: &AtlasKey) -> bool {
         self.0.lock().contains(key)
     }
@@ -3167,7 +3164,7 @@ impl Image {
                             for pixel in frame.buffer_mut().chunks_exact_mut(4) {
                                 pixel.swap(0, 2);
                             }
-                            frames.push_decoded_frame(frame)?;
+                            frames.push_animation_frame(frame);
                         }
                         Err(err) => {
                             log::debug!("Skipping GIF frame due to decode error: {err}");

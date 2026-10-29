@@ -370,16 +370,14 @@ impl ImageCacheItem {
     fn estimated_render_bytes(&self) -> usize {
         fn cost(image: Option<Result<Arc<RenderImage>, ImageCacheError>>) -> usize {
             image.and_then(Result::ok).map_or(0, |image| {
-                let texture = (0..image.frame_count())
+                (0..image.frame_count())
                     .map(|index| {
                         let size = image.size(index);
                         (size.width.0 as usize)
                             .saturating_mul(size.height.0 as usize)
                             .saturating_mul(4)
                     })
-                    .max()
-                    .unwrap_or(0);
-                texture.saturating_add(image.estimated_decode_working_bytes())
+                    .sum()
             })
         }
         self.prune_players();

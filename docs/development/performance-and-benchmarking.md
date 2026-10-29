@@ -26,6 +26,116 @@ Use the same fixture size, warm-up count, measured-run count, terminal dimension
 
 ## In-App Performance Work
 
+### Complete Animation Frame Caching (2026-10-29)
+
+The final playback policy restores decode-once, full-frame reuse for image widgets
+(file/SFTP previews and chat images) and terminal-protocol animations. It replaces
+the intermediate 64 MiB GPU-cache compromise. The separate desktop background/video
+media decoder is unchanged.
+
+- GIF and animated WebP sources decode, resize, rotate, and convert their complete
+  frame sets once per display resolution. Animation storage is raw BGRA, not QOI
+  frames decompressed on each loop. The streaming decoder worker and three-frame
+  sliding CPU cache have been removed.
+- Terminal animations prepare their complete BGRA frame sets, reserving the full
+  pixel allocation before conversion. Static terminal images retain the shared-RGBA
+  optimization. Image admission/eviction fixes and compact search coordinates remain.
+- Every uploaded frame of a visible animation remains in the atlas for subsequent
+  loops, including animations larger than the former 64 MiB limit. Hidden images,
+  superseded resolutions, explicit removal, and renderer resets release their
+  textures. The general image cache still evicts cold resources, not visible players.
+- Deadline-based wakeups remain: image widgets and terminal images request a frame
+  when the next image frame is due rather than continuously at display refresh rate.
+  Hidden views cancel deadline tasks and inactive windows are not notified.
+
+Regression coverage includes stable borrowed pixel addresses across repeated loops;
+17 distinct 4 MiB frames all remaining in the GPU cache; release after hiding/removal;
+independent playback cursors; resizing and rotation; GIF disposal and transparency;
+pause, loading, finite loops and gapless frames. The image suite passed 10 tests
+(four manual benchmarks unrun), the image-cache lifecycle suite passed three tests,
+the atlas reuse test passed, and all 214 terminal-view tests passed.
+
+The macOS ordinary application build passed without test-support features.
+The prior atlas-query build error is fixed across Metal, DirectX, WGPU, headless and
+test implementations. Windows/Linux native builds were not run on this macOS host.
+
+Complete decoded frames and visible GPU frames now scale with animation dimensions
+and frame count. The low-memory animation preparation numbers in the earlier section
+below describe the superseded implementation; the static-image and search results
+still apply. No standalone GUI instance was launched and hardware power was not
+measured. General scrollback compression stays paused.
+
+### Terminal Image Ownership And Search Coordinates (2026-10-29)
+
+Baseline: `b3aae458f`. Measurements use the same machine and optimized profiles as
+the search baseline below, with one warm-up and five recorded samples. General
+scrollback compression remains paused.
+
+The graphics ingress now accounts for decoded image bytes across protocols and
+emits deletion events when evicting images, releasing its Kitty animation sources
+as well as consumer placements. The default ingress allowance is 16 MiB; the
+existing terminal-state safety budget remains in place. PNG/JPEG/GIF dimensions
+are checked before pixel decoding, GIF accumulation is bounded, and GIF frame
+zero shares the primary image allocation. The GIF iterator can temporarily hold
+one additional canvas while detecting EOF. Sixel still uses its decoder's own
+allocation limit before the terminal checks the decoded dimensions.
+
+Terminal rendering shares protocol RGBA canvases. It converts only a requested
+frame/crop to BGRA during texture upload instead of retaining a second complete
+frame set. An upload-workspace reservation follows the render image through
+retirement. Animation controls with unchanged pixels/delays reuse the image;
+new pixel revisions retire old cache entries. Hidden panes release derived image
+resources while retaining protocol data and animation clocks, and late preparation
+results cannot repopulate a suspended cache.
+
+| Image workload | Before | After | Median preparation/ingress time |
+| --- | ---: | ---: | ---: |
+| 100 distinct 1024×1024 PNG uploads, parser-retained pixels | 400 MiB | 16 MiB | 73.04 → 79.89 ms |
+| One 512×256 static image, extra preparation peak heap | 513.30 KiB | 1.52 KiB | 137 → 1 µs |
+| 48 frames at 512×256, extra preparation peak heap | 24.01 MiB | 6.52 KiB | 3,913 → 4 µs |
+
+The upload benchmark counts pixel allocations still held by the parser via weak
+references, not RSS. The preparation benchmark tracks requested Rust heap above
+the already-created protocol source. Its 48-frame source remains 24 MiB; a requested
+frame needs a temporary 512 KiB conversion buffer during upload. GPU textures and
+first-paint latency are outside these measurements. Conversion moves to upload;
+the preparation-time improvement is not an end-to-end rendering speedup. Admission
+and eviction add about 9% to this small-PNG ingress workload.
+
+Search row mappings use 12-byte checked coordinates for ordinary rows, promoting
+only rows whose offsets/columns require `usize`. ASCII rows retain no map object.
+The benchmark uses the real background-search and result-reconciliation paths,
+20,000 history rows at 400 columns plus 40 screen rows. All paired match counts agree.
+
+| Search workload | Extra peak heap before → after | Median scan + resolution before → after |
+| --- | ---: | ---: |
+| ASCII, regex hit | 18.67 → 18.26 MiB | 6.79 → 6.64 ms |
+| Alternating cell colors, regex hit | 18.67 → 18.26 MiB | 38.11 → 35.09 ms |
+| CJK + combining marks, regex miss | 115.38 → 69.88 MiB | 43.62 → 42.46 ms |
+| CJK + combining marks, regex hit | 119.79 → 74.13 MiB | 71.04 → 67.26 ms |
+| CJK + combining marks, cross-line literal | 119.79 → 74.13 MiB | 53.61 → 48.98 ms |
+
+Validation: 194 terminal-core tests passed, with five existing ignored cases;
+26 graphics-protocol tests passed, with the manual benchmark separately executed.
+The final map-storage refinement passed all five focused search tests. The terminal
+view suite passed 212 tests and retained the previously reproduced failure in
+`terminal_background_animation_plays_and_pauses` at `app/render.rs:3027`.
+The final cache lifecycle tests and the GPUI shared-RGBA upload test passed.
+The native application build passed. Native image-playback inspection was stopped
+at the user's request; no interactive image-playback acceptance is claimed.
+
+Reproduction commands:
+
+```sh
+cargo test -p oxideterm-terminal-graphics --release image_retention_benchmark -- --ignored --nocapture
+cargo bench -p oxideterm-gpui-terminal --bench image_cache
+cargo bench -p oxideterm-terminal --bench history_search
+```
+
+Raw paired output is under `target/memory-evaluation/`: `images-before.txt`,
+`images-after.txt`, `image-cache-before.csv`, `image-cache-after.csv`,
+`search-mapping-before.csv`, and `search-mapping-after.csv`.
+
 ### Shared Background-Search Text (2026-10-28)
 
 The background search path now retains one text owner per matched logical line, or one

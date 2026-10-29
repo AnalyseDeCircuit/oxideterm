@@ -121,6 +121,10 @@ struct MetalAtlasTextures {
 }
 
 impl PlatformAtlas for MetalAtlas {
+    fn contains(&self, key: &AtlasKey) -> bool {
+        self.0.lock().contains(key)
+    }
+
     fn stream_gpu_staging_bytes(&self, size: Size<DevicePixels>) -> Result<usize> {
         let width = usize::try_from(size.width.0)?;
         let height = usize::try_from(size.height.0)?;

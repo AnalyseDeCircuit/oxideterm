@@ -28,10 +28,10 @@ use thiserror::Error;
 
 use super::{Stateful, StatefulInteractiveElement};
 
+mod animation;
 mod decoded_size;
 pub(crate) mod sized;
-mod streaming;
-pub(crate) use streaming::{AnimationInput, AnimationStream};
+pub(crate) use animation::{AnimationInput, decode_animation};
 
 /// The delay before showing the loading state.
 pub const LOADING_DELAY: Duration = Duration::from_millis(200);
@@ -355,6 +355,7 @@ impl Element for Img {
                             let frame_count = data.frame_count();
                             loading = frame_count == 0;
                             let max_frame_index = frame_count.saturating_sub(1);
+                            let mut next_frame_delay = None;
 
                             if let Some(state) = &mut state {
                                 state.frame_index = state.frame_index.min(max_frame_index);
@@ -367,15 +368,21 @@ impl Element for Img {
                                                 Duration::from(data.delay(state.frame_index));
 
                                             let next = (state.frame_index + 1) % frame_count;
-                                            if elapsed >= frame_duration && data.frame_ready(next) {
+                                            if elapsed >= frame_duration {
                                                 state.frame_index = next;
                                                 state.last_frame_time =
                                                     Some(current_time - (elapsed - frame_duration));
-                                            } else if elapsed >= frame_duration {
-                                                data.prefetch_frame(next);
+                                                next_frame_delay = Some(
+                                                    Duration::from(data.delay(next))
+                                                        .saturating_sub(elapsed - frame_duration),
+                                                );
+                                            } else {
+                                                next_frame_delay = Some(frame_duration - elapsed);
                                             }
                                         } else {
                                             state.last_frame_time = Some(current_time);
+                                            next_frame_delay =
+                                                Some(Duration::from(data.delay(state.frame_index)));
                                         }
                                     } else {
                                         state.last_frame_time = None;
@@ -427,8 +434,9 @@ impl Element for Img {
                                 && data.frame_count() > 1
                                 && window.is_window_active()
                                 && !cx.reduce_motion()
+                                && let Some(delay) = next_frame_delay
                             {
-                                window.request_animation_frame();
+                                window.request_animation_frame_after(delay, cx);
                             }
                         }
                         Some(_err) => {
@@ -846,7 +854,7 @@ impl ImageAssetLoader {
                                 for pixel in frame.buffer_mut().chunks_exact_mut(4) {
                                     pixel.swap(0, 2);
                                 }
-                                frames.push_decoded_frame(frame)?;
+                                frames.push_animation_frame(frame);
                             }
                             Err(err) => {
                                 log::debug!("Skipping GIF frame due to decode error: {err}");
@@ -876,7 +884,7 @@ impl ImageAssetLoader {
                                     for pixel in frame.buffer_mut().chunks_exact_mut(4) {
                                         pixel.swap(0, 2);
                                     }
-                                    frames.push_decoded_frame(frame)?;
+                                    frames.push_animation_frame(frame);
                                 }
                                 Err(err) => {
                                     log::debug!("Skipping WebP frame due to decode error: {err}");
@@ -1111,27 +1119,21 @@ mod tests {
             ImageSource::Image(image) => image.clone(),
             _ => unreachable!(),
         });
-        let streamed = Arc::new(
-            AnimationStream::spawn(
+        let decoded = Arc::new(
+            decode_animation(
                 AnimationInput::Image(input),
                 ImageFormat::Gif,
                 (512, 256),
-                (512, 256),
                 0,
-                [100, 200, 300]
-                    .into_iter()
-                    .map(|ms| image::Delay::from_numer_denom_ms(ms, 1))
-                    .collect(),
             )
             .unwrap(),
         );
         view.update(cx, |view, cx| {
-            view.source = ImageSource::Render(streamed.clone());
+            view.source = ImageSource::Render(decoded.clone());
             cx.notify();
         });
         assert_eq!(draw(cx).unwrap().frame_index, 1);
         for (millis, index) in [(200, 2), (300, 0)] {
-            futures::executor::block_on(streamed.prepare_frame(index)).unwrap();
             assert_eq!(advance(cx, millis).frame_index, index);
         }
         cx.update(|_, cx| cx.set_reduce_motion(true));
@@ -1144,8 +1146,40 @@ mod tests {
         assert_eq!(advance(cx, 1000).frame_index, 1);
         native.simulate_active_status_change(true);
         assert_eq!(draw(cx).unwrap().frame_index, 1);
-        futures::executor::block_on(streamed.prepare_frame(2)).unwrap();
         assert_eq!(advance(cx, 200).frame_index, 2);
+
+        let looped = Arc::new(
+            decode_animation(
+                AnimationInput::Bytes(sized::tests::animation_bytes(32, 16, 5).into()),
+                ImageFormat::Gif,
+                (32, 16),
+                0,
+            )
+            .unwrap(),
+        );
+        view.update(cx, |view, cx| {
+            view.source = ImageSource::Render(looped.clone());
+            cx.notify();
+        });
+        draw(cx);
+        assert_eq!(looped.retained_bytes(), 5 * 32 * 16 * 4);
+        let pointers = (0..5)
+            .map(|index| looped.as_bytes(index).unwrap().as_ptr())
+            .collect::<Vec<_>>();
+        for index in [3, 4, 0, 1, 2] {
+            assert_eq!(advance(cx, 40).frame_index, index);
+            assert_eq!(
+                looped.frame_bytes(index).unwrap().unwrap().as_ptr(),
+                pointers[index]
+            );
+        }
+        cx.update(|window, _| assert!(window.has_image_frame(looped.id, 4)));
+        assert_eq!(advance(cx, 40).frame_index, 3);
+        assert_eq!(advance(cx, 40).frame_index, 4);
+        assert_eq!(
+            looped.frame_bytes(4).unwrap().unwrap().as_ptr(),
+            pointers[4]
+        );
     }
 
     #[gpui::test]

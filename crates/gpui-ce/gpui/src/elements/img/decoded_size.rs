@@ -16,7 +16,7 @@ pub(super) fn animation(
             && animate_webp
             && image::codecs::webp::WebPDecoder::new(Cursor::new(input.as_ref()))?.has_animation())
     {
-        return super::AnimationStream::open(input, info.format, info.size, target, turns);
+        return super::decode_animation(input, info.format, target, turns).map(Some);
     }
     Ok(None)
 }

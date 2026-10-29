@@ -1514,9 +1514,15 @@ impl TerminalPane {
         if visible {
             cx.notify();
         } else {
-            // Only discard derived text layouts. The session, selection, viewport and image
-            // animation clocks remain pane-owned and continue independently of presentation.
+            // Protocol pixels and animation clocks survive; display resources can be rebuilt.
             self.layout_cache.lock().clear();
+            let images = self.image_cache.suspend();
+            // Defer until the current window is back in App.windows too.
+            cx.defer(move |cx| {
+                for image in images {
+                    cx.drop_image(image, None);
+                }
+            });
         }
     }
 

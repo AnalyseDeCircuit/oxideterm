@@ -113,8 +113,7 @@ impl SourceInfo {
         if turns != 0
             && let Ok(format) = image::guess_format(self.bytes())
         {
-            // At native zoom (or for unsupported thumbnails), rotate decoded frames
-            // before compact storage, without an intermediate full RenderImage copy.
+            // Rotate before storage without creating an intermediate full RenderImage copy.
             let frames = decode_static_image(self.bytes(), format)?
                 .into_iter()
                 .map(|frame| {
@@ -149,7 +148,6 @@ pub(crate) struct SizedImage {
         CachedLoad<Result<Arc<RenderImage>, ImageCacheError>>,
     )>,
     failed: Option<((u32, u32), ImageCacheError)>,
-    pending_frame: Option<CachedLoad<Result<(), ImageCacheError>>>,
 }
 
 impl SizedImage {
@@ -165,7 +163,6 @@ impl SizedImage {
             ready: VecDeque::new(),
             pending: None,
             failed: None,
-            pending_frame: None,
         }
     }
 
@@ -197,7 +194,6 @@ impl SizedImage {
             ready: VecDeque::new(),
             pending: None,
             failed: None,
-            pending_frame: None,
         }
     }
 
@@ -217,7 +213,7 @@ impl SizedImage {
     pub(crate) fn use_image(
         &mut self,
         bounds: Option<Size<DevicePixels>>,
-        frame: usize,
+        _frame: usize,
         window: &Window,
         cx: &App,
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
@@ -225,14 +221,6 @@ impl SizedImage {
             Ok(source) => source,
             Err(error) => return Some(Err(error)),
         };
-        if let Some(pending) = &self.pending_frame
-            && let Some(result) = pending.use_by(window.current_view())
-        {
-            self.pending_frame = None;
-            if let Err(error) = result {
-                return Some(Err(error));
-            }
-        }
         if let Some((target, pending)) = &self.pending
             && let Some(result) = pending.use_by(window.current_view())
         {
@@ -258,7 +246,7 @@ impl SizedImage {
                     .ready
                     .back()
                     .map_or_else(|| source.layout.clone(), |ready| ready.image.clone());
-                return self.display_frame(image, frame, window, cx);
+                return self.display_image(image);
             };
             // Bucket resize steps upward, never below the actual device-pixel request.
             source.target((
@@ -287,7 +275,7 @@ impl SizedImage {
             && ready.target.0 <= target.0.saturating_mul(2)
             && ready.target.1 <= target.1.saturating_mul(2)
         {
-            return self.display_frame(ready.image.clone(), frame, window, cx);
+            return self.display_image(ready.image.clone());
         }
         let previous = adequate
             .or_else(|| self.ready.back())
@@ -298,39 +286,22 @@ impl SizedImage {
             pending.use_by(window.current_view());
             self.pending = Some((target, pending));
         }
-        previous.and_then(|image| self.display_frame(image, frame, window, cx))
+        previous.and_then(|image| self.display_image(image))
     }
 
-    fn display_frame(
+    fn display_image(
         &mut self,
         image: Arc<RenderImage>,
-        frame: usize,
-        window: &Window,
-        cx: &App,
     ) -> Option<Result<Arc<RenderImage>, ImageCacheError>> {
-        let frame = frame.min(image.frame_count().saturating_sub(1));
-        if image.frame_ready(frame) {
-            image.prefetch_frame(frame + 1);
-            if image.frame_count() > 1
-                && self
-                    .ready
-                    .back()
-                    .is_some_and(|ready| ready.image.id == image.id)
-            {
-                self.ready.retain(|ready| ready.image.id == image.id);
-            }
-            return Some(Ok(image));
+        if image.frame_count() > 1
+            && self
+                .ready
+                .back()
+                .is_some_and(|ready| ready.image.id == image.id)
+        {
+            self.ready.retain(|ready| ready.image.id == image.id);
         }
-        if self.pending_frame.is_none() {
-            let pending = CachedLoad::new(async move { image.prepare_frame(frame).await }, cx);
-            pending.use_by(window.current_view());
-            self.pending_frame = Some(pending);
-        }
-        self.ready
-            .iter()
-            .rev()
-            .find(|ready| ready.image.frame_ready(frame))
-            .map(|ready| Ok(ready.image.clone()))
+        Some(Ok(image))
     }
 }
 
@@ -484,7 +455,7 @@ pub(crate) mod tests {
 
     #[test]
     #[cfg(target_os = "macos")]
-    #[ignore = "manual long-animation memory and frame-preparation comparison"]
+    #[ignore = "manual full-frame animation memory and playback comparison"]
     fn long_animation_memory() {
         let input = Arc::new(Image::from_bytes(
             crate::ImageFormat::Gif,
@@ -520,14 +491,11 @@ pub(crate) mod tests {
                 times[227],
                 times[239]
             );
-            futures::executor::block_on(output.prepare_frame(0)).unwrap();
             let start = Instant::now();
-            let mut late = 0;
             let mut reads = Vec::new();
             for index in 0..240 {
                 let deadline = start + Duration::from_millis(index as u64 * 40);
                 std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
-                late += usize::from(!output.frame_ready(index));
                 let read = Instant::now();
                 let pixels = output.frame_bytes(index).unwrap().unwrap();
                 let color = (index * 7 % 256) as u8;
@@ -535,17 +503,14 @@ pub(crate) mod tests {
                     &pixels[..4],
                     &[color.wrapping_mul(7), color.wrapping_mul(3), color, 255]
                 );
-                output.prefetch_frame(index + 1);
                 reads.push(read.elapsed().as_secs_f64() * 1000.0);
             }
             reads.sort_by(f64::total_cmp);
             eprintln!(
-                "PACED_PLAYBACK adaptive={adaptive} late={late} read_p95_ms={:.3} read_max_ms={:.3}",
+                "PACED_PLAYBACK adaptive={adaptive} read_p95_ms={:.3} read_max_ms={:.3}",
                 reads[227], reads[239]
             );
-            if adaptive {
-                assert!(output.retained_bytes() <= 640 * 360 * 4 * 3);
-            }
+            assert_eq!(output.retained_bytes(), 640 * 360 * 4 * 240);
         }
     }
 
@@ -626,41 +591,16 @@ pub(crate) mod tests {
             let regular = source
                 .decode(target, SvgRenderer::new(Arc::new(())))
                 .unwrap();
-            let Resource::Image(input) = &source.source else {
-                unreachable!()
-            };
-            let streamed = Arc::new(
-                super::super::AnimationStream::spawn(
-                    super::super::AnimationInput::Image(input.clone()),
-                    image::ImageFormat::Gif,
-                    (8, 4),
-                    target,
-                    0,
-                    [70, 130, 190, 0]
-                        .into_iter()
-                        .map(|ms| image::Delay::from_numer_denom_ms(ms, 1))
-                        .collect(),
-                )
-                .unwrap(),
-            );
-            for frames in [regular, streamed] {
+            {
+                let frames = regular;
                 assert_eq!(frames.frame_count(), 4);
-                if frames.estimated_decode_working_bytes() != 0 {
-                    let upload = frames.frame_bytes(0).unwrap().unwrap();
-                    let same_frame = frames.frame_bytes(0).unwrap().unwrap();
-                    assert_eq!(
-                        upload.as_ptr(),
-                        same_frame.as_ptr(),
-                        "upload copied a cached frame"
-                    );
-                    futures::executor::block_on(frames.prepare_frame(3)).unwrap();
-                    assert!(
-                        upload
-                            .chunks_exact(4)
-                            .all(|pixel| pixel == [0, 0, 255, 255]),
-                        "eviction changed pixels still held for upload"
-                    );
-                }
+                let upload = frames.frame_bytes(0).unwrap().unwrap();
+                let same_frame = frames.frame_bytes(0).unwrap().unwrap();
+                assert_eq!(
+                    upload.as_ptr(),
+                    same_frame.as_ptr(),
+                    "upload must borrow the decoded frame"
+                );
                 let expected = [
                     ([0, 0, 255, 255], [0, 0, 255, 255], 70),
                     ([255, 0, 0, 255], [0, 0, 255, 255], 130),
