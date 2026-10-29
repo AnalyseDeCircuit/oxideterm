@@ -217,7 +217,8 @@
     "cancel": "Hủy",
     "delete": "Xóa",
     "no": "Không",
-    "yes": "Có"
+    "yes": "Có",
+    "status_connecting": "Đang kết nối"
   },
   "topology": {
     "button_title": "Chế độ xem Topology",
@@ -503,6 +504,7 @@
         "sync_forwards": "Đồng bộ chuyển tiếp cổng và đường hầm SSH",
         "sync_quick_commands": "Đồng bộ lệnh nhanh",
         "sync_serial_profiles": "Đồng bộ hồ sơ serial",
+        "sync_ble_profiles": "Đồng bộ hồ sơ BLE",
         "sync_telnet_profiles": "Đồng bộ hồ sơ Telnet",
         "sync_mosh_profiles": "Đồng bộ hồ sơ Mosh",
         "sync_remote_desktop_profiles": "Đồng bộ kết nối máy tính từ xa",
@@ -546,6 +548,7 @@
         "forwards_detail": "Quy tắc chuyển tiếp cổng đã lưu được đưa vào cùng siêu dữ liệu kết nối sở hữu.",
         "quick_commands_detail": "Định nghĩa lệnh nhanh được đưa vào.",
         "serial_profiles_detail": "Hồ sơ kết nối serial được đưa vào.",
+        "ble_profiles_detail": "Hồ sơ thiết bị BLE được đưa vào.",
         "telnet_profiles_detail": "Hồ sơ kết nối Telnet được đưa vào.",
         "mosh_profiles_detail": "Hồ sơ kết nối Mosh được đưa vào nhưng không có thông tin xác thực cục bộ của thiết bị.",
         "app_settings_sections_detail": "Phần đã chọn: {{sections}}",
@@ -570,13 +573,13 @@
       },
       "backup": {
         "description": "Bản sao lưu khôi phục Oxide Cloud Sync",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{telnetProfiles}} hồ sơ Telnet, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{bleProfiles}} hồ sơ BLE, {{telnetProfiles}} hồ sơ Telnet, {{pluginSettingsCount}} cài đặt plugin, {{size}}, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "history": {
         "action_upload": "Tải lên",
         "action_pull": "Tải xuống",
         "action_restore": "Khôi phục",
-        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{telnetProfiles}} hồ sơ Telnet, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
+        "summary_line": "{{connections}} kết nối, {{forwards}} chuyển tiếp, {{quickCommands}} lệnh nhanh, {{serialProfiles}} hồ sơ serial, {{bleProfiles}} hồ sơ BLE, {{telnetProfiles}} hồ sơ Telnet, {{pluginSettingsCount}} cài đặt plugin, {{sensitiveCredentials}} thông tin xác thực nhạy cảm"
       },
       "errors": {
         "local_forward_requires_connection": "Để xuất tệp cục bộ, hãy chọn cả các kết nối sở hữu quy tắc chuyển tiếp đã chọn.",
@@ -719,6 +722,7 @@
         "total_forwards": "Chuyển tiếp",
         "quick_commands_label": "Lệnh nhanh",
         "serial_profiles_label": "Hồ sơ serial",
+        "ble_profiles_label": "Hồ sơ BLE",
         "telnet_profiles_label": "Hồ sơ Telnet",
         "mosh_profiles_label": "Hồ sơ Mosh",
         "will_import": "Sẽ nhập",
@@ -739,6 +743,7 @@
         "toggle_forwards": "Nhập chuyển tiếp đã lưu ({{count}})",
         "toggle_quick_commands": "Nhập lệnh nhanh ({{count}})",
         "toggle_serial_profiles": "Nhập hồ sơ serial ({{count}})",
+        "toggle_ble_profiles": "Nhập hồ sơ BLE ({{count}})",
         "toggle_telnet_profiles": "Nhập hồ sơ Telnet ({{count}})",
         "toggle_mosh_profiles": "Nhập hồ sơ Mosh ({{count}})",
         "toggle_remote_desktop_profiles": "Nhập kết nối máy tính từ xa ({{count}})",
@@ -918,6 +923,11 @@
         "stop_bits": "Bit dừng",
         "parity": "Chẵn lẻ",
         "flow_control": "Điều khiển luồng",
+        "device_mac": "MAC thiết bị",
+        "device_name": "Tên thiết bị",
+        "service_uuid": "UUID dịch vụ",
+        "mtu": "MTU",
+        "write_without_response": "Write Without Response",
         "connect_on_open": "Kết nối khi mở",
         "line_ending": "Kết thúc dòng",
         "display_mode": "Chế độ hiển thị",

@@ -32,6 +32,7 @@ oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
 oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-ble = { path = "../oxideterm-ble" }
 oxideterm-app-lock = { path = "../oxideterm-app-lock" }
 oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
 oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }

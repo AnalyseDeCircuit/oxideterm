@@ -217,7 +217,8 @@
     "cancel": "取消",
     "delete": "刪除",
     "no": "否",
-    "yes": "是"
+    "yes": "是",
+    "status_connecting": "連線中"
   },
   "topology": {
     "button_title": "拓撲檢視",
@@ -503,6 +504,7 @@
         "sync_forwards": "同步連接埠轉送與 SSH 通道",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步序列埠設定",
+        "sync_ble_profiles": "同步 BLE 設定",
         "sync_telnet_profiles": "同步 Telnet 設定",
         "sync_mosh_profiles": "同步 Mosh 設定",
         "sync_remote_desktop_profiles": "同步遠端桌面連線",
@@ -546,6 +548,7 @@
         "forwards_detail": "已儲存的連接埠轉送規則會連同所屬連線中繼資料一起同步。",
         "quick_commands_detail": "快捷命令定義會參與同步。",
         "serial_profiles_detail": "序列埠連線設定會參與同步。",
+        "ble_profiles_detail": "BLE 裝置設定會參與同步。",
         "telnet_profiles_detail": "Telnet 連線設定會參與同步。",
         "mosh_profiles_detail": "Mosh 連線設定會參與同步，但不包含目前裝置的憑證。",
         "app_settings_sections_detail": "已選取分組：{{sections}}",
@@ -570,13 +573,13 @@
       },
       "backup": {
         "description": "Oxide 雲端同步回滾備份",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{telnetProfiles}} 個 Telnet 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}，{{sensitiveCredentials}} 個敏感憑證"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{bleProfiles}} 個 BLE 設定，{{telnetProfiles}} 個 Telnet 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{size}}，{{sensitiveCredentials}} 個敏感憑證"
       },
       "history": {
         "action_upload": "上傳",
         "action_pull": "拉取",
         "action_restore": "還原",
-        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{telnetProfiles}} 個 Telnet 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{sensitiveCredentials}} 個敏感憑證"
+        "summary_line": "{{connections}} 個連線，{{forwards}} 個轉送，{{quickCommands}} 條快捷命令，{{serialProfiles}} 個序列埠設定，{{bleProfiles}} 個 BLE 設定，{{telnetProfiles}} 個 Telnet 設定，{{pluginSettingsCount}} 項外掛偏好設定，{{sensitiveCredentials}} 個敏感憑證"
       },
       "errors": {
         "local_forward_requires_connection": "匯出本機檔案時，請同時選取所選轉送規則所屬的連線。",
@@ -719,6 +722,7 @@
         "total_forwards": "轉送數",
         "quick_commands_label": "快捷命令",
         "serial_profiles_label": "序列埠設定",
+        "ble_profiles_label": "BLE 設定",
         "telnet_profiles_label": "Telnet 設定",
         "mosh_profiles_label": "Mosh 設定",
         "will_import": "將匯入",
@@ -739,6 +743,7 @@
         "toggle_forwards": "匯入已儲存的轉送（{{count}}）",
         "toggle_quick_commands": "匯入快捷命令（{{count}}）",
         "toggle_serial_profiles": "匯入序列埠設定（{{count}}）",
+        "toggle_ble_profiles": "匯入 BLE 設定（{{count}}）",
         "toggle_telnet_profiles": "匯入 Telnet 設定（{{count}}）",
         "toggle_mosh_profiles": "匯入 Mosh 設定（{{count}}）",
         "toggle_remote_desktop_profiles": "匯入遠端桌面連線（{{count}}）",
@@ -918,6 +923,11 @@
         "stop_bits": "停止位元",
         "parity": "同位檢查",
         "flow_control": "流量控制",
+        "device_mac": "裝置 MAC",
+        "device_name": "裝置名稱",
+        "service_uuid": "服務 UUID",
+        "mtu": "MTU",
+        "write_without_response": "無回應寫入",
         "connect_on_open": "開啟後連線",
         "line_ending": "換行方式",
         "display_mode": "顯示模式",

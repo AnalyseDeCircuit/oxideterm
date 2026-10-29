@@ -231,6 +231,11 @@
       "delete": "Xóa phiên cục bộ",
       "delete_failed": "Không thể xóa phiên cục bộ",
       "confirm_delete": "Xóa phiên cục bộ “{{name}}”? Các terminal đang chạy vẫn được giữ mở."
+    },
+    "ble_profiles": {
+      "delete": "Xóa",
+      "delete_failed": "Không thể xóa kết nối BLE",
+      "confirm_delete": "Xóa kết nối BLE \"{{name}}\"?"
     }
   }
 }

@@ -3,6 +3,147 @@
 
 use super::*;
 
+pub(super) fn ble_profile_summary_fields(value: &BleProfile) -> Vec<CloudSyncFieldDiffField> {
+    vec![
+        field(
+            "plugin.cloud_sync.diff_fields.device_name",
+            None,
+            value.device_name.clone(),
+        ),
+        field(
+            "plugin.cloud_sync.diff_fields.service_uuid",
+            None,
+            Some(oxideterm_ble::service_display_name_from_str(
+                &value.service_uuid,
+            )),
+        ),
+    ]
+}
+
+pub(super) fn ble_profile_changed_fields(
+    before: &BleProfile,
+    after: &BleProfile,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(before.name.clone()),
+        Some(after.name.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        before.group.clone(),
+        after.group.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.device_mac",
+        before.device_mac.clone(),
+        after.device_mac.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.device_name",
+        before.device_name.clone(),
+        after.device_name.clone(),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.service_uuid",
+        Some(before.service_uuid.clone()),
+        Some(after.service_uuid.clone()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.mtu",
+        before.mtu.map(|mtu| mtu.to_string()),
+        after.mtu.map(|mtu| mtu.to_string()),
+    );
+    push_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.write_without_response",
+        Some(before.write_without_response.to_string()),
+        Some(after.write_without_response.to_string()),
+    );
+    fields
+}
+
+pub(super) fn ble_profile_merge_fields(
+    base: &BleProfile,
+    local: &BleProfile,
+    remote: &BleProfile,
+    effective: &BleProfile,
+    conflict_strategy: &ConflictStrategy,
+) -> Vec<CloudSyncFieldDiffField> {
+    let mut fields = Vec::new();
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.name",
+        Some(base.name.clone()),
+        Some(local.name.clone()),
+        Some(remote.name.clone()),
+        Some(effective.name.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.group",
+        base.group.clone(),
+        local.group.clone(),
+        remote.group.clone(),
+        effective.group.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.device_mac",
+        base.device_mac.clone(),
+        local.device_mac.clone(),
+        remote.device_mac.clone(),
+        effective.device_mac.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.device_name",
+        base.device_name.clone(),
+        local.device_name.clone(),
+        remote.device_name.clone(),
+        effective.device_name.clone(),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.service_uuid",
+        Some(base.service_uuid.clone()),
+        Some(local.service_uuid.clone()),
+        Some(remote.service_uuid.clone()),
+        Some(effective.service_uuid.clone()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.mtu",
+        base.mtu.map(|mtu| mtu.to_string()),
+        local.mtu.map(|mtu| mtu.to_string()),
+        remote.mtu.map(|mtu| mtu.to_string()),
+        effective.mtu.map(|mtu| mtu.to_string()),
+        conflict_strategy,
+    );
+    push_merge_changed(
+        &mut fields,
+        "plugin.cloud_sync.diff_fields.write_without_response",
+        Some(base.write_without_response.to_string()),
+        Some(local.write_without_response.to_string()),
+        Some(remote.write_without_response.to_string()),
+        Some(effective.write_without_response.to_string()),
+        conflict_strategy,
+    );
+    fields
+}
+
 pub(super) fn serial_profile_changed_fields(
     before: &SerialProfile,
     after: &SerialProfile,

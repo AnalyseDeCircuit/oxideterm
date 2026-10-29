@@ -470,6 +470,9 @@ def native_cargo_build_env(target: str) -> dict[str, str]:
         # Release builds must use the system GSS framework even when Homebrew
         # exposes an alternative Kerberos implementation through pkg-config.
         env["LIBGSSAPI_IMPL"] = "apple"
+        # Without an explicit deployment target the linker omits the
+        # LC_BUILD_VERSION load command, so vtool reports no build version.
+        env.setdefault("MACOSX_DEPLOYMENT_TARGET", "13.0")
     return env
 
 

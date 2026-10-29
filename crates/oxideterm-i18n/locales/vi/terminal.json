@@ -165,10 +165,10 @@
       "flow_none": "Không điều khiển luồng",
       "flow_software": "XON/XOFF",
       "flow_hardware": "RTS/CTS",
-      "send_mode": "Gửi",
-      "display_mode": "Hiển thị",
-      "line_ending": "Kết dòng gửi",
-      "output_line_ending": "Kết dòng nhận",
+      "send_mode": "Chế độ gửi",
+      "display_mode": "Chế độ hiển thị",
+      "line_ending": "Ký tự kết dòng gửi",
+      "output_line_ending": "Ký tự kết dòng nhận",
       "local_echo": "Echo",
       "text_mode": "Văn bản",
       "hex_mode": "Hex",
@@ -642,7 +642,14 @@
       "ssh_shell": "SSH (kênh Shell)",
       "agent_installing": "Đang cài đặt tác nhân: {{percent}}% ({{transferred}} / {{total}} KiB)",
       "agent_starting": "Đang khởi động tác nhân…"
-    }
+    },
+      "ble": {
+        "connection_failed": "Kết nối BLE thất bại: {error}",
+        "runtime_init_failed": "Khởi tạo runtime BLE thất bại",
+        "adapter_index_out_of_range": "Chỉ số bộ chuyển đổi Bluetooth {n} nằm ngoài phạm vi",
+        "service_not_found": "Không tìm thấy dịch vụ {uuid}",
+        "no_notify_write_pair": "Dịch vụ đã chọn không có cặp đặc tính notify+write"
+      }
   },
   "search": {
     "placeholder": "Tìm kiếm",

@@ -133,6 +133,40 @@ fn upload_diff_items_mark_local_changes_and_remote_overwrites() {
 }
 
 #[test]
+fn upload_diff_items_track_ble_profile_revision_changes() {
+    let snapshot = test_snapshot(
+        SyncScope::default(),
+        StructuredLocalState {
+            ble_profiles: Some("ble-local-2".to_string()),
+            ..StructuredLocalState::default()
+        },
+    );
+    let state = CloudSyncPersistedState {
+        last_check_at: Some("2026-06-12T00:00:00Z".to_string()),
+        last_synced_structured_state: Some(StructuredLocalState {
+            ble_profiles: Some("ble-local-1".to_string()),
+            ..StructuredLocalState::default()
+        }),
+        remote_section_revisions: Some(StructuredSectionRevisions {
+            ble_profiles: Some("ble-remote".to_string()),
+            ..StructuredSectionRevisions::default()
+        }),
+        ..CloudSyncPersistedState::default()
+    };
+
+    let items = cloud_sync_upload_diff_items(&snapshot, &state);
+
+    let ble = items
+        .iter()
+        .find(|item| {
+            item.label == CloudSyncDiffLabel::Key("plugin.cloud_sync.settings.sync_ble_profiles")
+        })
+        .expect("BLE profiles diff item");
+    assert_eq!(ble.local_status, CloudSyncLocalDiffStatus::Modified);
+    assert_eq!(ble.remote_status, CloudSyncRemoteDiffStatus::Overwrites);
+}
+
+#[test]
 fn upload_diff_items_show_scope_exclusions_that_remove_remote_sections() {
     let mut scope = SyncScope::default();
     scope.sync_sensitive_credentials = false;
@@ -263,6 +297,7 @@ fn structured_preview(
             serde_json::to_string(&remote_quick_commands).expect("remote quick commands"),
         ),
         serial_profiles_snapshot: None,
+        ble_profiles_snapshot: None,
         telnet_profiles_snapshot: None,
         mosh_profiles_snapshot: None,
         standalone_sftp_profiles_snapshot: None,
@@ -272,6 +307,7 @@ fn structured_preview(
         base_quick_commands_snapshot_json: base_quick_commands
             .map(|snapshot| serde_json::to_string(&snapshot).expect("base quick commands")),
         base_serial_profiles_snapshot: None,
+        base_ble_profiles_snapshot: None,
         base_telnet_profiles_snapshot: None,
         base_mosh_profiles_snapshot: None,
         base_standalone_sftp_profiles_snapshot: None,

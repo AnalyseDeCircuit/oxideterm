@@ -224,7 +224,8 @@
     "cancel": "取消",
     "delete": "删除",
     "no": "否",
-    "yes": "是"
+    "yes": "是",
+    "status_connecting": "连接中"
   },
   "topology": {
     "button_title": "拓扑视图",
@@ -495,6 +496,7 @@
         "sync_forwards": "同步端口转发与 SSH 隧道",
         "sync_quick_commands": "同步快捷命令",
         "sync_serial_profiles": "同步串口配置",
+        "sync_ble_profiles": "同步 BLE 配置",
         "sync_telnet_profiles": "同步 Telnet 配置",
         "sync_mosh_profiles": "同步 Mosh 配置",
         "sync_remote_desktop_profiles": "同步远程桌面连接",
@@ -538,6 +540,7 @@
         "forwards_detail": "已保存的端口转发规则会连同所属连接元数据一起同步。",
         "quick_commands_detail": "快捷命令定义会参与同步。",
         "serial_profiles_detail": "串口连接配置会参与同步。",
+        "ble_profiles_detail": "BLE 设备配置会参与同步。",
         "telnet_profiles_detail": "Telnet 连接配置会参与同步。",
         "mosh_profiles_detail": "Mosh 连接配置会参与同步，但不包含当前设备的凭据。",
         "app_settings_sections_detail": "已选择分组：{{sections}}",
@@ -562,13 +565,13 @@
       },
       "backup": {
         "description": "Oxide 云同步回滚备份",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{telnetProfiles}} 个 Telnet 配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{bleProfiles}} 个 BLE 配置，{{telnetProfiles}} 个 Telnet 配置，{{pluginSettingsCount}} 项插件设置，{{size}}，{{sensitiveCredentials}} 个敏感凭据"
       },
       "history": {
         "action_upload": "上传",
         "action_pull": "拉取",
         "action_restore": "恢复",
-        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{telnetProfiles}} 个 Telnet 配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
+        "summary_line": "{{connections}} 个连接，{{forwards}} 个转发，{{quickCommands}} 条快捷命令，{{serialProfiles}} 个串口配置，{{bleProfiles}} 个 BLE 配置，{{telnetProfiles}} 个 Telnet 配置，{{pluginSettingsCount}} 项插件设置，{{sensitiveCredentials}} 个敏感凭据"
       },
       "errors": {
         "local_forward_requires_connection": "导出本地文件时，请同时选中所选转发规则所属的连接。",
@@ -711,6 +714,7 @@
         "total_forwards": "转发数",
         "quick_commands_label": "快捷命令",
         "serial_profiles_label": "串口配置",
+        "ble_profiles_label": "BLE 配置",
         "telnet_profiles_label": "Telnet 配置",
         "mosh_profiles_label": "Mosh 配置",
         "will_import": "将导入",
@@ -731,6 +735,7 @@
         "toggle_forwards": "导入已保存的转发（{{count}}）",
         "toggle_quick_commands": "导入快捷命令（{{count}}）",
         "toggle_serial_profiles": "导入串口配置（{{count}}）",
+        "toggle_ble_profiles": "导入 BLE 配置（{{count}}）",
         "toggle_telnet_profiles": "导入 Telnet 配置（{{count}}）",
         "toggle_mosh_profiles": "导入 Mosh 配置（{{count}}）",
         "toggle_remote_desktop_profiles": "导入远程桌面连接（{{count}}）",
@@ -910,6 +915,11 @@
         "stop_bits": "停止位",
         "parity": "校验位",
         "flow_control": "流控",
+        "device_mac": "设备 MAC",
+        "device_name": "设备名称",
+        "service_uuid": "服务 UUID",
+        "mtu": "MTU",
+        "write_without_response": "无响应写入",
         "connect_on_open": "打开后连接",
         "line_ending": "换行方式",
         "display_mode": "显示模式",

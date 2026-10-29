@@ -47,6 +47,7 @@ impl CloudSyncOperationService {
                     ResourceKind::Serial,
                     manifest.sections.serial_profiles.as_ref(),
                 ),
+                (ResourceKind::Ble, manifest.sections.ble_profiles.as_ref()),
                 (
                     ResourceKind::Telnet,
                     manifest.sections.telnet_profiles.as_ref(),

@@ -28,6 +28,8 @@ oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-modem-transfer = { path = "../oxideterm-modem-transfer" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-ble = { path = "../oxideterm-ble" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
 oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }

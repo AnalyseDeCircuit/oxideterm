@@ -1601,6 +1601,7 @@ impl WorkspaceApp {
             || dialog.include_telnet_profiles
             || dialog.include_mosh_profiles
             || dialog.include_remote_desktop_profiles
+            || dialog.include_ble_profiles
             || (dialog.include_plugin_settings && !dialog.selected_plugin_ids.is_empty())
             || dialog.include_portable_secrets
     }
@@ -1890,6 +1891,19 @@ impl WorkspaceApp {
         } else {
             None
         };
+        let ble_profiles_json = if dialog.include_ble_profiles {
+            Some(
+                serde_json::to_string_pretty(
+                    &self
+                        .connection_store
+                        .export_ble_profiles_snapshot()
+                        .map_err(|error| error.to_string())?,
+                )
+                .map_err(|error| error.to_string())?,
+            )
+        } else {
+            None
+        };
         let plugin_settings = if dialog.include_plugin_settings {
             oxideterm_cloud_sync::plugin_settings::load_plugin_settings(self.settings_store.path())?
                 .into_iter()
@@ -1981,6 +1995,7 @@ impl WorkspaceApp {
             telnet_profiles_json,
             mosh_profiles_json,
             remote_desktop_profiles_json,
+            ble_profiles_json,
             plugin_settings,
             portable_secrets,
             forwards,

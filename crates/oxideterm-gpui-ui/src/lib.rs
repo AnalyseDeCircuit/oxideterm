@@ -5,6 +5,7 @@ pub const WORKSPACE_STATUS_BAR_HEIGHT: f32 = 32.0;
 pub mod action_row;
 pub mod ai;
 pub mod badge;
+pub mod bounds_probe;
 pub mod button;
 pub mod checkbox;
 pub mod choice_dialog;
@@ -49,6 +50,7 @@ pub use badge::{
     IconBadgeMetrics, StatusPillColors, StatusPillOptions, StatusPillSize, StatusTone, icon_badge,
     icon_badge_metrics_from_tokens, status_pill, status_pill_colors, status_pill_element,
 };
+pub use bounds_probe::BoundsProbe;
 pub use button::{
     ActionChipOptions, ActionChipTextTone, ButtonTone, ContextChipOptions, IconButtonOptions,
     SplitFooterButtonOptions, ToolbarButtonIconPosition, ToolbarButtonOptions, action_chip,
@@ -84,8 +86,8 @@ pub use surface::{
 };
 pub use table::{
     TauriTableCellOptions, TauriTableCellStyle, TauriTableColors, TauriTableMetrics,
-    tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header, tauri_table_row,
-    tauri_table_sort_header, tauri_table_spacer_cell,
+    shaped_text_width, tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header,
+    tauri_table_row, tauri_table_sort_header, tauri_table_spacer_cell,
 };
 pub use tabs::{segmented_tab, segmented_tabs};
 pub use text_input::{TextInputView, text_input, text_input_anchor_probe};

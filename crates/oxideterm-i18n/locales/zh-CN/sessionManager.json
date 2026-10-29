@@ -231,6 +231,11 @@
       "delete": "删除本地会话",
       "delete_failed": "无法删除本地会话",
       "confirm_delete": "删除本地会话“{{name}}”？正在运行的终端会保留。"
+    },
+    "ble_profiles": {
+      "delete": "删除",
+      "delete_failed": "无法删除 BLE 连接",
+      "confirm_delete": "删除 BLE 连接“{{name}}”？"
     }
   }
 }

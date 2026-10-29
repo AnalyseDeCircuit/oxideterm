@@ -71,6 +71,22 @@
       "no_connection_id": "Nach der Wiederverbindung wurde keine Verbindungs-ID zugewiesen."
     },
     "failedFetchStats": "Statistiken konnten nicht abgerufen werden",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "BLE-Adapter-Aufzählung fehlgeschlagen: {error}",
+              "no_adapters": "Keine Bluetooth-Adapter verfügbar",
+              "adapter_open_failed": "Öffnen des BLE-Adapters fehlgeschlagen: {error}",
+              "device_enumeration_failed": "BLE-Geräteaufzählung fehlgeschlagen: {error}",
+              "scan_failed": "BLE-Scan fehlgeschlagen: {error}",
+              "no_device_matched": "Kein BLE-Gerät in Reichweite passt zum Profil ({identity})",
+              "ambiguous_device": "Mehrere BLE-Geräte passen zu {identity}; bitte erneut scannen und ein Gerät auswählen.",
+              "cancelled": "BLE-Verbindung abgebrochen",
+              "connect_failed": "BLE-Verbindung fehlgeschlagen: {error}",
+              "service_discovery_failed": "Diensterkennung fehlgeschlagen: {error}",
+              "service_mismatch": "Gerät gefunden, bewirbt aber nicht den Zieldienst {uuid}",
+              "invalid_service_uuid": "Ungültige Dienst-UUID: {uuid}"
+        }
+      },
     "errors": {
       "chain_busy_desc": "Eine andere Verbindungskette wird gerade aufgebaut. Bitte warten Sie.",
       "chain_busy_title": "Vorgang läuft",
@@ -125,6 +141,11 @@
         "no_common": "kein gemeinsamer {{kind}}-Algorithmus"
       },
       "stage": {
+        "ble_opening_adapter": "Bluetooth-Adapter wird geöffnet",
+        "ble_scanning": "Bluetooth-Geräte werden gesucht",
+        "ble_matching": "Gerät wird zugeordnet",
+        "ble_verifying_service": "Dienst wird geprüft",
+        "ble_ready": "Bereit",
         "authentication": "Authentifizierung",
         "kerberos_credentials": "Kerberos-Anmeldedaten werden geprüft",
         "gssapi_exchange": "GSSAPI-Token werden ausgetauscht",

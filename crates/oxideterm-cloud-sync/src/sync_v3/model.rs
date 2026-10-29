@@ -18,6 +18,7 @@ pub enum ResourceKind {
     QuickCommand,
     QuickCommandCategory,
     Serial,
+    Ble,
     Telnet,
     Mosh,
     StandaloneSftp,

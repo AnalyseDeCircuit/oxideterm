@@ -70,6 +70,22 @@
       "connection_failed": "Connection Failed",
       "no_connection_id": "No connection ID was assigned after reconnect."
     },
-    "failedFetchStats": "Failed to fetch stats"
+    "failedFetchStats": "Failed to fetch stats",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "BLE adapter enumeration failed: {error}",
+              "no_adapters": "no Bluetooth adapters available",
+              "adapter_open_failed": "BLE adapter open failed: {error}",
+              "device_enumeration_failed": "BLE device enumeration failed: {error}",
+              "scan_failed": "BLE scan failed: {error}",
+              "no_device_matched": "no BLE device in range matched the profile ({identity})",
+              "ambiguous_device": "Multiple BLE devices match {identity}; select a device from a fresh scan.",
+              "cancelled": "BLE connection cancelled",
+              "connect_failed": "BLE connect failed: {error}",
+              "service_discovery_failed": "service discovery failed: {error}",
+              "service_mismatch": "device matched but does not advertise the target service {uuid}",
+              "invalid_service_uuid": "invalid service UUID: {uuid}"
+        }
+      }
   }
 }

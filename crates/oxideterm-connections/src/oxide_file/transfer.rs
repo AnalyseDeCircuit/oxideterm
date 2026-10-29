@@ -15,10 +15,10 @@ use zeroize::{Zeroize, Zeroizing};
 
 use crate::store::{ImportedManagedSshKey, ManagedSshKey, ManagedSshKeyOrigin};
 use crate::{
-    AuthType, CONFIG_VERSION, ConnectionOptions, ConnectionStore, MoshProfilesSyncSnapshot,
-    RemoteDesktopProfilesSyncSnapshot, SavedAuth, SavedConnection, SavedPrivilegeCredential,
-    SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
-    SecretString, SerialProfilesSyncSnapshot, SshAlgorithmPreferences,
+    AuthType, BleProfilesSyncSnapshot, CONFIG_VERSION, ConnectionOptions, ConnectionStore,
+    MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot, SavedAuth, SavedConnection,
+    SavedPrivilegeCredential, SavedProxyHop, SavedUpstreamProxyAuth, SavedUpstreamProxyConfig,
+    SavedUpstreamProxyPolicy, SecretString, SerialProfilesSyncSnapshot, SshAlgorithmPreferences,
     StandaloneSftpProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
 };
 
@@ -67,6 +67,7 @@ pub struct OxideExportOptions {
     pub mosh_profiles_json: Option<String>,
     pub standalone_sftp_profiles_json: Option<String>,
     pub remote_desktop_profiles_json: Option<String>,
+    pub ble_profiles_json: Option<String>,
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     pub portable_secrets: Vec<EncryptedPortableSecret>,
     pub forwards: Vec<OxideForwardRecord>,
@@ -88,6 +89,7 @@ impl Default for OxideExportOptions {
             mosh_profiles_json: None,
             standalone_sftp_profiles_json: None,
             remote_desktop_profiles_json: None,
+            ble_profiles_json: None,
             plugin_settings: Vec::new(),
             portable_secrets: Vec::new(),
             forwards: Vec::new(),
@@ -106,6 +108,7 @@ pub struct OxideImportOptions {
     pub import_mosh_profiles: bool,
     pub import_standalone_sftp_profiles: bool,
     pub import_remote_desktop_profiles: bool,
+    pub import_ble_profiles: bool,
     pub import_portable_secrets: bool,
     /// Structured sync stages TOTP and plugin credential slots after merging metadata.
     pub defer_totp_secrets: bool,
@@ -127,6 +130,7 @@ impl Default for OxideImportOptions {
             import_mosh_profiles: true,
             import_standalone_sftp_profiles: true,
             import_remote_desktop_profiles: true,
+            import_ble_profiles: true,
             import_portable_secrets: false,
             defer_totp_secrets: false,
             restore_managed_keys: true,
@@ -195,6 +199,7 @@ pub struct ImportPreview {
     pub mosh_profiles_count: usize,
     pub standalone_sftp_profiles_count: usize,
     pub remote_desktop_profiles_count: usize,
+    pub ble_profiles_count: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub app_settings_format: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -305,6 +310,10 @@ pub struct ImportResultEnvelope {
     pub remote_desktop_profiles_json: Option<String>,
     pub imported_remote_desktop_profiles: usize,
     pub skipped_remote_desktop_profiles: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ble_profiles_json: Option<String>,
+    pub imported_ble_profiles: usize,
+    pub skipped_ble_profiles: usize,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     #[serde(skip)]

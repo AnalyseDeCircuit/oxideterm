@@ -165,10 +165,10 @@
       "flow_none": "フローなし",
       "flow_software": "XON/XOFF",
       "flow_hardware": "RTS/CTS",
-      "send_mode": "送信",
-      "display_mode": "表示",
-      "line_ending": "送信改行",
-      "output_line_ending": "受信改行",
+      "send_mode": "送信モード",
+      "display_mode": "表示モード",
+      "line_ending": "送信改行文字",
+      "output_line_ending": "受信改行文字",
       "local_echo": "エコー",
       "text_mode": "テキスト",
       "hex_mode": "16進",
@@ -642,7 +642,14 @@
       "ssh_shell": "SSH（Shell チャネル）",
       "agent_installing": "エージェントをインストール中：{{percent}}%（{{transferred}} / {{total}} KiB）",
       "agent_starting": "エージェントを起動中…"
-    }
+    },
+      "ble": {
+        "connection_failed": "BLE接続に失敗しました：{error}",
+        "runtime_init_failed": "BLEランタイムの初期化に失敗しました",
+        "adapter_index_out_of_range": "Bluetoothアダプターのインデックス {n} は範囲外です",
+        "service_not_found": "サービス {uuid} が見つかりません",
+        "no_notify_write_pair": "選択したサービスにnotify+writeキャラクタリスティックのペアがありません"
+      }
   },
   "search": {
     "placeholder": "検索",

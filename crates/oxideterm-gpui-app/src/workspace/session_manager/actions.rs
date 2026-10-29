@@ -1,7 +1,7 @@
 use super::*;
 use crate::workspace::new_connection::{
-    form_from_mosh_profile, form_from_remote_desktop_profile, form_from_serial_profile,
-    form_from_telnet_profile, terminal_serial_flow_from_profile,
+    form_from_ble_profile, form_from_mosh_profile, form_from_remote_desktop_profile,
+    form_from_serial_profile, form_from_telnet_profile, terminal_serial_flow_from_profile,
     terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_profile,
 };
 use crate::workspace::terminal_command_bar::{
@@ -842,6 +842,7 @@ impl WorkspaceApp {
             SessionManagerDeleteConfirm::SerialProfile { id, .. } => {
                 self.delete_serial_profile(&id, cx)
             }
+            SessionManagerDeleteConfirm::BleProfile { id, .. } => self.delete_ble_profile(&id, cx),
             SessionManagerDeleteConfirm::LocalTerminalProfile { id, .. } => {
                 self.delete_local_terminal_profile(&id, cx)
             }
@@ -1137,6 +1138,30 @@ impl WorkspaceApp {
         self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
         // Refresh discovery without replacing the persisted port selected by the editor.
         self.refresh_serial_ports(cx);
+        cx.notify();
+    }
+
+    pub(super) fn open_saved_ble_profile_editor(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(saved) = self
+            .connection_store
+            .ble_profiles()
+            .iter()
+            .find(|profile| profile.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        self.open_new_connection_form(window, cx);
+        let form = form_from_ble_profile(&saved, self.i18n.t("ssh.form.ungrouped"));
+        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        // Refresh adapters without replacing the saved device identity, which the
+        // save request reuses while the device stays out of scan range.
+        self.refresh_ble_adapters(cx);
         cx.notify();
     }
 
@@ -1444,6 +1469,15 @@ impl WorkspaceApp {
                         deleted += 1;
                     }
                 }
+                SessionManagerSelectionTarget::Ble(id) => {
+                    if self
+                        .connection_store
+                        .delete_ble_profile(&id)
+                        .unwrap_or(false)
+                    {
+                        deleted += 1;
+                    }
+                }
                 SessionManagerSelectionTarget::LocalTerminal(id) => {
                     if self
                         .connection_store
@@ -1627,6 +1661,7 @@ impl WorkspaceApp {
     ) {
         let mut connection_ids = Vec::new();
         let mut serial_profile_ids = Vec::new();
+        let mut ble_profile_ids = Vec::new();
         let mut local_terminal_profile_ids = Vec::new();
         let mut telnet_profile_ids = Vec::new();
         let mut ftp_profile_ids = Vec::new();
@@ -1645,6 +1680,7 @@ impl WorkspaceApp {
                 SessionManagerSelectionTarget::Plugin(id) => plugin_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Connection(id) => connection_ids.push(id.clone()),
                 SessionManagerSelectionTarget::Serial(id) => serial_profile_ids.push(id.clone()),
+                SessionManagerSelectionTarget::Ble(id) => ble_profile_ids.push(id.clone()),
                 SessionManagerSelectionTarget::LocalTerminal(id) => {
                     local_terminal_profile_ids.push(id.clone())
                 }
@@ -1769,6 +1805,12 @@ impl WorkspaceApp {
             SessionManagerSelectionTarget::Serial(id) => self
                 .connection_store
                 .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == id.as_str())
+                .map(|profile| profile.group.as_deref()),
+            SessionManagerSelectionTarget::Ble(id) => self
+                .connection_store
+                .ble_profiles()
                 .iter()
                 .find(|profile| profile.id == id.as_str())
                 .map(|profile| profile.group.as_deref()),

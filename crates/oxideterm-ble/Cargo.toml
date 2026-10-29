@@ -1,0 +1,15 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-ble"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+btleplug.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+uuid.workspace = true

@@ -20,17 +20,17 @@ use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::separator::{SeparatorOrientation, separator};
 use oxideterm_terminal::{
-    DetectedModemProtocol, ModemTransferDirection, SerialControlLine, SerialDisplayMode,
-    SerialFlowControl, SerialLineEnding, SerialParity, SerialSendMode, SerialSessionConfig,
-    TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle, TerminalSessionKind,
-    TerminalSnapshot, TmuxAction, TmuxUiState,
+    BleConnectionStatus, DetectedModemProtocol, ModemTransferDirection, SerialControlLine,
+    SerialDisplayMode, SerialFlowControl, SerialLineEnding, SerialParity, SerialRuntimeOptions,
+    SerialSendMode, SerialSessionConfig, TermMode, TerminalCommandMark, TerminalCursorShape,
+    TerminalLifecycle, TerminalSessionKind, TerminalSnapshot, TmuxAction, TmuxUiState,
 };
 
 use super::{
     BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL, ImageRenderCache, ModemProgressState,
-    SmoothScrollSnapshotCache, TerminalCommandNavigationDirection, TerminalContextAction,
-    TerminalContextMenu, TerminalPane, TerminalPaneEvent, TmuxPromptKind, TmuxPromptState,
-    command_mark_ui_available,
+    SmoothScrollSnapshotCache, TerminalBleStatus, TerminalCommandNavigationDirection,
+    TerminalContextAction, TerminalContextMenu, TerminalPane, TerminalPaneEvent, TmuxPromptKind,
+    TmuxPromptState, command_mark_ui_available,
 };
 use crate::background_cache::background_display_target;
 use crate::terminal_ui::*;
@@ -323,11 +323,12 @@ impl Render for TerminalPane {
                 })
                 .flatten()
         });
-        let terminal_top = if tmux_state.is_some() || self.is_serial_transport() {
-            self.terminal_control_bar_height()
-        } else {
-            0.0
-        };
+        let terminal_top =
+            if tmux_state.is_some() || self.is_serial_transport() || self.is_ble_transport() {
+                self.terminal_control_bar_height()
+            } else {
+                0.0
+            };
         let decode_images = self
             .preferences
             .render_policy
@@ -647,6 +648,9 @@ impl Render for TerminalPane {
             )
             .when(self.is_serial_transport(), |pane| {
                 pane.child(self.render_serial_control_bar(cx))
+            })
+            .when(self.is_ble_transport(), |pane| {
+                pane.child(self.render_ble_control_bar(cx))
             })
             .when(self.shell_ide_preparing, |pane| {
                 let label = self
@@ -1395,6 +1399,194 @@ impl TerminalPane {
             .into_any_element()
     }
 
+    /// Send and display mode controls shared by raw byte streams (serial and BLE).
+    fn render_transport_option_controls(
+        &self,
+        options: &SerialRuntimeOptions,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let labels = &self.preferences.serial_control_labels;
+        let send_mode_label = format!(
+            "{} {}",
+            labels.send_mode,
+            serial_send_mode_label(options.send_mode, labels)
+        );
+        let display_mode_label = format!(
+            "{} {}",
+            labels.display_mode,
+            serial_display_mode_label(options.display_mode, labels)
+        );
+        let line_ending_label = format!(
+            "{} {}",
+            labels.line_ending,
+            serial_line_ending_label(options.line_ending, labels)
+        );
+        let output_line_ending_label = format!(
+            "{} {}",
+            labels.output_line_ending,
+            serial_line_ending_label(options.output_line_ending, labels)
+        );
+        let local_echo_label = format!(
+            "{} {}",
+            labels.local_echo,
+            if options.local_echo {
+                &labels.on
+            } else {
+                &labels.off
+            }
+        );
+
+        div()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(self.theme.tokens.spacing.one))
+            .child(
+                self.render_terminal_toolbar_action(
+                    send_mode_label,
+                    true,
+                    matches!(options.send_mode, SerialSendMode::Hex),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_send_mode(cx);
+                    }),
+                ),
+            )
+            .child(self.render_terminal_toolbar_separator())
+            .child(
+                self.render_terminal_toolbar_action(
+                    display_mode_label,
+                    true,
+                    !matches!(options.display_mode, SerialDisplayMode::Text),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_display_mode(cx);
+                    }),
+                ),
+            )
+            .child(self.render_terminal_toolbar_separator())
+            .child(
+                self.render_terminal_toolbar_action(
+                    line_ending_label,
+                    true,
+                    !matches!(options.line_ending, SerialLineEnding::None),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_line_ending(cx);
+                    }),
+                ),
+            )
+            .child(self.render_terminal_toolbar_separator())
+            .child(
+                self.render_terminal_toolbar_action(
+                    output_line_ending_label,
+                    true,
+                    !matches!(options.output_line_ending, SerialLineEnding::None),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.cycle_serial_output_line_ending(cx);
+                    }),
+                ),
+            )
+            .child(self.render_terminal_toolbar_separator())
+            .child(
+                self.render_terminal_toolbar_action(local_echo_label, true, options.local_echo)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.toggle_serial_local_echo(cx);
+                        }),
+                    ),
+            )
+    }
+
+    fn render_ble_control_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(status) = self.ble_status() else {
+            return div().into_any_element();
+        };
+        let labels = &self.preferences.serial_control_labels;
+        let state_label = ble_connection_label(&status, labels);
+        let information_row = div()
+            .size_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(self.theme.tokens.spacing.one))
+            .px(px(10.0))
+            .child(
+                div()
+                    .min_w(px(180.0))
+                    .flex_1()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .truncate()
+                    .text_size(px(12.0))
+                    .text_color(rgb(self.theme.foreground))
+                    .child(format!(
+                        "{} · {} · {}{}",
+                        labels.ble,
+                        status.config.device_label,
+                        oxideterm_ble::service_display_name(&status.config.service_uuid),
+                        status
+                            .negotiated_mtu
+                            .map(|mtu| format!(" · MTU {}", mtu))
+                            .unwrap_or_default(),
+                    )),
+            )
+            .child(self.render_terminal_toolbar_separator())
+            .child(self.render_terminal_toolbar_status(state_label));
+        let control_row = div()
+            .size_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(self.theme.tokens.spacing.one))
+            .px(px(10.0))
+            .child(self.render_transport_option_controls(&status.runtime_options, cx))
+            .child(self.render_terminal_toolbar_separator())
+            .child(
+                self.render_terminal_toolbar_action(
+                    self.preferences.modem_labels.binary_transfer.clone(),
+                    status.lifecycle.is_running() && !self.modem_prompt_active,
+                    false,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, event: &MouseDownEvent, window, cx| {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        if this.modem_prompt_active || !this.lifecycle().is_running() {
+                            return;
+                        }
+                        window.focus(&this.focus_handle, cx);
+                        this.open_terminal_context_menu(event, cx);
+                        if let Some(menu) = this.context_menu.as_mut() {
+                            menu.serial_transfer_menu = true;
+                        }
+                    }),
+                ),
+            );
+        self.render_terminal_control_bar(information_row, control_row, cx)
+    }
+
     fn render_serial_control_bar(&self, cx: &mut Context<Self>) -> AnyElement {
         let Some(status) = self.serial_status() else {
             return div().into_any_element();
@@ -1420,35 +1612,6 @@ impl TerminalPane {
             "{} {}",
             labels.rts,
             if status.control_state.request_to_send {
-                &labels.on
-            } else {
-                &labels.off
-            }
-        );
-        let send_mode_label = format!(
-            "{} {}",
-            labels.send_mode,
-            serial_send_mode_label(status.runtime_options.send_mode, labels)
-        );
-        let display_mode_label = format!(
-            "{} {}",
-            labels.display_mode,
-            serial_display_mode_label(status.runtime_options.display_mode, labels)
-        );
-        let line_ending_label = format!(
-            "{} {}",
-            labels.line_ending,
-            serial_line_ending_label(status.runtime_options.line_ending, labels)
-        );
-        let output_line_ending_label = format!(
-            "{} {}",
-            labels.output_line_ending,
-            serial_line_ending_label(status.runtime_options.output_line_ending, labels)
-        );
-        let local_echo_label = format!(
-            "{} {}",
-            labels.local_echo,
-            if status.runtime_options.local_echo {
                 &labels.on
             } else {
                 &labels.off
@@ -1488,88 +1651,7 @@ impl TerminalPane {
             .items_center()
             .gap(px(self.theme.tokens.spacing.one))
             .px(px(10.0))
-            .child(
-                self.render_terminal_toolbar_action(
-                    send_mode_label,
-                    true,
-                    matches!(status.runtime_options.send_mode, SerialSendMode::Hex),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.cycle_serial_send_mode(cx);
-                    }),
-                ),
-            )
-            .child(self.render_terminal_toolbar_separator())
-            .child(
-                self.render_terminal_toolbar_action(
-                    display_mode_label,
-                    true,
-                    !matches!(status.runtime_options.display_mode, SerialDisplayMode::Text),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.cycle_serial_display_mode(cx);
-                    }),
-                ),
-            )
-            .child(self.render_terminal_toolbar_separator())
-            .child(
-                self.render_terminal_toolbar_action(
-                    line_ending_label,
-                    true,
-                    !matches!(status.runtime_options.line_ending, SerialLineEnding::None),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.cycle_serial_line_ending(cx);
-                    }),
-                ),
-            )
-            .child(self.render_terminal_toolbar_separator())
-            .child(
-                self.render_terminal_toolbar_action(
-                    output_line_ending_label,
-                    true,
-                    !matches!(
-                        status.runtime_options.output_line_ending,
-                        SerialLineEnding::None
-                    ),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.cycle_serial_output_line_ending(cx);
-                    }),
-                ),
-            )
-            .child(self.render_terminal_toolbar_separator())
-            .child(
-                self.render_terminal_toolbar_action(
-                    local_echo_label,
-                    true,
-                    status.runtime_options.local_echo,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event: &MouseDownEvent, window, cx| {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.toggle_serial_local_echo(cx);
-                    }),
-                ),
-            )
+            .child(self.render_transport_option_controls(&status.runtime_options, cx))
             .child(self.render_terminal_toolbar_separator())
             .child(
                 self.render_terminal_toolbar_action(labels.refresh.clone(), true, false)
@@ -1674,7 +1756,10 @@ impl TerminalPane {
     }
 
     pub(super) fn terminal_chrome_height(&self) -> f32 {
-        if self.is_serial_transport() || self.terminal.lock().tmux_state().is_some() {
+        if self.is_serial_transport()
+            || self.is_ble_transport()
+            || self.terminal.lock().tmux_state().is_some()
+        {
             self.terminal_control_bar_height()
         } else {
             0.0
@@ -1885,6 +1970,22 @@ fn serial_lifecycle_label(
 ) -> String {
     match lifecycle {
         TerminalLifecycle::Running => labels.connected.clone(),
+        TerminalLifecycle::Exited(_) => labels.disconnected.clone(),
+        TerminalLifecycle::Closed => labels.closed.clone(),
+    }
+}
+
+fn ble_connection_label(
+    status: &TerminalBleStatus,
+    labels: &TerminalSerialControlLabels,
+) -> String {
+    let connection_label = match status.connection_status {
+        BleConnectionStatus::Connected => labels.connected.clone(),
+        BleConnectionStatus::Connecting => labels.connecting.clone(),
+        BleConnectionStatus::Disconnected => labels.disconnected.clone(),
+    };
+    match status.lifecycle {
+        TerminalLifecycle::Running => connection_label,
         TerminalLifecycle::Exited(_) => labels.disconnected.clone(),
         TerminalLifecycle::Closed => labels.closed.clone(),
     }
@@ -2736,6 +2837,7 @@ impl TerminalPane {
             TerminalSessionKind::Telnet => "TN",
             TerminalSessionKind::Mosh => "M",
             TerminalSessionKind::Serial => "SER",
+            TerminalSessionKind::Ble => "BLE",
         };
         div()
             .absolute()

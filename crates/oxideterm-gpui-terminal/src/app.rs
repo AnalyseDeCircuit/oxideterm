@@ -21,11 +21,12 @@ use gpui::{
 };
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
-    GraphicsOptions, KittyFileTransmissionControl, LocalPtyConfig, SerialControlLine,
-    SerialControlState, SerialDisplayMode, SerialLineEnding, SerialRuntimeOptions, SerialSendMode,
-    SerialSessionConfig, ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig,
-    TelnetSessionConfig, TermMode, TerminalCell, TerminalCommandMark, TerminalCommandMarkClosedBy,
-    TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
+    BleConnectionStatus, BleSessionConfig, GraphicsOptions, KittyFileTransmissionControl,
+    LocalPtyConfig, SerialControlLine, SerialControlState, SerialDisplayMode, SerialLineEnding,
+    SerialRuntimeOptions, SerialSendMode, SerialSessionConfig, ShellIntegrationLifecycleState,
+    ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig, TermMode, TerminalCell,
+    TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
+    TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
     TerminalCwdIntegrationLaunchState, TerminalDrainBudget, TerminalDrainReport,
     TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEvent, TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo,
@@ -188,9 +189,8 @@ pub enum TerminalPaneEvent {
     // The pane retains the hovered value; Workspace owns tooltip timing and placement.
     HoverTooltipChanged,
     // Persistence stays workspace-owned because panes do not own saved connection profiles.
-    SerialLineEndingsChanged {
-        input: Option<SerialLineEnding>,
-        output: Option<SerialLineEnding>,
+    SerialRuntimeOptionsChanged {
+        options: SerialRuntimeOptions,
     },
     TelnetLineEndingsChanged {
         input: Option<SerialLineEnding>,
@@ -317,6 +317,16 @@ pub struct TerminalSerialStatus {
     pub can_reconnect: bool,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalBleStatus {
+    pub config: BleSessionConfig,
+    pub lifecycle: TerminalLifecycle,
+    pub connection_status: BleConnectionStatus,
+    pub runtime_options: SerialRuntimeOptions,
+    /// ATT MTU negotiated at runtime; `None` before the first worker event.
+    pub negotiated_mtu: Option<u16>,
+}
+
 /// A serial operation requested by another application-owned surface.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminalSerialAction {
@@ -421,6 +431,7 @@ fn populate_default_session_log_context(
         TerminalSessionKind::Telnet => "telnet",
         TerminalSessionKind::Mosh => "mosh",
         TerminalSessionKind::Serial => "serial",
+        TerminalSessionKind::Ble => "ble",
     };
     if context.protocol.is_empty() {
         context.protocol = protocol.to_string();
@@ -465,6 +476,7 @@ pub struct TerminalPane {
     // The backend kind is immutable for the pane's full lifetime.
     session_kind: TerminalSessionKind,
     serial_session_config: Option<SerialSessionConfig>,
+    ble_session_config: Option<BleSessionConfig>,
     serial_port_available: Option<bool>,
     control_bar_expanded: bool,
     focus_handle: FocusHandle,
@@ -1033,6 +1045,30 @@ impl TerminalPane {
         Ok(pane)
     }
 
+    pub fn new_ble_with_preferences(
+        config: BleSessionConfig,
+        adapter_guard: Option<oxideterm_terminal::BleAdapterGuard>,
+        preferences: TerminalUiPreferences,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        i18n: oxideterm_i18n::I18n,
+    ) -> Result<Self> {
+        let session_config = config.clone();
+        let terminal = Arc::new(Mutex::new(TerminalSession::ble_with_graphics_and_encoding(
+            config,
+            adapter_guard,
+            DEFAULT_COLS,
+            DEFAULT_ROWS,
+            graphics_options_from_preferences(&preferences),
+            preferences.terminal_encoding,
+            preferences.scrollback_lines,
+            i18n,
+        )));
+        let mut pane = Self::from_session(terminal, preferences, window, cx)?;
+        pane.ble_session_config = Some(session_config);
+        Ok(pane)
+    }
+
     pub fn open_serial_session_with_preferences(
         config: SerialSessionConfig,
         preferences: &TerminalUiPreferences,
@@ -1241,6 +1277,7 @@ impl TerminalPane {
             terminal,
             session_kind,
             serial_session_config: None,
+            ble_session_config: None,
             serial_port_available: None,
             control_bar_expanded: true,
             focus_handle,
@@ -1807,10 +1844,21 @@ impl TerminalPane {
     }
 
     fn history_input_available(&self, mode: TermMode) -> bool {
-        let prompt_available = match &self.serial_session_config {
-            Some(config) => {
-                config.runtime_options.display_mode == SerialDisplayMode::Text
-                    && config.runtime_options.send_mode == SerialSendMode::Text
+        // Serial and BLE consoles share runtime options; an opaque send or
+        // display mode cannot be reconstructed as history text input.
+        let transport_options = self
+            .serial_session_config
+            .as_ref()
+            .map(|config| config.runtime_options)
+            .or_else(|| {
+                self.ble_session_config
+                    .as_ref()
+                    .map(|config| config.runtime_options)
+            });
+        let prompt_available = match transport_options {
+            Some(options) => {
+                options.display_mode == SerialDisplayMode::Text
+                    && options.send_mode == SerialSendMode::Text
                     // Device consoles usually have no OSC prompt markers. If supplied, keep
                     // respecting them so input to a running command is not treated as a prompt.
                     && (!self.shell_integration_status.detected || self.autosuggest_prompt_active)
@@ -1843,7 +1891,9 @@ impl TerminalPane {
                 && !self.is_serial_transport()
                 && !matches!(
                     self.session_kind,
-                    TerminalSessionKind::Telnet | TerminalSessionKind::Mosh
+                    TerminalSessionKind::Telnet
+                        | TerminalSessionKind::Mosh
+                        | TerminalSessionKind::Ble
                 ))
             || self.marked_text.is_some()
             || self.tmux_prompt.is_some()
@@ -2336,6 +2386,22 @@ impl TerminalPane {
         self.serial_session_config.is_some()
     }
 
+    pub fn is_ble_transport(&self) -> bool {
+        self.ble_session_config.is_some()
+    }
+
+    pub fn ble_status(&self) -> Option<TerminalBleStatus> {
+        let config = self.ble_session_config.clone()?;
+        let terminal = self.terminal.lock();
+        Some(TerminalBleStatus {
+            config,
+            lifecycle: terminal.lifecycle(),
+            connection_status: terminal.ble_connection_status().unwrap_or_default(),
+            runtime_options: terminal.serial_runtime_options().unwrap_or_default(),
+            negotiated_mtu: terminal.ble_negotiated_mtu(),
+        })
+    }
+
     pub fn serial_status(&self) -> Option<TerminalSerialStatus> {
         let config = self.serial_session_config.clone()?;
         let terminal = self.terminal.lock();
@@ -2512,6 +2578,9 @@ impl TerminalPane {
         if let Some(config) = self.serial_session_config.as_mut() {
             config.runtime_options = options;
         }
+        if let Some(config) = self.ble_session_config.as_mut() {
+            config.runtime_options = options;
+        }
         if previous_options.is_some_and(|previous| {
             previous.display_mode != options.display_mode || previous.send_mode != options.send_mode
         }) {
@@ -2520,17 +2589,15 @@ impl TerminalPane {
             self.autosuggest_selected_index = None;
             self.autosuggest_dismissed_query = None;
         }
-        let changed_input = previous_options
-            .filter(|previous| previous.line_ending != options.line_ending)
-            .map(|_| options.line_ending);
-        let changed_output = previous_options
-            .filter(|previous| previous.output_line_ending != options.output_line_ending)
-            .map(|_| options.output_line_ending);
-        if changed_input.is_some() || changed_output.is_some() {
-            cx.emit(TerminalPaneEvent::SerialLineEndingsChanged {
-                input: changed_input,
-                output: changed_output,
-            });
+        if let Some(previous) = previous_options
+            && (previous.line_ending != options.line_ending
+                || previous.output_line_ending != options.output_line_ending
+                || previous.send_mode != options.send_mode
+                || previous.display_mode != options.display_mode
+                || previous.local_echo != options.local_echo)
+            && (self.is_serial_transport() || self.is_ble_transport())
+        {
+            cx.emit(TerminalPaneEvent::SerialRuntimeOptionsChanged { options });
         }
         cx.notify();
         Ok(())

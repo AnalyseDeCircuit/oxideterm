@@ -1,6 +1,6 @@
 use super::super::password_prompt::SavedPasswordLoadError;
 use super::*;
-use gpui::{App, CursorStyle};
+use gpui::{App, CursorStyle, InteractiveElement};
 use oxideterm_connections::{ConnectionTerminalSessionLogPolicy, SavedAuth, SshChannelStrategy};
 use oxideterm_remote_desktop::RemoteDesktopRdpNetworkProfile;
 use oxideterm_settings_model::parse_rgb24_hex;
@@ -27,6 +27,8 @@ pub(super) enum ConnectionFormSection {
     MoshOptions,
     SftpOptions,
     LocalShell,
+    BleDiscovery,
+    BleTransportOptions,
 }
 
 impl ConnectionFormSection {
@@ -48,6 +50,8 @@ impl ConnectionFormSection {
             Self::MoshOptions => "new-connection-mosh-options-section",
             Self::SftpOptions => "new-connection-sftp-options-section",
             Self::LocalShell => "new-connection-local-shell-section",
+            Self::BleDiscovery => "new-connection-ble-discovery-section",
+            Self::BleTransportOptions => "new-connection-ble-transport-options-section",
         }
     }
 
@@ -67,25 +71,29 @@ impl ConnectionFormSection {
             Self::MoshOptions => "mosh.form.advanced",
             Self::SftpOptions => "sftp.standalone.options_title",
             Self::LocalShell => "settings_view.local_terminal.available_shells",
+            Self::BleDiscovery => "modals.new_connection.ble_form_title",
+            Self::BleTransportOptions => "modals.new_connection.ble_transport_options_title",
         }
     }
 
-    fn hint_key(self) -> &'static str {
+    fn hint_key(self) -> Option<&'static str> {
         match self {
-            Self::Basic => "ssh.form.basic_information_hint",
-            Self::Authentication => "ssh.form.authentication_hint",
-            Self::Route => "ssh.form.connection_route_hint",
-            Self::StandaloneSftpSecondaryRoute => "ssh.form.connection_route_hint",
-            Self::SshOptions => "ssh.form.ssh_options_hint",
-            Self::Terminal => "ssh.form.terminal_options_hint",
-            Self::Appearance => "ssh.form.appearance_hint",
-            Self::RemoteGateway => "modals.new_connection.remote_desktop_ssh_gateway_hint",
-            Self::VncPreferences => "modals.new_connection.vnc_preferences_hint",
-            Self::RemoteFeatures => "modals.new_connection.remote_desktop_features_hint",
-            Self::SerialParameters => "modals.new_connection.serial_connect_hint",
-            Self::MoshOptions => "mosh.form.capability_hint",
-            Self::SftpOptions => "sftp.standalone.options_hint",
-            Self::LocalShell => "modals.new_connection.local_terminal_detail",
+            Self::Basic => Some("ssh.form.basic_information_hint"),
+            Self::Authentication => Some("ssh.form.authentication_hint"),
+            Self::Route => Some("ssh.form.connection_route_hint"),
+            Self::StandaloneSftpSecondaryRoute => Some("ssh.form.connection_route_hint"),
+            Self::SshOptions => Some("ssh.form.ssh_options_hint"),
+            Self::Terminal => Some("ssh.form.terminal_options_hint"),
+            Self::Appearance => Some("ssh.form.appearance_hint"),
+            Self::RemoteGateway => Some("modals.new_connection.remote_desktop_ssh_gateway_hint"),
+            Self::VncPreferences => Some("modals.new_connection.vnc_preferences_hint"),
+            Self::RemoteFeatures => Some("modals.new_connection.remote_desktop_features_hint"),
+            Self::SerialParameters => Some("modals.new_connection.serial_connect_hint"),
+            Self::MoshOptions => Some("mosh.form.capability_hint"),
+            Self::SftpOptions => Some("sftp.standalone.options_hint"),
+            Self::LocalShell => Some("modals.new_connection.local_terminal_detail"),
+            Self::BleDiscovery => Some("modals.new_connection.ble_discovery_section_hint"),
+            Self::BleTransportOptions => Some("modals.new_connection.ble_transport_options_hint"),
         }
     }
 }
@@ -113,6 +121,8 @@ fn connection_form_section_expanded_for_form(
         ConnectionFormSection::MoshOptions => form.mosh_options_section_expanded,
         ConnectionFormSection::SftpOptions => form.sftp_options_section_expanded,
         ConnectionFormSection::LocalShell => form.local_shell_section_expanded,
+        ConnectionFormSection::BleDiscovery => form.ble.discovery_section_expanded,
+        ConnectionFormSection::BleTransportOptions => form.ble.transport_section_expanded,
     };
     override_value.unwrap_or(true)
 }
@@ -249,23 +259,44 @@ fn new_connection_transport_index(transport: NewConnectionTransport) -> usize {
         NewConnectionTransport::Mosh => 1,
         NewConnectionTransport::Telnet => 2,
         NewConnectionTransport::Serial => 3,
-        NewConnectionTransport::Rdp => 4,
-        NewConnectionTransport::Vnc => 5,
-        NewConnectionTransport::WslGraphics => 6,
+        NewConnectionTransport::Ble => 4,
+        NewConnectionTransport::Rdp => 5,
+        NewConnectionTransport::Vnc => 6,
+        NewConnectionTransport::WslGraphics => 7,
         NewConnectionTransport::LocalTerminal => {
-            if cfg!(target_os = "windows") {
-                7
-            } else {
-                6
-            }
-        }
-        NewConnectionTransport::StandaloneSftp => {
             if cfg!(target_os = "windows") {
                 8
             } else {
                 7
             }
         }
+        NewConnectionTransport::StandaloneSftp => {
+            if cfg!(target_os = "windows") {
+                9
+            } else {
+                8
+            }
+        }
+    }
+}
+
+/// Icon shown when a connection has no explicit icon, matching the fallback the
+/// session manager uses after the profile is saved.
+fn default_icon_for_transport(transport: NewConnectionTransport) -> LucideIcon {
+    match transport {
+        NewConnectionTransport::Ssh => LucideIcon::Server,
+        NewConnectionTransport::StandaloneSftp | NewConnectionTransport::Ftp => {
+            LucideIcon::FolderSync
+        }
+        NewConnectionTransport::Mosh => LucideIcon::Wifi,
+        NewConnectionTransport::Telnet | NewConnectionTransport::LocalTerminal => {
+            LucideIcon::Terminal
+        }
+        NewConnectionTransport::Serial => LucideIcon::Radio,
+        NewConnectionTransport::Ble => LucideIcon::Bluetooth,
+        NewConnectionTransport::Rdp
+        | NewConnectionTransport::Vnc
+        | NewConnectionTransport::WslGraphics => LucideIcon::Monitor,
     }
 }
 
@@ -401,7 +432,9 @@ impl WorkspaceApp {
             .when(
                 !matches!(
                     section,
-                    ConnectionFormSection::Basic | ConnectionFormSection::LocalShell
+                    ConnectionFormSection::Basic
+                        | ConnectionFormSection::LocalShell
+                        | ConnectionFormSection::BleDiscovery
                 ),
                 |content| {
                     content
@@ -432,12 +465,14 @@ impl WorkspaceApp {
                                     .text_color(rgb(self.tokens.ui.text_heading))
                                     .child(self.i18n.t(section.title_key())),
                             )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(self.i18n.t(section.hint_key())),
-                            ),
+                            .when_some(section.hint_key(), |header, hint_key| {
+                                header.child(
+                                    div()
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(self.i18n.t(hint_key)),
+                                )
+                            }),
                     )
                     .child(self.render_animated_chevron(
                         (SharedString::from(chevron_id), expanded as usize),
@@ -496,6 +531,12 @@ impl WorkspaceApp {
                                     }
                                     ConnectionFormSection::LocalShell => {
                                         form.local_shell_section_expanded = override_value;
+                                    }
+                                    ConnectionFormSection::BleDiscovery => {
+                                        form.ble.discovery_section_expanded = override_value;
+                                    }
+                                    ConnectionFormSection::BleTransportOptions => {
+                                        form.ble.transport_section_expanded = override_value;
                                     }
                                 }
                                 form.field_focused = false;
@@ -564,6 +605,7 @@ impl WorkspaceApp {
             }
             NewConnectionSelect::LocalShell => SelectAnchorId::NewConnectionLocalShell,
             NewConnectionSelect::SerialPort => SelectAnchorId::NewConnectionSerialPort,
+            NewConnectionSelect::BleAdapter => SelectAnchorId::NewConnectionBleAdapter,
             NewConnectionSelect::SerialDataBits => SelectAnchorId::NewConnectionSerialDataBits,
             NewConnectionSelect::SerialStopBits => SelectAnchorId::NewConnectionSerialStopBits,
             NewConnectionSelect::SerialParity => SelectAnchorId::NewConnectionSerialParity,
@@ -583,6 +625,14 @@ impl WorkspaceApp {
             NewConnectionSelect::TelnetOutputLineEnding => {
                 SelectAnchorId::NewConnectionTelnetOutputLineEnding
             }
+            NewConnectionSelect::BleInputLineEnding => {
+                SelectAnchorId::NewConnectionBleInputLineEnding
+            }
+            NewConnectionSelect::BleOutputLineEnding => {
+                SelectAnchorId::NewConnectionBleOutputLineEnding
+            }
+            NewConnectionSelect::BleSendMode => SelectAnchorId::NewConnectionBleSendMode,
+            NewConnectionSelect::BleDisplayMode => SelectAnchorId::NewConnectionBleDisplayMode,
             NewConnectionSelect::TerminalSemanticScheme => {
                 SelectAnchorId::NewConnectionTerminalSemanticScheme
             }
@@ -1627,6 +1677,7 @@ impl WorkspaceApp {
                     | NewConnectionSelect::StandaloneSftpSecondaryUpstreamProxyAuth
                     | NewConnectionSelect::LocalShell
                     | NewConnectionSelect::SerialPort
+                    | NewConnectionSelect::BleAdapter
                     | NewConnectionSelect::SerialDataBits
                     | NewConnectionSelect::SerialStopBits
                     | NewConnectionSelect::SerialParity
@@ -1636,6 +1687,10 @@ impl WorkspaceApp {
                     | NewConnectionSelect::TerminalDeleteSequence
                     | NewConnectionSelect::TelnetInputLineEnding
                     | NewConnectionSelect::TelnetOutputLineEnding
+                    | NewConnectionSelect::BleInputLineEnding
+                    | NewConnectionSelect::BleOutputLineEnding
+                    | NewConnectionSelect::BleSendMode
+                    | NewConnectionSelect::BleDisplayMode
                     | NewConnectionSelect::TerminalSemanticScheme
                     | NewConnectionSelect::TerminalHighlightRuleSet
                     | NewConnectionSelect::TerminalSessionLogPolicy => return,
@@ -1801,7 +1856,7 @@ impl WorkspaceApp {
         });
     }
 
-    fn render_connection_input(
+    pub(super) fn render_connection_input(
         &self,
         value: &str,
         placeholder: String,
@@ -2590,6 +2645,7 @@ impl WorkspaceApp {
         background_color_value: &str,
         expanded: bool,
         supports_auto_icon: bool,
+        default_icon: LucideIcon,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -2597,8 +2653,9 @@ impl WorkspaceApp {
         let preview_background = parse_rgb24_hex(background_color_value)
             .map(rgb)
             .unwrap_or_else(|| rgba((preview_color << 8) | 0x22));
-        let active_icon =
-            session_icon_from_id(Some(icon_value)).unwrap_or(LucideIcon::Server.into());
+        // An empty (or unknown) icon id means "use the transport default"; the
+        // preview must show that same icon so clearing the picker is visible.
+        let active_icon = session_icon_from_id(Some(icon_value)).unwrap_or(default_icon.into());
         let mut grid = div().flex().flex_wrap().gap(px(self.tokens.spacing.two));
 
         let choices = crate::assets::DISTRO_ICONS
@@ -2852,6 +2909,13 @@ impl WorkspaceApp {
                 false,
             ),
             (
+                NewConnectionTransport::Ble,
+                self.i18n.t("modals.new_connection.transport_ble"),
+                NewConnectionField::BleProfileName,
+                LucideIcon::Bluetooth,
+                false,
+            ),
+            (
                 NewConnectionTransport::Rdp,
                 self.i18n.t("modals.new_connection.transport_rdp"),
                 NewConnectionField::Host,
@@ -3018,6 +3082,7 @@ impl WorkspaceApp {
                             });
                         }
                         let mut should_refresh_ports = false;
+                        let mut should_refresh_ble_adapters = false;
                         let mut selection_offset = None;
                         this.update_connection_form_state(cx, |state| {     if let Some(form) = state.form.as_mut() {
                             let previous_transport = form.transport;
@@ -3043,6 +3108,23 @@ impl WorkspaceApp {
                             if form.transport != transport {
                                 form.standalone_connection_id = None;
                             }
+                            if transport != NewConnectionTransport::Ble {
+                                // Leaving the BLE form: stop any in-flight scan
+                                // or inspection, drop the adapter guard so its
+                                // discovery window closes, and clear the stale
+                                // device list. A re-scan is required after
+                                // returning to BLE.
+                                form.ble.scan_generation += 1;
+                                form.ble.scanning = false;
+                                form.ble.scan_started = false;
+                                form.ble.inspecting = false;
+                                form.ble.devices.clear();
+                                form.ble.adapter_guard = None;
+                                form.ble.selected_device_id = None;
+                                form.ble.device_details = None;
+                                form.ble.inspect_error = None;
+                                form.ble.selected_service_uuid = None;
+                            }
                             form.transport = transport;
                             form.focused_field = focus_field;
                             form.field_focused = false;
@@ -3051,6 +3133,9 @@ impl WorkspaceApp {
                             should_refresh_ports = transport == NewConnectionTransport::Serial
                                 && form.serial_ports.is_empty()
                                 && !form.serial_ports_loading;
+                            should_refresh_ble_adapters = transport == NewConnectionTransport::Ble
+                                && form.ble.adapters.is_empty()
+                                && !form.ble.adapters_loading;
                             } });
                         if let Some(vertical_offset_y) = selection_offset {
                             this.begin_user_segmented_control_transition_with_vertical_offset(
@@ -3063,6 +3148,9 @@ impl WorkspaceApp {
                         this.close_new_connection_select(cx);
                         if should_refresh_ports {
                             this.refresh_serial_ports(cx);
+                        }
+                        if should_refresh_ble_adapters {
+                            this.refresh_ble_adapters(cx);
                         }
                         cx.notify();
                     }),
@@ -4323,7 +4411,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_new_connection_select_control(
+    pub(super) fn render_new_connection_select_control(
         &self,
         select_id: NewConnectionSelect,
         value: String,
@@ -4428,7 +4516,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_connection_label_with_help(
+    pub(super) fn render_connection_label_with_help(
         &self,
         trigger_id: &'static str,
         tooltip_id: &'static str,
@@ -4513,21 +4601,11 @@ impl WorkspaceApp {
     pub(super) fn render_connection_terminal_options(&self, cx: &mut Context<Self>) -> AnyElement {
         // Saved host controls are optional overrides so application defaults
         // continue to govern legacy records and temporary local terminals.
-        let Some((
-            terminal,
-            dedicated_new_terminal_connection,
-            open_sftp_on_connect,
-            ssh_channel_strategy,
-            ssh_transport,
-        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
-            (
-                form.terminal.clone(),
-                form.dedicated_new_terminal_connection,
-                form.open_sftp_on_connect,
-                form.ssh_channel_strategy,
-                form.transport == NewConnectionTransport::Ssh,
-            )
-        })
+        let Some(terminal) = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .map(|form| form.terminal.clone())
         else {
             return div().into_any_element();
         };
@@ -4540,6 +4618,23 @@ impl WorkspaceApp {
                 (
                     form.telnet_input_line_ending,
                     form.telnet_output_line_ending,
+                )
+            });
+        // BLE keeps its byte-stream runtime controls (send/display modes,
+        // line endings, local echo) inside the shared terminal behavior
+        // section; only MTU and the write mode stay in transport options.
+        let ble_runtime_controls = self
+            .connection_form_state(cx)
+            .form
+            .as_ref()
+            .filter(|form| form.transport == NewConnectionTransport::Ble)
+            .map(|form| {
+                (
+                    form.ble.input_line_ending,
+                    form.ble.output_line_ending,
+                    form.ble.send_mode,
+                    form.ble.display_mode,
+                    form.ble.local_echo,
                 )
             });
         let application_defaults = &self.settings_store.settings().terminal;
@@ -4769,36 +4864,158 @@ impl WorkspaceApp {
                                     cx,
                                 ),
                             )),
+                    )
+                    .when_some(
+                        ble_runtime_controls,
+                        |row,
+                         (input, output, send_mode, display_mode, local_echo): (
+                            oxideterm_connections::SerialLineEnding,
+                            oxideterm_connections::SerialLineEnding,
+                            oxideterm_connections::SerialSendMode,
+                            oxideterm_connections::SerialDisplayMode,
+                            bool,
+                        )| {
+                            row.children([
+                                div()
+                                    .flex_1()
+                                    .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                                    .child(form_field(
+                                        &self.tokens,
+                                        self.i18n.t("terminal.serial_control.send_mode"),
+                                        self.render_new_connection_select_control(
+                                            NewConnectionSelect::BleSendMode,
+                                            self.connection_send_mode_label(send_mode),
+                                            false,
+                                            false,
+                                            cx,
+                                        ),
+                                    )),
+                                div()
+                                    .flex_1()
+                                    .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                                    .child(form_field(
+                                        &self.tokens,
+                                        self.i18n.t("terminal.serial_control.display_mode"),
+                                        self.render_new_connection_select_control(
+                                            NewConnectionSelect::BleDisplayMode,
+                                            self.connection_display_mode_label(display_mode),
+                                            false,
+                                            false,
+                                            cx,
+                                        ),
+                                    )),
+                                div()
+                                    .flex_1()
+                                    .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                                    .child(form_field(
+                                        &self.tokens,
+                                        self.i18n.t("terminal.serial_control.line_ending"),
+                                        self.render_new_connection_select_control(
+                                            NewConnectionSelect::BleInputLineEnding,
+                                            self.connection_line_ending_label(input),
+                                            false,
+                                            false,
+                                            cx,
+                                        ),
+                                    )),
+                                div()
+                                    .flex_1()
+                                    .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                                    .child(form_field(
+                                        &self.tokens,
+                                        self.i18n.t("terminal.serial_control.output_line_ending"),
+                                        self.render_new_connection_select_control(
+                                            NewConnectionSelect::BleOutputLineEnding,
+                                            self.connection_line_ending_label(output),
+                                            false,
+                                            false,
+                                            cx,
+                                        ),
+                                    )),
+                                div()
+                                    .flex_1()
+                                    .min_w(px(CONNECTION_TERMINAL_CONTROL_MIN_WIDTH))
+                                    .child(self.render_connection_checkbox(
+                                        "ble-local-echo",
+                                        self.i18n.t("terminal.serial_control.local_echo"),
+                                        local_echo,
+                                        |form| form.ble.local_echo = !form.ble.local_echo,
+                                        cx,
+                                    )),
+                            ])
+                        },
                     ),
             )
-            .child(self.render_connection_checkbox_with_help(
-                "new-connection-dedicated-terminal-help",
-                "new-connection-dedicated-terminal",
-                "ssh.form.dedicated_new_terminal_connection",
-                "ssh.form.dedicated_new_terminal_connection_hint",
-                dedicated_new_terminal_connection
-                    || ssh_channel_strategy.requires_dedicated_consumers(),
-                ssh_channel_strategy.requires_dedicated_consumers(),
-                |form| {
-                    form.dedicated_new_terminal_connection =
-                        !form.dedicated_new_terminal_connection;
-                },
+            .into_any_element()
+    }
+
+    pub(super) fn render_connection_appearance_options(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        // Session asset appearance is shared by every form that can persist a
+        // connection.
+        let Some((icon, color, icon_background_color, icon_picker_expanded, transport)) =
+            self.connection_form_state(cx).form.as_ref().map(|form| {
+                (
+                    form.icon.clone(),
+                    form.color.clone(),
+                    form.icon_background_color.clone(),
+                    form.icon_picker_expanded,
+                    form.transport,
+                )
+            })
+        else {
+            return div().into_any_element();
+        };
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.modal_section_gap))
+            .child(self.render_edit_icon_field(
+                &icon,
+                &color,
+                &icon_background_color,
+                icon_picker_expanded,
+                transport == NewConnectionTransport::Ssh,
+                default_icon_for_transport(transport),
                 cx,
             ))
-            .when(ssh_transport, |section| {
-                section.child(self.render_connection_checkbox_with_help(
-                    "new-connection-open-sftp-help",
-                    "new-connection-open-sftp",
-                    "ssh.form.open_sftp_on_connect",
-                    "ssh.form.open_sftp_on_connect_hint",
-                    open_sftp_on_connect,
-                    false,
-                    |form| {
-                        form.open_sftp_on_connect = !form.open_sftp_on_connect;
-                    },
-                    cx,
-                ))
-            })
+            .child(
+                // The two asset colors form one responsive pair: share a row
+                // when the modal has room and wrap together without compressing
+                // either input below a usable width.
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .gap(px(self.tokens.spacing.three))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH))
+                            .child(self.render_edit_color_field(
+                                self.i18n.t("sessionManager.edit_properties.icon_color"),
+                                &color,
+                                NewConnectionField::Color,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(CONNECTION_ICON_COLOR_CONTROL_MIN_WIDTH))
+                            .child(
+                                self.render_edit_color_field(
+                                    self.i18n
+                                        .t("sessionManager.edit_properties.icon_background_color"),
+                                    &icon_background_color,
+                                    NewConnectionField::IconBackgroundColor,
+                                    cx,
+                                ),
+                            ),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -4808,14 +5025,21 @@ impl WorkspaceApp {
         legacy_ssh_compatibility: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some((connect_timeout_seconds_text, x11_forwarding, ssh_channel_strategy)) =
-            self.connection_form_state(cx).form.as_ref().map(|form| {
-                (
-                    form.connect_timeout_seconds_text.clone(),
-                    form.x11_forwarding,
-                    form.ssh_channel_strategy,
-                )
-            })
+        let Some((
+            connect_timeout_seconds_text,
+            x11_forwarding,
+            ssh_channel_strategy,
+            dedicated_new_terminal_connection,
+            open_sftp_on_connect,
+        )) = self.connection_form_state(cx).form.as_ref().map(|form| {
+            (
+                form.connect_timeout_seconds_text.clone(),
+                form.x11_forwarding,
+                form.ssh_channel_strategy,
+                form.dedicated_new_terminal_connection,
+                form.open_sftp_on_connect,
+            )
+        })
         else {
             return div().into_any_element();
         };
@@ -4918,6 +5142,32 @@ impl WorkspaceApp {
                             form.x11_forwarding.enabled = false;
                             SshChannelStrategy::DedicatedPerConsumer
                         };
+                },
+                cx,
+            ))
+            .child(self.render_connection_checkbox_with_help(
+                "new-connection-dedicated-terminal-help",
+                "new-connection-dedicated-terminal",
+                "ssh.form.dedicated_new_terminal_connection",
+                "ssh.form.dedicated_new_terminal_connection_hint",
+                dedicated_new_terminal_connection
+                    || ssh_channel_strategy.requires_dedicated_consumers(),
+                ssh_channel_strategy.requires_dedicated_consumers(),
+                |form| {
+                    form.dedicated_new_terminal_connection =
+                        !form.dedicated_new_terminal_connection;
+                },
+                cx,
+            ))
+            .child(self.render_connection_checkbox_with_help(
+                "new-connection-open-sftp-help",
+                "new-connection-open-sftp",
+                "ssh.form.open_sftp_on_connect",
+                "ssh.form.open_sftp_on_connect_hint",
+                open_sftp_on_connect,
+                false,
+                |form| {
+                    form.open_sftp_on_connect = !form.open_sftp_on_connect;
                 },
                 cx,
             ))
@@ -5075,6 +5325,29 @@ impl WorkspaceApp {
             SerialLineEnding::Lf => "terminal.serial_control.line_ending_lf",
             SerialLineEnding::CrLf => "terminal.serial_control.line_ending_crlf",
             SerialLineEnding::Cr => "terminal.serial_control.line_ending_cr",
+        })
+    }
+
+    pub(super) fn connection_send_mode_label(
+        &self,
+        value: oxideterm_connections::SerialSendMode,
+    ) -> String {
+        use oxideterm_connections::SerialSendMode;
+        self.i18n.t(match value {
+            SerialSendMode::Text => "terminal.serial_control.text_mode",
+            SerialSendMode::Hex => "terminal.serial_control.hex_mode",
+        })
+    }
+
+    pub(super) fn connection_display_mode_label(
+        &self,
+        value: oxideterm_connections::SerialDisplayMode,
+    ) -> String {
+        use oxideterm_connections::SerialDisplayMode;
+        self.i18n.t(match value {
+            SerialDisplayMode::Text => "terminal.serial_control.text_mode",
+            SerialDisplayMode::Hex => "terminal.serial_control.hex_mode",
+            SerialDisplayMode::Mixed => "terminal.serial_control.mixed_mode",
         })
     }
 

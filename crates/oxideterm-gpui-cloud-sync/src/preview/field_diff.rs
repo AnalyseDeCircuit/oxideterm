@@ -3,6 +3,45 @@
 
 use super::*;
 
+pub(super) fn push_profile_deletion_fields<'a>(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    section: &'static str,
+    tombstones: &[oxideterm_connections::DeletedConnectionTombstone],
+    incoming: impl Iterator<Item = (&'a str, &'a str, chrono::DateTime<chrono::Utc>)>,
+    local: impl Iterator<Item = (&'a str, &'a str, chrono::DateTime<chrono::Utc>)>,
+) {
+    let incoming = incoming
+        .map(|(id, name, updated)| (id, (name, updated)))
+        .collect::<BTreeMap<_, _>>();
+    let local = local
+        .map(|(id, name, updated)| (id, (name, updated)))
+        .collect::<BTreeMap<_, _>>();
+    for tombstone in tombstones {
+        let id = tombstone.id.as_str();
+        if incoming
+            .get(id)
+            .into_iter()
+            .chain(local.get(id))
+            .any(|(_, updated)| *updated > tombstone.deleted_at)
+        {
+            continue;
+        }
+        let name = local
+            .get(id)
+            .or_else(|| incoming.get(id))
+            .map_or(id, |(name, _)| *name)
+            .to_owned();
+        items.retain(|item| item.section_label_key != section || item.item_key != id);
+        items.push(field_diff_item_with_key(
+            section,
+            id.to_owned(),
+            name,
+            CloudSyncFieldDiffStatus::Deleted,
+            Vec::new(),
+        ));
+    }
+}
+
 pub(super) fn push_preview_impact(
     items: &mut Vec<CloudSyncPreviewImpactItem>,
     label_key: &'static str,
@@ -462,23 +501,90 @@ pub(super) fn push_quick_command_field_diffs(
     }
 }
 
-pub(super) fn push_upload_serial_profile_field_diffs(
+/// Per-family hooks that keep the push loops below generic: the settings key
+/// names the sync scope and the field functions describe how a family's
+/// records render into preview diffs.
+trait ProfileFieldDiffRecord: Clone + serde::Serialize + serde::de::DeserializeOwned {
+    const SETTINGS_KEY: &'static str;
+    fn diff_record_id(&self) -> &str;
+    fn diff_record_name(&self) -> &str;
+    fn diff_merge_fields(
+        base: &Self,
+        local: &Self,
+        remote: &Self,
+        effective_remote: &Self,
+        conflict_strategy: &ConflictStrategy,
+    ) -> Vec<CloudSyncFieldDiffField>;
+    fn diff_changed_fields(remote: &Self, local: &Self) -> Vec<CloudSyncFieldDiffField>;
+    fn diff_summary_fields(profile: &Self) -> Vec<CloudSyncFieldDiffField>;
+}
+
+impl ProfileFieldDiffRecord for BleProfile {
+    const SETTINGS_KEY: &'static str = "plugin.cloud_sync.settings.sync_ble_profiles";
+    fn diff_record_id(&self) -> &str {
+        &self.id
+    }
+    fn diff_record_name(&self) -> &str {
+        &self.name
+    }
+    fn diff_merge_fields(
+        base: &Self,
+        local: &Self,
+        remote: &Self,
+        effective_remote: &Self,
+        conflict_strategy: &ConflictStrategy,
+    ) -> Vec<CloudSyncFieldDiffField> {
+        ble_profile_merge_fields(base, local, remote, effective_remote, conflict_strategy)
+    }
+    fn diff_changed_fields(remote: &Self, local: &Self) -> Vec<CloudSyncFieldDiffField> {
+        ble_profile_changed_fields(remote, local)
+    }
+    fn diff_summary_fields(profile: &Self) -> Vec<CloudSyncFieldDiffField> {
+        ble_profile_summary_fields(profile)
+    }
+}
+
+impl ProfileFieldDiffRecord for SerialProfile {
+    const SETTINGS_KEY: &'static str = "plugin.cloud_sync.settings.sync_serial_profiles";
+    fn diff_record_id(&self) -> &str {
+        &self.id
+    }
+    fn diff_record_name(&self) -> &str {
+        &self.name
+    }
+    fn diff_merge_fields(
+        base: &Self,
+        local: &Self,
+        remote: &Self,
+        effective_remote: &Self,
+        conflict_strategy: &ConflictStrategy,
+    ) -> Vec<CloudSyncFieldDiffField> {
+        serial_profile_merge_fields(base, local, remote, effective_remote, conflict_strategy)
+    }
+    fn diff_changed_fields(remote: &Self, local: &Self) -> Vec<CloudSyncFieldDiffField> {
+        serial_profile_changed_fields(remote, local)
+    }
+    fn diff_summary_fields(profile: &Self) -> Vec<CloudSyncFieldDiffField> {
+        serial_profile_summary_fields(profile)
+    }
+}
+
+fn push_upload_profile_field_diffs<P: ProfileFieldDiffRecord>(
     items: &mut Vec<CloudSyncFieldDiffItem>,
-    remote: Option<&SerialProfilesSyncSnapshot>,
-    local: &SerialProfilesSyncSnapshot,
+    remote_records: &[P],
+    local_records: &[P],
 ) {
-    let remote_profiles = remote
-        .into_iter()
-        .flat_map(|snapshot| snapshot.records.iter())
-        .map(|profile| (profile.id.as_str(), profile))
+    let remote_profiles = remote_records
+        .iter()
+        .map(|profile| (profile.diff_record_id(), profile))
         .collect::<BTreeMap<_, _>>();
     let mut seen_ids = BTreeSet::new();
-    for local_profile in &local.records {
-        seen_ids.insert(local_profile.id.as_str());
-        let remote_profile = remote_profiles.get(local_profile.id.as_str()).copied();
+    for local_profile in local_records {
+        seen_ids.insert(local_profile.diff_record_id());
+        let remote_profile = remote_profiles.get(local_profile.diff_record_id()).copied();
         let fields = remote_profile
-            .map(|remote_profile| serial_profile_changed_fields(remote_profile, local_profile))
-            .unwrap_or_else(|| serial_profile_summary_fields(local_profile));
+            .map(|remote_profile| P::diff_changed_fields(remote_profile, local_profile))
+            .unwrap_or_else(|| P::diff_summary_fields(local_profile));
         let status = if remote_profile.is_some() {
             CloudSyncFieldDiffStatus::Modified
         } else {
@@ -486,9 +592,9 @@ pub(super) fn push_upload_serial_profile_field_diffs(
         };
         push_non_empty_field_diff(
             items,
-            "plugin.cloud_sync.settings.sync_serial_profiles",
-            local_profile.id.clone(),
-            local_profile.name.clone(),
+            P::SETTINGS_KEY,
+            local_profile.diff_record_id().to_owned(),
+            local_profile.diff_record_name().to_owned(),
             status,
             fields,
         );
@@ -498,35 +604,35 @@ pub(super) fn push_upload_serial_profile_field_diffs(
             continue;
         }
         items.push(field_diff_item_with_key(
-            "plugin.cloud_sync.settings.sync_serial_profiles",
-            remote_profile.id.clone(),
-            remote_profile.name.clone(),
+            P::SETTINGS_KEY,
+            remote_profile.diff_record_id().to_owned(),
+            remote_profile.diff_record_name().to_owned(),
             CloudSyncFieldDiffStatus::Deleted,
             Vec::new(),
         ));
     }
 }
 
-pub(super) fn push_serial_profile_field_diffs(
+fn push_profile_field_diffs<P: ProfileFieldDiffRecord>(
     items: &mut Vec<CloudSyncFieldDiffItem>,
-    remote: &SerialProfilesSyncSnapshot,
-    base: Option<&SerialProfilesSyncSnapshot>,
-    local: Option<&SerialProfilesSyncSnapshot>,
+    remote_records: &[P],
+    base: Option<&[P]>,
+    local: Option<&[P]>,
     conflict_strategy: &ConflictStrategy,
 ) {
     let base_profiles = base
         .into_iter()
-        .flat_map(|snapshot| snapshot.records.iter())
-        .map(|profile| (profile.id.as_str(), profile))
+        .flat_map(|records| records.iter())
+        .map(|profile| (profile.diff_record_id(), profile))
         .collect::<BTreeMap<_, _>>();
     let local_profiles = local
         .into_iter()
-        .flat_map(|snapshot| snapshot.records.iter())
-        .map(|profile| (profile.id.as_str(), profile))
+        .flat_map(|records| records.iter())
+        .map(|profile| (profile.diff_record_id(), profile))
         .collect::<BTreeMap<_, _>>();
-    for remote_profile in &remote.records {
-        let local_profile = local_profiles.get(remote_profile.id.as_str()).copied();
-        let base_profile = base_profiles.get(remote_profile.id.as_str()).copied();
+    for remote_profile in remote_records {
+        let local_profile = local_profiles.get(remote_profile.diff_record_id()).copied();
+        let base_profile = base_profiles.get(remote_profile.diff_record_id()).copied();
         let effective_remote = local_profile
             .and_then(|local_profile| {
                 base_profile.and_then(|base_profile| {
@@ -542,17 +648,15 @@ pub(super) fn push_serial_profile_field_diffs(
             })
             .unwrap_or_else(|| remote_profile.clone());
         let fields = match (base_profile, local_profile) {
-            (Some(base_profile), Some(local_profile)) => serial_profile_merge_fields(
+            (Some(base_profile), Some(local_profile)) => P::diff_merge_fields(
                 base_profile,
                 local_profile,
                 remote_profile,
                 &effective_remote,
                 conflict_strategy,
             ),
-            (_, Some(local_profile)) => {
-                serial_profile_changed_fields(local_profile, &effective_remote)
-            }
-            _ => serial_profile_summary_fields(remote_profile),
+            (_, Some(local_profile)) => P::diff_changed_fields(local_profile, &effective_remote),
+            _ => P::diff_summary_fields(remote_profile),
         };
         let status = if local_profile.is_some() {
             CloudSyncFieldDiffStatus::Modified
@@ -561,13 +665,73 @@ pub(super) fn push_serial_profile_field_diffs(
         };
         push_non_empty_field_diff(
             items,
-            "plugin.cloud_sync.settings.sync_serial_profiles",
-            remote_profile.id.clone(),
-            remote_profile.name.clone(),
+            P::SETTINGS_KEY,
+            remote_profile.diff_record_id().to_owned(),
+            remote_profile.diff_record_name().to_owned(),
             status,
             fields,
         );
     }
+}
+
+pub(super) fn push_upload_ble_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&BleProfilesSyncSnapshot>,
+    local: &BleProfilesSyncSnapshot,
+) {
+    push_upload_profile_field_diffs(
+        items,
+        remote
+            .map(|snapshot| snapshot.records.as_slice())
+            .unwrap_or(&[]),
+        &local.records,
+    );
+}
+
+pub(super) fn push_ble_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &BleProfilesSyncSnapshot,
+    base: Option<&BleProfilesSyncSnapshot>,
+    local: Option<&BleProfilesSyncSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    push_profile_field_diffs(
+        items,
+        &remote.records,
+        base.map(|snapshot| snapshot.records.as_slice()),
+        local.map(|snapshot| snapshot.records.as_slice()),
+        conflict_strategy,
+    );
+}
+
+pub(super) fn push_upload_serial_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: Option<&SerialProfilesSyncSnapshot>,
+    local: &SerialProfilesSyncSnapshot,
+) {
+    push_upload_profile_field_diffs(
+        items,
+        remote
+            .map(|snapshot| snapshot.records.as_slice())
+            .unwrap_or(&[]),
+        &local.records,
+    );
+}
+
+pub(super) fn push_serial_profile_field_diffs(
+    items: &mut Vec<CloudSyncFieldDiffItem>,
+    remote: &SerialProfilesSyncSnapshot,
+    base: Option<&SerialProfilesSyncSnapshot>,
+    local: Option<&SerialProfilesSyncSnapshot>,
+    conflict_strategy: &ConflictStrategy,
+) {
+    push_profile_field_diffs(
+        items,
+        &remote.records,
+        base.map(|snapshot| snapshot.records.as_slice()),
+        local.map(|snapshot| snapshot.records.as_slice()),
+        conflict_strategy,
+    );
 }
 
 pub(super) fn push_upload_app_settings_field_diffs(

@@ -31,6 +31,13 @@ use oxideterm_ssh::{
 };
 use tokio::sync::oneshot;
 
+// Shared form-to-profile conversion helpers; the BLE submit path in ble_flow
+// reuses them so group/notes/icon handling stays identical across transports.
+pub(in crate::workspace) use conversion::{
+    asset_color_from_form, asset_icon_from_form, serial_profile_group_from_form,
+};
+pub(in crate::workspace) use save::saved_profile_notes;
+
 use super::{
     ConnectionFormState, NativeProxyConnectRun, ProxyConnectPreflightContext,
     form_state::{

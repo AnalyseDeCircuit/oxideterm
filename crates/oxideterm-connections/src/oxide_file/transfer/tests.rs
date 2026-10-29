@@ -584,6 +584,7 @@ mod tests {
             revision: "invalid".to_string(),
             exported_at: Utc::now().to_rfc3339(),
             records: vec![invalid_profile],
+            tombstones: Vec::new(),
         };
         let bytes = export_connections_to_oxide(
             &source,
@@ -1089,10 +1090,12 @@ mod tests {
                 ..SaveRemoteDesktopProfileRequest::default()
             })
             .unwrap();
-        let snapshot_json = serde_json::to_string_pretty(
-            &source.export_remote_desktop_profiles_snapshot().unwrap(),
-        )
-        .unwrap();
+        let mut snapshot = source.export_remote_desktop_profiles_snapshot().unwrap();
+        snapshot.tombstones.push(crate::DeletedConnectionTombstone {
+            id: "removed-desktop".into(),
+            deleted_at: Utc::now(),
+        });
+        let snapshot_json = serde_json::to_string_pretty(&snapshot).unwrap();
         assert!(!snapshot_json.contains(CREDENTIAL));
         assert!(!snapshot_json.contains("remote-desktop:remote-1"));
 
@@ -1108,7 +1111,7 @@ mod tests {
         .unwrap();
         let file = OxideFile::from_bytes(&bytes).unwrap();
         let (metadata,_) = super::super::crypto::decrypt_oxide_archive_with_context_and_progress(&file,&mut OxideBatchDecryptionContext::new("secret!").unwrap(),|_|{}).unwrap();
-        assert_eq!(metadata.remote_desktop_profiles_count, Some(1));
+        assert_eq!(metadata.remote_desktop_profiles_count, Some(2));
         assert!(!serde_json::to_string(&metadata).unwrap().contains(CREDENTIAL));
         let payload = decrypt_payload(&bytes, "secret!").unwrap();
         assert!(
@@ -1126,7 +1129,7 @@ mod tests {
             ImportConflictStrategy::Rename,
         )
         .unwrap();
-        assert_eq!(preview.remote_desktop_profiles_count, 1);
+        assert_eq!(preview.remote_desktop_profiles_count, 2);
 
         let mut target = temp_store("remote-desktop-profile-target");
         let imported = apply_oxide_import(
@@ -1160,6 +1163,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(skipped.imported_remote_desktop_profiles, 0);
+        // Import counters describe live profiles; preview counts include deletions.
         assert_eq!(skipped.skipped_remote_desktop_profiles, 1);
         assert!(skipped_target.remote_desktop_profiles().is_empty());
     }

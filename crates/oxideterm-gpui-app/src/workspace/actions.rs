@@ -99,6 +99,9 @@ pub(in crate::workspace) fn terminal_broadcast_target_ref(
         oxideterm_terminal_triggers::SavedConnectionKind::Serial => {
             oxideterm_settings::TerminalBroadcastTargetKind::Serial
         }
+        oxideterm_terminal_triggers::SavedConnectionKind::Ble => {
+            oxideterm_settings::TerminalBroadcastTargetKind::Ble
+        }
     };
     oxideterm_settings::TerminalBroadcastTargetRef {
         kind,
@@ -2417,6 +2420,7 @@ impl WorkspaceApp {
             TerminalSessionKind::Telnet => QuickCommandTargetProtocol::Telnet,
             TerminalSessionKind::Mosh => QuickCommandTargetProtocol::Mosh,
             TerminalSessionKind::Serial => QuickCommandTargetProtocol::Serial,
+            TerminalSessionKind::Ble => QuickCommandTargetProtocol::Ble,
         };
         if pane.is_tmux_control_mode() {
             protocol = QuickCommandTargetProtocol::Tmux;
@@ -2513,6 +2517,21 @@ impl WorkspaceApp {
                     .find(|profile| profile.id == saved.saved_connection_id)
                 {
                     values.host = Some(Zeroizing::new(profile.port_path.clone()));
+                    values.connection = Some(Zeroizing::new(profile.name.clone()));
+                    values.group = profile
+                        .group
+                        .clone()
+                        .map(Zeroizing::new)
+                        .or_else(|| values.group.clone());
+                }
+            }
+            TerminalBroadcastTargetKind::Ble => {
+                if let Some(profile) = self
+                    .connection_store
+                    .ble_profiles()
+                    .iter()
+                    .find(|profile| profile.id == saved.saved_connection_id)
+                {
                     values.connection = Some(Zeroizing::new(profile.name.clone()));
                     values.group = profile
                         .group

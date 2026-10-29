@@ -273,6 +273,7 @@ fn export_connections_to_oxide_inner(
     );
     let remote_desktop_profiles_count =
         count_remote_desktop_profiles_for_export(options.remote_desktop_profiles_json.as_deref());
+    let ble_profiles_count = count_ble_profiles_for_export(options.ble_profiles_json.as_deref());
     let has_extra_payload = options.app_settings_json.is_some()
         || !plugin_profiles.is_empty()
         || options.quick_commands_json.is_some()
@@ -281,6 +282,7 @@ fn export_connections_to_oxide_inner(
         || options.mosh_profiles_json.is_some()
         || standalone_sftp_profiles_json.is_some()
         || options.remote_desktop_profiles_json.is_some()
+        || options.ble_profiles_json.is_some()
         || !options.plugin_settings.is_empty()
         || !portable_secrets.is_empty();
     let mut payload = EncryptedPayload {
@@ -295,6 +297,7 @@ fn export_connections_to_oxide_inner(
         mosh_profiles_json: options.mosh_profiles_json,
         standalone_sftp_profiles_json,
         remote_desktop_profiles_json: options.remote_desktop_profiles_json,
+        ble_profiles_json: options.ble_profiles_json,
         plugin_settings: options.plugin_settings,
         portable_secrets,
         checksum: String::new(),
@@ -327,6 +330,7 @@ fn export_connections_to_oxide_inner(
         mosh_profiles_count,
         standalone_sftp_profiles_count,
         remote_desktop_profiles_count,
+        ble_profiles_count,
         plugin_settings_count: (!payload.plugin_settings.is_empty())
             .then_some(payload.plugin_settings.len()),
         portable_secret_count: (!payload.portable_secrets.is_empty())
@@ -757,23 +761,28 @@ fn count_quick_commands_for_export(snapshot_json: Option<&str>) -> Option<(usize
 
 fn count_serial_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
 }
 
 fn count_telnet_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
+}
+
+fn count_ble_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
+    let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
 }
 
 fn count_mosh_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let value = serde_json::from_str::<Value>(snapshot_json?).ok()?;
-    value.get("records")?.as_array().map(Vec::len)
+    value.get("records")?.as_array().map(|records| records.len() + value.get("tombstones").and_then(Value::as_array).map_or(0, Vec::len))
 }
 
 fn count_standalone_sftp_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let snapshot =
         serde_json::from_str::<StandaloneSftpProfilesSyncSnapshot>(snapshot_json?).ok()?;
-    Some(snapshot.record_count())
+    Some(snapshot.record_count() + snapshot.tombstones.len())
 }
 
 fn portable_standalone_sftp_profiles_json(
@@ -806,5 +815,5 @@ fn portable_standalone_sftp_profiles_json(
 fn count_remote_desktop_profiles_for_export(snapshot_json: Option<&str>) -> Option<usize> {
     let snapshot =
         serde_json::from_str::<RemoteDesktopProfilesSyncSnapshot>(snapshot_json?).ok()?;
-    Some(snapshot.records.len())
+    Some(snapshot.records.len() + snapshot.tombstones.len())
 }

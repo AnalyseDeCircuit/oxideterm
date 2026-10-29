@@ -347,7 +347,12 @@
         "fallback_authentication": "正在嘗試備用驗證",
         "pty": "配置 PTY",
         "shell_ready": "啟動 Shell",
-        "ready": "就緒"
+        "ready": "就緒",
+        "ble_opening_adapter": "開啟藍牙適配器",
+        "ble_scanning": "掃描藍牙裝置",
+        "ble_matching": "匹配裝置",
+        "ble_verifying_service": "校驗服務",
+        "ble_ready": "就緒"
       }
     }
   }

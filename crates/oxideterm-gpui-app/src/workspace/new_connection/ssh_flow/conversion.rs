@@ -760,7 +760,7 @@ pub(super) fn remote_desktop_label_host(host: &str) -> String {
     }
 }
 
-pub(super) fn serial_profile_group_from_form(
+pub(in crate::workspace) fn serial_profile_group_from_form(
     group: &str,
     i18n: &oxideterm_i18n::I18n,
 ) -> Option<String> {
@@ -777,13 +777,13 @@ pub(super) fn serial_profile_group_from_form(
     }
 }
 
-pub(super) fn asset_icon_from_form(icon: &str) -> Option<String> {
+pub(in crate::workspace) fn asset_icon_from_form(icon: &str) -> Option<String> {
     // Empty means the asset should use its transport-specific fallback icon.
     let icon = icon.trim();
     (!icon.is_empty()).then(|| icon.to_string())
 }
 
-pub(super) fn asset_color_from_form(color: &str) -> Option<String> {
+pub(in crate::workspace) fn asset_color_from_form(color: &str) -> Option<String> {
     // Empty means the asset should use its transport-specific fallback color.
     let color = color.trim();
     (!color.is_empty()).then(|| color.to_string())

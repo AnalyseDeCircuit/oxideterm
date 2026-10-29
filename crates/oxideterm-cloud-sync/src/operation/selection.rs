@@ -81,6 +81,17 @@ pub(super) fn filter_saved_forwards_snapshot(
     }
 }
 
+pub(super) fn filter_standalone_sftp_deletions(
+    snapshot: &mut StandaloneSftpProfilesSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
+    }
+}
+
 pub(super) fn filter_serial_profiles_snapshot(
     snapshot: &mut SerialProfilesSyncSnapshot,
     selected_ids: Option<&BTreeSet<String>>,
@@ -89,6 +100,23 @@ pub(super) fn filter_serial_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
+    }
+}
+
+pub(super) fn filter_ble_profiles_snapshot(
+    snapshot: &mut BleProfilesSyncSnapshot,
+    selected_ids: Option<&BTreeSet<String>>,
+) {
+    if let Some(selected_ids) = selected_ids {
+        snapshot
+            .records
+            .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -100,6 +128,9 @@ pub(super) fn filter_telnet_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -111,6 +142,9 @@ pub(super) fn filter_mosh_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -122,6 +156,9 @@ pub(super) fn filter_remote_desktop_profiles_snapshot(
         snapshot
             .records
             .retain(|profile| selected_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selected_ids.contains(&tombstone.id));
     }
 }
 
@@ -252,6 +289,7 @@ pub(super) fn has_structured_conflict(
             || dirty_sections.forwards
             || dirty_sections.quick_commands
             || dirty_sections.serial_profiles
+            || dirty_sections.ble_profiles
             || dirty_sections.telnet_profiles
             || dirty_sections.mosh_profiles
             || dirty_sections.remote_desktop_profiles
@@ -270,6 +308,9 @@ pub(super) fn has_structured_conflict(
         return true;
     }
     if dirty_sections.serial_profiles && remote.serial_profiles != previous.serial_profiles {
+        return true;
+    }
+    if dirty_sections.ble_profiles && remote.ble_profiles != previous.ble_profiles {
         return true;
     }
     if dirty_sections.telnet_profiles && remote.telnet_profiles != previous.telnet_profiles {

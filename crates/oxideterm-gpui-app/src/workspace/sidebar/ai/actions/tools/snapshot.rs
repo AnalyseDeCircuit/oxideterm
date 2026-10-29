@@ -330,7 +330,11 @@ impl WorkspaceApp {
                     session_kind == oxideterm_terminal::TerminalSessionKind::Serial;
                 let is_telnet_terminal =
                     session_kind == oxideterm_terminal::TerminalSessionKind::Telnet;
-                let terminal_type = if is_serial_terminal {
+                let is_ble_terminal =
+                    session_kind == oxideterm_terminal::TerminalSessionKind::Ble;
+                let terminal_type = if is_ble_terminal {
+                    "ble"
+                } else if is_serial_terminal {
                     "serial"
                 } else if is_telnet_terminal {
                     "telnet"

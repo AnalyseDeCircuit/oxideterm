@@ -15,11 +15,11 @@ use crate::workspace::session_icons;
 use chrono::{DateTime, Datelike, Local, Utc};
 use gpui::{Div, EventEmitter, Pixels, Point, Rgba, Task, prelude::*, rgba};
 use oxideterm_connections::{
-    AuthType, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft, ConnectionInfo,
-    ConnectionStore, LocalTerminalProfile, MoshProfile, ProxyHopDraft, RemoteDesktopProfile,
-    SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyCommand, SavedUpstreamProxyAuth,
-    SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy, SavedUpstreamProxyProtocol, SecretString,
-    SerialProfile, SshConfigHost, TelnetProfile,
+    AuthType, BleProfile, ConnectionAuthDraft, ConnectionAuthDraftKind, ConnectionDraft,
+    ConnectionInfo, ConnectionStore, LocalTerminalProfile, MoshProfile, ProxyHopDraft,
+    RemoteDesktopProfile, SaveConnectionRequest, SavedAuth, SavedConnection, SavedProxyCommand,
+    SavedUpstreamProxyAuth, SavedUpstreamProxyConfig, SavedUpstreamProxyPolicy,
+    SavedUpstreamProxyProtocol, SecretString, SerialProfile, SshConfigHost, TelnetProfile,
     oxide_file::{
         ExportPreflightResult, ForwardDetail, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideExportOptions, OxideFile, OxideFileError, OxideForwardRecord,
@@ -277,6 +277,10 @@ pub(super) enum SessionManagerDeleteConfirm {
         id: String,
         name: String,
     },
+    BleProfile {
+        id: String,
+        name: String,
+    },
     LocalTerminalProfile {
         id: String,
         name: String,
@@ -311,6 +315,7 @@ pub(super) enum SessionManagerSelectionTarget {
     Plugin(String),
     Connection(String),
     Serial(String),
+    Ble(String),
     LocalTerminal(String),
     Telnet(String),
     Ftp(String),
@@ -344,6 +349,7 @@ pub(super) enum SessionManagerRowActionTarget {
     Plugin(String),
     Connection(String),
     Serial(String),
+    Ble(String),
     LocalTerminal(String),
     Telnet(String),
     Ftp(String),
@@ -910,6 +916,7 @@ pub(super) struct OxideExportDialogState {
     pub(super) include_telnet_profiles: bool,
     pub(super) include_mosh_profiles: bool,
     pub(super) include_remote_desktop_profiles: bool,
+    pub(super) include_ble_profiles: bool,
     pub(super) include_plugin_settings: bool,
     pub(super) plugin_groups: HashMap<String, usize>,
     pub(super) selected_plugin_ids: HashSet<String>,
@@ -953,6 +960,7 @@ impl Default for OxideExportDialogState {
             include_telnet_profiles: true,
             include_mosh_profiles: true,
             include_remote_desktop_profiles: true,
+            include_ble_profiles: true,
             include_plugin_settings: true,
             plugin_groups: HashMap::new(),
             selected_plugin_ids: HashSet::new(),
@@ -997,10 +1005,12 @@ impl std::fmt::Debug for OxideExportDialogState {
             .field("include_quick_commands", &self.include_quick_commands)
             .field("include_serial_profiles", &self.include_serial_profiles)
             .field("include_telnet_profiles", &self.include_telnet_profiles)
+            .field("include_mosh_profiles", &self.include_mosh_profiles)
             .field(
                 "include_remote_desktop_profiles",
                 &self.include_remote_desktop_profiles,
             )
+            .field("include_ble_profiles", &self.include_ble_profiles)
             .field("include_plugin_settings", &self.include_plugin_settings)
             .field("plugin_groups", &self.plugin_groups)
             .field("selected_plugin_ids", &self.selected_plugin_ids)
@@ -1031,6 +1041,7 @@ impl std::fmt::Debug for OxideExportDialogState {
 
 // Keep the manager split by UI surface and behavior while preserving one workspace boundary.
 mod actions;
+mod ble_actions;
 mod controls;
 mod dialogs;
 mod helpers;
@@ -1050,10 +1061,10 @@ mod views;
 // Recreate the former flat include scope without exposing internal helpers to the workspace.
 #[allow(unused_imports)]
 use self::{
-    actions::*, controls::*, dialogs::*, helpers::*, oxide_actions::*, oxide_dialog_common::*,
-    oxide_dialog_helpers::*, oxide_export_dialogs::*, oxide_export_selection_dialogs::*,
-    oxide_export_summary_dialogs::*, oxide_import_dialogs::*, oxide_import_preview_dialogs::*,
-    oxide_import_result_dialogs::*, surface::*, tree::*, views::*,
+    actions::*, ble_actions::*, controls::*, dialogs::*, helpers::*, oxide_actions::*,
+    oxide_dialog_common::*, oxide_dialog_helpers::*, oxide_export_dialogs::*,
+    oxide_export_selection_dialogs::*, oxide_export_summary_dialogs::*, oxide_import_dialogs::*,
+    oxide_import_preview_dialogs::*, oxide_import_result_dialogs::*, surface::*, tree::*, views::*,
 };
 
 // Preserve the workspace-facing session manager API at its original visibility.

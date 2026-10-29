@@ -1,6 +1,39 @@
 use super::*;
 
 #[test]
+fn partial_profile_upload_filters_deletions_with_the_selected_ids() {
+    let selected = ["chosen".to_string()].into();
+    let snapshot = serde_json::json!({
+        "revision": "deletions", "exportedAt": "2026-09-07T00:00:00Z", "records": [],
+        "tombstones": [
+            {"id": "chosen", "deleted_at": "2026-09-07T00:00:00Z"},
+            {"id": "unselected", "deleted_at": "2026-09-07T00:00:00Z"}
+        ]
+    });
+    macro_rules! check {
+        ($filter:ident) => {{
+            let mut snapshot = serde_json::from_value(snapshot.clone()).unwrap();
+            $filter(&mut snapshot, Some(&selected));
+            assert_eq!(
+                snapshot
+                    .tombstones
+                    .iter()
+                    .map(|t| t.id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["chosen"],
+                stringify!($filter)
+            );
+        }};
+    }
+    check!(filter_serial_profiles_snapshot);
+    check!(filter_ble_profiles_snapshot);
+    check!(filter_telnet_profiles_snapshot);
+    check!(filter_mosh_profiles_snapshot);
+    check!(filter_remote_desktop_profiles_snapshot);
+    check!(filter_standalone_sftp_deletions);
+}
+
+#[test]
 fn quick_command_category_sync_merges_icon_color_and_theme_reset() {
     let mut base = oxideterm_quick_commands::default_quick_command_categories();
     for initial in [None, Some("#112233".to_string())] {
@@ -41,6 +74,7 @@ fn ftp_cloud_merge_keeps_independent_local_and_remote_edits() {
         revision: "base".into(),
         exported_at: now.to_rfc3339(),
         records: vec![],
+        tombstones: vec![],
         ftp: Some(FtpProfilesSyncSnapshot {
             revision: "base-ftp".into(),
             exported_at: now.to_rfc3339(),

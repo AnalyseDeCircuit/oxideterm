@@ -370,6 +370,12 @@ impl WorkspaceApp {
                         ),
                 );
             }
+            if dialog.include_ble_profiles {
+                items.push(self.i18n.t("export.content_summary_ble_profiles").replace(
+                    "{{count}}",
+                    &self.connection_store.ble_profiles().len().to_string(),
+                ));
+            }
             if dialog.include_app_settings && !dialog.selected_app_settings_sections.is_empty() {
                 let labels = OXIDE_APP_SETTINGS_SECTIONS
                     .iter()

@@ -347,7 +347,12 @@
         "fallback_authentication": "正在尝试后备认证",
         "pty": "分配 PTY",
         "shell_ready": "启动 Shell",
-        "ready": "就绪"
+        "ready": "就绪",
+        "ble_opening_adapter": "打开蓝牙适配器",
+        "ble_scanning": "扫描蓝牙设备",
+        "ble_matching": "匹配设备",
+        "ble_verifying_service": "校验服务",
+        "ble_ready": "就绪"
       }
     }
   }

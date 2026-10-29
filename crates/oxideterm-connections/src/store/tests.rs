@@ -4543,6 +4543,7 @@ mod tests {
                 revision: "foreign".to_string(),
                 exported_at: Utc::now().to_rfc3339(),
                 records: vec![imported],
+                tombstones: Vec::new(),
             })
             .unwrap();
         assert_eq!(
@@ -4562,6 +4563,7 @@ mod tests {
                 revision: "foreign".to_string(),
                 exported_at: Utc::now().to_rfc3339(),
                 records: vec![foreign_profile],
+                tombstones: Vec::new(),
             })
             .unwrap();
         assert!(
@@ -4571,6 +4573,126 @@ mod tests {
                 .credential_ref
                 .is_none()
         );
+    }
+    #[test]
+    fn serial_and_ble_snapshots_propagate_deletions_without_resurrection() {
+        // Two stores simulate two devices. The exported snapshot must carry
+        // the deletion, the other device's stale upload must not resurrect
+        // the deleted profile, and a re-created record with a newer
+        // timestamp must survive the tombstone.
+        let mut store_a = load_empty_store("serial-tombstone-device-a");
+        let mut profile = SerialProfile::new("Board", "/dev/ttyUSB0");
+        let created = Utc::now() - Duration::seconds(5);
+        profile.created_at = created;
+        profile.updated_at = created;
+        let seed = |records: Vec<SerialProfile>| SerialProfilesSyncSnapshot {
+            revision: "seed".to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            records,
+            tombstones: Vec::new(),
+        };
+        store_a
+            .apply_serial_profiles_snapshot(seed(vec![profile.clone()]))
+            .unwrap();
+        assert!(store_a.serial_profiles().iter().any(|p| p.id == profile.id));
+
+        assert!(store_a.delete_serial_profile(&profile.id).unwrap());
+        let export = store_a.export_serial_profiles_snapshot().unwrap();
+        assert!(export.records.is_empty());
+        assert_eq!(
+            export
+                .tombstones
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            [profile.id.as_str()]
+        );
+
+        let mut store_b = load_empty_store("serial-tombstone-device-b");
+        let stale_upload = seed(vec![profile.clone()]);
+        store_b
+            .apply_serial_profiles_snapshot(stale_upload.clone())
+            .unwrap();
+        store_b.apply_serial_profiles_snapshot(export).unwrap();
+        assert!(!store_b.serial_profiles().iter().any(|p| p.id == profile.id));
+        store_a.apply_serial_profiles_snapshot(stale_upload).unwrap();
+        assert!(!store_a.serial_profiles().iter().any(|p| p.id == profile.id));
+
+        let mut reborn = profile.clone();
+        reborn.updated_at = Utc::now() + Duration::seconds(5);
+        store_a
+            .apply_serial_profiles_snapshot(seed(vec![reborn.clone()]))
+            .unwrap();
+        assert_eq!(
+            store_a
+                .serial_profiles()
+                .iter()
+                .find(|p| p.id == profile.id)
+                .unwrap()
+                .updated_at,
+            reborn.updated_at
+        );
+        store_b
+            .apply_serial_profiles_snapshot(seed(vec![reborn]))
+            .unwrap();
+        assert!(store_b.serial_profiles().iter().any(|p| p.id == profile.id));
+
+        let mut store_a = load_empty_store("ble-tombstone-device-a");
+        let mut profile = BleProfile::new("Tag", uuid::Uuid::new_v4().to_string());
+        let created = Utc::now() - Duration::seconds(5);
+        profile.created_at = created;
+        profile.updated_at = created;
+        let seed = |records: Vec<BleProfile>| BleProfilesSyncSnapshot {
+            revision: "seed".to_string(),
+            exported_at: Utc::now().to_rfc3339(),
+            records,
+            tombstones: Vec::new(),
+        };
+        store_a
+            .apply_ble_profiles_snapshot(seed(vec![profile.clone()]))
+            .unwrap();
+        assert!(store_a.ble_profiles().iter().any(|p| p.id == profile.id));
+
+        assert!(store_a.delete_ble_profile(&profile.id).unwrap());
+        let export = store_a.export_ble_profiles_snapshot().unwrap();
+        assert!(export.records.is_empty());
+        assert_eq!(
+            export
+                .tombstones
+                .iter()
+                .map(|t| t.id.as_str())
+                .collect::<Vec<_>>(),
+            [profile.id.as_str()]
+        );
+
+        let mut store_b = load_empty_store("ble-tombstone-device-b");
+        let stale_upload = seed(vec![profile.clone()]);
+        store_b
+            .apply_ble_profiles_snapshot(stale_upload.clone())
+            .unwrap();
+        store_b.apply_ble_profiles_snapshot(export).unwrap();
+        assert!(!store_b.ble_profiles().iter().any(|p| p.id == profile.id));
+        store_a.apply_ble_profiles_snapshot(stale_upload).unwrap();
+        assert!(!store_a.ble_profiles().iter().any(|p| p.id == profile.id));
+
+        let mut reborn = profile;
+        reborn.updated_at = Utc::now() + Duration::seconds(5);
+        store_a
+            .apply_ble_profiles_snapshot(seed(vec![reborn.clone()]))
+            .unwrap();
+        assert_eq!(
+            store_a
+                .ble_profiles()
+                .iter()
+                .find(|p| p.id == reborn.id)
+                .unwrap()
+                .updated_at,
+            reborn.updated_at
+        );
+        store_b
+            .apply_ble_profiles_snapshot(seed(vec![reborn.clone()]))
+            .unwrap();
+        assert!(store_b.ble_profiles().iter().any(|p| p.id == reborn.id));
     }
     #[test]
     fn local_profiles_persist_sync_and_delete_without_syncing_usage() {

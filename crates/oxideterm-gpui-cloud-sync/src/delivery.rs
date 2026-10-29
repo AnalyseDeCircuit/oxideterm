@@ -514,6 +514,7 @@ pub async fn deliver_cloud_sync_upload(
             scope.sync_forwards,
             scope.sync_quick_commands,
             scope.sync_serial_profiles,
+            scope.sync_ble_profiles,
             scope.sync_telnet_profiles,
             scope.sync_mosh_profiles,
             scope.sync_remote_desktop_profiles,
@@ -952,22 +953,53 @@ fn filter_structured_preview_for_selection(
         snapshot
             .records
             .retain(|profile| selection.selected_serial_profile_ids.contains(&profile.id));
+        snapshot.tombstones.retain(|tombstone| {
+            selection
+                .selected_serial_profile_ids
+                .contains(&tombstone.id)
+        });
+    }
+    if let Some(snapshot) = preview.standalone_sftp_profiles_snapshot.as_mut() {
+        snapshot
+            .tombstones
+            .retain(|tombstone| selection.selected_connection_ids.contains(&tombstone.id));
+    }
+    if let Some(snapshot) = preview.ble_profiles_snapshot.as_mut() {
+        snapshot
+            .records
+            .retain(|profile| selection.selected_ble_profile_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selection.selected_ble_profile_ids.contains(&tombstone.id));
     }
     if let Some(snapshot) = preview.telnet_profiles_snapshot.as_mut() {
         snapshot
             .records
             .retain(|profile| selection.selected_telnet_profile_ids.contains(&profile.id));
+        snapshot.tombstones.retain(|tombstone| {
+            selection
+                .selected_telnet_profile_ids
+                .contains(&tombstone.id)
+        });
     }
     if let Some(snapshot) = preview.mosh_profiles_snapshot.as_mut() {
         snapshot
             .records
             .retain(|profile| selection.selected_mosh_profile_ids.contains(&profile.id));
+        snapshot
+            .tombstones
+            .retain(|tombstone| selection.selected_mosh_profile_ids.contains(&tombstone.id));
     }
     if let Some(snapshot) = preview.remote_desktop_profiles_snapshot.as_mut() {
         snapshot.records.retain(|profile| {
             selection
                 .selected_remote_desktop_profile_ids
                 .contains(&profile.id)
+        });
+        snapshot.tombstones.retain(|tombstone| {
+            selection
+                .selected_remote_desktop_profile_ids
+                .contains(&tombstone.id)
         });
     }
 }
@@ -1199,6 +1231,7 @@ mod tests {
             forwards_snapshot: None,
             quick_commands_snapshot_json: None,
             serial_profiles_snapshot: None,
+            ble_profiles_snapshot: None,
             telnet_profiles_snapshot: None,
             mosh_profiles_snapshot: None,
             standalone_sftp_profiles_snapshot: None,
@@ -1206,13 +1239,18 @@ mod tests {
                 oxideterm_connections::RemoteDesktopProfilesSyncSnapshot {
                     revision: "desktops".into(),
                     exported_at: "2026-09-07T00:00:00Z".into(),
-                    records: vec![first.clone(), second],
+                    records: vec![first.clone()],
+                    tombstones: vec![oxideterm_connections::DeletedConnectionTombstone {
+                        id: second.id.clone(),
+                        deleted_at: second.updated_at + chrono::Duration::seconds(1),
+                    }],
                 },
             ),
             base_connections_snapshot: None,
             base_forwards_snapshot: None,
             base_quick_commands_snapshot_json: None,
             base_serial_profiles_snapshot: None,
+            base_ble_profiles_snapshot: None,
             base_telnet_profiles_snapshot: None,
             base_mosh_profiles_snapshot: None,
             base_standalone_sftp_profiles_snapshot: None,
@@ -1226,6 +1264,35 @@ mod tests {
         });
         let mut selection =
             CloudSyncPreviewSelection::from_preview(&preview, ConflictStrategy::Merge);
+        assert_eq!(
+            selection.selected_remote_desktop_profile_ids,
+            [first.id.clone(), second.id.clone()].into()
+        );
+        let path = std::env::temp_dir().join(format!(
+            "oxideterm-selected-deletions-{}.json",
+            uuid::Uuid::new_v4()
+        ));
+        let mut store = oxideterm_connections::ConnectionStore::load(&path).unwrap();
+        let local = oxideterm_connections::RemoteDesktopProfilesSyncSnapshot {
+            revision: "local".into(),
+            exported_at: "2026-09-07T00:00:00Z".into(),
+            records: vec![second.clone()],
+            tombstones: Vec::new(),
+        };
+        store
+            .apply_remote_desktop_profiles_snapshot(local.clone())
+            .unwrap();
+        let differences = crate::cloud_sync_apply_field_diff_items(
+            &preview,
+            &selection,
+            &crate::CloudSyncLocalFieldDiffSnapshot {
+                remote_desktop_profiles: Some(local),
+                ..Default::default()
+            },
+        );
+        assert!(differences.iter().any(|item| item.item_key == second.id
+            && item.status == crate::CloudSyncFieldDiffStatus::Deleted));
+        let unfiltered_preview = preview.clone();
         selection.selected_remote_desktop_profile_ids =
             std::collections::BTreeSet::from([first.id.clone()]);
         assert_eq!(
@@ -1256,9 +1323,39 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["delete-kept"]
         );
-        let records = preview.remote_desktop_profiles_snapshot.unwrap().records;
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].id, first.id);
+        store
+            .apply_remote_desktop_profiles_snapshot(
+                preview.remote_desktop_profiles_snapshot.unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .remote_desktop_profiles()
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            [second.id.as_str(), first.id.as_str()].into()
+        );
+
+        selection.selected_remote_desktop_profile_ids = [second.id.clone()].into();
+        let CloudSyncPendingPreview::Structured(mut preview) = unfiltered_preview else {
+            unreachable!()
+        };
+        filter_structured_preview_for_selection(&mut preview, &selection);
+        store
+            .apply_remote_desktop_profiles_snapshot(
+                preview.remote_desktop_profiles_snapshot.unwrap(),
+            )
+            .unwrap();
+        assert_eq!(
+            store
+                .remote_desktop_profiles()
+                .iter()
+                .map(|p| p.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![first.id.as_str()]
+        );
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -1403,6 +1500,14 @@ fn create_cloud_sync_rollback_backup(
                 })
         })
         .collect::<Vec<_>>();
+    // Rollback backups must cover every profile family: after a bad pull
+    // replaces local data, BLE profiles have no source to recover from.
+    let ble_profiles_json = serde_json::to_string(
+        &connection_store
+            .export_ble_profiles_snapshot()
+            .map_err(|error| anyhow::anyhow!(error.to_string()))?,
+    )
+    .map_err(|error| anyhow::anyhow!(error.to_string()))?;
     let bytes = oxideterm_connections::oxide_file::export_connections_to_oxide_with_progress(
         connection_store,
         &connection_ids,
@@ -1410,6 +1515,7 @@ fn create_cloud_sync_rollback_backup(
         OxideExportOptions {
             description: Some("Oxide Cloud Sync rollback backup".to_string()),
             embed_keys: false,
+            ble_profiles_json: Some(ble_profiles_json),
             app_settings_json: Some(app_settings_json),
             plugin_settings,
             forwards,
@@ -1450,6 +1556,7 @@ fn create_cloud_sync_rollback_backup(
             forwards: preview.total_forwards,
             quick_commands: metadata.quick_commands_count.unwrap_or(0),
             serial_profiles: metadata.serial_profiles_count.unwrap_or(0),
+            ble_profiles: metadata.ble_profiles_count.unwrap_or(0),
             telnet_profiles: metadata.telnet_profiles_count.unwrap_or(0),
             mosh_profiles: metadata.mosh_profiles_count.unwrap_or(0),
             remote_desktop_profiles: metadata.remote_desktop_profiles_count.unwrap_or(0),

@@ -313,6 +313,34 @@ impl TerminalSession {
         })
     }
 
+    pub fn ble_with_graphics_and_encoding(
+        config: BleSessionConfig,
+        adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+        cols: usize,
+        rows: usize,
+        graphics_options: GraphicsOptions,
+        encoding: TerminalEncoding,
+        scrollback_lines: usize,
+        i18n: oxideterm_i18n::I18n,
+    ) -> Self {
+        let audit = terminal_audit_context("ble", &config.endpoint_label());
+        Self {
+            audit: audit.clone(),
+            backend: Box::new(BleSession::new(
+                config,
+                adapter_guard,
+                audit,
+                cols,
+                rows,
+                graphics_options,
+                encoding,
+                scrollback_lines,
+                i18n,
+            )),
+            kitty_file_transmission: None,
+        }
+    }
+
     pub fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
         if let Some(mut context) = self.backend.audit_context()
         {
@@ -398,6 +426,16 @@ impl TerminalSession {
 
     pub fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannelAcquisition> {
         self.backend.acquire_shell_channel()
+    }
+
+    /// Live link state for BLE terminals; `None` for every other backend.
+    pub fn ble_connection_status(&self) -> Option<BleConnectionStatus> {
+        self.backend.ble_connection_status()
+    }
+
+    /// ATT MTU currently negotiated with the BLE peripheral; `None` before negotiation or for non-BLE.
+    pub fn ble_negotiated_mtu(&self) -> Option<u16> {
+        self.backend.ble_negotiated_mtu()
     }
 
     pub fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {

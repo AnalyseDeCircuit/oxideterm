@@ -1,0 +1,4 @@
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>OxideTerm requests Bluetooth access to discover and connect to user-selected BLE peripherals in terminal sessions.</string>
+<key>NSBluetoothPeripheralUsageDescription</key>
+<string>OxideTerm uses Bluetooth to connect to user-selected BLE peripherals for terminal sessions.</string>

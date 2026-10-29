@@ -506,7 +506,9 @@ impl Default for TerminalModemLabels {
 #[derive(Clone, Debug)]
 pub struct TerminalSerialControlLabels {
     pub serial: String,
+    pub ble: String,
     pub connected: String,
+    pub connecting: String,
     pub disconnected: String,
     pub closed: String,
     pub port_available: String,
@@ -602,7 +604,9 @@ impl Default for TerminalSerialControlLabels {
     fn default() -> Self {
         Self {
             serial: "Serial".to_string(),
+            ble: "BLE".to_string(),
             connected: "Connected".to_string(),
+            connecting: "Connecting".to_string(),
             disconnected: "Disconnected".to_string(),
             closed: "Closed".to_string(),
             port_available: "Port available".to_string(),

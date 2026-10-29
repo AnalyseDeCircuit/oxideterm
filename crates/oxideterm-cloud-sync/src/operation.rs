@@ -9,9 +9,10 @@ use std::{
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use oxideterm_connections::{
-    ConnectionStore, MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot,
-    SavedConnectionsConflictStrategy, SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot,
-    StandaloneSftpProfilesSyncSnapshot, TelnetProfilesSyncSnapshot,
+    BleProfilesSyncSnapshot, ConnectionStore, MoshProfilesSyncSnapshot,
+    RemoteDesktopProfilesSyncSnapshot, SavedConnectionsConflictStrategy,
+    SavedConnectionsSyncSnapshot, SerialProfilesSyncSnapshot, StandaloneSftpProfilesSyncSnapshot,
+    TelnetProfilesSyncSnapshot,
     oxide_file::{
         AppSettingsSectionPreview, EncryptedPortableSecret, ImportConflictStrategy, ImportPreview,
         ImportResultEnvelope, OxideBatchDecryptionContext, OxideBatchEncryptionContext,
@@ -36,7 +37,8 @@ use crate::{
     StructuredLocalState, StructuredManifest, StructuredManifestSections, StructuredObjectEntry,
     StructuredSectionRevisions,
     backend::{CloudSyncBackend, RemoteMetadata, RemoteUploadObject},
-    connections_object_path, forwards_object_path, mosh_profiles_object_path,
+    ble_profiles_object_path, connections_object_path, forwards_object_path,
+    mosh_profiles_object_path,
     progress::{
         CloudSyncProgressSink, CloudSyncProgressStage, report_fractional_progress, report_progress,
     },
@@ -142,6 +144,7 @@ pub struct StructuredUploadItemFilter {
     pub forward_ids: Option<BTreeSet<String>>,
     pub quick_command_ids: Option<BTreeSet<String>>,
     pub serial_profile_ids: Option<BTreeSet<String>>,
+    pub ble_profile_ids: Option<BTreeSet<String>>,
     pub telnet_profile_ids: Option<BTreeSet<String>>,
     pub mosh_profile_ids: Option<BTreeSet<String>>,
     pub remote_desktop_profile_ids: Option<BTreeSet<String>>,
@@ -210,6 +213,7 @@ pub struct StructuredPreview {
     pub forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub quick_commands_snapshot_json: Option<String>,
     pub serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub ble_profiles_snapshot: Option<BleProfilesSyncSnapshot>,
     pub telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     pub mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
     pub standalone_sftp_profiles_snapshot: Option<StandaloneSftpProfilesSyncSnapshot>,
@@ -218,6 +222,7 @@ pub struct StructuredPreview {
     pub base_forwards_snapshot: Option<SavedForwardsSyncSnapshot>,
     pub base_quick_commands_snapshot_json: Option<String>,
     pub base_serial_profiles_snapshot: Option<SerialProfilesSyncSnapshot>,
+    pub base_ble_profiles_snapshot: Option<BleProfilesSyncSnapshot>,
     pub base_telnet_profiles_snapshot: Option<TelnetProfilesSyncSnapshot>,
     pub base_mosh_profiles_snapshot: Option<MoshProfilesSyncSnapshot>,
     pub base_standalone_sftp_profiles_snapshot: Option<StandaloneSftpProfilesSyncSnapshot>,
@@ -263,6 +268,7 @@ impl StructuredPreview {
             forwards: self.forwards_snapshot.is_some(),
             quick_commands: self.quick_commands_snapshot_json.is_some(),
             serial_profiles: self.serial_profiles_snapshot.is_some(),
+            ble_profiles: self.ble_profiles_snapshot.is_some(),
             telnet_profiles: self.telnet_profiles_snapshot.is_some(),
             mosh_profiles: self.mosh_profiles_snapshot.is_some(),
             remote_desktop_profiles: self.remote_desktop_profiles_snapshot.is_some(),

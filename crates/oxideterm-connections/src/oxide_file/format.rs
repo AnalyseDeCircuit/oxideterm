@@ -125,6 +125,8 @@ pub struct OxideMetadata {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_desktop_profiles_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ble_profiles_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plugin_settings_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub portable_secret_count: Option<usize>,
@@ -154,6 +156,8 @@ pub struct EncryptedPayload {
     pub standalone_sftp_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remote_desktop_profiles_json: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ble_profiles_json: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub plugin_settings: Vec<EncryptedPluginSetting>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

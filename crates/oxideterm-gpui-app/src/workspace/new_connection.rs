@@ -1,3 +1,4 @@
+mod ble_flow;
 mod entity;
 mod form_entity;
 mod form_state;
@@ -9,6 +10,10 @@ mod kbi_dialog;
 mod password_prompt;
 mod ssh_flow;
 
+pub(super) use ble_flow::{
+    BleConnectionWorkerResult, BleOpenRequest, BlePendingOpen, BleStandaloneTarget, BleTraceTarget,
+    form_from_ble_profile,
+};
 pub(super) use entity::{
     ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun, ProxyConnectPreflightContext,
 };
@@ -22,8 +27,8 @@ pub(super) use form_state::{
     form_from_telnet_profile, identity_agent_from_form, identity_agent_selector,
     password_draft_mut, refresh_connection_timeout_seconds, refresh_identity_agent_availability,
     ssh_auth_tab_from_saved_auth, terminal_serial_flow_from_profile,
-    terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_profile,
-    terminal_telnet_line_endings_from_profile,
+    terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_ble_profile,
+    terminal_serial_runtime_options_from_profile, terminal_telnet_line_endings_from_profile,
 };
 pub(super) use host_key_dialog::HostKeyChallenge;
 pub(super) use kbi_dialog::KeyboardInteractiveChallenge;

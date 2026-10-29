@@ -264,9 +264,10 @@ use oxideterm_ssh_launch::{
     NativeConnectionLaunch, TemporaryMoshLaunch, TemporarySshLaunch, TemporaryTelnetLaunch,
 };
 use oxideterm_terminal::{
-    LocalPtyConfig, MoshTerminalConfig, RemoteShellIntegrationStatus, SerialSessionConfig,
-    ShellInfo, SshSessionConfig, TelnetSessionConfig, TerminalCommandMarkDetectionSource,
-    TerminalCursorShape, TerminalLifecycle, load_local_shell_history_commands, scan_shells,
+    BleSessionConfig, LocalPtyConfig, MoshTerminalConfig, RemoteShellIntegrationStatus,
+    SerialSessionConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig,
+    TerminalCommandMarkDetectionSource, TerminalCursorShape, TerminalLifecycle,
+    load_local_shell_history_commands, scan_shells,
 };
 use oxideterm_theme::{
     AppUiColors, TerminalTheme, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,

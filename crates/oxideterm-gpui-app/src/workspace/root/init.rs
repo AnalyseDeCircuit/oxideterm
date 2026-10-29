@@ -1024,6 +1024,7 @@ impl WorkspaceApp {
                     pane.session_kind(),
                     TerminalSessionKind::Telnet
                         | TerminalSessionKind::Serial
+                        | TerminalSessionKind::Ble
                         | TerminalSessionKind::Mosh
                 )
             })
@@ -1355,7 +1356,9 @@ impl WorkspaceApp {
             control_bar_collapse_label: self.i18n.t("terminal.control_bar.hide_controls"),
             serial_control_labels: TerminalSerialControlLabels {
                 serial: self.i18n.t("terminal.serial_control.serial"),
+                ble: self.i18n.t("modals.new_connection.transport_ble"),
                 connected: self.i18n.t("terminal.serial_control.connected"),
+                connecting: self.i18n.t("common.status_connecting"),
                 disconnected: self.i18n.t("terminal.serial_control.disconnected"),
                 closed: self.i18n.t("terminal.serial_control.closed"),
                 port_available: self.i18n.t("terminal.serial_control.port_available"),

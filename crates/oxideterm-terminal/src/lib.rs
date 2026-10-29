@@ -97,14 +97,19 @@ pub use search::{
     TerminalSearchOptions, TerminalSearchQuery, TerminalSearchResult, TerminalSearchSource,
 };
 pub use selection::TerminalSelectionRange;
+// Re-exported so UI layers can hold the scan adapter without depending on
+// oxideterm-ble directly alongside oxideterm-terminal.
+pub use oxideterm_ble::BleAdapterGuard;
 pub use session::{
-    MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine,
-    SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,
-    SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode,
-    SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand, TelnetLineEndings,
+    BleConnectionStatus, BleResolveError, BleResolveStage, BleSessionConfig, MoshConnectionStatus,
+    MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine, SerialControlState,
+    SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl, SerialLineEnding,
+    SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode, SerialSessionConfig,
+    SshPtySession, SshSessionConfig, TelnetControlCommand, TelnetLineEndings,
     TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport,
     TerminalMagicKind, TerminalOutputProcessor, TerminalResize, TerminalSession,
-    TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus, serial_list_ports,
+    TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
+    ble_resolve_profile_to_session, serial_list_ports,
 };
 pub use shell_completion::{
     TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell,

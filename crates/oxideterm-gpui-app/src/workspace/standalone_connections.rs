@@ -1,7 +1,9 @@
 use super::*;
 use oxideterm_connections::SavedUpstreamProxyPolicy;
 mod persistence;
-use crate::workspace::new_connection::MoshConnectionOptions;
+use crate::workspace::new_connection::{
+    BleOpenRequest, BleStandaloneTarget, BleTraceTarget, MoshConnectionOptions,
+};
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopProviderManifest, RemoteDesktopSecret,
 };
@@ -13,8 +15,22 @@ pub(super) enum StandaloneConnectionKind {
     Mosh,
     Telnet,
     Serial,
+    Ble,
     Rdp,
     Vnc,
+}
+
+/// Device identity carried by a BLE session record.
+///
+/// A BLE peripheral handle is assigned by the OS at scan time and cannot be
+/// restored, so the record keeps the discovery clues the resolver matches
+/// against instead of the runtime id.
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub(super) struct BleConnectionClues {
+    pub adapter_mac: Option<String>,
+    pub device_mac: Option<String>,
+    pub device_name: Option<String>,
+    pub service_uuid: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -44,6 +60,15 @@ pub(super) enum StandaloneConnectionLaunch {
         upstream_proxy: SavedUpstreamProxyPolicy,
         terminal_options: ConnectionTerminalOptions,
     },
+    Ble {
+        clues: BleConnectionClues,
+        terminal_options: ConnectionTerminalOptions,
+    },
+    SavedBle {
+        profile_id: String,
+        clues: BleConnectionClues,
+        terminal_options: ConnectionTerminalOptions,
+    },
     MoshPreflight {
         // The pending record owns zeroizing SSH authentication until retry or removal.
         config: SshConfig,
@@ -71,6 +96,7 @@ pub(super) enum StandaloneConnectionLaunch {
 }
 
 pub(super) struct StandaloneConnectionRecord {
+    pending_ble: Option<super::new_connection::BlePendingOpen>,
     pub(super) id: StandaloneConnectionId,
     attempt_id: String,
     pub(super) kind: StandaloneConnectionKind,
@@ -89,6 +115,11 @@ enum StandaloneReconnectPlan {
     Telnet {
         config: TelnetSessionConfig,
         upstream_proxy: SavedUpstreamProxyPolicy,
+        terminal_options: ConnectionTerminalOptions,
+        saved_profile_id: Option<String>,
+    },
+    Ble {
+        clues: BleConnectionClues,
         terminal_options: ConnectionTerminalOptions,
         saved_profile_id: Option<String>,
     },
@@ -211,6 +242,61 @@ impl WorkspaceApp {
                         );
                     }
                 }),
+            StandaloneReconnectPlan::Ble {
+                clues,
+                terminal_options,
+                saved_profile_id,
+            } => {
+                // BLE never mounts a terminal directly: the resolver must scan
+                // and match the device again, and it reports through the same
+                // trace card as a saved-profile open.
+                let saved_profile = saved_profile_id.as_deref().and_then(|id| {
+                    self.connection_store
+                        .ble_profiles()
+                        .iter()
+                        .find(|p| p.id == id)
+                });
+                let runtime_options = saved_profile
+                    .map(|profile| {
+                        crate::workspace::new_connection::terminal_serial_runtime_options_from_ble_profile(profile)
+                    })
+                    .unwrap_or_default();
+                let mtu = saved_profile.and_then(|profile| profile.mtu);
+                self.start_ble_open_flow(
+                    BleOpenRequest {
+                        target: BleTraceTarget {
+                            node_id: connection_id.to_string(),
+                            label: title.clone(),
+                            endpoint: clues
+                                .device_name
+                                .clone()
+                                .or_else(|| clues.device_mac.clone()),
+                        },
+                        adapter_guard: None,
+                        selected_device: None,
+                        adapter_mac: clues.adapter_mac,
+                        device_mac: clues.device_mac,
+                        device_name: clues.device_name,
+                        service_uuid: clues.service_uuid,
+                        title: format!("BLE {title}"),
+                        terminal_options,
+                        runtime_options,
+                        mtu,
+                        // Saved profiles carry the user's preference; unsaved
+                        // clues fall back to the lower-latency default.
+                        write_without_response: saved_profile
+                            .map(|profile| profile.write_without_response)
+                            .unwrap_or(true),
+                        profile_id: saved_profile_id,
+                        form_id: None,
+                        standalone: BleStandaloneTarget::Reconnect {
+                            attempt_id: connection_attempt_id.clone(),
+                        },
+                    },
+                    cx,
+                );
+                Ok(())
+            }
             StandaloneReconnectPlan::MoshPreflight {
                 config,
                 mut options,
@@ -409,6 +495,43 @@ impl WorkspaceApp {
                     saved_profile_id: Some(profile_id.clone()),
                 }
             }
+            StandaloneConnectionLaunch::Ble {
+                clues,
+                terminal_options,
+            } => StandaloneReconnectPlan::Ble {
+                clues: clues.clone(),
+                terminal_options: terminal_options.clone(),
+                saved_profile_id: None,
+            },
+            StandaloneConnectionLaunch::SavedBle {
+                profile_id,
+                clues,
+                terminal_options,
+            } => {
+                // A saved profile stays authoritative so edits (renamed device,
+                // changed service) apply on the next reconnect.
+                let current_profile = self
+                    .connection_store
+                    .ble_profiles()
+                    .iter()
+                    .find(|profile| profile.id == *profile_id);
+                StandaloneReconnectPlan::Ble {
+                    clues: current_profile.map_or_else(
+                        || clues.clone(),
+                        |profile| BleConnectionClues {
+                            adapter_mac: profile.adapter_mac.clone(),
+                            device_mac: profile.device_mac.clone(),
+                            device_name: profile.device_name.clone(),
+                            service_uuid: profile.service_uuid.clone(),
+                        },
+                    ),
+                    terminal_options: current_profile.map_or_else(
+                        || terminal_options.clone(),
+                        |profile| profile.terminal.clone(),
+                    ),
+                    saved_profile_id: Some(profile_id.clone()),
+                }
+            }
             StandaloneConnectionLaunch::MoshPreflight { config, options } => {
                 StandaloneReconnectPlan::MoshPreflight {
                     config: config.clone(),
@@ -497,10 +620,55 @@ mod tests {
         assert!(!registry.is_connecting_attempt(&next_attempt_id));
 
         let fresh_attempt_id = registry.begin_reconnect(&connection_id).unwrap();
+        assert!(!registry.bind_surface_for_attempt(&next_attempt_id, next_surface));
         assert!(registry.bind_surface_for_attempt(&fresh_attempt_id, next_surface));
         let rebound = registry.record(&connection_id).expect("record must remain");
         assert_eq!(rebound.surface, Some(next_surface));
         assert_ne!(rebound.surface, Some(first_surface));
+    }
+
+    #[test]
+    fn ble_pending_open_is_cancelled_on_disconnect_retry_and_remove() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let mut registry = StandaloneConnectionRegistry::default();
+        let id = registry.insert(
+            StandaloneConnectionKind::Serial,
+            "Pending".into(),
+            serial_launch(),
+            StandaloneConnectionSurface::Terminal(TerminalSessionId(41)),
+        );
+        for action in ["disconnect", "retry", "remove"] {
+            let attempt = registry.begin_reconnect(&id).unwrap();
+            let cancellation = tokio_util::sync::CancellationToken::new();
+            registry.set_ble_pending(
+                &attempt,
+                super::super::new_connection::BlePendingOpen {
+                    cancellation: cancellation.clone(),
+                    _worker: runtime.spawn(std::future::pending()),
+                },
+            );
+            match action {
+                "disconnect" => registry.mark_disconnected(&id),
+                "retry" => {
+                    registry.begin_reconnect(&id).unwrap();
+                }
+                "remove" => {
+                    registry.remove(&id);
+                }
+                _ => unreachable!(),
+            }
+            assert!(cancellation.is_cancelled(), "{action}");
+            assert!(!registry.is_connecting_attempt(&attempt), "{action}");
+            assert!(
+                !registry.bind_surface_for_attempt(
+                    &attempt,
+                    StandaloneConnectionSurface::Terminal(TerminalSessionId(73))
+                ),
+                "{action}"
+            );
+        }
     }
 }
 
@@ -563,6 +731,7 @@ impl StandaloneConnectionRegistry {
     ) -> StandaloneConnectionId {
         let id = uuid::Uuid::new_v4().to_string();
         self.records.push(StandaloneConnectionRecord {
+            pending_ble: None,
             id: id.clone(),
             attempt_id: id.clone(),
             kind,
@@ -583,6 +752,7 @@ impl StandaloneConnectionRegistry {
     ) -> StandaloneConnectionId {
         let id = uuid::Uuid::new_v4().to_string();
         self.records.push(StandaloneConnectionRecord {
+            pending_ble: None,
             id: id.clone(),
             attempt_id: id.clone(),
             kind,
@@ -600,6 +770,9 @@ impl StandaloneConnectionRegistry {
         attempt_id: &str,
         surface: StandaloneConnectionSurface,
     ) -> bool {
+        if !self.is_connecting_attempt(attempt_id) {
+            return false;
+        }
         let Some(record) = self
             .records
             .iter_mut()
@@ -608,6 +781,7 @@ impl StandaloneConnectionRegistry {
             return false;
         };
         record.surface = Some(surface);
+        record.pending_ble = None;
         record.readiness = ActiveSessionReadiness::Connecting;
         true
     }
@@ -636,11 +810,13 @@ impl StandaloneConnectionRegistry {
             }
             record.surface = None;
             record.readiness = ActiveSessionReadiness::Error;
+            record.pending_ble = None;
         }
     }
 
     pub(super) fn mark_disconnected(&mut self, id: &str) {
         if let Some(record) = self.record_mut(id) {
+            record.pending_ble = None;
             record.surface = None;
             record.readiness = ActiveSessionReadiness::Disconnected;
         }
@@ -654,8 +830,37 @@ impl StandaloneConnectionRegistry {
         })
     }
 
+    pub(super) fn set_ble_pending(
+        &mut self,
+        attempt_id: &str,
+        task: super::new_connection::BlePendingOpen,
+    ) {
+        if !self.is_connecting_attempt(attempt_id) {
+            return;
+        }
+        if let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.attempt_id == attempt_id)
+        {
+            record.pending_ble = Some(task);
+        }
+    }
+
+    pub(super) fn cancel_attempt(&mut self, attempt_id: &str) {
+        if let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.attempt_id == attempt_id)
+        {
+            record.pending_ble = None;
+            record.readiness = ActiveSessionReadiness::Disconnected;
+        }
+    }
+
     pub(super) fn begin_reconnect(&mut self, id: &str) -> Option<String> {
         let record = self.record_mut(id)?;
+        record.pending_ble = None;
         let attempt_id = uuid::Uuid::new_v4().to_string();
         record.attempt_id = attempt_id.clone();
         record.surface = None;
@@ -676,7 +881,8 @@ impl StandaloneConnectionRegistry {
 
     pub(super) fn remove(&mut self, id: &str) -> Option<StandaloneConnectionRecord> {
         let index = self.records.iter().position(|record| record.id == id)?;
-        let record = self.records.remove(index);
+        let mut record = self.records.remove(index);
+        record.pending_ble = None;
         self.persist();
         Some(record)
     }
@@ -723,6 +929,21 @@ impl StandaloneConnectionRegistry {
                         // Saving transfers retry credentials to the protected store.
                         upstream_proxy: profile.upstream_proxy.clone(),
                         terminal_options: profile.terminal.clone(),
+                    };
+                }
+            }
+            StandaloneConnectionKind::Ble => {
+                // Saving an ad-hoc BLE session keeps the discovered identity as
+                // a fallback for when the profile is deleted or unreadable.
+                if let StandaloneConnectionLaunch::Ble {
+                    clues,
+                    terminal_options,
+                } = &record.launch
+                {
+                    record.launch = StandaloneConnectionLaunch::SavedBle {
+                        profile_id,
+                        clues: clues.clone(),
+                        terminal_options: terminal_options.clone(),
                     };
                 }
             }

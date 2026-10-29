@@ -2,6 +2,7 @@ use super::*;
 use gpui::{Div, StatefulInteractiveElement, point};
 use oxideterm_remote_desktop::RemoteDesktopSessionStatus;
 use oxideterm_settings::SessionSortOrder;
+use oxideterm_terminal::BleConnectionStatus;
 
 fn active_connection_count(rows: &[ActiveSessionSidebarRow]) -> usize {
     // Count connection owners, including SSH nodes with only SFTP/forwarding consumers.
@@ -44,6 +45,7 @@ impl standalone_connections::StandaloneConnectionKind {
             standalone_connections::StandaloneConnectionKind::Mosh => LucideIcon::Wifi,
             standalone_connections::StandaloneConnectionKind::Telnet => LucideIcon::Terminal,
             standalone_connections::StandaloneConnectionKind::Serial => LucideIcon::Cable,
+            standalone_connections::StandaloneConnectionKind::Ble => LucideIcon::Bluetooth,
             standalone_connections::StandaloneConnectionKind::Rdp
             | standalone_connections::StandaloneConnectionKind::Vnc => LucideIcon::Monitor,
         }
@@ -143,6 +145,17 @@ fn terminal_lifecycle_readiness(lifecycle: &TerminalLifecycle) -> ActiveSessionR
         TerminalLifecycle::Running => ActiveSessionReadiness::Ready,
         TerminalLifecycle::Exited(_) => ActiveSessionReadiness::Error,
         TerminalLifecycle::Closed => ActiveSessionReadiness::Disconnected,
+    }
+}
+
+/// BLE reports a lost link through the worker rather than the pane lifecycle.
+/// A dropped peer is a failure the user must act on, so it reads as Error;
+/// only closing the tab releases the surface and returns the row to Idle.
+fn ble_connection_readiness(status: BleConnectionStatus) -> ActiveSessionReadiness {
+    match status {
+        BleConnectionStatus::Connecting => ActiveSessionReadiness::Connecting,
+        BleConnectionStatus::Connected => ActiveSessionReadiness::Ready,
+        BleConnectionStatus::Disconnected => ActiveSessionReadiness::Error,
     }
 }
 
@@ -1306,6 +1319,11 @@ impl WorkspaceApp {
                                 }
                             })
                             .unwrap_or(ActiveSessionReadiness::Connecting)
+                    } else if record.kind == standalone_connections::StandaloneConnectionKind::Ble {
+                        terminal
+                            .ble_connection_status()
+                            .map(ble_connection_readiness)
+                            .unwrap_or_else(|| terminal_lifecycle_readiness(&terminal.lifecycle()))
                     } else {
                         terminal_lifecycle_readiness(&terminal.lifecycle())
                     };

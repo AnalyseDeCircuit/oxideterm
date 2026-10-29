@@ -68,6 +68,29 @@ fn serial_profile_line_ending(
     }
 }
 
+fn serial_profile_send_mode(
+    mode: oxideterm_terminal::SerialSendMode,
+) -> oxideterm_connections::SerialSendMode {
+    match mode {
+        oxideterm_terminal::SerialSendMode::Text => oxideterm_connections::SerialSendMode::Text,
+        oxideterm_terminal::SerialSendMode::Hex => oxideterm_connections::SerialSendMode::Hex,
+    }
+}
+
+fn serial_profile_display_mode(
+    mode: oxideterm_terminal::SerialDisplayMode,
+) -> oxideterm_connections::SerialDisplayMode {
+    match mode {
+        oxideterm_terminal::SerialDisplayMode::Text => {
+            oxideterm_connections::SerialDisplayMode::Text
+        }
+        oxideterm_terminal::SerialDisplayMode::Hex => oxideterm_connections::SerialDisplayMode::Hex,
+        oxideterm_terminal::SerialDisplayMode::Mixed => {
+            oxideterm_connections::SerialDisplayMode::Mixed
+        }
+    }
+}
+
 #[derive(Clone)]
 struct TerminalInputBroadcastRoute {
     source_pane_id: PaneId,
@@ -337,8 +360,49 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }
-            TerminalPaneEvent::SerialLineEndingsChanged { input, output } => {
-                self.persist_serial_line_endings(session_id, input, output, cx);
+            TerminalPaneEvent::SerialRuntimeOptionsChanged { options } => {
+                // Serial profiles persist line-ending changes only; BLE persists
+                // all five fields (line endings, send/display mode, local echo).
+                let input = options.line_ending;
+                let output = options.output_line_ending;
+                let Some(saved_connection) = self.terminal_saved_connection_refs.get(&session_id)
+                else {
+                    return;
+                };
+                match saved_connection.kind {
+                    oxideterm_terminal_triggers::SavedConnectionKind::Serial => {
+                        let profile_id = saved_connection.id.clone();
+                        match self.connection_store.set_serial_profile_line_endings(
+                            &profile_id,
+                            Some(serial_profile_line_ending(input)),
+                            Some(serial_profile_line_ending(output)),
+                        ) {
+                            Ok(true) => self.queue_cloud_sync_dirty_refresh(cx),
+                            Ok(false) => {}
+                            Err(error) => {
+                                tracing::warn!(%profile_id, %error, "failed to persist Serial runtime options")
+                            }
+                        }
+                    }
+                    oxideterm_terminal_triggers::SavedConnectionKind::Ble => {
+                        let profile_id = saved_connection.id.clone();
+                        match self.connection_store.set_ble_profile_runtime_options(
+                            &profile_id,
+                            Some(serial_profile_line_ending(input)),
+                            Some(serial_profile_line_ending(output)),
+                            Some(serial_profile_send_mode(options.send_mode)),
+                            Some(serial_profile_display_mode(options.display_mode)),
+                            Some(options.local_echo),
+                        ) {
+                            Ok(true) => self.queue_cloud_sync_dirty_refresh(cx),
+                            Ok(false) => {}
+                            Err(error) => {
+                                tracing::warn!(%profile_id, %error, "failed to persist BLE runtime options")
+                            }
+                        }
+                    }
+                    _ => {}
+                }
             }
             TerminalPaneEvent::TelnetLineEndingsChanged { input, output } => {
                 self.persist_telnet_line_endings(session_id, input, output, cx);
@@ -392,35 +456,6 @@ impl WorkspaceApp {
             Ok(false) => {}
             Err(error) => {
                 tracing::warn!(%profile_id, %error, "failed to persist Telnet line endings")
-            }
-        }
-    }
-
-    fn persist_serial_line_endings(
-        &mut self,
-        session_id: TerminalSessionId,
-        input: Option<oxideterm_terminal::SerialLineEnding>,
-        output: Option<oxideterm_terminal::SerialLineEnding>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(saved_connection) = self.terminal_saved_connection_refs.get(&session_id) else {
-            return;
-        };
-        if saved_connection.kind != SavedConnectionKind::Serial {
-            return;
-        }
-        let profile_id = saved_connection.id.clone();
-        let input_line_ending = input.map(serial_profile_line_ending);
-        let output_line_ending = output.map(serial_profile_line_ending);
-        match self.connection_store.set_serial_profile_line_endings(
-            &profile_id,
-            input_line_ending,
-            output_line_ending,
-        ) {
-            Ok(true) => self.queue_cloud_sync_dirty_refresh(cx),
-            Ok(false) => {}
-            Err(error) => {
-                tracing::warn!(%profile_id, %error, "failed to persist serial line endings");
             }
         }
     }

@@ -231,6 +231,11 @@
       "delete": "Eliminar sesión local",
       "delete_failed": "No se pudo eliminar la sesión local",
       "confirm_delete": "¿Eliminar la sesión local «{{name}}»? Los terminales activos permanecerán abiertos."
+    },
+    "ble_profiles": {
+      "delete": "Eliminar",
+      "delete_failed": "No se pudo eliminar la conexión BLE",
+      "confirm_delete": "¿Eliminar la conexión BLE \"{{name}}\"?"
     }
   }
 }

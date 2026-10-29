@@ -70,6 +70,22 @@
       "connection_failed": "连接失败",
       "no_connection_id": "重连后未分配连接 ID。"
     },
-    "failedFetchStats": "获取统计信息失败"
+    "failedFetchStats": "获取统计信息失败",
+      "ble": {
+        "resolve": {
+              "adapter_enumeration_failed": "枚举蓝牙适配器失败：{error}",
+              "no_adapters": "没有可用的蓝牙适配器",
+              "adapter_open_failed": "打开蓝牙适配器失败：{error}",
+              "device_enumeration_failed": "枚举蓝牙设备失败：{error}",
+              "scan_failed": "蓝牙扫描失败：{error}",
+              "no_device_matched": "附近没有匹配该配置的 BLE 设备（{identity}）",
+              "ambiguous_device": "多个蓝牙设备匹配“{identity}”，请重新扫描并选择设备。",
+              "cancelled": "蓝牙连接已取消",
+              "connect_failed": "连接 BLE 设备失败：{error}",
+              "service_discovery_failed": "服务发现失败：{error}",
+              "service_mismatch": "设备已匹配，但不广播目标服务 {uuid}",
+              "invalid_service_uuid": "服务 UUID 无效：{uuid}"
+        }
+      }
   }
 }

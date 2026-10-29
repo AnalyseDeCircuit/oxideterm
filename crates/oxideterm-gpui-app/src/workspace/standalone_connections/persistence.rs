@@ -31,6 +31,10 @@ enum LaunchSnapshot {
         upstream_proxy: SavedUpstreamProxyPolicy,
         terminal: ConnectionTerminalOptions,
     },
+    Ble {
+        clues: BleConnectionClues,
+        terminal: ConnectionTerminalOptions,
+    },
     Mosh {
         profile: MoshProfile,
     },
@@ -64,6 +68,7 @@ impl StandaloneConnectionRegistry {
                 }
                 let launch = snapshot.launch.restore(snapshot.kind, store)?;
                 Some(StandaloneConnectionRecord {
+                    pending_ble: None,
                     id: snapshot.id,
                     attempt_id: uuid::Uuid::new_v4().to_string(),
                     kind: snapshot.kind,
@@ -151,6 +156,16 @@ impl LaunchSnapshot {
                 config: config.clone(),
                 upstream_proxy: upstream_proxy.clone(),
                 terminal: terminal_options.clone(),
+            },
+            StandaloneConnectionLaunch::Ble {
+                clues,
+                terminal_options,
+            } => Self::Ble {
+                clues: clues.clone(),
+                terminal: terminal_options.clone(),
+            },
+            StandaloneConnectionLaunch::SavedBle { profile_id, .. } => Self::Saved {
+                profile_id: profile_id.clone(),
             },
             StandaloneConnectionLaunch::MoshPreflight { config, options } => {
                 let mut profile = MoshProfile::new(
@@ -291,6 +306,24 @@ impl LaunchSnapshot {
                         terminal_options: profile.terminal.clone(),
                     }
                 }
+                StandaloneConnectionKind::Ble => {
+                    let profile = store
+                        .ble_profiles()
+                        .iter()
+                        .find(|profile| profile.id == profile_id)?;
+                    // The runtime peripheral handle cannot survive a restart;
+                    // the saved identity is the reconnect input.
+                    StandaloneConnectionLaunch::SavedBle {
+                        profile_id,
+                        clues: BleConnectionClues {
+                            adapter_mac: profile.adapter_mac.clone(),
+                            device_mac: profile.device_mac.clone(),
+                            device_name: profile.device_name.clone(),
+                            service_uuid: profile.service_uuid.clone(),
+                        },
+                        terminal_options: profile.terminal.clone(),
+                    }
+                }
                 StandaloneConnectionKind::Mosh => {
                     store.get_mosh_profile(&profile_id)?;
                     StandaloneConnectionLaunch::SavedMosh { profile_id }
@@ -315,6 +348,12 @@ impl LaunchSnapshot {
                 upstream_proxy,
                 terminal_options: terminal,
             },
+            Self::Ble { clues, terminal } if kind == StandaloneConnectionKind::Ble => {
+                StandaloneConnectionLaunch::Ble {
+                    clues,
+                    terminal_options: terminal,
+                }
+            }
             Self::Mosh { profile } if kind == StandaloneConnectionKind::Mosh => {
                 StandaloneConnectionLaunch::RestoredMosh { profile }
             }

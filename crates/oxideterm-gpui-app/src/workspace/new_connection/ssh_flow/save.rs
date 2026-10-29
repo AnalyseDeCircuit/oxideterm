@@ -125,7 +125,7 @@ fn rdp_proxy_policy_from_form(
     })
 }
 
-fn saved_profile_notes(notes: &str) -> Option<String> {
+pub(in crate::workspace) fn saved_profile_notes(notes: &str) -> Option<String> {
     let notes = notes.trim();
     (!notes.is_empty()).then(|| notes.to_string())
 }
@@ -1078,6 +1078,13 @@ impl WorkspaceApp {
             && mode == NewConnectionFormMode::NewConnection
         {
             self.submit_telnet_connection_form(action, window, cx);
+            return;
+        }
+        if transport == Some(NewConnectionTransport::Ble)
+            && drill_down_parent_id.is_none()
+            && mode == NewConnectionFormMode::NewConnection
+        {
+            self.submit_ble_connection_form(action, window, cx);
             return;
         }
         if transport == Some(NewConnectionTransport::Mosh)
