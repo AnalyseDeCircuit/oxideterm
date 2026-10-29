@@ -1,6 +1,7 @@
 // Hallmark · pre-emit critique: P5 H5 E5 S5 R5 V5
 use gpui::{
-    BoxShadow, CursorStyle, Div, ParentElement, Styled, div, point, prelude::*, px, rgb, rgba, svg,
+    BoxShadow, CursorStyle, Div, ElementId, ParentElement, Styled, div, point, prelude::*, px, rgb,
+    rgba, svg,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -32,18 +33,25 @@ pub struct CheckboxOptions {
     pub disabled: bool,
 }
 
-pub fn checkbox(tokens: &ThemeTokens, label: String, checked: bool) -> Div {
-    checkbox_with(tokens, label, checked, CheckboxOptions::default())
+pub fn checkbox(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    label: String,
+    checked: bool,
+) -> Div {
+    checkbox_with(tokens, id, label, checked, CheckboxOptions::default())
 }
 
 pub fn checkbox_with(
     tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
     label: String,
     checked: bool,
     options: CheckboxOptions,
 ) -> Div {
     checkbox_with_state(
         tokens,
+        id,
         label,
         if checked {
             CheckboxState::Checked
@@ -57,6 +65,7 @@ pub fn checkbox_with(
 /// Renders a checkbox that can communicate a partially selected group.
 pub fn checkbox_with_state(
     tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
     label: String,
     state: CheckboxState,
     options: CheckboxOptions,
@@ -64,7 +73,9 @@ pub fn checkbox_with_state(
     let theme = tokens.ui;
     let has_label = !label.is_empty();
     let selected = state != CheckboxState::Unchecked;
-    let mark_animation_id = gpui::SharedString::from(format!("checkbox-mark-{label}"));
+    // Labels can be empty, duplicated, translated, or changed while the control lives.
+    let mark_animation_id =
+        ElementId::NamedChild(std::sync::Arc::new(id.into()), "checkbox-mark".into());
     let mark = match state {
         CheckboxState::Indeterminate => div()
             .w(px(CHECKBOX_INDETERMINATE_MARK_WIDTH))

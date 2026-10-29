@@ -299,6 +299,7 @@ impl WorkspaceApp {
             .child(
                 checkbox_with(
                     &self.tokens,
+                    format!("certificate-remember-{tab_id:?}-{remember_challenge_id}"),
                     self.i18n.t("remote_desktop.certificate_remember"),
                     challenge.remember,
                     CheckboxOptions::default(),

@@ -787,63 +787,78 @@ impl WorkspaceApp {
                 self.setting_row(
                     "settings_view.connections.ssh_config.auto_load",
                     "settings_view.connections.ssh_config.auto_load_hint",
-                    checkbox(&self.tokens, String::new(), auto_load_hosts)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.edit_settings(
-                                    |settings| {
-                                        set_ssh_config_auto_load_hosts(settings, !auto_load_hosts)
-                                    },
-                                    cx,
-                                );
-                                this.refresh_session_manager_ssh_config_hosts(cx);
-                                if this.command_palette.read(cx).is_open() {
-                                    this.load_command_palette_ssh_config_hosts(cx);
-                                }
-                            }),
-                        )
-                        .into_any_element(),
+                    checkbox(
+                        &self.tokens,
+                        "ssh-config-auto-load",
+                        String::new(),
+                        auto_load_hosts,
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.edit_settings(
+                                |settings| {
+                                    set_ssh_config_auto_load_hosts(settings, !auto_load_hosts)
+                                },
+                                cx,
+                            );
+                            this.refresh_session_manager_ssh_config_hosts(cx);
+                            if this.command_palette.read(cx).is_open() {
+                                this.load_command_palette_ssh_config_hosts(cx);
+                            }
+                        }),
+                    )
+                    .into_any_element(),
                     cx,
                 ),
                 self.setting_row(
                     "settings_view.connections.ssh_config.auto_sync",
                     "settings_view.connections.ssh_config.auto_sync_hint",
-                    checkbox(&self.tokens, String::new(), auto_sync_hosts)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.edit_settings(
-                                    |settings| {
-                                        set_ssh_config_auto_sync_hosts(settings, !auto_sync_hosts)
-                                    },
-                                    cx,
-                                );
-                                this.sync_ssh_config_sync_service();
-                            }),
-                        )
-                        .into_any_element(),
+                    checkbox(
+                        &self.tokens,
+                        "ssh-config-auto-sync",
+                        String::new(),
+                        auto_sync_hosts,
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.edit_settings(
+                                |settings| {
+                                    set_ssh_config_auto_sync_hosts(settings, !auto_sync_hosts)
+                                },
+                                cx,
+                            );
+                            this.sync_ssh_config_sync_service();
+                        }),
+                    )
+                    .into_any_element(),
                     cx,
                 ),
                 self.setting_row(
                     "settings_view.connections.ssh_config.allow_proxy_command",
                     "settings_view.connections.ssh_config.allow_proxy_command_hint",
-                    checkbox(&self.tokens, String::new(), allow_proxy_command)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.edit_settings(
-                                    |settings| {
-                                        set_ssh_config_allow_proxy_command(
-                                            settings,
-                                            !allow_proxy_command,
-                                        )
-                                    },
-                                    cx,
-                                );
-                            }),
-                        )
-                        .into_any_element(),
+                    checkbox(
+                        &self.tokens,
+                        "ssh-config-allow-proxy-command",
+                        String::new(),
+                        allow_proxy_command,
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.edit_settings(
+                                |settings| {
+                                    set_ssh_config_allow_proxy_command(
+                                        settings,
+                                        !allow_proxy_command,
+                                    )
+                                },
+                                cx,
+                            );
+                        }),
+                    )
+                    .into_any_element(),
                     cx,
                 ),
                 div()

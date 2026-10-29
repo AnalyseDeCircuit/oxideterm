@@ -508,6 +508,7 @@ impl WorkspaceApp {
             .map(|section| section.id.clone())
             .collect::<HashSet<_>>();
         let mut children = vec![self.render_oxide_option_row(
+            "import-app-settings",
             "应用设置".to_string(),
             "导入应用设置".to_string(),
             import_app_settings,
@@ -583,6 +584,7 @@ impl WorkspaceApp {
         };
         self.render_oxide_import_preview_subcard(vec![
             self.render_oxide_option_row(
+                "import-managed-keys",
                 self.i18n
                     .t("modals.import.section_managed_keys")
                     .replace("{{count}}", &count.to_string()),
@@ -610,6 +612,7 @@ impl WorkspaceApp {
                 .opacity(if restore_managed_keys { 1.0 } else { 0.45 })
                 .child(
                     self.render_oxide_option_row(
+                        "import-key-passphrases",
                         self.i18n.t("modals.import.restore_managed_key_passphrases"),
                         self.i18n
                             .t("modals.import.restore_managed_key_passphrases_description"),
@@ -877,6 +880,7 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|dialog| dialog.import_quick_commands);
         self.render_oxide_import_preview_subcard(vec![self.render_oxide_option_row(
+            "import-quick-commands",
             format!("快捷命令（{} 条命令）", preview.quick_commands_count),
             format!(
                 "导入 {} 个快捷命令组。已有冲突会按当前冲突策略处理；替换只替换冲突项。",
@@ -909,6 +913,7 @@ impl WorkspaceApp {
             .is_some_and(|dialog| dialog.import_serial_profiles);
         self.render_oxide_import_preview_subcard(vec![
             self.render_oxide_option_row(
+                "import-serial",
                 self.i18n
                     .t("modals.import.section_serial_profiles")
                     .replace("{{count}}", &preview.serial_profiles_count.to_string()),
@@ -941,6 +946,7 @@ impl WorkspaceApp {
             .is_some_and(|dialog| dialog.import_mosh_profiles);
         self.render_oxide_import_preview_subcard(vec![
             self.render_oxide_option_row(
+                "import-mosh",
                 self.i18n
                     .t("modals.import.section_mosh_profiles")
                     .replace("{{count}}", &preview.mosh_profiles_count.to_string()),
@@ -973,6 +979,7 @@ impl WorkspaceApp {
             .is_some_and(|dialog| dialog.import_telnet_profiles);
         self.render_oxide_import_preview_subcard(vec![
             self.render_oxide_option_row(
+                "import-telnet",
                 self.i18n
                     .t("modals.import.section_telnet_profiles")
                     .replace("{{count}}", &preview.telnet_profiles_count.to_string()),
@@ -1004,6 +1011,7 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|dialog| dialog.import_plugin_settings);
         let mut children = vec![self.render_oxide_option_row(
+            "import-plugin-settings",
             format!(
                 "插件偏好设置（{} 个插件）",
                 preview.plugin_settings_by_plugin.len()
@@ -1145,6 +1153,7 @@ impl WorkspaceApp {
             .is_some_and(|dialog| dialog.import_portable_secrets);
         self.render_oxide_import_preview_subcard(vec![
             self.render_oxide_option_row(
+                "import-secrets",
                 self.i18n
                     .t("modals.import.section_portable_secrets")
                     .replace("{{count}}", &preview.portable_secret_count.to_string()),
@@ -1182,6 +1191,7 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|dialog| dialog.import_forwards);
         let mut children = vec![self.render_oxide_option_row(
+            "import-forwards",
             format!("已保存的端口转发（{}）", preview.total_forwards),
             "导入已保存的端口转发".to_string(),
             checked,

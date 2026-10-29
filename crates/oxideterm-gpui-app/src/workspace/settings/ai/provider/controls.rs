@@ -74,21 +74,29 @@ impl WorkspaceApp {
         enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        checkbox(&self.tokens, String::new(), enabled)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.edit_settings(
-                        |settings| {
-                            ai_update_provider(settings, index, |provider| {
-                                provider.insert("enabled".to_string(), serde_json::json!(!enabled));
-                            });
-                        },
-                        cx,
-                    );
-                }),
-            )
-            .into_any_element()
+        checkbox(
+            &self.tokens,
+            format!(
+                "ai-provider-enabled-{}",
+                self.settings_store.settings().ai.providers[index]["id"]
+            ),
+            String::new(),
+            enabled,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                this.edit_settings(
+                    |settings| {
+                        ai_update_provider(settings, index, |provider| {
+                            provider.insert("enabled".to_string(), serde_json::json!(!enabled));
+                        });
+                    },
+                    cx,
+                );
+            }),
+        )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn ai_provider_remove_button(

@@ -176,6 +176,7 @@ impl WorkspaceApp {
         body = body.child(
             checkbox(
                 &self.tokens,
+                "ssh-tunnel-startup",
                 self.i18n.t("ssh_tunnel.startup"),
                 form.startup,
             )

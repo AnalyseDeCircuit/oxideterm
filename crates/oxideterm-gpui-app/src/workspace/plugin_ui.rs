@@ -1278,6 +1278,7 @@ impl WorkspaceApp {
         });
         let checkbox = oxideterm_gpui_ui::checkbox_with(
             &self.tokens,
+            format!("plugin-checkbox-{key:?}"),
             native_plugin_control_label(control, ""),
             checked,
             oxideterm_gpui_ui::CheckboxOptions {

@@ -45,7 +45,7 @@ impl WorkspaceApp {
         self.setting_row(
             "settings_view.ai.enable",
             "settings_view.ai.enable_hint",
-            checkbox(&self.tokens, String::new(), enabled)
+            checkbox(&self.tokens, "ai-enabled", String::new(), enabled)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

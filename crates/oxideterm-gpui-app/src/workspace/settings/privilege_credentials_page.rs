@@ -884,7 +884,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     )
-                    .child(checkbox(&self.tokens, String::new(), privilege.enabled))
+                    .child(checkbox(&self.tokens, "privilege-enabled", String::new(), privilege.enabled))
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
@@ -1092,6 +1092,7 @@ impl WorkspaceApp {
             )
             .child(checkbox(
                 &self.tokens,
+                "privilege-auto-submit",
                 String::new(),
                 !require_click_to_send,
             ))

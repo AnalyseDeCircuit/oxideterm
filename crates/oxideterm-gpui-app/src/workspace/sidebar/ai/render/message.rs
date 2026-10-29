@@ -2588,7 +2588,7 @@ impl WorkspaceApp {
                         let call_id = id.to_owned();
                         body = body.child(self.agent_control(
                             format!("cursor-choice-{generation}-{id}-{question_index}-{option_index}"), option.label.clone(),
-                            checkbox(&self.tokens, option.label.clone(), selected),
+                            checkbox(&self.tokens, format!("cursor-choice-{generation}-{id}-{question_index}-{}", option.id), option.label.clone(), selected),
                             move |this, _, cx| {
                                 this.ai_entity.update(cx, |ai, _| ai.select_cursor_option(generation, &call_id, question_index, option_index));
                                 cx.notify();

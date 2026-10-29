@@ -91,6 +91,7 @@ impl WorkspaceApp {
             .child(
                 checkbox(
                     &self.tokens,
+                    "skip-ssh-close-confirmation",
                     self.i18n.t("common.actions.do_not_ask_again"),
                     self.skip_future_ssh_close_confirmations,
                 )

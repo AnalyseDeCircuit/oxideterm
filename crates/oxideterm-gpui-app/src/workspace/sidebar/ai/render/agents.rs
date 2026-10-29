@@ -241,7 +241,7 @@ impl WorkspaceApp {
             .agent_control(
                 "allow-subagents".into(),
                 self.i18n.t("ai.agents.allow"),
-                oxideterm_gpui_ui::checkbox::checkbox(&self.tokens, String::new(), checked),
+                oxideterm_gpui_ui::checkbox::checkbox(&self.tokens, "allow-subagents", String::new(), checked),
                 |this, _, cx| {
                     let mut options = this.global_agent_options();
                     options.enabled = !options.enabled;

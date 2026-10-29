@@ -339,6 +339,7 @@ impl WorkspaceApp {
             prompt_list = prompt_list.child(
                 oxideterm_gpui_ui::checkbox_with(
                     &self.tokens,
+                    "ssh-prompt-save-password",
                     self.i18n.t("ssh.kbi.save_password_after_login"),
                     challenge.remember_password,
                     oxideterm_gpui_ui::CheckboxOptions {

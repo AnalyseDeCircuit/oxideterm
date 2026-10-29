@@ -941,23 +941,28 @@ impl WorkspaceApp {
                         for &tool_group in groups {
                             let checked = client.tool_groups.contains(&tool_group);
                             let client_ref = client.client_ref.clone();
-                            let control = checkbox(&self.tokens, String::new(), checked)
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        if let Err(error) = this.set_public_mcp_client_tool_group(
-                                            &client_ref,
-                                            tool_group,
-                                            !checked,
-                                            cx,
-                                        ) {
-                                            this.public_mcp.record_action_error(error);
-                                        }
-                                        cx.notify();
-                                        cx.stop_propagation();
-                                    }),
-                                )
-                                .into_any_element();
+                            let control = checkbox(
+                                &self.tokens,
+                                format!("mcp-permission-{client_ref}-{tool_group:?}"),
+                                String::new(),
+                                checked,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    if let Err(error) = this.set_public_mcp_client_tool_group(
+                                        &client_ref,
+                                        tool_group,
+                                        !checked,
+                                        cx,
+                                    ) {
+                                        this.public_mcp.record_action_error(error);
+                                    }
+                                    cx.notify();
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .into_any_element();
                             items.push(settings_ai_tool_policy_item(
                                 &self.tokens,
                                 self.i18n.t(public_mcp_tool_group_label_key(tool_group)),
@@ -1698,8 +1703,8 @@ impl WorkspaceApp {
         on_toggle: fn(&mut WorkspaceApp, &mut Context<Self>),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut control =
-            checkbox(&self.tokens, String::new(), checked).opacity(if enabled { 1.0 } else { 0.5 });
+        let mut control = checkbox(&self.tokens, label_key, String::new(), checked)
+            .opacity(if enabled { 1.0 } else { 0.5 });
         if enabled {
             control = control.on_mouse_down(
                 MouseButton::Left,

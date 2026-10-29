@@ -163,7 +163,12 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     )
-                    .child(checkbox(&tokens, String::new(), selected))
+                    .child(checkbox(
+                        &tokens,
+                        format!("totp-connection-{}", connection.id),
+                        String::new(),
+                        selected,
+                    ))
                     .child(
                         div()
                             .flex_1()
@@ -420,7 +425,7 @@ impl WorkspaceApp {
                                 cx.stop_propagation();
                             }),
                         )
-                        .child(checkbox(&tokens, String::new(), enabled))
+                        .child(checkbox(&tokens, "totp-enabled", String::new(), enabled))
                         .child(self.i18n.t("settings_view.totp.enabled")),
                 )
                 .child(self.settings_totp_connection_list(id.as_deref(), &connection_ids, cx))

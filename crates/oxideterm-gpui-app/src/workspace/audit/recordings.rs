@@ -686,6 +686,7 @@ impl WorkspaceApp {
                                 .child(
                                     oxideterm_gpui_ui::checkbox::checkbox(
                                         &self.tokens,
+                                        "audit-record-output",
                                         self.i18n.t("event_log.recordings.enable"),
                                         self.audit.policy.record_output,
                                     )

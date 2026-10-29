@@ -125,6 +125,7 @@ impl WorkspaceApp {
                     .cursor(CursorStyle::PointingHand)
                     .child(checkbox::checkbox(
                         &self.tokens,
+                        "onboarding-disclaimer-accept",
                         self.i18n.t("onboarding.disclaimer_accept"),
                         self.onboarding.disclaimer_accepted,
                     ))

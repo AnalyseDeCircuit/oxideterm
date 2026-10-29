@@ -790,6 +790,7 @@ impl WorkspaceApp {
     fn render_audit_toggle(&self, cx: &Context<Self>) -> AnyElement {
         oxideterm_gpui_ui::checkbox::checkbox(
             &self.tokens,
+            "audit-enabled",
             self.i18n.t(if self.audit.policy.enabled {
                 "event_log.audit.enabled_status"
             } else {

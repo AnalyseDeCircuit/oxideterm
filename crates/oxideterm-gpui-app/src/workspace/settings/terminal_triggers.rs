@@ -986,19 +986,24 @@ impl WorkspaceApp {
                 self.setting_row(
                     "settings_view.terminal.triggers.shell_execution",
                     "settings_view.terminal.triggers.shell_execution_hint",
-                    checkbox(&self.tokens, String::new(), enabled)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                if enabled {
-                                    this.persist_terminal_trigger_shell_execution(false, cx);
-                                } else {
-                                    this.terminal_trigger_shell_confirmation_pending = true;
-                                    cx.notify();
-                                }
-                            }),
-                        )
-                        .into_any_element(),
+                    checkbox(
+                        &self.tokens,
+                        "terminal-trigger-shell-execution",
+                        String::new(),
+                        enabled,
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if enabled {
+                                this.persist_terminal_trigger_shell_execution(false, cx);
+                            } else {
+                                this.terminal_trigger_shell_confirmation_pending = true;
+                                cx.notify();
+                            }
+                        }),
+                    )
+                    .into_any_element(),
                     cx,
                 ),
             );
@@ -1098,7 +1103,13 @@ impl WorkspaceApp {
                     .when(selected, |marker| marker.bg(rgb(self.tokens.ui.accent))),
             )
             .child(
-                checkbox(&self.tokens, String::new(), trigger.enabled).on_mouse_down(
+                checkbox(
+                    &self.tokens,
+                    format!("trigger-enabled-{}", trigger.id),
+                    String::new(),
+                    trigger.enabled,
+                )
+                .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         let changed = this.terminal_triggers.toggle_rule(&toggle_id);
@@ -1167,7 +1178,13 @@ impl WorkspaceApp {
                     ),
             )
             .child(
-                checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                checkbox(
+                    &self.tokens,
+                    format!("pane-trigger-{pane_id:?}-{}", trigger.id),
+                    String::new(),
+                    checked,
+                )
+                .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         this.toggle_terminal_trigger_for_pane(pane_id, &trigger_id, cx);
@@ -1731,7 +1748,7 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.md))
             .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
             .child(
-                checkbox(&self.tokens, String::new(), checked)
+                checkbox(&self.tokens, label_key, String::new(), checked)
                     .on_mouse_down(MouseButton::Left, listener),
             )
             .child(
@@ -1895,7 +1912,13 @@ impl WorkspaceApp {
                                 .child(label),
                         )
                         .child(
-                            checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                            checkbox(
+                                &self.tokens,
+                                format!("trigger-scope-{reference:?}"),
+                                String::new(),
+                                checked,
+                            )
+                            .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {
                                     let Some(TerminalTriggerScope::SavedConnections {

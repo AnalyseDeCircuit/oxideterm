@@ -74,12 +74,14 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_connection_checkbox(
+                "ftp-save-password",
                 self.i18n.t("ssh.form.save_password"),
                 save_password,
                 |form| form.save_password = !form.save_password,
                 cx,
             ))
             .child(self.render_connection_checkbox(
+                "ftp-tls",
                 self.i18n.t("modals.new_connection.ftp_tls"),
                 tls,
                 |form| form.ftp_tls = !form.ftp_tls,

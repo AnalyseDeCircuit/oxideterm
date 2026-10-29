@@ -1146,7 +1146,13 @@ impl WorkspaceApp {
             )
             .when_some(checkbox_target, |card, target| {
                 card.child(
-                    checkbox(&self.tokens, String::new(), is_selected).on_mouse_down(
+                    checkbox(
+                        &self.tokens,
+                        format!("session-selection-{target:?}"),
+                        String::new(),
+                        is_selected,
+                    )
+                    .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
                             this.toggle_session_selection(target.clone(), cx);
@@ -1782,16 +1788,21 @@ impl WorkspaceApp {
             None
         };
         let selection = if let Some(target) = checkbox_target {
-            checkbox(&self.tokens, String::new(), is_selected)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.toggle_session_selection(target.clone(), cx);
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                )
-                .into_any_element()
+            checkbox(
+                &self.tokens,
+                format!("session-selection-{target:?}"),
+                String::new(),
+                is_selected,
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.toggle_session_selection(target.clone(), cx);
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
         } else {
             // Non-SSH profiles keep the selection column reserved so all
             // identity and metadata columns remain aligned.

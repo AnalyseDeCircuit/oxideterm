@@ -137,7 +137,13 @@ impl OxideExportConnectionRowRenderer {
                         cx.stop_propagation();
                     })
                     .child(
-                        checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                        checkbox(
+                            &self.tokens,
+                            format!("oxide-connection-{checkbox_id}"),
+                            String::new(),
+                            checked,
+                        )
+                        .on_mouse_down(
                             MouseButton::Left,
                             move |_event, _window, cx| {
                                 toggle_oxide_export_connection(&checkbox_manager, &checkbox_id, cx);
@@ -254,7 +260,7 @@ impl OxideExportForwardGroupRenderer {
                     })
                     .cursor_pointer()
                     .child(
-                        checkbox(&self.tokens, String::new(), checked).on_mouse_down(
+                        checkbox(&self.tokens, format!("oxide-forward-{forward_id}"), String::new(), checked).on_mouse_down(
                             MouseButton::Left,
                             move |_event, _window, cx| {
                                 session_manager.update(cx, |manager, cx| {
@@ -639,6 +645,7 @@ impl WorkspaceApp {
             .gap(px(OXIDE_MODAL_SECTION_GAP))
             .child(self.render_oxide_forward_card(cx))
             .child(self.render_oxide_option_row(
+                "export-app-settings",
                 "包含全局设置".to_string(),
                 "导出终端外观、操作习惯和其他 OxideTerm 应用设置。".to_string(),
                 include_app_settings,
@@ -708,6 +715,7 @@ impl WorkspaceApp {
                     options.child(self.render_oxide_card(
                         None,
                         vec![self.render_oxide_option_row(
+                            "export-environment",
                             "包含本地终端环境变量".to_string(),
                             "可能包含机器相关或敏感值。".to_string(),
                             include_local_terminal_env_vars,
@@ -728,6 +736,7 @@ impl WorkspaceApp {
                 },
             )
             .child(self.render_oxide_option_row(
+                "export-quick-commands",
                 "包含快捷命令".to_string(),
                 "快捷命令可能包含主机名、路径或命令中的敏感信息。".to_string(),
                 include_quick_commands,
@@ -745,6 +754,7 @@ impl WorkspaceApp {
             ))
             .child(
                 self.render_oxide_option_row(
+                    "export-serial",
                     self.i18n.t("export.include_serial_profiles"),
                     self.i18n
                         .t("export.include_serial_profiles_description")
@@ -768,6 +778,7 @@ impl WorkspaceApp {
             )
             .child(
                 self.render_oxide_option_row(
+                    "export-telnet",
                     self.i18n.t("export.include_telnet_profiles"),
                     self.i18n
                         .t("export.include_telnet_profiles_description")
@@ -791,6 +802,7 @@ impl WorkspaceApp {
             )
             .child(
                 self.render_oxide_option_row(
+                    "export-mosh",
                     self.i18n.t("export.include_mosh_profiles"),
                     self.i18n
                         .t("export.include_mosh_profiles_description")
@@ -814,6 +826,7 @@ impl WorkspaceApp {
             )
             .child(
                 self.render_oxide_option_row(
+                    "export-desktops",
                     self.i18n.t("export.include_remote_desktop_profiles"),
                     self.i18n
                         .t("export.include_remote_desktop_profiles_description")
@@ -841,6 +854,7 @@ impl WorkspaceApp {
                 ),
             )
             .child(self.render_oxide_option_row(
+                "export-plugin-settings",
                 "包含插件偏好设置".to_string(),
                 "导出存放在 OxideTerm 本地存储中的声明式插件 settings。".to_string(),
                 include_plugin_settings,
@@ -863,6 +877,7 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_oxide_option_row(
+                "export-secrets",
                 "包含便携秘密项".to_string(),
                 "导出可在导入时恢复的便携安全秘密项，例如 AI 提供商密钥。".to_string(),
                 include_portable_secrets,
@@ -1041,6 +1056,7 @@ impl WorkspaceApp {
                     .opacity(if enabled { 1.0 } else { 0.6 })
                     .cursor_pointer()
                     .child(self.render_oxide_checkbox(
+                        format!("oxide-plugin-{row_plugin_id}"),
                         String::new(),
                         selected,
                         cx.listener(move |this, _event, _window, cx| {

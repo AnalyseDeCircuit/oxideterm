@@ -422,6 +422,7 @@ impl WorkspaceApp {
                 .child(
                     oxideterm_gpui_ui::checkbox::checkbox_with(
                         &self.tokens,
+                        format!("ssh-algorithm-{category:?}-{name}"),
                         String::new(),
                         checked,
                         oxideterm_gpui_ui::checkbox::CheckboxOptions {

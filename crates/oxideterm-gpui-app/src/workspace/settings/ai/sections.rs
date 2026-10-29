@@ -378,6 +378,10 @@ impl WorkspaceApp {
     ) -> AnyElement {
         checkbox(
             &self.tokens,
+            format!(
+                "acp-enabled-{}",
+                self.settings_store.settings().ai.acp_agents[index].id
+            ),
             if enabled {
                 self.i18n.t("settings_view.ai.acp_agent_enabled")
             } else {
@@ -576,22 +580,30 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = self.i18n.t(label_key);
-        checkbox(&self.tokens, label, checked)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.edit_settings(
-                        |settings| {
-                            if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
-                                toggle(&mut agent.capability_policy);
-                            }
-                        },
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+        checkbox(
+            &self.tokens,
+            format!(
+                "acp-{}-{label_key}",
+                self.settings_store.settings().ai.acp_agents[index].id
+            ),
+            label,
+            checked,
+        )
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _event, _window, cx| {
+                this.edit_settings(
+                    |settings| {
+                        if let Some(agent) = settings.ai.acp_agents.get_mut(index) {
+                            toggle(&mut agent.capability_policy);
+                        }
+                    },
+                    cx,
+                );
+                cx.stop_propagation();
+            }),
+        )
+        .into_any_element()
     }
 
     pub(in crate::workspace) fn ai_provider_settings_section(
@@ -852,7 +864,7 @@ impl WorkspaceApp {
             &self.tokens,
             self.i18n.t(label_key),
             self.i18n.t(hint_key),
-            checkbox(&self.tokens, String::new(), checked).into_any_element(),
+            checkbox(&self.tokens, label_key.to_owned(), String::new(), checked).into_any_element(),
         )
         .on_mouse_down(
             MouseButton::Left,
@@ -1540,6 +1552,7 @@ impl WorkspaceApp {
         };
         let mut group_control = checkbox_with_state(
             &self.tokens,
+            group.title_key,
             String::new(),
             group_checkbox_state,
             CheckboxOptions {
@@ -1568,7 +1581,7 @@ impl WorkspaceApp {
             let tool_key = item.key.map(str::to_string);
             let checked = item.checked;
             let locked = item.locked;
-            let control = checkbox(&self.tokens, String::new(), checked)
+            let control = checkbox(&self.tokens, item.label_key, String::new(), checked)
                 .opacity(if locked { 0.5 } else { 1.0 })
                 .when(!locked, |checkbox| {
                     checkbox.on_mouse_down(

@@ -2484,7 +2484,7 @@ impl WorkspaceApp {
         self.setting_row(
             label_key,
             hint_key,
-            checkbox(&self.tokens, String::new(), checked)
+            checkbox(&self.tokens, label_key.to_owned(), String::new(), checked)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

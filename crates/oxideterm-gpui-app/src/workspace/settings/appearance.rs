@@ -629,7 +629,7 @@ impl WorkspaceApp {
                 self.appearance_row(
                     "settings_view.terminal.bg_enabled",
                     "settings_view.terminal.bg_enabled_hint",
-                    checkbox(&self.tokens, String::new(), enabled)
+                    checkbox(&self.tokens, "background-enabled", String::new(), enabled)
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {
@@ -1299,7 +1299,7 @@ impl WorkspaceApp {
         self.appearance_row(
             "settings_view.appearance.show_window_titlebar",
             "settings_view.appearance.show_window_titlebar_hint",
-            checkbox(&self.tokens, String::new(), checked)
+            checkbox(&self.tokens, "window-titlebar", String::new(), checked)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

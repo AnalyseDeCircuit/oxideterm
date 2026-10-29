@@ -1731,6 +1731,7 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.spacing.two))
             .child(self.render_connection_checkbox(
+                format!("proxy-command-{secondary}"),
                 self.i18n.t("ssh.form.proxy_command_enable"),
                 enabled,
                 move |form| {
@@ -2023,6 +2024,7 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.metrics.modal_section_gap))
             .child(self.render_connection_checkbox(
+                format!("sftp-kerberos-{secondary}"),
                 self.i18n.t("ssh.form.kerberos_preferred"),
                 gssapi_enabled,
                 if secondary {
@@ -2080,6 +2082,7 @@ impl WorkspaceApp {
             .when(active_tab == SshAuthTab::Password, |content| {
                 content
                     .child(self.render_connection_checkbox(
+                        format!("sftp-empty-password-{secondary}"),
                         self.i18n.t("ssh.form.use_empty_password"),
                         empty_password,
                         if secondary {
@@ -2102,6 +2105,7 @@ impl WorkspaceApp {
                     })
                     .when(!saved_credential_present, |content| {
                         content.child(self.render_connection_checkbox(
+                            format!("sftp-save-password-{secondary}"),
                             self.i18n.t("ssh.form.save_password"),
                             save_password,
                             if secondary {
@@ -3590,6 +3594,7 @@ impl WorkspaceApp {
                 cx,
             ))
             .child(self.render_connection_checkbox(
+                "telnet-save-password",
                 self.i18n.t("ssh.form.save_password"),
                 save_password,
                 |form| form.save_password = !form.save_password,
@@ -3949,6 +3954,7 @@ impl WorkspaceApp {
             .child(
                 checkbox_with(
                     &self.tokens,
+                    format!("remote-desktop-feature-{feature:?}"),
                     label,
                     selected,
                     CheckboxOptions {
@@ -4369,6 +4375,7 @@ impl WorkspaceApp {
             .child(if disabled {
                 checkbox_with(
                     &self.tokens,
+                    label_key,
                     self.i18n.t(label_key),
                     checked,
                     CheckboxOptions {
@@ -4378,7 +4385,13 @@ impl WorkspaceApp {
                 )
                 .into_any_element()
             } else {
-                self.render_connection_checkbox(self.i18n.t(label_key), checked, toggle, cx)
+                self.render_connection_checkbox(
+                    trigger_id,
+                    self.i18n.t(label_key),
+                    checked,
+                    toggle,
+                    cx,
+                )
             })
             .child(self.render_connection_help_icon(trigger_id, tooltip_id, hint_key, cx))
             .into_any_element()
@@ -4398,7 +4411,13 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(self.tokens.spacing.two))
-            .child(self.render_connection_checkbox(self.i18n.t(label_key), checked, toggle, cx))
+            .child(self.render_connection_checkbox(
+                trigger_id,
+                self.i18n.t(label_key),
+                checked,
+                toggle,
+                cx,
+            ))
             .child(self.render_connection_help_icon_with_icon(
                 trigger_id,
                 tooltip_id,
@@ -5367,7 +5386,7 @@ impl WorkspaceApp {
                         false,
                         cx,
                     ))
-                    .child(self.render_connection_checkbox(
+                    .child(self.render_connection_checkbox(format!("remote-dns-{secondary}"), 
                         self.i18n.t("settings_view.network.remote_dns"),
                         remote_dns,
                         move |form| {
@@ -5616,12 +5635,13 @@ impl WorkspaceApp {
 
     pub(super) fn render_connection_checkbox(
         &self,
+        id: impl Into<gpui::ElementId>,
         label: String,
         checked: bool,
         toggle: impl Fn(&mut NewConnectionForm) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        checkbox(&self.tokens, label, checked)
+        checkbox(&self.tokens, id, label, checked)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {

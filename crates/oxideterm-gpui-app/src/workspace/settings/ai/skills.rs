@@ -288,44 +288,49 @@ impl WorkspaceApp {
         } else {
             "common.disabled"
         };
-        let toggle = checkbox(&self.tokens, String::new(), checked)
-            .id(SharedString::from(format!(
-                "skill-enabled-{}",
-                path.display()
-            )))
-            .role(gpui::Role::CheckBox)
-            .aria_toggled(if checked {
-                gpui::Toggled::True
-            } else {
-                gpui::Toggled::False
-            })
-            .focusable()
-            .tab_stop(true)
-            .focus_visible(|style| style.border_1().border_color(rgb(self.tokens.ui.accent)))
-            .aria_label(format!("{} · {}", record.name, self.i18n.t(status_key)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _, _, cx| {
-                    this.edit_settings(
-                        |settings| set_skill_enabled(settings, &toggle_path, !checked),
-                        cx,
-                    );
-                    this.refresh_ai_skill_registry();
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                    this.edit_settings(
-                        |settings| set_skill_enabled(settings, &keyboard_path, !checked),
-                        cx,
-                    );
-                    this.refresh_ai_skill_registry();
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-            }));
+        let toggle = checkbox(
+            &self.tokens,
+            format!("skill-enabled-{}", path.display()),
+            String::new(),
+            checked,
+        )
+        .id(SharedString::from(format!(
+            "skill-enabled-{}",
+            path.display()
+        )))
+        .role(gpui::Role::CheckBox)
+        .aria_toggled(if checked {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
+        .focusable()
+        .tab_stop(true)
+        .focus_visible(|style| style.border_1().border_color(rgb(self.tokens.ui.accent)))
+        .aria_label(format!("{} · {}", record.name, self.i18n.t(status_key)))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |this, _, _, cx| {
+                this.edit_settings(
+                    |settings| set_skill_enabled(settings, &toggle_path, !checked),
+                    cx,
+                );
+                this.refresh_ai_skill_registry();
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        )
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
+                this.edit_settings(
+                    |settings| set_skill_enabled(settings, &keyboard_path, !checked),
+                    cx,
+                );
+                this.refresh_ai_skill_registry();
+                cx.stop_propagation();
+                cx.notify();
+            }
+        }));
         let keyboard_path = path.clone();
         let row = entity_list_row(
             &self.tokens,

@@ -149,17 +149,22 @@ impl WorkspaceApp {
                         .items_center()
                         .gap(px(8.0))
                         .child(
-                            oxideterm_gpui_ui::checkbox(&self.tokens, String::new(), apply_all)
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    self.sftp_listener(cx, |this, _event, _window, cx| {
-                                        this.sftp_view().update(cx, |sftp, cx| {
-                                            sftp.toggle_conflict_apply_all(cx);
-                                        });
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
-                                ),
+                            oxideterm_gpui_ui::checkbox(
+                                &self.tokens,
+                                "sftp-conflict-apply-all",
+                                String::new(),
+                                apply_all,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                self.sftp_listener(cx, |this, _event, _window, cx| {
+                                    this.sftp_view().update(cx, |sftp, cx| {
+                                        sftp.toggle_conflict_apply_all(cx);
+                                    });
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
                         )
                         .child(
                             div()

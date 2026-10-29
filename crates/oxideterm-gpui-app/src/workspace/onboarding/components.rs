@@ -330,7 +330,12 @@ impl WorkspaceApp {
             } else {
                 CursorStyle::OperationNotAllowed
             })
-            .child(checkbox::checkbox(&self.tokens, String::new(), checked))
+            .child(checkbox::checkbox(
+                &self.tokens,
+                title_key.to_owned(),
+                String::new(),
+                checked,
+            ))
             .child(
                 div()
                     .flex_1()

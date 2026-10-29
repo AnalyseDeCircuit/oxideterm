@@ -664,7 +664,7 @@ impl WorkspaceApp {
                                         .flex()
                                         .flex_col()
                                         .gap(px(self.tokens.metrics.modal_section_gap))
-                                        .child(self.render_connection_checkbox(
+                                        .child(self.render_connection_checkbox("ssh-kerberos", 
                                             self.i18n.t("ssh.form.kerberos_preferred"),
                                             form.gssapi_enabled,
                                             |form| form.gssapi_enabled = !form.gssapi_enabled,
@@ -791,7 +791,7 @@ impl WorkspaceApp {
                                                 NewConnectionField::Password,
                                                 cx,
                                             ))
-                                            .child(self.render_connection_checkbox(
+                                            .child(self.render_connection_checkbox("ssh-save-password", 
                                                 self.i18n.t("ssh.form.save_password"),
                                                 form.save_password,
                                                 |form| form.save_password = !form.save_password,
@@ -800,7 +800,7 @@ impl WorkspaceApp {
                                     }
                                 })
                                 .when(form.auth_tab == SshAuthTab::Password && !prompt_mode, |content| {
-                                    content.child(self.render_connection_checkbox(
+                                    content.child(self.render_connection_checkbox("ssh-empty-password", 
                                         self.i18n.t("ssh.form.use_empty_password"),
                                         form.empty_password,
                                         |form| {
@@ -814,7 +814,7 @@ impl WorkspaceApp {
                                     ))
                                 })
                                 .when(prompt_mode, |content| {
-                                    content.child(self.render_connection_checkbox(
+                                    content.child(self.render_connection_checkbox("ssh-save-credentials", 
                                         self.i18n.t("ssh.form.save_credentials_after_login"),
                                         form.save_password,
                                         |form| form.save_password = !form.save_password,

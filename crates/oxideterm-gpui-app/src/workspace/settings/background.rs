@@ -55,7 +55,7 @@ impl WorkspaceApp {
                 self.appearance_row(
                     &format!("settings_view.terminal.{key}"),
                     &format!("settings_view.terminal.{key}_hint"),
-                    checkbox(&self.tokens, String::new(), enabled)
+                    checkbox(&self.tokens, key, String::new(), enabled)
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {

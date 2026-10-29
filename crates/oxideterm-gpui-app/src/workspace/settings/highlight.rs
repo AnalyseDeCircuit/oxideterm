@@ -137,7 +137,7 @@ impl WorkspaceApp {
                         .child(
                             div().flex_none().child(
                                 checkbox(
-                                    &self.tokens,
+                                    &self.tokens, "semantic-coloring",
                                     String::new(),
                                     settings.terminal.semantic_coloring,
                                 )
@@ -977,7 +977,13 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(8.0))
                             .child(
-                                checkbox(&self.tokens, String::new(), rule.enabled).on_mouse_down(
+                                checkbox(
+                                    &self.tokens,
+                                    ("semantic-rule-enabled", index),
+                                    String::new(),
+                                    rule.enabled,
+                                )
+                                .on_mouse_down(
                                     MouseButton::Left,
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.toggle_semantic_scheme_rule(index, cx);
@@ -1314,6 +1320,7 @@ impl WorkspaceApp {
                         rule.render_mode == HighlightRuleRenderMode::Background,
                         |row| {
                             row.child(self.highlight_checkbox(
+                                ("highlight-preserve-background", index),
                                 self.i18n.t(
                                     "settings_view.terminal.highlight_rules.preserve_background",
                                 ),
@@ -1333,6 +1340,7 @@ impl WorkspaceApp {
                     )
                     .child(
                         self.highlight_checkbox(
+                            ("highlight-enabled", index),
                             self.i18n
                                 .t("settings_view.terminal.highlight_rules.enabled"),
                             rule.enabled,
@@ -1349,6 +1357,7 @@ impl WorkspaceApp {
                         ),
                     )
                     .child(self.highlight_checkbox(
+                        ("highlight-regex", index),
                         self.i18n.t("settings_view.terminal.highlight_rules.regex"),
                         rule.is_regex,
                         move |settings, value| {
@@ -1364,6 +1373,7 @@ impl WorkspaceApp {
                     ))
                     .child(
                         self.highlight_checkbox(
+                            ("highlight-case-sensitive", index),
                             self.i18n
                                 .t("settings_view.terminal.highlight_rules.case_sensitive"),
                             rule.case_sensitive,
@@ -1509,12 +1519,13 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn highlight_checkbox(
         &self,
+        id: impl Into<gpui::ElementId>,
         label: String,
         checked: bool,
         setter: impl Fn(&mut PersistedSettings, bool) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        checkbox(&self.tokens, label, checked)
+        checkbox(&self.tokens, id, label, checked)
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {

@@ -98,6 +98,7 @@ impl WorkspaceApp {
                 "settings_view.sftp.bandwidth_hint",
                 checkbox(
                     &self.tokens,
+                    "sftp-speed-limit",
                     String::new(),
                     settings.sftp.speed_limit_enabled,
                 )

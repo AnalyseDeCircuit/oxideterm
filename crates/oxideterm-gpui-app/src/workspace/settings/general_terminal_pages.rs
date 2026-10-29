@@ -445,7 +445,7 @@ impl WorkspaceApp {
             .flex_none()
             .opacity(if loading { 0.55 } else { 1.0 })
             .child(
-                checkbox(&self.tokens, String::new(), enabled).on_mouse_down(
+                checkbox(&self.tokens, "launch-at-login", String::new(), enabled).on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         if !this
@@ -581,7 +581,7 @@ impl WorkspaceApp {
         self.setting_row(
             label_key,
             hint_key,
-            checkbox(&self.tokens, String::new(), checked)
+            checkbox(&self.tokens, label_key.to_owned(), String::new(), checked)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

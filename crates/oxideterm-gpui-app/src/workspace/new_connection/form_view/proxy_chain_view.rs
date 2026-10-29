@@ -1221,6 +1221,7 @@ impl WorkspaceApp {
                                 self.i18n.t("ssh.form.proxy_jump_kbi_hint"),
                             ))
                             .child(self.render_connection_checkbox(
+                                "jump-kerberos",
                                 self.i18n.t("ssh.form.kerberos_preferred"),
                                 jump_form.gssapi_enabled,
                                 |form| {
@@ -1349,6 +1350,7 @@ impl WorkspaceApp {
                                         cx,
                                     ))
                                     .child(self.render_connection_checkbox(
+                                        "jump-empty-password",
                                         self.i18n.t("ssh.form.use_empty_password"),
                                         jump_form.empty_password,
                                         |form| {
@@ -1381,6 +1383,7 @@ impl WorkspaceApp {
                                     ))
                             })
                             .child(self.render_connection_checkbox(
+                                "jump-agent-forwarding",
                                 self.i18n.t("ssh.form.agent_forwarding"),
                                 jump_form.agent_forwarding,
                                 |form| {
@@ -1391,6 +1394,7 @@ impl WorkspaceApp {
                                 cx,
                             ))
                             .child(self.render_connection_checkbox(
+                                "jump-legacy-ssh",
                                 self.i18n.t("ssh.form.legacy_ssh_compatibility"),
                                 jump_form.legacy_ssh_compatibility,
                                 |form| {

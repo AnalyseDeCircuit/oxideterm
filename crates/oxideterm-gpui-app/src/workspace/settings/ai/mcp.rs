@@ -1018,7 +1018,7 @@ impl WorkspaceApp {
         self.setting_row(
             "settings_view.mcp.retry_on_disconnect",
             "",
-            checkbox(&self.tokens, String::new(), checked)
+            checkbox(&self.tokens, "mcp-retry", String::new(), checked)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

@@ -119,6 +119,7 @@ impl WorkspaceApp {
 
     pub(super) fn render_oxide_option_row(
         &self,
+        id: impl Into<gpui::ElementId>,
         title: String,
         description: String,
         checked: bool,
@@ -129,7 +130,7 @@ impl WorkspaceApp {
             .flex()
             .items_start()
             .gap(px(8.0))
-            .child(self.render_oxide_checkbox(String::new(), checked, listener))
+            .child(self.render_oxide_checkbox(id, String::new(), checked, listener))
             .child(
                 div()
                     .flex()
@@ -392,6 +393,7 @@ impl WorkspaceApp {
                     .items_start()
                     .gap(px(8.0))
                     .child(self.render_oxide_checkbox(
+                        format!("oxide-settings-{section}"),
                         String::new(),
                         checked,
                         cx.listener(move |this, _event, _window, cx| {
@@ -570,11 +572,12 @@ impl WorkspaceApp {
 
     pub(super) fn render_oxide_checkbox(
         &self,
+        id: impl Into<gpui::ElementId>,
         label: String,
         checked: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> gpui::Div {
-        checkbox(&self.tokens, label, checked).on_mouse_down(MouseButton::Left, listener)
+        checkbox(&self.tokens, id, label, checked).on_mouse_down(MouseButton::Left, listener)
     }
 
     pub(super) fn render_oxide_status_line(

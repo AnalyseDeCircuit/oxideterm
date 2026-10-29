@@ -661,7 +661,7 @@ impl WorkspaceApp {
                         .when(show_suppression, |description| {
                             description.child(
                                 checkbox(
-                                    &self.tokens,
+                                    &self.tokens, "shell-integration-suppress-prompt",
                                     self.i18n.t(
                                         "settings_view.connections.shell_integration.dont_ask_again",
                                     ),

@@ -288,6 +288,7 @@ impl WorkspaceApp {
                         ),
                         checkbox_with(
                             &self.tokens,
+                            "portable-auto-unlock",
                             String::new(),
                             auto_unlock_enabled,
                             CheckboxOptions {
