@@ -459,9 +459,9 @@ macro_rules! raw_stream_inherent_methods {
         match self.runtime_options.display_mode {
             SerialDisplayMode::Text => {
                 // Serial ingress pairs: LineEndingIngress normalizes CR/LF,
-                // SerialConsoleIngress escapes unterminated OSC/APC boot
-                // noise that would otherwise swallow subsequent bytes. BLE-UART
-                // bridge devices produce the same class of console traffic.
+                // SerialConsoleIngress preserves OSC selectors while escaping
+                // invalid OSC prefixes and unsupported string controls in boot
+                // noise. BLE-UART bridges produce the same console traffic.
                 let normalized = self
                     .line_ending_ingress
                     .normalize(bytes, self.runtime_options.output_line_ending);

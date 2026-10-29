@@ -228,56 +228,55 @@ const ESC_BYTE: u8 = 0x1b;
 const SERIAL_STRING_CONTROL_MARKER: &[u8] = b"?";
 
 #[derive(Debug, Default)]
+enum SerialEscapePrefix {
+    #[default]
+    None,
+    Escape,
+    Osc,
+}
+
+#[derive(Debug, Default)]
 pub(crate) struct SerialConsoleIngress {
-    pending_escape: bool,
+    pending_prefix: SerialEscapePrefix,
 }
 
 impl SerialConsoleIngress {
     pub(crate) fn filter(&mut self, bytes: &[u8]) -> Vec<u8> {
-        if bytes.is_empty() {
-            return Vec::new();
-        }
-
         let mut filtered = Vec::with_capacity(bytes.len());
-        let mut index = 0;
-        if self.pending_escape {
-            self.pending_escape = false;
-            append_serial_escape_pair(&mut filtered, bytes[0]);
-            index = 1;
-        }
-
-        while index < bytes.len() {
-            let byte = bytes[index];
-            if byte != ESC_BYTE {
-                filtered.push(byte);
-                index += 1;
-                continue;
+        for &byte in bytes {
+            match std::mem::take(&mut self.pending_prefix) {
+                SerialEscapePrefix::Escape => {
+                    match byte {
+                        // Wait for the OSC selector even when serial reads split the prefix.
+                        b']' => self.pending_prefix = SerialEscapePrefix::Osc,
+                        b'P' | b'_' | b'^' | b'X' => {
+                            filtered.extend_from_slice(SERIAL_STRING_CONTROL_MARKER);
+                        }
+                        _ => filtered.extend_from_slice(&[ESC_BYTE, byte]),
+                    }
+                    continue;
+                }
+                SerialEscapePrefix::Osc => {
+                    // Numeric (or omitted) selectors belong to the terminal parser.
+                    // Escaping them exposes shell markers and working-directory URIs as text.
+                    if byte.is_ascii_digit() || byte == b';' {
+                        filtered.extend_from_slice(&[ESC_BYTE, b']', byte]);
+                        continue;
+                    }
+                    // Non-OSC boot noise must not start an unterminated string that
+                    // hides subsequent console output. Process a new ESC normally.
+                    filtered.extend_from_slice(SERIAL_STRING_CONTROL_MARKER);
+                }
+                SerialEscapePrefix::None => {}
             }
-
-            let Some(next) = bytes.get(index + 1).copied() else {
-                // Serial reads can split an escape sequence across chunks.
-                self.pending_escape = true;
-                break;
-            };
-            append_serial_escape_pair(&mut filtered, next);
-            index += 2;
+            if byte == ESC_BYTE {
+                self.pending_prefix = SerialEscapePrefix::Escape;
+            } else {
+                filtered.push(byte);
+            }
         }
 
         filtered
-    }
-}
-
-fn append_serial_escape_pair(output: &mut Vec<u8>, next: u8) {
-    match next {
-        // Raw serial boot noise can contain unterminated terminal string controls.
-        // Passing them to the VTE parser can hide every later printable byte.
-        b']' | b'P' | b'_' | b'^' | b'X' => {
-            output.extend_from_slice(SERIAL_STRING_CONTROL_MARKER)
-        }
-        _ => {
-            output.push(ESC_BYTE);
-            output.push(next);
-        }
     }
 }
 
@@ -1992,17 +1991,53 @@ mod serial_tests {
     }
 
     #[test]
+    fn serial_shell_control_sequences_do_not_leak_into_prompt_text() {
+        for terminator in ["\x07", "\x1b\\"] {
+            let prompt = format!(
+                "\x1b]133;D;0;aid=oxideterm{terminator}\x1b]7;file://Lechi/%72%6f%6f%74{terminator}\x1b]133;A;aid=oxideterm{terminator}root@Lechi:~# \x1b]133;B;aid=oxideterm{terminator}\r\n"
+            );
+            let output = prompt.repeat(2);
+            for chunk_size in [1, 7, output.len()] {
+                let mut session = test_serial_session();
+                for chunk in output.as_bytes().chunks(chunk_size) {
+                    session.feed_transport_output(chunk);
+                }
+
+                let snapshot = session.snapshot();
+                for line in &snapshot.lines[..2] {
+                    assert_eq!(line.text().trim_end(), "root@Lechi:~#");
+                }
+                let directories: Vec<_> = session
+                    .pending_events
+                    .iter()
+                    .filter_map(|event| match event {
+                        TerminalEvent::CwdChanged { cwd, host } => {
+                            Some((cwd.as_str(), host.as_deref()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                assert_eq!(directories, [("/root", Some("Lechi")); 2]);
+            }
+        }
+    }
+
+    #[test]
     fn serial_boot_text_survives_unfinished_osc_noise() {
-        let mut session = test_serial_session();
+        for chunk_size in [1, 64] {
+            let mut session = test_serial_session();
 
-        session.feed_transport_output(b"\x1b]boot-noise-without-terminator");
-        session.feed_transport_output(b"I (30) boot: ESP-IDF v3.0.7 2nd stage bootloader\r\n");
+            for chunk in b"\x1b]boot-noise-without-terminator".chunks(chunk_size) {
+                session.feed_transport_output(chunk);
+            }
+            session.feed_transport_output(b"I (30) boot: ESP-IDF v3.0.7 2nd stage bootloader\r\n");
 
-        assert!(
-            session
-                .buffer_text()
-                .contains("I (30) boot: ESP-IDF v3.0.7")
-        );
+            assert!(
+                session
+                    .buffer_text()
+                    .contains("I (30) boot: ESP-IDF v3.0.7")
+            );
+        }
     }
 
     #[test]
