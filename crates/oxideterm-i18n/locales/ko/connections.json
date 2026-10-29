@@ -79,6 +79,8 @@
               "device_enumeration_failed": "BLE 장치 열거 실패: {error}",
               "scan_failed": "BLE 스캔 실패: {error}",
               "no_device_matched": "근처에 프로필과 일치하는 BLE 장치가 없습니다({identity})",
+              "ambiguous_device": "{identity}와 일치하는 BLE 장치가 여러 개입니다. 다시 검색하여 장치를 선택하세요.",
+              "cancelled": "BLE 연결이 취소되었습니다",
               "connect_failed": "BLE 장치 연결 실패: {error}",
               "service_discovery_failed": "서비스 검색 실패: {error}",
               "service_mismatch": "장치가 일치하지만 대상 서비스 {uuid}를 광고하지 않습니다",

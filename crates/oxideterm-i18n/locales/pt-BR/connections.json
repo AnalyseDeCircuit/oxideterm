@@ -79,6 +79,8 @@
               "device_enumeration_failed": "Falha ao enumerar dispositivos BLE: {error}",
               "scan_failed": "Falha na varredura BLE: {error}",
               "no_device_matched": "Nenhum dispositivo BLE no alcance corresponde ao perfil ({identity})",
+              "ambiguous_device": "Vários dispositivos BLE correspondem a {identity}; faça uma nova busca e selecione um dispositivo.",
+              "cancelled": "Conexão BLE cancelada",
               "connect_failed": "Falha ao conectar o dispositivo BLE: {error}",
               "service_discovery_failed": "Falha na descoberta de serviços: {error}",
               "service_mismatch": "O dispositivo corresponde, mas não anuncia o serviço de destino {uuid}",

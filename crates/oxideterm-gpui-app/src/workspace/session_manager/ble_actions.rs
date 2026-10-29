@@ -89,6 +89,7 @@ impl WorkspaceApp {
                         .or_else(|| profile.device_mac.clone()),
                 },
                 adapter_guard: None,
+                selected_device: None,
                 adapter_mac: profile.adapter_mac.clone(),
                 device_mac: profile.device_mac.clone(),
                 device_name: profile.device_name.clone(),
@@ -102,7 +103,7 @@ impl WorkspaceApp {
                 mtu: profile.mtu,
                 write_without_response: profile.write_without_response,
                 profile_id: Some(profile.id),
-                from_form: false,
+                form_id: None,
                 standalone: BleStandaloneTarget::New,
             },
             cx,
@@ -156,6 +157,7 @@ impl WorkspaceApp {
         let BleOpenRequest {
             target,
             adapter_guard,
+            selected_device,
             adapter_mac,
             device_mac,
             device_name,
@@ -166,26 +168,38 @@ impl WorkspaceApp {
             mtu,
             write_without_response,
             profile_id,
-            from_form,
+            form_id,
             standalone: _,
         } = request;
         let tx = self.ble_worker_sender(cx);
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        if let Some(form_id) = form_id {
+            self.update_connection_form_state(cx, |state| {
+                if let Some(form) = state
+                    .form
+                    .as_mut()
+                    .filter(|form| form.ble.instance_id == form_id)
+                {
+                    form.ble.open_cancel = Some(cancellation.clone().drop_guard());
+                }
+            });
+        }
+        let cancel_worker = cancellation.clone();
+        let owned_attempt = attempt_id.clone();
 
-        // BLE devices cannot be opened from a stored PeripheralId — the OS assigns an
-        // opaque handle at scan time, so the resolver scans and matches against
-        // profile clues and reports each milestone back through the ActiveDelivery
-        // channel (mirroring SSH preflight). It must run on the long-lived forwarding
-        // runtime: the adapter guard's BlueZ D-Bus tasks are bound to the runtime that
-        // created them, so a temporary runtime would be dropped with the scan and
-        // leave the guard unable to connect or subscribe in the terminal session.
+        // Live selections keep their peripheral handle; saved profiles resolve
+        // persisted clues afresh. The long-lived runtime keeps the adapter's
+        // platform tasks alive through the handoff to the terminal session.
         let runtime = self.forwarding_runtime.clone();
-        runtime.spawn(async move {
+        let worker = runtime.spawn(async move {
             let mut last_stage = oxideterm_terminal::BleResolveStage::OpeningAdapter;
             let stage_tx = tx.clone();
             let stage_target = target.clone();
             let stage_attempt_id = attempt_id.clone();
             let result = oxideterm_terminal::ble_resolve_profile_to_session(
                 adapter_guard,
+                selected_device.as_ref(),
+                &cancel_worker,
                 adapter_mac.as_deref(),
                 device_mac.as_deref(),
                 device_name.as_deref(),
@@ -213,7 +227,7 @@ impl WorkspaceApp {
                         attempt_id,
                         target,
                         profile_id,
-                        from_form,
+                        form_id,
                     });
                 }
                 Err(error) => {
@@ -223,11 +237,18 @@ impl WorkspaceApp {
                         attempt_id,
                         target,
                         profile_id,
-                        from_form,
+                        form_id,
                     });
                 }
             }
         });
+        self.standalone_connections.set_ble_pending(
+            &owned_attempt,
+            crate::workspace::new_connection::BlePendingOpen {
+                cancellation,
+                _worker: worker,
+            },
+        );
     }
 
     pub(in crate::workspace) fn handle_ble_worker_result(
@@ -236,6 +257,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let attempt = match &result {
+            BleConnectionWorkerResult::StageChanged { attempt_id, .. }
+            | BleConnectionWorkerResult::ScanComplete { attempt_id, .. }
+            | BleConnectionWorkerResult::ScanFailed { attempt_id, .. } => attempt_id,
+        };
+        if !self.standalone_connections.is_connecting_attempt(attempt) {
+            return;
+        }
         match result {
             BleConnectionWorkerResult::StageChanged {
                 stage,
@@ -259,8 +288,12 @@ impl WorkspaceApp {
                 attempt_id,
                 target,
                 profile_id,
-                from_form,
+                form_id,
             } => {
+                if form_id.is_some() && !self.ble_form_is_current(form_id, cx) {
+                    self.standalone_connections.cancel_attempt(&attempt_id);
+                    return;
+                }
                 let created = self.create_ble_terminal_tab(
                     config,
                     Some(adapter_guard),
@@ -274,10 +307,13 @@ impl WorkspaceApp {
                         // The active-session row now observes this terminal; a
                         // reconnect replaces the released surface because the
                         // record still owns the attempt id.
-                        let _ = self.standalone_connections.bind_surface_for_attempt(
+                        if !self.standalone_connections.bind_surface_for_attempt(
                             &attempt_id,
                             StandaloneConnectionSurface::Terminal(session_id),
-                        );
+                        ) {
+                            self.close_terminal_session(session_id, window, cx);
+                            return;
+                        }
                         if let Some(profile_id) = profile_id.as_deref() {
                             self.register_terminal_saved_connection(
                                 session_id,
@@ -288,7 +324,7 @@ impl WorkspaceApp {
                             let _ = self.connection_store.mark_ble_profile_used(profile_id);
                             self.queue_cloud_sync_dirty_refresh(cx);
                         }
-                        if from_form {
+                        if self.ble_form_is_current(form_id, cx) {
                             self.update_connection_form_state(cx, ConnectionFormState::clear);
                         }
                         // A ready terminal is its own confirmation; the overlay
@@ -305,7 +341,7 @@ impl WorkspaceApp {
                     Err(error) => {
                         let detail = error.to_string();
                         self.standalone_connections.mark_attempt_error(&attempt_id);
-                        if from_form {
+                        if self.ble_form_is_current(form_id, cx) {
                             self.fail_ble_form_open(&detail, cx);
                         }
                         self.push_ble_trace_event(
@@ -325,8 +361,12 @@ impl WorkspaceApp {
                 attempt_id,
                 target,
                 profile_id,
-                from_form,
+                form_id,
             } => {
+                if matches!(error, oxideterm_terminal::BleResolveError::Cancelled) {
+                    self.standalone_connections.cancel_attempt(&attempt_id);
+                    return;
+                }
                 tracing::warn!(
                     category = "ble.open",
                     profile_id = profile_id.as_deref().unwrap_or(""),
@@ -336,7 +376,7 @@ impl WorkspaceApp {
                 // The record keeps its failure visible in the active-session
                 // list, which is where the reconnect action lives.
                 self.standalone_connections.mark_attempt_error(&attempt_id);
-                if from_form {
+                if self.ble_form_is_current(form_id, cx) {
                     self.fail_ble_form_open(&detail, cx);
                 }
                 // The failure card stays visible until dismissed or retried.
@@ -358,6 +398,7 @@ impl WorkspaceApp {
     fn localize_ble_resolve_error(&self, error: &oxideterm_terminal::BleResolveError) -> String {
         use oxideterm_terminal::BleResolveError;
         match error {
+            BleResolveError::Cancelled => self.i18n.t("connections.ble.resolve.cancelled"),
             BleResolveError::AdapterEnumeration(error) => self.i18n.t_with(
                 "connections.ble.resolve.adapter_enumeration_failed",
                 &[("error", error)],
@@ -378,6 +419,10 @@ impl WorkspaceApp {
                 "connections.ble.resolve.no_device_matched",
                 &[("identity", identity)],
             ),
+            BleResolveError::AmbiguousDevice { identity } => self.i18n.t_with(
+                "connections.ble.resolve.ambiguous_device",
+                &[("identity", identity)],
+            ),
             BleResolveError::Connect(error) => self.i18n.t_with(
                 "connections.ble.resolve.connect_failed",
                 &[("error", error)],
@@ -395,6 +440,15 @@ impl WorkspaceApp {
                 &[("uuid", service_uuid)],
             ),
         }
+    }
+
+    fn ble_form_is_current(&mut self, form_id: Option<uuid::Uuid>, cx: &mut Context<Self>) -> bool {
+        self.update_connection_form_state(cx, |state| {
+            state
+                .form
+                .as_ref()
+                .is_some_and(|form| Some(form.ble.instance_id) == form_id)
+        })
     }
 
     fn fail_ble_form_open(&mut self, detail: &str, cx: &mut Context<Self>) {

@@ -1666,40 +1666,6 @@ impl ConnectionStore {
         result
     }
 
-    /// Persists the ATT MTU negotiated at runtime back onto the saved BLE
-    /// profile so future sessions can start from the known-good value. The
-    /// runtime always clamps to `[BLE_ATT_MTU_MIN, BLE_ATT_MTU_MAX]`, so we
-    /// repeat the clamp here for callers that bypass the session pipeline
-    /// (cloud-sync snapshots, manual edits).
-    pub fn set_ble_profile_mtu(&mut self, id: &str, mtu: u16) -> Result<bool> {
-        let audit = oxideterm_audit::AuditOperation::begin(
-            oxideterm_audit::AuditCategory::Configuration,
-            "configuration_save",
-            Some(id),
-            Some("ble_negotiated_mtu"),
-        );
-        let result = (|| {
-            let Some(profile) = self
-                .data
-                .ble_profiles
-                .iter_mut()
-                .find(|profile| profile.id == id)
-            else {
-                return Ok(false);
-            };
-            let clamped = mtu.clamp(BLE_ATT_MTU_MIN, BLE_ATT_MTU_MAX);
-            if profile.mtu == Some(clamped) {
-                return Ok(false);
-            }
-            profile.mtu = Some(clamped);
-            profile.updated_at = Utc::now();
-            self.save()?;
-            Ok(true)
-        })();
-        audit.changed(&result);
-        result
-    }
-
     pub fn delete_telnet_profile(&mut self, id: &str) -> Result<bool> {
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Configuration,

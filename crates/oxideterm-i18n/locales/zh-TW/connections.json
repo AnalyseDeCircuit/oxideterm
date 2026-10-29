@@ -79,6 +79,8 @@
               "device_enumeration_failed": "列舉藍牙裝置失敗：{error}",
               "scan_failed": "藍牙掃描失敗：{error}",
               "no_device_matched": "附近沒有符合該設定檔的 BLE 裝置（{identity}）",
+              "ambiguous_device": "多個藍牙裝置符合「{identity}」，請重新掃描並選擇裝置。",
+              "cancelled": "藍牙連線已取消",
               "connect_failed": "連線 BLE 裝置失敗：{error}",
               "service_discovery_failed": "服務探索失敗：{error}",
               "service_mismatch": "裝置已符合，但不廣播目標服務 {uuid}",

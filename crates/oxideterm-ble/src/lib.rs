@@ -33,6 +33,8 @@ pub enum BleError {
     ConnectTimedOut,
     #[error("device is no longer available")]
     DeviceUnavailable,
+    #[error("bluetooth operation cancelled")]
+    Cancelled,
     #[error(transparent)]
     Platform(#[from] btleplug::Error),
 }
@@ -86,6 +88,17 @@ pub struct BleDeviceInfo {
     /// Profiles store `device_mac` only for public-address devices because
     /// resolvable private addresses rotate every ~15 minutes.
     pub address_type: Option<AddressType>,
+}
+
+impl BleDeviceInfo {
+    /// Only public, non-placeholder addresses are stable profile identities.
+    pub fn persistent_address(&self) -> Option<&str> {
+        if !matches!(self.address_type, Some(AddressType::Public)) {
+            return None;
+        }
+        let address = self.address.parse::<btleplug::api::BDAddr>().ok()?;
+        (address != btleplug::api::BDAddr::default()).then_some(self.address.as_str())
+    }
 }
 
 /// Enumerates local central adapters in platform order.
@@ -415,18 +428,32 @@ pub async fn ble_connect_discovered_device(
     adapter: &btleplug::platform::Adapter,
     id: &BlePeripheralId,
     connect_timeout: Duration,
+    cancelled: &tokio_util::sync::CancellationToken,
 ) -> Result<(btleplug::platform::Peripheral, bool), BleError> {
     match adapter.peripheral(id).await {
         Ok(peripheral) => {
             let was_connected = peripheral.is_connected().await?;
-            connect_if_needed(&peripheral, was_connected, connect_timeout).await?;
+            connect_if_needed(&peripheral, was_connected, connect_timeout, cancelled).await?;
             Ok((peripheral, was_connected))
         }
         Err(_) => {
             adapter.start_scan(ScanFilter::default()).await?;
-            match wait_for_recreated_peripheral(adapter, id).await {
+            let recreated = tokio::select! {
+                biased;
+                _ = cancelled.cancelled() => {
+                    let _ = adapter.stop_scan().await;
+                    return Err(BleError::Cancelled);
+                }
+                result = wait_for_recreated_peripheral(adapter, id) => result,
+            };
+            match recreated {
                 Some(peripheral) => {
-                    connect_if_needed(&peripheral, false, connect_timeout).await?;
+                    if let Err(error) =
+                        connect_if_needed(&peripheral, false, connect_timeout, cancelled).await
+                    {
+                        let _ = adapter.stop_scan().await;
+                        return Err(error);
+                    }
                     Ok((peripheral, false))
                 }
                 None => Err(BleError::DeviceUnavailable),
@@ -444,23 +471,24 @@ async fn connect_if_needed(
     peripheral: &btleplug::platform::Peripheral,
     was_connected: bool,
     connect_timeout: Duration,
+    cancelled: &tokio_util::sync::CancellationToken,
 ) -> Result<(), BleError> {
     if was_connected {
         return Ok(());
     }
-    match tokio::time::timeout(connect_timeout, peripheral.connect()).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => {
-            let _ = peripheral.disconnect().await;
-            Err(error.into())
-        }
-        Err(_elapsed) => {
-            // The disconnect is harmless when no link was established, and it
-            // reclaims the link when the request completed in the background.
-            let _ = peripheral.disconnect().await;
-            Err(BleError::ConnectTimedOut)
-        }
+    let result = tokio::select! {
+        biased;
+        _ = cancelled.cancelled() => Err(BleError::Cancelled),
+        result = tokio::time::timeout(connect_timeout, peripheral.connect()) => match result {
+            Ok(result) => result.map_err(BleError::from),
+            Err(_) => Err(BleError::ConnectTimedOut),
+        },
+    };
+    if result.is_err() {
+        // Cancellation must undo a platform connect that may finish after its future is dropped.
+        let _ = tokio::time::timeout(Duration::from_secs(2), peripheral.disconnect()).await;
     }
+    result
 }
 
 /// Connects to one discovered device just long enough to read its GATT
@@ -473,8 +501,13 @@ pub async fn ble_inspect_device(
     adapter: &btleplug::platform::Adapter,
     id: BlePeripheralId,
 ) -> Result<BleDeviceDetails, BleError> {
-    let (peripheral, was_connected) =
-        ble_connect_discovered_device(adapter, &id, BLE_INSPECT_CONNECT_TIMEOUT).await?;
+    let (peripheral, was_connected) = ble_connect_discovered_device(
+        adapter,
+        &id,
+        BLE_INSPECT_CONNECT_TIMEOUT,
+        &tokio_util::sync::CancellationToken::new(),
+    )
+    .await?;
     let inspect_result = inspect_connected(&peripheral, was_connected).await;
     // The inspection link is temporary; a link this call did not create belongs
     // to another consumer and must survive the inspection.

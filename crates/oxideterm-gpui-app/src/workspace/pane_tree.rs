@@ -407,23 +407,6 @@ impl WorkspaceApp {
             TerminalPaneEvent::TelnetLineEndingsChanged { input, output } => {
                 self.persist_telnet_line_endings(session_id, input, output, cx);
             }
-            TerminalPaneEvent::BleNegotiatedMtuDetermined { mtu } => {
-                let Some(saved_connection) = self.terminal_saved_connection_refs.get(&session_id)
-                else {
-                    return;
-                };
-                if saved_connection.kind != oxideterm_terminal_triggers::SavedConnectionKind::Ble {
-                    return;
-                }
-                let profile_id = saved_connection.id.clone();
-                match self.connection_store.set_ble_profile_mtu(&profile_id, mtu) {
-                    Ok(true) => self.queue_cloud_sync_dirty_refresh(cx),
-                    Ok(false) => {}
-                    Err(error) => {
-                        tracing::warn!(%profile_id, %error, "failed to persist BLE negotiated MTU")
-                    }
-                }
-            }
             TerminalPaneEvent::PrivilegePromptStateChanged => {
                 if self.active_pane_id(cx) == Some(pane_id)
                     && self.sync_active_privilege_prompt_inline_hint(cx)

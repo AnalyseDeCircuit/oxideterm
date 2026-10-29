@@ -79,6 +79,8 @@
               "device_enumeration_failed": "枚举蓝牙设备失败：{error}",
               "scan_failed": "蓝牙扫描失败：{error}",
               "no_device_matched": "附近没有匹配该配置的 BLE 设备（{identity}）",
+              "ambiguous_device": "多个蓝牙设备匹配“{identity}”，请重新扫描并选择设备。",
+              "cancelled": "蓝牙连接已取消",
               "connect_failed": "连接 BLE 设备失败：{error}",
               "service_discovery_failed": "服务发现失败：{error}",
               "service_mismatch": "设备已匹配，但不广播目标服务 {uuid}",

@@ -96,6 +96,7 @@ pub(super) enum StandaloneConnectionLaunch {
 }
 
 pub(super) struct StandaloneConnectionRecord {
+    pending_ble: Option<super::new_connection::BlePendingOpen>,
     pub(super) id: StandaloneConnectionId,
     attempt_id: String,
     pub(super) kind: StandaloneConnectionKind,
@@ -272,6 +273,7 @@ impl WorkspaceApp {
                                 .or_else(|| clues.device_mac.clone()),
                         },
                         adapter_guard: None,
+                        selected_device: None,
                         adapter_mac: clues.adapter_mac,
                         device_mac: clues.device_mac,
                         device_name: clues.device_name,
@@ -286,7 +288,7 @@ impl WorkspaceApp {
                             .map(|profile| profile.write_without_response)
                             .unwrap_or(true),
                         profile_id: saved_profile_id,
-                        from_form: false,
+                        form_id: None,
                         standalone: BleStandaloneTarget::Reconnect {
                             attempt_id: connection_attempt_id.clone(),
                         },
@@ -618,10 +620,55 @@ mod tests {
         assert!(!registry.is_connecting_attempt(&next_attempt_id));
 
         let fresh_attempt_id = registry.begin_reconnect(&connection_id).unwrap();
+        assert!(!registry.bind_surface_for_attempt(&next_attempt_id, next_surface));
         assert!(registry.bind_surface_for_attempt(&fresh_attempt_id, next_surface));
         let rebound = registry.record(&connection_id).expect("record must remain");
         assert_eq!(rebound.surface, Some(next_surface));
         assert_ne!(rebound.surface, Some(first_surface));
+    }
+
+    #[test]
+    fn ble_pending_open_is_cancelled_on_disconnect_retry_and_remove() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let mut registry = StandaloneConnectionRegistry::default();
+        let id = registry.insert(
+            StandaloneConnectionKind::Serial,
+            "Pending".into(),
+            serial_launch(),
+            StandaloneConnectionSurface::Terminal(TerminalSessionId(41)),
+        );
+        for action in ["disconnect", "retry", "remove"] {
+            let attempt = registry.begin_reconnect(&id).unwrap();
+            let cancellation = tokio_util::sync::CancellationToken::new();
+            registry.set_ble_pending(
+                &attempt,
+                super::super::new_connection::BlePendingOpen {
+                    cancellation: cancellation.clone(),
+                    _worker: runtime.spawn(std::future::pending()),
+                },
+            );
+            match action {
+                "disconnect" => registry.mark_disconnected(&id),
+                "retry" => {
+                    registry.begin_reconnect(&id).unwrap();
+                }
+                "remove" => {
+                    registry.remove(&id);
+                }
+                _ => unreachable!(),
+            }
+            assert!(cancellation.is_cancelled(), "{action}");
+            assert!(!registry.is_connecting_attempt(&attempt), "{action}");
+            assert!(
+                !registry.bind_surface_for_attempt(
+                    &attempt,
+                    StandaloneConnectionSurface::Terminal(TerminalSessionId(73))
+                ),
+                "{action}"
+            );
+        }
     }
 }
 
@@ -684,6 +731,7 @@ impl StandaloneConnectionRegistry {
     ) -> StandaloneConnectionId {
         let id = uuid::Uuid::new_v4().to_string();
         self.records.push(StandaloneConnectionRecord {
+            pending_ble: None,
             id: id.clone(),
             attempt_id: id.clone(),
             kind,
@@ -704,6 +752,7 @@ impl StandaloneConnectionRegistry {
     ) -> StandaloneConnectionId {
         let id = uuid::Uuid::new_v4().to_string();
         self.records.push(StandaloneConnectionRecord {
+            pending_ble: None,
             id: id.clone(),
             attempt_id: id.clone(),
             kind,
@@ -721,6 +770,9 @@ impl StandaloneConnectionRegistry {
         attempt_id: &str,
         surface: StandaloneConnectionSurface,
     ) -> bool {
+        if !self.is_connecting_attempt(attempt_id) {
+            return false;
+        }
         let Some(record) = self
             .records
             .iter_mut()
@@ -729,6 +781,7 @@ impl StandaloneConnectionRegistry {
             return false;
         };
         record.surface = Some(surface);
+        record.pending_ble = None;
         record.readiness = ActiveSessionReadiness::Connecting;
         true
     }
@@ -757,11 +810,13 @@ impl StandaloneConnectionRegistry {
             }
             record.surface = None;
             record.readiness = ActiveSessionReadiness::Error;
+            record.pending_ble = None;
         }
     }
 
     pub(super) fn mark_disconnected(&mut self, id: &str) {
         if let Some(record) = self.record_mut(id) {
+            record.pending_ble = None;
             record.surface = None;
             record.readiness = ActiveSessionReadiness::Disconnected;
         }
@@ -775,8 +830,37 @@ impl StandaloneConnectionRegistry {
         })
     }
 
+    pub(super) fn set_ble_pending(
+        &mut self,
+        attempt_id: &str,
+        task: super::new_connection::BlePendingOpen,
+    ) {
+        if !self.is_connecting_attempt(attempt_id) {
+            return;
+        }
+        if let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.attempt_id == attempt_id)
+        {
+            record.pending_ble = Some(task);
+        }
+    }
+
+    pub(super) fn cancel_attempt(&mut self, attempt_id: &str) {
+        if let Some(record) = self
+            .records
+            .iter_mut()
+            .find(|record| record.attempt_id == attempt_id)
+        {
+            record.pending_ble = None;
+            record.readiness = ActiveSessionReadiness::Disconnected;
+        }
+    }
+
     pub(super) fn begin_reconnect(&mut self, id: &str) -> Option<String> {
         let record = self.record_mut(id)?;
+        record.pending_ble = None;
         let attempt_id = uuid::Uuid::new_v4().to_string();
         record.attempt_id = attempt_id.clone();
         record.surface = None;
@@ -797,7 +881,8 @@ impl StandaloneConnectionRegistry {
 
     pub(super) fn remove(&mut self, id: &str) -> Option<StandaloneConnectionRecord> {
         let index = self.records.iter().position(|record| record.id == id)?;
-        let record = self.records.remove(index);
+        let mut record = self.records.remove(index);
+        record.pending_ble = None;
         self.persist();
         Some(record)
     }

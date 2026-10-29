@@ -34,6 +34,18 @@ pub(in crate::workspace) struct BleTraceTarget {
     pub endpoint: Option<String>,
 }
 
+pub(in crate::workspace) struct BlePendingOpen {
+    pub cancellation: tokio_util::sync::CancellationToken,
+    pub _worker: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for BlePendingOpen {
+    fn drop(&mut self) {
+        // The resolver observes cancellation and finishes link cleanup on the shared runtime.
+        self.cancellation.cancel();
+    }
+}
+
 /// How an open relates to the active-session record that represents it.
 pub(in crate::workspace) enum BleStandaloneTarget {
     /// This open registers a new record before the resolver starts scanning.
@@ -51,6 +63,7 @@ pub(in crate::workspace) struct BleOpenRequest {
     /// resolver reuses its still-running discovery window instead of starting
     /// a second scan, which BlueZ would reject.
     pub adapter_guard: Option<BleAdapterGuard>,
+    pub selected_device: Option<oxideterm_ble::BlePeripheralId>,
     pub adapter_mac: Option<String>,
     pub device_mac: Option<String>,
     pub device_name: Option<String>,
@@ -68,7 +81,7 @@ pub(in crate::workspace) struct BleOpenRequest {
     pub profile_id: Option<String>,
     /// The open started from the connection form, so completion and failure
     /// must settle its pending state instead of only updating the card.
-    pub from_form: bool,
+    pub form_id: Option<uuid::Uuid>,
     pub standalone: BleStandaloneTarget,
 }
 
@@ -102,7 +115,7 @@ pub(in crate::workspace) enum BleConnectionWorkerResult {
         attempt_id: String,
         target: BleTraceTarget,
         profile_id: Option<String>,
-        from_form: bool,
+        form_id: Option<uuid::Uuid>,
     },
     /// Scan failed: device not in range, service missing, or adapter error.
     ScanFailed {
@@ -111,15 +124,17 @@ pub(in crate::workspace) enum BleConnectionWorkerResult {
         attempt_id: String,
         target: BleTraceTarget,
         profile_id: Option<String>,
-        from_form: bool,
+        form_id: Option<uuid::Uuid>,
     },
 }
 
 /// Identity captured from the BLE form when the user starts an open. The
-/// resolver re-derives the runtime config from these clues, so the modal only
-/// has to hand over the adapter it already scanned with plus the tab title.
+/// resolver keeps the live peripheral identity; persisted clues are used only
+/// when opening saved profiles without a current scan selection.
 struct PendingBleOpen {
+    form_id: uuid::Uuid,
     adapter_guard: Option<BleAdapterGuard>,
+    selected_device: Option<oxideterm_ble::BlePeripheralId>,
     adapter_mac: Option<String>,
     device_mac: Option<String>,
     device_name: Option<String>,
@@ -191,7 +206,7 @@ impl WorkspaceApp {
                             .adapters
                             .get(form.ble.selected_adapter_index)
                             .and_then(|adapter| adapter.adapter_mac.clone()),
-                        Some(device.address.clone()),
+                        device.persistent_address().map(ToOwned::to_owned),
                         device.name.clone(),
                         service_uuid
                             .expect("selection paired a service")
@@ -261,10 +276,12 @@ impl WorkspaceApp {
                 connect_on_open: existing.as_ref().map(|profile| profile.connect_on_open),
             });
             let open = PendingBleOpen {
+                form_id: form.ble.instance_id,
                 // The adapter that produced the user's selection is handed
                 // to the resolver so the discovered peripheral stays
                 // addressable while the card reports the short re-check.
                 adapter_guard: form.ble.adapter_guard.take(),
+                selected_device: device_id,
                 adapter_mac,
                 device_mac,
                 device_name,
@@ -352,6 +369,7 @@ impl WorkspaceApp {
                     endpoint: open.device_name.clone().or_else(|| open.device_mac.clone()),
                 },
                 adapter_guard: open.adapter_guard,
+                selected_device: open.selected_device,
                 adapter_mac: open.adapter_mac,
                 device_mac: open.device_mac,
                 device_name: open.device_name,
@@ -362,7 +380,7 @@ impl WorkspaceApp {
                 mtu: open.mtu,
                 write_without_response: open.write_without_response,
                 profile_id,
-                from_form: true,
+                form_id: Some(open.form_id),
                 standalone: BleStandaloneTarget::New,
             },
             cx,
@@ -394,6 +412,24 @@ pub(in crate::workspace) fn form_from_ble_profile(
     form.ble.display_mode = profile.display_mode;
     form.ble.local_echo = profile.local_echo;
     form.ble.mtu = profile.mtu.map(|mtu| mtu.to_string()).unwrap_or_default();
+    form.ble.write_without_response = profile.write_without_response;
     form.focused_field = NewConnectionField::BleProfileName;
     form
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ble_profile_edit_preserves_acknowledged_writes_and_mtu_cap() {
+        let mut profile = BleProfile::new("sensor", "6e400001-b5a3-f393-e0a9-e50e24dcca9e");
+        profile.write_without_response = false;
+        for (mtu, expected) in [(None, ""), (Some(23), "23")] {
+            profile.mtu = mtu;
+            let form = form_from_ble_profile(&profile, "Ungrouped".into());
+            assert!(!form.ble.write_without_response);
+            assert_eq!(form.ble.mtu, expected);
+        }
+    }
 }

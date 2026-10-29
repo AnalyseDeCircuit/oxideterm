@@ -79,6 +79,8 @@
               "device_enumeration_failed": "BLE-Geräteaufzählung fehlgeschlagen: {error}",
               "scan_failed": "BLE-Scan fehlgeschlagen: {error}",
               "no_device_matched": "Kein BLE-Gerät in Reichweite passt zum Profil ({identity})",
+              "ambiguous_device": "Mehrere BLE-Geräte passen zu {identity}; bitte erneut scannen und ein Gerät auswählen.",
+              "cancelled": "BLE-Verbindung abgebrochen",
               "connect_failed": "BLE-Verbindung fehlgeschlagen: {error}",
               "service_discovery_failed": "Diensterkennung fehlgeschlagen: {error}",
               "service_mismatch": "Gerät gefunden, bewirbt aber nicht den Zieldienst {uuid}",

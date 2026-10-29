@@ -678,14 +678,16 @@ impl WorkspaceApp {
         else {
             return div().into_any_element();
         };
-        // The write-mode checkbox stays disabled until the inspected device
-        // details confirm the selected service carries a write-without-response
-        // characteristic; the session falls back to whatever the device offers.
+        // Saved preferences remain editable without a live scan. Once a device
+        // is inspected, restrict the choice to its advertised characteristics.
         let write_without_response_available = self
             .connection_form_state(cx)
             .form
             .as_ref()
             .and_then(|form| {
+                if form.ble.device_details.is_none() && form.ble.profile_id.is_some() {
+                    return Some(true);
+                }
                 let details = form.ble.device_details.as_ref()?;
                 let service_uuid = form.ble.selected_service_uuid?;
                 Some(
@@ -782,14 +784,9 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn refresh_ble_adapters(&mut self, cx: &mut Context<Self>) {
         // Bumping the generation invalidates any in-flight adapter listing or
         // scan so their results cannot reach a form that moved on.
-        let generation = self.update_connection_form_state(cx, |state| {
-            let generation = state
-                .form
-                .as_ref()
-                .map(|form| form.ble.scan_generation + 1)
-                .unwrap_or_default();
+        let Some((generation, form_id)) = self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
-                form.ble.scan_generation = generation;
+                form.ble.scan_generation += 1;
                 form.ble.adapters_loading = true;
                 form.ble.scanning = false;
                 form.ble.scan_started = false;
@@ -798,9 +795,13 @@ impl WorkspaceApp {
                 form.ble.selected_device_id = None;
                 form.ble.device_details = None;
                 form.error = None;
+                Some((form.ble.scan_generation, form.ble.instance_id))
+            } else {
+                None
             }
-            generation
-        });
+        }) else {
+            return;
+        };
         cx.notify();
 
         let runtime = self.forwarding_runtime.handle().clone();
@@ -817,7 +818,7 @@ impl WorkspaceApp {
                     let Some(form) = state.form.as_mut() else {
                         return;
                     };
-                    if form.ble.scan_generation != generation {
+                    if form.ble.scan_generation != generation || form.ble.instance_id != form_id {
                         return;
                     }
                     form.ble.adapters_loading = false;
@@ -862,20 +863,26 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_new_connection_ble_scan(&mut self, cx: &mut Context<Self>) {
-        let Some((generation, adapter_index)) = self.update_connection_form_state(cx, |state| {
-            state.form.as_mut().map(|form| {
-                form.ble.scan_generation += 1;
-                form.ble.scanning = true;
-                form.ble.scan_started = false;
-                form.ble.devices.clear();
-                form.ble.selected_device_id = None;
-                form.ble.device_details = None;
-                form.ble.inspect_error = None;
-                form.ble.selected_service_uuid = None;
-                form.error = None;
-                (form.ble.scan_generation, form.ble.selected_adapter_index)
+        let Some((generation, adapter_index, form_id)) =
+            self.update_connection_form_state(cx, |state| {
+                state.form.as_mut().map(|form| {
+                    form.ble.scan_generation += 1;
+                    form.ble.scanning = true;
+                    form.ble.scan_started = false;
+                    form.ble.devices.clear();
+                    form.ble.selected_device_id = None;
+                    form.ble.device_details = None;
+                    form.ble.inspect_error = None;
+                    form.ble.selected_service_uuid = None;
+                    form.error = None;
+                    (
+                        form.ble.scan_generation,
+                        form.ble.selected_adapter_index,
+                        form.ble.instance_id,
+                    )
+                })
             })
-        }) else {
+        else {
             return;
         };
         cx.notify();
@@ -902,7 +909,7 @@ impl WorkspaceApp {
                     let Some(form) = state.form.as_mut() else {
                         return;
                     };
-                    if form.ble.scan_generation != generation {
+                    if form.ble.scan_generation != generation || form.ble.instance_id != form_id {
                         // A newer scan superseded this one; drop the guard so
                         // its discovery window closes instead of leaking.
                         if let Ok((_, guard)) = result.as_ref() {
@@ -944,7 +951,7 @@ impl WorkspaceApp {
         device_id: oxideterm_ble::BlePeripheralId,
         cx: &mut Context<Self>,
     ) {
-        let Some((generation, adapter)) = self.update_connection_form_state(cx, |state| {
+        let Some((generation, adapter, form_id)) = self.update_connection_form_state(cx, |state| {
             state.form.as_mut().and_then(|form| {
                 // Inspection reuses the adapter that produced the scan results
                 // so the device object (Linux) or cache entry (macOS/Windows)
@@ -965,7 +972,7 @@ impl WorkspaceApp {
                 form.ble.inspect_error = None;
                 form.ble.selected_service_uuid = None;
                 form.error = None;
-                Some((form.ble.scan_generation, adapter))
+                Some((form.ble.scan_generation, adapter, form.ble.instance_id))
             })
         }) else {
             return;
@@ -976,6 +983,7 @@ impl WorkspaceApp {
         cx.spawn(async move |weak, cx| {
             // The inspection link connects, reads the GATT layout, and
             // disconnects again; keep it off the GPUI thread.
+            let inspected_device = device_id.clone();
             let result = runtime
                 .spawn(async move { oxideterm_ble::ble_inspect_device(&adapter, device_id).await })
                 .await
@@ -986,7 +994,10 @@ impl WorkspaceApp {
                     let Some(form) = state.form.as_mut() else {
                         return;
                     };
-                    if form.ble.scan_generation != generation {
+                    if form.ble.scan_generation != generation
+                        || form.ble.instance_id != form_id
+                        || form.ble.selected_device_id.as_ref() != Some(&inspected_device)
+                    {
                         return;
                     }
                     form.ble.inspecting = false;
@@ -1044,6 +1055,8 @@ impl WorkspaceApp {
     ) {
         self.update_connection_form_state(cx, |state| {
             if let Some(form) = state.form.as_mut() {
+                form.ble.scan_generation += 1;
+                form.ble.inspecting = false;
                 form.ble.selected_device_id = Some(device_id);
                 // Details and the selected service belong to the previously
                 // inspected device and would mislead once the selection moves.

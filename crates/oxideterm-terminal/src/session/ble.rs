@@ -57,6 +57,7 @@ pub struct BleSession {
     resize: TerminalResize,
     lifecycle: TerminalLifecycle,
     runtime: Option<Runtime>,
+    worker: Option<tokio::task::JoinHandle<()>>,
     command_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
     /// Closes the worker outside the bounded data channel: a stalled device
     /// write can fill that channel, and a close silently dropped there would
@@ -148,16 +149,17 @@ impl BleSession {
         });
 
         let runtime = Runtime::new().ok();
+        let mut worker = None;
         if let Some(runtime) = runtime.as_ref() {
             let worker_config = config.clone();
-            runtime.spawn(run_ble_worker(
+            worker = Some(runtime.spawn(run_ble_worker(
                 worker_config,
                 adapter_guard,
                 command_rx,
                 worker_tx,
                 close_token.clone(),
                 i18n.clone(),
-            ));
+            )));
         } else {
             let _ = worker_tx.send_control(BleWorkerEvent::Failed(
                 i18n.t("terminal.ble.runtime_init_failed"),
@@ -180,6 +182,7 @@ impl BleSession {
             resize,
             lifecycle: TerminalLifecycle::Running,
             runtime,
+            worker,
             command_tx,
             close_token,
             title: None,
@@ -425,8 +428,10 @@ impl BleSession {
                             |event| self.pending_events.push(event),
                         );
                     }
-                    self.graphics
-                        .clear_for_alt_screen_transition(&term, &mut self.graphics_alt_screen_active);
+                    self.graphics.clear_for_alt_screen_transition(
+                        &term,
+                        &mut self.graphics_alt_screen_active,
+                    );
                     cursor.set(graphics_cursor_from_term(&term, size));
                 }
                 TerminalGraphicsSegment::Event(event) => {
@@ -565,12 +570,27 @@ impl TerminalSessionBackend for BleSession {
         // wait runs off the UI thread.
         self.close_token.cancel();
         if let Some(runtime) = self.runtime.take() {
+            let worker = self.worker.take();
             std::thread::spawn(move || {
-                runtime.shutdown_timeout(Duration::from_secs(2));
+                shutdown_ble_runtime(runtime, worker);
             });
         }
         self.lifecycle = TerminalLifecycle::Closed;
     }
+}
+
+fn shutdown_ble_runtime(runtime: Runtime, worker: Option<tokio::task::JoinHandle<()>>) {
+    runtime.block_on(async {
+        if let Some(mut worker) = worker {
+            if tokio::time::timeout(Duration::from_secs(3), &mut worker)
+                .await
+                .is_err()
+            {
+                worker.abort();
+            }
+        }
+    });
+    runtime.shutdown_timeout(Duration::from_secs(2));
 }
 
 /// Selects the notify and write characteristics for the BLE terminal channel.
@@ -609,16 +629,15 @@ fn select_channel_characteristics(
     // property and vice versa.
     let (write_char, write_type) = if prefer_write_without_response {
         match wwr_char {
-            Some(characteristic) => {
-                (Some(characteristic), btleplug::api::WriteType::WithoutResponse)
-            }
+            Some(characteristic) => (
+                Some(characteristic),
+                btleplug::api::WriteType::WithoutResponse,
+            ),
             None => (write_char, btleplug::api::WriteType::WithResponse),
         }
     } else {
         match write_char {
-            Some(characteristic) => {
-                (Some(characteristic), btleplug::api::WriteType::WithResponse)
-            }
+            Some(characteristic) => (Some(characteristic), btleplug::api::WriteType::WithResponse),
             None => (wwr_char, btleplug::api::WriteType::WithoutResponse),
         }
     };
@@ -641,7 +660,9 @@ async fn write_with_mtu(
     // The OS negotiates the ATT MTU; a configured value only caps it so
     // transfers can be throttled for devices that misbehave at larger sizes.
     let negotiated = peripheral.mtu();
-    let mtu = config_mtu.map(|configured| configured.min(negotiated)).unwrap_or(negotiated) as usize;
+    let mtu = config_mtu
+        .map(|configured| configured.min(negotiated))
+        .unwrap_or(negotiated) as usize;
     let max_chunk = mtu.saturating_sub(BLE_ATT_HEADER_BYTES).max(1);
     for chunk in bytes.chunks(max_chunk) {
         peripheral.write(characteristic, chunk, write_type).await?;
@@ -664,6 +685,7 @@ pub enum BleResolveStage {
 /// the human-facing sentence per variant instead of parsing an English blob.
 #[derive(Clone, Debug)]
 pub enum BleResolveError {
+    Cancelled,
     AdapterEnumeration(String),
     NoAdapters,
     AdapterOpen(String),
@@ -672,18 +694,28 @@ pub enum BleResolveError {
     Scan(String),
     /// No in-range device matched the profile clues; the payload is the
     /// identity clue (MAC or advertised name) used for matching.
-    NoDeviceMatched { identity: String },
+    NoDeviceMatched {
+        identity: String,
+    },
+    AmbiguousDevice {
+        identity: String,
+    },
     Connect(String),
     ServiceDiscovery(String),
     /// The matched device does not advertise the profile's target service.
-    ServiceMismatch { service_uuid: String },
+    ServiceMismatch {
+        service_uuid: String,
+    },
     /// The profile's service UUID does not parse, so the resolve never starts.
-    InvalidServiceUuid { service_uuid: String },
+    InvalidServiceUuid {
+        service_uuid: String,
+    },
 }
 
 impl std::fmt::Display for BleResolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::Cancelled => write!(f, "BLE connection cancelled"),
             Self::AdapterEnumeration(error) => {
                 write!(f, "BLE adapter enumeration failed: {error}")
             }
@@ -696,6 +728,10 @@ impl std::fmt::Display for BleResolveError {
             Self::NoDeviceMatched { identity } => {
                 write!(f, "no BLE device in range matched the profile ({identity})")
             }
+            Self::AmbiguousDevice { identity } => write!(
+                f,
+                "multiple BLE devices matched ({identity}); select the device explicitly"
+            ),
             Self::Connect(error) => write!(f, "BLE connect failed: {error}"),
             Self::ServiceDiscovery(error) => write!(f, "service discovery failed: {error}"),
             Self::ServiceMismatch { service_uuid } => write!(
@@ -718,7 +754,7 @@ async fn disconnect_temporary_link(
 ) {
     use btleplug::api::Peripheral as _;
     if !was_connected {
-        let _ = peripheral.disconnect().await;
+        let _ = tokio::time::timeout(Duration::from_secs(2), peripheral.disconnect()).await;
     }
 }
 
@@ -728,24 +764,17 @@ async fn disconnect_temporary_link(
 /// supplied so the scan results it produced stay addressable on all three
 /// platforms.
 ///
-/// Matching follows a strict two-tier rule:
-///
-/// 1. **Primary — MAC + service UUID.** When the profile stores a device MAC
-///    (public/static address), scan for a peripheral with that address and
-///    verify its GATT service table contains the target UUID. The advertised
-///    service list is consulted first as an optimization — if the broadcast
-///    already carries the UUID we skip a full `discover_services` round-trip.
-///
-/// 2. **Fallback — name + service UUID.** When MAC matching is disabled
-///    (profile has no MAC, e.g. macOS or devices using resolvable private
-///    addresses) or the MAC does not match anything in range, fall back to
-///    matching the advertisement name and verify the service UUID the same
-///    way (advertisement hint first, full discovery as fallback).
+/// A live scan selection takes precedence. Saved profiles match a public MAC
+/// when available, otherwise a unique advertisement name. An unmatched MAC
+/// or ambiguous name must not silently connect to a different peripheral.
+/// The target service is checked against advertisements or the GATT table.
 ///
 /// Returns the runtime config plus the guard so the caller (typically
 /// [`run_ble_worker`]) can stop the scan window once the terminal link is up.
 pub async fn ble_resolve_profile_to_session(
     guard: Option<oxideterm_ble::BleAdapterGuard>,
+    selected_device: Option<&oxideterm_ble::BlePeripheralId>,
+    cancelled: &tokio_util::sync::CancellationToken,
     adapter_mac: Option<&str>,
     device_mac: Option<&str>,
     device_name: Option<&str>,
@@ -759,17 +788,18 @@ pub async fn ble_resolve_profile_to_session(
     use uuid::Uuid;
 
     on_stage(BleResolveStage::OpeningAdapter);
-    let target_service = Uuid::parse_str(service_uuid).map_err(|_| {
-        BleResolveError::InvalidServiceUuid {
+    let target_service =
+        Uuid::parse_str(service_uuid).map_err(|_| BleResolveError::InvalidServiceUuid {
             service_uuid: service_uuid.to_string(),
-        }
-    })?;
+        })?;
 
     // Step 0 — adapter selection. Reuse a supplied guard; otherwise pick by
     // stored MAC preference or fall back to the first available adapter.
     let guard_supplied = guard.is_some();
-    let (guard, adapter_index) =
-        match guard {
+    let (guard, adapter_index) = tokio::select! {
+        biased;
+        _ = cancelled.cancelled() => return Err(BleResolveError::Cancelled),
+        result = async { Ok::<_, BleResolveError>(match guard {
             // A supplied guard wins even when the profile's adapter MAC
             // preference points elsewhere: the scan is already running on
             // the shared adapter, and the worker uses the guard's adapter
@@ -777,7 +807,8 @@ pub async fn ble_resolve_profile_to_session(
             // never read while a guard is handed over.
             Some(existing) => (existing, 0usize),
             None => open_adapter_for_profile(adapter_mac).await?,
-        };
+        }) } => result?,
+    };
 
     // Step 1 — collect discovered peripherals. A supplied guard already has
     // its discovery window open (the form's scan kept it alive so the selected
@@ -786,7 +817,11 @@ pub async fn ble_resolve_profile_to_session(
     // adapter performs a real scan window.
     on_stage(BleResolveStage::Scanning);
     let devices = if guard_supplied {
-        match guard.discovered_devices().await {
+        match tokio::select! {
+            biased;
+            _ = cancelled.cancelled() => { guard.stop_scan().await; return Err(BleResolveError::Cancelled); }
+            result = guard.discovered_devices() => result,
+        } {
             Ok(devices) => devices,
             Err(error) => {
                 // This attempt owns the discovery window; a failed resolve must
@@ -796,7 +831,11 @@ pub async fn ble_resolve_profile_to_session(
             }
         }
     } else {
-        match guard.scan(BLE_SAVED_PROFILE_SCAN_WINDOW).await {
+        match tokio::select! {
+            biased;
+            _ = cancelled.cancelled() => { guard.stop_scan().await; return Err(BleResolveError::Cancelled); }
+            result = guard.scan(BLE_SAVED_PROFILE_SCAN_WINDOW) => result,
+        } {
             Ok(devices) => devices,
             Err(error) => {
                 guard.stop_scan().await;
@@ -805,28 +844,14 @@ pub async fn ble_resolve_profile_to_session(
         }
     };
 
-    // Step 2 — identity match: primary MAC branch first, then name fallback.
+    // A live scan selection is authoritative; saved profiles must resolve uniquely.
     on_stage(BleResolveStage::Matching);
-    let matched_device = if let Some(mac) = device_mac {
-        devices
-            .iter()
-            .find(|d| d.address.eq_ignore_ascii_case(mac))
-            .or_else(|| {
-                device_name.and_then(|name| {
-                    devices.iter().find(|d| d.name.as_deref() == Some(name))
-                })
-            })
-    } else {
-        device_name.and_then(|name| {
-            devices.iter().find(|d| d.name.as_deref() == Some(name))
-        })
-    };
-
-    let Some(device) = matched_device else {
-        let _ = guard.stop_scan().await;
-        return Err(BleResolveError::NoDeviceMatched {
-            identity: device_mac.or(device_name).unwrap_or("no identity clue").to_string(),
-        });
+    let device = match match_ble_device(&devices, selected_device, device_mac, device_name) {
+        Ok(device) => device,
+        Err(error) => {
+            guard.stop_scan().await;
+            return Err(error);
+        }
     };
 
     // Step 3 — service UUID verification. Fast path uses the advertised
@@ -836,21 +861,29 @@ pub async fn ble_resolve_profile_to_session(
     let uuid_match = if device.advertised_services.contains(&target_service) {
         true
     } else {
-        let (peripheral, was_connected) =
-            match oxideterm_ble::ble_connect_discovered_device(
-                guard.adapter(),
-                &device.id,
-                BLE_CONNECT_TIMEOUT,
-            )
-            .await
-            {
-                Ok(pair) => pair,
-                Err(error) => {
-                    guard.stop_scan().await;
-                    return Err(BleResolveError::Connect(error.to_string()));
+        let (peripheral, was_connected) = match oxideterm_ble::ble_connect_discovered_device(
+            guard.adapter(),
+            &device.id,
+            BLE_CONNECT_TIMEOUT,
+            cancelled,
+        )
+        .await
+        {
+            Ok(pair) => pair,
+            Err(error) => {
+                guard.stop_scan().await;
+                if matches!(error, oxideterm_ble::BleError::Cancelled) {
+                    return Err(BleResolveError::Cancelled);
                 }
-            };
-        let has_target = match peripheral.discover_services().await {
+                return Err(BleResolveError::Connect(error.to_string()));
+            }
+        };
+        let discovered = tokio::select! {
+            biased;
+            _ = cancelled.cancelled() => Err(BleResolveError::Cancelled),
+            result = peripheral.discover_services() => result.map_err(|error| BleResolveError::ServiceDiscovery(error.to_string())),
+        };
+        let has_target = match discovered {
             Ok(()) => peripheral
                 .services()
                 .iter()
@@ -858,7 +891,7 @@ pub async fn ble_resolve_profile_to_session(
             Err(error) => {
                 disconnect_temporary_link(&peripheral, was_connected).await;
                 guard.stop_scan().await;
-                return Err(BleResolveError::ServiceDiscovery(error.to_string()));
+                return Err(error);
             }
         };
         // The verification link is temporary; a link that predated this check
@@ -889,6 +922,42 @@ pub async fn ble_resolve_profile_to_session(
     };
     on_stage(BleResolveStage::Ready);
     Ok((config, guard))
+}
+
+fn match_ble_device<'a>(
+    devices: &'a [oxideterm_ble::BleDeviceInfo],
+    selected: Option<&oxideterm_ble::BlePeripheralId>,
+    mac: Option<&str>,
+    name: Option<&str>,
+) -> Result<&'a oxideterm_ble::BleDeviceInfo, BleResolveError> {
+    let mac = mac.filter(|value| {
+        value
+            .parse::<btleplug::api::BDAddr>()
+            .is_ok_and(|address| address != btleplug::api::BDAddr::default())
+    });
+    let identity = selected
+        .map(ToString::to_string)
+        .unwrap_or_else(|| mac.or(name).unwrap_or("no identity clue").to_owned());
+    let mut matches = devices.iter().filter(|device| {
+        if let Some(id) = selected {
+            return &device.id == id;
+        }
+        if let Some(mac) = mac {
+            return device
+                .persistent_address()
+                .is_some_and(|address| address.eq_ignore_ascii_case(mac));
+        }
+        name.is_some_and(|name| device.name.as_deref() == Some(name))
+    });
+    let first = matches
+        .next()
+        .ok_or_else(|| BleResolveError::NoDeviceMatched {
+            identity: identity.clone(),
+        })?;
+    if matches.next().is_some() {
+        return Err(BleResolveError::AmbiguousDevice { identity });
+    }
+    Ok(first)
 }
 
 /// Opens a [`oxideterm_ble::BleAdapterGuard`] for the profile, honoring the
@@ -932,8 +1001,8 @@ async fn run_ble_worker(
     close_token: tokio_util::sync::CancellationToken,
     i18n: oxideterm_i18n::I18n,
 ) {
-    use futures_util::StreamExt;
     use btleplug::api::{Manager as _, Peripheral as _};
+    use futures_util::StreamExt;
 
     // Reuse the adapter that produced the scan results when the form handed it
     // over; the device object (Linux) or peripheral cache (macOS/Windows) is
@@ -974,6 +1043,7 @@ async fn run_ble_worker(
         &adapter,
         &config.device_id,
         BLE_CONNECT_TIMEOUT,
+        &close_token,
     )
     .await
     {
@@ -988,147 +1058,227 @@ async fn run_ble_worker(
             return;
         }
     };
-    // The established link makes the device non-temporary, so the discovery
-    // window is no longer needed.
-    if let Some(guard) = adapter_guard.take() {
-        guard.stop_scan().await;
-    }
-    if let Err(error) = peripheral.discover_services().await {
-        // A failed start must not leave the physical link (or the notify
-        // registration below) behind: leaked links make every reopened session
-        // subscribe to an already-live connection and receive duplicate data.
-        disconnect_temporary_link(&peripheral, was_connected).await;
-        let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
-        return;
-    }
-    let services = peripheral.services();
-    let Some(service) = services
-        .iter()
-        .find(|service| service.uuid == config.service_uuid)
-    else {
-        disconnect_temporary_link(&peripheral, was_connected).await;
-        let _ = worker_tx.send_control(BleWorkerEvent::Failed(i18n.t_with(
-            "terminal.ble.service_not_found",
-            &[("uuid", &config.service_uuid.to_string())],
-        )));
-        return;
-    };
-    let Some((notify_char, write_char, write_type)) =
-        select_channel_characteristics(&service.characteristics, config.write_without_response)
-    else {
-        disconnect_temporary_link(&peripheral, was_connected).await;
-        let _ = worker_tx.send_control(BleWorkerEvent::Failed(
-            i18n.t("terminal.ble.no_notify_write_pair"),
-        ));
-        return;
-    };
-    let notify_uuid = notify_char.uuid;
-    if let Err(error) = peripheral.subscribe(notify_char).await {
-        disconnect_temporary_link(&peripheral, was_connected).await;
-        let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
-        return;
-    }
-    let _ = worker_tx.send_control(BleWorkerEvent::Connected);
-
-    let mut notifications = match peripheral.notifications().await {
-        Ok(stream) => stream,
-        Err(error) => {
-            let _ = peripheral.unsubscribe(notify_char).await;
-            disconnect_temporary_link(&peripheral, was_connected).await;
+    let mut subscribed = None;
+    let connected_worker = async {
+        if let Some(guard) = adapter_guard.as_ref() {
+            guard.stop_scan().await;
+        }
+        adapter_guard = None;
+        if let Err(error) = peripheral.discover_services().await {
+            // A failed start must not leave the physical link (or the notify
+            // registration below) behind: leaked links make every reopened session
+            // subscribe to an already-live connection and receive duplicate data.
             let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
             return;
         }
-    };
-    let mut link_check = tokio::time::interval(BLE_LINK_CHECK_INTERVAL);
-    link_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    link_check.tick().await;
-    // Emit the negotiated MTU once after subscribe completes; platforms that
-    // update the value later will re-emit it on the first link-check tick.
-    let mut last_mtu = peripheral.mtu();
-    let _ = worker_tx.send_control(BleWorkerEvent::NegotiatedMtu(last_mtu));
-    loop {
-        tokio::select! {
-            // Close rides the cancel token, not the data channel, so it wins
-            // even while every other await point is stalled.
-            _ = close_token.cancelled() => {
-                break;
+        let services = peripheral.services();
+        let Some(service) = services
+            .iter()
+            .find(|service| service.uuid == config.service_uuid)
+        else {
+            let _ = worker_tx.send_control(BleWorkerEvent::Failed(i18n.t_with(
+                "terminal.ble.service_not_found",
+                &[("uuid", &config.service_uuid.to_string())],
+            )));
+            return;
+        };
+        let Some((notify_char, write_char, write_type)) =
+            select_channel_characteristics(&service.characteristics, config.write_without_response)
+        else {
+            let _ = worker_tx.send_control(BleWorkerEvent::Failed(
+                i18n.t("terminal.ble.no_notify_write_pair"),
+            ));
+            return;
+        };
+        let notify_uuid = notify_char.uuid;
+        subscribed = Some(notify_char.clone());
+        if let Err(error) = peripheral.subscribe(notify_char).await {
+            let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
+            return;
+        }
+        let _ = worker_tx.send_control(BleWorkerEvent::Connected);
+
+        let mut notifications = match peripheral.notifications().await {
+            Ok(stream) => stream,
+            Err(error) => {
+                let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
+                return;
             }
-            _ = link_check.tick() => {
-                // `Err` means the platform cannot answer the query; only a
-                // definite `false` proves the peer is gone.
-                if matches!(peripheral.is_connected().await, Ok(false)) {
-                    let _ = worker_tx.send_control(BleWorkerEvent::Closed);
+        };
+        let mut link_check = tokio::time::interval(BLE_LINK_CHECK_INTERVAL);
+        link_check.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        link_check.tick().await;
+        // Emit the negotiated MTU once after subscribe completes; platforms that
+        // update the value later will re-emit it on the first link-check tick.
+        let mut last_mtu = peripheral.mtu();
+        let _ = worker_tx.send_control(BleWorkerEvent::NegotiatedMtu(last_mtu));
+        loop {
+            tokio::select! {
+                // Close rides the cancel token, not the data channel, so it wins
+                // even while every other await point is stalled.
+                _ = close_token.cancelled() => {
                     break;
                 }
-                // Some platforms finalise the ATT MTU after subscribe returns;
-                // surface late updates so the UI reflects the real value.
-                let current_mtu = peripheral.mtu();
-                if current_mtu != last_mtu {
-                    last_mtu = current_mtu;
-                    let _ = worker_tx.send_control(BleWorkerEvent::NegotiatedMtu(current_mtu));
-                }
-            }
-            notification = notifications.next() => {
-                match notification {
-                    Some(notification) if notification.uuid == notify_uuid => {
-                        let data = notification.value;
-                        let data_len = data.len();
-                        // Output backpressure waits for the UI drain; the
-                        // cancel branch keeps shutdown reaching the cleanup
-                        // below instead of waiting out the stalled consumer.
-                        tokio::select! {
-                            _ = close_token.cancelled() => break,
-                            sent = worker_tx.send_async(BleWorkerEvent::Output(data), data_len) => {
-                                if sent.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Some(_) => {}
-                    None => {
+                _ = link_check.tick() => {
+                    // `Err` means the platform cannot answer the query; only a
+                    // definite `false` proves the peer is gone.
+                    if matches!(peripheral.is_connected().await, Ok(false)) {
                         let _ = worker_tx.send_control(BleWorkerEvent::Closed);
                         break;
                     }
+                    // Some platforms finalise the ATT MTU after subscribe returns;
+                    // surface late updates so the UI reflects the real value.
+                    let current_mtu = peripheral.mtu();
+                    if current_mtu != last_mtu {
+                        last_mtu = current_mtu;
+                        let _ = worker_tx.send_control(BleWorkerEvent::NegotiatedMtu(current_mtu));
+                    }
                 }
-            }
-            command = command_rx.recv() => {
-                match command {
-                    Some(bytes) => {
-                        // A stalled device write must not delay the close: the
-                        // cancel branch releases the link without waiting out
-                        // the blocked transport.
-                        tokio::select! {
-                            _ = close_token.cancelled() => break,
-                            written = write_with_mtu(&peripheral, write_char, &bytes, write_type, config.mtu) => {
-                                if let Err(error) = written {
-                                    let _ = worker_tx
-                                        .send_control(BleWorkerEvent::Failed(error.to_string()));
-                                    break;
+                notification = notifications.next() => {
+                    match notification {
+                        Some(notification) if notification.uuid == notify_uuid => {
+                            let data = notification.value;
+                            let data_len = data.len();
+                            // Output backpressure waits for the UI drain; the
+                            // cancel branch keeps shutdown reaching the cleanup
+                            // below instead of waiting out the stalled consumer.
+                            tokio::select! {
+                                _ = close_token.cancelled() => break,
+                                sent = worker_tx.send_async(BleWorkerEvent::Output(data), data_len) => {
+                                    if sent.is_err() {
+                                        break;
+                                    }
                                 }
                             }
                         }
+                        Some(_) => {}
+                        None => {
+                            let _ = worker_tx.send_control(BleWorkerEvent::Closed);
+                            break;
+                        }
                     }
-                    None => {
-                        let _ = worker_tx.send_control(BleWorkerEvent::Closed);
-                        break;
+                }
+                command = command_rx.recv() => {
+                    match command {
+                        Some(bytes) => {
+                            // A stalled device write must not delay the close: the
+                            // cancel branch releases the link without waiting out
+                            // the blocked transport.
+                            tokio::select! {
+                                _ = close_token.cancelled() => break,
+                                written = write_with_mtu(&peripheral, write_char, &bytes, write_type, config.mtu) => {
+                                    if let Err(error) = written {
+                                        let _ = worker_tx
+                                            .send_control(BleWorkerEvent::Failed(error.to_string()));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        None => {
+                            let _ = worker_tx.send_control(BleWorkerEvent::Closed);
+                            break;
+                        }
                     }
                 }
             }
         }
+    };
+    tokio::select! {
+        biased;
+        _ = close_token.cancelled() => {},
+        _ = connected_worker => {},
     }
     // Every exit path releases the notify registration and the physical link,
     // otherwise the next open reuses a live connection and receives one extra
     // copy of every peer notification per leaked attempt.
-    let _ = peripheral.unsubscribe(notify_char).await;
+    if let Some(characteristic) = subscribed {
+        // A stalled unsubscribe must still leave time to disconnect the link.
+        let _ = tokio::time::timeout(
+            Duration::from_millis(500),
+            peripheral.unsubscribe(&characteristic),
+        )
+        .await;
+    }
     disconnect_temporary_link(&peripheral, was_connected).await;
+    if let Some(guard) = adapter_guard.take() {
+        guard.stop_scan().await;
+    }
 }
 
 #[cfg(test)]
 mod ble_tests {
     use super::*;
 
-    fn characteristic(uuid: u128, properties: btleplug::api::CharPropFlags) -> btleplug::api::Characteristic {
+    #[test]
+    fn shutdown_waits_for_async_worker_cleanup_before_stopping_runtime() {
+        let runtime = Runtime::new().unwrap();
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        let worker_cancel = cancellation.clone();
+        let (complete_tx, complete_rx) = std::sync::mpsc::channel();
+        let worker = runtime.spawn(async move {
+            worker_cancel.cancelled().await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            complete_tx.send("cleanup completed").unwrap();
+        });
+        cancellation.cancel();
+        shutdown_ble_runtime(runtime, Some(worker));
+        assert_eq!(complete_rx.try_recv().unwrap(), "cleanup completed");
+    }
+
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn live_identity_wins_over_placeholder_addresses_and_names_must_be_unique() {
+        use btleplug::api::AddressType;
+        let mut devices = (1..=2)
+            .map(|id| oxideterm_ble::BleDeviceInfo {
+                id: uuid::Uuid::from_u128(id).into(),
+                name: Some("UART".into()),
+                address: "00:00:00:00:00:00".into(),
+                rssi: None,
+                supports_nus: true,
+                advertised_services: vec![oxideterm_ble::NORDIC_UART_SERVICE_UUID],
+                address_type: None,
+            })
+            .collect::<Vec<_>>();
+        let selected = devices[1].id.clone();
+        assert_eq!(
+            match_ble_device(
+                &devices,
+                Some(&selected),
+                Some("00:00:00:00:00:00"),
+                Some("UART")
+            )
+            .unwrap()
+            .id,
+            selected
+        );
+        assert!(matches!(
+            match_ble_device(&devices, None, Some("00:00:00:00:00:00"), Some("UART")),
+            Err(BleResolveError::AmbiguousDevice { .. })
+        ));
+        assert!(devices[0].persistent_address().is_none());
+        devices[0].address = "12:34:56:78:9A:BC".into();
+        devices[0].address_type = Some(AddressType::Random);
+        assert!(devices[0].persistent_address().is_none());
+        devices[0].address_type = Some(AddressType::Public);
+        assert_eq!(devices[0].persistent_address(), Some("12:34:56:78:9A:BC"));
+        assert_eq!(
+            match_ble_device(&devices, None, Some("12:34:56:78:9a:bc"), Some("UART"))
+                .unwrap()
+                .id,
+            devices[0].id
+        );
+        assert!(matches!(
+            match_ble_device(&devices, None, Some("AB:CD:EF:01:23:45"), Some("UART")),
+            Err(BleResolveError::NoDeviceMatched { .. })
+        ));
+    }
+
+    fn characteristic(
+        uuid: u128,
+        properties: btleplug::api::CharPropFlags,
+    ) -> btleplug::api::Characteristic {
         btleplug::api::Characteristic {
             uuid: uuid::Uuid::from_u128(uuid),
             service_uuid: uuid::Uuid::from_u128(0x0002),
@@ -1148,8 +1298,7 @@ mod ble_tests {
         characteristics.insert(write.clone());
         characteristics.insert(notify.clone());
         characteristics.insert(wwr.clone());
-        let (n, w, wt) =
-            select_channel_characteristics(&characteristics, true).unwrap();
+        let (n, w, wt) = select_channel_characteristics(&characteristics, true).unwrap();
         assert_eq!(n.uuid, notify.uuid);
         assert_eq!(w.uuid, wwr.uuid);
         assert_eq!(wt, btleplug::api::WriteType::WithoutResponse);
@@ -1164,8 +1313,7 @@ mod ble_tests {
         characteristics.insert(write.clone());
         characteristics.insert(notify.clone());
         characteristics.insert(wwr.clone());
-        let (n, w, wt) =
-            select_channel_characteristics(&characteristics, false).unwrap();
+        let (n, w, wt) = select_channel_characteristics(&characteristics, false).unwrap();
         assert_eq!(n.uuid, notify.uuid);
         assert_eq!(w.uuid, write.uuid);
         assert_eq!(wt, btleplug::api::WriteType::WithResponse);
@@ -1181,8 +1329,7 @@ mod ble_tests {
         let mut characteristics = std::collections::BTreeSet::new();
         characteristics.insert(wwr.clone());
         characteristics.insert(notify.clone());
-        let (n, w, wt) =
-            select_channel_characteristics(&characteristics, false).unwrap();
+        let (n, w, wt) = select_channel_characteristics(&characteristics, false).unwrap();
         assert_eq!(n.uuid, notify.uuid);
         assert_eq!(w.uuid, wwr.uuid);
         assert_eq!(wt, btleplug::api::WriteType::WithoutResponse);

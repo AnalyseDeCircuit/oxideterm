@@ -196,12 +196,6 @@ pub enum TerminalPaneEvent {
         input: Option<SerialLineEnding>,
         output: Option<SerialLineEnding>,
     },
-    /// Emitted once the BLE peripheral ATT MTU is known, either at connect
-    /// or later when the platform finalises negotiation. Workspace persists
-    /// it back to the saved profile so next sessions start from a known good cap.
-    BleNegotiatedMtuDetermined {
-        mtu: u16,
-    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -666,8 +660,6 @@ pub struct TerminalPane {
     modem_progress: Option<ModemProgressState>,
     modem_transfer: Option<oxideterm_modem_transfer::ModemTransfer>,
     modem_worker: Option<std::thread::JoinHandle<()>>,
-    /// Last ATT MTU we emitted so we only surface changes once.
-    last_emitted_ble_negotiated_mtu: Option<u16>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -1471,7 +1463,6 @@ impl TerminalPane {
             modem_progress: None,
             modem_transfer: None,
             modem_worker: None,
-            last_emitted_ble_negotiated_mtu: None,
             _subscriptions: vec![focus_in, focus_out],
         };
         pane.sync_terminal_output_events_enabled();
@@ -3578,19 +3569,6 @@ impl TerminalPane {
         self.last_drain_budget_exhausted = report.budget_exhausted;
         self.apply_terminal_drain_activity(&report, now, cx);
         let render_stats_changed = self.update_render_stats(&report, now);
-
-        // Surface negotiated BLE ATT MTU changes so workspace can persist them
-        // back to the saved profile. `Some(mtu)` is the value the session just
-        // learned, or `None` if this pane is not BLE / not yet connected.
-        if self.is_ble_transport() {
-            let current_mtu = self.terminal.lock().ble_negotiated_mtu();
-            if current_mtu != self.last_emitted_ble_negotiated_mtu {
-                if let Some(mtu) = current_mtu {
-                    self.last_emitted_ble_negotiated_mtu = current_mtu;
-                    cx.emit(TerminalPaneEvent::BleNegotiatedMtuDetermined { mtu });
-                }
-            }
-        }
 
         let mut event_effect = TerminalEventEffect::default();
         for event in events {

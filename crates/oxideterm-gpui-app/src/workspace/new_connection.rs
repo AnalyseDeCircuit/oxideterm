@@ -11,7 +11,7 @@ mod password_prompt;
 mod ssh_flow;
 
 pub(super) use ble_flow::{
-    BleConnectionWorkerResult, BleOpenRequest, BleStandaloneTarget, BleTraceTarget,
+    BleConnectionWorkerResult, BleOpenRequest, BlePendingOpen, BleStandaloneTarget, BleTraceTarget,
     form_from_ble_profile,
 };
 pub(super) use entity::{

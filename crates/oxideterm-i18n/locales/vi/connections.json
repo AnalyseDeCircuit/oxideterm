@@ -79,6 +79,8 @@
               "device_enumeration_failed": "Liệt kê thiết bị BLE thất bại: {error}",
               "scan_failed": "Quét BLE thất bại: {error}",
               "no_device_matched": "Không có thiết bị BLE trong phạm vi khớp với hồ sơ ({identity})",
+              "ambiguous_device": "Nhiều thiết bị BLE khớp với {identity}; hãy quét lại và chọn một thiết bị.",
+              "cancelled": "Đã hủy kết nối BLE",
               "connect_failed": "Kết nối thiết bị BLE thất bại: {error}",
               "service_discovery_failed": "Khám phá dịch vụ thất bại: {error}",
               "service_mismatch": "Thiết bị khớp nhưng không quảng bá dịch vụ đích {uuid}",

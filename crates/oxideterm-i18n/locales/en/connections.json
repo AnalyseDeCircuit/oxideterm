@@ -79,6 +79,8 @@
               "device_enumeration_failed": "BLE device enumeration failed: {error}",
               "scan_failed": "BLE scan failed: {error}",
               "no_device_matched": "no BLE device in range matched the profile ({identity})",
+              "ambiguous_device": "Multiple BLE devices match {identity}; select a device from a fresh scan.",
+              "cancelled": "BLE connection cancelled",
               "connect_failed": "BLE connect failed: {error}",
               "service_discovery_failed": "service discovery failed: {error}",
               "service_mismatch": "device matched but does not advertise the target service {uuid}",

@@ -936,6 +936,8 @@ pub(in crate::workspace) struct NewConnectionForm {
 /// the BLE surface stays in one resettable unit; nothing here is persisted —
 /// saving still materializes a `BleProfile` into the connection store.
 pub(in crate::workspace) struct BleFormState {
+    pub(in crate::workspace) instance_id: uuid::Uuid,
+    pub(in crate::workspace) open_cancel: Option<tokio_util::sync::DropGuard>,
     pub(in crate::workspace) discovery_section_expanded: Option<bool>,
     pub(in crate::workspace) profile_name: String,
     // Set only when the form edits an existing BLE profile; the save request
@@ -983,6 +985,8 @@ pub(in crate::workspace) struct BleFormState {
 impl Default for BleFormState {
     fn default() -> Self {
         Self {
+            instance_id: uuid::Uuid::new_v4(),
+            open_cancel: None,
             discovery_section_expanded: None,
             profile_name: String::new(),
             profile_id: None,

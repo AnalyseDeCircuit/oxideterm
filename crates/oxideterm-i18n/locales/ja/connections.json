@@ -79,6 +79,8 @@
               "device_enumeration_failed": "BLEデバイスの列挙に失敗しました：{error}",
               "scan_failed": "BLEスキャンに失敗しました：{error}",
               "no_device_matched": "付近にプロファイルに一致するBLEデバイスがありません（{identity}）",
+              "ambiguous_device": "{identity} に一致する BLE デバイスが複数あります。再スキャンしてデバイスを選択してください。",
+              "cancelled": "BLE 接続をキャンセルしました",
               "connect_failed": "BLEデバイスへの接続に失敗しました：{error}",
               "service_discovery_failed": "サービス探索に失敗しました：{error}",
               "service_mismatch": "デバイスは一致しましたが、対象サービス {uuid} をアドバタイズしていません",

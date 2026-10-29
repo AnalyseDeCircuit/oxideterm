@@ -68,6 +68,7 @@ impl StandaloneConnectionRegistry {
                 }
                 let launch = snapshot.launch.restore(snapshot.kind, store)?;
                 Some(StandaloneConnectionRecord {
+                    pending_ble: None,
                     id: snapshot.id,
                     attempt_id: uuid::Uuid::new_v4().to_string(),
                     kind: snapshot.kind,
