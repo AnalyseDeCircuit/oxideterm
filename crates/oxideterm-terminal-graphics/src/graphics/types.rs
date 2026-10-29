@@ -336,6 +336,8 @@ pub struct GraphicsIngress {
     next_image_id: u64,
     kitty_chunks: HashMap<u64, KittyChunkAssembly>,
     kitty_images: HashMap<TerminalImageId, TerminalImageData>,
+    image_order: VecDeque<(TerminalImageId, usize)>,
+    storage_bytes: usize,
     sync_buffer: Option<Zeroizing<Vec<u8>>>,
     sync_deadline: Option<std::time::Instant>,
 }

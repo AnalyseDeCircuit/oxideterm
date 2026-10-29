@@ -84,7 +84,75 @@ struct SearchRow {
     wrapped: bool,
     history: bool,
     // ASCII columns are implicit; only width/UTF-8 deviations need coordinates.
-    adjustments: Box<[(usize, usize, usize)]>,
+    adjustments: Option<Box<ColumnMap>>,
+}
+
+#[derive(PartialEq, Eq)]
+enum ColumnMap {
+    Compact(Vec<[u32; 3]>),
+    Wide(Vec<[usize; 3]>),
+}
+
+impl Default for ColumnMap {
+    fn default() -> Self {
+        Self::Compact(Vec::new())
+    }
+}
+
+impl ColumnMap {
+    fn push(&mut self, (byte, col, end): (usize, usize, usize)) {
+        match self {
+            Self::Compact(entries) => {
+                if let (Ok(byte), Ok(col), Ok(end)) =
+                    (u32::try_from(byte), u32::try_from(col), u32::try_from(end))
+                {
+                    entries.push([byte, col, end]);
+                    return;
+                }
+                // Combining sequences can make a row's UTF-8 offsets exceed its
+                // column count. Promote only that row without truncating offsets.
+                let mut wide = Vec::with_capacity(entries.len() + 1);
+                wide.extend(
+                    entries
+                        .iter()
+                        .map(|entry| entry.map(|value| value as usize)),
+                );
+                wide.push([byte, col, end]);
+                *self = Self::Wide(wide);
+            }
+            Self::Wide(entries) => entries.push([byte, col, end]),
+        }
+    }
+
+    fn shrink_to_fit(&mut self) {
+        match self {
+            Self::Compact(entries) => entries.shrink_to_fit(),
+            Self::Wide(entries) => entries.shrink_to_fit(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        match self {
+            Self::Compact(entries) => entries.is_empty(),
+            Self::Wide(entries) => entries.is_empty(),
+        }
+    }
+
+    fn preceding(&self, byte: usize) -> Option<(usize, usize, usize)> {
+        let [start, col, end] = match self {
+            Self::Compact(entries) => {
+                let index = entries.partition_point(|entry| entry[0] as usize <= byte);
+                entries
+                    .get(index.checked_sub(1)?)?
+                    .map(|value| value as usize)
+            }
+            Self::Wide(entries) => {
+                let index = entries.partition_point(|entry| entry[0] <= byte);
+                *entries.get(index.checked_sub(1)?)?
+            }
+        };
+        Some((start, col, end))
+    }
 }
 
 impl SearchRow {
@@ -120,11 +188,11 @@ impl SearchRow {
                 text_index: 0,
                 wrapped,
                 history: false,
-                adjustments: Box::default(),
+                adjustments: None,
             };
         }
         text.reserve(cols);
-        let mut adjustments = Vec::new();
+        let mut adjustments = ColumnMap::default();
         let mut next_col = 0;
         for (col, cell) in row.iter().take(cols).enumerate() {
             if cell
@@ -151,6 +219,7 @@ impl SearchRow {
             }
             next_col = end_col;
         }
+        adjustments.shrink_to_fit();
         Self {
             identity: row.identity(),
             start,
@@ -158,7 +227,7 @@ impl SearchRow {
             text_index: 0,
             wrapped,
             history: false,
-            adjustments: adjustments.into_boxed_slice(),
+            adjustments: (!adjustments.is_empty()).then(|| Box::new(adjustments)),
         }
     }
 
@@ -167,13 +236,13 @@ impl SearchRow {
     }
 
     fn cell_at(&self, byte: usize, text: &str) -> (usize, usize) {
-        let index = self
+        let Some((start, col, end_col)) = self
             .adjustments
-            .partition_point(|(start, _, _)| *start <= byte);
-        if index == 0 {
+            .as_ref()
+            .and_then(|map| map.preceding(byte))
+        else {
             return (byte, byte + 1);
-        }
-        let (start, col, end_col) = self.adjustments[index - 1];
+        };
         if byte == start {
             return (col, end_col);
         }
@@ -630,6 +699,20 @@ pub(crate) fn append_grid_line_text<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_pointer_width = "64")]
+    fn search_columns_preserve_offsets_beyond_u32() {
+        let mut map = ColumnMap::default();
+        map.push((0, 0, 2));
+        map.push((u32::MAX as usize + 1, 2, 3));
+        assert_eq!(map.preceding(0), Some((0, 0, 2)));
+        assert_eq!(map.preceding(u32::MAX as usize), Some((0, 0, 2)));
+        assert_eq!(
+            map.preceding(u32::MAX as usize + 1),
+            Some((4_294_967_296, 2, 3))
+        );
+    }
 
     #[test]
     fn background_search_preserves_text_history_tails_and_chunk_boundaries() {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fs,
     io::Read,
     path::{Path, PathBuf},
@@ -12,6 +12,7 @@ use std::{
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use image::AnimationDecoder;
+use image::ImageDecoder;
 use image::ImageReader;
 use image::codecs::gif::GifDecoder;
 use tempfile::TempDir;

@@ -1,7 +1,7 @@
 mod tests {
     use super::*;
-    use image::{Delay, Frame, RgbaImage};
     use image::codecs::gif::GifEncoder;
+    use image::{Delay, Frame, RgbaImage};
 
     fn cursor() -> GraphicsCursor {
         GraphicsCursor {
@@ -13,6 +13,78 @@ mod tests {
             cell_width: 10,
             cell_height: 20,
         }
+    }
+
+    #[test]
+    #[ignore = "manual memory/performance measurement"]
+    fn image_retention_benchmark() {
+        let mut png = Vec::new();
+        image::write_buffer_with_format(
+            &mut std::io::Cursor::new(&mut png),
+            &vec![127; 1024 * 1024 * 4],
+            1024,
+            1024,
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+        let encoded = BASE64.encode(png);
+        for sample in 0..6 {
+            let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+            let mut pixels = Vec::new();
+            let start = std::time::Instant::now();
+            for id in 1..=100 {
+                let command = format!("\x1b_Ga=t,f=100,i={id};{encoded}\x1b\\");
+                for event in ingress.advance(command.as_bytes(), cursor()).events {
+                    if let TerminalGraphicsEvent::ImageReady(image) = event {
+                        pixels.push(Arc::downgrade(&image.rgba));
+                    }
+                }
+            }
+            let elapsed = start.elapsed().as_micros();
+            let retained: usize = pixels
+                .iter()
+                .filter_map(std::sync::Weak::upgrade)
+                .map(|pixels| pixels.len())
+                .sum();
+            if sample > 0 {
+                println!("images,{sample},{elapsed},{retained}");
+            }
+        }
+    }
+
+    #[test]
+    fn kitty_budget_releases_evicted_pixels_and_keeps_recent_image_usable() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions {
+            storage_limit_mb: 1,
+            ..GraphicsOptions::default()
+        });
+        let encoded = BASE64.encode(vec![127; 512 * 512 * 4]);
+        let mut first = None;
+        let mut deleted = Vec::new();
+        for id in 1..=2 {
+            let command = format!("\x1b_Ga=t,f=32,s=512,v=512,i={id};{encoded}\x1b\\");
+            for event in ingress.advance(command.as_bytes(), cursor()).events {
+                match event {
+                    TerminalGraphicsEvent::ImageReady(image) if id == 1 => {
+                        first = Some(Arc::downgrade(&image.rgba));
+                    }
+                    TerminalGraphicsEvent::Delete { id: Some(id) } => deleted.push(id),
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            first.unwrap().upgrade().is_none(),
+            "eviction must release parser pixels"
+        );
+        assert_eq!(deleted, [TerminalImageId(1)]);
+        let events = ingress
+            .advance(b"\x1b_Ga=p,i=2,C=1;\x1b\\", cursor())
+            .events;
+        assert!(events.iter().any(|event| matches!(event,
+            TerminalGraphicsEvent::Place(placement) if placement.id == TerminalImageId(2)
+                && placement.source_width == 512 && placement.source_height == 512)));
     }
 
     #[test]
@@ -170,6 +242,37 @@ mod tests {
         assert_eq!(image.frames.len(), 2);
         assert_eq!(image.frames[0].delay_ms_numerator, 50);
         assert_eq!(image.frames[1].delay_ms_numerator, 80);
+        assert!(Arc::ptr_eq(&image.rgba, &image.frames[0].rgba));
+    }
+
+    #[test]
+    fn decoded_image_limits_cover_headers_and_accumulated_gif_frames() {
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = GifEncoder::new(&mut bytes);
+            encoder
+                .encode_frames((0..2).map(|_| {
+                    Frame::new(RgbaImage::from_pixel(
+                        512,
+                        512,
+                        image::Rgba([255, 0, 0, 255]),
+                    ))
+                }))
+                .unwrap();
+        }
+        assert!(matches!(
+            decode_image_bytes(&bytes, DEFAULT_PIXEL_LIMIT, 1),
+            Err(GraphicsError::StorageLimitExceeded)
+        ));
+        assert!(matches!(
+            decode_image_bytes(&bytes, 512, 16),
+            Err(GraphicsError::PixelLimitExceeded)
+        ));
+        let decoded = decode_image_bytes(&bytes, DEFAULT_PIXEL_LIMIT, 2).unwrap();
+        assert_eq!(
+            decoded.frames[1].rgba.as_ref(),
+            vec![255, 0, 0, 255].repeat(512 * 512)
+        );
     }
 
     #[test]
