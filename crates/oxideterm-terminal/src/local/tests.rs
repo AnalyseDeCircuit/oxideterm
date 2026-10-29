@@ -21,6 +21,32 @@ mod tests {
         process::{parse_lsof_cwd, parse_process_table_for_group},
     };
 
+    #[test]
+    fn cursor_reports_reach_the_pty_without_draining_ui_events() {
+        for direct_reply in [false, true] {
+            let (mut listener, events) = local_event_channel();
+            let (protocol_tx, protocol_rx) = unbounded();
+            if direct_reply {
+                listener.protocol_tx = Some(protocol_tx);
+            }
+            let size = TerminalSize { cols: 80, rows: 24, cell_width: 0, cell_height: 0 };
+            let mut term = Term::new(Config::default(), &size, listener);
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, b"\x1b[12;7H\x1b[6n");
+            if direct_reply {
+                assert_eq!(protocol_rx.try_recv().unwrap(), "\x1b[12;7R");
+                assert!(!events.rx.try_iter().any(|event| matches!(event, AlacEvent::PtyWrite(_))));
+            } else {
+                // tmux pane owners still receive their replies for pane-specific routing.
+                let replies = events.rx.try_iter().filter_map(|event| match event {
+                    AlacEvent::PtyWrite(text) => Some(text),
+                    _ => None,
+                }).collect::<Vec<_>>();
+                assert_eq!(replies, ["\x1b[12;7R"]);
+            }
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn local_pty_exit_records_actual_child_code_without_input() {

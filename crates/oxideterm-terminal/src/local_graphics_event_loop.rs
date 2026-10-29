@@ -98,6 +98,7 @@ pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     tx: Sender<LocalGraphicsMsg>,
     terminal: Arc<FairMutex<Term<U>>>,
     event_proxy: U,
+    protocol_rx: crossbeam_channel::Receiver<String>,
     drain_on_exit: bool,
     read_eof: bool,
     graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
@@ -118,6 +119,7 @@ where
     pub(crate) fn new(
         terminal: Arc<FairMutex<Term<U>>>,
         event_proxy: U,
+        protocol_rx: crossbeam_channel::Receiver<String>,
         pty: tty::Pty,
         drain_on_exit: bool,
         graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
@@ -143,6 +145,7 @@ where
             tx,
             terminal,
             event_proxy,
+            protocol_rx,
             drain_on_exit,
             read_eof: false,
             graphics_tx,
@@ -692,7 +695,14 @@ where
         })
     }
 
+    fn queue_protocol_replies(&self, state: &mut LocalGraphicsState) {
+        for reply in self.protocol_rx.try_iter() {
+            state.push_priority_write(Cow::Owned(reply.into_bytes()));
+        }
+    }
+
     fn pty_write(&mut self, state: &mut LocalGraphicsState) -> io::Result<()> {
+        self.queue_protocol_replies(state);
         state.ensure_next();
 
         'write_many: while let Some(mut current) = state.take_current() {
@@ -964,6 +974,7 @@ where
                         }
                     }
 
+                    self.queue_protocol_replies(&mut state);
                     let needs_write = state.needs_write();
                     #[cfg(target_os = "macos")]
                     let needs_read = false;

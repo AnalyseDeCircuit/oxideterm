@@ -130,7 +130,11 @@ impl LocalPtySession {
             prepare_local_shell_launch(&local_config, &shell, terminal_env, base_shell_args);
         let shell_args = launch.args;
 
-        let (listener, event_rx) = local_event_channel();
+        let (mut listener, event_rx) = local_event_channel();
+        let (protocol_tx, protocol_rx) = unbounded();
+        // Only the outer terminal replies directly. tmux pane listeners keep
+        // their per-pane routing through the control-mode owner.
+        listener.protocol_tx = Some(protocol_tx);
         let tmux_display = Arc::new(crate::tmux::TmuxDisplay::default());
         let (graphics_tx, graphics_rx) = unbounded();
         let (magic_tx, magic_rx) = unbounded();
@@ -194,6 +198,7 @@ impl LocalPtySession {
         let event_loop = LocalGraphicsEventLoop::new(
             term.clone(),
             listener.clone(),
+            protocol_rx,
             pty,
             true,
             graphics_tx,

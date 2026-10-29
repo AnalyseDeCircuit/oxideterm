@@ -1,6 +1,7 @@
 #[derive(Clone)]
 struct LocalEventListener {
     tx: Sender<AlacEvent>,
+    protocol_tx: Option<Sender<String>>,
     wakeup_pending: Arc<std::sync::atomic::AtomicBool>,
     activity: crate::activity::TerminalActivitySender,
 }
@@ -18,6 +19,7 @@ fn local_event_channel() -> (LocalEventListener, LocalEventReceiver) {
     (
         LocalEventListener {
             tx,
+            protocol_tx: None,
             wakeup_pending: wakeup_pending.clone(),
             activity: activity_tx,
         },
@@ -57,6 +59,14 @@ impl LocalEventReceiver {
 
 impl EventListener for LocalEventListener {
     fn send_event(&self, event: AlacEvent) {
+        if let AlacEvent::PtyWrite(text) = &event
+            && let Some(tx) = &self.protocol_tx
+        {
+            // ConPTY waits for cursor reports after resize. Reply on the PTY
+            // worker even when the pane is hidden or the UI thread is busy.
+            let _ = tx.send(text.clone());
+            return;
+        }
         let is_wakeup = matches!(event, AlacEvent::Wakeup);
         if is_wakeup
             && self
