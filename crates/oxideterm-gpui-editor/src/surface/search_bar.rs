@@ -111,7 +111,7 @@ mod tests {
             ))
         });
         cx.simulate_keystrokes(&format!("{modifier}-v"));
-        editor.read_with(cx, |editor, _| assert_eq!(editor.find_matches, vec![]));
+        editor.read_with(cx, |editor, _| assert!(editor.find_matches.is_empty()));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let regex = cx.debug_bounds("find-use-regex").unwrap();
         cx.simulate_click(regex.center(), Modifiers::default());
@@ -152,7 +152,7 @@ mod tests {
             );
             editor.set_find_query("[", cx);
             assert!(editor.find_regex_error);
-            assert_eq!(editor.find_matches, vec![]);
+            assert!(editor.find_matches.is_empty());
             editor.replace_all_find_matches("changed", cx);
             assert_eq!(
                 editor.buffer.text(),
@@ -160,7 +160,7 @@ mod tests {
             );
             editor.set_find_query("^", cx);
             assert!(!editor.find_regex_error);
-            assert_eq!(editor.find_matches, vec![]);
+            assert!(editor.find_matches.is_empty());
             editor.set_find_query("alph", cx);
             assert_eq!(
                 editor
@@ -173,7 +173,7 @@ mod tests {
             let mut settings = editor.settings.clone();
             settings.find_whole_word = true;
             editor.set_settings(settings.clone(), cx);
-            assert_eq!(editor.find_matches, vec![]);
+            assert!(editor.find_matches.is_empty());
             settings.find_whole_word = false;
             editor.set_settings(settings, cx);
             assert_eq!(
@@ -707,7 +707,7 @@ impl TextEditorView {
             .map_or(0, |(current, _)| current);
         let match_label = if self.find_regex_error {
             labels.invalid_regex.clone()
-        } else if self.find_query.is_empty() {
+        } else if self.find_query.is_empty() || self.find_work.pending {
             String::new()
         } else if match_count == 0 {
             labels.no_results.clone()

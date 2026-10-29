@@ -348,7 +348,7 @@ impl TextEditorView {
     fn after_history_change(&mut self, cx: &mut Context<Self>) {
         self.request_syntax(None, true, cx);
         self.clear_folds_after_buffer_change();
-        self.refresh_find_matches();
+        self.refresh_find_matches(cx);
         self.secondary_selections.clear();
         self.save_status = if self.buffer.is_dirty() {
             EditorSaveStatus::Dirty

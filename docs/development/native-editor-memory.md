@@ -2,6 +2,73 @@
 
 Date: 2026-10-27. Baseline: main at 38fa618ba; subsequent changes are recorded by batch below.
 
+## Tenth batch: editor search and shared edit text (2026-10-29)
+
+Search and snapshot-append baselines were recorded at `3321229af` with the probe added before
+production changes. The deletion baseline was recorded after the search changes but before
+changing buffer storage; that probe uses `TextBuffer` directly, without an editor or search.
+
+### Search leaves the UI executor and stores compact ranges
+
+Documents over 64 KiB use one background search per editor. New requests invalidate the worker
+and retain only the latest request state until it finishes. Completion checks both generation
+and document version. Navigation and replacement requested while searching wait for current
+results; changing the query cancels those queued actions. Small inputs still finish inline.
+Closing the editor cancels its work. A result for a hidden editor does not rebuild its released
+row cache; revealing the selected match waits until the editor is visible again.
+
+Equal-length matches store one shared length and 32-bit start offsets. Variable-length matches
+add end offsets, and documents with larger offsets retain full-width coordinates. Painting and
+navigation read this representation directly. Literal replacement reuses the current match
+index and one shared replacement allocation instead of rescanning into another match vector
+and cloning the replacement string for every occurrence.
+
+### Snapshots and undo share inserted text allocations
+
+Small inserts append only to an exclusively owned chunk, up to 64 KiB. Large pastes keep their
+owned allocation. A snapshot holding an older chunk no longer forces the next edit to clone
+the complete accumulated insertion buffer. Undo records for ranges within one piece share the
+underlying allocation and range; restoring them reuses that allocation in the piece table.
+Reclamation keeps bytes needed by snapshots or history and removes unused current-buffer
+references. Multi-piece deleted ranges still copy their replacement text for contiguous reads.
+
+### Paired measurements
+
+macOS, the same development profile, no concurrent builds, one run per side. Values below are
+live malloc allocation deltas after each operation, not process RSS or sampled peak memory.
+The search fixture is 5,000,000 bytes with 1,000,000 matches; the document row index is populated
+before timing. Search allocation includes completion-related runtime allocations. Each buffer
+fixture holds an immutable snapshot of 8 MiB text while appending one character or deleting all
+but its first and last bytes. The retained snapshot and source bytes are outside those deltas.
+
+| Operation | Additional live heap before / after | Operation time before / after, ms |
+| --- | ---: | ---: |
+| Million-match search | 16.000 / 4.782 MiB | UI dispatch: 171.792 / 0.049 |
+| Append with a retained snapshot | 16,777,328 / 160 bytes | 0.164 / 0.002 |
+| Delete with a retained snapshot and undo | 8,388,928 / 320 bytes | 0.173 / 0.009 |
+
+Search completion took 171.821 ms before and 175.773 ms after: the benefit is 70.1% less retained
+search-related heap and moving the scan off the UI executor, rather than faster total scanning.
+The buffer probes validate final text and undo/redo. They measure elimination of additional
+copies; the original 8 MiB remains available to the snapshot and history.
+
+```sh
+cargo test -p oxideterm-gpui-editor --lib editor_search_snapshot_memory -- --ignored --nocapture --test-threads=1
+```
+
+### Verification and remaining work
+
+- Editor core: 28 tests passed; GPUI editor: 41 passed. Existing coverage exercises Unicode,
+  cross-piece and cross-line searches, captures, replacement, saved revisions, undo/redo,
+  coordinates, wrapping, syntax and hidden-tab restoration.
+- The asynchronous search regression checks obsolete queries, editing during a pending search,
+  queued navigation/replacement, regex, clearing search and hidden-tab layout retention.
+- `cargo check -p oxideterm-gpui-app` passed. No separate GUI instance was started.
+- Regex matching still needs contiguous text and checks cancellation between iterator results;
+  one regex search operation is not forcibly interrupted. Replace-all application still runs
+  on the UI executor. Multi-piece undo text and initial full-document layout remain candidates
+  for subsequent work. Native scrolling and typing feel remain manual acceptance.
+
 ## Ninth batch: reduce work within the existing memory budgets (2026-10-28)
 
 Baseline: `df7538086`, with the paced-playback and statistics probes added before production

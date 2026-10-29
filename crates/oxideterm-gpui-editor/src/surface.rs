@@ -15,7 +15,7 @@ use gpui::{
     SharedString, Task, TextRun, Window, div, point, prelude::*, px, rgb,
 };
 use oxideterm_editor_core::{
-    BufferOffset, Cursor, EditTransaction, FindMatch, LineCol, Selection, TextBuffer, TextEdit,
+    BufferOffset, Cursor, EditTransaction, FindMatches, LineCol, Selection, TextBuffer, TextEdit,
     TextRange,
 };
 use oxideterm_editor_syntax::{
@@ -461,7 +461,8 @@ pub struct TextEditorView {
     find_regex: bool,
     find_regex_error: bool,
     find_pattern_cache: RefCell<Option<search::FindPatternCache>>,
-    find_matches: Vec<FindMatch>,
+    find_matches: FindMatches,
+    find_work: search::FindWork,
     active_find_index: Option<usize>,
     search_labels: Option<EditorSearchLabels>,
     search_bar: Option<EditorSearchBar>,
@@ -584,7 +585,8 @@ impl TextEditorView {
             find_regex: false,
             find_regex_error: false,
             find_pattern_cache: RefCell::new(None),
-            find_matches: Vec::new(),
+            find_matches: FindMatches::default(),
+            find_work: search::FindWork::default(),
             active_find_index: None,
             search_labels: None,
             search_bar: None,
@@ -715,7 +717,7 @@ impl TextEditorView {
             self.save_status = EditorSaveStatus::Dirty;
             self.request_syntax(None, true, cx);
             self.clear_folds_after_buffer_change();
-            self.refresh_find_matches();
+            self.refresh_find_matches(cx);
             if self.render_cache_active {
                 self.viewport
                     .clamp(self.document_row_count(), self.metrics.line_height);
@@ -808,7 +810,7 @@ impl TextEditorView {
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
         }
-        self.refresh_find_matches();
+        self.refresh_find_matches(cx);
         cx.notify();
     }
 
@@ -1157,7 +1159,7 @@ impl TextEditorView {
             self.save_status = EditorSaveStatus::Dirty;
             self.clear_folds_after_buffer_change();
             self.restore_rows_after_edit(row_edit);
-            self.refresh_find_matches();
+            self.refresh_find_matches(cx);
             if self.render_cache_active {
                 self.viewport
                     .clamp(self.document_row_count(), self.metrics.line_height);
@@ -1220,7 +1222,7 @@ impl TextEditorView {
             self.save_status = EditorSaveStatus::Dirty;
             self.request_syntax(None, true, cx);
             self.clear_folds_after_buffer_change();
-            self.refresh_find_matches();
+            self.refresh_find_matches(cx);
             if self.render_cache_active {
                 self.viewport
                     .clamp(self.document_row_count(), self.metrics.line_height);
@@ -2275,7 +2277,6 @@ mod tests {
             assert!(editor.bracket_index.is_empty());
             assert!(editor.structure_cache.columns_for_line(1).is_empty());
             assert!(editor.find_matches.is_empty());
-            assert_eq!(editor.find_matches.capacity(), 0);
             assert_eq!(editor.buffer.line_text(0).as_deref(), Some("zfn main() {"));
         });
     }

@@ -503,10 +503,10 @@ impl TextBuffer {
         let mut delta: isize = 0;
 
         for edit in &edits {
-            let original = self.storage.slice_to_string(edit.range.as_range());
+            let original = self.storage.shared_slice(edit.range.as_range());
             let start_after = apply_delta(edit.range.start.0, delta)?;
             let end_after = start_after + edit.replacement.len();
-            inverse.push(TextEdit::new(
+            inverse.push(TextEdit::with_shared_text(
                 TextRange::new(BufferOffset(start_after), BufferOffset(end_after)),
                 original,
             ));
@@ -634,7 +634,7 @@ mod tests {
             &shared.storage.original,
             &buffer.storage.original
         ));
-        assert!(Arc::ptr_eq(&shared.storage.add, &buffer.storage.add));
+        assert!(shared.storage.add[0].same_allocation(&buffer.storage.add[0]));
         buffer
             .replace_selection(
                 Selection::new(BufferOffset(8), BufferOffset(8 + middle.len())),
@@ -642,7 +642,13 @@ mod tests {
             )
             .unwrap();
         assert_eq!(buffer.text(), "baseleftright");
-        assert_eq!(buffer.storage.add.as_str(), "leftright");
+        assert!(shared.storage.add[0].same_allocation(&buffer.storage.add[0]));
+        assert_eq!(
+            buffer.undo_stack.last().unwrap().edits[0]
+                .replacement
+                .as_ptr(),
+            shared.storage.add[0].text().as_ptr().wrapping_add(4),
+        );
         buffer
             .replace_selection(Selection::caret(BufferOffset(8)), "!")
             .unwrap();
@@ -678,10 +684,14 @@ mod tests {
         }
         assert_eq!(buffer.text(), "original");
         eprintln!(
-            "EDITOR_RETENTION text_bytes={} added_bytes={} added_capacity={} undo_entries={} redo_entries={}",
+            "EDITOR_RETENTION text_bytes={} added_bytes={} undo_entries={} redo_entries={}",
             buffer.len(),
-            buffer.storage.add.len(),
-            buffer.storage.add.capacity(),
+            buffer
+                .storage
+                .add
+                .iter()
+                .map(|chunk| chunk.text().len())
+                .sum::<usize>(),
             buffer.undo_stack.len(),
             buffer.redo_stack.len()
         );
@@ -727,7 +737,7 @@ mod tests {
         buffer
             .replace_selection(Selection::caret(BufferOffset(4)), "!")
             .unwrap();
-        assert_eq!(buffer.storage.original.as_ref(), "leftright");
+        assert_eq!(buffer.storage.original.len(), 4 + 3 * 1024 + 5);
         assert_eq!(buffer.text(), "left!right");
         assert_eq!(snapshot.as_ref(), "leftright");
         buffer.undo().unwrap();

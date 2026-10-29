@@ -2,6 +2,91 @@ use super::*;
 use gpui::{AvailableSpace, TestAppContext, size};
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
+#[gpui::test]
+#[ignore = "manual dense-search and shared-snapshot allocation benchmark"]
+fn editor_search_snapshot_memory(cx: &mut TestAppContext) {
+    let editor = cx.new(|cx| {
+        TextEditorView::new(
+            "word word word word\n".repeat(250_000),
+            &oxideterm_theme::default_tokens(),
+            cx,
+        )
+    });
+    // Separate search storage from the existing document row index.
+    editor.update(cx, |editor, _| {
+        let _ = editor.display_rows();
+    });
+    let before = allocator_bytes();
+    let started = Instant::now();
+    editor.update(cx, |editor, cx| editor.set_find_query("word", cx));
+    let dispatch_ms = started.elapsed().as_secs_f64() * 1000.0;
+    cx.run_until_parked();
+    let complete_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let retained = allocator_bytes().saturating_sub(before);
+    editor.read_with(cx, |editor, _| {
+        assert_eq!(editor.find_matches.len(), 1_000_000);
+        let last = editor.find_matches.iter().last().unwrap();
+        assert_eq!(last.range.start.0..last.range.end.0, 4_999_995..4_999_999);
+    });
+    eprintln!(
+        "EDITOR_SEARCH retained={retained} dispatch_ms={dispatch_ms:.3} complete_ms={complete_ms:.3}"
+    );
+    drop(editor);
+    cx.run_until_parked();
+
+    let mut buffer = TextBuffer::new("");
+    buffer
+        .replace_selection(
+            Selection::caret(BufferOffset(0)),
+            "x".repeat(8 * 1024 * 1024),
+        )
+        .unwrap();
+    let snapshot = buffer.shared_snapshot();
+    let before = allocator_bytes();
+    let started = Instant::now();
+    buffer
+        .replace_selection(Selection::caret(BufferOffset(buffer.len())), "z")
+        .unwrap();
+    let append_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let retained = allocator_bytes().saturating_sub(before);
+    assert_eq!(snapshot.len(), 8 * 1024 * 1024);
+    assert_eq!(
+        buffer
+            .slice(TextRange::new(
+                BufferOffset(buffer.len() - 2),
+                BufferOffset(buffer.len())
+            ))
+            .unwrap(),
+        "xz"
+    );
+    buffer.undo().unwrap();
+    assert_eq!(buffer.len(), snapshot.len());
+    buffer.redo().unwrap();
+    assert_eq!(buffer.len(), snapshot.len() + 1);
+    eprintln!("EDITOR_SNAPSHOT_APPEND retained={retained} append_ms={append_ms:.3}");
+
+    let mut buffer = TextBuffer::new("x".repeat(8 * 1024 * 1024));
+    let snapshot = buffer.shared_snapshot();
+    let before = allocator_bytes();
+    let started = Instant::now();
+    buffer
+        .replace_selection(
+            Selection::new(BufferOffset(1), BufferOffset(buffer.len() - 1)),
+            "",
+        )
+        .unwrap();
+    let delete_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let retained = allocator_bytes().saturating_sub(before);
+    assert_eq!(buffer.text(), "xx");
+    buffer.undo().unwrap();
+    assert_eq!(buffer.len(), snapshot.len());
+    assert!(buffer.with_temporary_text(|text| text.bytes().all(|byte| byte == b'x')));
+    buffer.redo().unwrap();
+    assert_eq!(buffer.text(), "xx");
+    eprintln!("EDITOR_SNAPSHOT_DELETE retained={retained} delete_ms={delete_ms:.3}");
+}
+
 #[gpui::test]
 #[ignore = "manual release-profile editor input and headless paint benchmark"]
 fn editor_input_performance(cx: &mut TestAppContext) {
@@ -243,6 +328,9 @@ fn editor_memory_performance(cx: &mut TestAppContext) {
         editor.update(cx, |editor, cx| {
             editor.set_find_case_sensitive(true, cx);
             editor.set_find_query("zzzz", cx);
+        });
+        cx.run_until_parked();
+        editor.read_with(cx, |editor, _| {
             assert_eq!(
                 editor
                     .find_matches

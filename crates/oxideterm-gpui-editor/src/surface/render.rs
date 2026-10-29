@@ -1405,8 +1405,9 @@ impl TextEditorView {
         let first = self
             .find_matches
             .partition_point(|hit| hit.range.end.0 <= line_range.start);
-        self.find_matches[first..]
+        self.find_matches
             .iter()
+            .skip(first)
             .take_while(|hit| hit.range.start.0 < line_range.end)
             .filter_map(|hit| {
                 selection_byte_range_for_line(

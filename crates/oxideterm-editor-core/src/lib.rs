@@ -11,6 +11,7 @@ mod buffer;
 mod cursor;
 mod edit;
 mod error;
+mod find_matches;
 mod line_index;
 mod piece_table;
 mod search;
@@ -21,8 +22,9 @@ mod word;
 
 pub use buffer::{BufferChange, TextBuffer, TextSnapshot};
 pub use cursor::Cursor;
-pub use edit::{EditTransaction, TextEdit};
+pub use edit::{EditTransaction, SharedText, TextEdit};
 pub use error::EditorError;
+pub use find_matches::FindMatches;
 pub use search::{FindMatch, FindOptions, find_all, replace_all_transaction};
 pub use selection::Selection;
 pub use types::{BufferOffset, LineCol, TextRange};

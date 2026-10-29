@@ -59,6 +59,7 @@ impl TextEditorView {
             self.request_syntax(None, true, cx);
             self.viewport
                 .clamp(self.document_row_count(), self.metrics.line_height);
+            self.reveal_pending_find_match();
         } else {
             self.syntax_generation.fetch_add(1, Ordering::AcqRel);
             self.pending_syntax = None;

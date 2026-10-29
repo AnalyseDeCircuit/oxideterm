@@ -1,7 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::{BufferOffset, EditTransaction, TextBuffer, TextEdit, TextRange};
+use crate::{
+    BufferOffset, EditTransaction, FindMatches, TextBuffer, TextEdit, TextRange, TextSnapshot,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FindOptions {
@@ -20,68 +22,110 @@ pub fn find_all(source: &str, query: &str, options: FindOptions) -> Vec<FindMatc
     }
 
     let mut matches = Vec::new();
-    append_window_matches(source, query, options, 0, 0, source.len(), &mut matches);
+    append_window_matches(source, query, options, 0, 0, source.len(), &mut |hit| {
+        matches.push(hit);
+        true
+    });
     matches
 }
 
 impl TextBuffer {
     /// Search pieces with bounded overlap, including matches crossing edits or newlines.
     pub fn find_all(&self, query: &str, options: FindOptions) -> Vec<FindMatch> {
-        if query.is_empty() {
-            return Vec::new();
-        }
-        const CHUNK_BYTES: usize = 64 * 1024;
-        let mut window = String::new();
-        let mut base = 0;
-        let mut scanned = 0;
         let mut matches = Vec::new();
-        for piece in self.chunks() {
-            let mut remaining = piece;
-            while !remaining.is_empty() {
-                let mut end = remaining.len().min(CHUNK_BYTES);
-                while !remaining.is_char_boundary(end) {
-                    end -= 1;
-                }
-                window.push_str(&remaining[..end]);
-                remaining = &remaining[end..];
-                // Leave the longest candidate plus one Unicode neighbour for
-                // whole-word checks; retain another neighbour before the cursor.
-                let mut limit = window.len().saturating_sub(query.len().saturating_add(4));
-                while !window.is_char_boundary(limit) {
-                    limit -= 1;
-                }
-                if base + limit <= scanned {
-                    continue;
-                }
-                append_window_matches(
-                    &window,
-                    query,
-                    options,
-                    base,
-                    scanned,
-                    base + limit,
-                    &mut matches,
-                );
-                scanned = base + limit;
-                let mut discard = limit.saturating_sub(4);
-                while !window.is_char_boundary(discard) {
-                    discard -= 1;
-                }
-                window.drain(..discard);
-                base += discard;
-            }
-        }
-        append_window_matches(
-            &window,
+        scan_chunks(
+            self.chunks(),
+            self.len(),
             query,
             options,
-            base,
-            scanned,
-            self.len(),
-            &mut matches,
+            &|| false,
+            &mut |hit| {
+                matches.push(hit);
+                true
+            },
         );
         matches
     }
+}
+
+impl TextSnapshot {
+    /// Cancellation returns no partial result, so obsolete searches cannot be published.
+    pub fn find_all_controlled(
+        &self,
+        query: &str,
+        options: FindOptions,
+        cancelled: impl Fn() -> bool,
+    ) -> Option<FindMatches> {
+        let mut matches = FindMatches::default();
+        scan_chunks(
+            self.chunks(),
+            self.len(),
+            query,
+            options,
+            &cancelled,
+            &mut |hit| {
+                if cancelled() {
+                    return false;
+                }
+                matches.push(hit);
+                true
+            },
+        )
+        .then_some(matches)
+    }
+}
+
+fn scan_chunks<'a>(
+    chunks: impl Iterator<Item = &'a str>,
+    len: usize,
+    query: &str,
+    options: FindOptions,
+    cancelled: &impl Fn() -> bool,
+    emit: &mut impl FnMut(FindMatch) -> bool,
+) -> bool {
+    if query.is_empty() {
+        return true;
+    }
+    const CHUNK_BYTES: usize = 64 * 1024;
+    let mut window = String::new();
+    let mut base = 0;
+    let mut scanned = 0;
+    for piece in chunks {
+        let mut remaining = piece;
+        while !remaining.is_empty() {
+            if cancelled() {
+                return false;
+            }
+            let mut end = remaining.len().min(CHUNK_BYTES);
+            while !remaining.is_char_boundary(end) {
+                end -= 1;
+            }
+            window.push_str(&remaining[..end]);
+            remaining = &remaining[end..];
+            // Leave the longest candidate plus one Unicode neighbour for
+            // whole-word checks; retain another neighbour before the cursor.
+            let mut limit = window.len().saturating_sub(query.len().saturating_add(4));
+            while !window.is_char_boundary(limit) {
+                limit -= 1;
+            }
+            if base + limit <= scanned {
+                continue;
+            }
+            if !append_window_matches(&window, query, options, base, scanned, base + limit, emit) {
+                return false;
+            }
+            scanned = base + limit;
+            let mut discard = limit.saturating_sub(4);
+            while !window.is_char_boundary(discard) {
+                discard -= 1;
+            }
+            window.drain(..discard);
+            base += discard;
+        }
+    }
+    !cancelled()
+        && append_window_matches(&window, query, options, base, scanned, len, emit)
+        && !cancelled()
 }
 
 fn append_window_matches(
@@ -91,8 +135,8 @@ fn append_window_matches(
     base: usize,
     start: usize,
     end: usize,
-    matches: &mut Vec<FindMatch>,
-) {
+    emit: &mut impl FnMut(FindMatch) -> bool,
+) -> bool {
     // Keep leading context in source rather than slicing at start: whole-word
     // matching must see the character immediately before the candidate.
     let mut search_from = start - base;
@@ -105,18 +149,21 @@ fn append_window_matches(
             && source.is_char_boundary(match_end)
             && (!options.whole_word || is_whole_word_match(source, relative, match_end))
         {
-            matches.push(FindMatch {
+            if !emit(FindMatch {
                 range: TextRange::new(
                     BufferOffset(base + relative),
                     BufferOffset(base + match_end),
                 ),
-            });
+            }) {
+                return false;
+            }
         }
         search_from = next_search_offset(source, relative);
         if search_from >= source.len() {
             break;
         }
     }
+    true
 }
 
 pub fn replace_all_transaction(
@@ -213,6 +260,12 @@ mod tests {
             for hits in [
                 find_all(source, query, options),
                 buffer.find_all(query, options),
+                buffer
+                    .shared_snapshot()
+                    .find_all_controlled(query, options, || false)
+                    .unwrap()
+                    .iter()
+                    .collect(),
             ] {
                 assert_eq!(
                     hits.into_iter()
@@ -257,6 +310,21 @@ mod tests {
                 .collect::<Vec<_>>(),
             [1..1 + query.len()]
         );
+    }
+
+    #[test]
+    fn cancelled_snapshot_search_discards_partial_results() {
+        let buffer = TextBuffer::new("word ".repeat(30_000));
+        let checkpoints = std::cell::Cell::new(0);
+        let result =
+            buffer
+                .shared_snapshot()
+                .find_all_controlled("word", FindOptions::default(), || {
+                    checkpoints.set(checkpoints.get() + 1);
+                    checkpoints.get() > 10
+                });
+        assert!(result.is_none());
+        assert_eq!(checkpoints.get(), 11);
     }
 
     #[test]

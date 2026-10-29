@@ -84,10 +84,6 @@ mod tests {
                 );
                 editor.set_find_case_sensitive(true, cx);
                 editor.set_find_query("中文e\u{301}👨‍👩‍👧‍👦", cx);
-                assert_eq!(
-                    editor.find_matches[0].range.start.0..editor.find_matches[0].range.end.0,
-                    180224..source.len() - 4
-                );
                 editor
                     .cursor
                     .set_selection(Selection::caret(BufferOffset(byte)));
@@ -96,10 +92,13 @@ mod tests {
                 assert_eq!(editor.buffer.text(), source);
             })
         });
+        cx.run_until_parked();
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
         editor.read_with(cx, |editor, _| {
+            let hit = editor.find_matches.get(0).unwrap();
+            assert_eq!(hit.range.start.0..hit.range.end.0, 180224..source.len() - 4);
             assert!(
                 editor.highlight_chunk_cache.borrow().retained_bytes
                     < super::super::HighlightChunkCache::BYTE_BUDGET
