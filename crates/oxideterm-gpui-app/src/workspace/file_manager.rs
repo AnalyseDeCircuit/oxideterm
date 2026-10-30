@@ -8,9 +8,7 @@ use gpui::{
 };
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
-use oxideterm_gpui_markdown::{
-    MarkdownOptions, MarkdownVirtualListScrollHandle, highlight, markdown_virtual_with_code_actions,
-};
+use oxideterm_gpui_markdown::{MarkdownOptions, MarkdownVirtualListScrollHandle, highlight};
 use oxideterm_gpui_ui::{
     button::{ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions},
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
@@ -361,6 +359,7 @@ pub(super) struct FileManagerState {
     pub(super) preview_image_rotation: i32,
     pub(super) preview_code_scroll: UniformListScrollHandle,
     pub(super) preview_markdown_scroll: MarkdownVirtualListScrollHandle,
+    pub(super) preview_markdown_cache: MarkdownPreviewCache<LocalPreview>,
     pub(in crate::workspace) preview_document_scroll: ScrollHandle,
     pub(in crate::workspace) preview_metadata_scroll: ScrollHandle,
     pub(super) preview_archive_list_state: ListState,
@@ -437,6 +436,7 @@ impl Default for FileManagerState {
             preview_image_rotation: 0,
             preview_code_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
+            preview_markdown_cache: MarkdownPreviewCache::default(),
             preview_document_scroll: ScrollHandle::new(),
             preview_metadata_scroll: ScrollHandle::new(),
             // Archive previews can contain thousands of entries. Keep the file
@@ -487,6 +487,7 @@ impl FileManagerState {
         self.preview_markdown_source = false;
         self.preview_code_scroll = UniformListScrollHandle::new();
         self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.preview_markdown_cache = MarkdownPreviewCache::default();
         self.preview_document_scroll = ScrollHandle::new();
         self.preview_metadata_scroll = ScrollHandle::new();
         self.preview_stream = FileManagerPreviewStreamState::default();
@@ -1030,6 +1031,66 @@ mod tests {
     use super::*;
     use gpui::TestAppContext;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[test]
+    fn markdown_preview_cache_tracks_payload_options_and_release() {
+        let mut cache = MarkdownPreviewCache::default();
+        let mut scroll = MarkdownVirtualListScrollHandle::new();
+        let owner = Arc::new(LocalPreview::Markdown {
+            content: "'quoted'".into(),
+        });
+        let text = |document: &MarkdownDocument| {
+            let mut fragments = Vec::new();
+            oxideterm_gpui_markdown::render::visit_selectable_text(
+                document,
+                &MarkdownOptions::default(),
+                &mut |_, text| fragments.push(text.to_owned()),
+            );
+            fragments.join("\n")
+        };
+        let document = cache.document(&owner, "'quoted'", true, &mut scroll);
+        let reused = cache.document(&owner, "'quoted'", true, &mut scroll);
+        assert!(Arc::ptr_eq(&document.blocks, &reused.blocks));
+        assert_eq!(text(&document), "‘quoted’");
+        let plain = cache.document(&owner, "'quoted'", false, &mut scroll);
+        assert_eq!(text(&plain), "'quoted'");
+        let blocks = Arc::downgrade(&plain.blocks);
+        drop(plain);
+        cache.release(&mut scroll);
+        assert!(blocks.upgrade().is_none());
+        let resumed = cache.document(&owner, "'quoted'", false, &mut scroll);
+        assert_eq!(text(&resumed), "'quoted'");
+        let next = Arc::new(LocalPreview::Markdown {
+            content: "# Replacement".into(),
+        });
+        let replacement = cache.document(&next, "# Replacement", false, &mut scroll);
+        assert_eq!(text(&replacement), "Replacement");
+        assert_eq!(text(&resumed), "'quoted'");
+    }
+
+    #[gpui::test]
+    fn markdown_preview_cache_releases_on_close(cx: &mut TestAppContext) {
+        let manager = cx.new(|_| FileManagerState::default());
+        manager.update(cx, |state, cx| {
+            let owner = Arc::new(LocalPreview::Markdown {
+                content: "# Local".into(),
+            });
+            let document = state.preview_markdown_cache.document(
+                &owner,
+                "# Local",
+                true,
+                &mut state.preview_markdown_scroll,
+            );
+            let blocks = Arc::downgrade(&document.blocks);
+            drop(document);
+            state.preview = Some(owner);
+            state.close_dialog(cx);
+            assert!(
+                blocks.upgrade().is_none(),
+                "closed local preview retained its parsed document"
+            );
+        });
+    }
 
     fn cache_entry(name: &str) -> LocalFileEntry {
         LocalFileEntry {

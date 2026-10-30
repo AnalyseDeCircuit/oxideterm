@@ -368,6 +368,10 @@ impl WorkspaceApp {
                                     this.sftp_view().update(cx, |sftp, cx| {
                                         sftp.preview_markdown_source_mode =
                                             !sftp.preview_markdown_source_mode;
+                                        if sftp.preview_markdown_source_mode {
+                                            sftp.preview_markdown_cache
+                                                .release(&mut sftp.preview_markdown_scroll);
+                                        }
                                         cx.notify();
                                     });
                                     cx.stop_propagation();

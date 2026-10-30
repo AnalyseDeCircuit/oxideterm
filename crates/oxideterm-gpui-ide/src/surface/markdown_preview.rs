@@ -658,7 +658,7 @@ mod markdown_preview_tests {
         surface.update(cx, |surface, cx| {
             let state = &surface.markdown_previews[&tab];
             assert_eq!(
-                state.document.as_ref().unwrap().blocks,
+                *state.document.as_ref().unwrap().blocks,
                 vec![Block::Heading {
                     level: 1,
                     id: "unsaved".into(),

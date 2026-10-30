@@ -8,9 +8,7 @@ use gpui::{
 use oxideterm_connections::SshChannelStrategy;
 use oxideterm_editor_syntax::LanguageId;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
-use oxideterm_gpui_markdown::{
-    MarkdownVirtualListScrollHandle, markdown_virtual_with_code_actions,
-};
+use oxideterm_gpui_markdown::MarkdownVirtualListScrollHandle;
 use oxideterm_gpui_ui::{
     button::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions,
@@ -1079,6 +1077,7 @@ pub(super) struct SftpWorkspaceEntity {
     queue_resize_drag: Option<SftpQueueResizeDrag>,
     diff_scroll: UniformListScrollHandle,
     preview_markdown_scroll: MarkdownVirtualListScrollHandle,
+    preview_markdown_cache: MarkdownPreviewCache<PreviewContent>,
     pub(in crate::workspace) diff_document_scroll: ScrollHandle,
     pub(in crate::workspace) preview_document_scroll: ScrollHandle,
     pub(in crate::workspace) font_preview_scroll: ScrollHandle,
@@ -1214,6 +1213,7 @@ impl Default for SftpWorkspaceEntity {
             queue_resize_drag: None,
             diff_scroll: UniformListScrollHandle::new(),
             preview_markdown_scroll: MarkdownVirtualListScrollHandle::new(),
+            preview_markdown_cache: MarkdownPreviewCache::default(),
             diff_document_scroll: ScrollHandle::new(),
             preview_document_scroll: ScrollHandle::new(),
             font_preview_scroll: ScrollHandle::new(),
@@ -1550,6 +1550,7 @@ impl SftpWorkspaceEntity {
         self.preview_hex_loading_more = false;
         self.preview_markdown_source_mode = false;
         self.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+        self.preview_markdown_cache = MarkdownPreviewCache::default();
         self.preview_font_family = None;
         self.preview_font_error = None;
         self.preview_font_size = SFTP_PREVIEW_FONT_DEFAULT_SIZE;

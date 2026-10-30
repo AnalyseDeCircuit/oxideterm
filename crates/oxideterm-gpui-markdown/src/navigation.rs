@@ -1,10 +1,15 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::Rc,
+    sync::{Arc, Weak},
+};
 
 use gpui::{App, ScrollHandle, Window, point, px};
 
 use crate::{
     layout::MarkdownBlockLayout,
-    model::{Block, Inline, MarkdownDocument},
+    model::{Block, FootnoteDefinition, Inline, MarkdownDocument},
     options::MarkdownOptions,
 };
 
@@ -16,6 +21,7 @@ pub struct MarkdownNavigation {
 
 #[derive(Default, Debug)]
 struct NavigationState {
+    prepared: Option<(Weak<Vec<Block>>, Weak<Vec<FootnoteDefinition>>)>,
     offsets: HashMap<String, f32>,
     pending: Option<String>,
     ancestors: HashMap<String, Vec<String>>,
@@ -29,6 +35,7 @@ impl MarkdownNavigation {
         let mut state = self.state.borrow_mut();
         state.offsets = HashMap::new();
         state.ancestors = HashMap::new();
+        state.prepared = None;
     }
 
     pub fn new(scroll: ScrollHandle) -> Self {
@@ -38,10 +45,29 @@ impl MarkdownNavigation {
         }
     }
 
-    pub(crate) fn prepare(&self, document: &MarkdownDocument, opts: &MarkdownOptions) {
-        let layout = MarkdownBlockLayout::from_document(document, opts);
+    pub(crate) fn prepare(
+        &self,
+        document: &MarkdownDocument,
+        layout: &MarkdownBlockLayout,
+        opts: &MarkdownOptions,
+    ) {
         let mut state = self.state.borrow_mut();
         state.disclosures = opts.disclosures.clone();
+        if state.prepared.as_ref().is_some_and(|(blocks, notes)| {
+            blocks
+                .upgrade()
+                .is_some_and(|old| Arc::ptr_eq(&old, &document.blocks) || old == document.blocks)
+                && notes.upgrade().is_some_and(|old| {
+                    Arc::ptr_eq(&old, &document.footnotes) || old == document.footnotes
+                })
+        }) {
+            return;
+        }
+        state.prepared = Some((
+            Arc::downgrade(&document.blocks),
+            Arc::downgrade(&document.footnotes),
+        ));
+        state.offsets.clear();
         state.ancestors.clear();
         let mut top = 0.0;
         for (block, size) in document.blocks.iter().zip(layout.item_sizes().iter()) {
@@ -212,7 +238,11 @@ mod tests {
         );
         let opts = MarkdownOptions::default();
         let navigation = MarkdownNavigation::new(ScrollHandle::new());
-        navigation.prepare(&doc, &opts);
+        navigation.prepare(
+            &doc,
+            &MarkdownBlockLayout::from_document(&doc, &opts),
+            &opts,
+        );
         let mut state = navigation.state.borrow_mut();
         assert_eq!(
             state.ancestors["hidden"],
@@ -231,7 +261,12 @@ mod tests {
     fn heading_targets_include_nested_sections_and_decode_chinese_fragments() {
         let document = crate::parser::parse("# 开始\n\n> ## 嵌套\n\n# 开始");
         let navigation = MarkdownNavigation::new(ScrollHandle::new());
-        navigation.prepare(&document, &MarkdownOptions::default());
+        let opts = MarkdownOptions::default();
+        navigation.prepare(
+            &document,
+            &MarkdownBlockLayout::from_document(&document, &opts),
+            &opts,
+        );
         let state = navigation.state.borrow();
         let mut targets = state.offsets.keys().map(String::as_str).collect::<Vec<_>>();
         targets.sort_unstable();

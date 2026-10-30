@@ -2,6 +2,73 @@
 
 Date: 2026-10-27. Baseline: main at 38fa618ba; subsequent changes are recorded by batch below.
 
+## Fifteenth batch: shared Markdown trees and indexed block heights (2026-10-30)
+
+Baseline: `7c5d4aae2`. Parsed block and footnote roots now have shared immutable owners.
+Layout items borrow those roots; preparing an unchanged document reuses its layout before
+estimating block sizes. Height reuse after source-offset changes compares content directly,
+without cloning trees to remove source locations. Navigation reuses the prepared layout and
+keeps weak document identities, avoiding another tree copy and repeated target registration.
+
+Measured heights update a cumulative-height index in logarithmic time. Visible-range lookup
+uses that index instead of allocating every block's bounds and scanning them on each render.
+The compatibility size array used by scroll synchronization is generated lazily and reused
+until a measured height changes. Released previews retain geometry and disclosure state but
+drop their parsed document roots.
+
+File-manager and SFTP Markdown previews now cache parsing under their immutable preview
+payload owners. Repeated rendering reuses the parsed tree; changing the payload or smart
+punctuation invalidates it. Both keyboard and button transitions to source mode release the
+tree, and closing the preview releases its cache. Returning to the same preview reparses while
+retaining scroll position and reusable geometry. Existing relative-image rules are unchanged.
+
+### Same-workload layout measurements
+
+The fixture contains 10,000 paragraphs with bold text, Chinese, emoji and a link, totaling
+640,000 source bytes. Source text and the original parsed tree are prepared before measuring
+additional layout allocations. The initial preparation records every block at a known height
+of 100 pixels with a 10-pixel gap, then prepares navigation. Repeated preparations exercise
+the actual measurement, navigation and visible-window paths, with explicit expected ranges
+and spacer heights.
+
+Both runs use the same macOS development profile without concurrent builds. Live heap
+allocation comes from `malloc_zone_statistics`; a separate thread samples the repeated-
+preparation peak every 100 microseconds. Timings are individual paired runs.
+
+| Measurement | Before | After |
+| --- | ---: | ---: |
+| Additional retained layout heap, bytes | 6,566,928 | 328,000 |
+| Sampled extra peak during repeated preparation, bytes | 12,971,264 | 1,520 |
+| Initial preparation, ms | 10.643 | 3.409 |
+| 12 repeated preparations and window lookups, ms | 161.022 | 0.444 |
+| 1,000 visible-window lookups, ms | 272.228 | 0.284 |
+
+Additional retained layout heap falls from 6.26 MiB to 0.31 MiB, about 95%. These measurements
+exclude the original source/tree, native glyph layout, image resources and GPU rendering.
+The peak sampler can miss short-lived allocations; the result describes this layout workload,
+not the total application footprint or native frame rate.
+
+### Verification and remaining work
+
+- Markdown library: 46 tests passed; its manual allocation probe also passed separately.
+  Coverage includes parsing, selection text, anchors, disclosures, footnotes, measured-height
+  reuse, gap boundaries, bottom-of-document scrolling and real GPUI draw/scroll synchronization.
+- GPUI IDE: 43 tests passed, including preview modes, history and selection/clipboard behavior.
+- Application preview-cache regressions: 3 passed, covering reuse, parser-option changes,
+  payload replacement and release by the actual local/SFTP close paths. The existing Knowledge
+  background-note regression also passed, preserving unsaved contents, history and preview
+  restoration across cache release.
+- Ordinary `cargo check -p oxideterm-gpui-app` passed. No standalone native GUI was launched;
+  native visual and interactive acceptance remains manual.
+- Large code blocks, tables and lists still render their internal contents as a whole when
+  visible. Full-document selection text and repeated code highlighting remain separate targets.
+  Source-string convenience renderers still parse on each call; file-manager and SFTP previews
+  now use the parsed-document entry point.
+
+```sh
+cargo test -p oxideterm-gpui-markdown --lib markdown_layout_memory -- --ignored --nocapture --test-threads=1
+```
+
 ## Fourteenth batch: shared save contents, sparse folds and snapshot metadata (2026-10-30)
 
 Baseline: `c96366ddf` plus batches eleven through thirteen. Each probe was recorded before

@@ -107,7 +107,7 @@ impl MarkdownScrollSync {
             && let Some(anchor) = state.anchor
         {
             let mut distance = f64::INFINITY;
-            for (item, size) in layout.items().iter().zip(layout.item_sizes().iter()) {
+            for (item, size) in layout.items().zip(layout.item_sizes().iter()) {
                 let span = match item {
                     MarkdownLayoutItem::Block(block) => block.source_span(),
                     MarkdownLayoutItem::Footnotes(notes) => notes

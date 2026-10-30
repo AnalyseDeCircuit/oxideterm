@@ -1,18 +1,19 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Block-level layout estimates for virtualized markdown rendering.
-//!
-//! GPUI's variable-size virtual list needs a stable height before it decides
-//! which blocks to render.  These estimates intentionally live beside the
-//! markdown model so consumers such as SFTP preview do not need to approximate
-//! rendered markdown from the outside.
+//! Shared document layout and measured heights for windowed Markdown rendering.
 
-use std::{cell::RefCell, rc::Rc};
+use std::{
+    cell::{Ref, RefCell},
+    ops::Range,
+    rc::Rc,
+};
 
 use gpui::{Pixels, Size, px, size};
 
-use crate::model::{Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument};
+use crate::model::{
+    Block, FootnoteDefinition, Inline, ListItem, MarkdownDocument, blocks_same_content,
+};
 use crate::options::MarkdownOptions;
 use crate::style::BODY_LINE_HEIGHT;
 
@@ -25,19 +26,132 @@ const TABLE_ROW_EXTRA: f32 = 10.0;
 const MIN_BLOCK_HEIGHT: f32 = 18.0;
 const LINE_BREAK_ESTIMATED_TEXT_LEN: usize = 128;
 
-/// A block-level markdown item that can be independently virtualized.
-#[derive(Clone, Debug, PartialEq)]
-pub enum MarkdownLayoutItem {
-    Block(Block),
-    Footnotes(Vec<FootnoteDefinition>),
+/// A borrowed block-level item. Layout never owns another copy of the parsed tree.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MarkdownLayoutItem<'a> {
+    Block(&'a Block),
+    Footnotes(&'a [FootnoteDefinition]),
 }
 
-/// Precomputed item order and estimated sizes for rendered markdown.
+impl MarkdownLayoutItem<'_> {
+    fn same_content(self, other: Self) -> bool {
+        match (self, other) {
+            (Self::Block(a), Self::Block(b)) => a.same_content(b),
+            (Self::Footnotes(a), Self::Footnotes(b)) => {
+                a.len() == b.len()
+                    && a.iter().zip(b).all(|(a, b)| {
+                        a.label == b.label && blocks_same_content(&a.blocks, &b.blocks)
+                    })
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Fenwick sums include each item's following gap; the final gap is not content.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct BlockHeights {
+    sums: Vec<f64>,
+    gap: f64,
+}
+
+impl BlockHeights {
+    pub(crate) fn new(sizes: &[Size<Pixels>], gap: f32) -> Self {
+        let gap = finite_height(gap) as f64;
+        let mut sums = vec![0.0; sizes.len() + 1];
+        for (index, size) in sizes.iter().enumerate() {
+            let slot = index + 1;
+            sums[slot] += finite_height(f32::from(size.height)) as f64 + gap;
+            let parent = slot + (slot & slot.wrapping_neg());
+            if parent < sums.len() {
+                sums[parent] += sums[slot];
+            }
+        }
+        Self { sums, gap }
+    }
+
+    fn update(&mut self, index: usize, delta: f32) {
+        let mut slot = index + 1;
+        while slot < self.sums.len() {
+            self.sums[slot] += delta as f64;
+            slot += slot & slot.wrapping_neg();
+        }
+    }
+
+    fn prefix(&self, mut count: usize) -> f64 {
+        let mut total = 0.0;
+        while count > 0 {
+            total += self.sums[count];
+            count &= count - 1;
+        }
+        total
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.sums.len() - 1
+    }
+    pub(crate) fn top(&self, index: usize) -> f32 {
+        self.prefix(index) as f32
+    }
+    pub(crate) fn bottom(&self, index: usize) -> f32 {
+        (self.prefix(index + 1) - self.gap) as f32
+    }
+    pub(crate) fn total(&self) -> f32 {
+        if self.len() == 0 {
+            0.0
+        } else {
+            (self.prefix(self.len()) - self.gap).max(0.0) as f32
+        }
+    }
+
+    // Return the count of complete weighted items before the requested prefix.
+    fn search(&self, target: f64, inclusive: bool) -> usize {
+        let mut index = 0;
+        let mut sum = 0.0;
+        let mut step = self.sums.len().next_power_of_two() >> 1;
+        while step > 0 {
+            let next = index + step;
+            if next < self.sums.len() {
+                let value = sum + self.sums[next];
+                if value < target || (inclusive && value == target) {
+                    index = next;
+                    sum = value;
+                }
+            }
+            step >>= 1;
+        }
+        index
+    }
+
+    pub(crate) fn visible_range(&self, top: f32, bottom: f32) -> Range<usize> {
+        let first = self.search(top as f64 + self.gap, false).min(self.len());
+        let end = (self.search(bottom as f64, true) + 1).min(self.len());
+        first..end.max(first)
+    }
+}
+
+fn finite_height(height: f32) -> f32 {
+    if height.is_finite() {
+        height.max(0.0)
+    } else {
+        0.0
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct MeasuredGeometry {
+    heights: Vec<Option<f32>>,
+    index: BlockHeights,
+    sizes: Option<Rc<Vec<Size<Pixels>>>>,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarkdownBlockLayout {
-    items: Rc<Vec<MarkdownLayoutItem>>,
+    document: Option<MarkdownDocument>,
+    footnotes: bool,
     item_sizes: Rc<Vec<Size<Pixels>>>,
-    measured: Option<Rc<RefCell<Vec<Option<f32>>>>>,
+    geometry: Rc<RefCell<MeasuredGeometry>>,
+    measured: bool,
     pub(crate) disclosures: crate::disclosure::DisclosureState,
 }
 
@@ -56,17 +170,14 @@ struct MeasurementState {
 impl MarkdownMeasurements {
     pub(crate) fn release_document(&self) {
         if let Some(state) = self.0.borrow_mut().as_mut() {
-            if state.document_released {
-                return;
-            }
-            state.layout.items = Rc::new(Vec::new());
+            state.layout.document = None;
             state.document_released = true;
         }
     }
 
     pub(crate) fn prepare(
         &self,
-        mut layout: MarkdownBlockLayout,
+        document: &MarkdownDocument,
         width: f32,
         opts: &MarkdownOptions,
     ) -> MarkdownBlockLayout {
@@ -93,76 +204,71 @@ impl MarkdownMeasurements {
             opts.heading_font_scales[4],
             opts.heading_font_scales[5],
         ];
-        if let Some(previous) = state.as_ref()
-            && (previous.document_released || previous.layout.items == layout.items)
-        {
-            layout.disclosures = previous.layout.disclosures.clone();
-        }
-        if let Some(previous) = state.as_ref()
+        let same_document = state.as_ref().is_some_and(|previous| {
+            previous.document_released
+                || previous
+                    .layout
+                    .document
+                    .as_ref()
+                    .is_some_and(|old| old.same_identity(document) || old == document)
+        });
+        if let Some(previous) = state.as_mut()
+            && same_document
+            && previous.layout.footnotes == opts.enable_footnotes
             && previous.width == width
             && previous.fonts == fonts
             && previous.geometry_style == geometry_style
-            && (previous.document_released || previous.layout.items == layout.items)
-            && previous.layout.item_sizes == layout.item_sizes
         {
-            layout.measured = previous.layout.measured.clone();
-            layout.disclosures = previous.layout.disclosures.clone();
             if previous.document_released {
-                let previous = state.as_mut().unwrap();
-                previous.layout = layout.clone();
+                previous.layout.document = Some(document.clone());
                 previous.document_released = false;
             }
-            return layout;
+            return previous.layout.clone();
         }
-        let mut measured = vec![None; layout.items.len()];
+        let mut layout = MarkdownBlockLayout::from_document(document, opts);
+        layout.measured = true;
+        layout.geometry.borrow_mut().heights = vec![None; layout.item_sizes.len()];
         if let Some(previous) = state.as_ref() {
-            if opts.scroll_sync.is_some() {
-                // A synchronized handle belongs to one document across edits.
+            if same_document || opts.scroll_sync.is_some() {
                 layout.disclosures = previous.layout.disclosures.clone();
             }
             if previous.width == width
                 && previous.fonts == fonts
                 && previous.geometry_style == geometry_style
+                && !previous.document_released
             {
-                let clean = |item: &MarkdownLayoutItem| match item {
-                    MarkdownLayoutItem::Block(block) => {
-                        MarkdownLayoutItem::Block(block.without_sources())
+                let old_heights = previous.layout.geometry.borrow();
+                for index in 0..previous.layout.len().min(layout.len()) {
+                    if previous
+                        .layout
+                        .item(index)
+                        .unwrap()
+                        .same_content(layout.item(index).unwrap())
+                        && previous.layout.item_sizes[index] == layout.item_sizes[index]
+                        && let Some(height) = old_heights.heights[index]
+                    {
+                        layout.record_height(index, height);
                     }
-                    MarkdownLayoutItem::Footnotes(notes) => MarkdownLayoutItem::Footnotes(
-                        notes
-                            .iter()
-                            .map(|note| FootnoteDefinition {
-                                label: note.label.clone(),
-                                blocks: note.blocks.iter().map(Block::without_sources).collect(),
-                            })
-                            .collect(),
-                    ),
-                };
-                let old = previous.layout.items.iter().map(clean).collect::<Vec<_>>();
-                let new = layout.items.iter().map(clean).collect::<Vec<_>>();
-                if let Some(heights) = &previous.layout.measured {
-                    let heights = heights.borrow();
-                    for index in 0..old.len().min(new.len()) {
-                        if old[index] == new[index]
-                            && previous.layout.item_sizes[index] == layout.item_sizes[index]
-                        {
-                            measured[index] = heights[index];
-                        }
+                }
+                for offset in 0..previous.layout.len().min(layout.len()) {
+                    let a = previous.layout.len() - 1 - offset;
+                    let b = layout.len() - 1 - offset;
+                    if !previous
+                        .layout
+                        .item(a)
+                        .unwrap()
+                        .same_content(layout.item(b).unwrap())
+                    {
+                        break;
                     }
-                    for offset in 0..old.len().min(new.len()) {
-                        let a = old.len() - 1 - offset;
-                        let b = new.len() - 1 - offset;
-                        if old[a] != new[b] {
-                            break;
-                        }
-                        if previous.layout.item_sizes[a] == layout.item_sizes[b] {
-                            measured[b] = heights[a];
-                        }
+                    if previous.layout.item_sizes[a] == layout.item_sizes[b]
+                        && let Some(height) = old_heights.heights[a]
+                    {
+                        layout.record_height(b, height);
                     }
                 }
             }
         }
-        layout.measured = Some(Rc::new(RefCell::new(measured)));
         *state = Some(MeasurementState {
             layout: layout.clone(),
             document_released: false,
@@ -176,28 +282,31 @@ impl MarkdownMeasurements {
 
 impl MarkdownBlockLayout {
     pub(crate) fn measurement_id(&self) -> usize {
-        self.measured
-            .as_ref()
-            .map_or(0, |value| Rc::as_ptr(value) as usize)
-    }
-    /// Build virtual-list layout items from a parsed markdown document.
-    pub fn from_document(document: &MarkdownDocument, opts: &MarkdownOptions) -> Self {
-        let mut items: Vec<MarkdownLayoutItem> = document
-            .blocks
-            .iter()
-            .cloned()
-            .map(MarkdownLayoutItem::Block)
-            .collect();
-
-        if opts.enable_footnotes && !document.footnotes.is_empty() {
-            items.push(MarkdownLayoutItem::Footnotes(document.footnotes.clone()));
+        if self.measured {
+            Rc::as_ptr(&self.geometry) as usize
+        } else {
+            0
         }
+    }
 
-        let item_sizes = items
-            .iter()
+    pub fn from_document(document: &MarkdownDocument, opts: &MarkdownOptions) -> Self {
+        let mut layout = Self {
+            document: Some(document.clone()),
+            footnotes: opts.enable_footnotes,
+            item_sizes: Rc::new(Vec::new()),
+            geometry: Rc::new(RefCell::new(MeasuredGeometry {
+                heights: Vec::new(),
+                index: BlockHeights::new(&[], opts.block_gap),
+                sizes: None,
+            })),
+            measured: false,
+            disclosures: Default::default(),
+        };
+        let sizes = layout
+            .items()
             .enumerate()
             .map(|(index, item)| {
-                let top_padding = match item {
+                let padding = match item {
                     MarkdownLayoutItem::Block(block) => {
                         crate::style::block_top_padding(block, index, opts)
                     }
@@ -205,47 +314,67 @@ impl MarkdownBlockLayout {
                 };
                 size(
                     px(ESTIMATED_CONTENT_WIDTH),
-                    px(estimate_item_height(item, opts) + top_padding),
+                    px(estimate_item_height(&item, opts) + padding),
                 )
             })
-            .collect();
+            .collect::<Vec<_>>();
+        layout.geometry.borrow_mut().index = BlockHeights::new(&sizes, opts.block_gap);
+        layout.item_sizes = Rc::new(sizes);
+        layout
+    }
 
-        Self {
-            items: Rc::new(items),
-            item_sizes: Rc::new(item_sizes),
-            measured: None,
-            disclosures: Default::default(),
+    pub(crate) fn len(&self) -> usize {
+        self.document.as_ref().map_or(0, |doc| {
+            doc.blocks.len() + usize::from(self.footnotes && !doc.footnotes.is_empty())
+        })
+    }
+
+    pub(crate) fn item(&self, index: usize) -> Option<MarkdownLayoutItem<'_>> {
+        let document = self.document.as_ref()?;
+        if let Some(block) = document.blocks.get(index) {
+            return Some(MarkdownLayoutItem::Block(block));
         }
+        (index == document.blocks.len() && self.footnotes && !document.footnotes.is_empty())
+            .then(|| MarkdownLayoutItem::Footnotes(document.footnotes.as_slice()))
     }
 
-    /// Items in the same order expected by [`Self::item_sizes`].
-    pub fn items(&self) -> Rc<Vec<MarkdownLayoutItem>> {
-        self.items.clone()
+    pub fn items(
+        &self,
+    ) -> impl ExactSizeIterator<Item = MarkdownLayoutItem<'_>> + DoubleEndedIterator {
+        (0..self.len()).map(|index| self.item(index).expect("layout item is in bounds"))
     }
 
-    /// Estimated GPUI sizes used by windowed markdown rendering.
+    pub(crate) fn heights(&self) -> Ref<'_, BlockHeights> {
+        Ref::map(self.geometry.borrow(), |geometry| &geometry.index)
+    }
+
     pub fn item_sizes(&self) -> Rc<Vec<Size<Pixels>>> {
-        let Some(measured) = &self.measured else {
+        if !self.measured {
             return self.item_sizes.clone();
-        };
-        let measured = measured.borrow();
-        Rc::new(
+        }
+        let mut geometry = self.geometry.borrow_mut();
+        if let Some(sizes) = &geometry.sizes {
+            return sizes.clone();
+        }
+        let sizes = Rc::new(
             self.item_sizes
                 .iter()
                 .enumerate()
                 .map(|(index, size)| {
                     gpui::size(
                         size.width,
-                        px(measured[index].unwrap_or(f32::from(size.height))),
+                        px(geometry.heights[index].unwrap_or(f32::from(size.height))),
                     )
                 })
-                .collect(),
-        )
+                .collect::<Vec<_>>(),
+        );
+        geometry.sizes = Some(sizes.clone());
+        sizes
     }
 
     pub(crate) fn measure(&self, index: usize, child: gpui::AnyElement) -> gpui::AnyElement {
         use gpui::{IntoElement, ParentElement, Styled};
-        if self.measured.is_none() {
+        if !self.measured {
             return child;
         }
         let layout = self.clone();
@@ -258,8 +387,7 @@ impl MarkdownBlockLayout {
             .child(
                 gpui::canvas(
                     move |bounds, window, _| {
-                        let height = f32::from(bounds.size.height);
-                        if layout.record_height(index, height) {
+                        if layout.record_height(index, f32::from(bounds.size.height)) {
                             window.refresh();
                         }
                     },
@@ -274,14 +402,17 @@ impl MarkdownBlockLayout {
     }
 
     pub(crate) fn record_height(&self, index: usize, height: f32) -> bool {
-        let Some(measured) = &self.measured else {
-            return false;
-        };
-        let mut sizes = measured.borrow_mut();
-        if sizes[index].is_some_and(|old| (old - height).abs() <= 0.5) {
+        if !self.measured || !height.is_finite() || height < 0.0 {
             return false;
         }
-        sizes[index] = Some(height);
+        let mut geometry = self.geometry.borrow_mut();
+        if geometry.heights[index].is_some_and(|old| (old - height).abs() <= 0.5) {
+            return false;
+        }
+        let old = geometry.heights[index].unwrap_or(f32::from(self.item_sizes[index].height));
+        geometry.heights[index] = Some(height);
+        geometry.index.update(index, height - finite_height(old));
+        geometry.sizes = None;
         true
     }
 }
@@ -447,24 +578,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn height_index_updates_preserve_gap_and_boundary_visibility() {
+        let sizes = [10.0, 20.0, 30.0].map(|height| size(px(100.0), px(height)));
+        let mut heights = BlockHeights::new(&sizes, 5.0);
+        assert_eq!(
+            (heights.total(), heights.top(1), heights.bottom(1)),
+            (70.0, 15.0, 35.0)
+        );
+        for (top, bottom, expected) in [
+            (0.0, 10.0, 0..1),
+            (10.0, 15.0, 0..2),
+            (11.0, 14.0, 1..1),
+            (35.0, 40.0, 1..3),
+            (70.0, 90.0, 2..3),
+        ] {
+            assert_eq!(heights.visible_range(top, bottom), expected);
+        }
+        heights.update(1, 10.0);
+        assert_eq!(
+            (heights.total(), heights.top(2), heights.bottom(1)),
+            (80.0, 50.0, 45.0)
+        );
+        assert_eq!(heights.visible_range(40.0, 50.0), 1..3);
+        let sizes = [0.0, 10.0, 0.0].map(|height| size(px(100.0), px(height)));
+        let heights = BlockHeights::new(&sizes, 0.0);
+        assert_eq!(heights.visible_range(0.0, 0.0), 0..2);
+        assert_eq!(heights.visible_range(10.0, 10.0), 1..3);
+    }
+
+    #[test]
+    fn nested_blocks_and_footnotes_reuse_heights_after_source_offsets_shift() {
+        let source = "- item\n  - nested\n\n| h |\n| - |\n| value |\n\n```rs\nlet x = 1;\n```\n\nend[^n]\n\n[^n]: note";
+        let opts = MarkdownOptions::default();
+        let measurements = MarkdownMeasurements::default();
+        let document = crate::parser::parse_with_source_ranges(source);
+        let layout = measurements.prepare(&document, 640.0, &opts);
+        for (index, height) in [111.0, 222.0, 333.0, 444.0, 555.0].into_iter().enumerate() {
+            layout.record_height(index, height);
+        }
+        let reused = measurements.prepare(&document, 640.0, &opts);
+        assert!(Rc::ptr_eq(&layout.geometry, &reused.geometry));
+        assert!(Rc::ptr_eq(&layout.item_sizes(), &reused.item_sizes()));
+        let changed = crate::parser::parse_with_source_ranges(&format!("new\n\n{source}"));
+        let changed = measurements.prepare(&changed, 640.0, &opts);
+        assert_eq!(
+            changed
+                .item_sizes()
+                .iter()
+                .map(|size| f32::from(size.height))
+                .collect::<Vec<_>>(),
+            [22.0, 111.0, 222.0, 333.0, 444.0, 555.0]
+        );
+    }
+
+    #[test]
     fn unchanged_blocks_keep_measured_heights_after_source_offsets_shift() {
         let opts = MarkdownOptions::default();
         let measurements = MarkdownMeasurements::default();
         let document = crate::parser::parse_with_source_ranges("first\n\nsecond\n\nthird");
-        let layout = measurements.prepare(
-            MarkdownBlockLayout::from_document(&document, &opts),
-            640.0,
-            &opts,
-        );
+        let layout = measurements.prepare(&document, 640.0, &opts);
         layout.record_height(0, 40.0);
         layout.record_height(1, 80.0);
         layout.record_height(2, 60.0);
         let document = crate::parser::parse_with_source_ranges("new\n\nfirst\n\nsecond\n\nthird");
-        let changed = measurements.prepare(
-            MarkdownBlockLayout::from_document(&document, &opts),
-            640.0,
-            &opts,
-        );
+        let changed = measurements.prepare(&document, 640.0, &opts);
         assert_eq!(
             changed
                 .item_sizes()
@@ -475,11 +652,7 @@ mod tests {
         );
         let document =
             crate::parser::parse_with_source_ranges("new\n\nfirst\n\nreplacement\n\nthird");
-        let changed = measurements.prepare(
-            MarkdownBlockLayout::from_document(&document, &opts),
-            640.0,
-            &opts,
-        );
+        let changed = measurements.prepare(&document, 640.0, &opts);
         assert_eq!(
             changed
                 .item_sizes()
@@ -497,40 +670,29 @@ mod tests {
         );
         let opts = MarkdownOptions::default();
         let measurements = MarkdownMeasurements::default();
-        let layout = measurements.prepare(
-            MarkdownBlockLayout::from_document(&document, &opts),
-            640.0,
-            &opts,
-        );
+        let layout = measurements.prepare(&document, 640.0, &opts);
         layout.disclosures.toggle("html-details", false);
         layout.disclosures.toggle("html-details-2", true);
-        layout.measured.as_ref().unwrap().borrow_mut()[0] = Some(245.0);
-        let items = Rc::downgrade(&layout.items);
+        layout.record_height(0, 245.0);
+        let blocks = std::sync::Arc::downgrade(&document.blocks);
         drop(layout);
         measurements.release_document();
-        assert!(
-            items.upgrade().is_none(),
-            "suspended geometry retained document blocks"
+        assert_eq!(
+            blocks.strong_count(),
+            1,
+            "only the caller should retain the document"
         );
         for width in [640.0, 320.0] {
-            let layout = measurements.prepare(
-                MarkdownBlockLayout::from_document(&document, &opts),
-                width,
-                &opts,
-            );
+            let layout = measurements.prepare(&document, width, &opts);
             assert!(layout.disclosures.is_open("html-details", false));
             assert!(!layout.disclosures.is_open("html-details-2", true));
             if width == 640.0 {
-                assert_eq!(layout.measured.as_ref().unwrap().borrow()[0], Some(245.0));
+                assert_eq!(layout.geometry.borrow().heights[0], Some(245.0));
             }
         }
         let replacement =
             crate::parser::parse("<details><summary>Different</summary><p>New body</p></details>");
-        let layout = measurements.prepare(
-            MarkdownBlockLayout::from_document(&replacement, &opts),
-            320.0,
-            &opts,
-        );
+        let layout = measurements.prepare(&replacement, 320.0, &opts);
         assert!(!layout.disclosures.is_open("html-details", false));
     }
 }

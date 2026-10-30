@@ -7,13 +7,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut opts = self.localized_markdown_options();
-        let (preview_pane, preview_path, markdown_scroll) = {
+        let (preview_pane, preview_path) = {
             let sftp_view = self.sftp_view().read(cx);
-            (
-                sftp_view.preview_pane,
-                sftp_view.preview_path.clone(),
-                sftp_view.preview_markdown_scroll.clone(),
-            )
+            (sftp_view.preview_pane, sftp_view.preview_path.clone())
         };
         if preview_pane == Some(SftpPane::Local)
             && let Some(source_path) = preview_path.as_deref()
@@ -23,18 +19,34 @@ impl WorkspaceApp {
             // safe to hand to GPUI's local image renderer.
             opts = opts.with_source_path(source_path);
         }
+        let (document, markdown_scroll) = self.sftp_view().update(cx, |state, _| {
+            let owner = state
+                .preview_content
+                .as_ref()
+                .expect("Markdown preview payload")
+                .clone();
+            let document = state.preview_markdown_cache.document(
+                &owner,
+                source,
+                opts.enable_smart_punctuation,
+                &mut state.preview_markdown_scroll,
+            );
+            (document, state.preview_markdown_scroll.clone())
+        });
         let code_actions = self.markdown_mermaid_actions(cx);
         div()
             .size_full()
             .p(px(16.0))
-            .child(markdown_virtual_with_code_actions(
-                "sftp-preview-markdown-virtual",
-                &self.tokens,
-                source,
-                &opts,
-                &markdown_scroll,
-                &code_actions,
-            ))
+            .child(
+                oxideterm_gpui_markdown::render::render_document_virtual_with_code_actions(
+                    "sftp-preview-markdown-virtual",
+                    &document,
+                    &self.tokens,
+                    &opts,
+                    &markdown_scroll,
+                    Some(&code_actions),
+                ),
+            )
             .into_any_element()
     }
 

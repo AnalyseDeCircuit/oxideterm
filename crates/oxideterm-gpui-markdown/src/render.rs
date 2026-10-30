@@ -37,6 +37,83 @@ const WINDOWED_MARKDOWN_MIN_ITEMS: usize = 24;
 const MARKDOWN_VIRTUAL_OVERDRAW_PX: f32 = 480.0;
 const MARKDOWN_IMAGE_CACHE_BYTES: usize = 64 * 1024 * 1024;
 
+#[cfg(all(test, target_os = "macos"))]
+#[test]
+#[ignore = "manual markdown layout and scroll allocation benchmark"]
+fn markdown_layout_memory() {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    #[repr(C)]
+    #[derive(Default)]
+    struct Statistics {
+        blocks: u32,
+        live: usize,
+        peak: usize,
+        allocated: usize,
+    }
+    unsafe extern "C" {
+        fn malloc_zone_statistics(zone: *mut std::ffi::c_void, stats: *mut Statistics);
+    }
+    let allocated = || {
+        let mut stats = Statistics::default();
+        unsafe { malloc_zone_statistics(std::ptr::null_mut(), &mut stats) };
+        stats.live
+    };
+    let source = "Paragraph **bold** 中文🙂 and [link](https://example.com).\n\n".repeat(10_000);
+    let document = crate::parser::parse(&source);
+    let mut opts = MarkdownOptions::default();
+    opts.block_gap = 10.0;
+    let measurements = crate::layout::MarkdownMeasurements::default();
+    let navigation = crate::navigation::MarkdownNavigation::new(gpui::ScrollHandle::new());
+    let before = allocated();
+    let started = std::time::Instant::now();
+    let layout = measurements.prepare(&document, 640.0, &opts);
+    for index in 0..10_000 {
+        layout.record_height(index, 100.0);
+    }
+    navigation.prepare(&document, &layout, &opts);
+    let initial_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let retained = allocated() as isize - before as isize;
+    let peak = AtomicUsize::new(allocated());
+    let baseline = allocated();
+    let stop = AtomicBool::new(false);
+    let started = std::time::Instant::now();
+    std::thread::scope(|scope| {
+        scope.spawn(|| {
+            while !stop.load(Ordering::Acquire) {
+                peak.fetch_max(allocated(), Ordering::Relaxed);
+                std::thread::sleep(std::time::Duration::from_micros(100));
+            }
+        });
+        for _ in 0..12 {
+            let layout = measurements.prepare(&document, 640.0, &opts);
+            navigation.prepare(&document, &layout, &opts);
+            let heights = layout.heights();
+            let window = markdown_virtual_window(&heights, 550_000.0, 600.0, 0.0).unwrap();
+            assert_eq!(window.range, 5000..5006);
+            assert_eq!(window.top_spacer, 550_000.0);
+            assert_eq!(window.bottom_spacer, 549_340.0);
+        }
+        stop.store(true, Ordering::Release);
+    });
+    let frames_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let started = std::time::Instant::now();
+    for index in 0..1000 {
+        let heights = layout.heights();
+        std::hint::black_box(markdown_virtual_window(
+            &heights,
+            index as f32 * 550.0,
+            600.0,
+            0.0,
+        ));
+    }
+    let seek_ms = started.elapsed().as_secs_f64() * 1000.0;
+    eprintln!(
+        "MARKDOWN_LAYOUT blocks=10000 source_bytes={} retained={retained} repaint_peak={} initial_ms={initial_ms:.3} frames12_ms={frames_ms:.3} seeks1000_ms={seek_ms:.3}",
+        source.len(),
+        peak.load(Ordering::Relaxed).saturating_sub(baseline)
+    );
+}
+
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct MarkdownTextFragmentId {
     pub key: String,
@@ -154,25 +231,20 @@ fn render_document_windowed_with_code_actions(
         return render_document_with_code_actions(document, tokens, opts, code_actions);
     }
 
-    let item_sizes = layout.item_sizes();
-    let total_height = estimated_markdown_height(&item_sizes, opts.block_gap);
+    let heights = layout.heights();
+    let total_height = heights.total();
     if total_height <= viewport_height + overdraw * 2.0 {
         return render_document_with_code_actions(document, tokens, opts, code_actions);
     }
 
-    let Some(virtual_window) = markdown_virtual_window(
-        &item_sizes,
-        opts.block_gap,
-        viewport_top,
-        viewport_height,
-        overdraw,
-    ) else {
+    let Some(virtual_window) =
+        markdown_virtual_window(&heights, viewport_top, viewport_height, overdraw)
+    else {
         return render_document_with_code_actions(document, tokens, opts, code_actions);
     };
     let mut rendered = Vec::new();
 
     for (index, item) in items
-        .iter()
         .enumerate()
         .skip(virtual_window.range.start)
         .take(virtual_window.range.len())
@@ -373,8 +445,8 @@ pub fn render_document_windowed_selectable_with_code_actions(
         );
     }
 
-    let item_sizes = layout.item_sizes();
-    let total_height = estimated_markdown_height(&item_sizes, opts.block_gap);
+    let heights = layout.heights();
+    let total_height = heights.total();
     if total_height <= viewport_height + overdraw * 2.0 {
         return render_document_selectable_with_code_actions(
             document,
@@ -385,13 +457,9 @@ pub fn render_document_windowed_selectable_with_code_actions(
         );
     }
 
-    let Some(virtual_window) = markdown_virtual_window(
-        &item_sizes,
-        opts.block_gap,
-        viewport_top,
-        viewport_height,
-        overdraw,
-    ) else {
+    let Some(virtual_window) =
+        markdown_virtual_window(&heights, viewport_top, viewport_height, overdraw)
+    else {
         return render_document_selectable_with_code_actions(
             document,
             tokens,
@@ -403,7 +471,6 @@ pub fn render_document_windowed_selectable_with_code_actions(
     let mut rendered = Vec::new();
 
     for (index, item) in items
-        .iter()
         .enumerate()
         .skip(virtual_window.range.start)
         .take(virtual_window.range.len())
@@ -508,7 +575,7 @@ pub fn render_document_virtual_with_code_actions(
     code_actions: Option<&MarkdownCodeBlockActions>,
 ) -> AnyElement {
     let layout = scroll_handle.measurements.prepare(
-        MarkdownBlockLayout::from_document(document, opts),
+        document,
         f32::from(scroll_handle.bounds().size.width),
         opts,
     );
@@ -523,7 +590,7 @@ pub fn render_document_virtual_with_code_actions(
         |sync| sync.begin(&layout, opts.block_gap, scroll_handle),
     );
     if let Some(navigation) = &opts.navigation {
-        navigation.prepare(document, opts);
+        navigation.prepare(document, &layout, opts);
     }
     let viewport_height = f32::from(scroll_handle.bounds().size.height);
     let content = render_document_windowed_with_code_actions(
@@ -581,7 +648,7 @@ pub fn render_document_virtual_selectable(
     ) -> AnyElement,
 ) -> AnyElement {
     let layout = scroll_handle.measurements.prepare(
-        MarkdownBlockLayout::from_document(document, opts),
+        document,
         f32::from(scroll_handle.bounds().size.width),
         opts,
     );
@@ -596,7 +663,7 @@ pub fn render_document_virtual_selectable(
         |sync| sync.begin(&layout, opts.block_gap, scroll_handle),
     );
     if let Some(navigation) = &opts.navigation {
-        navigation.prepare(document, opts);
+        navigation.prepare(document, &layout, opts);
     }
     let content = render_document_windowed_selectable_with_code_actions(
         document,
@@ -636,11 +703,6 @@ pub fn render_document_virtual_selectable(
         .into_any_element()
 }
 
-fn estimated_markdown_height(item_sizes: &[gpui::Size<gpui::Pixels>], block_gap: f32) -> f32 {
-    let items_height: f32 = item_sizes.iter().map(|size| f32::from(size.height)).sum();
-    items_height + block_gap * item_sizes.len().saturating_sub(1) as f32
-}
-
 #[derive(Clone, Debug, PartialEq)]
 struct MarkdownVirtualWindow {
     range: Range<usize>,
@@ -649,74 +711,36 @@ struct MarkdownVirtualWindow {
 }
 
 fn markdown_virtual_window(
-    item_sizes: &[gpui::Size<gpui::Pixels>],
-    block_gap: f32,
+    heights: &crate::layout::BlockHeights,
     viewport_top: f32,
     viewport_height: f32,
     overdraw: f32,
 ) -> Option<MarkdownVirtualWindow> {
-    if item_sizes.is_empty() {
+    if heights.len() == 0 {
         return None;
     }
-
-    let total_height = estimated_markdown_height(item_sizes, block_gap);
+    let total_height = heights.total();
     if total_height <= 0.0 {
         return None;
     }
-
     let viewport_top = finite_non_negative(viewport_top);
     let viewport_height = finite_non_negative(viewport_height);
     let overdraw = finite_non_negative(overdraw);
-    let block_gap = finite_non_negative(block_gap);
-    let max_viewport_top = (total_height - viewport_height).max(0.0);
-    let clamped_viewport_top = viewport_top.min(max_viewport_top);
-    let window_top = (clamped_viewport_top - overdraw).max(0.0);
-    let window_bottom = (clamped_viewport_top + viewport_height + overdraw).min(total_height);
-
-    // Keep the item origins as the source of truth, like a variable-height
-    // list. This prevents an empty render window when the scroll offset and
-    // estimated markdown height drift apart.
-    let mut item_bounds = Vec::with_capacity(item_sizes.len());
-    let mut cursor_y = 0.0;
-    for (index, size) in item_sizes.iter().enumerate() {
-        let item_top = cursor_y;
-        let item_bottom = item_top + finite_non_negative(f32::from(size.height));
-        item_bounds.push((item_top, item_bottom));
-        cursor_y = item_bottom;
-        if index + 1 < item_sizes.len() {
-            cursor_y += block_gap;
-        }
+    let clamped = viewport_top.min((total_height - viewport_height).max(0.0));
+    let top = (clamped - overdraw).max(0.0);
+    let bottom = (clamped + viewport_height + overdraw).min(total_height);
+    let mut range = heights.visible_range(top, bottom);
+    if range.is_empty() {
+        let index = heights
+            .visible_range(clamped, clamped)
+            .start
+            .min(heights.len() - 1);
+        range = index..index + 1;
     }
-
-    let mut first_index = None;
-    let mut last_index_exclusive = 0;
-    for (index, (item_top, item_bottom)) in item_bounds.iter().copied().enumerate() {
-        if item_bottom >= window_top && item_top <= window_bottom {
-            first_index.get_or_insert(index);
-            last_index_exclusive = index + 1;
-        }
-    }
-
-    let (first_index, last_index_exclusive) = match first_index {
-        Some(first_index) => (first_index, last_index_exclusive),
-        None => {
-            let fallback_index = item_bounds
-                .iter()
-                .position(|(_, item_bottom)| *item_bottom >= clamped_viewport_top)
-                .unwrap_or_else(|| item_bounds.len().saturating_sub(1));
-            (fallback_index, fallback_index + 1)
-        }
-    };
-
-    let (first_item_top, _) = item_bounds[first_index];
-    let (_, last_item_bottom) = item_bounds[last_index_exclusive - 1];
-
     Some(MarkdownVirtualWindow {
-        range: first_index..last_index_exclusive,
-        // Keep content height independent of overscroll so the scroll container
-        // can clamp stale offsets after measurements or disclosure changes.
-        top_spacer: first_item_top,
-        bottom_spacer: (total_height - last_item_bottom).max(0.0),
+        top_spacer: heights.top(range.start),
+        bottom_spacer: (total_height - heights.bottom(range.end - 1)).max(0.0),
+        range,
     })
 }
 
@@ -3494,54 +3518,33 @@ mod tests {
         let document =
             crate::parser::parse(&format!("{}The end", "$$\\frac{1}{2}$$\n\n".repeat(30)));
         let measurements = crate::layout::MarkdownMeasurements::default();
-        let layout = measurements.prepare(
-            crate::MarkdownBlockLayout::from_document(&document, &opts),
-            640.0,
-            &opts,
-        );
+        let layout = measurements.prepare(&document, 640.0, &opts);
         for index in 0..30 {
             layout.record_height(index, 80.0);
         }
         layout.record_height(30, 22.0);
-        let layout = measurements.prepare(
-            crate::MarkdownBlockLayout::from_document(&document, &opts),
-            640.0,
-            &opts,
-        );
-        let sizes = layout.item_sizes();
-        assert_eq!(
-            super::estimated_markdown_height(&sizes, opts.block_gap),
-            2902.0
-        );
+        let layout = measurements.prepare(&document, 640.0, &opts);
+        let heights = layout.heights();
+        assert_eq!(heights.total(), 2902.0);
         for viewport_top in [2702.0, 2802.0, 3702.0] {
             let window =
-                super::markdown_virtual_window(&sizes, opts.block_gap, viewport_top, 200.0, 0.0)
-                    .unwrap();
+                super::markdown_virtual_window(&heights, viewport_top, 200.0, 0.0).unwrap();
             assert_eq!(window.range, 28..31);
             assert_eq!(window.top_spacer, 2688.0, "scroll top {viewport_top}");
             assert_eq!(window.bottom_spacer, 0.0);
         }
-        let window =
-            super::markdown_virtual_window(&sizes, opts.block_gap, 2602.0, 200.0, 0.0).unwrap();
+        let window = super::markdown_virtual_window(&heights, 2602.0, 200.0, 0.0).unwrap();
         assert_eq!(window.range, 27..30);
         assert_eq!(window.top_spacer, 2592.0);
         assert_eq!(window.bottom_spacer, 38.0);
-        let resized = measurements.prepare(
-            crate::MarkdownBlockLayout::from_document(&document, &opts),
-            320.0,
-            &opts,
-        );
+        let resized = measurements.prepare(&document, 320.0, &opts);
         assert_eq!(f32::from(resized.item_sizes()[0].height), 22.0);
         let changed = crate::parser::parse("Replacement paragraph");
-        let edited = measurements.prepare(
-            crate::MarkdownBlockLayout::from_document(&changed, &opts),
-            320.0,
-            &opts,
-        );
+        let edited = measurements.prepare(&changed, 320.0, &opts);
         assert_eq!(
-            edited.items().as_ref(),
-            &vec![crate::MarkdownLayoutItem::Block(
-                crate::model::Block::Paragraph {
+            edited.items().collect::<Vec<_>>(),
+            vec![crate::MarkdownLayoutItem::Block(
+                &crate::model::Block::Paragraph {
                     inlines: vec![crate::model::Inline::Text("Replacement paragraph".into())],
                 }
             )]

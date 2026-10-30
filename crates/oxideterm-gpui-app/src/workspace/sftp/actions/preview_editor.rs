@@ -61,6 +61,7 @@ impl WorkspaceApp {
                 sftp.preview_asset_owner = None;
                 sftp.preview_plugin = plugin_preview;
                 sftp.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+                sftp.preview_markdown_cache = MarkdownPreviewCache::default();
                 sftp.preview_document_scroll = ScrollHandle::new();
                 sftp.font_preview_scroll = ScrollHandle::new();
                 sftp.preview_error = None;

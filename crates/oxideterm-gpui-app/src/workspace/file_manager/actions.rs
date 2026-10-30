@@ -240,6 +240,11 @@ impl WorkspaceApp {
                         self.file_manager.update(cx, |file_manager, cx| {
                             file_manager.preview_markdown_source =
                                 !file_manager.preview_markdown_source;
+                            if file_manager.preview_markdown_source {
+                                file_manager
+                                    .preview_markdown_cache
+                                    .release(&mut file_manager.preview_markdown_scroll);
+                            }
                             cx.notify();
                         });
                         return true;
@@ -983,6 +988,7 @@ impl WorkspaceApp {
             file_manager.preview_markdown_source = false;
             file_manager.preview_code_scroll = UniformListScrollHandle::new();
             file_manager.preview_markdown_scroll = MarkdownVirtualListScrollHandle::new();
+            file_manager.preview_markdown_cache = MarkdownPreviewCache::default();
             file_manager.preview_document_scroll = ScrollHandle::new();
             file_manager.preview_metadata_scroll = ScrollHandle::new();
             file_manager.preview_stream = FileManagerPreviewStreamState::default();

@@ -471,6 +471,59 @@ struct AiCachedMarkdownDocument {
     layout: MarkdownBlockLayout,
 }
 
+// Preview payloads are immutable. A weak owner identifies replacement without copying source text.
+struct MarkdownPreviewCache<T> {
+    owner: Option<std::sync::Weak<T>>,
+    smart_punctuation: bool,
+    document: Option<MarkdownDocument>,
+}
+
+impl<T> Default for MarkdownPreviewCache<T> {
+    fn default() -> Self {
+        Self {
+            owner: None,
+            smart_punctuation: false,
+            document: None,
+        }
+    }
+}
+
+impl<T> MarkdownPreviewCache<T> {
+    fn document(
+        &mut self,
+        owner: &Arc<T>,
+        source: &str,
+        smart_punctuation: bool,
+        scroll: &mut MarkdownVirtualListScrollHandle,
+    ) -> MarkdownDocument {
+        let owner = Arc::downgrade(owner);
+        if !self
+            .owner
+            .as_ref()
+            .is_some_and(|previous| previous.ptr_eq(&owner))
+            || self.smart_punctuation != smart_punctuation
+        {
+            self.owner = Some(owner);
+            self.smart_punctuation = smart_punctuation;
+            self.document = None;
+            scroll.invalidate_document_cache();
+        }
+        self.document
+            .get_or_insert_with(|| {
+                oxideterm_gpui_markdown::parser::parse_with_smart_punctuation(
+                    source,
+                    smart_punctuation,
+                )
+            })
+            .clone()
+    }
+
+    fn release(&mut self, scroll: &mut MarkdownVirtualListScrollHandle) {
+        self.document = None;
+        scroll.release_document_cache();
+    }
+}
+
 const AI_CHAT_LIST_ROW_HEIGHT_ESTIMATE: f32 = 80.0;
 const AI_CHAT_LIST_VIRTUAL_OVERSCAN: usize = 8;
 

@@ -270,6 +270,11 @@ impl WorkspaceApp {
                                 this.file_manager.update(cx, |file_manager, cx| {
                                     file_manager.preview_markdown_source =
                                         !file_manager.preview_markdown_source;
+                                    if file_manager.preview_markdown_source {
+                                        file_manager
+                                            .preview_markdown_cache
+                                            .release(&mut file_manager.preview_markdown_scroll);
+                                    }
                                     cx.notify();
                                 });
                                 cx.stop_propagation();
@@ -1087,18 +1092,33 @@ impl WorkspaceApp {
             .localized_markdown_options()
             .with_source_path(source_path);
         let code_actions = self.markdown_mermaid_actions(cx);
-        let markdown_scroll = self.file_manager.read(cx).preview_markdown_scroll.clone();
+        let (document, markdown_scroll) = self.file_manager.update(cx, |state, _| {
+            let owner = state
+                .preview
+                .as_ref()
+                .expect("Markdown preview payload")
+                .clone();
+            let document = state.preview_markdown_cache.document(
+                &owner,
+                content,
+                opts.enable_smart_punctuation,
+                &mut state.preview_markdown_scroll,
+            );
+            (document, state.preview_markdown_scroll.clone())
+        });
         div()
             .size_full()
             .p(px(16.0))
-            .child(markdown_virtual_with_code_actions(
-                "file-manager-preview-markdown-virtual",
-                &self.tokens,
-                content,
-                &opts,
-                &markdown_scroll,
-                &code_actions,
-            ))
+            .child(
+                oxideterm_gpui_markdown::render::render_document_virtual_with_code_actions(
+                    "file-manager-preview-markdown-virtual",
+                    &document,
+                    &self.tokens,
+                    &opts,
+                    &markdown_scroll,
+                    Some(&code_actions),
+                ),
+            )
             .into_any_element()
     }
 

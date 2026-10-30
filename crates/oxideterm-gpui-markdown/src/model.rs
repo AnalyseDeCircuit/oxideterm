@@ -10,9 +10,9 @@
 /// A parsed markdown document — an ordered list of block-level nodes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct MarkdownDocument {
-    pub blocks: Vec<Block>,
+    pub blocks: std::sync::Arc<Vec<Block>>,
     /// Footnote definitions ordered by their first reference in the document.
-    pub footnotes: Vec<FootnoteDefinition>,
+    pub footnotes: std::sync::Arc<Vec<FootnoteDefinition>>,
 }
 
 /// A collected footnote definition.
@@ -200,28 +200,109 @@ pub struct SourceSpan {
 }
 
 impl Block {
-    pub(crate) fn without_sources(&self) -> Block {
-        let mut block = self.unlocated().clone();
-        match &mut block {
-            Block::HtmlContainer { blocks, .. }
-            | Block::Blockquote { blocks, .. }
-            | Block::Details { blocks, .. } => {
-                *blocks = blocks.iter().map(Block::without_sources).collect();
+    pub(crate) fn same_content(&self, other: &Block) -> bool {
+        use Block::*;
+        let items_equal = |a: &[ListItem], b: &[ListItem]| {
+            a.len() == b.len()
+                && a.iter().zip(b).all(|(a, b)| {
+                    a.inlines == b.inlines
+                        && a.checked == b.checked
+                        && blocks_same_content(&a.children, &b.children)
+                })
+        };
+        let cells_equal = |a: &[Vec<Block>], b: &[Vec<Block>]| {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| blocks_same_content(a, b))
+        };
+        match (self.unlocated(), other.unlocated()) {
+            (
+                Heading {
+                    level: a,
+                    id: ai,
+                    inlines: at,
+                },
+                Heading {
+                    level: b,
+                    id: bi,
+                    inlines: bt,
+                },
+            ) => a == b && ai == bi && at == bt,
+            (Paragraph { inlines: a }, Paragraph { inlines: b }) => a == b,
+            (Html(a), Html(b)) => a == b,
+            (
+                HtmlContainer {
+                    alignment: a,
+                    blocks: ab,
+                },
+                HtmlContainer {
+                    alignment: b,
+                    blocks: bb,
+                },
+            ) => a == b && blocks_same_content(ab, bb),
+            (
+                Details {
+                    id: a,
+                    summary: at,
+                    blocks: ab,
+                    open: ao,
+                },
+                Details {
+                    id: b,
+                    summary: bt,
+                    blocks: bb,
+                    open: bo,
+                },
+            ) => a == b && at == bt && ao == bo && blocks_same_content(ab, bb),
+            (
+                CodeBlock {
+                    language: a,
+                    code: at,
+                },
+                CodeBlock {
+                    language: b,
+                    code: bt,
+                },
+            ) => a == b && at == bt,
+            (UnorderedList { items: a }, UnorderedList { items: b }) => items_equal(a, b),
+            (
+                OrderedList {
+                    start: a,
+                    items: ai,
+                },
+                OrderedList {
+                    start: b,
+                    items: bi,
+                },
+            ) => a == b && items_equal(ai, bi),
+            (HorizontalRule, HorizontalRule) => true,
+            (
+                Blockquote {
+                    kind: a,
+                    blocks: ab,
+                },
+                Blockquote {
+                    kind: b,
+                    blocks: bb,
+                },
+            ) => a == b && blocks_same_content(ab, bb),
+            (
+                Table {
+                    headers: a,
+                    alignments: aa,
+                    rows: ar,
+                },
+                Table {
+                    headers: b,
+                    alignments: ba,
+                    rows: br,
+                },
+            ) => {
+                aa == ba
+                    && cells_equal(a, b)
+                    && ar.len() == br.len()
+                    && ar.iter().zip(br).all(|(a, b)| cells_equal(a, b))
             }
-            Block::OrderedList { items, .. } | Block::UnorderedList { items } => {
-                for item in items {
-                    item.source = None;
-                    item.children = item.children.iter().map(Block::without_sources).collect();
-                }
-            }
-            Block::Table { headers, rows, .. } => {
-                for cell in headers.iter_mut().chain(rows.iter_mut().flatten()) {
-                    *cell = cell.iter().map(Block::without_sources).collect();
-                }
-            }
-            _ => {}
+            _ => false,
         }
-        block
     }
     pub fn unlocated(&self) -> &Block {
         match self {
@@ -238,6 +319,10 @@ impl Block {
 }
 
 impl MarkdownDocument {
+    pub(crate) fn same_identity(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self.blocks, &other.blocks)
+            && std::sync::Arc::ptr_eq(&self.footnotes, &other.footnotes)
+    }
     /// Allocation capacities retained by the parsed tree, excluding the document value itself.
     pub fn retained_bytes(&self) -> usize {
         blocks_bytes(&self.blocks)
@@ -248,6 +333,10 @@ impl MarkdownDocument {
                 .map(|note| note.label.capacity() + blocks_bytes(&note.blocks))
                 .sum::<usize>()
     }
+}
+
+pub(crate) fn blocks_same_content(a: &[Block], b: &[Block]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.same_content(b))
 }
 
 fn inlines_bytes(inlines: &Vec<Inline>) -> usize {

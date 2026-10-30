@@ -426,8 +426,8 @@ fn parse_events<'input>(
     let footnotes = ctx.ordered_footnotes();
 
     MarkdownDocument {
-        blocks: ctx.blocks,
-        footnotes,
+        blocks: ctx.blocks.into(),
+        footnotes: footnotes.into(),
     }
 }
 
@@ -610,12 +610,12 @@ impl ParseContext {
         }
         if matches!(self.block_containers.last(), Some(BlockContainer::Details)) {
             let document = parse_with_smart_punctuation(source, self.smart_punctuation);
-            let mut blocks = document.blocks;
+            let mut blocks = std::sync::Arc::unwrap_or_clone(document.blocks);
             for block in &mut blocks {
                 self.import_block(block);
             }
             self.push_html_blocks(blocks);
-            for mut footnote in document.footnotes {
+            for mut footnote in std::sync::Arc::unwrap_or_clone(document.footnotes) {
                 for block in &mut footnote.blocks {
                     self.import_block(block);
                 }
@@ -1066,7 +1066,7 @@ mod tests {
         );
         let text = |value: &str| vec![super::Inline::Text(value.into())];
         assert_eq!(
-            doc.blocks,
+            *doc.blocks,
             vec![super::Block::UnorderedList {
                 items: vec![super::ListItem {
                     source: None,
@@ -1211,7 +1211,7 @@ mod tests {
                 vec![paragraph(vec![text("before"), text("after")])],
             ),
         ] {
-            assert_eq!(parse(source).blocks, expected, "{source}");
+            assert_eq!(*parse(source).blocks, expected, "{source}");
         }
     }
 
@@ -1296,7 +1296,7 @@ mod tests {
                     blocks: vec![Block::Paragraph { inlines }],
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(doc.footnotes, expected, "{source}");
+            assert_eq!(*doc.footnotes, expected, "{source}");
         }
     }
 
@@ -1304,7 +1304,7 @@ mod tests {
     fn multiline_html_preserves_table_and_list_structure() {
         let table = parse("<table>\n<tr><th>A</th></tr>\n<tr><td>1</td></tr>\n</table>");
         assert_eq!(
-            table.blocks,
+            *table.blocks,
             vec![Block::Table {
                 headers: vec![vec![Block::Paragraph {
                     inlines: vec![Inline::Text("A".into())]
@@ -1318,7 +1318,7 @@ mod tests {
         let list =
             parse("<ul>\n<li><p>First</p><p>Second</p><pre>code</pre><p>Last</p></li>\n</ul>");
         assert_eq!(
-            list.blocks,
+            *list.blocks,
             vec![Block::UnorderedList {
                 items: vec![ListItem {
                     source: None,
@@ -1347,7 +1347,7 @@ mod tests {
             "<details>\n<summary>More</summary>\n\n## Inside\n\n**Bold**\n\n<details open><summary>Nested</summary>\n\n```rust\nlet n = 1;\n```\n\n</details>\n</details>\n\nAfter",
         );
         assert_eq!(
-            doc.blocks,
+            *doc.blocks,
             vec![
                 Block::Details {
                     id: "html-details".into(),
@@ -1380,7 +1380,7 @@ mod tests {
         );
         let code = parse("```html\n<details><summary>Literal</summary></details>\n```");
         assert_eq!(
-            code.blocks,
+            *code.blocks,
             vec![Block::CodeBlock {
                 language: Some("html".into()),
                 code: "<details><summary>Literal</summary></details>\n".into()
@@ -1394,7 +1394,7 @@ mod tests {
             "<table><tr><td><p>A</p><p>B</p><ul><li>C</li></ul><pre>code</pre></td></tr></table>",
         );
         assert_eq!(
-            doc.blocks,
+            *doc.blocks,
             vec![Block::Table {
                 headers: Vec::new(),
                 alignments: vec![TableAlignment::None],
@@ -1426,7 +1426,7 @@ mod tests {
     fn disclosure_markdown_preserves_the_surrounding_quote_and_list() {
         let doc = parse("> <details>\n> <summary>More</summary>\n>\n> - Item\n>\n> </details>");
         assert_eq!(
-            doc.blocks,
+            *doc.blocks,
             vec![Block::Blockquote {
                 kind: None,
                 blocks: vec![Block::Details {

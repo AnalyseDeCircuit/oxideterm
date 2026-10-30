@@ -2095,6 +2095,8 @@ impl SftpWorkspaceEntity {
         self.preview_loading = false;
         self.preview_hex_loading_more = false;
         self.preview_path = Some(path);
+        self.preview_markdown_cache
+            .release(&mut self.preview_markdown_scroll);
         match result {
             Ok(content) => {
                 if let Some(owner) = asset_owner.as_ref() {
@@ -2404,6 +2406,38 @@ fn apply_tauri_transfer_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn markdown_preview_cache_releases_on_close(cx: &mut gpui::TestAppContext) {
+        let remote = cx.new(SftpWorkspaceEntity::new);
+        remote.update(cx, |state, cx| {
+            state.set_dialog(SftpDialog::Preview {
+                name: "readme.md".into(),
+            });
+            let owner = Arc::new(PreviewContent::Text {
+                data: "# Remote".into(),
+                mime_type: Some("text/markdown".into()),
+                language: Some("markdown".into()),
+                encoding: "UTF-8".into(),
+                confidence: 1.0,
+                has_bom: false,
+            });
+            let document = state.preview_markdown_cache.document(
+                &owner,
+                "# Remote",
+                true,
+                &mut state.preview_markdown_scroll,
+            );
+            let blocks = Arc::downgrade(&document.blocks);
+            drop(document);
+            state.preview_content = Some(owner);
+            state.begin_dialog_exit(Duration::ZERO, cx);
+            assert!(
+                blocks.upgrade().is_none(),
+                "closed remote preview retained its parsed document"
+            );
+        });
+    }
 
     #[gpui::test]
     fn closed_preview_releases_content_and_rejects_late_delivery(cx: &mut gpui::TestAppContext) {
