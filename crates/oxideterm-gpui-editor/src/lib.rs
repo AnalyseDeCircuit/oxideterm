@@ -34,6 +34,6 @@ pub use settings::EditorSettings;
 pub use surface::{
     EditorCommand, EditorContextMenuLabels, EditorKeybindings, EditorPresentation,
     EditorSaveStatus, EditorScrollAnchor, EditorScrollOrigin, EditorSearchLabels, EditorShortcut,
-    EditorViewportChanged, SaveCallback, TextEditorView,
+    EditorViewportChanged, SaveCallback, SharedSaveCallback, TextEditorView,
 };
 pub use viewport::{EditorViewport, VisibleRows};

@@ -82,7 +82,12 @@ impl HighlightCache {
             })
     }
 
-    pub fn update(&mut self, session: &SyntaxSession, source: &str, change: Option<&SyntaxChange>) {
+    pub fn update(
+        &mut self,
+        session: &SyntaxSession,
+        source: &(impl crate::TextSource + ?Sized),
+        change: Option<&SyntaxChange>,
+    ) {
         self.update_controlled(session, source, change, None)
             .expect("uncontrolled cache updates cannot be cancelled");
     }
@@ -90,7 +95,7 @@ impl HighlightCache {
     pub fn update_controlled(
         &mut self,
         session: &SyntaxSession,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         change: Option<&SyntaxChange>,
         work: Option<&crate::SyntaxWork>,
     ) -> Result<(), crate::SyntaxError> {

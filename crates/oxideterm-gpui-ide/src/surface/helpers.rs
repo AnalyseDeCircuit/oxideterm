@@ -156,9 +156,7 @@ fn paste_target_directory(location: &IdeLocation, is_directory: bool) -> Option<
         IdeLocation::Remote { node_id, path } if is_directory => {
             Some((node_id.clone(), normalize_remote_path(path)))
         }
-        IdeLocation::Remote { node_id, path } => {
-            Some((node_id.clone(), parent_remote_path(path)))
-        }
+        IdeLocation::Remote { node_id, path } => Some((node_id.clone(), parent_remote_path(path))),
         IdeLocation::Local { .. } => None,
     }
 }
@@ -304,18 +302,28 @@ fn watch_refresh_path(root_path: &str, event_path: &str) -> String {
 mod helper_tests {
     use super::*;
 
-
     #[test]
     fn normalize_remote_path_preserves_home_expansion_inputs() {
         assert_eq!(normalize_remote_path("~"), "~");
         assert_eq!(normalize_remote_path("~/project/"), "~/project");
     }
-
 }
 
-fn language_for_location(location: &IdeLocation, source: &str) -> Option<LanguageId> {
-    match location {
-        IdeLocation::Local { path } => LanguageId::detect(Some(path.as_path()), source),
-        IdeLocation::Remote { path, .. } => LanguageId::detect(Some(Path::new(path)), source),
+fn language_for_location(location: &IdeLocation, source: &SharedText) -> Option<LanguageId> {
+    let path = match location {
+        IdeLocation::Local { path } => path.as_path(),
+        IdeLocation::Remote { path, .. } => Path::new(path),
+    };
+    if let Some(language) = LanguageId::from_path(path) {
+        return Some(language);
     }
+    if !source.bytes().take(2).eq(b"#!".iter().copied()) {
+        return None;
+    }
+    let first = source
+        .chunks()
+        .flat_map(str::chars)
+        .take_while(|&ch| ch != '\n')
+        .collect::<String>();
+    LanguageId::detect(Some(path), &first)
 }

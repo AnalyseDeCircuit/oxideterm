@@ -5,38 +5,43 @@ use oxideterm_editor_core::BufferOffset;
 
 use crate::BracketPair;
 
-pub(crate) fn bracket_pairs(source: &str) -> Vec<BracketPair> {
+pub(crate) fn bracket_pairs(source: &(impl crate::TextSource + ?Sized)) -> Vec<BracketPair> {
     bracket_pairs_controlled(source, None).expect("uncontrolled bracket scans cannot be cancelled")
 }
 
 pub(crate) fn bracket_pairs_controlled(
-    source: &str,
+    source: &(impl crate::TextSource + ?Sized),
     work: Option<&crate::SyntaxWork>,
 ) -> Result<Vec<BracketPair>, crate::SyntaxError> {
     let mut stack: Vec<(u8, usize)> = Vec::new();
     let mut pairs = Vec::new();
 
-    for (index, byte) in source.bytes().enumerate() {
-        if index % 4096 == 0 {
-            crate::work::checkpoint(work)?;
-        }
-        match byte {
-            b'(' | b'[' | b'{' => stack.push((byte, index)),
-            b')' | b']' | b'}' => {
-                let Some(position) = stack
-                    .iter()
-                    .rposition(|(open, _)| brackets_match(*open, byte))
-                else {
-                    continue;
-                };
-                let (_, open_index) = stack.remove(position);
-                pairs.push(BracketPair {
-                    open: BufferOffset(open_index),
-                    close: BufferOffset(index),
-                });
+    let mut base = 0;
+    for chunk in crate::source::SourceChunks::new(source, 0..source.len()) {
+        for (offset, &byte) in chunk.iter().enumerate() {
+            let index = base + offset;
+            if index % 4096 == 0 {
+                crate::work::checkpoint(work)?;
             }
-            _ => {}
+            match byte {
+                b'(' | b'[' | b'{' => stack.push((byte, index)),
+                b')' | b']' | b'}' => {
+                    let Some(position) = stack
+                        .iter()
+                        .rposition(|(open, _)| brackets_match(*open, byte))
+                    else {
+                        continue;
+                    };
+                    let (_, open_index) = stack.remove(position);
+                    pairs.push(BracketPair {
+                        open: BufferOffset(open_index),
+                        close: BufferOffset(index),
+                    });
+                }
+                _ => {}
+            }
         }
+        base += chunk.len();
     }
 
     pairs.sort_by_key(|pair| pair.open);

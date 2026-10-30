@@ -239,7 +239,7 @@ pub trait IdeFileSystem {
     fn write_file(
         &self,
         location: &IdeLocation,
-        text: &str,
+        text: &crate::SharedText,
         format: &TextFileFormat,
         expected_version: Option<&SavedFileVersion>,
         mode: WriteMode,
@@ -270,7 +270,7 @@ pub trait AsyncIdeFileSystem {
     fn write_file<'a>(
         &'a self,
         location: &'a IdeLocation,
-        text: &'a str,
+        text: &'a crate::SharedText,
         format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,

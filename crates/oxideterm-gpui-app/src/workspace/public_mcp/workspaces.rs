@@ -1,6 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
-use oxideterm_editor_core::{BufferOffset, EditTransaction, TextBuffer, TextEdit, TextRange};
+use oxideterm_editor_core::{
+    BufferOffset, EditTransaction, SharedText, TextBuffer, TextEdit, TextRange,
+};
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, FileKind, IdeFileCheck, IdeLocation, IdeSearchQuery, SavedFileVersion,
     WriteMode,
@@ -40,15 +42,15 @@ struct PublicWorkspaceTreeEntry {
 struct PreparedWorkspaceWrite {
     format: oxideterm_ide_core::TextFileFormat,
     path: String,
-    original_text: String,
-    updated_text: String,
+    original_text: SharedText,
+    updated_text: SharedText,
     original_version: SavedFileVersion,
 }
 
 struct AppliedWorkspaceWrite {
     format: oxideterm_ide_core::TextFileFormat,
     path: String,
-    original_text: String,
+    original_text: SharedText,
     written_version: SavedFileVersion,
 }
 
@@ -550,7 +552,8 @@ async fn apply_public_mcp_workspace_edits(
         {
             return Err("The remote IDE file changed before editing".to_owned());
         }
-        let mut buffer = TextBuffer::new(current.text.clone());
+        let original_text: SharedText = current.text.into();
+        let mut buffer = TextBuffer::from_shared_text(original_text.clone());
         let edits = file
             .edits
             .into_iter()
@@ -568,14 +571,14 @@ async fn apply_public_mcp_workspace_edits(
         buffer
             .apply_transaction(EditTransaction::new(edits))
             .map_err(|_| "A workspace edit contains an invalid or overlapping range".to_owned())?;
-        let updated_text = buffer.text();
+        let updated_text = buffer.shared_text();
         if updated_text.len() as u64 > WORKSPACE_TEXT_LIMIT_BYTES {
             return Err("The edited IDE file exceeds the supported text limit".to_owned());
         }
         prepared.push(PreparedWorkspaceWrite {
             format: current.format,
             path: canonical,
-            original_text: current.text,
+            original_text,
             updated_text,
             original_version: current.version,
         });

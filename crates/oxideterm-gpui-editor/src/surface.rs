@@ -49,6 +49,13 @@ use wrap::DisplayRow;
 
 pub type SaveCallback =
     Box<dyn FnMut(Arc<str>, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
+pub type SharedSaveCallback = Box<
+    dyn FnMut(
+        oxideterm_editor_core::SharedText,
+        &mut Window,
+        &mut Context<TextEditorView>,
+    ) -> Result<(), String>,
+>;
 pub type ModifiedWordClickCallback =
     Box<dyn FnMut(String, &mut Window, &mut Context<TextEditorView>) -> Result<(), String>>;
 
@@ -434,7 +441,7 @@ pub struct TextEditorView {
     appearance: EditorAppearance,
     read_only: bool,
     preserve_line_endings: bool,
-    on_save: Option<SaveCallback>,
+    on_save: Option<SharedSaveCallback>,
     on_modified_word_click: Option<ModifiedWordClickCallback>,
     save_status: EditorSaveStatus,
     language: Option<LanguageId>,
@@ -505,8 +512,6 @@ impl TextEditorView {
         tokens: &ThemeTokens,
         cx: &mut Context<Self>,
     ) -> Self {
-        let metrics = EditorMetrics::from_theme(tokens);
-        let settings = EditorSettings::default();
         let text: Arc<str> = text.into();
         let text = if !preserve_line_endings && text.contains('\r') {
             normalize_editor_text(text.to_string()).into()
@@ -514,11 +519,36 @@ impl TextEditorView {
             text
         };
         let buffer = TextBuffer::new(text);
+        Self::from_buffer(buffer, preserve_line_endings, tokens, cx)
+    }
+
+    pub fn from_shared_text(
+        text: oxideterm_editor_core::SharedText,
+        tokens: &ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let buffer = if text.chunks().any(|chunk| chunk.contains('\r')) {
+            TextBuffer::new(text.with_text(|text| normalize_editor_text(text.to_owned())))
+        } else {
+            TextBuffer::from_shared_text(text)
+        };
+        Self::from_buffer(buffer, false, tokens, cx)
+    }
+
+    fn from_buffer(
+        buffer: TextBuffer,
+        preserve_line_endings: bool,
+        tokens: &ThemeTokens,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let metrics = EditorMetrics::from_theme(tokens);
+        let settings = EditorSettings::default();
         let language_subscription =
             cx.observe_global::<crate::EditorLanguagePlugins>(|this, cx| {
                 let detected = this.language_path.as_deref().map(|path| {
                     this.buffer
-                        .with_text(|source| crate::detect_language(Some(path), source, cx))
+                        .with_line_text(0, |source| crate::detect_language(Some(path), source, cx))
+                        .flatten()
                         .or_else(|| this.language_fallback.clone())
                 });
                 let language_changed = detected
@@ -741,7 +771,13 @@ impl TextEditorView {
         self.read_only = read_only;
     }
 
-    pub fn set_on_save(&mut self, on_save: SaveCallback) {
+    pub fn set_on_save(&mut self, mut on_save: SaveCallback) {
+        self.on_save = Some(Box::new(move |text, window, cx| {
+            on_save(text.into_contiguous(), window, cx)
+        }));
+    }
+
+    pub fn set_on_save_shared(&mut self, on_save: SharedSaveCallback) {
         self.on_save = Some(on_save);
     }
 
@@ -915,7 +951,8 @@ impl TextEditorView {
         let path = path.as_ref().to_path_buf();
         let language = self
             .buffer
-            .with_text(|source| crate::detect_language(Some(&path), source, cx))
+            .with_line_text(0, |source| crate::detect_language(Some(&path), source, cx))
+            .flatten()
             .or_else(|| fallback.clone());
         self.set_language(language, cx);
         self.language_path = Some(path);
@@ -970,16 +1007,22 @@ impl TextEditorView {
         }
         let selection = self.cursor.selection();
         let range = selection.range();
-        let selected = self.buffer.with_text(|text| {
-            text.get(range.start.0..range.end.0)
-                .unwrap_or_default()
-                .to_string()
-        });
-        let surrounding = self.buffer.with_text(|text| {
-            range.start.0 >= prefix.len()
-                && text.get(range.start.0 - prefix.len()..range.start.0) == Some(prefix)
-                && text.get(range.end.0..range.end.0 + suffix.len()) == Some(suffix)
-        });
+        let selected = self.buffer.slice(range).unwrap_or_default();
+        let surrounding = range.start.0 >= prefix.len()
+            && self
+                .buffer
+                .slice(TextRange::new(
+                    BufferOffset(range.start.0 - prefix.len()),
+                    range.start,
+                ))
+                .is_ok_and(|text| text == prefix)
+            && self
+                .buffer
+                .slice(TextRange::new(
+                    range.end,
+                    BufferOffset(range.end.0 + suffix.len()),
+                ))
+                .is_ok_and(|text| text == suffix);
         let (range, replacement, selection_start) = if surrounding {
             (
                 TextRange::new(
@@ -1012,17 +1055,49 @@ impl TextEditorView {
             return;
         }
         let selection = self.cursor.selection();
-        let (line_start, line_end, replacement, adjusted_selection) = self
+        let range = selection.range();
+        let first = self
             .buffer
-            .with_text(|text| prefixed_line_replacement(text, selection, prefix));
+            .offset_to_line_col(range.start)
+            .expect("valid selection");
+        let end = self
+            .buffer
+            .offset_to_line_col(range.end)
+            .expect("valid selection");
+        let last_line = if range.end > range.start && end.column == 0 {
+            end.line - 1
+        } else {
+            end.line
+        };
+        let base = self.buffer.line_start_offset(first.line).unwrap().0;
+        let end = self
+            .buffer
+            .line_start_offset(last_line + 1)
+            .map_or(self.buffer.len(), |offset| offset.0);
+        let text = self
+            .buffer
+            .slice(TextRange::new(BufferOffset(base), BufferOffset(end)))
+            .expect("valid line range");
+        let relative = Selection::new(
+            BufferOffset(selection.anchor.0 - base),
+            BufferOffset(selection.head.0 - base),
+        );
+        let (line_start, line_end, replacement, adjusted_selection) =
+            prefixed_line_replacement(&text, relative, prefix);
         self.replace_range_with_caret(
-            TextRange::new(BufferOffset(line_start), BufferOffset(line_end)),
+            TextRange::new(
+                BufferOffset(base + line_start),
+                BufferOffset(base + line_end),
+            ),
             replacement,
             cx,
         );
         // Keep Markdown markers outside the restored selection so the next
         // input replaces only the original content.
-        self.cursor.set_selection(adjusted_selection);
+        self.cursor.set_selection(Selection::new(
+            BufferOffset(base + adjusted_selection.anchor.0),
+            BufferOffset(base + adjusted_selection.head.0),
+        ));
         cx.notify();
     }
 
@@ -1237,7 +1312,7 @@ impl TextEditorView {
             cx.notify();
             return;
         };
-        let result = on_save(self.buffer.text_snapshot(), window, cx);
+        let result = on_save(self.buffer.shared_text(), window, cx);
         match result {
             Ok(()) => {
                 // The IDE save path is asynchronous, matching Tauri's
@@ -2278,6 +2353,39 @@ mod tests {
             assert!(editor.structure_cache.columns_for_line(1).is_empty());
             assert!(editor.find_matches.is_empty());
             assert_eq!(editor.buffer.line_text(0).as_deref(), Some("zfn main() {"));
+        });
+    }
+
+    #[gpui::test]
+    fn selected_line_commands_keep_global_unicode_offsets_and_history(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let editor = cx.new(|cx| {
+            super::TextEditorView::new(
+                "before\n中🙂\nafter\n",
+                &oxideterm_theme::default_tokens(),
+                cx,
+            )
+        });
+        editor.update(cx, |editor, cx| {
+            editor
+                .cursor
+                .set_selection(Selection::new(BufferOffset(15), BufferOffset(7)));
+            editor.prefix_selected_lines_external("> ", cx);
+            assert_eq!(editor.buffer.text(), "before\n> 中🙂\nafter\n");
+            assert_eq!(
+                editor.cursor.selection(),
+                Selection::new(BufferOffset(17), BufferOffset(9))
+            );
+            editor.undo_external(cx);
+            assert_eq!(editor.buffer.text(), "before\n中🙂\nafter\n");
+            editor
+                .cursor
+                .set_selection(Selection::new(BufferOffset(7), BufferOffset(14)));
+            editor.wrap_primary_selection_external("**", "**", cx);
+            assert_eq!(editor.buffer.text(), "before\n**中🙂**\nafter\n");
+            editor.wrap_primary_selection_external("**", "**", cx);
+            assert_eq!(editor.buffer.text(), "before\n中🙂\nafter\n");
         });
     }
 

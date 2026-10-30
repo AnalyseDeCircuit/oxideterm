@@ -18,6 +18,7 @@ pub(super) struct SyntaxRequest {
     tab_size: usize,
 }
 
+#[derive(Default)]
 struct SyntaxState {
     version: Option<u64>,
     syntax: Option<SyntaxSession>,
@@ -155,9 +156,8 @@ impl TextEditorView {
                 .scheduler_executor()
                 .spawn_dedicated(move |_| async move {
                     let work = SyntaxWork::new(token, generation, SYNTAX_SLICE);
-                    // Legacy query collectors need a contiguous view, but that
-                    // temporary belongs to the worker, not the document cache.
-                    text.with_text(|text| compute(runtime, &request, text, &work))
+                    let source = oxideterm_editor_syntax::ChunkedText::new(text.chunks());
+                    compute(runtime, &request, &source, &work)
                 });
         self.syntax_task = Some(cx.spawn(async move |weak, cx| {
             let result = background.await;
@@ -225,7 +225,7 @@ impl Drop for TextEditorView {
 fn compute(
     mut runtime: OwnedSyntax,
     request: &SyntaxRequest,
-    text: &str,
+    text: &(impl oxideterm_editor_syntax::TextSource + ?Sized),
     work: &SyntaxWork,
 ) -> Result<OwnedSyntax, SyntaxError> {
     let result = (|| -> Result<(), SyntaxError> {
@@ -249,6 +249,9 @@ fn compute(
                     Some(work),
                 )?)
             } else {
+                // A full parse cannot reuse the old tree or its owner-bound indexes.
+                // Release them on this worker before allocating the replacement state.
+                *state = SyntaxState::default();
                 state.syntax = Some(if let Some(grammar) = &request.grammar {
                     SyntaxSession::parse_plugin(grammar, text, Some(work))?
                 } else {

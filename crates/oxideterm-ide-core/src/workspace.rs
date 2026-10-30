@@ -1,10 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{
-    collections::{HashMap, HashSet},
-    sync::Arc,
-};
+use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -306,9 +303,9 @@ impl IdeWorkspace {
     pub fn replace_buffer_text(
         &mut self,
         tab_id: EditorTabId,
-        text: impl Into<Arc<str>>,
+        text: impl Into<crate::SharedText>,
     ) -> Result<(), WorkspaceError> {
-        let text: Arc<str> = text.into();
+        let text: crate::SharedText = text.into();
         let buffer = self
             .buffers
             .get_mut(&tab_id)
@@ -355,7 +352,7 @@ impl IdeWorkspace {
     pub fn complete_save_at_revision(
         &mut self,
         tab_id: EditorTabId,
-        saved_text: impl Into<Arc<str>>,
+        saved_text: impl Into<crate::SharedText>,
         saved_revision: u64,
         saved_format: crate::TextFileFormat,
         version: SavedFileVersion,
@@ -402,7 +399,7 @@ impl IdeWorkspace {
     pub fn reload_clean_buffer(
         &mut self,
         tab_id: EditorTabId,
-        text: impl Into<Arc<str>>,
+        text: impl Into<crate::SharedText>,
         version: SavedFileVersion,
     ) -> Result<(), ReloadError> {
         let Some(buffer) = self.buffers.get_mut(&tab_id) else {
@@ -411,7 +408,7 @@ impl IdeWorkspace {
         if buffer.is_dirty() {
             return Err(ReloadError::DirtyBuffer);
         }
-        let text: Arc<str> = text.into();
+        let text: crate::SharedText = text.into();
         buffer.text = text.clone();
         buffer.saved_text = text;
         buffer.version = version;
@@ -580,7 +577,7 @@ impl IdeWorkspace {
     pub fn complete_dirty_close_after_save_at_revision(
         &mut self,
         request_id: CloseRequestId,
-        saved_text: impl Into<Arc<str>>,
+        saved_text: impl Into<crate::SharedText>,
         saved_revision: u64,
         saved_format: crate::TextFileFormat,
         version: SavedFileVersion,

@@ -8,6 +8,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

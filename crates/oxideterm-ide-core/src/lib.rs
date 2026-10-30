@@ -10,6 +10,7 @@
 //! state however they need.
 
 mod filesystem;
+pub use oxideterm_editor_core::SharedText;
 mod model;
 mod plugin_snapshot;
 mod tree;

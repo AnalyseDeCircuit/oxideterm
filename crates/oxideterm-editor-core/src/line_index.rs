@@ -10,6 +10,34 @@ pub(crate) enum LineIndex {
 }
 
 impl LineIndex {
+    pub(crate) fn from_chunks<'a>(
+        chunks: impl Iterator<Item = &'a str> + Clone,
+        len: usize,
+    ) -> Self {
+        fn starts<'a, T: TryFrom<usize>>(chunks: impl Iterator<Item = &'a str> + Clone) -> Vec<T> {
+            // Match contiguous opening: reserve exactly once instead of growing a full row index.
+            let lines = 1 + chunks
+                .clone()
+                .map(|text| text.matches('\n').count())
+                .sum::<usize>();
+            let mut starts = Vec::with_capacity(lines);
+            starts.push(stored_offset(0));
+            let mut base = 0;
+            for chunk in chunks {
+                for (index, _) in chunk.match_indices('\n') {
+                    starts.push(stored_offset(base + index + 1));
+                }
+                base += chunk.len();
+            }
+            starts
+        }
+        if u32::try_from(len).is_ok() {
+            Self::Compact(starts(chunks))
+        } else {
+            Self::Wide(starts(chunks))
+        }
+    }
+
     pub(crate) fn new(text: &str) -> Self {
         if u32::try_from(text.len()).is_ok() {
             Self::Compact(compute_line_starts(text))
@@ -97,10 +125,12 @@ fn update_line_starts_after_edits<T: Copy + TryFrom<usize> + TryInto<usize>>(
             old_index += 1;
         }
         let base = apply_line_shift(edit.range.start.0, shift);
-        for (index, byte) in edit.replacement.bytes().enumerate() {
-            if byte == b'\n' {
-                push_line_start(&mut middle, base + index + 1);
+        let mut replacement_offset = 0;
+        for chunk in edit.replacement.chunks() {
+            for (index, _) in chunk.match_indices('\n') {
+                push_line_start(&mut middle, base + replacement_offset + index + 1);
             }
+            replacement_offset += chunk.len();
         }
         while old_index < last && offset(starts[old_index]) <= edit.range.end.0 {
             old_index += 1;
@@ -139,6 +169,17 @@ fn apply_line_shift(offset: usize, shift: isize) -> usize {
 mod tests {
     use super::*;
     use crate::{BufferOffset, TextRange};
+
+    #[test]
+    fn chunked_opening_keeps_absolute_offsets_without_spare_line_capacity() {
+        let LineIndex::Compact(starts) =
+            LineIndex::from_chunks(["", "a\n中", "🙂\n", "tail\n"].into_iter(), 15)
+        else {
+            panic!("small source uses compact offsets");
+        };
+        assert_eq!(starts, [0, 2, 10, 15]);
+        assert_eq!(starts.capacity(), 4);
+    }
 
     #[test]
     fn crossing_the_compact_limit_keeps_absolute_line_offsets() {

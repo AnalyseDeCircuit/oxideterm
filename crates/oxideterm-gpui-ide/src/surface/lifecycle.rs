@@ -1024,7 +1024,7 @@ mod lifecycle_tests {
             surface.resolve_dirty_close(DirtyCloseDecision::Cancel, cx);
             surface.advance_shell_return(cx);
             assert_eq!(
-                &*surface.workspace.buffer(tab).unwrap().text,
+                surface.workspace.buffer(tab).unwrap().text.to_string(),
                 "unsaved container edit"
             );
             assert!(!surface.shell_return_requested);

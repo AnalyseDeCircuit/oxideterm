@@ -9,6 +9,7 @@ version.workspace = true
 
 [dependencies]
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+memchr.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
 tree-sitter.workspace = true

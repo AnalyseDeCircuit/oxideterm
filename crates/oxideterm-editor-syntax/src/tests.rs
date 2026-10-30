@@ -5,6 +5,123 @@ use oxideterm_editor_core::{BufferOffset, TextRange};
 
 use crate::*;
 
+fn fragmented_buffer(source: &str) -> oxideterm_editor_core::TextBuffer {
+    use oxideterm_editor_core::{EditTransaction, TextBuffer, TextEdit};
+    let mut buffer = TextBuffer::new(source);
+    let edits = source
+        .char_indices()
+        .enumerate()
+        .filter(|(index, _)| index % 2 == 1)
+        .map(|(_, (offset, ch))| {
+            TextEdit::new(
+                TextRange::new(BufferOffset(offset), BufferOffset(offset + ch.len_utf8())),
+                ch.to_string(),
+            )
+        })
+        .collect();
+    buffer
+        .apply_transaction(EditTransaction::new(edits))
+        .unwrap();
+    buffer
+}
+
+#[test]
+fn fragmented_source_preserves_incremental_highlights_folds_and_brackets() {
+    let source = "fn main() {\n\tlet message = \"你🙂\";\n\tcall(message);\n}\n";
+    let mut buffer = fragmented_buffer(source);
+    let snapshot = buffer.shared_snapshot();
+    assert!(snapshot.chunks().count() > 1);
+    let input = ChunkedText::new(snapshot.chunks());
+    let mut session = SyntaxSession::parse_plugin(
+        crate::grammar_fixture::grammar(LanguageId::Rust),
+        &input,
+        None,
+    )
+    .unwrap();
+    assert!(!session.root_has_error());
+    let mut highlights = HighlightCache::default();
+    highlights.update(&session, &input, None);
+    let spans = highlights
+        .spans_in_range(0..input.len())
+        .collect::<Vec<_>>();
+    assert!(syntax_scope_covers_range(
+        &spans,
+        SyntaxScope::Keyword,
+        0..2
+    ));
+    let quoted = source.find("\"你🙂\"").unwrap();
+    assert!(syntax_scope_covers_range(
+        &spans,
+        SyntaxScope::String,
+        quoted..quoted + "\"你🙂\"".len()
+    ));
+    let mut structure = StructureCache::default();
+    structure.update(&session, &input, 4, None);
+    assert_eq!(structure.fold_at_line(0), Some((0, 3)));
+    assert_eq!(structure.columns_for_line(1), [0]);
+    assert_eq!(
+        session
+            .bracket_index_controlled(&input, None)
+            .unwrap()
+            .pair_at(7),
+        Some(&BracketPair {
+            open: BufferOffset(7),
+            close: BufferOffset(8)
+        })
+    );
+
+    let range = TextRange::new(
+        BufferOffset(quoted + 1),
+        BufferOffset(quoted + 1 + "你🙂".len()),
+    );
+    let edit = SyntaxEdit::from_buffer(&buffer, range, "中文e\u{301}").unwrap();
+    buffer
+        .replace_selection(
+            oxideterm_editor_core::Selection::new(range.start, range.end),
+            "中文e\u{301}",
+        )
+        .unwrap();
+    let after = buffer.shared_snapshot();
+    let after_input = ChunkedText::new(after.chunks());
+    let change = session.apply_edit(&after_input, edit).unwrap();
+    highlights.update(&session, &after_input, Some(&change));
+    structure.update(&session, &after_input, 4, Some(&change));
+    let expected = "fn main() {\n\tlet message = \"中文e\u{301}\";\n\tcall(message);\n}\n";
+    assert_eq!(buffer.text(), expected);
+    let spans = highlights
+        .spans_in_range(0..after_input.len())
+        .collect::<Vec<_>>();
+    assert!(syntax_scope_covers_range(
+        &spans,
+        SyntaxScope::String,
+        quoted..quoted + "\"中文e\u{301}\"".len()
+    ));
+    assert_eq!(structure.fold_at_line(0), Some((0, 3)));
+    assert_eq!(structure.columns_for_line(2), [0]);
+    assert_eq!(snapshot.with_text(str::to_owned), source);
+}
+
+#[test]
+fn fragmented_markdown_inline_queries_keep_global_unicode_ranges() {
+    let source = "# Heading\n\n前言🙂 **粗体** and `x🙂`.\n";
+    let buffer = fragmented_buffer(source);
+    let snapshot = buffer.shared_snapshot();
+    let input = ChunkedText::new(snapshot.chunks());
+    let session = SyntaxSession::parse_controlled(LanguageId::Markdown, &input, None).unwrap();
+    let spans = session.highlight_spans(&input);
+    for (text, scope) in [
+        ("Heading", SyntaxScope::Keyword),
+        ("粗体", SyntaxScope::Variable),
+        ("x🙂", SyntaxScope::String),
+    ] {
+        let start = source.find(text).unwrap();
+        assert!(
+            syntax_scope_covers_range(&spans, scope, start..start + text.len()),
+            "{text}"
+        );
+    }
+}
+
 fn syntax_scope_covers_range(
     spans: &[HighlightSpan],
     scope: SyntaxScope,

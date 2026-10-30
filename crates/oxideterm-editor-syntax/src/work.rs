@@ -62,7 +62,7 @@ pub(crate) fn checkpoint(work: Option<&SyntaxWork>) -> Result<(), SyntaxError> {
 
 pub(crate) fn parse(
     parser: &mut tree_sitter::Parser,
-    source: &str,
+    source: &(impl crate::TextSource + ?Sized),
     old: Option<&tree_sitter::Tree>,
     work: Option<&SyntaxWork>,
 ) -> Result<tree_sitter::Tree, SyntaxError> {
@@ -76,7 +76,7 @@ pub(crate) fn parse(
             }
         };
         if let Some(tree) = parser.parse_with_options(
-            &mut |offset, _| source.as_bytes().get(offset..).unwrap_or_default(),
+            &mut |offset, _| source.bytes_at(offset),
             old,
             Some(tree_sitter::ParseOptions::new().progress_callback(&mut pause)),
         ) {

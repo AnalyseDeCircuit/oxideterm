@@ -261,7 +261,7 @@ mod tree_selection_tests {
             assert_eq!(confirm.unsaved_tab_count, 1);
             surface.confirm_delete_tree_item(cx);
             assert_eq!(
-                surface.workspace.buffer(tab).unwrap().text.as_ref(),
+                surface.workspace.buffer(tab).unwrap().text.to_string(),
                 "unsaved"
             );
             let directory = FileTreeEntry {

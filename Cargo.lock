@@ -7283,6 +7283,7 @@ dependencies = [
 name = "oxideterm-editor-core"
 version = "2.2.6"
 dependencies = [
+ "serde",
  "thiserror 2.0.20",
  "unicode-segmentation",
 ]
@@ -7291,6 +7292,7 @@ dependencies = [
 name = "oxideterm-editor-syntax"
 version = "2.2.6"
 dependencies = [
+ "memchr",
  "oxideterm-editor-core",
  "oxideterm-plugin-manifest",
  "serde_json",
@@ -7691,6 +7693,7 @@ dependencies = [
 name = "oxideterm-ide-core"
 version = "2.2.6"
 dependencies = [
+ "oxideterm-editor-core",
  "serde",
  "serde_json",
  "thiserror 2.0.20",

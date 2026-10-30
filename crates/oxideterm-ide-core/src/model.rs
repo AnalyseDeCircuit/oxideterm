@@ -1,7 +1,8 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::{path::PathBuf, sync::Arc};
+use crate::SharedText;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -149,8 +150,8 @@ pub struct EditorBuffer {
     #[serde(default)]
     pub saved_format: TextFileFormat,
     pub location: IdeLocation,
-    pub text: Arc<str>,
-    pub saved_text: Arc<str>,
+    pub text: SharedText,
+    pub saved_text: SharedText,
     pub version: SavedFileVersion,
     pub revision: u64,
     pub saved_revision: u64,
@@ -158,7 +159,7 @@ pub struct EditorBuffer {
 
 impl EditorBuffer {
     pub fn new(location: IdeLocation, text: impl Into<String>, version: SavedFileVersion) -> Self {
-        let text: Arc<str> = text.into().into();
+        let text: SharedText = text.into().into();
         Self {
             location,
             format: TextFileFormat::default(),
@@ -195,8 +196,8 @@ pub struct BufferSnapshot {
     pub saved_format: TextFileFormat,
     pub tab_id: EditorTabId,
     pub location: IdeLocation,
-    pub text: Arc<str>,
-    pub saved_text: Arc<str>,
+    pub text: SharedText,
+    pub saved_text: SharedText,
     pub version: SavedFileVersion,
     pub revision: u64,
     pub saved_revision: u64,

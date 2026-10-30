@@ -40,6 +40,7 @@ use oxideterm_gpui_ui::{
         text_input_anchor_probe,
     },
 };
+use oxideterm_ide_core::SharedText;
 use oxideterm_ide_core::{
     AsyncIdeFileSystem, CloseRequestId, DirtyCloseDecision, EditorTabId, FileKind, FileTreeEntry,
     IdeFileCheck, IdeFileError, IdeFileErrorKind, IdeLocation, IdePluginFileSnapshot,

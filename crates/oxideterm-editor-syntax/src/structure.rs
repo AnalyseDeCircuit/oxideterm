@@ -70,7 +70,7 @@ impl StructureCache {
     pub fn update(
         &mut self,
         session: &SyntaxSession,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         tab_size: usize,
         change: Option<&SyntaxChange>,
     ) {
@@ -81,7 +81,7 @@ impl StructureCache {
     pub fn update_controlled(
         &mut self,
         session: &SyntaxSession,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         tab_size: usize,
         change: Option<&SyntaxChange>,
         work: Option<&crate::SyntaxWork>,

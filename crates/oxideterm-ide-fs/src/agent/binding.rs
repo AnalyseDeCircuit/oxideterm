@@ -132,7 +132,7 @@ impl NodeAgentIdeFileSystem {
         &self,
         id: &str,
         path: &str,
-        text: &str,
+        text: &oxideterm_ide_core::SharedText,
         format: &oxideterm_ide_core::TextFileFormat,
         expected: Option<&SavedFileVersion>,
         mode: WriteMode,
@@ -144,7 +144,7 @@ impl NodeAgentIdeFileSystem {
                 "File must be reopened before saving",
             ));
         }
-        let bytes = crate::text::encode_file(text, format)?;
+        let bytes = crate::text::encode_chunks(text.chunks(), format)?;
         let result = session
             .write_bytes(
                 "fs/writeIdeFile",

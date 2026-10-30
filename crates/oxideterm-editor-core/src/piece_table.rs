@@ -1,5 +1,8 @@
-use crate::edit::{SharedText, TextAllocation};
-use std::{ops::Range, sync::Arc};
+use crate::{
+    BufferOffset, TextEdit, TextRange,
+    edit::{SharedText, TextAllocation, TextSlice},
+};
+use std::{collections::HashMap, ops::Range, sync::Arc};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PieceSource {
@@ -35,13 +38,13 @@ impl Piece {
 /// `original` is immutable and shared until dead ranges are compacted. Inserted text is appended to
 /// bounded `add` chunks, and `pieces` describes the visible document as byte spans.
 /// `TextBuffer` materializes the full document only for
-/// boundary APIs such as save, syntax, and regex search; edits themselves keep
+/// consumers requiring contiguous text, such as regex search; edits themselves keep
 /// the piece table as the source of truth.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PieceTableTextBuffer {
     pub(crate) original: Arc<str>,
-    pub(crate) add: Vec<TextAllocation>,
-    pub(crate) pieces: Vec<Piece>,
+    pub(crate) add: Arc<Vec<TextAllocation>>,
+    pub(crate) pieces: Arc<Vec<Piece>>,
     len: usize,
 }
 
@@ -53,14 +56,48 @@ impl PieceTableTextBuffer {
             .collect();
         Self {
             original,
-            add: Vec::new(),
-            pieces,
+            add: Arc::new(Vec::new()),
+            pieces: Arc::new(pieces),
             len,
         }
     }
 
     pub(crate) fn len(&self) -> usize {
         self.len
+    }
+
+    pub(crate) fn shared_text(&self) -> SharedText {
+        SharedText::from_slices(
+            self.pieces
+                .iter()
+                .map(|piece| TextSlice {
+                    allocation: match piece.source {
+                        PieceSource::Original => TextAllocation::Original(self.original.clone()),
+                        PieceSource::Add(index) => self.add[index].clone(),
+                    },
+                    range: piece.start..piece.end(),
+                })
+                .collect(),
+        )
+    }
+
+    pub(crate) fn from_shared_text(text: SharedText) -> Self {
+        if let [slice] = text.slices()
+            && let TextAllocation::Original(original) = &slice.allocation
+            && slice.range == (0..original.len())
+        {
+            return Self::new(original.clone());
+        }
+        let mut storage = Self::new(Arc::from(""));
+        let len = text.len();
+        storage.replace_batch(
+            &[TextEdit::with_shared_text(
+                TextRange::caret(BufferOffset::ZERO),
+                text,
+            )],
+            len,
+        );
+        storage
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -116,6 +153,25 @@ impl PieceTableTextBuffer {
         text
     }
 
+    pub(crate) fn borrow_range(&self, range: Range<usize>) -> Option<&str> {
+        if range.is_empty() {
+            return Some("");
+        }
+        let mut base = 0;
+        for piece in self.pieces.iter() {
+            if range.start >= base && range.end <= base + piece.len {
+                return self
+                    .source_text(piece.source)
+                    .get(piece.start + range.start - base..piece.start + range.end - base);
+            }
+            base += piece.len;
+            if base > range.start {
+                break;
+            }
+        }
+        None
+    }
+
     pub(crate) fn is_char_boundary(&self, offset: usize) -> bool {
         if offset > self.len {
             return false;
@@ -145,89 +201,62 @@ impl PieceTableTextBuffer {
         false
     }
 
-    pub(crate) fn shared_slice(&self, range: Range<usize>) -> SharedText {
-        if range.is_empty() {
-            return String::new().into();
+    /// Edits are validated, sorted and expressed in the original document's coordinates.
+    pub(crate) fn replace_batch(&mut self, edits: &[TextEdit], new_len: usize) -> Vec<TextEdit> {
+        let original_pieces = std::mem::take(&mut self.pieces);
+        let mut cursor = PieceCursor::new(&original_pieces);
+        let mut next = Vec::with_capacity(original_pieces.len() + edits.len());
+        let mut inverse = Vec::with_capacity(edits.len());
+        let mut written = 0;
+        let mut sources = HashMap::with_capacity(self.add.len() + 1);
+        sources.insert(
+            TextAllocation::Original(self.original.clone()).allocation_key(),
+            PieceSource::Original,
+        );
+        for (index, allocation) in self.add.iter().enumerate() {
+            sources.insert(allocation.allocation_key(), PieceSource::Add(index));
         }
-        let mut offset = 0;
-        for piece in &self.pieces {
-            if range.start >= offset && range.end <= offset + piece.len {
-                let start = piece.start + range.start - offset;
+
+        for edit in edits {
+            written += edit.range.start.0 - cursor.position;
+            cursor.take_until(edit.range.start.0, |piece| push_piece(&mut next, piece));
+            let mut removed: Vec<TextSlice> = Vec::new();
+            cursor.take_until(edit.range.end.0, |piece| {
                 let allocation = match piece.source {
                     PieceSource::Original => TextAllocation::Original(self.original.clone()),
                     PieceSource::Add(index) => self.add[index].clone(),
                 };
-                return SharedText {
-                    allocation,
-                    range: start..start + range.len(),
-                };
-            }
-            offset += piece.len;
-        }
-        // A deletion spanning independent chunks needs a contiguous replacement
-        // for the line index. Keep this copy only in history, not another full snapshot.
-        self.slice_to_string(range).into()
-    }
-
-    pub(crate) fn replace(&mut self, range: Range<usize>, replacement: &SharedText) {
-        debug_assert!(range.start <= range.end);
-        debug_assert!(range.end <= self.len);
-
-        let replacement_piece = self.append_add_piece(replacement);
-        let mut next =
-            Vec::with_capacity(self.pieces.len() + usize::from(replacement_piece.is_some()));
-        let mut position = 0;
-        let mut inserted = false;
-
-        for piece in self.pieces.iter().copied() {
-            let piece_start = position;
-            let piece_end = position + piece.len;
-            position = piece_end;
-
-            if piece_end <= range.start {
+                if let Some(previous) = removed.last_mut()
+                    && previous.allocation.same_allocation(&allocation)
+                    && previous.range.end == piece.start
+                {
+                    previous.range.end = piece.end();
+                } else {
+                    removed.push(TextSlice {
+                        allocation,
+                        range: piece.start..piece.end(),
+                    });
+                }
+            });
+            for slice in edit.replacement.slices() {
+                let piece = self.append_slice(slice, &mut sources);
                 push_piece(&mut next, piece);
-                continue;
             }
-
-            if piece_start >= range.end {
-                if !inserted {
-                    if let Some(piece) = replacement_piece {
-                        push_piece(&mut next, piece);
-                    }
-                    inserted = true;
-                }
-                push_piece(&mut next, piece);
-                continue;
-            }
-
-            if !inserted {
-                if range.start > piece_start {
-                    let left_len = range.start - piece_start;
-                    if let Some(left) = piece.slice(0, left_len) {
-                        push_piece(&mut next, left);
-                    }
-                }
-                if let Some(piece) = replacement_piece {
-                    push_piece(&mut next, piece);
-                }
-                inserted = true;
-            }
-
-            if range.end < piece_end {
-                let right_offset = range.end - piece_start;
-                let right_len = piece_end - range.end;
-                if let Some(right) = piece.slice(right_offset, right_len) {
-                    push_piece(&mut next, right);
-                }
-            }
+            let start = written;
+            written += edit.replacement.len();
+            inverse.push(TextEdit::with_shared_text(
+                TextRange::new(BufferOffset(start), BufferOffset(written)),
+                SharedText::from_slices(removed),
+            ));
         }
-
-        if !inserted && let Some(piece) = replacement_piece {
-            push_piece(&mut next, piece);
-        }
-
-        self.pieces = next;
-        self.len = self.len - (range.end - range.start) + replacement.len();
+        written += self.len - cursor.position;
+        cursor.take_until(self.len, |piece| push_piece(&mut next, piece));
+        debug_assert_eq!(written, new_len);
+        // The next transaction builds another vector, so retaining spare capacity has no benefit.
+        next.shrink_to_fit();
+        self.pieces = Arc::new(next);
+        self.len = new_len;
+        inverse
     }
 
     pub(crate) fn reclaim_unused_text(&mut self) {
@@ -247,7 +276,7 @@ impl PieceTableTextBuffer {
             // Undo and worker snapshots can retain slices of the original.
             // Compact only when dropping this reference would release the old allocation.
             let mut compact = String::with_capacity(original_live);
-            for piece in &mut self.pieces {
+            for piece in Arc::make_mut(&mut self.pieces) {
                 if piece.source == PieceSource::Original {
                     let start = compact.len();
                     compact.push_str(&self.original[piece.start..piece.end()]);
@@ -257,7 +286,7 @@ impl PieceTableTextBuffer {
             self.original = compact.into();
         }
         let mut usage = vec![(0, 0, 0); self.add.len()];
-        for piece in &self.pieces {
+        for piece in self.pieces.iter() {
             if let PieceSource::Add(index) = piece.source {
                 usage[index].0 += piece.len;
                 usage[index].1 = usage[index].1.max(piece.end());
@@ -268,19 +297,23 @@ impl PieceTableTextBuffer {
             if *live == 0 {
                 continue;
             }
-            let chunk = &mut self.add[index];
-            if chunk.is_unique() && chunk.text().len().saturating_sub(*live) > *live {
+            // A shared allocation table is also a reader, even if its text Arc has one owner.
+            let table_unique = Arc::strong_count(&self.add) == 1;
+            let chunk = &self.add[index];
+            if table_unique && chunk.is_unique() && chunk.text().len().saturating_sub(*live) > *live
+            {
                 let mut compact = String::with_capacity(*live);
-                for piece in &mut self.pieces {
+                for piece in Arc::make_mut(&mut self.pieces) {
                     if piece.source == PieceSource::Add(index) {
                         let start = compact.len();
                         compact.push_str(&chunk.text()[piece.start..piece.end()]);
                         piece.start = start;
                     }
                 }
-                *chunk = TextAllocation::Added(Arc::new(compact));
-            } else if *end < chunk.text().len()
-                && let TextAllocation::Added(chunk) = chunk
+                Arc::make_mut(&mut self.add)[index] = TextAllocation::Added(Arc::new(compact));
+            } else if table_unique
+                && *end < chunk.text().len()
+                && let TextAllocation::Added(chunk) = &mut Arc::make_mut(&mut self.add)[index]
                 && let Some(chunk) = Arc::get_mut(chunk)
             {
                 // A worker still reading this chunk keeps its suffix; do not clone it to trim.
@@ -289,54 +322,88 @@ impl PieceTableTextBuffer {
             *new_index = retained;
             retained += 1;
         }
-        for piece in &mut self.pieces {
-            if let PieceSource::Add(index) = &mut piece.source {
-                *index = usage[*index].2;
+        if retained != self.add.len() {
+            for piece in Arc::make_mut(&mut self.pieces) {
+                if let PieceSource::Add(index) = &mut piece.source {
+                    *index = usage[*index].2;
+                }
             }
+            let mut index = 0;
+            Arc::make_mut(&mut self.add).retain(|_| {
+                let keep = usage[index].0 != 0;
+                index += 1;
+                keep
+            });
         }
-        let mut index = 0;
-        self.add.retain(|_| {
-            let keep = usage[index].0 != 0;
-            index += 1;
-            keep
-        });
         if self.add.is_empty() {
-            self.add = Vec::new();
+            self.add = Arc::new(Vec::new());
         }
     }
 
-    fn append_add_piece(&mut self, text: &SharedText) -> Option<Piece> {
-        if text.is_empty() {
-            return None;
+    fn append_slice(
+        &mut self,
+        slice: &TextSlice,
+        sources: &mut HashMap<(u8, usize), PieceSource>,
+    ) -> Piece {
+        let key = slice.allocation.allocation_key();
+        if let Some(&source) = sources.get(&key) {
+            return Piece::new(source, slice.range.start, slice.range.len()).unwrap();
         }
         // Shared snapshots can keep old chunks indefinitely. Append elsewhere
         // rather than copying their accumulated text on each keystroke.
         const CHUNK_BYTES: usize = 64 * 1024;
-        if let Some(last) = self.add.last_mut()
-            && text.allocation.is_unique()
+        if let Some(last) = Arc::make_mut(&mut self.add).last_mut()
+            && slice.allocation.is_unique()
             && let TextAllocation::Added(last) = last
-            && last.len().saturating_add(text.len()) <= CHUNK_BYTES
+            && last.len().saturating_add(slice.range.len()) <= CHUNK_BYTES
             && let Some(chunk) = Arc::get_mut(last)
         {
             let start = chunk.len();
-            chunk.push_str(text);
-            return Piece::new(PieceSource::Add(self.add.len() - 1), start, text.len());
-        }
-        if let TextAllocation::Original(original) = &text.allocation
-            && Arc::ptr_eq(original, &self.original)
-        {
-            return Piece::new(PieceSource::Original, text.range.start, text.len());
-        }
-        if let Some(index) = self
-            .add
-            .iter()
-            .position(|chunk| chunk.same_allocation(&text.allocation))
-        {
-            return Piece::new(PieceSource::Add(index), text.range.start, text.len());
+            chunk.push_str(slice.text());
+            return Piece::new(
+                PieceSource::Add(self.add.len() - 1),
+                start,
+                slice.range.len(),
+            )
+            .unwrap();
         }
         let index = self.add.len();
-        self.add.push(text.allocation.clone());
-        Piece::new(PieceSource::Add(index), text.range.start, text.len())
+        Arc::make_mut(&mut self.add).push(slice.allocation.clone());
+        let source = PieceSource::Add(index);
+        sources.insert(key, source);
+        Piece::new(source, slice.range.start, slice.range.len()).unwrap()
+    }
+}
+
+struct PieceCursor<'a> {
+    pieces: &'a [Piece],
+    index: usize,
+    offset: usize,
+    position: usize,
+}
+
+impl<'a> PieceCursor<'a> {
+    fn new(pieces: &'a [Piece]) -> Self {
+        Self {
+            pieces,
+            index: 0,
+            offset: 0,
+            position: 0,
+        }
+    }
+
+    fn take_until(&mut self, end: usize, mut emit: impl FnMut(Piece)) {
+        while self.position < end {
+            let piece = self.pieces[self.index];
+            let len = (piece.len - self.offset).min(end - self.position);
+            emit(piece.slice(self.offset, len).unwrap());
+            self.position += len;
+            self.offset += len;
+            if self.offset == piece.len {
+                self.index += 1;
+                self.offset = 0;
+            }
+        }
     }
 }
 

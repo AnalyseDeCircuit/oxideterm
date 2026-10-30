@@ -3,6 +3,285 @@ use gpui::{AvailableSpace, TestAppContext, size};
 use std::time::Instant;
 
 #[cfg(target_os = "macos")]
+#[test]
+#[ignore = "manual fragmented snapshot metadata benchmark"]
+fn editor_fragmented_snapshot_memory() {
+    for count in [4_096, 16_384] {
+        let mut buffer = TextBuffer::new("ab\n".repeat(count));
+        let edits = (0..count)
+            .map(|index| {
+                TextEdit::new(
+                    TextRange::new(BufferOffset(index * 3), BufferOffset(index * 3 + 1)),
+                    "z",
+                )
+            })
+            .collect();
+        buffer
+            .apply_transaction(EditTransaction::new(edits))
+            .unwrap();
+        let before = allocator_bytes();
+        let started = Instant::now();
+        let first = buffer.shared_snapshot();
+        let second = buffer.shared_snapshot();
+        let snapshot_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let retained = allocator_bytes() as isize - before as isize;
+        let started = Instant::now();
+        buffer
+            .replace_selection(Selection::caret(BufferOffset(count * 3 / 2)), "中")
+            .unwrap();
+        let edit_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert!(
+            first
+                .chunks()
+                .flat_map(str::bytes)
+                .eq(b"zb\n".repeat(count))
+        );
+        assert!(
+            second
+                .chunks()
+                .flat_map(str::bytes)
+                .eq(b"zb\n".repeat(count))
+        );
+        assert_eq!(buffer.len(), count * 3 + 3);
+        buffer.undo().unwrap();
+        assert_eq!(buffer.text(), "zb\n".repeat(count));
+        buffer.redo().unwrap();
+        assert_eq!(buffer.line_text(count / 2).as_deref(), Some("中zb"));
+        eprintln!(
+            "EDITOR_FRAGMENTED_SNAPSHOT pieces={} retained={retained} snapshot_ms={snapshot_ms:.3} edit_ms={edit_ms:.3}",
+            first.chunks().count()
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[gpui::test]
+#[ignore = "manual folded row-map allocation benchmark"]
+fn editor_folded_rows_memory(cx: &mut TestAppContext) {
+    for folded in [false, true] {
+        let editor = cx.new(|cx| {
+            TextEditorView::new(
+                "row\n".repeat(250_000),
+                &oxideterm_theme::default_tokens(),
+                cx,
+            )
+        });
+        editor.update(cx, |editor, _| {
+            if folded {
+                editor.folded_ranges.push(FoldRange {
+                    start_line: 5,
+                    end_line: 10,
+                });
+            }
+            let before = allocator_bytes();
+            let started = Instant::now();
+            let rows = editor.display_rows();
+            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+            let retained = allocator_bytes() as isize - before as isize;
+            assert_eq!(rows.len(), if folded { 249_996 } else { 250_001 });
+            assert_eq!(rows.get(5).unwrap().is_folded_header, folded);
+            assert_eq!(rows.get(6).unwrap().line, if folded { 11 } else { 6 });
+            assert_eq!(rows.get(rows.len() - 1).unwrap().line, 250_000);
+            eprintln!(
+                "EDITOR_FOLDED_ROWS folded={folded} retained={retained} build_ms={elapsed:.3}"
+            );
+        });
+        drop(editor);
+        cx.run_until_parked();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[gpui::test]
+#[ignore = "manual syntax full-reset peak allocation benchmark"]
+fn editor_syntax_reset_memory(cx: &mut TestAppContext) {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    let flat = "fn example() { let value = 42; }\n";
+    let blocks = "fn example() {\n    if ready {\n        run();\n    }\n}\n";
+    for (name, source, first_item_len) in [
+        (
+            "flat",
+            flat.repeat((1024usize * 1024).div_ceil(flat.len())),
+            flat.len(),
+        ),
+        (
+            "blocks",
+            blocks.repeat((1024usize * 1024).div_ceil(blocks.len())),
+            blocks.len(),
+        ),
+        (
+            "comment-fragments",
+            format!(
+                "// original\n/*{}*/\nfn end() {{}}\n",
+                "x".repeat(8 * 1024 * 1024)
+            ),
+            "// original\n".len(),
+        ),
+    ] {
+        let editor =
+            cx.new(|cx| TextEditorView::new(source, &oxideterm_theme::default_tokens(), cx));
+        if name == "comment-fragments" {
+            editor.update(cx, |editor, _| {
+                let edits = (1..128)
+                    .map(|index| {
+                        TextEdit::new(
+                            TextRange::new(
+                                BufferOffset(index * 64 * 1024),
+                                BufferOffset(index * 64 * 1024 + 1),
+                            ),
+                            "x",
+                        )
+                    })
+                    .collect();
+                editor
+                    .buffer
+                    .apply_transaction(EditTransaction::new(edits))
+                    .unwrap();
+            });
+        }
+        editor.update(cx, |_, cx| crate::grammar_fixture::install_rust(cx));
+        let document_heap = allocator_bytes();
+        editor.update(cx, |editor, cx| {
+            editor.set_language(Some(LanguageId::Rust), cx)
+        });
+        cx.run_until_parked();
+        let active_heap = allocator_bytes();
+        let peak = AtomicUsize::new(active_heap);
+        let stop = AtomicBool::new(false);
+        let started = Instant::now();
+        std::thread::scope(|scope| {
+            scope.spawn(|| {
+                while !stop.load(Ordering::Acquire) {
+                    peak.fetch_max(allocator_bytes(), Ordering::Relaxed);
+                    std::thread::sleep(Duration::from_micros(100));
+                }
+            });
+            editor.update(cx, |editor, cx| {
+                editor
+                    .buffer
+                    .apply_transaction(EditTransaction::single(TextEdit::new(
+                        TextRange::new(BufferOffset(0), BufferOffset(first_item_len)),
+                        "// rebuilt\n",
+                    )))
+                    .unwrap();
+                editor.request_syntax(None, true, cx);
+            });
+            cx.run_until_parked();
+            peak.fetch_max(allocator_bytes(), Ordering::Relaxed);
+            stop.store(true, Ordering::Release);
+        });
+        let rebuild_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let finished_heap = allocator_bytes();
+        editor.read_with(cx, |editor, _| {
+            assert_eq!(editor.syntax_version, Some(editor.buffer.version()));
+            assert!(editor.highlight_spans.spans_in_range(0..10).any(|span| {
+                span.range.start.0 == 0
+                    && span.range.end.0 == 10
+                    && span.scope == oxideterm_editor_syntax::SyntaxScope::Comment
+            }));
+            assert_eq!(editor.buffer.line_text(0).as_deref(), Some("// rebuilt"));
+            if name == "blocks" {
+                assert_eq!(editor.structure_cache.fold_at_line(1), Some((1, 5)));
+            }
+        });
+        eprintln!(
+            "EDITOR_SYNTAX_RESET workload={name} active={} peak={} retained={} peak_growth={} retained_growth={} rebuild_ms={rebuild_ms:.3}",
+            active_heap as isize - document_heap as isize,
+            peak.load(Ordering::Relaxed) as isize - document_heap as isize,
+            finished_heap as isize - document_heap as isize,
+            peak.load(Ordering::Relaxed).saturating_sub(active_heap),
+            finished_heap as isize - active_heap as isize,
+        );
+        drop(editor);
+        cx.run_until_parked();
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "manual batch-edit and cross-chunk undo allocation benchmark"]
+fn editor_batch_edit_memory() {
+    for count in [1_024, 4_096, 16_384] {
+        let mut buffer = TextBuffer::new("word\n".repeat(count));
+        buffer.track_changes(true);
+        let replacement = oxideterm_editor_core::SharedText::from("中".to_string());
+        let transaction = EditTransaction::new(
+            (0..count)
+                .map(|index| {
+                    TextEdit::with_shared_text(
+                        TextRange::new(BufferOffset(index * 5), BufferOffset(index * 5 + 4)),
+                        replacement.clone(),
+                    )
+                })
+                .collect(),
+        );
+        let before = allocator_bytes() as isize;
+        let started = Instant::now();
+        buffer.apply_transaction(transaction).unwrap();
+        let apply_ms = started.elapsed().as_secs_f64() * 1000.0;
+        let retained = allocator_bytes() as isize - before;
+        assert_eq!(buffer.text(), "中\n".repeat(count));
+        assert_eq!(buffer.line_count(), count + 1);
+        assert!(buffer.is_dirty());
+        let started = Instant::now();
+        buffer.undo().unwrap();
+        let undo_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(buffer.text(), "word\n".repeat(count));
+        assert!(!buffer.is_dirty());
+        let started = Instant::now();
+        buffer.redo().unwrap();
+        let redo_ms = started.elapsed().as_secs_f64() * 1000.0;
+        assert_eq!(buffer.text(), "中\n".repeat(count));
+        eprintln!(
+            "EDITOR_BATCH edits={count} retained={retained} apply_ms={apply_ms:.3} undo_ms={undo_ms:.3} redo_ms={redo_ms:.3}"
+        );
+    }
+
+    let mut buffer = TextBuffer::new("head\ntail");
+    let blocks = [
+        format!("{}\n", "A".repeat(2 * 1024 * 1024)),
+        format!("{}\n", "中".repeat(512 * 1024)),
+        format!("{}\n", "B".repeat(2 * 1024 * 1024)),
+    ];
+    let mut end = 5;
+    for block in &blocks {
+        buffer
+            .replace_selection(Selection::caret(BufferOffset(end)), block)
+            .unwrap();
+        end += block.len();
+    }
+    buffer.mark_saved();
+    let snapshot = buffer.shared_snapshot();
+    let before = allocator_bytes() as isize;
+    let started = Instant::now();
+    buffer
+        .replace_selection(Selection::new(BufferOffset(5), BufferOffset(end)), "")
+        .unwrap();
+    let delete_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let deleted = allocator_bytes() as isize - before;
+    assert_eq!(buffer.text(), "head\ntail");
+    let started = Instant::now();
+    buffer.undo().unwrap();
+    let undo_ms = started.elapsed().as_secs_f64() * 1000.0;
+    let restored = allocator_bytes() as isize - before;
+    assert!(!buffer.is_dirty());
+    for (line, block) in blocks.iter().enumerate() {
+        assert_eq!(
+            buffer.line_text(line + 1).as_deref(),
+            Some(block.trim_end_matches('\n'))
+        );
+    }
+    assert_eq!(buffer.line_text(4).as_deref(), Some("tail"));
+    assert_eq!(snapshot.len(), end + 4);
+    buffer.redo().unwrap();
+    assert_eq!(buffer.text(), "head\ntail");
+    eprintln!(
+        "EDITOR_CROSS_CHUNK bytes={} deleted_retained={deleted} restored_retained={restored} delete_ms={delete_ms:.3} undo_ms={undo_ms:.3}",
+        end - 5
+    );
+}
+
+#[cfg(target_os = "macos")]
 #[gpui::test]
 #[ignore = "manual dense-search and shared-snapshot allocation benchmark"]
 fn editor_search_snapshot_memory(cx: &mut TestAppContext) {

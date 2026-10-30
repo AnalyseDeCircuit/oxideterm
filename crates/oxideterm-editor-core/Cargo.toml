@@ -8,5 +8,6 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+serde.workspace = true
 thiserror.workspace = true
 unicode-segmentation.workspace = true

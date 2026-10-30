@@ -16,7 +16,7 @@ pub(crate) fn highlight_spans(
     tree: &Tree,
     highlight_query: &Query,
     markdown_inline_query: Option<&Query>,
-    source: &str,
+    source: &(impl crate::TextSource + ?Sized),
     requested: Range<usize>,
     work: Option<&crate::SyntaxWork>,
 ) -> Result<Vec<HighlightSpan>, crate::SyntaxError> {
@@ -40,7 +40,7 @@ pub(crate) fn highlight_spans(
     let mut captures = cursor.captures_with_options(
         highlight_query,
         tree.root_node(),
-        source.as_bytes(),
+        crate::source::QuerySource(source),
         tree_sitter::QueryCursorOptions::new().progress_callback(&mut pause),
     );
     let names = highlight_query.capture_names();
@@ -153,7 +153,7 @@ fn scope_for_capture(capture: &str, node_kind: &str) -> Option<SyntaxScope> {
 
 fn collect_markdown_inline_highlights(
     node: Node<'_>,
-    source: &str,
+    source: &(impl crate::TextSource + ?Sized),
     inline_query: &Query,
     requested: &Range<usize>,
     spans: &mut Vec<HighlightSpan>,
@@ -184,7 +184,7 @@ fn collect_markdown_inline_highlights(
 
 fn collect_markdown_inline_node_highlights(
     node: Node<'_>,
-    source: &str,
+    source: &(impl crate::TextSource + ?Sized),
     inline_query: &Query,
     requested: &Range<usize>,
     spans: &mut Vec<HighlightSpan>,
@@ -198,7 +198,8 @@ fn collect_markdown_inline_node_highlights(
     let inline_language: Language = tree_sitter_md::INLINE_LANGUAGE.into();
     let mut parser = Parser::new();
     parser.set_language(&inline_language)?;
-    let tree = crate::work::parse(&mut parser, &source[range.clone()], None, work)?;
+    let inline_source = crate::source::SourceSlice::new(source, range.clone());
+    let tree = crate::work::parse(&mut parser, &inline_source, None, work)?;
 
     let mut query_cursor = QueryCursor::new();
     query_cursor.set_byte_range(
@@ -217,7 +218,7 @@ fn collect_markdown_inline_node_highlights(
     let mut captures = query_cursor.captures_with_options(
         inline_query,
         tree.root_node(),
-        source[range.clone()].as_bytes(),
+        crate::source::QuerySource(&inline_source),
         tree_sitter::QueryCursorOptions::new().progress_callback(&mut pause),
     );
     let names = inline_query.capture_names();

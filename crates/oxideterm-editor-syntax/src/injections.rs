@@ -20,7 +20,7 @@ pub(crate) struct InjectionSyntax {
 impl SyntaxSession {
     pub(crate) fn refresh_injections(
         &mut self,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         edit: Option<SyntaxEdit>,
         work: Option<&SyntaxWork>,
     ) -> Result<(), SyntaxError> {
@@ -66,7 +66,7 @@ impl SyntaxSession {
 impl InjectionSyntax {
     pub(crate) fn overlay_highlights(
         &self,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         range: TextRange,
         spans: Vec<HighlightSpan>,
         work: Option<&SyntaxWork>,
@@ -174,15 +174,23 @@ mod tests {
 
     #[test]
     fn embedded_highlights_follow_global_offsets_edits_and_removed_regions() {
+        fn chunked(source: &str) -> crate::ChunkedText<'_> {
+            crate::ChunkedText::new(
+                source
+                    .char_indices()
+                    .map(|(offset, ch)| &source[offset..offset + ch.len_utf8()]),
+            )
+        }
         let (_directory, grammar) = fixture();
         let grammar = PluginGrammar::new(grammar);
         let mut source = "<template><div>🙂 {{ count + 1 }}</div></template>\n<script lang=\"ts\">\nconst count: number = 42;\n</script>\n<style>\n.box { color: red; }\n</style>\n".to_string();
         let generation = Arc::new(std::sync::atomic::AtomicU64::new(1));
         let work = SyntaxWork::new(generation.clone(), 1, std::time::Duration::from_micros(1));
-        let mut session = SyntaxSession::parse_plugin(&grammar, &source, Some(&work)).unwrap();
+        let mut session =
+            SyntaxSession::parse_plugin(&grammar, &chunked(&source), Some(&work)).unwrap();
         let mut cache = HighlightCache::default();
         cache
-            .update_controlled(&session, &source, None, Some(&work))
+            .update_controlled(&session, &chunked(&source), None, Some(&work))
             .unwrap();
         let check = |cache: &HighlightCache, source: &str, word: &str, scope: SyntaxScope| {
             let start = source.find(word).unwrap();
@@ -229,10 +237,10 @@ mod tests {
             );
             source.replace_range(range, replacement);
             let change = session
-                .apply_edit_controlled(&source, edit, Some(&work))
+                .apply_edit_controlled(&chunked(&source), edit, Some(&work))
                 .unwrap();
             cache
-                .update_controlled(&session, &source, Some(&change), Some(&work))
+                .update_controlled(&session, &chunked(&source), Some(&change), Some(&work))
                 .unwrap();
             check(&cache, &source, "const", SyntaxScope::Keyword);
             check(&cache, &source, "color", SyntaxScope::Property);
@@ -249,10 +257,10 @@ mod tests {
         );
         source.replace_range(start..end, replacement);
         let change = session
-            .apply_edit_controlled(&source, edit, Some(&work))
+            .apply_edit_controlled(&chunked(&source), edit, Some(&work))
             .unwrap();
         cache
-            .update_controlled(&session, &source, Some(&change), Some(&work))
+            .update_controlled(&session, &chunked(&source), Some(&change), Some(&work))
             .unwrap();
         check(&cache, &source, "100", SyntaxScope::Number);
         assert!(
@@ -266,7 +274,7 @@ mod tests {
             injection_ranges(
                 &session.queries.injections[0].query,
                 &session.tree,
-                &source,
+                &chunked(&source),
                 Some(&work)
             ),
             Err(SyntaxError::ParseCancelled)
@@ -303,7 +311,7 @@ mod tests {
 fn injection_ranges(
     query: &Query,
     tree: &tree_sitter::Tree,
-    source: &str,
+    source: &(impl crate::TextSource + ?Sized),
     work: Option<&SyntaxWork>,
 ) -> Result<Vec<tree_sitter::Range>, SyntaxError> {
     let mut cursor = QueryCursor::new();
@@ -320,7 +328,7 @@ fn injection_ranges(
     let mut captures = cursor.captures_with_options(
         query,
         tree.root_node(),
-        source.as_bytes(),
+        crate::source::QuerySource(source),
         tree_sitter::QueryCursorOptions::new().progress_callback(&mut pause),
     );
     let mut ranges = Vec::new();

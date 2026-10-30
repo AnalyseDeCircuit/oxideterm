@@ -586,12 +586,17 @@ mod markdown_preview_tests {
                 surface.toggle_markdown_mode(window, cx);
                 assert!(surface.focus_handle.is_focused(window));
                 assert_eq!(
-                    surface.workspace.buffer(first).unwrap().text.as_ref(),
+                    surface.workspace.buffer(first).unwrap().text.to_string(),
                     "changed\n# Original"
                 );
                 assert!(surface.is_tab_dirty(first, cx));
                 assert_eq!(
-                    surface.workspace.buffer(first).unwrap().saved_text.as_ref(),
+                    surface
+                        .workspace
+                        .buffer(first)
+                        .unwrap()
+                        .saved_text
+                        .to_string(),
                     "# Original"
                 );
                 cx.write_to_clipboard(ClipboardItem::new_string("must not paste".into()));
@@ -675,10 +680,15 @@ mod markdown_preview_tests {
             let request = surface
                 .prepare_file_save(tab, oxideterm_audit::AuditSource::User, cx)
                 .unwrap();
-            assert_eq!(request.buffer.text.as_ref(), "# Unsaved");
+            assert_eq!(request.buffer.text.to_string(), "# Unsaved");
             surface.complete_file_save(request, Ok(SavedFileVersion::unknown()), cx);
             assert_eq!(
-                surface.workspace.buffer(tab).unwrap().saved_text.as_ref(),
+                surface
+                    .workspace
+                    .buffer(tab)
+                    .unwrap()
+                    .saved_text
+                    .to_string(),
                 "# Unsaved"
             );
             assert!(!surface.is_tab_dirty(tab, cx));

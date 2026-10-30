@@ -172,6 +172,32 @@ impl TextBuffer {
         }
     }
 
+    pub fn shared_text(&self) -> crate::SharedText {
+        self.storage.shared_text()
+    }
+
+    pub fn from_shared_text(text: crate::SharedText) -> Self {
+        let line_starts = LineIndex::from_chunks(text.chunks(), text.len());
+        let storage = PieceTableTextBuffer::from_shared_text(text);
+        let text_cache = if storage.add.is_empty() {
+            Some(storage.original.clone())
+        } else {
+            None
+        };
+        Self {
+            storage,
+            text_cache: RefCell::new(text_cache),
+            line_starts,
+            version: 0,
+            content_revision: 0,
+            saved_revision: 0,
+            next_content_revision: 1,
+            undo_stack: Vec::new(),
+            redo_stack: Vec::new(),
+            changes: None,
+        }
+    }
+
     /// Drop only the contiguous read cache; pieces and undo history retain ownership.
     pub fn release_text_cache(&self) {
         let mut cache = self.text_cache.borrow_mut();
@@ -304,6 +330,9 @@ impl TextBuffer {
     pub fn with_line_text<R>(&self, line: usize, f: impl FnOnce(&str) -> R) -> Option<R> {
         let start = self.line_starts.get(line)?;
         let end = self.line_end_offset(line)?.0;
+        if let Some(text) = self.storage.borrow_range(start..end) {
+            return Some(f(text));
+        }
         if start == 0 && end == self.storage.len() {
             // A single-line document is already the requested row; cache it for repeated paints.
             return Some(self.with_text(f));
@@ -499,29 +528,17 @@ impl TextBuffer {
                     .collect(),
             });
         }
-        let mut inverse = Vec::with_capacity(edits.len());
         let mut delta: isize = 0;
 
         for edit in &edits {
-            let original = self.storage.shared_slice(edit.range.as_range());
-            let start_after = apply_delta(edit.range.start.0, delta)?;
-            let end_after = start_after + edit.replacement.len();
-            inverse.push(TextEdit::with_shared_text(
-                TextRange::new(BufferOffset(start_after), BufferOffset(end_after)),
-                original,
-            ));
             delta += edit.replacement.len() as isize - edit.range.len() as isize;
         }
 
         let new_len = apply_delta(self.len(), delta)?;
         self.line_starts.update(&edits, new_len);
 
-        for edit in edits.iter().rev() {
-            self.storage
-                .replace(edit.range.as_range(), &edit.replacement);
-        }
-        // Syntax and save snapshots still require contiguous text. Invalidate
-        // that version without forcing ordinary reads to materialize it again.
+        let inverse = self.storage.replace_batch(&edits, new_len);
+        // Invalidate optional contiguous consumers without rebuilding text for shared readers.
         *self.text_cache.borrow_mut() = None;
         self.storage.reclaim_unused_text();
         self.version = self.version.saturating_add(1);
@@ -568,8 +585,14 @@ fn normalize_edits_for_storage(
 
     let mut previous_end = BufferOffset::ZERO;
     for edit in &edits {
-        validate_offset_for_storage(storage, edit.range.start)?;
-        validate_offset_for_storage(storage, edit.range.end)?;
+        for offset in [edit.range.start, edit.range.end] {
+            if offset.0 > storage.len() {
+                return Err(EditorError::OffsetOutOfBounds {
+                    offset: offset.0,
+                    len: storage.len(),
+                });
+            }
+        }
         if edit.range.start > edit.range.end {
             return Err(EditorError::InvalidRange {
                 start: edit.range.start.0,
@@ -584,23 +607,25 @@ fn normalize_edits_for_storage(
         previous_end = edit.range.end;
     }
 
+    // Ordered boundaries share one forward walk, including undo on highly fragmented text.
+    let mut chunks = storage.chunks();
+    let mut chunk = chunks.next().unwrap_or_default();
+    let mut chunk_start = 0;
+    for offset in edits
+        .iter()
+        .flat_map(|edit| [edit.range.start.0, edit.range.end.0])
+    {
+        while offset > chunk_start + chunk.len() {
+            chunk_start += chunk.len();
+            chunk = chunks
+                .next()
+                .expect("validated offset has a containing piece");
+        }
+        if !chunk.is_char_boundary(offset - chunk_start) {
+            return Err(EditorError::InvalidUtf8Boundary { offset });
+        }
+    }
     Ok(edits)
-}
-
-fn validate_offset_for_storage(
-    storage: &PieceTableTextBuffer,
-    offset: BufferOffset,
-) -> Result<(), EditorError> {
-    if offset.0 > storage.len() {
-        return Err(EditorError::OffsetOutOfBounds {
-            offset: offset.0,
-            len: storage.len(),
-        });
-    }
-    if !storage.is_char_boundary(offset.0) {
-        return Err(EditorError::InvalidUtf8Boundary { offset: offset.0 });
-    }
-    Ok(())
 }
 
 fn apply_delta(offset: usize, delta: isize) -> Result<usize, EditorError> {
@@ -646,6 +671,9 @@ mod tests {
         assert_eq!(
             buffer.undo_stack.last().unwrap().edits[0]
                 .replacement
+                .chunks()
+                .next()
+                .unwrap()
                 .as_ptr(),
             shared.storage.add[0].text().as_ptr().wrapping_add(4),
         );
@@ -967,6 +995,30 @@ mod tests {
                 "A\nbeta\nB2\ngamma",
                 vec!["A", "beta", "B2", "gamma"],
             ),
+            (
+                "ab",
+                vec![(1, 1, "X"), (1, 1, "你\n"), (1, 2, "Z")],
+                "aX你\nZ",
+                vec!["aX你", "Z"],
+            ),
+            (
+                "aé\n你z",
+                vec![(8, 8, "!\n"), (1, 3, ""), (4, 7, "🙂")],
+                "a\n🙂z!\n",
+                vec!["a", "🙂z!", ""],
+            ),
+            (
+                "abcd",
+                vec![(0, 2, ""), (2, 2, "X\n"), (2, 4, "")],
+                "X\n",
+                vec!["X", ""],
+            ),
+            (
+                "",
+                vec![(0, 0, "a"), (0, 0, "\n中")],
+                "a\n中",
+                vec!["a", "中"],
+            ),
         ] {
             let mut buffer = TextBuffer::new(initial);
             buffer.mark_saved();
@@ -1003,6 +1055,51 @@ mod tests {
     }
 
     #[test]
+    fn cross_piece_undo_shares_deleted_text_and_restores_lines_and_revision() {
+        let mut buffer = TextBuffer::new("ab\ncd");
+        buffer
+            .replace_selection(Selection::caret(BufferOffset(1)), "é")
+            .unwrap();
+        buffer
+            .replace_selection(Selection::caret(BufferOffset(5)), "🙂\n")
+            .unwrap();
+        buffer.mark_saved();
+        let snapshot = buffer.shared_snapshot();
+        let source_pointers: Vec<_> = snapshot.chunks().skip(1).map(str::as_ptr).collect();
+        buffer.track_changes(true);
+        buffer
+            .replace_selection(Selection::new(BufferOffset(1), BufferOffset(11)), "")
+            .unwrap();
+        assert_eq!(buffer.text(), "ad");
+        let deleted = &buffer.undo_stack.last().unwrap().edits[0].replacement;
+        assert_eq!(
+            deleted.chunks().collect::<Vec<_>>(),
+            ["é", "b\n", "🙂\n", "c"]
+        );
+        assert_eq!(
+            deleted.chunks().map(str::as_ptr).collect::<Vec<_>>(),
+            source_pointers
+        );
+        assert_eq!(buffer.take_changes()[0].replacements, [(1..11, 0)]);
+        buffer.undo().unwrap();
+        assert_eq!(buffer.text(), "aéb\n🙂\ncd");
+        assert_eq!(
+            (0..buffer.line_count())
+                .map(|line| buffer.line_text(line).unwrap())
+                .collect::<Vec<_>>(),
+            ["aéb", "🙂", "cd"]
+        );
+        assert!(!buffer.is_dirty());
+        assert_eq!(buffer.take_changes()[0].replacements, [(1..1, 10)]);
+        buffer.redo().unwrap();
+        assert_eq!(buffer.text(), "ad");
+        assert_eq!(buffer.line_count(), 1);
+        assert!(buffer.is_dirty());
+        assert_eq!(buffer.take_changes()[0].replacements, [(1..11, 0)]);
+        assert_eq!(snapshot.with_text(str::to_owned), "aéb\n🙂\ncd");
+    }
+
+    #[test]
     fn rejects_overlapping_or_invalid_edits() {
         let mut buffer = TextBuffer::new("abcdef");
 
@@ -1024,6 +1121,19 @@ mod tests {
             )))
             .unwrap_err();
         assert_eq!(error, EditorError::InvalidUtf8Boundary { offset: 1 });
+        unicode_buffer
+            .replace_selection(Selection::caret(BufferOffset(0)), "abc")
+            .unwrap();
+        let error = unicode_buffer
+            .apply_transaction(EditTransaction::new(vec![
+                TextEdit::new(TextRange::new(BufferOffset(0), BufferOffset(3)), ""),
+                TextEdit::insert(BufferOffset(4), "invalid"),
+            ]))
+            .unwrap_err();
+        assert_eq!(error, EditorError::InvalidUtf8Boundary { offset: 4 });
+        assert_eq!(unicode_buffer.text(), "abcéx");
+        unicode_buffer.undo().unwrap();
+        assert_eq!(unicode_buffer.text(), "éx");
     }
 
     #[test]

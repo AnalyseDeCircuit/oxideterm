@@ -1,4 +1,4 @@
-use crate::text::{decode_file, encode_file};
+use crate::text::decode_file;
 use oxideterm_ide_core::TextFileFormat;
 impl NodeAgentIdeFileSystem {
     pub fn new(router: NodeRouter, mode: NodeAgentMode) -> Self {
@@ -1335,7 +1335,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
     fn write_file<'a>(
         &'a self,
         location: &'a IdeLocation,
-        text: &'a str,
+        text: &'a oxideterm_ide_core::SharedText,
         format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,
@@ -1372,7 +1372,7 @@ impl AsyncIdeFileSystem for NodeAgentIdeFileSystem {
             if should_write_via_agent(expected_version)
                 && let Some(session) = self.agent_session(&node_id).await?
             {
-                let bytes = encode_file(text, format)?;
+                let bytes = crate::text::encode_chunks(text.chunks(), format)?;
                 match session.write_file_bytes(&path, &bytes, expect_hash).await {
                     Ok(result) => return Ok(version_from_agent_write(&result)),
                     Err(AgentError::Rpc { code, message })

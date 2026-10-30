@@ -336,7 +336,7 @@ async fn ssh_file_backends_work_without_sftp_through_exec_and_shell() {
             let version = fs
                 .write_file(
                     &location,
-                    "hello €\n",
+                    &"hello €\n".into(),
                     &oxideterm_ide_core::TextFileFormat::default(),
                     None,
                     WriteMode::CreateNew,
@@ -349,7 +349,7 @@ async fn ssh_file_backends_work_without_sftp_through_exec_and_shell() {
             );
             fs.write_file(
                 &location,
-                "saved\n",
+                &"saved\n".into(),
                 &oxideterm_ide_core::TextFileFormat::default(),
                 Some(&version),
                 WriteMode::AtomicReplace,
@@ -364,7 +364,7 @@ async fn ssh_file_backends_work_without_sftp_through_exec_and_shell() {
             let binary = IdeLocation::remote(node.0.clone(), &binary_path);
             fs.write_file(
                 &binary,
-                "\0binary",
+                &"\0binary".into(),
                 &oxideterm_ide_core::TextFileFormat::default(),
                 None,
                 WriteMode::CreateNew,
@@ -385,9 +385,15 @@ async fn ssh_file_backends_work_without_sftp_through_exec_and_shell() {
                 has_bom: false,
                 ..Default::default()
             };
-            fs.write_file(&unicode, "你好", &format, None, WriteMode::CreateNew)
-                .await
-                .unwrap();
+            fs.write_file(
+                &unicode,
+                &"你好".into(),
+                &format,
+                None,
+                WriteMode::CreateNew,
+            )
+            .await
+            .unwrap();
             assert_eq!(
                 fs.read_file(&unicode, Some("UTF-16LE"))
                     .await

@@ -26,13 +26,16 @@ pub struct SyntaxSession {
 }
 
 impl SyntaxSession {
-    pub fn parse(language_id: LanguageId, source: &str) -> Result<Self, SyntaxError> {
+    pub fn parse(
+        language_id: LanguageId,
+        source: &(impl crate::TextSource + ?Sized),
+    ) -> Result<Self, SyntaxError> {
         Self::parse_controlled(language_id, source, None)
     }
 
     pub fn parse_controlled(
         language_id: LanguageId,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Self, SyntaxError> {
         crate::work::checkpoint(work)?;
@@ -60,7 +63,7 @@ impl SyntaxSession {
 
     pub fn parse_plugin(
         grammar: &crate::PluginGrammar,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Self, SyntaxError> {
         Self::parse_plugin_in_ranges(grammar, source, &[], work)
@@ -68,7 +71,7 @@ impl SyntaxSession {
 
     pub(crate) fn parse_plugin_in_ranges(
         grammar: &crate::PluginGrammar,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         ranges: &[tree_sitter::Range],
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Self, SyntaxError> {
@@ -99,7 +102,7 @@ impl SyntaxSession {
 
     pub fn apply_edit(
         &mut self,
-        source_after: &str,
+        source_after: &(impl crate::TextSource + ?Sized),
         edit: SyntaxEdit,
     ) -> Result<SyntaxChange, SyntaxError> {
         self.apply_edit_controlled(source_after, edit, None)
@@ -108,7 +111,7 @@ impl SyntaxSession {
     /// On cancellation, discard the session or fully reparse before reuse.
     pub fn apply_edit_controlled(
         &mut self,
-        source_after: &str,
+        source_after: &(impl crate::TextSource + ?Sized),
         edit: SyntaxEdit,
         work: Option<&crate::SyntaxWork>,
     ) -> Result<SyntaxChange, SyntaxError> {
@@ -130,13 +133,16 @@ impl SyntaxSession {
         })
     }
 
-    pub fn reparse(&mut self, source: &str) -> Result<(), SyntaxError> {
+    pub fn reparse(
+        &mut self,
+        source: &(impl crate::TextSource + ?Sized),
+    ) -> Result<(), SyntaxError> {
         self.reparse_controlled(source, None)
     }
 
     pub(crate) fn reparse_controlled(
         &mut self,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         work: Option<&crate::SyntaxWork>,
     ) -> Result<(), SyntaxError> {
         self.cache_owner = Arc::new(());
@@ -147,7 +153,10 @@ impl SyntaxSession {
         Ok(())
     }
 
-    pub fn highlight_spans(&self, source: &str) -> Vec<HighlightSpan> {
+    pub fn highlight_spans(
+        &self,
+        source: &(impl crate::TextSource + ?Sized),
+    ) -> Vec<HighlightSpan> {
         self.highlight_spans_in_range(
             source,
             TextRange::new(BufferOffset(0), BufferOffset(source.len())),
@@ -156,14 +165,18 @@ impl SyntaxSession {
 
     /// Return full, absolute spans intersecting a half-open byte range, without
     /// clipping captures that cross its edges. Source must match this session's tree.
-    pub fn highlight_spans_in_range(&self, source: &str, range: TextRange) -> Vec<HighlightSpan> {
+    pub fn highlight_spans_in_range(
+        &self,
+        source: &(impl crate::TextSource + ?Sized),
+        range: TextRange,
+    ) -> Vec<HighlightSpan> {
         self.highlights_controlled(source, range, None)
             .expect("uncontrolled highlight queries cannot be cancelled")
     }
 
     pub fn highlights_controlled(
         &self,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         range: TextRange,
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Vec<HighlightSpan>, SyntaxError> {
@@ -182,13 +195,13 @@ impl SyntaxSession {
         Ok(highlight::normalize_highlight_spans(spans))
     }
 
-    pub fn bracket_pairs(&self, source: &str) -> Vec<BracketPair> {
+    pub fn bracket_pairs(&self, source: &(impl crate::TextSource + ?Sized)) -> Vec<BracketPair> {
         brackets::bracket_pairs(source)
     }
 
     pub fn bracket_index_controlled(
         &self,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         work: Option<&crate::SyntaxWork>,
     ) -> Result<crate::BracketIndex, SyntaxError> {
         crate::BracketIndex::new(self.brackets_controlled(source, work)?, work)
@@ -196,7 +209,7 @@ impl SyntaxSession {
 
     pub fn brackets_controlled(
         &self,
-        source: &str,
+        source: &(impl crate::TextSource + ?Sized),
         work: Option<&crate::SyntaxWork>,
     ) -> Result<Vec<BracketPair>, SyntaxError> {
         brackets::bracket_pairs_controlled(source, work)
@@ -206,7 +219,11 @@ impl SyntaxSession {
         folding::fold_ranges(self.tree.root_node())
     }
 
-    pub fn indent_guides(&self, source: &str, tab_size: usize) -> Vec<crate::IndentGuide> {
+    pub fn indent_guides(
+        &self,
+        source: &(impl crate::TextSource + ?Sized),
+        tab_size: usize,
+    ) -> Vec<crate::IndentGuide> {
         indent::indent_guides(self.tree.root_node(), source, tab_size)
     }
 }

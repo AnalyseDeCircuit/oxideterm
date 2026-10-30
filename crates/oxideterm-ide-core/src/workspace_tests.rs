@@ -63,8 +63,8 @@ fn replacement_marks_only_changed_text_dirty_and_saving_clears_it() {
         };
         workspace.mark_saved(tab_id, version.clone()).unwrap();
         let buffer = workspace.buffer(tab_id).unwrap();
-        assert_eq!(buffer.text.as_ref(), replacement);
-        assert_eq!(buffer.saved_text.as_ref(), replacement);
+        assert_eq!(buffer.text.to_string(), replacement);
+        assert_eq!(buffer.saved_text.to_string(), replacement);
         assert_eq!(buffer.version, version);
         assert!(!buffer.is_dirty());
     }
@@ -81,9 +81,15 @@ fn stale_save_completion_preserves_newer_dirty_text() {
         panic!("file should open");
     };
     let initial = workspace.buffer(tab_id).unwrap();
-    assert_eq!(initial.text.as_ptr(), initial.saved_text.as_ptr());
+    assert_eq!(
+        initial.text.chunks().next().unwrap().as_ptr(),
+        initial.saved_text.chunks().next().unwrap().as_ptr()
+    );
     let snapshot = workspace.snapshot().unwrap();
-    assert_eq!(snapshot.buffers[0].text.as_ptr(), initial.text.as_ptr());
+    assert_eq!(
+        snapshot.buffers[0].text.chunks().next().unwrap().as_ptr(),
+        initial.text.chunks().next().unwrap().as_ptr()
+    );
     workspace
         .replace_buffer_text(tab_id, "saved request")
         .unwrap();
@@ -109,10 +115,10 @@ fn stale_save_completion_preserves_newer_dirty_text() {
 
     let buffer = workspace.buffer(tab_id).unwrap();
     assert!(!clean);
-    assert_eq!(buffer.text.as_ref(), "newer local edit");
-    assert_eq!(buffer.saved_text.as_ref(), "saved request");
+    assert_eq!(buffer.text.to_string(), "newer local edit");
+    assert_eq!(buffer.saved_text.to_string(), "saved request");
     assert_eq!(buffer.version.etag.as_deref(), Some("saved-request"));
-    assert_eq!(&*snapshot.buffers[0].text, "old");
+    assert_eq!(snapshot.buffers[0].text.to_string(), "old");
     assert!(buffer.is_dirty());
 }
 
@@ -153,8 +159,8 @@ fn close_after_save_keeps_tab_open_when_newer_edit_arrives() {
     let buffer = workspace.buffer(tab_id).unwrap();
     assert!(!closed);
     assert!(workspace.pending_close().is_none());
-    assert_eq!(buffer.text.as_ref(), "keep me");
-    assert_eq!(buffer.saved_text.as_ref(), "save me");
+    assert_eq!(buffer.text.to_string(), "keep me");
+    assert_eq!(buffer.saved_text.to_string(), "save me");
     assert!(buffer.is_dirty());
 }
 
@@ -224,7 +230,7 @@ fn rename_path_retargets_open_tabs_without_clearing_dirty_text() {
     );
     let buffer = workspace.buffer(tab_id).unwrap();
     assert_eq!(buffer.location, tab.location);
-    assert_eq!(buffer.text.as_ref(), "dirty");
+    assert_eq!(buffer.text.to_string(), "dirty");
     assert!(buffer.is_dirty());
 }
 
@@ -288,7 +294,17 @@ fn snapshot_restore_preserves_dirty_buffers_locations_pins_and_active_tab() {
     else {
         panic!("file should open");
     };
-    source.replace_buffer_text(first, "dirty").unwrap();
+    let mut edited = oxideterm_editor_core::TextBuffer::new("dir");
+    edited
+        .replace_selection(
+            oxideterm_editor_core::Selection::caret(oxideterm_editor_core::BufferOffset(3)),
+            "ty",
+        )
+        .unwrap();
+    assert_eq!(edited.shared_text().chunks().count(), 2);
+    source
+        .replace_buffer_text(first, edited.shared_text())
+        .unwrap();
     assert!(source.toggle_tab_pin(first).unwrap());
 
     let snapshot = source.snapshot().unwrap();
@@ -317,11 +333,17 @@ fn snapshot_restore_preserves_dirty_buffers_locations_pins_and_active_tab() {
         restored.buffer(first).unwrap().location,
         IdeLocation::remote("node-a", "/home/demo/a.rs")
     );
-    assert_eq!(restored.buffer(first).unwrap().text.as_ref(), "dirty");
-    assert_eq!(restored.buffer(first).unwrap().saved_text.as_ref(), "saved");
+    assert_eq!(restored.buffer(first).unwrap().text.to_string(), "dirty");
+    assert_eq!(
+        restored.buffer(first).unwrap().saved_text.to_string(),
+        "saved"
+    );
     let clean = restored.buffer(second).unwrap();
-    assert_eq!(clean.text.as_ref(), "b");
-    assert_eq!(clean.text.as_ptr(), clean.saved_text.as_ptr());
+    assert_eq!(clean.text.to_string(), "b");
+    assert_eq!(
+        clean.text.chunks().next().unwrap().as_ptr(),
+        clean.saved_text.chunks().next().unwrap().as_ptr()
+    );
     assert!(!clean.is_dirty());
     assert!(restored.buffer(first).unwrap().is_dirty());
 }

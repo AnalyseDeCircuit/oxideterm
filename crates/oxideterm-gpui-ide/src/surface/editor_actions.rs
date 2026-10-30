@@ -1159,7 +1159,7 @@ impl IdeSurface {
                 }
                 let dirty_text = remote_path(&result.location)
                     .and_then(|path| self.pending_restore_dirty_contents.remove(path));
-                let text: Arc<str> = result.text.into();
+                let text: SharedText = result.text.into();
                 let _ = self.workspace.replace_buffer_text(tab_id, text.clone());
                 let _ = self.workspace.set_file_format(tab_id, result.format);
                 let _ = self.workspace.mark_saved(tab_id, result.version);
@@ -1187,7 +1187,7 @@ impl IdeSurface {
         &mut self,
         tab_id: EditorTabId,
         location: &IdeLocation,
-        text: Arc<str>,
+        text: SharedText,
         cx: &mut Context<Self>,
     ) {
         self.file_open_errors.remove(&tab_id);
@@ -1205,7 +1205,7 @@ impl IdeSurface {
             && self.workspace.active_tab() == Some(tab_id)
             && !self.is_markdown_preview();
         let editor = cx.new(|cx| {
-            let mut editor = TextEditorView::new(text, &tokens, cx);
+            let mut editor = TextEditorView::from_shared_text(text, &tokens, cx);
             editor.set_render_cache_active(cache_active, cx);
             editor.set_search_labels(self.labels.editor_search.clone());
             editor.set_context_menu_labels(EditorContextMenuLabels {
@@ -1226,7 +1226,7 @@ impl IdeSurface {
                 cx,
             );
             editor.set_language_from_path(language_path, None, cx);
-            editor.set_on_save(Box::new(move |text, _window, cx| {
+            editor.set_on_save_shared(Box::new(move |text, _window, cx| {
                 let _ = save_surface.update(cx, |surface, cx| {
                     surface.save_tab_with_text(tab_id, text, cx);
                 });
@@ -1285,7 +1285,9 @@ impl IdeSurface {
         {
             let _ = self.workspace.set_file_format(tab_id, format);
         }
-        if dirty_text.as_str() == buffer.saved_text.as_ref() {
+        if dirty_text.len() == buffer.saved_text.len()
+            && dirty_text.bytes().eq(buffer.saved_text.bytes())
+        {
             return;
         }
 
@@ -2111,7 +2113,12 @@ impl IdeSurface {
         self.save_tab_current(tab_id, source, cx);
     }
 
-    fn save_tab_with_text(&mut self, tab_id: EditorTabId, text: Arc<str>, cx: &mut Context<Self>) {
+    fn save_tab_with_text(
+        &mut self,
+        tab_id: EditorTabId,
+        text: SharedText,
+        cx: &mut Context<Self>,
+    ) {
         let _ = self.workspace.replace_buffer_text(tab_id, text);
         self.save_tab_current(tab_id, oxideterm_audit::AuditSource::User, cx);
     }
@@ -2663,7 +2670,7 @@ impl IdeSurface {
         let Some(editor) = self.editors.get(&tab_id) else {
             return;
         };
-        let text = editor.read(cx).buffer().text_snapshot();
+        let text = editor.read(cx).buffer().shared_text();
         let _ = self.workspace.replace_buffer_text(tab_id, text);
     }
 
@@ -2734,7 +2741,7 @@ impl IdeSurface {
 async fn force_write_conflict(
     fs: &impl AsyncIdeFileSystem,
     location: &IdeLocation,
-    text: &str,
+    text: &SharedText,
     format: &oxideterm_ide_core::TextFileFormat,
     mode: WriteMode,
 ) -> Result<SavedFileVersion, IdeFileError> {
@@ -3110,7 +3117,7 @@ mod conflict_overwrite_tests {
         fn write_file<'a>(
             &'a self,
             location: &'a IdeLocation,
-            text: &'a str,
+            text: &'a SharedText,
             _format: &'a oxideterm_ide_core::TextFileFormat,
             expected_version: Option<&'a SavedFileVersion>,
             mode: WriteMode,
@@ -3134,7 +3141,7 @@ mod conflict_overwrite_tests {
         force_write_conflict(
             &fs,
             &location,
-            "local contents",
+            &"local contents".into(),
             &TextFileFormat::default(),
             WriteMode::AtomicReplace,
         )
@@ -3153,10 +3160,32 @@ mod conflict_overwrite_tests {
     }
 }
 
-fn ai_code_snippet_around_start(text: &str) -> (Option<String>, usize) {
+fn ai_code_snippet_around_start(text: &SharedText) -> (Option<String>, usize) {
     const MAX_LINES: usize = 21;
     const MAX_CHARS: usize = 4000;
-    let snippet = text.lines().take(MAX_LINES).collect::<Vec<_>>().join("\n");
+    let mut snippet = String::new();
+    let mut lines = 0;
+    let mut stopped = false;
+    for ch in text.chunks().flat_map(str::chars) {
+        if ch == '\n' {
+            if snippet.ends_with('\r') {
+                snippet.pop();
+            }
+            lines += 1;
+            if lines == MAX_LINES {
+                stopped = true;
+                break;
+            }
+        }
+        snippet.push(ch);
+        if snippet.len() > MAX_CHARS {
+            stopped = true;
+            break;
+        }
+    }
+    if !stopped && snippet.ends_with('\n') {
+        snippet.pop();
+    }
     if snippet.trim().is_empty() {
         return (None, 1);
     }
@@ -3183,6 +3212,21 @@ fn ide_plugin_file_path(location: &IdeLocation) -> String {
 mod shared_text_tests {
     use super::*;
     use gpui::TestAppContext;
+
+    #[test]
+    fn context_snippets_keep_line_and_utf8_limits() {
+        let source = SharedText::from("line\r\n".repeat(25));
+        assert_eq!(
+            ai_code_snippet_around_start(&source),
+            (Some(vec!["line"; 21].join("\n")), 1)
+        );
+        let source = SharedText::from(format!("{}🙂tail", "a".repeat(3999)));
+        assert_eq!(
+            ai_code_snippet_around_start(&source),
+            (Some(format!("{}\n... (truncated)", "a".repeat(3999))), 1)
+        );
+        assert_eq!(ai_code_snippet_around_start(&" \t\n".into()), (None, 1));
+    }
 
     fn ready_surface(cx: &mut TestAppContext) -> Entity<IdeSurface> {
         cx.new(|cx| {
@@ -3243,7 +3287,12 @@ mod shared_text_tests {
                     .is_none()
             );
             assert_eq!(
-                surface.workspace.buffer(tab).unwrap().saved_text.as_ref(),
+                surface
+                    .workspace
+                    .buffer(tab)
+                    .unwrap()
+                    .saved_text
+                    .to_string(),
                 "A"
             );
             let first = edit_and_prepare(surface, "B", cx).unwrap();
@@ -3260,10 +3309,15 @@ mod shared_text_tests {
             let next = surface
                 .complete_file_save(first, Ok(version.clone()), cx)
                 .unwrap();
-            assert_eq!(next.buffer.text.as_ref(), "latest E");
+            assert_eq!(next.buffer.text.to_string(), "latest E");
             assert_eq!(next.buffer.version, version);
             assert_eq!(
-                surface.workspace.buffer(tab).unwrap().saved_text.as_ref(),
+                surface
+                    .workspace
+                    .buffer(tab)
+                    .unwrap()
+                    .saved_text
+                    .to_string(),
                 "B"
             );
             assert!(
@@ -3272,7 +3326,12 @@ mod shared_text_tests {
                     .is_none()
             );
             assert_eq!(
-                surface.workspace.buffer(tab).unwrap().saved_text.as_ref(),
+                surface
+                    .workspace
+                    .buffer(tab)
+                    .unwrap()
+                    .saved_text
+                    .to_string(),
                 "latest E"
             );
             assert!(!surface.is_tab_dirty(tab, cx));
@@ -3287,8 +3346,8 @@ mod shared_text_tests {
                     .is_none()
             );
             let buffer = surface.workspace.buffer(tab).unwrap();
-            assert_eq!(buffer.saved_text.as_ref(), "F");
-            assert_eq!(buffer.text.as_ref(), "unsaved G");
+            assert_eq!(buffer.saved_text.to_string(), "F");
+            assert_eq!(buffer.text.to_string(), "unsaved G");
             assert!(surface.is_tab_dirty(tab, cx));
         });
     }
@@ -3311,8 +3370,8 @@ mod shared_text_tests {
                         .is_none()
                 );
                 let buffer = surface.workspace.buffer(tab).unwrap();
-                assert_eq!(buffer.text.as_ref(), "latest");
-                assert_eq!(buffer.saved_text.as_ref(), "original");
+                assert_eq!(buffer.text.to_string(), "latest");
+                assert_eq!(buffer.saved_text.to_string(), "original");
                 assert!(surface.is_tab_dirty(tab, cx));
                 assert_eq!(
                     surface.conflict_state.is_some(),
@@ -3353,7 +3412,7 @@ mod shared_text_tests {
                 let next = surface.complete_file_save(first, Ok(SavedFileVersion::unknown()), cx);
                 if edit_during_save {
                     let next = next.unwrap();
-                    assert_eq!(next.buffer.text.as_ref(), "latest");
+                    assert_eq!(next.buffer.text.to_string(), "latest");
                     assert!(
                         surface
                             .complete_file_save(next, Ok(SavedFileVersion::unknown()), cx)
@@ -3365,7 +3424,12 @@ mod shared_text_tests {
                 if cancel_close {
                     assert_eq!(surface.workspace.tabs()[0].id, tab);
                     assert_eq!(
-                        surface.workspace.buffer(tab).unwrap().saved_text.as_ref(),
+                        surface
+                            .workspace
+                            .buffer(tab)
+                            .unwrap()
+                            .saved_text
+                            .to_string(),
                         if edit_during_save { "latest" } else { "first" }
                     );
                     assert!(!surface.is_tab_dirty(tab, cx));
@@ -3661,27 +3725,46 @@ mod shared_text_tests {
             let saved = surface.workspace.buffer(tab).unwrap().text.clone();
             surface.create_editor(tab, &location, saved.clone(), cx);
             let editor = surface.editors[&tab].clone();
-            assert!(Arc::ptr_eq(
-                &saved,
-                &editor.read(cx).buffer().text_snapshot()
-            ));
+            assert_eq!(
+                saved.chunks().map(str::as_ptr).collect::<Vec<_>>(),
+                editor
+                    .read(cx)
+                    .buffer()
+                    .shared_text()
+                    .chunks()
+                    .map(str::as_ptr)
+                    .collect::<Vec<_>>()
+            );
             editor.update(cx, |editor, cx| editor.insert_text("new\n", cx));
             surface.sync_editor_to_workspace(tab, cx);
             let buffer = surface.workspace.buffer(tab).unwrap();
-            assert_eq!(buffer.text.as_ref(), "new\nsaved\n中文");
-            assert_eq!(buffer.saved_text.as_ref(), "saved\n中文");
+            assert_eq!(buffer.text.to_string(), "new\nsaved\n中文");
+            assert_eq!(buffer.saved_text.to_string(), "saved\n中文");
             assert!(buffer.is_dirty());
-            assert!(Arc::ptr_eq(
-                &buffer.text,
-                &editor.read(cx).buffer().text_snapshot()
-            ));
+            assert_eq!(
+                buffer.text.chunks().map(str::as_ptr).collect::<Vec<_>>(),
+                editor
+                    .read(cx)
+                    .buffer()
+                    .shared_text()
+                    .chunks()
+                    .map(str::as_ptr)
+                    .collect::<Vec<_>>()
+            );
             let snapshot = surface.workspace.snapshot().unwrap();
-            assert!(Arc::ptr_eq(&snapshot.buffers[0].text, &buffer.text));
+            assert_eq!(
+                snapshot.buffers[0]
+                    .text
+                    .chunks()
+                    .map(str::as_ptr)
+                    .collect::<Vec<_>>(),
+                buffer.text.chunks().map(str::as_ptr).collect::<Vec<_>>()
+            );
             editor.update(cx, |editor, cx| editor.insert_text("later", cx));
             surface.sync_editor_to_workspace(tab, cx);
-            assert_eq!(snapshot.buffers[0].text.as_ref(), "new\nsaved\n中文");
+            assert_eq!(snapshot.buffers[0].text.to_string(), "new\nsaved\n中文");
             assert_eq!(
-                surface.workspace.buffer(tab).unwrap().text.as_ref(),
+                surface.workspace.buffer(tab).unwrap().text.to_string(),
                 "new\nlatersaved\n中文"
             );
             editor.downgrade()
@@ -3746,12 +3829,16 @@ mod shared_text_tests {
                 let text = surface.workspace.buffer(tab).unwrap().text.clone();
                 surface.create_editor(tab, &location, text, cx);
                 let opened = allocated();
+                surface.editors[&tab].update(cx, |editor, cx| editor.insert_text("中\n", cx));
+                let edited = allocated();
+                let started = std::time::Instant::now();
                 surface.sync_editor_to_workspace(tab, cx);
                 let snapshot = surface.workspace.snapshot().unwrap();
                 let synchronized = allocated();
-                assert_eq!(snapshot.buffers[0].text.len(), bytes);
-                assert!(snapshot.buffers[0].text.bytes().all(|byte| byte == b'x'));
-                eprintln!("IDE_EDITOR_MEMORY bytes={bytes} baseline={baseline} opened={opened} synchronized={synchronized}");
+                let sync_ms = started.elapsed().as_secs_f64() * 1000.0;
+                assert_eq!(snapshot.buffers[0].text.len(), bytes + "中\n".len());
+                assert!(snapshot.buffers[0].text.bytes().skip("中\n".len()).all(|byte| byte == b'x'));
+                eprintln!("IDE_EDITOR_MEMORY bytes={bytes} baseline={baseline} opened={opened} edited={edited} synchronized={synchronized} sync_growth={} sync_ms={sync_ms:.3}", synchronized as isize - edited as isize);
                 std::hint::black_box(snapshot);
             });
             let weak = surface.downgrade();

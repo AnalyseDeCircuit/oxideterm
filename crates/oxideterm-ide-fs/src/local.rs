@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::text::{check_size, decode_file, encode_file};
+use crate::text::{check_size, decode_file};
 use oxideterm_ide_core::{MAX_EDITABLE_FILE_SIZE, TextFileFormat};
 use std::{
     fs,
@@ -194,7 +194,7 @@ impl IdeFileSystem for LocalIdeFileSystem {
     fn write_file(
         &self,
         location: &IdeLocation,
-        text: &str,
+        text: &oxideterm_ide_core::SharedText,
         format: &TextFileFormat,
         expected_version: Option<&SavedFileVersion>,
         mode: WriteMode,
@@ -217,7 +217,7 @@ impl IdeFileSystem for LocalIdeFileSystem {
         );
         let mut written_bytes = None;
         let audit_result = (|| {
-            let bytes = encode_file(text, format)?;
+            let bytes = crate::text::encode_chunks(text.chunks(), format)?;
             let path = self.local_path(location)?;
             if mode == WriteMode::CreateNew && path.exists() {
                 return Err(IdeFileError::new(
@@ -301,7 +301,7 @@ impl AsyncIdeFileSystem for LocalIdeFileSystem {
     fn write_file<'a>(
         &'a self,
         location: &'a IdeLocation,
-        text: &'a str,
+        text: &'a oxideterm_ide_core::SharedText,
         format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,
@@ -460,7 +460,7 @@ mod tests {
                 IdeFileSystem::write_file(
                     &provider,
                     &location,
-                    "new",
+                    &"new".into(),
                     &data.format,
                     Some(&data.version),
                     WriteMode::AtomicReplace,
@@ -522,7 +522,7 @@ mod tests {
         IdeFileSystem::write_file(
             &provider,
             &location,
-            &data.text,
+            &data.text.as_str().into(),
             &data.format,
             Some(&data.version),
             WriteMode::AtomicReplace,
@@ -533,7 +533,7 @@ mod tests {
             IdeFileSystem::write_file(
                 &provider,
                 &location,
-                "😀",
+                &"😀".into(),
                 &data.format,
                 None,
                 WriteMode::AtomicReplace
@@ -562,7 +562,7 @@ mod tests {
         let version = IdeFileSystem::write_file(
             &fs,
             &location,
-            "fn main() { }\n",
+            &"fn main() { }\n".into(),
             &data.format,
             Some(&data.version),
             WriteMode::AtomicReplace,
@@ -588,7 +588,7 @@ mod tests {
         let error = IdeFileSystem::write_file(
             &fs,
             &location,
-            "new",
+            &"new".into(),
             &data.format,
             Some(&data.version),
             WriteMode::AtomicReplace,

@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use crate::text::{check_size, decode_file, encode_file};
+use crate::text::{check_size, decode_file};
 use oxideterm_ide_core::{MAX_EDITABLE_FILE_SIZE, TextFileFormat};
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -169,7 +169,7 @@ impl NodeSftpIdeFileSystem {
         let location = IdeLocation::remote(node_id.into(), path.into());
         self.write_file(
             &location,
-            "",
+            &"".into(),
             &TextFileFormat::default(),
             None,
             WriteMode::CreateNew,
@@ -404,14 +404,14 @@ impl AsyncIdeFileSystem for NodeSftpIdeFileSystem {
     fn write_file<'a>(
         &'a self,
         location: &'a IdeLocation,
-        text: &'a str,
+        text: &'a oxideterm_ide_core::SharedText,
         format: &'a TextFileFormat,
         expected_version: Option<&'a SavedFileVersion>,
         mode: WriteMode,
     ) -> IdeFsFuture<'a, SavedFileVersion> {
         Box::pin(async move {
             let (node_id, path) = remote_location(location)?;
-            let bytes = encode_file(text, format)?;
+            let bytes = crate::text::encode_chunks(text.chunks(), format)?;
             let sftp = self.acquire_sftp(&node_id).await?;
             match self
                 .write_file_once(&sftp, &path, &bytes, expected_version, mode)
