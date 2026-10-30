@@ -490,7 +490,9 @@ impl KnowledgeDocumentEditor {
                 {
                     break;
                 }
-                Timer::after(KNOWLEDGE_INDEX_STATE_POLL_INTERVAL).await;
+                cx.background_executor()
+                    .timer(KNOWLEDGE_INDEX_STATE_POLL_INTERVAL)
+                    .await;
             }
         }));
     }
@@ -503,7 +505,7 @@ impl KnowledgeDocumentEditor {
             self.mode_transition = None;
             if let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(&self.tokens) {
                 self.mode_transition = Some(cx.spawn(async move |surface, cx| {
-                    Timer::after(motion.duration).await;
+                    cx.background_executor().timer(motion.duration).await;
                     let _ = surface.update(cx, |surface, cx| {
                         surface.previous_mode = surface.mode;
                         surface.mode_transition = None;
@@ -539,7 +541,9 @@ impl KnowledgeDocumentEditor {
         // Replacing the retained task cancels superseded idle timers, so bursts of edits produce
         // one document save and one index rebuild rather than one rebuild per keystroke.
         self.autosave_task = Some(cx.spawn(async move |surface, cx| {
-            Timer::after(KNOWLEDGE_AUTOSAVE_DELAY).await;
+            cx.background_executor()
+                .timer(KNOWLEDGE_AUTOSAVE_DELAY)
+                .await;
             let _ = surface.update(cx, |surface, cx| {
                 if generation == surface.autosave_generation
                     && !matches!(surface.save_state, KnowledgeDocumentSaveState::Saving)

@@ -320,7 +320,9 @@ impl KnowledgeDocumentEditor {
 
     pub(super) fn schedule_preview(&mut self, cx: &mut Context<Self>) {
         self.preview_timer = Some(cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_millis(120)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(120))
+                .await;
             let _ = weak.update(cx, |this, cx| {
                 this.preview_timer = None;
                 this.load_preview(cx);

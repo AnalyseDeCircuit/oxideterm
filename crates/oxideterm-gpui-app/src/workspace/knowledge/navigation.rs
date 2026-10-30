@@ -116,7 +116,7 @@ impl WorkspaceApp {
                 oxideterm_gpui_ui::motion::MotionDuration::Control,
             );
             let task = cx.spawn(async move |workspace, cx| {
-                Timer::after(delay).await;
+                cx.background_executor().timer(delay).await;
                 let _ = workspace.update(cx, |workspace, cx| {
                     workspace.knowledge_workspace.update(cx, |state, _| {
                         state.navigator_closing = false;
@@ -132,7 +132,9 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn queue_knowledge_search(&mut self, cx: &mut Context<Self>) {
         let task = cx.spawn(async move |workspace, cx| {
-            Timer::after(Duration::from_millis(180)).await;
+            cx.background_executor()
+                .timer(Duration::from_millis(180))
+                .await;
             let _ = workspace.update(cx, |workspace, cx| {
                 workspace.refresh_knowledge_navigator(true, cx)
             });
