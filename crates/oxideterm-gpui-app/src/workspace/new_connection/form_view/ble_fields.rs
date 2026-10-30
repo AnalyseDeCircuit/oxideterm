@@ -21,6 +21,7 @@ impl WorkspaceApp {
         let Some((
             ble_profile_name,
             notes,
+            group,
             adapters,
             adapters_loading,
             adapter_index,
@@ -36,6 +37,7 @@ impl WorkspaceApp {
             (
                 form.ble.profile_name.clone(),
                 form.notes.clone(),
+                form.group.clone(),
                 form.ble.adapters.clone(),
                 form.ble.adapters_loading,
                 form.ble.selected_adapter_index,
@@ -631,6 +633,7 @@ impl WorkspaceApp {
                 ),
             )
             .child(self.render_connection_notes_fields(&notes, cx))
+            .child(self.render_connection_group_select(self.i18n.t("ssh.form.group"), &group, cx))
             .into_any_element();
 
         div()

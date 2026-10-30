@@ -1700,6 +1700,7 @@ impl WorkspaceApp {
             || !plugin_ids.is_empty()
             || !ftp_profile_ids.is_empty()
             || !serial_profile_ids.is_empty()
+            || !ble_profile_ids.is_empty()
             || !local_terminal_profile_ids.is_empty()
             || !telnet_profile_ids.is_empty()
             || !mosh_profile_ids.is_empty()
@@ -1726,6 +1727,7 @@ impl WorkspaceApp {
         match self.connection_store.move_session_assets_to_group(
             &connection_ids,
             &serial_profile_ids,
+            &ble_profile_ids,
             &local_terminal_profile_ids,
             &telnet_profile_ids,
             &mosh_profile_ids,

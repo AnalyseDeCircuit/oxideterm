@@ -432,6 +432,7 @@ mod tests {
                 &[],
                 &[],
                 &[],
+                &[],
                 &["plugin-one".into()],
                 Some("Lab/Devices"),
             )
@@ -4379,6 +4380,7 @@ mod tests {
                     &[],
                     &[],
                     &[],
+                    &[],
                     std::slice::from_ref(&cleared.id),
                     &[],
                     &[],
@@ -4445,12 +4447,21 @@ mod tests {
                 ..SaveRemoteDesktopProfileRequest::default()
             })
             .unwrap();
+        let ble = store
+            .upsert_ble_profile(SaveBleProfileRequest {
+                id: Some("ble-move".to_string()),
+                name: "BLE console".to_string(),
+                service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                ..SaveBleProfileRequest::default()
+            })
+            .unwrap();
 
         assert_eq!(
             store
                 .move_session_assets_to_group(
                     &["ssh-move".to_string()],
                     std::slice::from_ref(&serial.id),
+                    std::slice::from_ref(&ble.id),
                     std::slice::from_ref(&local.id),
                     std::slice::from_ref(&telnet.id),
                     std::slice::from_ref(&mosh.id),
@@ -4461,7 +4472,7 @@ mod tests {
                     Some("Moved"),
                 )
                 .unwrap(),
-            7
+            8
         );
         assert_eq!(
             store.get("ssh-move").and_then(|connection| connection.group.as_deref()),
@@ -4472,6 +4483,14 @@ mod tests {
                 .serial_profiles()
                 .iter()
                 .find(|profile| profile.id == serial.id)
+                .and_then(|profile| profile.group.as_deref()),
+            Some("Moved")
+        );
+        assert_eq!(
+            store
+                .ble_profiles()
+                .iter()
+                .find(|profile| profile.id == ble.id)
                 .and_then(|profile| profile.group.as_deref()),
             Some("Moved")
         );
