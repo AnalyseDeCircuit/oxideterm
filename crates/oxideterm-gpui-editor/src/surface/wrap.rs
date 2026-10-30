@@ -26,7 +26,19 @@ pub(super) enum DisplayRows {
         widths: Vec<u32>,
         wraps: Vec<WrappedLine>,
     },
+    Folded {
+        base: Box<DisplayRows>,
+        folds: Vec<FoldedRows>,
+    },
     Explicit(Vec<DisplayRow>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct FoldedRows {
+    line: usize,
+    end_line: usize,
+    first_row: usize,
+    hidden_before: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -86,6 +98,12 @@ impl DisplayRows {
                         .map_or(0, |line| line.first_row - line.line + line.ends.len() - 1)
             }
             Self::Explicit(rows) => rows.len(),
+            Self::Folded { base, folds } => {
+                base.len()
+                    - folds
+                        .last()
+                        .map_or(0, |fold| fold.hidden_before + fold.end_line - fold.line)
+            }
         }
     }
 
@@ -128,6 +146,23 @@ impl DisplayRows {
                 })
             }
             Self::Explicit(rows) => rows.get(index).copied(),
+            Self::Folded { base, folds } => {
+                let fold = folds
+                    .partition_point(|fold| fold.first_row <= index)
+                    .checked_sub(1)
+                    .map(|i| &folds[i]);
+                let hidden = fold.map_or(0, |fold| {
+                    fold.hidden_before
+                        + if index == fold.first_row {
+                            0
+                        } else {
+                            fold.end_line - fold.line
+                        }
+                });
+                let mut row = base.get(index.checked_add(hidden)?)?;
+                row.is_folded_header = fold.is_some_and(|fold| fold.first_row == index);
+                Some(row)
+            }
         }
     }
 
@@ -140,6 +175,7 @@ impl DisplayRows {
     fn max_width(&self) -> usize {
         match self {
             Self::Unwrapped(widths) => widths.iter().copied().max().unwrap_or(0) as usize,
+            Self::Folded { base, .. } => base.max_width(),
             Self::Wrapped { .. } => self
                 .iter()
                 .map(|row| row.end_col - row.start_col)
@@ -334,6 +370,11 @@ impl TextEditorView {
     }
 
     fn compute_display_rows(&self, wrap_width: Option<f32>) -> DisplayRows {
+        if !self.folded_ranges.is_empty()
+            && let Some(rows) = self.compact_folded_rows(wrap_width)
+        {
+            return rows;
+        }
         if let Some(width) = wrap_width {
             self.ensure_wrap_measurements();
             if self.folded_ranges.is_empty() {
@@ -413,6 +454,71 @@ impl TextEditorView {
                 .unwrap_or_else(|| line + 1);
         }
         DisplayRows::Explicit(rows)
+    }
+
+    fn compact_folded_rows(&self, wrap_width: Option<f32>) -> Option<DisplayRows> {
+        if wrap_width.is_some() {
+            self.ensure_wrap_measurements();
+        }
+        // Hidden physical lines keep implicit positions, not individual display-row records.
+        let mut widths = vec![0; self.buffer.line_count()];
+        let mut wraps = Vec::new();
+        let mut folds = Vec::with_capacity(self.folded_ranges.len());
+        let mut line = 0;
+        let mut extra = 0;
+        let mut hidden = 0;
+        while line < self.buffer.line_count() {
+            if let Some(fold) = self
+                .folded_ranges
+                .get(folds.len())
+                .filter(|fold| fold.start_line == line)
+            {
+                widths[line] = u32::try_from(
+                    self.buffer
+                        .with_line_text(line, unwrapped_line_width)
+                        .unwrap_or(0),
+                )
+                .ok()?;
+                folds.push(FoldedRows {
+                    line,
+                    end_line: fold.end_line,
+                    first_row: line + extra - hidden,
+                    hidden_before: hidden,
+                });
+                hidden += fold.end_line - line;
+                line = fold.end_line + 1;
+            } else {
+                if let Some(width) = wrap_width {
+                    let rows = self.wrapped_line_rows(line, width);
+                    widths[line] = u32::try_from(rows.last().unwrap().end_col).ok()?;
+                    if rows.len() > 1 {
+                        wraps.push(WrappedLine {
+                            line,
+                            first_row: line + extra,
+                            ends: rows.iter().map(|row| row.end_col).collect(),
+                        });
+                        extra += rows.len() - 1;
+                    }
+                } else {
+                    widths[line] = u32::try_from(
+                        self.buffer
+                            .with_line_text(line, unwrapped_line_width)
+                            .unwrap_or(0),
+                    )
+                    .ok()?;
+                }
+                line += 1;
+            }
+        }
+        let base = if wrap_width.is_some() {
+            DisplayRows::Wrapped { widths, wraps }
+        } else {
+            DisplayRows::Unwrapped(widths)
+        };
+        Some(DisplayRows::Folded {
+            base: Box::new(base),
+            folds,
+        })
     }
 
     fn measure_wrap_line(&self, line: usize) -> LineMeasure {
@@ -604,6 +710,26 @@ pub(super) fn display_row_for_visual_column(
     line: usize,
     visual_column: usize,
 ) -> Option<(usize, DisplayRow, usize)> {
+    if let DisplayRows::Folded { base, folds } = rows {
+        let previous = folds
+            .partition_point(|fold| fold.line <= line)
+            .checked_sub(1)
+            .map(|i| &folds[i]);
+        if previous.is_some_and(|fold| line > fold.line && line <= fold.end_line) {
+            return None;
+        }
+        let hidden = previous.map_or(0, |fold| {
+            fold.hidden_before
+                + if line == fold.line {
+                    0
+                } else {
+                    fold.end_line - fold.line
+                }
+        });
+        let (index, _, column) = display_row_for_visual_column(base, line, visual_column)?;
+        let index = index.checked_sub(hidden)?;
+        return rows.get(index).map(|row| (index, row, column));
+    }
     if matches!(rows, DisplayRows::Unwrapped(_)) {
         return rows.get(line).map(|row| (line, row, visual_column));
     }
@@ -933,6 +1059,78 @@ mod edit_layout_tests {
             assert_eq!((index, row.start_col, row.end_col, column), (1, 8, 13, 0));
             let (index, row, column) = display_row_for_visual_column(&wrapped, 0, 13).unwrap();
             assert_eq!((index, row.start_col, row.end_col, column), (1, 8, 13, 5));
+        });
+    }
+
+    #[gpui::test]
+    fn multiple_folds_keep_wrapped_rows_and_caret_coordinates(cx: &mut TestAppContext) {
+        use gpui::{Bounds, point, px, size};
+        let editor = cx.new(|cx| TextEditorView::new("fn first() {\n    hidden();\n}\n//abcdefghij\nfn second() {\n    hidden();\n}\nTAIL", &default_tokens(), cx));
+        editor.update(cx, |editor, cx| {
+            crate::grammar_fixture::install_rust(cx);
+            editor.set_language(Some(oxideterm_editor_syntax::LanguageId::Rust), cx);
+        });
+        cx.run_until_parked();
+        editor.update(cx, |editor, cx| {
+            editor.content_bounds = Some(Bounds::new(
+                point(px(0.0), px(0.0)),
+                size(px(1000.0), px(500.0)),
+            ));
+            editor.settings.soft_wrap_column = Some(8);
+            assert!(editor.toggle_fold_at_line(0, cx));
+            assert!(editor.toggle_fold_at_line(4, cx));
+            for wrapped in [false, true] {
+                editor.settings.soft_wrap = wrapped;
+                let rows = editor.display_rows();
+                let expected = if wrapped {
+                    vec![
+                        (0, 0, 12, true),
+                        (3, 0, 8, false),
+                        (3, 8, 12, false),
+                        (4, 0, 13, true),
+                        (7, 0, 4, false),
+                    ]
+                } else {
+                    vec![
+                        (0, 0, 12, true),
+                        (3, 0, 12, false),
+                        (4, 0, 13, true),
+                        (7, 0, 4, false),
+                    ]
+                };
+                assert_eq!(
+                    rows.iter()
+                        .map(|row| (row.line, row.start_col, row.end_col, row.is_folded_header))
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert!(rows.get(expected.len()).is_none());
+                for line in [1, 2, 5, 6] {
+                    assert!(display_row_for_visual_column(&rows, line, 0).is_none());
+                }
+                let (index, row, column) = display_row_for_visual_column(&rows, 3, 8).unwrap();
+                assert_eq!(
+                    (index, row.line, column),
+                    if wrapped { (2, 3, 0) } else { (1, 3, 8) }
+                );
+                let (index, row, column) = display_row_for_visual_column(&rows, 7, 4).unwrap();
+                assert_eq!(
+                    (index, row.line, column),
+                    if wrapped { (4, 7, 4) } else { (3, 7, 4) }
+                );
+                assert_eq!(editor.document_width_columns(), 13);
+            }
+            assert!(editor.toggle_fold_at_line(0, cx));
+            assert!(editor.toggle_fold_at_line(4, cx));
+            editor.settings.soft_wrap = false;
+            assert_eq!(
+                editor
+                    .display_rows()
+                    .iter()
+                    .map(|row| row.line)
+                    .collect::<Vec<_>>(),
+                (0..8).collect::<Vec<_>>()
+            );
         });
     }
 

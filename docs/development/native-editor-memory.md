@@ -2,6 +2,280 @@
 
 Date: 2026-10-27. Baseline: main at 38fa618ba; subsequent changes are recorded by batch below.
 
+## Fourteenth batch: shared save contents, sparse folds and snapshot metadata (2026-10-30)
+
+Baseline: `c96366ddf` plus batches eleven through thirteen. Each probe was recorded before
+its production change, then repeated on the same macOS development profile without concurrent
+builds. Measurements below are live malloc allocations or sampled malloc peaks, not process RSS.
+Older sections describe their respective batches rather than the latest implementation.
+
+### Save and workspace owners share text pieces
+
+Workspace current/saved contents, close-after-save requests and in-flight saves now retain
+`SharedText` slices instead of calling the editor's contiguous `text_snapshot()`. Editor creation
+and restoration accept those shared contents, including modified multi-piece documents. Their
+initial line index counts newlines before allocating, retaining the exact-capacity opening path. The
+persisted workspace format still contains ordinary text strings. Saved revisions, conflict
+preconditions, queued saves, edits during upload and dirty-close behavior keep their contracts.
+The public MCP workspace editor uses the same shared contents for writes and rollback snapshots.
+
+Local, SFTP and agent writes encode those pieces without rebuilding a document string. Newline
+conversion uses an 8 KiB zeroizing buffer; legacy encodings keep one encoder across piece
+boundaries and write directly into the final zeroizing byte vector. Unrepresentable text fails
+before a file is changed. UTF-8/UTF-16 encoded-size checks include newline expansion and BOMs.
+The encoded byte vector remains available for the existing atomic-write and retry paths.
+The original contiguous editor save callback is retained alongside the shared callback.
+
+Selection formatting reads only the affected text/lines. Language detection reads the first
+line, and workspace language/snippet metadata no longer requires flattening the full document.
+
+The IDE probe opens a file, inserts `中\n`, synchronizes the real editor into its workspace and
+captures a workspace snapshot. Allocation and timing cover synchronization plus snapshot capture.
+
+| Source size | Additional retained heap before / after, bytes | Sync before / after, ms |
+| ---: | ---: | ---: |
+| 16 MiB | 16,794,880 / 1,616 | 2.176 / 0.025 |
+| 64 MiB | 67,126,528 / 1,616 | 8.149 / 0.023 |
+
+The encoding probe uses `中文 line\n` repeated 1,400,000 times (16,800,000 UTF-8 bytes).
+A separate thread samples allocator usage every 100 microseconds. Expected bytes are checked
+after timing; the peak includes the encoded output but excludes the already-prepared source.
+
+| Encoding / ending | Extra peak before / after, MiB | Encode before / after, ms |
+| --- | ---: | ---: |
+| UTF-8 / LF | 48.096 / 16.033 | 362.530 / 1.304 |
+| UTF-8 / CRLF | 66.768 / 17.369 | 519.581 / 453.565 |
+| GBK / CRLF | 80.080 / 17.369 | 21213.798 / 20112.636 |
+
+Exact peak-growth pairs: 50,431,984 / 16,812,016; 70,010,864 / 18,212,848;
+83,970,032 / 18,212,848 bytes. GBK's output capacity is estimated from UTF-8 input length:
+returned-vector allocation is 16,809,984 / 18,202,624 bytes, a 1.33 MiB increase, while eliminating
+the much larger conversion peak. UTF-8 output retention is unchanged. An intermediate version
+used a separate encoding output buffer and increased GBK time to 34477.531 ms; direct-to-vector
+encoding removed that regression. Timings are individual development-profile runs.
+
+### Folding keeps the compact row representation
+
+Folded documents now keep compact widths/wraps plus a sparse list of collapsed intervals.
+Hidden physical lines have implicit positions rather than full `DisplayRow` records. Fold
+headers stay unwrapped; display-row lookup and caret coordinates account for cumulative hidden
+lines. The existing explicit representation remains available for widths exceeding `u32`.
+
+For 250,000 `row\n` lines with physical lines 6 through 10 hidden below header line 5 (zero-based):
+
+| Row map | Retained bytes before / after | Build before / after, ms |
+| --- | ---: | ---: |
+| Unfolded | 1,015,872 / 1,015,872 | 14.130 / 18.719 |
+| Folded | 8,388,672 / 1,015,952 | 17.373 / 15.788 |
+
+The folded representation drops about 87.9% of its allocation in this fixture. Regression
+coverage exercises multiple separated folds, wrapped boundary columns, unwrapped headers,
+hidden-line lookup, the final visible row and unfolding back to ordinary rows.
+
+### Background snapshots share their metadata arrays
+
+The piece and allocation vectors now use shared copy-on-write owners. A syntax/search snapshot
+clones those owners instead of copying every descriptor. Allocation-table sharing also prevents
+trimming text still visible to a snapshot; mutations detach the table before appending or remapping.
+This keeps the existing flat piece table rather than introducing a new persistent tree.
+
+The fixture replaces `a` with `z` in every `ab\n` line, retains two snapshots, then inserts `中`
+in the middle. Snapshots must retain `zb\n`, and undo/redo must restore the corresponding text.
+
+| Pieces | Two-snapshot heap before / after, bytes | Capture before / after, ms | Subsequent edit before / after, ms |
+| ---: | ---: | ---: | ---: |
+| 8,192 | 655,360 / 0 | 0.212 / <0.001 | 2.296 / 2.344 |
+| 32,768 | 2,621,440 / 0 | 0.451 / <0.001 | 5.234 / 5.212 |
+
+The existing batch-edit probe also passed: 16,384 edits apply/undo/redo in 7.430 / 7.500 /
+7.412 ms with 1,442,144 retained bytes. Multi-piece deletion/undo retain 288 / 640 extra bytes;
+the difference from batch eleven includes the new shared-array owners, not another text copy.
+
+### Verification and remaining structural work
+
+- Editor core, syntax, GPUI editor, IDE state and GPUI IDE regression suites passed. Coverage
+  includes search, history, snapshot independence, fragmented workspace serialization,
+  save coalescing/failure/races, dirty close, Markdown modes and Unicode selection formatting.
+- The focused bounded-snippet regression passed. IDE filesystem: 39 tests passed, including
+  exact chunked UTF-8/UTF-16/GBK/stateful-encoder output and existing local/agent write behavior.
+- `cargo check -p oxideterm-gpui-app`, workspace formatting and whitespace checks passed.
+  No native GUI was launched.
+- Ordinary regex search and Markdown parsing still use contiguous text at their API boundaries.
+  Active syntax-tree size, full width-dependent wrap initialization and linear piece lookup
+  remain structural targets. This batch does not implement a persistent indexed tree or
+  background wrap scheduling.
+
+```sh
+cargo test -p oxideterm-gpui-ide --lib ide_editor_memory -- --ignored --nocapture --test-threads=1
+cargo test -p oxideterm-ide-fs --lib file_encoding_memory -- --ignored --nocapture --test-threads=1
+cargo test -p oxideterm-gpui-editor --lib editor_folded_rows_memory -- --ignored --nocapture --test-threads=1
+cargo test -p oxideterm-gpui-editor --lib editor_fragmented_snapshot_memory -- --ignored --nocapture --test-threads=1
+```
+
+## Thirteenth batch: syntax reads shared text pieces directly (2026-10-30)
+
+Baseline: `c96366ddf` plus the eleventh and twelfth batches. The same reset probe was
+expanded and measured before changing syntax input. The editor worker now builds a borrowed
+offset index over snapshot chunks instead of joining them into a temporary document string.
+Parser callbacks read bytes at the requested offset, including offsets inside UTF-8 characters.
+Highlight query predicates iterate the pieces intersecting each captured node. Markdown inline
+parsing uses a bounded source view; injected languages retain their global included ranges.
+Bracket scans and indentation consume the same source without joining text.
+
+The implementation uses OxideTerm's existing piece table and tree-sitter's callback/provider
+interfaces. Zed informed the choice of chunked reads; no Zed implementation was incorporated.
+Undo storage, grammar loading and the final syntax-tree representation are unchanged.
+
+### Paired reset measurements
+
+Same macOS development-profile probe and sampling method as the twelfth batch, one paired
+run per case, no concurrent builds. The first two fixtures remain approximately 1 MiB.
+The third contains an 8 MiB block comment split across roughly 255 pieces by edits that preserve
+its contents. All cases replace the initial item with `// rebuilt\n` and perform a full reset
+through the real editor worker. The measured peak is additional live malloc allocation above
+the already-active pre-reset heap, not process RSS.
+
+| Rust fixture | Extra rebuild peak before / after, MiB | Rebuild before / after, ms |
+| --- | ---: | ---: |
+| Single-line functions | 14.692 / 13.677 | 1749.210 / 1728.948 |
+| Multi-line functions | 2.872 / 1.872 | 1920.928 / 1886.507 |
+| Fragmented 8 MiB comment | 16.543 / 0.536 | 2753.295 / 2669.216 |
+
+Exact peak-growth pairs in bytes: 15,405,872 / 14,340,960; 3,011,664 / 1,963,136;
+17,346,576 / 562,192. Post-reset retained growth remains effectively unchanged: 1,664 / 1,728;
+560 / 560; 2,384 / 2,384 bytes. The main benefit is eliminating temporary text allocations,
+particularly with fragmented documents; the observed timing differences are from individual runs.
+
+### Verification
+
+- Syntax: 29 tests passed, including fragmented UTF-8 incremental parsing, exact highlight
+  ranges, folds, indentation, bracket positions and immutable snapshots. Markdown inline ranges,
+  cross-piece query predicates and embedded-language edits/removal/cancellation are covered.
+- GPUI editor: 41 tests passed, including existing search, edit/history, worker publication,
+  cancellation and hidden-cache restoration cases. The reset memory probe also passed.
+- `cargo check -p oxideterm-gpui-app`, workspace formatting and diff whitespace checks passed.
+- No native GUI was started. Persistent piece-tree indexing and wrap scheduling are unchanged.
+
+## Twelfth batch: release obsolete state before a full syntax rebuild (2026-10-30)
+
+The baseline includes the eleventh batch's working changes, with the new probe recorded before
+changing syntax-state disposal. Only the full-rebuild branch now releases its old tree, parser,
+highlight/structure caches and bracket index before creating replacements on the syntax worker.
+Same-version reuse and incremental parsing retain their existing paths and required old trees.
+Cancellation and publication still use the existing generation/version checks.
+
+### Paired peak measurements
+
+macOS, development profile, the real editor request/completion path, one paired run per case,
+no concurrent builds. Each fixture is approximately 1 MiB of Rust, using either single-line
+functions or multi-line functions with a nested `if`. After the first parse finishes, the probe
+replaces the first function with `// rebuilt\n` and requests a full syntax reset. It checks
+the new comment highlight, buffer version and multi-line fixture's new fold position.
+
+A separate thread samples live malloc allocation every 100 microseconds. The table reports
+the maximum growth above that fixture's already-active pre-reset heap, including temporary
+text, new parser/tree, indexes and runtime allocations. These are sampled heap peaks, not RSS.
+
+| Rust fixture | Extra rebuild peak before / after, MiB | Rebuild before / after, ms |
+| --- | ---: | ---: |
+| Single-line functions | 40.94 / 14.69 | 1732.360 / 1695.977 |
+| Multi-line functions | 42.28 / 2.87 | 1947.758 / 1830.027 |
+
+Using the earlier document-only baseline, total peak deltas were 96,448,400 / 68,930,400 bytes
+and 50,735,248 / 9,412,448 bytes, respectively. The cases have independent baselines; the
+second fixture runs after language/runtime initialization from the first fixture. Post-reset
+retained heap is unchanged on both sides: 53,526,256 bytes and 6,401,344 bytes above their
+respective document-only baselines. The improvement removes overlap during rebuilding rather
+than shrinking the final syntax representation.
+
+```sh
+cargo test -p oxideterm-gpui-editor --lib editor_syntax_reset_memory -- --ignored --nocapture --test-threads=1
+```
+
+### Verification and scope
+
+- GPUI editor: 41 tests passed. Existing cases cover incremental edits, queued work, full
+  document/language replacement, plugin updates, cancellation, hidden-cache restoration,
+  highlighting, folds, indentation, search, editing and history.
+- The peak probe was run explicitly before and after the production change. No native GUI
+  was started.
+- At this batch, grammar/highlight consumers still used a temporary contiguous snapshot. First document
+  layout and the final active syntax-tree size are unchanged.
+
+## Eleventh batch: single-pass transactions and cross-piece undo (2026-10-30)
+
+Baseline: `c96366ddf`, with `editor_batch_edit_memory` added before production changes.
+
+### Transactions build the piece table once
+
+After sorting and rejecting overlapping edits, UTF-8 boundary validation walks the original
+chunks in order. A forward piece cursor then copies unchanged ranges, records deleted shared
+slices and inserts replacements into one new piece vector. Undo and redo use that same path.
+An allocation-identity map reuses replacement sources without repeatedly searching the chunk
+list. The finished vector releases spare capacity because each subsequent transaction builds
+another vector rather than extending it.
+
+### Cross-piece undo no longer joins deleted text
+
+`SharedText` stores an empty value, one slice or a shared array of slices. Line-index updates
+read those chunks directly, locating newline bytes within each chunk. Undo restores the source
+allocations and byte ranges; it does not flatten a multi-piece deletion. Public transaction
+constructors, byte coordinates, transaction boundaries and saved-revision tracking are unchanged.
+The internal replacement type now exposes chunk reads instead of dereferencing to contiguous text.
+
+### Same-workload results
+
+macOS, development profile, one paired run per case, no concurrent builds. Each batch replaces
+every `word` in `word\n` repeated N times with `中`, with change tracking enabled. Setup and
+expected-text assertions are outside timing. Undo must restore `word\n` and the saved state;
+redo must restore `中\n`. Heap is live malloc allocation above the pre-transaction baseline,
+including inverse edits, piece metadata and tracked coordinate changes, while consuming the
+already-prepared transaction. It is not process RSS or a sampled peak.
+
+| Edits | Apply before / after, ms | Undo before / after, ms | Redo before / after, ms | Retained heap before / after, bytes |
+| ---: | ---: | ---: | ---: | ---: |
+| 1,024 | 23.718 / 1.248 | 31.795 / 1.181 | 12.639 / 1.173 | 90,496 / 90,464 |
+| 4,096 | 171.090 / 4.617 | 359.509 / 4.190 | 176.003 / 4.099 | 360,832 / 360,800 |
+| 16,384 | 2764.518 / 12.482 | 5888.644 / 10.302 | 2781.034 / 9.227 | 1,442,176 / 1,442,144 |
+
+The multi-piece fixture inserts three independently allocated ASCII/CJK blocks totalling
+5,767,171 bytes between `head\n` and `tail`, then retains an immutable snapshot while deleting
+those blocks. The blocks and snapshot are outside the allocation baseline.
+
+| Cross-piece operation | Before | After |
+| --- | ---: | ---: |
+| Net live heap after deletion, bytes | 5,783,552 | -32 |
+| Net live heap after undo, bytes | 5,783,792 | 320 |
+| Delete, ms | 0.406 | 0.034 |
+| Undo, ms | 27.471 | 0.185 |
+
+The negative 32-byte delta is freed metadata, not released document content. Source bytes
+remain owned by the snapshot and undo history; the eliminated allocation is the joined copy.
+An intermediate implementation made undo slower by flattening chunk iterators one byte at a
+time. Per-chunk newline searches removed that regression without reintroducing a text copy.
+
+The previous search/snapshot probe also ran: search retained 5,013,824 bytes, UI dispatch was
+0.050 ms and completion 174.817 ms. Single-character append with an 8 MiB retained snapshot
+still added 160 bytes and took 0.003 ms; single-piece deletion added 256 bytes and took 0.009 ms.
+
+```sh
+cargo test -p oxideterm-gpui-editor --lib editor_batch_edit_memory -- --ignored --nocapture --test-threads=1
+```
+
+### Verification and scope
+
+- Editor core: 29 tests passed; GPUI editor: 41 passed. The transaction table now includes
+  repeated insertions at one position, adjacent deletion/insertion, unsorted edits, Unicode,
+  empty documents and trailing newlines. Rejected UTF-8 edits on a fragmented buffer leave
+  both text and undo behavior intact.
+- The cross-piece regression checks exact deleted chunks, shared source pointers, restored
+  line contents, saved state, immutable snapshots and edit-coordinate notifications.
+- `cargo check -p oxideterm-gpui-app` passed after the storage/API changes. The subsequent
+  line-index scan and piece-capacity refinements were verified by core/editor tests and the
+  final paired probe; they do not change caller interfaces.
+- Transactions still apply on the UI executor. Regex/grammar consumers that require a full
+  contiguous snapshot and initial document layout are unchanged. No native GUI was launched.
+
 ## Tenth batch: editor search and shared edit text (2026-10-29)
 
 Search and snapshot-append baselines were recorded at `3321229af` with the probe added before
