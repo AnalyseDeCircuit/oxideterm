@@ -135,7 +135,7 @@ impl EffectiveRenderPolicy {
                 decode_images: true,
                 show_placeholders: true,
                 pixel_limit: 16_777_216,
-                storage_limit_bytes: 16 * 1024 * 1024,
+                storage_limit_bytes: 256 * 1024 * 1024,
             },
             image_cache_bytes: 64 * 1024 * 1024,
             drain: TerminalDrainPolicy {

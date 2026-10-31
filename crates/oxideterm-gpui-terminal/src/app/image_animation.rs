@@ -212,6 +212,7 @@ mod tests {
     fn loading_appends_gapless_frames_and_manual_seeks_use_the_requested_frame() {
         let now = Instant::now();
         let mut image = Arc::new(TerminalImageData {
+            memory: None,
             id: TerminalImageId(1),
             protocol: TerminalImageProtocol::Kitty,
             version: 1,
@@ -221,6 +222,7 @@ mod tests {
             frames: [0, 100, 100]
                 .into_iter()
                 .map(|delay| TerminalImageFrame {
+                    memory: None,
                     rgba: vec![delay as u8, 0, 0, 255].into(),
                     delay_ms_numerator: delay,
                     delay_ms_denominator: 1,
@@ -257,6 +259,7 @@ mod tests {
             }
         );
         Arc::make_mut(&mut image).frames.push(TerminalImageFrame {
+            memory: None,
             rgba: vec![0, 255, 0, 255].into(),
             delay_ms_numerator: 100,
             delay_ms_denominator: 1,
@@ -297,6 +300,7 @@ mod tests {
     fn clock_preserves_stop_seek_loading_and_hidden_progress() {
         let now = Instant::now();
         let mut image = Arc::new(TerminalImageData {
+            memory: None,
             id: TerminalImageId(1),
             protocol: TerminalImageProtocol::Kitty,
             version: 1,
@@ -306,6 +310,7 @@ mod tests {
             frames: [100, 200]
                 .into_iter()
                 .map(|delay| TerminalImageFrame {
+                    memory: None,
                     rgba: vec![0; 4].into(),
                     delay_ms_numerator: delay,
                     delay_ms_denominator: 1,

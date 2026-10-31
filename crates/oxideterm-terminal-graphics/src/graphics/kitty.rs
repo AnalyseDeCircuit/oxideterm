@@ -584,9 +584,7 @@ impl GraphicsIngress {
                 assembly.params.insert("q".into(), quiet.clone());
             }
             let payload = payload.unwrap_or_default();
-            if assembly.encoded.len().saturating_add(payload.len())
-                > encoded_storage_limit(self.options.storage_limit_mb)
-            {
+            if assembly.encoded.len().saturating_add(payload.len()) > encoded_storage_limit() {
                 self.kitty_reply(
                     &assembly.params,
                     Err(&GraphicsError::StorageLimitExceeded),
@@ -850,15 +848,16 @@ impl GraphicsIngress {
         let complete = decode_kitty_payload(
             params,
             encoded,
-            self.options.storage_limit_mb,
+            MAX_TRANSFER_MB,
             &self.options.kitty_file_transmission,
         )?;
         match params.get("f").map(String::as_str).unwrap_or("32") {
             "24" | "32" => {
                 let (width, height) = raw_dimensions(params)?;
-                enforce_pixel_limit(width, height, self.options.pixel_limit)?;
-                enforce_storage_limit(
-                    width as usize * height as usize * 4,
+                decoded_rgba_bytes(
+                    width,
+                    height,
+                    self.options.pixel_limit,
                     self.options.storage_limit_mb,
                 )?;
                 if params.get("f").is_some_and(|f| f == "24") {
@@ -892,7 +891,7 @@ impl GraphicsIngress {
             .len()
             .saturating_add(1)
             .saturating_mul(std::mem::size_of::<TerminalImagePlacement>() * 2);
-        enforce_storage_limit(metadata, self.options.storage_limit_mb)?;
+        enforce_storage_limit(metadata, MAX_GRAPHICS_METADATA_MB)?;
         let (mut placement, _) = self.place_kitty_image(params, cursor)?;
         let named_image = self.kitty_wire_ids.values().any(|id| *id == placement.id);
         let wire_id = if named_image {
@@ -1114,6 +1113,7 @@ impl GraphicsIngress {
         }
         image.frames.remove(index);
         image.rgba = image.frames[0].rgba.clone();
+        image.memory = image.frames[0].memory.clone();
         image.animation.current_frame = image
             .animation
             .current_frame

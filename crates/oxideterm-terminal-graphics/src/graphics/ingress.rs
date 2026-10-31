@@ -26,6 +26,7 @@ fn terminal_image_data_from_decoded(
         .frames
         .into_iter()
         .map(|frame| TerminalImageFrame {
+            memory: Some(frame.memory),
             rgba: frame.rgba,
             delay_ms_numerator: frame.delay_ms_numerator,
             delay_ms_denominator: frame.delay_ms_denominator,
@@ -40,6 +41,7 @@ fn terminal_image_data_from_decoded(
         ..Default::default()
     };
     TerminalImageData {
+        memory: Some(decoded.memory),
         id,
         protocol,
         version: 0,
@@ -344,7 +346,7 @@ impl GraphicsIngress {
                 .image_order
                 .len()
                 .saturating_mul(std::mem::size_of::<TerminalImageData>() * 2)
-                > limit
+                > MAX_GRAPHICS_METADATA_MB as usize * 1024 * 1024
         {
             let unplaced = self.image_order.iter().position(|(id, _)| {
                 self.kitty_images.contains_key(id)
@@ -408,6 +410,13 @@ impl GraphicsIngress {
         C: FnMut() -> GraphicsCursor,
     {
         let state = std::mem::replace(&mut self.state, ParserState::Ground);
+        // Reject before a full buffer's next push doubles its allocation.
+        if parser_state_len(&state) > encoded_storage_limit().saturating_sub(2) {
+            result.events.push(TerminalGraphicsEvent::Error(
+                GraphicsError::StorageLimitExceeded.to_string(),
+            ));
+            return;
+        }
         match state {
             ParserState::Ground => match byte {
                 0x1b => self.state = ParserState::Esc,
@@ -489,7 +498,7 @@ impl GraphicsIngress {
         state: ParserState,
         result: &mut GraphicsAdvance,
     ) -> ParserState {
-        if parser_state_len(&state) <= encoded_storage_limit(self.options.storage_limit_mb) {
+        if parser_state_len(&state) <= encoded_storage_limit() {
             state
         } else {
             result.events.push(TerminalGraphicsEvent::Error(
@@ -588,7 +597,7 @@ impl GraphicsIngress {
         let payload = BASE64
             .decode(&data[separator + 1..])
             .map_err(|_| GraphicsError::InvalidBase64)?;
-        enforce_storage_limit(payload.len(), self.options.storage_limit_mb)?;
+        enforce_storage_limit(payload.len(), MAX_TRANSFER_MB)?;
         let name = params
             .get("name")
             .and_then(|value| BASE64.decode(value).ok())
@@ -640,13 +649,21 @@ impl GraphicsIngress {
         sequence: &[u8],
         cursor: GraphicsCursor,
     ) -> Result<(TerminalImageData, TerminalImagePlacement, Vec<u8>), GraphicsError> {
-        enforce_storage_limit(sequence.len(), self.options.storage_limit_mb)?;
+        enforce_storage_limit(sequence.len(), MAX_TRANSFER_MB)?;
+        let bytes = sixel_canvas_bytes(
+            sequence,
+            self.options.pixel_limit,
+            self.options.storage_limit_mb,
+        )?;
+        let memory = reserve_pixels(bytes)?;
+        let _workspace = reserve_decode_workspace(bytes.saturating_add(sequence.len()))?;
         let decoded = icy_sixel::SixelImage::decode(sequence)
             .map_err(|error| GraphicsError::Decode(error.to_string()))?;
         let width = decoded.width as u32;
         let height = decoded.height as u32;
         enforce_pixel_limit(width, height, self.options.pixel_limit)?;
         let image = TerminalImageData {
+            memory: Some(memory),
             id: self.next_id(),
             protocol: TerminalImageProtocol::Sixel,
             version: 0,
@@ -703,6 +720,10 @@ impl GraphicsIngress {
         }
         if target_frame.is_none() {
             enforce_storage_limit(
+                (count + 1).saturating_mul(std::mem::size_of::<TerminalImageFrame>()),
+                MAX_GRAPHICS_METADATA_MB,
+            )?;
+            enforce_storage_limit(
                 (count + 1).saturating_mul(
                     image.width as usize * image.height as usize * 4
                         + std::mem::size_of::<TerminalImageFrame>(),
@@ -710,6 +731,9 @@ impl GraphicsIngress {
                 self.options.storage_limit_mb,
             )?;
         }
+        let canvas_bytes = image.width as usize * image.height as usize * 4;
+        let memory = reserve_pixels(canvas_bytes)?;
+        let _workspace = reserve_decode_workspace(canvas_bytes)?;
         ensure_kitty_animation_root(image);
         let mut canvas = if let Some(target_frame) = target_frame {
             image
@@ -747,6 +771,7 @@ impl GraphicsIngress {
                 .get_mut(target_frame)
                 .ok_or(GraphicsError::UnsupportedImage)?;
             frame.rgba = canvas.into();
+            frame.memory = Some(memory);
             if let Some((delay_ms, gapless)) = gap {
                 frame.delay_ms_numerator = delay_ms;
                 frame.delay_ms_denominator = 1;
@@ -756,6 +781,7 @@ impl GraphicsIngress {
         } else {
             let (delay_ms, gapless) = gap.unwrap_or((40, false));
             image.frames.push(TerminalImageFrame {
+                memory: Some(memory),
                 rgba: canvas.into(),
                 delay_ms_numerator: delay_ms,
                 delay_ms_denominator: 1,
@@ -765,6 +791,7 @@ impl GraphicsIngress {
         };
         if frame_index == 0 {
             image.rgba = image.frames[0].rgba.clone();
+            image.memory = image.frames[0].memory.clone();
         }
         image.animation.current_frame = image
             .animation
@@ -872,6 +899,11 @@ impl GraphicsIngress {
             return Err(GraphicsError::UnsupportedImage);
         }
 
+        let canvas_bytes = image.width as usize * image.height as usize * 4;
+        let memory = reserve_pixels(canvas_bytes)?;
+        let _workspace = reserve_decode_workspace(
+            canvas_bytes.saturating_add(width as usize * height as usize * 4),
+        )?;
         ensure_kitty_animation_root(image);
         let source_rect = copy_protocol_rgba_rect(
             &image.frames[source_frame].rgba,
@@ -898,8 +930,10 @@ impl GraphicsIngress {
             replace,
         );
         dest.rgba = dest_rgba.into();
+        dest.memory = Some(memory);
         if dest_frame == 0 {
             image.rgba = dest.rgba.clone();
+            image.memory = dest.memory.clone();
         }
         Ok(image.clone())
     }
@@ -1135,6 +1169,7 @@ fn kitty_loop_limit(value: Option<&String>) -> Option<u32> {
 fn ensure_kitty_animation_root(image: &mut TerminalImageData) {
     if image.frames.is_empty() {
         image.frames.push(TerminalImageFrame {
+            memory: image.memory.clone(),
             rgba: image.rgba.clone(),
             delay_ms_numerator: 0,
             delay_ms_denominator: 1,

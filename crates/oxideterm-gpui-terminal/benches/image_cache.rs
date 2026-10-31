@@ -55,6 +55,7 @@ fn main() {
         } else {
             (0..count)
                 .map(|index| TerminalImageFrame {
+                    memory: None,
                     rgba: vec![index as u8; pixels.len()].into(),
                     delay_ms_numerator: 40,
                     delay_ms_denominator: 1,
@@ -81,6 +82,7 @@ fn main() {
             clipped_rows: 0,
             version: 1,
             data: Some(Arc::new(TerminalImageData {
+                memory: None,
                 id: TerminalImageId(1),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,

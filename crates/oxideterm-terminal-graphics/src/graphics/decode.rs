@@ -3,12 +3,14 @@ struct DecodedPixels {
     width: u32,
     height: u32,
     rgba: Arc<[u8]>,
+    memory: ImageMemoryLease,
     frames: Vec<DecodedImageFrame>,
 }
 
 #[derive(Clone, Debug)]
 struct DecodedImageFrame {
     rgba: Arc<[u8]>,
+    memory: ImageMemoryLease,
     delay_ms_numerator: u32,
     delay_ms_denominator: u32,
 }
@@ -32,13 +34,18 @@ fn decode_image_bytes(
 ) -> Result<DecodedPixels, GraphicsError> {
     let format = image::guess_format(bytes).map_err(|_| GraphicsError::UnsupportedImage)?;
     if format == image::ImageFormat::Gif {
-        let decoder = GifDecoder::new(std::io::Cursor::new(bytes))
+        let mut decoder = GifDecoder::new(std::io::Cursor::new(bytes))
+            .map_err(|error| GraphicsError::Decode(error.to_string()))?;
+        decoder
+            .set_limits(decoder_limits())
             .map_err(|error| GraphicsError::Decode(error.to_string()))?;
         let (width, height) = decoder.dimensions();
         enforce_pixel_limit(width, height, pixel_limit)?;
-        let frame_bytes = width as usize * height as usize * 4;
-        enforce_storage_limit(frame_bytes, storage_limit_mb)?;
+        let frame_bytes = decoded_rgba_bytes(width, height, pixel_limit, storage_limit_mb)?;
+        let _workspace =
+            reserve_decode_workspace(bytes.len().saturating_add(frame_bytes.saturating_mul(3)))?;
         let mut frames = decoder.into_frames();
+        let first_memory = reserve_pixels(frame_bytes)?;
         let first_frame = frames
             .next()
             .ok_or(GraphicsError::UnsupportedImage)?
@@ -50,17 +57,18 @@ fn decode_image_bytes(
         let first_rgba: Arc<[u8]> = first_image.into_raw().into();
         let mut decoded_frames = vec![DecodedImageFrame {
             rgba: first_rgba.clone(),
+            memory: first_memory.clone(),
             // GIF zero-delay frames are common in the wild. Normalize them
             // before rendering so protocol-level zero gaps can still mean
             // "skip this frame" for Kitty animation frames.
             delay_ms_numerator: normalize_gif_frame_delay_ms(delay_ms_numerator),
             delay_ms_denominator,
         }];
-        for frame in frames {
+        loop {
+            let Some(frame) = frames.next() else { break };
             let frame = frame.map_err(|error| GraphicsError::Decode(error.to_string()))?;
-            // The iterator needs to read the next frame to distinguish EOF. Keep at
-            // most one extra canvas alive, never an unbounded decoded animation.
             enforce_storage_limit((decoded_frames.len() + 1) * frame_bytes, storage_limit_mb)?;
+            let memory = reserve_pixels(frame_bytes)?;
             let (delay_ms_numerator, delay_ms_denominator) = frame.delay().numer_denom_ms();
             let image = frame.into_buffer();
             if image.dimensions() != (width, height) {
@@ -68,6 +76,7 @@ fn decode_image_bytes(
             }
             decoded_frames.push(DecodedImageFrame {
                 rgba: image.into_raw().into(),
+                memory,
                 delay_ms_numerator: normalize_gif_frame_delay_ms(delay_ms_numerator),
                 delay_ms_denominator,
             });
@@ -79,18 +88,25 @@ fn decode_image_bytes(
             width,
             height,
             rgba: first_rgba,
+            memory: first_memory,
             frames,
         });
     }
 
-    let decoder = ImageReader::new(std::io::Cursor::new(bytes))
+    let mut reader = ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
-        .map_err(|error| GraphicsError::Decode(error.to_string()))?
+        .map_err(|error| GraphicsError::Decode(error.to_string()))?;
+    reader.limits(decoder_limits());
+    let decoder = reader
         .into_decoder()
         .map_err(|error| GraphicsError::Decode(error.to_string()))?;
     let (width, height) = decoder.dimensions();
-    enforce_pixel_limit(width, height, pixel_limit)?;
-    enforce_storage_limit(width as usize * height as usize * 4, storage_limit_mb)?;
+    let rgba_bytes = decoded_rgba_bytes(width, height, pixel_limit, storage_limit_mb)?;
+    let raw_bytes =
+        usize::try_from(decoder.total_bytes()).map_err(|_| GraphicsError::StorageLimitExceeded)?;
+    let _workspace =
+        reserve_decode_workspace(bytes.len().saturating_add(raw_bytes.max(rgba_bytes)))?;
+    let memory = reserve_pixels(rgba_bytes)?;
     let image = image::DynamicImage::from_decoder(decoder)
         .map_err(|error| GraphicsError::Decode(error.to_string()))?
         .to_rgba8();
@@ -98,6 +114,7 @@ fn decode_image_bytes(
         width,
         height,
         rgba: image.into_raw().into(),
+        memory,
         frames: Vec::new(),
     })
 }
@@ -150,13 +167,32 @@ fn decode_kitty_payload(
         Some("z") => {
             let input = Zeroizing::new(bytes);
             let decoder = flate2::read::ZlibDecoder::new(input.as_slice());
-            let limit = storage_limit_mb.max(1) as u64 * 1024 * 1024;
+            let transfer_limit = storage_limit_mb.max(1) as u64 * 1024 * 1024;
+            let limit = match params.get("f").map(String::as_str).unwrap_or("32") {
+                "24" | "32" => {
+                    let (width, height) = raw_dimensions(params)?;
+                    u64::from(width)
+                        .checked_mul(u64::from(height))
+                        .and_then(|n| {
+                            n.checked_mul(if params.get("f").is_some_and(|f| f == "24") {
+                                3
+                            } else {
+                                4
+                            })
+                        })
+                        .ok_or(GraphicsError::StorageLimitExceeded)?
+                        .min(transfer_limit)
+                }
+                _ => transfer_limit,
+            };
             let mut output = Vec::new();
             decoder
                 .take(limit + 1)
                 .read_to_end(&mut output)
                 .map_err(|_| GraphicsError::InvalidCommand)?;
-            enforce_storage_limit(output.len(), storage_limit_mb)?;
+            if output.len() as u64 > limit {
+                return Err(GraphicsError::StorageLimitExceeded);
+            }
             Ok(output)
         }
         _ => Err(GraphicsError::UnsupportedImage),
@@ -422,6 +458,9 @@ fn decode_raw_rgb(
 ) -> Result<DecodedPixels, GraphicsError> {
     let (width, height) = raw_dimensions(params)?;
     enforce_raw_len(bytes, width, height, 3)?;
+    let rgba_bytes = width as usize * height as usize * 4;
+    let memory = reserve_pixels(rgba_bytes)?;
+    let _workspace = reserve_decode_workspace(bytes.len().saturating_add(rgba_bytes))?;
     let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
     for chunk in bytes.chunks_exact(3) {
         rgba.extend_from_slice(&[chunk[0], chunk[1], chunk[2], 0xff]);
@@ -430,6 +469,7 @@ fn decode_raw_rgb(
         width,
         height,
         rgba: rgba.into(),
+        memory,
         frames: Vec::new(),
     })
 }
@@ -444,10 +484,13 @@ fn decode_raw_rgba(
 ) -> Result<DecodedPixels, GraphicsError> {
     let (width, height) = raw_dimensions(params)?;
     enforce_raw_len(bytes, width, height, 4)?;
+    let memory = reserve_pixels(bytes.len())?;
+    let _workspace = reserve_decode_workspace(bytes.len())?;
     Ok(DecodedPixels {
         width,
         height,
         rgba: bytes.into(),
+        memory,
         frames: Vec::new(),
     })
 }
@@ -500,9 +543,44 @@ fn enforce_storage_limit(bytes: usize, storage_limit_mb: u32) -> Result<(), Grap
     }
 }
 
-fn encoded_storage_limit(storage_limit_mb: u32) -> usize {
+fn encoded_storage_limit() -> usize {
     // Base64 payloads are roughly 4/3 of decoded data. Keep a small allowance
     // for protocol parameters while still bounding incomplete graphics control
     // sequences before they can stall the PTY reader.
-    storage_limit_mb.max(1) as usize * 1024 * 1024 * 2
+    MAX_TRANSFER_MB as usize * 1024 * 1024 * 2
+}
+
+fn reserve_pixels(bytes: usize) -> Result<ImageMemoryLease, GraphicsError> {
+    reserve_image_memory(bytes).ok_or(GraphicsError::StorageLimitExceeded)
+}
+
+fn decoder_limits() -> image::Limits {
+    let mut limits = image::Limits::default();
+    limits.max_alloc = Some(MAX_DECODE_WORKSPACE_BYTES as u64);
+    limits
+}
+
+fn reserve_decode_workspace(bytes: usize) -> Result<ImageMemoryLease, GraphicsError> {
+    if bytes > MAX_DECODE_WORKSPACE_BYTES {
+        return Err(GraphicsError::StorageLimitExceeded);
+    }
+    reserve_pixels(bytes)
+}
+
+fn decoded_rgba_bytes(
+    width: u32,
+    height: u32,
+    pixel_limit: u32,
+    cache_mb: u32,
+) -> Result<usize, GraphicsError> {
+    enforce_pixel_limit(width, height, pixel_limit)?;
+    let bytes = (width as usize)
+        .checked_mul(height as usize)
+        .and_then(|n| n.checked_mul(4))
+        .ok_or(GraphicsError::StorageLimitExceeded)?;
+    if bytes > MAX_DECODE_BYTES {
+        return Err(GraphicsError::StorageLimitExceeded);
+    }
+    enforce_storage_limit(bytes, cache_mb)?;
+    Ok(bytes)
 }

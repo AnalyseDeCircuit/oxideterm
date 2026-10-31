@@ -54,6 +54,107 @@ mod tests {
     }
 
     #[test]
+    fn default_cache_retains_large_pngs_but_small_explicit_cache_rejects_them() {
+        let mut png = Vec::new();
+        image::write_buffer_with_format(
+            &mut std::io::Cursor::new(&mut png),
+            &vec![127; 3840 * 2160 * 4],
+            3840,
+            2160,
+            image::ExtendedColorType::Rgba8,
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+        let payload = BASE64.encode(png);
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        for id in 1..=9 {
+            let result = ingress.advance(
+                format!("\x1b_Ga=t,i={id},f=100;{payload}\x1b\\").as_bytes(),
+                cursor(),
+            );
+            let image = result
+                .events
+                .iter()
+                .find_map(|event| match event {
+                    TerminalGraphicsEvent::ImageReady(image) => Some(image),
+                    _ => None,
+                })
+                .expect("default cache accepts 4K pixels");
+            assert_eq!(
+                (image.width, image.height, image.rgba.len()),
+                (3840, 2160, 33_177_600)
+            );
+            assert_eq!(&image.rgba[..4], &[127, 127, 127, 127]);
+            assert_eq!(&image.rgba[image.rgba.len() - 4..], &[127, 127, 127, 127]);
+            let deleted = result
+                .events
+                .iter()
+                .filter_map(|event| match event {
+                    TerminalGraphicsEvent::Delete { id } => *id,
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                deleted,
+                if id == 9 {
+                    vec![TerminalImageId(1)]
+                } else {
+                    Vec::new()
+                }
+            );
+        }
+        let mut small = GraphicsIngress::new(GraphicsOptions {
+            storage_limit_mb: 16,
+            ..Default::default()
+        });
+        let result = small.advance(
+            format!("\x1b_Ga=t,i=7,f=100;{payload}\x1b\\").as_bytes(),
+            cursor(),
+        );
+        assert!(result.events.contains(&TerminalGraphicsEvent::Respond(
+            b"\x1b_Gi=7;ENOSPC:Graphics resource limit exceeded\x1b\\".to_vec()
+        )));
+        assert!(
+            !result
+                .events
+                .iter()
+                .any(|e| matches!(e, TerminalGraphicsEvent::ImageReady(_)))
+        );
+    }
+
+    #[test]
+    fn sixel_canvas_budget_rejects_repeat_and_raster_expansion_before_decode() {
+        let mut ingress = GraphicsIngress::new(GraphicsOptions {
+            storage_limit_mb: 1,
+            ..Default::default()
+        });
+        for input in [
+            b"\x1bPq\"1;1;4096;4096\x1b\\".as_slice(),
+            b"\x1bPq!65535~\x1b\\",
+        ] {
+            let result = ingress.advance(input, cursor());
+            assert!(result.events.contains(&TerminalGraphicsEvent::Error(
+                GraphicsError::StorageLimitExceeded.to_string()
+            )));
+            assert!(
+                !result
+                    .events
+                    .iter()
+                    .any(|e| matches!(e, TerminalGraphicsEvent::ImageReady(_)))
+            );
+        }
+        assert_eq!(
+            sixel_canvas_bytes(
+                b"\x1bPq#1;2;0;100;0!3~$#2;2;0;0;100@-!2~\x1b\\",
+                DEFAULT_PIXEL_LIMIT,
+                1
+            )
+            .unwrap(),
+            144
+        );
+    }
+
+    #[test]
     fn kitty_budget_releases_evicted_pixels_and_keeps_recent_image_usable() {
         let mut ingress = GraphicsIngress::new(GraphicsOptions {
             storage_limit_mb: 1,

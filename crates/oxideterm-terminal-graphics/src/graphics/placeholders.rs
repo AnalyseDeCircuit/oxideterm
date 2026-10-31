@@ -104,7 +104,7 @@ impl GraphicsIngress {
                         + std::mem::size_of::<TerminalImagePlacement>() * 3)
             })
             .sum::<usize>();
-        if enforce_storage_limit(metadata, self.options.storage_limit_mb).is_err() {
+        if enforce_storage_limit(metadata, MAX_GRAPHICS_METADATA_MB).is_err() {
             self.drop_kitty_resources(events);
             return;
         }

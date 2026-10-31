@@ -56,6 +56,14 @@ Grant permission only to sessions you trust: programs running in that terminal, 
 
 Direct image transfers do not need this permission. Image memory remains budgeted, and repeated placements share their pixels. Images represented by Unicode placeholders move with the underlying text, including in scrollback.
 
+The default quality profile retains up to 256 MiB of protocol pixels per terminal,
+allocated only as images arrive. Terminal pixels, decode workspaces, upload copies
+and backgrounds share a 512 MiB CPU image allowance; GPU storage is separate.
+Transfers and individual frame decoding have independent limits, and the existing
+pixel-count limit still applies. Low-power and compatibility profiles keep their
+smaller limits. Under pressure, old images can be evicted or a new transfer rejected;
+animations keep their decoded frames rather than repeatedly decoding to save space.
+
 ### Command Folding and Shell Integration
 
 Open **Settings → Terminal → Display** and enable **Command folding**. Click the button beside a completed command in the left gutter to collapse or expand its output. The command's context menu also offers **Collapse output** or **Expand output**; enable **Hover Actions** if you want those controls beside a selected command.

@@ -245,7 +245,8 @@ impl ImageRenderCache {
         }
         let reservation = ImageUploadReservation(upload_bytes);
         let image = render_image_for_snapshot(&source, &snapshot, request.previous.as_deref())?
-            .retaining(reservation);
+            .retaining(reservation)
+            .retaining(source.clone());
         let bytes = if source.frames.is_empty() {
             source.rgba.len()
         } else {
@@ -464,6 +465,7 @@ mod tests {
             clipped_rows: 0,
             version: 1,
             data: Some(Arc::new(TerminalImageData {
+                memory: None,
                 id: TerminalImageId(10),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,
@@ -476,10 +478,16 @@ mod tests {
             })),
         };
 
+        let owner = Arc::downgrade(snapshot.data.as_ref().unwrap());
         let rendered = cache.render_images(&[snapshot], true);
-        let image = rendered[0].render_image.as_ref().unwrap();
+        let image = rendered[0].render_image.as_ref().unwrap().clone();
 
         assert_eq!(image.as_bytes(0), Some([255, 0, 0, 255].as_slice()));
+        drop(cache);
+        drop(rendered);
+        assert!(owner.upgrade().is_some());
+        drop(image);
+        assert!(owner.upgrade().is_none());
     }
 
     #[test]
@@ -504,6 +512,7 @@ mod tests {
             clipped_rows: 0,
             version: 1,
             data: Some(Arc::new(TerminalImageData {
+                memory: None,
                 id: TerminalImageId(12),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,
@@ -512,12 +521,14 @@ mod tests {
                 rgba: vec![255, 0, 0, 255].into(),
                 frames: vec![
                     TerminalImageFrame {
+                        memory: None,
                         rgba: vec![255, 0, 0, 255].into(),
                         delay_ms_numerator: 50,
                         delay_ms_denominator: 1,
                         gapless: false,
                     },
                     TerminalImageFrame {
+                        memory: None,
                         rgba: vec![0, 255, 0, 255].into(),
                         delay_ms_numerator: 75,
                         delay_ms_denominator: 1,
@@ -617,6 +628,7 @@ mod tests {
             clipped_rows: 0,
             version: 1,
             data: Some(Arc::new(TerminalImageData {
+                memory: None,
                 id: TerminalImageId(11),
                 protocol: TerminalImageProtocol::Kitty,
                 version: 1,

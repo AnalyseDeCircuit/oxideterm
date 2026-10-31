@@ -8214,6 +8214,7 @@ dependencies = [
  "image",
  "libc",
  "memchr",
+ "oxideterm-image-decoder",
  "tempfile",
  "thiserror 2.0.20",
  "zeroize",

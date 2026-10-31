@@ -3,10 +3,8 @@ use std::sync::{
     atomic::{AtomicUsize, Ordering},
 };
 
-// A 4K background and one serialized gallery decode can retain separate codec pools.
-const CPU_BYTES: usize = 512 * 1024 * 1024;
 const PLAYER_BYTES: usize = 192 * 1024 * 1024;
-static RESERVED: AtomicUsize = AtomicUsize::new(0);
+pub use oxideterm_image_decoder::{release_image_bytes, try_reserve_image_bytes};
 
 fn reserve(counter: &AtomicUsize, bytes: usize, limit: usize) -> bool {
     counter
@@ -14,15 +12,6 @@ fn reserve(counter: &AtomicUsize, bytes: usize, limit: usize) -> bool {
             current.checked_add(bytes).filter(|next| *next <= limit)
         })
         .is_ok()
-}
-
-/// Terminal images and backgrounds use the same process-wide CPU allowance.
-pub fn try_reserve_image_bytes(bytes: usize) -> bool {
-    reserve(&RESERVED, bytes, CPU_BYTES)
-}
-
-pub fn release_image_bytes(bytes: usize) {
-    RESERVED.fetch_sub(bytes, Ordering::AcqRel);
 }
 
 #[derive(Clone)]

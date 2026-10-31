@@ -264,7 +264,7 @@ impl Default for TerminalGraphicsSettings {
             iterm2_inline: true,
             kitty: true,
             pixel_limit: 16_777_216,
-            storage_limit_mb: 16,
+            storage_limit_mb: 256,
             show_placeholder: true,
             extra: ExtraFields::new(),
         }

@@ -2,7 +2,7 @@ use alacritty_terminal::term::graphics::{GraphicsGridChange, GraphicsGridEvents}
 
 impl GraphicsIngress {
     pub fn attach_grid(&mut self, events: GraphicsGridEvents) {
-        events.set_byte_limit(self.options.storage_limit_mb.max(1) as usize * 1024 * 1024);
+        events.set_byte_limit(MAX_GRAPHICS_METADATA_MB as usize * 1024 * 1024);
         self.grid_events = Some(events);
     }
 

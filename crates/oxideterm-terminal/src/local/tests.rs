@@ -841,6 +841,7 @@ mod tests {
     #[test]
     fn graphics_state_retransmission_removes_placements_but_updates_preserve_them() {
         let image = |rgba: [u8; 4]| TerminalImageData {
+            memory: None,
             id: TerminalImageId(7),
             protocol: TerminalImageProtocol::Kitty,
             version: 0,
@@ -894,6 +895,7 @@ mod tests {
     fn graphics_state_uses_monotonic_versions_across_deleted_image_ids() {
         let mut graphics = TerminalGraphicsState::default();
         let image = |id| TerminalImageData {
+            memory: None,
             id: TerminalImageId(id),
             protocol: TerminalImageProtocol::Kitty,
             version: 0,
@@ -928,6 +930,7 @@ mod tests {
         let term = Term::new(Config::default(), &size, VoidListener);
         let mut graphics = TerminalGraphicsState::default();
         graphics.handle_event(TerminalGraphicsEvent::ImageReady(TerminalImageData {
+            memory: None,
             id: TerminalImageId(9),
             protocol: TerminalImageProtocol::Kitty,
             version: 0,

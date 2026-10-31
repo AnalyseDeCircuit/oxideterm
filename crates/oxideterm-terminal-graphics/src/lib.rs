@@ -15,6 +15,7 @@ use image::AnimationDecoder;
 use image::ImageDecoder;
 use image::ImageReader;
 use image::codecs::gif::GifDecoder;
+use oxideterm_image_decoder::{ImageMemoryLease, reserve_image_memory};
 use thiserror::Error;
 use zeroize::Zeroizing;
 
@@ -23,6 +24,7 @@ use zeroize::Zeroizing;
 include!("graphics/types.rs");
 include!("graphics/ingress.rs");
 include!("graphics/decode.rs");
+include!("graphics/sixel.rs");
 include!("graphics/parse.rs");
 include!("graphics/kitty.rs");
 include!("graphics/grid.rs");

@@ -1,5 +1,10 @@
 pub const DEFAULT_PIXEL_LIMIT: u32 = 16_777_216;
-pub const DEFAULT_STORAGE_LIMIT_MB: u32 = 16;
+pub const DEFAULT_STORAGE_LIMIT_MB: u32 = 256;
+// Growing the cache must not grow protocol buffers or codec workspaces with it.
+const MAX_TRANSFER_MB: u32 = 64;
+const MAX_DECODE_BYTES: usize = 64 * 1024 * 1024;
+const MAX_DECODE_WORKSPACE_BYTES: usize = 256 * 1024 * 1024;
+const MAX_GRAPHICS_METADATA_MB: u32 = 16;
 
 /// Per-session authority for Kitty's local-file transmission modes.
 #[derive(Clone)]
@@ -167,7 +172,7 @@ pub enum TerminalImageProtocol {
     Sixel,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct TerminalImageData {
     pub id: TerminalImageId,
     pub protocol: TerminalImageProtocol,
@@ -175,18 +180,47 @@ pub struct TerminalImageData {
     pub width: u32,
     pub height: u32,
     pub rgba: Arc<[u8]>,
+    /// Shares the admission with every snapshot and renderer retaining these pixels.
+    pub memory: Option<ImageMemoryLease>,
     pub frames: Vec<TerminalImageFrame>,
     pub animation: TerminalImageAnimationState,
     pub name: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+// Admission ownership does not change the pixels or protocol state of a snapshot.
+impl PartialEq for TerminalImageData {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.protocol == other.protocol
+            && self.version == other.version
+            && self.width == other.width
+            && self.height == other.height
+            && self.rgba == other.rgba
+            && self.frames == other.frames
+            && self.animation == other.animation
+            && self.name == other.name
+    }
+}
+impl Eq for TerminalImageData {}
+
+#[derive(Clone, Debug)]
 pub struct TerminalImageFrame {
     pub rgba: Arc<[u8]>,
+    pub memory: Option<ImageMemoryLease>,
     pub delay_ms_numerator: u32,
     pub delay_ms_denominator: u32,
     pub gapless: bool,
 }
+
+impl PartialEq for TerminalImageFrame {
+    fn eq(&self, other: &Self) -> bool {
+        self.rgba == other.rgba
+            && self.delay_ms_numerator == other.delay_ms_numerator
+            && self.delay_ms_denominator == other.delay_ms_denominator
+            && self.gapless == other.gapless
+    }
+}
+impl Eq for TerminalImageFrame {}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TerminalImageAnimationState {
