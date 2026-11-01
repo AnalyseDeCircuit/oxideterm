@@ -1,0 +1,230 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="1008pt" height="540pt" viewBox="0 0 1008 540" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <title>OxideTerm 2.3.0 terminal history memory comparison</title>
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:title>OxideTerm 2.3.0 terminal history memory comparison</dc:title>
+    <dc:date>2026-11-01T13:36:12.849422</dc:date>
+    <dc:description>{"source": "docs/development/performance-and-benchmarking.md", "sections": ["Shared-Attribute History (2026-10-26)", "Text-Run History And Sequential Reads (2026-10-26)"], "measurement": "median retained terminal/parser heap, decimal MB", "history_rows": 20000, "screen_rows": 40, "columns": 400, "warmups": 1, "measured_samples": 5, "environment": "Apple M5, macOS 26.6.2, Rust 1.97.0, optimized bench profile", "baseline": "full-cell history with repeated-tail compression", "comparison": "same workloads across the documented optimization stages", "data": [{"workload": "Full ASCII lines", "before_mb": 196.47, "after_mb": 15.5}, {"workload": "Ten color runs per line", "before_mb": 196.47, "after_mb": 21.26}], "reduction": "100 * (before_mb - after_mb) / before_mb, rounded to 1 decimal"}</dc:description>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.2, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 540
+L 1008 540
+L 1008 0
+L 0 0
+z
+" style="fill: #f8fafc"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 75.6 437.4
+L 987.84 437.4
+L 987.84 156.6
+L 75.6 156.6
+z
+" style="fill: #f8fafc"/>
+   </g>
+   <g id="matplotlib.axis_1">
+    <g id="xtick_1">
+     <g id="line2d_1"/>
+     <g id="text_1">
+      <text style="font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #1e293b" x="310.570909" y="461.797656" transform="rotate(-0 310.570909 461.797656)">Full ASCII lines</text>
+     </g>
+    </g>
+    <g id="xtick_2">
+     <g id="line2d_2"/>
+     <g id="text_2">
+      <text style="font-size: 15px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #1e293b" x="752.869091" y="461.797656" transform="rotate(-0 752.869091 461.797656)">Ten color runs per line</text>
+     </g>
+    </g>
+   </g>
+   <g id="matplotlib.axis_2">
+    <g id="ytick_1">
+     <g id="line2d_3">
+      <path d="M 75.6 437.4
+L 987.84 437.4
+" clip-path="url(#p2e800f2898)" style="fill: none; stroke: #cbd5e1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_4"/>
+     <g id="text_3">
+      <text style="font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #64748b" x="65.6" y="442.338477" transform="rotate(-0 65.6 442.338477)">0</text>
+     </g>
+    </g>
+    <g id="ytick_2">
+     <g id="line2d_5">
+      <path d="M 75.6 373.581818
+L 987.84 373.581818
+" clip-path="url(#p2e800f2898)" style="fill: none; stroke: #cbd5e1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_6"/>
+     <g id="text_4">
+      <text style="font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #64748b" x="65.6" y="378.520295" transform="rotate(-0 65.6 378.520295)">50</text>
+     </g>
+    </g>
+    <g id="ytick_3">
+     <g id="line2d_7">
+      <path d="M 75.6 309.763636
+L 987.84 309.763636
+" clip-path="url(#p2e800f2898)" style="fill: none; stroke: #cbd5e1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_8"/>
+     <g id="text_5">
+      <text style="font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #64748b" x="65.6" y="314.702113" transform="rotate(-0 65.6 314.702113)">100</text>
+     </g>
+    </g>
+    <g id="ytick_4">
+     <g id="line2d_9">
+      <path d="M 75.6 245.945455
+L 987.84 245.945455
+" clip-path="url(#p2e800f2898)" style="fill: none; stroke: #cbd5e1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_10"/>
+     <g id="text_6">
+      <text style="font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #64748b" x="65.6" y="250.883931" transform="rotate(-0 65.6 250.883931)">150</text>
+     </g>
+    </g>
+    <g id="ytick_5">
+     <g id="line2d_11">
+      <path d="M 75.6 182.127273
+L 987.84 182.127273
+" clip-path="url(#p2e800f2898)" style="fill: none; stroke: #cbd5e1; stroke-width: 0.8; stroke-linecap: square"/>
+     </g>
+     <g id="line2d_12"/>
+     <g id="text_7">
+      <text style="font-size: 13px; font-family: 'DejaVu Sans'; text-anchor: end; fill: #64748b" x="65.6" y="187.065749" transform="rotate(-0 65.6 187.065749)">200</text>
+     </g>
+    </g>
+    <g id="text_8">
+     <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #64748b" x="25.422969" y="297" transform="rotate(-90 25.422969 297)">Retained heap (MB)</text>
+    </g>
+   </g>
+   <g id="patch_3">
+    <path d="M 75.6 437.4
+L 75.6 156.6
+" style="fill: none; stroke: #94a3b8; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 987.84 437.4
+L 987.84 156.6
+" style="fill: none; stroke: #94a3b8; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 75.6 437.4
+L 987.84 437.4
+" style="fill: none; stroke: #94a3b8; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 75.6 156.6
+L 987.84 156.6
+" style="fill: none; stroke: #94a3b8; stroke-width: 0.8; stroke-linejoin: miter; stroke-linecap: square"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 197.232 437.4
+L 296.749091 437.4
+L 296.749091 186.632836
+L 197.232 186.632836
+z
+" clip-path="url(#p2e800f2898)" style="fill: #cbd5e1"/>
+   </g>
+   <g id="text_9">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #1e293b" x="246.990545" y="174.89067" transform="rotate(-0 246.990545 174.89067)">196.47</text>
+   </g>
+   <g id="patch_8">
+    <path d="M 324.392727 437.4
+L 423.909818 437.4
+L 423.909818 417.616364
+L 324.392727 417.616364
+z
+" clip-path="url(#p2e800f2898)" style="fill: #2563eb"/>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #1e293b" x="374.151273" y="405.874197" transform="rotate(-0 374.151273 405.874197)">15.50</text>
+   </g>
+   <g id="text_11">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #2563eb" x="310.570909" y="141.284016" transform="rotate(-0 310.570909 141.284016)">92.1% less memory</text>
+   </g>
+   <g id="patch_9">
+    <path d="M 639.530182 437.4
+L 739.047273 437.4
+L 739.047273 186.632836
+L 639.530182 186.632836
+z
+" clip-path="url(#p2e800f2898)" style="fill: #cbd5e1"/>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #1e293b" x="689.288727" y="174.89067" transform="rotate(-0 689.288727 174.89067)">196.47</text>
+   </g>
+   <g id="patch_10">
+    <path d="M 766.690909 437.4
+L 866.208 437.4
+L 866.208 410.264509
+L 766.690909 410.264509
+z
+" clip-path="url(#p2e800f2898)" style="fill: #2563eb"/>
+   </g>
+   <g id="text_13">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #1e293b" x="816.449455" y="398.522343" transform="rotate(-0 816.449455 398.522343)">21.26</text>
+   </g>
+   <g id="text_14">
+    <text style="font-weight: 700; font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle; fill: #2563eb" x="752.869091" y="141.284016" transform="rotate(-0 752.869091 141.284016)">89.2% less memory</text>
+   </g>
+  </g>
+  <g id="text_15">
+   <text style="font-weight: 700; font-size: 24px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #1e293b" x="75.6" y="32.4" transform="rotate(-0 75.6 32.4)">OxideTerm 2.3.0 terminal memory</text>
+  </g>
+  <g id="text_16">
+   <text style="font-size: 13.5px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #64748b" x="75.6" y="62.1" transform="rotate(-0 75.6 62.1)">20,000 history rows × 400 columns · +40 screen rows · lower is better</text>
+  </g>
+  <g id="text_17">
+   <text style="font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #64748b" x="75.6" y="494.1" transform="rotate(-0 75.6 494.1)">Terminal + parser heap · decimal MB · median of 5 runs · Apple M5 / macOS 26.6.2</text>
+  </g>
+  <g id="text_18">
+   <text style="font-size: 12px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #64748b" x="75.6" y="515.7" transform="rotate(-0 75.6 515.7)">Same-workload staged benchmarks · baseline includes tail compression · Rust 1.97.0</text>
+  </g>
+  <g id="legend_1">
+   <g id="patch_11">
+    <path d="M 80.136 112.337812
+L 98.336 112.337812
+L 98.336 102.537812
+L 80.136 102.537812
+z
+" style="fill: #cbd5e1"/>
+   </g>
+   <g id="text_19">
+    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #1e293b" x="109.536" y="112.337812" transform="rotate(-0 109.536 112.337812)">Before · full-cell history</text>
+   </g>
+   <g id="patch_12">
+    <path d="M 302.781938 112.337812
+L 320.981938 112.337812
+L 320.981938 102.537812
+L 302.781938 102.537812
+z
+" style="fill: #2563eb"/>
+   </g>
+   <g id="text_20">
+    <text style="font-size: 14px; font-family: 'DejaVu Sans'; text-anchor: start; fill: #1e293b" x="332.181938" y="112.337812" transform="rotate(-0 332.181938 112.337812)">2.3.0 · compact history</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="p2e800f2898">
+   <rect x="75.6" y="156.6" width="912.24" height="280.8"/>
+  </clipPath>
+ </defs>
+</svg>
