@@ -7,8 +7,25 @@ fn parser_state_len(state: &ParserState) -> usize {
         | ParserState::DcsEsc(data)
         | ParserState::Apc(data)
         | ParserState::ApcEsc(data) => data.len(),
-        ParserState::Ground | ParserState::Esc => 0,
+        ParserState::Ground | ParserState::Esc | ParserState::DiscardString { .. } => 0,
     }
+}
+
+// Only a raw C1 DCS introduces graphics; 0x90 inside UTF-8 must remain text,
+// including when the leading byte arrived in the preceding input packet.
+fn utf8_tail_pending(bytes: &[u8], pending: u8) -> u8 {
+    let start = bytes.len().saturating_sub(4);
+    let mut left = if start == 0 { pending } else { 0 };
+    for byte in &bytes[start..] {
+        left = match *byte {
+            0x80..=0xbf => left.saturating_sub(1),
+            0xc2..=0xdf => 1,
+            0xe0..=0xef => 2,
+            0xf0..=0xf4 => 3,
+            _ => 0,
+        };
+    }
+    left
 }
 
 fn parse_semicolon_params(data: &[u8]) -> HashMap<String, String> {

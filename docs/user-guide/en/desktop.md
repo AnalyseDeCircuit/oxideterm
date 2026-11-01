@@ -64,6 +64,19 @@ pixel-count limit still applies. Low-power and compatibility profiles keep their
 smaller limits. Under pressure, old images can be evicted or a new transfer rejected;
 animations keep their decoded frames rather than repeatedly decoding to save space.
 
+Sixel images keep their native pixel size and specified pixel aspect ratio. In
+scrolling mode, they follow the text through scrolling and resizing without
+inserting spaces into the document. Full-screen applications can select fixed
+display mode with `DECSET 80`; this starts images at the screen origin and leaves
+the text cursor unchanged. `DECRST 80` restores scrolling mode. The terminal also
+answers Sixel capability, color-register and geometry queries, and supports
+private or shared color registers.
+
+Typing over a Sixel image or erasing text clears only the corresponding image
+area. Inserting or deleting characters moves the affected image strips with the
+text. Images retain their native size inside tmux panes and stay clipped to the
+pane boundary.
+
 ### Command Folding and Shell Integration
 
 Open **Settings → Terminal → Display** and enable **Command folding**. Click the button beside a completed command in the left gutter to collapse or expand its output. The command's context menu also offers **Collapse output** or **Expand output**; enable **Hover Actions** if you want those controls beside a selected command.

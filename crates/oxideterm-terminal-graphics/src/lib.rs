@@ -25,6 +25,7 @@ include!("graphics/types.rs");
 include!("graphics/ingress.rs");
 include!("graphics/decode.rs");
 include!("graphics/sixel.rs");
+include!("graphics/sixel_grid.rs");
 include!("graphics/parse.rs");
 include!("graphics/kitty.rs");
 include!("graphics/grid.rs");

@@ -236,7 +236,7 @@ fn ssh_parses_and_sends_replies_without_ui_drains() {
 }
 
 #[test]
-fn ssh_palette_changes_rebuild_rows_and_answer_color_queries() {
+fn ssh_palette_changes_rebuild_rows_and_answer_color_and_size_queries() {
     let mut fixture = Fixture::new();
     // Leave the cursor on the next row; the cursor row is always reported as damaged.
     fixture.send(b"\x1b[41mAB\x1b[0m\r\n");
@@ -293,6 +293,21 @@ fn ssh_palette_changes_rebuild_rows_and_answer_color_queries() {
             .unwrap()
             .0,
         b"\x1b]11;rgb:fdfd/f6f6/e3e3\x07"
+    );
+
+    fixture
+        .terminal
+        .resize_with_cell_size(TerminalResize::new(80, 24, 20, 40))
+        .unwrap();
+    fixture.barrier();
+    fixture.send(b"\x1b[14t");
+    assert_eq!(
+        fixture
+            .input
+            .recv_timeout(Duration::from_secs(5))
+            .unwrap()
+            .0,
+        b"\x1b[4;960;1600t"
     );
 }
 
@@ -1353,13 +1368,13 @@ fn ssh_parser_failure_is_reported_once_without_falling_back_to_ui_parsing() {
 #[test]
 fn ssh_packet_splits_preserve_grid_modes_selection_graphics_and_private_recording() {
     let prefix = "line0\r\n\x1b[31mred\x1b[0m 中文 e\u{301}\r\n\x1b[?1049hhidden\x1b[?1049l";
-    let image =
-        "\x1b7\x1b[6;41H\x1b_Gq=2,a=T,i=7,z=-1,C=1,f=24,s=2,v=2,m=0;AAAA/////wAAAP8A\x1b\\\x1b8";
+    let image = "\x1b7\x1b[6;41H\x1b_Gq=2,a=T,i=7,z=-1,C=1,f=24,s=2,v=2,m=0;AAAA/////wAAAP8A\x1b\\\x1b8\x1b7\x1b[9;41H\x1bP9;1q#1;2;100;0;0!30~\x1b\\\x1b[9;42HX\x1b8";
     let private =
         "\x1b]7719;v=3;kind=editor-clipboard;app=vim;op=copy;data=%73%65%63%72%65%74\x1b\\";
     let suffix = "\x1b[?2004hend\x1b[6n";
     let transcript = format!("{prefix}{image}{private}{suffix}").into_bytes();
-    let expected_recording = format!("{prefix}\x1b7\x1b[6;41H\x1b8{suffix}").into_bytes();
+    let expected_recording =
+        format!("{prefix}\x1b7\x1b[6;41H\x1b8\x1b7\x1b[9;41H\x1b[9;42HX\x1b8{suffix}").into_bytes();
     let selection = Some(crate::TerminalSelectionRange {
         start_line: 1,
         start_col: 0,
@@ -1392,7 +1407,7 @@ fn ssh_packet_splits_preserve_grid_modes_selection_graphics_and_private_recordin
     );
     assert_eq!((expected.cursor_row, expected.cursor_col), (2, 3));
     assert!(baseline.mode().contains(TermMode::BRACKETED_PASTE));
-    assert_eq!(expected.images.len(), 1);
+    assert_eq!(expected.images.len(), 3);
     let image = &expected.images[0];
     assert_eq!(
         (image.row, image.col, image.pixel_width, image.pixel_height),
@@ -1403,6 +1418,15 @@ fn ssh_packet_splits_preserve_grid_modes_selection_graphics_and_private_recordin
         &[
             0, 0, 0, 255, 255, 255, 255, 255, 255, 0, 0, 255, 0, 255, 0, 255
         ]
+    );
+    let sixel = &expected.images[1];
+    assert_eq!(
+        (sixel.row, sixel.col, sixel.pixel_width, sixel.pixel_height),
+        (8, 40, 30, 6)
+    );
+    assert_eq!(
+        sixel.data.as_ref().unwrap().rgba.as_ref(),
+        [255, 0, 0, 255].repeat(180)
     );
     for chunk_size in [1, 7, transcript.len()] {
         let mut fixture = Fixture::new();

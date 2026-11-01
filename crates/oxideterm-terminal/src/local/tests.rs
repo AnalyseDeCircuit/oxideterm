@@ -39,7 +39,9 @@ mod tests {
             let mut parser = Processor::<StdSyncHandler>::new();
             parser.advance(&mut term, b"\x1b[12;7H\x1b[6n");
             if direct_reply {
-                assert_eq!(protocol_rx.try_recv().unwrap(), "\x1b[12;7R");
+                assert!(
+                    matches!(protocol_rx.try_recv().unwrap(), AlacEvent::PtyWrite(text) if text == "\x1b[12;7R")
+                );
                 assert!(
                     !events
                         .rx
@@ -59,6 +61,75 @@ mod tests {
                 assert_eq!(replies, ["\x1b[12;7R"]);
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn local_color_and_size_probes_finish_without_a_ui_event_drain() {
+        let expected =
+            b"\x1b]10;rgb:3333/3333/3333\x07\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[4;120;800t";
+        let script = format!(
+            "stty raw -echo; printf 'READY\\r\\n'; dd bs=1 count=1 >/dev/null 2>&1; printf '\\033]10;?\\007\\033]11;?\\007\\033[14t'; printf 'HEX'; dd bs=1 count={} 2>/dev/null | od -An -tx1 | tr -d ' \\n'; printf '\\r\\nDONE\\r\\n'",
+            expected.len()
+        );
+        let config = crate::LocalPtyConfig {
+            shell: Some(
+                crate::ShellInfo::new("test-sh", "Test", "/bin/sh")
+                    .with_args(vec!["-c".into(), script]),
+            ),
+            load_profile: false,
+            ..Default::default()
+        };
+        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+            80,
+            6,
+            config,
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .unwrap();
+        let activity = session.event_rx.activity_receiver();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let wait_for = |session: &LocalPtySession, needle: &str| {
+            runtime.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        let text = session
+                            .snapshot()
+                            .lines
+                            .iter()
+                            .flat_map(|r| r.cells.iter().map(|c| c.ch))
+                            .collect::<String>();
+                        if text.contains(needle) {
+                            return text;
+                        }
+                        assert!(activity.notified().await);
+                    }
+                })
+                .await
+                .expect("PTY probe did not finish without the UI")
+            })
+        };
+        wait_for(&session, "READY");
+        session.resize_with_cell_size(80, 6, 10, 20).unwrap();
+        session.set_palette(TerminalPalette::new(
+            TerminalColor::rgb(51, 51, 51),
+            TerminalColor::rgb(255, 255, 255),
+            TerminalColor::rgb(51, 51, 51),
+            OXIDETERM_DARK_THEME.ansi,
+        ));
+        session.write_input(b"x").unwrap();
+        let text = wait_for(&session, "DONE");
+        let hex = expected
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        assert!(
+            text.contains(&format!("HEX{hex}")),
+            "unexpected probe response: {text}"
+        );
+        session.shutdown();
     }
 
     #[cfg(unix)]
@@ -869,6 +940,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             kitty: None,
+            sixel: None,
             alternate_screen: false,
         };
         for (event, expected_placements) in [
@@ -958,6 +1030,7 @@ mod tests {
             z_index: 0,
             placeholder: false,
             kitty: None,
+            sixel: None,
             alternate_screen: false,
         }));
 
@@ -1161,6 +1234,678 @@ mod tests {
                 }
             },
             || graphics_cursor_from_term(&term.borrow(), size),
+        );
+    }
+
+    #[test]
+    fn sixel_preserves_text_and_tracks_grid_lifecycle() {
+        let mut size = TerminalSize {
+            cols: 12,
+            rows: 6,
+            cell_width: 10,
+            cell_height: 6,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"abcdefghijkl\x1b[1;3H\x1bP9;1q#1;2;100;0;0!15~-!15~\x1b\\",
+            size,
+        );
+        let snapshot =
+            snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
+        assert_eq!(
+            snapshot.lines[0]
+                .cells
+                .iter()
+                .map(|c| c.ch)
+                .collect::<String>(),
+            "abcdefghijkl"
+        );
+        assert_eq!((snapshot.cursor_row, snapshot.cursor_col), (1, 2));
+        assert_eq!(
+            (
+                snapshot.images[0].row,
+                snapshot.images[0].col,
+                snapshot.images[0].rows
+            ),
+            (0, 2, 2)
+        );
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?1049h\x1bP9;1q#2;2;0;100;0~\x1b\\\x1b[?1049l",
+            size,
+        );
+        assert_eq!(
+            graphics.visible_images(0, 6)[0].data.as_ref().unwrap().rgba[..4],
+            [255, 0, 0, 255]
+        );
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?1049h",
+            size,
+        );
+        assert!(graphics.visible_images(0, 6).is_empty());
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?1049l\x1b[6;1H\n",
+            size,
+        );
+        assert_eq!(graphics.placements[0].line, -1);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[3J",
+            size,
+        );
+        assert_eq!(graphics.placements[0].line, -1);
+        assert_eq!(graphics.visible_images(0, 6)[0].clipped_rows, 1);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[2J",
+            size,
+        );
+        assert!(graphics.images.is_empty());
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[1;1Habcdefghij\x1b[1;5H\x1bP9;1q~\x1b\\",
+            size,
+        );
+        size.cols = 3;
+        term.borrow_mut().resize(size);
+        feed_kitty_grid(&mut ingress, &term, &mut parser, &mut graphics, b"", size);
+        assert_eq!(graphics.placements[0].col, 1);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1bc",
+            size,
+        );
+        assert!(graphics.images.is_empty());
+    }
+
+    #[test]
+    fn kitty_cursor_advance_scrolls_the_image_above_following_text() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 6,
+            cell_width: 10,
+            cell_height: 20,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[5;1Habcdef\x1b[5;2H\x1b_Ga=T,i=42,f=32,s=1,v=1,c=2,r=3,q=2;/wAA/w==\x1b\\Z",
+            size,
+        );
+        let snapshot =
+            snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
+        assert_eq!(
+            (
+                snapshot.images[0].row,
+                snapshot.images[0].col,
+                snapshot.images[0].rows
+            ),
+            (2, 1, 3)
+        );
+        assert_eq!(snapshot.scrollback_lines, 2);
+        assert_eq!(
+            snapshot.lines[2]
+                .cells
+                .iter()
+                .take(6)
+                .map(|c| c.ch)
+                .collect::<String>(),
+            "abcdef"
+        );
+        assert_eq!(snapshot.lines[5].cells[3].ch, 'Z');
+        assert_eq!((snapshot.cursor_row, snapshot.cursor_col), (5, 4));
+    }
+
+    #[test]
+    fn sixel_modes_shared_colors_and_local_scroll() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 6,
+            cell_width: 10,
+            cell_height: 6,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?1070l\x1b[3;4H\x1bP9;1q#3;2;100;0;0~-~\x1b\\\x1b[1;1H\x1bP9;1q#3~\x1b\\",
+            size,
+        );
+        assert_eq!(
+            graphics.visible_images(0, 6)[1]
+                .data
+                .as_ref()
+                .unwrap()
+                .rgba
+                .as_ref(),
+            [255, 0, 0, 255].repeat(6)
+        );
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?1070h\x1bP9;1q#3~\x1b\\\x1b[?1070l\x1bP9;1q#3~\x1b\\",
+            size,
+        );
+        let images = graphics.visible_images(0, 6);
+        assert_eq!(
+            images[2].data.as_ref().unwrap().rgba[..4],
+            [51, 204, 51, 255]
+        );
+        assert_eq!(images[3].data.as_ref().unwrap().rgba[..4], [255, 0, 0, 255]);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?80h\x1b[5;7H\x1bP9;1q#2;2;0;100;0~-~\x1b\\",
+            size,
+        );
+        assert_eq!(
+            (
+                term.borrow().grid().cursor.point.line.0,
+                term.borrow().grid().cursor.point.column.0
+            ),
+            (4, 6)
+        );
+        let fixed = graphics
+            .visible_images(0, 6)
+            .into_iter()
+            .find(|p| p.sixel.as_ref().unwrap().fixed)
+            .unwrap();
+        assert_eq!((fixed.row, fixed.col), (0, 0));
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?80l\x1b[?8452h\x1b[1;1H\x1bP9;1q#1;1;120;50;100!15~\x1b\\",
+            size,
+        );
+        assert_eq!(
+            (
+                term.borrow().grid().cursor.point.line.0,
+                term.borrow().grid().cursor.point.column.0
+            ),
+            (0, 2)
+        );
+        assert_eq!(
+            graphics
+                .visible_images(0, 6)
+                .last()
+                .unwrap()
+                .data
+                .as_ref()
+                .unwrap()
+                .rgba[..4],
+            [255, 0, 0, 255]
+        );
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1bc\x1b[1;1H\x1bP9;1q#1;2;100;0;0~-~-~-~-~\x1b\\\x1b[2;4r\x1b[4;1H\n",
+            size,
+        );
+        let fragments = graphics
+            .placements
+            .iter()
+            .map(|p| {
+                let s = p.sixel.as_ref().unwrap();
+                (
+                    p.line + s.clip_top as i32,
+                    p.line + p.rows as i32 - s.clip_bottom as i32,
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(fragments, [(0, 1), (4, 5), (1, 3)]);
+        let snapshot =
+            snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
+        assert!(snapshot.images.iter().all(|p| Arc::ptr_eq(
+            p.data.as_ref().unwrap(),
+            snapshot.images[0].data.as_ref().unwrap()
+        )));
+    }
+
+    #[test]
+    fn sixel_aspect_and_background_preserve_source_pixels() {
+        let size = TerminalSize {
+            cols: 12,
+            rows: 10,
+            cell_width: 10,
+            cell_height: 6,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[48;2;12;34;56m\x1bP2;0q#1;2;100;0;0@\x1b\\\x1bP2;1q\"1;1;15;7@\x1b\\",
+            size,
+        );
+        let snapshot =
+            snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
+        let opaque = &snapshot.images[0];
+        assert_eq!(
+            (
+                opaque.source_width,
+                opaque.source_height,
+                opaque.pixel_width,
+                opaque.pixel_height,
+                opaque.rows
+            ),
+            (1, 6, 1, 30, 5)
+        );
+        assert_eq!(
+            opaque.sixel.as_ref().unwrap().background_rgb(),
+            Some([12, 34, 56])
+        );
+        assert_eq!(
+            &opaque.data.as_ref().unwrap().rgba[..8],
+            &[255, 0, 0, 255, 0, 0, 0, 0]
+        );
+        let transparent = &snapshot.images[1];
+        assert_eq!(
+            (
+                transparent.source_width,
+                transparent.source_height,
+                transparent.pixel_width,
+                transparent.pixel_height
+            ),
+            (15, 7, 15, 7)
+        );
+        assert_eq!(transparent.sixel.as_ref().unwrap().background, None);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[1;1H\x1bPq~\x1b\\",
+            size,
+        );
+        assert_eq!(
+            graphics.visible_images(0, 10).last().unwrap().pixel_height,
+            12
+        );
+    }
+
+    #[test]
+    fn sixel_queries_report_capabilities_and_actual_modes() {
+        for enabled in [false, true] {
+            let (listener, events) = local_event_channel();
+            let size = TerminalSize {
+                cols: 12,
+                rows: 6,
+                cell_width: 10,
+                cell_height: 6,
+            };
+            let term = std::cell::RefCell::new(Term::new(Config::default(), &size, listener));
+            let mut parser = Processor::<StdSyncHandler>::new();
+            let mut ingress = GraphicsIngress::new(GraphicsOptions {
+                sixel: enabled,
+                ..GraphicsOptions::default()
+            });
+            ingress.attach_grid(term.borrow_mut().graphics_events());
+            let mut replies = Vec::new();
+            ingress.advance_ordered(b"\x1b[c\x1b[?80$p\x1b[?80h\x1b[?80$p\x1b[?1070$p\x1b[?8452$p\x1b[?1;1S\x1b[?1;3;16S\x1b[?1;1S\x1b[?2;3;100;80S\x1b[?2;1S\x1b[?1;3;1024S\x1b[?1;9S\x1b[?3;1S\x1b[?1;2S\x1b[c",
+                |segment| match segment {
+                    TerminalGraphicsSegment::Terminal(bytes) => parser.advance(&mut *term.borrow_mut(), &bytes),
+                    TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Respond(bytes)) => replies.push(bytes),
+                    TerminalGraphicsSegment::Event(_) => {},
+                }, || graphics_cursor_from_term(&term.borrow(), size));
+            let core = events
+                .rx
+                .try_iter()
+                .filter_map(|e| {
+                    if let AlacEvent::PtyWrite(text) = e {
+                        Some(text)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                core,
+                if enabled {
+                    vec![
+                        "\x1b[?62;4c",
+                        "\x1b[?80;2$y",
+                        "\x1b[?80;1$y",
+                        "\x1b[?1070;1$y",
+                        "\x1b[?8452;2$y",
+                        "\x1b[?1;0;256S",
+                        "\x1b[?1;0;16S",
+                        "\x1b[?1;0;16S",
+                        "\x1b[?2;0;100;80S",
+                        "\x1b[?2;0;100;80S",
+                        "\x1b[?1;3;16S",
+                        "\x1b[?1;2;16S",
+                        "\x1b[?3;1;0S",
+                        "\x1b[?1;0;256S",
+                        "\x1b[?62;4c",
+                    ]
+                } else {
+                    vec![
+                        "\x1b[?6c",
+                        "\x1b[?80;0$y",
+                        "\x1b[?80;0$y",
+                        "\x1b[?1070;0$y",
+                        "\x1b[?8452;0$y",
+                        "\x1b[?6c",
+                    ]
+                }
+            );
+            assert!(replies.is_empty());
+        }
+    }
+
+    #[test]
+    fn sixel_text_erasure_preserves_surrounding_pixels_and_releases_the_last_fragment() {
+        let size = TerminalSize {
+            cols: 8,
+            rows: 6,
+            cell_width: 2,
+            cell_height: 2,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        feed_kitty_grid(&mut ingress, &term, &mut parser, &mut graphics,
+            b"abcdefgh\r\nijklmnop\r\nqrstuvwx\x1b[1;1H\x1bP9;1q#1;2;100;0;0!16~\x1b\\\x1b[2;3H\x1b[2X", size);
+        let fragments = sixel_fragment_cells(&graphics);
+        assert_eq!(
+            fragments,
+            [(0, 1, 0, 8), (1, 2, 0, 2), (1, 2, 4, 8), (2, 3, 0, 8)]
+        );
+        let snapshot =
+            snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
+        assert_eq!(
+            snapshot.lines[1]
+                .cells
+                .iter()
+                .map(|c| c.ch)
+                .collect::<String>(),
+            "ij  mnop"
+        );
+        let pixels = Arc::downgrade(&snapshot.images[0].data.as_ref().unwrap().rgba);
+        assert!(snapshot.images.iter().all(|p| Arc::ptr_eq(
+            p.data.as_ref().unwrap(),
+            snapshot.images[0].data.as_ref().unwrap()
+        )));
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[1;1H\x1b[8X\x1b[2;1H\x1b[8X\x1b[3;1H\x1b[8X",
+            size,
+        );
+        assert!(graphics.images.is_empty());
+        assert!(graphics.placements.is_empty());
+        drop(snapshot);
+        assert!(pixels.upgrade().is_none());
+    }
+
+    fn sixel_fragment_cells(graphics: &TerminalGraphicsState) -> Vec<(i32, i32, i64, i64)> {
+        let mut rectangles = graphics
+            .placements
+            .iter()
+            .filter_map(|p| {
+                let s = p.sixel.as_ref()?;
+                let origin = p.col as i64 + s.column_offset;
+                Some((
+                    p.line + s.clip_top as i32,
+                    p.line + p.rows as i32 - s.clip_bottom as i32,
+                    origin + s.clip_left as i64,
+                    origin + p.cols as i64 - s.clip_right as i64,
+                ))
+            })
+            .collect::<Vec<_>>();
+        rectangles.sort_unstable();
+        rectangles
+    }
+
+    #[test]
+    fn sixel_text_commands_update_only_the_affected_cells() {
+        let surrounding = [(0, 1, 0, 8), (1, 2, 0, 2), (1, 2, 4, 8), (2, 3, 0, 8)];
+        let cases: &[(&str, &[u8], &[(i32, i32, i64, i64)], &str)] = &[
+            ("ascii", b"XY", &surrounding, "ijXYmnop"),
+            ("wide", "界".as_bytes(), &surrounding, "ij界 mnop"),
+            (
+                "combining",
+                "e\u{301}".as_bytes(),
+                &[(0, 1, 0, 8), (1, 2, 0, 2), (1, 2, 3, 8), (2, 3, 0, 8)],
+                "ijelmnop",
+            ),
+            ("erase", b"\x1b[2X", &surrounding, "ij  mnop"),
+            (
+                "line-right",
+                b"\x1b[K",
+                &[(0, 1, 0, 8), (1, 2, 0, 2), (2, 3, 0, 8)],
+                "ij      ",
+            ),
+            (
+                "line-left",
+                b"\x1b[1K",
+                &[(0, 1, 0, 8), (1, 2, 3, 8), (2, 3, 0, 8)],
+                "   lmnop",
+            ),
+            (
+                "line-all",
+                b"\x1b[2K",
+                &[(0, 1, 0, 8), (2, 3, 0, 8)],
+                "        ",
+            ),
+            (
+                "display-below",
+                b"\x1b[J",
+                &[(0, 1, 0, 8), (1, 2, 0, 2)],
+                "ij      ",
+            ),
+            (
+                "display-above",
+                b"\x1b[1J",
+                &[(1, 2, 3, 8), (2, 3, 0, 8)],
+                "   lmnop",
+            ),
+            ("insert", b"\x1b[2@", &surrounding, "ij  klmn"),
+            (
+                "delete",
+                b"\x1b[2P",
+                &[(0, 1, 0, 8), (1, 2, 0, 2), (1, 2, 2, 6), (2, 3, 0, 8)],
+                "ijmnop  ",
+            ),
+            (
+                "delete-to-margin",
+                b"\x1b[100P",
+                &[(0, 1, 0, 8), (1, 2, 0, 2), (2, 3, 0, 8)],
+                "ij      ",
+            ),
+            (
+                "insert-mode",
+                b"\x1b[4hX",
+                &[(0, 1, 0, 8), (1, 2, 0, 2), (1, 2, 3, 8), (2, 3, 0, 8)],
+                "ijXklmno",
+            ),
+            ("cursor-only", b"\t\x08\r\n", &[(0, 3, 0, 8)], "ijklmnop"),
+        ];
+        for &(name, command, expected, row) in cases {
+            let size = TerminalSize {
+                cols: 8,
+                rows: 6,
+                cell_width: 2,
+                cell_height: 2,
+            };
+            let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+            let mut parser = Processor::<StdSyncHandler>::new();
+            let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+            let mut graphics = TerminalGraphicsState::default();
+            feed_kitty_grid(&mut ingress, &term, &mut parser, &mut graphics,
+                b"abcdefgh\r\nijklmnop\r\nqrstuvwx\x1b[1;1H\x1bP9;1q#1;2;100;0;0!16~\x1b\\\x1b[2;3H", size);
+            feed_kitty_grid(
+                &mut ingress,
+                &term,
+                &mut parser,
+                &mut graphics,
+                command,
+                size,
+            );
+            assert_eq!(sixel_fragment_cells(&graphics), expected, "{name}");
+            let snapshot =
+                snapshot_from_term(&term.borrow(), size, &graphics, &TerminalPalette::default());
+            assert_eq!(
+                snapshot.lines[1]
+                    .cells
+                    .iter()
+                    .map(|c| c.ch)
+                    .collect::<String>(),
+                row,
+                "{name}"
+            );
+            if name == "display-above" {
+                assert_eq!(
+                    snapshot.lines[0]
+                        .cells
+                        .iter()
+                        .map(|c| c.ch)
+                        .collect::<String>(),
+                    "        "
+                );
+            }
+            if let Some(shift) = match name {
+                "insert" => Some(2),
+                "delete" => Some(-2),
+                "insert-mode" => Some(1),
+                _ => None,
+            } {
+                let shifted = graphics
+                    .placements
+                    .iter()
+                    .find(|p| p.sixel.as_ref().unwrap().column_offset == shift)
+                    .unwrap();
+                assert_eq!(shifted.line, 0, "{name}");
+                assert_eq!(shifted.source_width, 16, "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn fixed_sixel_text_batches_and_reflow_keep_erased_pixels_hidden() {
+        let mut size = TerminalSize {
+            cols: 8,
+            rows: 6,
+            cell_width: 2,
+            cell_height: 2,
+        };
+        let term = std::cell::RefCell::new(Term::new(Config::default(), &size, VoidListener));
+        let mut parser = Processor::<StdSyncHandler>::new();
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        let mut graphics = TerminalGraphicsState::default();
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1b[?80h\x1bP9;1q!16~\x1b\\\x1b[?80l\x1b[6;1H",
+            size,
+        );
+        // Exceed the ANSI parser's line-batching threshold through the real input path.
+        let output = b"a\r\n".repeat(64);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            &output,
+            size,
+        );
+        assert_eq!(sixel_fragment_cells(&graphics), [(0, 3, 0, 8)]);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1bc\x1bP9;1q!16~\x1b\\\x1b[6;1H",
+            size,
+        );
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            &output,
+            size,
+        );
+        assert_eq!(sixel_fragment_cells(&graphics), [(-64, -61, 0, 8)]);
+        feed_kitty_grid(
+            &mut ingress,
+            &term,
+            &mut parser,
+            &mut graphics,
+            b"\x1bcabcdefgh\x1b[1;1H\x1bP9;1q!16~\x1b\\\x1b[1;1H\x1b[4X",
+            size,
+        );
+        size.cols = 4;
+        term.borrow_mut().resize(size);
+        feed_kitty_grid(&mut ingress, &term, &mut parser, &mut graphics, b"", size);
+        let rects = sixel_fragment_cells(&graphics);
+        assert!(rects.iter().all(|r| r.2 >= 0));
+        let right = graphics
+            .placements
+            .iter()
+            .find(|p| p.sixel.as_ref().unwrap().clip_left == 4)
+            .unwrap();
+        assert_eq!(
+            (right.col, right.sixel.as_ref().unwrap().column_offset),
+            (0, -4)
         );
     }
 

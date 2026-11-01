@@ -3,12 +3,33 @@
 
 use std::hint::black_box;
 
-use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use alacritty_terminal::{
+    event::VoidListener,
+    grid::Dimensions,
+    index::Line,
+    term::{Config, Term},
+    vte::ansi::{Processor, StdSyncHandler},
+};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use oxideterm_terminal_graphics::{
     GraphicsCursor, GraphicsIngress, GraphicsOptions, TerminalGraphicsSegment,
 };
 
 const PAYLOAD_BYTES: usize = 1024 * 1024;
+
+struct GridSize;
+
+impl Dimensions for GridSize {
+    fn total_lines(&self) -> usize {
+        40
+    }
+    fn screen_lines(&self) -> usize {
+        40
+    }
+    fn columns(&self) -> usize {
+        120
+    }
+}
 
 fn benchmark_cursor() -> GraphicsCursor {
     GraphicsCursor {
@@ -86,6 +107,81 @@ fn benchmark_graphics_ingress(criterion: &mut Criterion) {
     }
 
     group.finish();
+
+    // Disabled ingress is a stricter reference than the old scanner: it skips
+    // graphics scanning entirely, while both variants execute the real ANSI grid.
+    let mut group = criterion.benchmark_group("terminal_output");
+    group.throughput(Throughput::Bytes(PAYLOAD_BYTES as u64));
+    for (name, payload) in &workloads {
+        for enabled in [false, true] {
+            group.bench_with_input(
+                BenchmarkId::new(if enabled { "graphics" } else { "direct" }, name),
+                payload,
+                |bencher, payload| {
+                    bencher.iter_batched(
+                        || {
+                            let mut term = Term::new(
+                                Config {
+                                    scrolling_history: 1000,
+                                    ..Config::default()
+                                },
+                                &GridSize,
+                                VoidListener,
+                            );
+                            let mut ingress = GraphicsIngress::new(GraphicsOptions {
+                                enabled,
+                                ..GraphicsOptions::default()
+                            });
+                            ingress.attach_grid(term.graphics_events());
+                            (
+                                std::cell::RefCell::new(term),
+                                Processor::<StdSyncHandler>::new(),
+                                ingress,
+                            )
+                        },
+                        |(term, mut parser, mut ingress)| {
+                            for chunk in payload.chunks(32 * 1024) {
+                                ingress.advance_ordered(
+                                    black_box(chunk),
+                                    |segment| {
+                                        if let TerminalGraphicsSegment::Terminal(bytes) = segment {
+                                            parser.advance(&mut *term.borrow_mut(), &bytes);
+                                        }
+                                    },
+                                    || {
+                                        let term = term.borrow();
+                                        term.capture_graphics_placeholders();
+                                        term.capture_sixel_background();
+                                        benchmark_cursor()
+                                    },
+                                );
+                            }
+                            black_box(
+                                term.borrow().grid()[Line(0)]
+                                    .cell(alacritty_terminal::index::Column(0))
+                                    .c,
+                            );
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+        }
+    }
+    group.finish();
+
+    // Omit raster dimensions to exercise the decoder's growing-canvas path.
+    let mut sixel = b"\x1bP9;1q#1;2;100;0;0".to_vec();
+    for _ in 0..100 {
+        sixel.extend_from_slice(b"!800~-");
+    }
+    sixel.extend_from_slice(b"\x1b\\");
+    criterion.bench_function("sixel/800x600", |bencher| {
+        bencher.iter(|| {
+            let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+            black_box(ingress.advance(black_box(&sixel), benchmark_cursor()));
+        });
+    });
 }
 
 criterion_group!(benches, benchmark_graphics_ingress);

@@ -688,7 +688,16 @@ impl SshParser {
                 let _ = self.write_protocol_bytes(formatter(color).as_bytes());
                 false
             }
-            AlacEvent::TextAreaSizeRequest(_) => false,
+            AlacEvent::TextAreaSizeRequest(formatter) => {
+                let size = crate::window_size(TerminalSize {
+                    cols: self.resize.cols,
+                    rows: self.resize.rows,
+                    cell_width: self.resize.cell_width,
+                    cell_height: self.resize.cell_height,
+                });
+                let _ = self.write_protocol_bytes(formatter(size).as_bytes());
+                false
+            }
             AlacEvent::ChildExit(_) | AlacEvent::Exit => false,
         }
     }

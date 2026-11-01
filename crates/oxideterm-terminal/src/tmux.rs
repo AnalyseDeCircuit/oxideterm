@@ -562,6 +562,29 @@ impl TmuxDisplay {
                 scrollback_lines = pane_snapshot.scrollback_lines;
             }
             for mut image in pane_snapshot.images {
+                if let Some(sixel) = &mut image.sixel {
+                    let left = image.col as i64 + sixel.column_offset;
+                    let top = image.row as i64 - image.clipped_rows as i64;
+                    sixel.clip_left = sixel.clip_left.max(left.saturating_neg().max(0) as usize);
+                    sixel.clip_top = sixel.clip_top.max(top.saturating_neg().max(0) as usize);
+                    sixel.clip_right = sixel
+                        .clip_right
+                        .max((left + image.cols as i64 - i64::from(cell.width)).max(0) as usize);
+                    sixel.clip_bottom = sixel
+                        .clip_bottom
+                        .max((top + image.rows as i64 - i64::from(cell.height)).max(0) as usize);
+                    if sixel.clip_left + sixel.clip_right >= image.cols
+                        || sixel.clip_top + sixel.clip_bottom >= image.rows
+                    {
+                        continue;
+                    }
+                    // Pane clipping changes only visibility; every fragment keeps the original texture.
+                    image.id = namespaced_image_id(pane, image.id);
+                    image.row += usize::from(cell.y);
+                    image.col += usize::from(cell.x);
+                    images.push(image);
+                    continue;
+                }
                 let available_cols = usize::from(cell.width).saturating_sub(image.col);
                 let available_rows = usize::from(cell.height).saturating_sub(image.row);
                 let visible_cols = image.cols.min(available_cols);
@@ -2084,6 +2107,65 @@ fn parse_leading_decimal(bytes: &[u8]) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn composed_sixel_fragments_keep_native_pixels_inside_the_pane() {
+        let (listener, _) = crate::local_event_channel();
+        let display = Arc::new(TmuxDisplay::default());
+        let size = TerminalSize {
+            cols: 8,
+            rows: 6,
+            cell_width: 2,
+            cell_height: 2,
+        };
+        let mut controller = TmuxController::new(
+            display.clone(),
+            listener,
+            size,
+            TerminalEncoding::Utf8,
+            100,
+            GraphicsOptions::default(),
+        );
+        controller.apply_pane_record(b"%1 @1 1 4 4 0 0 4x4,1,1,1");
+        controller.apply_active_record(b"$1 @1 %1");
+        controller.refresh_display();
+        controller.feed_pane(
+            PaneId(1),
+            b"\x1b[?80h\x1bP9;1q#1;2;100;0;0!12~-!12~\x1b\\\x1b[1;2HX",
+            false,
+            &mut |_| {},
+            &mut TmuxAdvance::new(),
+        );
+        let snapshot = display.snapshot(size, None).unwrap();
+        let mut rects = snapshot
+            .images
+            .iter()
+            .map(|p| {
+                let s = p.sixel.as_ref().unwrap();
+                assert_eq!(
+                    (
+                        p.source_width,
+                        p.source_height,
+                        p.pixel_width,
+                        p.pixel_height
+                    ),
+                    (12, 12, 12, 12)
+                );
+                (
+                    p.row + s.clip_top,
+                    p.row + p.rows - s.clip_bottom,
+                    (p.col as i64 + s.column_offset) as usize + s.clip_left,
+                    (p.col as i64 + s.column_offset) as usize + p.cols - s.clip_right,
+                )
+            })
+            .collect::<Vec<_>>();
+        rects.sort_unstable();
+        assert_eq!(rects, [(1, 2, 1, 2), (1, 2, 3, 5), (2, 5, 1, 5)]);
+        assert!(snapshot.images.iter().all(|p| Arc::ptr_eq(
+            p.data.as_ref().unwrap(),
+            snapshot.images[0].data.as_ref().unwrap()
+        )));
+    }
 
     #[test]
     fn layout_sized_panes_survive_active_sync_and_output() {

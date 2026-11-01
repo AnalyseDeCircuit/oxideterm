@@ -2,8 +2,10 @@ use alacritty_terminal::term::graphics::{GraphicsGridChange, GraphicsGridEvents}
 
 impl GraphicsIngress {
     pub fn attach_grid(&mut self, events: GraphicsGridEvents) {
+        events.set_sixel_enabled(self.options.enabled && self.options.sixel);
         events.set_byte_limit(MAX_GRAPHICS_METADATA_MB as usize * 1024 * 1024);
         self.grid_events = Some(events);
+        self.track_sixel_screens();
     }
 
     /// Apply model changes before the next graphics command, not at repaint time.
@@ -28,7 +30,14 @@ impl GraphicsIngress {
                 } => continue,
                 change => change,
             };
+            self.synchronize_sixel_grid(&change, &grid, &mut events);
             match change {
+                GraphicsGridChange::Erase { .. } | GraphicsGridChange::ShiftColumns { .. } => {}
+                GraphicsGridChange::SixelPaletteReset => {
+                    if let Some(state) = &mut self.sixel_state {
+                        state.colors.fill(None);
+                    }
+                }
                 GraphicsGridChange::Placeholders {
                     alternate,
                     line,
@@ -40,6 +49,7 @@ impl GraphicsIngress {
                     events.push(TerminalGraphicsEvent::Screen { alternate });
                 }
                 GraphicsGridChange::Reset => {
+                    self.sixel_state = None;
                     self.placeholder_rows.clear();
                     self.placeholder_rendered.clear();
                     self.kitty_placements.clear();

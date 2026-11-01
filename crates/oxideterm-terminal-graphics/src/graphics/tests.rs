@@ -144,11 +144,13 @@ mod tests {
             );
         }
         assert_eq!(
-            sixel_canvas_bytes(
+            scan_sixel(
                 b"\x1bPq#1;2;0;100;0!3~$#2;2;0;0;100@-!2~\x1b\\",
                 DEFAULT_PIXEL_LIMIT,
-                1
+                1,
+                SIXEL_COLORS
             )
+            .map(|s| s.width as usize * s.height as usize * 4)
             .unwrap(),
             144
         );
@@ -838,13 +840,75 @@ mod tests {
         let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
         let result = ingress.advance(b"\x1bPq#0;2;100;0;0#0~-\x1b\\", cursor());
 
-        assert!(result.terminal_bytes.contains(&b' '));
+        assert!(result.terminal_bytes.is_empty());
+        let image = result
+            .events
+            .iter()
+            .find_map(|event| match event {
+                TerminalGraphicsEvent::ImageReady(image) => Some(image),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!((image.width, image.height), (1, 6));
+        assert_eq!(image.rgba.as_ref(), [255, 0, 0, 255].repeat(6));
         assert!(
             result
                 .events
-                .iter()
-                .any(|event| matches!(event, TerminalGraphicsEvent::ImageReady(_)))
+                .contains(&TerminalGraphicsEvent::SixelCursor { rows: 0, column: 0 })
         );
+    }
+
+    #[test]
+    fn sixel_c1_cancel_and_utf8_are_packet_independent() {
+        for sequence in [
+            b"\x90q#1;2;100;0;0~\x9c".as_slice(),
+            b"\x1bPq#1;2;100;0;0~\x1b\\",
+        ] {
+            for split in 0..=sequence.len() {
+                let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+                let first = ingress.advance(&sequence[..split], cursor());
+                let second = ingress.advance(&sequence[split..], cursor());
+                assert!(first.terminal_bytes.is_empty() && second.terminal_bytes.is_empty());
+                let events = first
+                    .events
+                    .into_iter()
+                    .chain(second.events)
+                    .collect::<Vec<_>>();
+                let image = events
+                    .iter()
+                    .find_map(|event| match event {
+                        TerminalGraphicsEvent::ImageReady(image) => Some(image),
+                        _ => None,
+                    })
+                    .unwrap();
+                assert_eq!(image.rgba.as_ref(), [255, 0, 0, 255].repeat(6));
+            }
+        }
+        for input in [
+            b"\x1bPq~\x18text".as_slice(),
+            b"\x1bPq~\x1atext",
+            b"\x1bPq~\x1b[2Jtext",
+        ] {
+            let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+            let result = ingress.advance(input, cursor());
+            assert!(result.events.is_empty());
+            assert_eq!(
+                result.terminal_bytes,
+                if input.contains(&0x18) || input.contains(&0x1a) {
+                    b"text".as_slice()
+                } else {
+                    b"\x1b[2Jtext"
+                }
+            );
+        }
+        let text = "А\u{410}中\u{10eeee}".as_bytes();
+        for split in 0..=text.len() {
+            let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+            let first = ingress.advance(&text[..split], cursor());
+            let second = ingress.advance(&text[split..], cursor());
+            assert!(first.events.is_empty() && second.events.is_empty());
+            assert_eq!([first.terminal_bytes, second.terminal_bytes].concat(), text);
+        }
     }
 
     #[test]

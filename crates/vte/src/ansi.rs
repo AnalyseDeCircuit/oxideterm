@@ -671,6 +671,9 @@ pub trait Handler {
     /// DECRPM - report private mode.
     fn report_private_mode(&mut self, _mode: PrivateMode) {}
 
+    /// Set or request raster graphics attributes (XTSMGRAPHICS).
+    fn graphics_attribute(&mut self, _item: u16, _action: u16, _value: [u16; 2]) {}
+
     /// DECSTBM - Set the terminal scrolling region.
     fn set_scrolling_region(&mut self, _top: usize, _bottom: Option<usize>) {}
 
@@ -1782,6 +1785,12 @@ where
                 handler.set_scrolling_region(top, bottom);
             },
             ('S', []) => handler.scroll_up(next_param_or(1) as usize),
+            ('S', [b'?']) => {
+                let item = next_param_or(0);
+                let action = next_param_or(0);
+                let value = [next_param_or(0), next_param_or(0)];
+                handler.graphics_attribute(item, action, value);
+            },
             ('s', []) => handler.save_cursor_position(),
             ('T', []) => handler.scroll_down(next_param_or(1) as usize),
             ('t', []) => match next_param_or(1) as usize {

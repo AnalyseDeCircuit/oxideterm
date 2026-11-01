@@ -59,6 +59,7 @@ impl GraphicsIngress {
     pub fn reset_stream(&mut self) {
         self.options.kitty_file_transmission.revoke();
         self.state = ParserState::Ground;
+        self.utf8_remaining = 0;
         self.kitty_chunks.clear();
         self.sync_buffer = None;
         self.sync_deadline = None;
@@ -68,12 +69,15 @@ impl GraphicsIngress {
         Self {
             options,
             state: ParserState::Ground,
+            utf8_remaining: 0,
             next_image_id: u64::from(u32::MAX) + 1,
             kitty_chunks: HashMap::new(),
             kitty_images: HashMap::new(),
             kitty_numbers: HashMap::new(),
             kitty_wire_ids: HashMap::new(),
             kitty_placements: Vec::new(),
+            sixel_placements: Vec::new(),
+            sixel_state: None,
             next_placement_serial: 1,
             grid_events: None,
             alternate_screen: false,
@@ -172,18 +176,22 @@ impl GraphicsIngress {
         {
             // SIMD substring searches let ordinary CSI output stay borrowed. Leave
             // possible OSC/DCS/APC prefixes and split escapes to the state machine.
-            if memchr::memchr(0x1b, bytes).is_none()
+            if memchr::memchr2(0x1b, 0x90, bytes).is_none()
                 || (bytes.last() != Some(&0x1b)
                     && memchr::memmem::find(bytes, b"\x1b]").is_none()
-                    && !memchr::memchr2_iter(b'P', b'?', bytes).any(|index| match bytes[index] {
-                        b'P' => index > 0 && bytes[index - 1] == 0x1b,
-                        _ => index >= 2 && bytes[index - 2..].starts_with(SYNC_BEGIN),
+                    && !memchr::memchr3_iter(b'P', b'?', 0x90, bytes).any(|index| {
+                        match bytes[index] {
+                            b'P' => index > 0 && bytes[index - 1] == 0x1b,
+                            0x90 => utf8_tail_pending(&bytes[..index], self.utf8_remaining) == 0,
+                            _ => index >= 2 && bytes[index - 2..].starts_with(SYNC_BEGIN),
+                        }
                     })
                     && memchr::memmem::find(bytes, b"\x1b_").is_none()
                     && !(2..SYNC_BEGIN.len()).any(|len| {
                         bytes.len() >= len && SYNC_BEGIN.starts_with(&bytes[bytes.len() - len..])
                     }))
             {
+                self.utf8_remaining = utf8_tail_pending(bytes, self.utf8_remaining);
                 emit(TerminalGraphicsSegment::Terminal(bytes.into()));
                 if self.grid_events.is_some() {
                     let _ = cursor();
@@ -215,16 +223,35 @@ impl GraphicsIngress {
             }
             if matches!(self.state, ParserState::Ground) {
                 let remaining = &bytes[index..];
-                let Some(escape_offset) = memchr::memchr(0x1b, remaining) else {
+                let escape = memchr::memchr2_iter(0x1b, 0x90, remaining).find(|index| {
+                    remaining[*index] == 0x1b
+                        || utf8_tail_pending(&remaining[..*index], self.utf8_remaining) == 0
+                });
+                let Some(escape_offset) = escape else {
                     // Ordinary terminal output does not need graphics state-machine work.
+                    self.utf8_remaining = utf8_tail_pending(remaining, self.utf8_remaining);
                     terminal_bytes.extend_from_slice(remaining);
                     break;
                 };
                 terminal_bytes.extend_from_slice(&remaining[..escape_offset]);
+                self.utf8_remaining = 0;
                 index += escape_offset;
             }
 
             let was_terminal_state = matches!(self.state, ParserState::Ground | ParserState::Esc);
+            if matches!(
+                (&self.state, bytes[index]),
+                (
+                    ParserState::DcsEsc(_) | ParserState::ApcEsc(_) | ParserState::OscEsc(_),
+                    b'\\'
+                ) | (ParserState::Dcs(_), 0x9c)
+                    | (ParserState::Osc(_), 0x07)
+            ) {
+                // Apply the preceding grid changes before the command creates new
+                // resources. A queued reset must never erase that command's anchors.
+                let _ = cursor();
+                self.emit_grid_changes(&mut emit);
+            }
             self.advance_byte(bytes[index], &mut cursor, &mut result);
             terminal_bytes.append(&mut result.terminal_bytes);
             if !result.events.is_empty() {
@@ -306,6 +333,15 @@ impl GraphicsIngress {
                 self.storage_bytes += bytes;
             }
             TerminalGraphicsEvent::Delete { id: Some(id) } => {
+                self.sixel_placements.retain(|p| {
+                    if p.id == *id
+                        && let Some(grid) = &self.grid_events
+                    {
+                        grid.set_anchor(p.alternate_screen, p.sixel.as_ref().unwrap().serial, None);
+                    }
+                    p.id != *id
+                });
+                self.track_sixel_screens();
                 if let Some(grid) = &self.grid_events {
                     for placement in self.kitty_placements.iter().filter(|p| p.id == *id) {
                         grid.set_anchor(
@@ -327,6 +363,13 @@ impl GraphicsIngress {
                 });
             }
             TerminalGraphicsEvent::Delete { id: None } => {
+                if let Some(grid) = &self.grid_events {
+                    for p in &self.sixel_placements {
+                        grid.set_anchor(p.alternate_screen, p.sixel.as_ref().unwrap().serial, None);
+                    }
+                }
+                self.sixel_placements.clear();
+                self.track_sixel_screens();
                 self.image_order.clear();
                 self.storage_bytes = 0;
                 self.kitty_images.clear();
@@ -342,6 +385,12 @@ impl GraphicsIngress {
         let limit = self.options.storage_limit_mb.max(1) as usize * 1024 * 1024;
         let mut evicted = Vec::new();
         while self.storage_bytes > limit
+            || self
+                .sixel_placements
+                .len()
+                .saturating_add(self.kitty_placements.len())
+                .saturating_mul(std::mem::size_of::<TerminalImagePlacement>() * 2)
+                > MAX_GRAPHICS_METADATA_MB as usize * 1024 * 1024
             || self
                 .image_order
                 .len()
@@ -359,6 +408,14 @@ impl GraphicsIngress {
                 break;
             };
             self.storage_bytes -= bytes;
+            self.sixel_placements.retain(|p| {
+                if p.id == id
+                    && let Some(grid) = &self.grid_events
+                {
+                    grid.set_anchor(p.alternate_screen, p.sixel.as_ref().unwrap().serial, None);
+                }
+                p.id != id
+            });
             self.kitty_images.remove(&id);
             self.kitty_wire_ids.retain(|_, resource| *resource != id);
             if let Some(grid) = &self.grid_events {
@@ -377,6 +434,7 @@ impl GraphicsIngress {
             });
             evicted.push(id);
         }
+        self.track_sixel_screens();
         evicted
     }
 
@@ -412,6 +470,10 @@ impl GraphicsIngress {
         let state = std::mem::replace(&mut self.state, ParserState::Ground);
         // Reject before a full buffer's next push doubles its allocation.
         if parser_state_len(&state) > encoded_storage_limit().saturating_sub(2) {
+            self.state = ParserState::DiscardString {
+                osc: matches!(state, ParserState::Osc(_) | ParserState::OscEsc(_)),
+                escape: byte == 0x1b,
+            };
             result.events.push(TerminalGraphicsEvent::Error(
                 GraphicsError::StorageLimitExceeded.to_string(),
             ));
@@ -420,6 +482,7 @@ impl GraphicsIngress {
         match state {
             ParserState::Ground => match byte {
                 0x1b => self.state = ParserState::Esc,
+                0x90 => self.state = ParserState::Dcs(Vec::new()),
                 _ => result.terminal_bytes.push(byte),
             },
             ParserState::Esc => match byte {
@@ -461,18 +524,20 @@ impl GraphicsIngress {
                 }
             },
             ParserState::Dcs(mut data) => match byte {
+                0x18 | 0x1a => {}
+                0x9c => self.dispatch_dcs(data, cursor(), result),
                 0x1b => self.state = ParserState::DcsEsc(data),
                 _ => {
                     data.push(byte);
                     self.state = self.parser_state_or_size_error(ParserState::Dcs(data), result);
                 }
             },
-            ParserState::DcsEsc(mut data) => match byte {
+            ParserState::DcsEsc(data) => match byte {
                 b'\\' => self.dispatch_dcs(data, cursor(), result),
                 _ => {
-                    data.push(0x1b);
-                    data.push(byte);
-                    self.state = self.parser_state_or_size_error(ParserState::Dcs(data), result);
+                    // ESC starts a new control sequence when it is not the string terminator.
+                    self.state = ParserState::Esc;
+                    self.advance_byte(byte, cursor, result);
                 }
             },
             ParserState::Apc(mut data) => match byte {
@@ -490,6 +555,17 @@ impl GraphicsIngress {
                     self.state = self.parser_state_or_size_error(ParserState::Apc(data), result);
                 }
             },
+            ParserState::DiscardString { osc, escape } => {
+                if !matches!(byte, 0x18 | 0x1a | 0x9c)
+                    && !(osc && byte == 0x07)
+                    && !(escape && byte == b'\\')
+                {
+                    self.state = ParserState::DiscardString {
+                        osc,
+                        escape: byte == 0x1b,
+                    };
+                }
+            }
         }
     }
 
@@ -561,7 +637,9 @@ impl GraphicsIngress {
             Ok((image, placement, advance)) => {
                 result.events.push(TerminalGraphicsEvent::ImageReady(image));
                 result.events.push(TerminalGraphicsEvent::Place(placement));
-                result.terminal_bytes.extend(advance);
+                if let Some(advance) = advance {
+                    result.events.push(advance);
+                }
             }
             Err(error) => result
                 .events
@@ -575,7 +653,6 @@ impl GraphicsIngress {
         cursor: GraphicsCursor,
         result: &mut GraphicsAdvance,
     ) {
-        result.events.extend(self.synchronize_grid());
         if !self.options.kitty || !data.starts_with(b"G") {
             result.terminal_bytes.extend_from_slice(b"\x1b_");
             result.terminal_bytes.extend_from_slice(&data);
@@ -648,20 +725,100 @@ impl GraphicsIngress {
         &mut self,
         sequence: &[u8],
         cursor: GraphicsCursor,
-    ) -> Result<(TerminalImageData, TerminalImagePlacement, Vec<u8>), GraphicsError> {
+    ) -> Result<
+        (
+            TerminalImageData,
+            TerminalImagePlacement,
+            Option<TerminalGraphicsEvent>,
+        ),
+        GraphicsError,
+    > {
+        use std::fmt::Write;
         enforce_storage_limit(sequence.len(), MAX_TRANSFER_MB)?;
-        let bytes = sixel_canvas_bytes(
+        let state = self.sixel_state.get_or_insert_with(Default::default);
+        let (color_count, size) = self
+            .grid_events
+            .as_ref()
+            .map(|g| g.sixel_limits())
+            .unwrap_or((SIXEL_COLORS, [SIXEL_DIMENSION; 2]));
+        let scan = scan_sixel(
             sequence,
+            self.options.pixel_limit,
+            self.options.storage_limit_mb,
+            color_count,
+        )?;
+        if scan.width > size[0] || scan.height > size[1] {
+            return Err(GraphicsError::PixelLimitExceeded);
+        }
+        let bytes = decoded_rgba_bytes(
+            scan.width,
+            scan.height,
             self.options.pixel_limit,
             self.options.storage_limit_mb,
         )?;
         let memory = reserve_pixels(bytes)?;
-        let _workspace = reserve_decode_workspace(bytes.saturating_add(sequence.len()))?;
-        let decoded = icy_sixel::SixelImage::decode(sequence)
+        // Preallocate the validated canvas once. The dependency otherwise reallocates
+        // and copies the entire canvas on every horizontal or vertical expansion.
+        let _workspace = reserve_decode_workspace(
+            bytes
+                .saturating_add(sequence.len())
+                .saturating_add(16 * 1024),
+        )?;
+        let private = self
+            .grid_events
+            .as_ref()
+            .and_then(|g| g.sixel_mode(1070))
+            .unwrap_or(true);
+        let mut prepared = String::from("\x1bP9;1q");
+        if !private {
+            for (index, color) in state.colors.iter().enumerate() {
+                if let Some([space, a, b, c]) = color {
+                    let _ = write!(prepared, "#{index};{space};{a};{b};{c}");
+                }
+            }
+        }
+        let _ = write!(prepared, "#0\"1;1;{};{}", scan.width, scan.height);
+        let mut prepared = prepared.into_bytes();
+        prepared.extend_from_slice(&sequence[scan.payload..]);
+        let decoded = icy_sixel::SixelImage::decode(&prepared)
             .map_err(|error| GraphicsError::Decode(error.to_string()))?;
         let width = decoded.width as u32;
         let height = decoded.height as u32;
-        enforce_pixel_limit(width, height, self.options.pixel_limit)?;
+        if !private {
+            for (old, new) in state.colors.iter_mut().zip(scan.colors) {
+                if new.is_some() {
+                    *old = new;
+                }
+            }
+        }
+        let display_height = (height as usize)
+            .checked_mul(scan.aspect[0])
+            .map(|n| n.div_ceil(scan.aspect[1]))
+            .and_then(|n| u32::try_from(n).ok())
+            .filter(|n| *n <= SIXEL_DIMENSION)
+            .ok_or(GraphicsError::PixelLimitExceeded)?;
+        let fixed = self
+            .grid_events
+            .as_ref()
+            .and_then(|g| g.sixel_mode(80))
+            .unwrap_or(false);
+        let right = self
+            .grid_events
+            .as_ref()
+            .and_then(|g| g.sixel_mode(8452))
+            .unwrap_or(false);
+        let cursor_y = scan
+            .cursor_y
+            .checked_mul(scan.aspect[0])
+            .map(|n| n.div_ceil(scan.aspect[1]))
+            .filter(|n| *n <= SIXEL_DIMENSION as usize)
+            .ok_or(GraphicsError::PixelLimitExceeded)?;
+        let mut image_cursor = cursor;
+        if fixed {
+            image_cursor.line = 0;
+            image_cursor.row = 0;
+            image_cursor.col = 0;
+        }
         let image = TerminalImageData {
             memory: Some(memory),
             id: self.next_id(),
@@ -674,14 +831,14 @@ impl GraphicsIngress {
             animation: TerminalImageAnimationState::default(),
             name: None,
         };
-        let (placement, advance) = self.placement_for_image(
+        let (mut placement, _) = self.placement_for_image(
             image.id,
             image.protocol,
             width,
-            height,
-            cursor,
+            display_height,
+            image_cursor,
             PlacementOptions {
-                move_cursor: true,
+                move_cursor: false,
                 cols: None,
                 rows: None,
                 source_x: 0,
@@ -691,6 +848,52 @@ impl GraphicsIngress {
                 z_index: 0,
             },
         );
+        placement.cols = (width as usize).div_ceil(usize::from(cursor.cell_width.max(1)));
+        placement.rows = (display_height as usize).div_ceil(usize::from(cursor.cell_height.max(1)));
+        placement.sixel = Some(SixelPlacement {
+            serial: self.next_placement_serial,
+            fixed,
+            clip_top: 0,
+            clip_bottom: 0,
+            clip_left: 0,
+            clip_right: 0,
+            column_offset: 0,
+            background: (!scan.transparent).then(|| {
+                self.grid_events
+                    .as_ref()
+                    .map(|g| g.sixel_background())
+                    .unwrap_or(alacritty_terminal::vte::ansi::Color::Named(
+                        alacritty_terminal::vte::ansi::NamedColor::Background,
+                    ))
+            }),
+        });
+        self.next_placement_serial += 1;
+        enforce_storage_limit(
+            (self.sixel_placements.len() + 1)
+                .saturating_mul(std::mem::size_of::<TerminalImagePlacement>() * 2),
+            MAX_GRAPHICS_METADATA_MB,
+        )?;
+        if let Some(grid) = &self.grid_events
+            && !fixed
+        {
+            grid.set_anchor(
+                self.alternate_screen,
+                placement.sixel.as_ref().unwrap().serial,
+                Some(alacritty_terminal::index::Point::new(
+                    alacritty_terminal::index::Line(placement.line),
+                    alacritty_terminal::index::Column(placement.col),
+                )),
+            );
+        }
+        self.sixel_placements.push(placement.clone());
+        self.track_sixel_screens();
+        let advance = (!fixed).then_some(TerminalGraphicsEvent::SixelCursor {
+            rows: cursor_y.max(display_height as usize - 1)
+                / usize::from(cursor.cell_height.max(1)),
+            column: cursor
+                .col
+                .saturating_add(if right { placement.cols } else { 0 }),
+        });
         Ok((image, placement, advance))
     }
 
@@ -1033,6 +1236,7 @@ impl GraphicsIngress {
             z_index: options.z_index,
             placeholder: self.options.show_placeholder,
             kitty: None,
+            sixel: None,
             alternate_screen: self.alternate_screen,
         };
         let advance = if options.move_cursor {

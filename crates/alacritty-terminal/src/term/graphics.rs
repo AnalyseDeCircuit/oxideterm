@@ -8,12 +8,19 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use vte::ansi::{Color, NamedColor};
 
 mod placeholder;
 pub use placeholder::PlaceholderRun;
 
+pub const SIXEL_MAX_COLORS: usize = 256;
+pub const SIXEL_MAX_DIMENSION: u32 = 1_000_000;
+
 #[derive(Clone, Debug)]
 pub enum GraphicsGridChange {
+    Erase { alternate: bool, top: i32, bottom: i32, left: usize, right: usize },
+    ShiftColumns { alternate: bool, line: i32, start: usize, end: usize, delta: i32 },
+    SixelPaletteReset,
     Scroll {
         alternate: bool,
         start: i32,
@@ -55,6 +62,9 @@ struct State {
     dirty_rows: HashSet<(bool, i32)>,
     alternate: bool,
     queued_bytes: usize,
+    sixel_background: Option<Color>,
+    sixel_colors: Option<usize>,
+    sixel_size: Option<[u32; 2]>,
 }
 
 #[derive(Default)]
@@ -65,6 +75,10 @@ struct Events {
     dirty_line: AtomicU64,
     rescan: AtomicBool,
     byte_limit: AtomicUsize,
+    sixel: AtomicBool,
+    sixel_modes: AtomicUsize,
+    sixel_screens: AtomicUsize,
+    fixed_sixel_screens: AtomicUsize,
 }
 
 /// Shared only between a terminal model and its ordered graphics parser.
@@ -72,6 +86,170 @@ struct Events {
 pub struct GraphicsGridEvents(Arc<Events>);
 
 impl GraphicsGridEvents {
+    pub fn set_sixel_screens(&self, active: [bool; 2], fixed: [bool; 2]) {
+        self.0.sixel_screens.store(
+            usize::from(active[0]) | (usize::from(active[1]) << 1),
+            Ordering::Relaxed,
+        );
+        self.0.fixed_sixel_screens.store(
+            usize::from(fixed[0]) | (usize::from(fixed[1]) << 1),
+            Ordering::Relaxed,
+        );
+    }
+
+    pub(super) fn has_fixed_sixel(&self, alternate: bool) -> bool {
+        self.0.fixed_sixel_screens.load(Ordering::Relaxed) & (1 << usize::from(alternate)) != 0
+    }
+
+    pub(super) fn has_sixel(&self, alternate: bool) -> bool {
+        self.0.sixel_screens.load(Ordering::Relaxed) & (1 << usize::from(alternate)) != 0
+    }
+
+    pub(super) fn erase_sixel(
+        &self,
+        alternate: bool,
+        top: i32,
+        bottom: i32,
+        left: usize,
+        right: usize,
+    ) {
+        if top < bottom && left < right && self.has_sixel(alternate) {
+            self.record(GraphicsGridChange::Erase {
+                alternate,
+                top,
+                bottom,
+                left,
+                right,
+            });
+        }
+    }
+
+    pub(super) fn shift_sixel(
+        &self,
+        alternate: bool,
+        line: i32,
+        start: usize,
+        end: usize,
+        delta: i32,
+    ) {
+        if start < end && delta != 0 && self.has_sixel(alternate) {
+            self.record(GraphicsGridChange::ShiftColumns {
+                alternate,
+                line,
+                start,
+                end,
+                delta,
+            });
+        }
+    }
+    pub fn sixel_limits(&self) -> (usize, [u32; 2]) {
+        let state = self.0.state.lock();
+        (
+            state.sixel_colors.unwrap_or(SIXEL_MAX_COLORS),
+            state.sixel_size.unwrap_or([SIXEL_MAX_DIMENSION; 2]),
+        )
+    }
+
+    pub(super) fn sixel_attribute(
+        &self,
+        item: u16,
+        action: u16,
+        value: [u16; 2],
+    ) -> Option<String> {
+        if !self.sixel_enabled() {
+            return None;
+        }
+        let mut state = self.0.state.lock();
+        let mut status = 0;
+        match (item, action) {
+            (1, 2) => state.sixel_colors = None,
+            (1, 3) if value[0] > 0 && usize::from(value[0]) <= SIXEL_MAX_COLORS => {
+                state.sixel_colors = Some(value[0] as usize)
+            }
+            (2, 2) => state.sixel_size = None,
+            (2, 3) if value[0] > 0 && value[1] > 0 => {
+                state.sixel_size = Some([u32::from(value[0]), u32::from(value[1])])
+            }
+            (1 | 2, 1 | 4) => {}
+            (1 | 2, 3) => status = 3,
+            (1 | 2, _) => status = 2,
+            _ => status = 1,
+        }
+        let result = match item {
+            1 => if action == 4 {
+                SIXEL_MAX_COLORS
+            } else {
+                state.sixel_colors.unwrap_or(SIXEL_MAX_COLORS)
+            }
+            .to_string(),
+            2 => {
+                let [w, h] = if action == 4 {
+                    [SIXEL_MAX_DIMENSION; 2]
+                } else {
+                    state.sixel_size.unwrap_or([SIXEL_MAX_DIMENSION; 2])
+                };
+                format!("{w};{h}")
+            }
+            _ => "0".to_owned(),
+        };
+        drop(state);
+        if item == 1 && action == 2 {
+            self.record(GraphicsGridChange::SixelPaletteReset);
+        }
+        Some(format!("\x1b[?{item};{status};{result}S"))
+    }
+    pub fn set_sixel_enabled(&self, enabled: bool) {
+        self.0.sixel.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn sixel_enabled(&self) -> bool {
+        self.0.sixel.load(Ordering::Relaxed)
+    }
+
+    pub fn sixel_mode(&self, mode: u16) -> Option<bool> {
+        if !self.sixel_enabled() {
+            return None;
+        }
+        let flags = self.0.sixel_modes.load(Ordering::Relaxed);
+        match mode {
+            80 => Some(flags & 1 != 0),
+            1070 => Some(flags & 2 == 0),
+            8452 => Some(flags & 4 != 0),
+            _ => None,
+        }
+    }
+
+    pub(super) fn set_sixel_mode(&self, mode: u16, set: bool) -> bool {
+        if !self.sixel_enabled() {
+            return false;
+        }
+        let (flag, set) = match mode {
+            80 => (1, set),
+            1070 => (2, !set),
+            8452 => (4, set),
+            _ => return false,
+        };
+        if set {
+            self.0.sixel_modes.fetch_or(flag, Ordering::Relaxed);
+        } else {
+            self.0.sixel_modes.fetch_and(!flag, Ordering::Relaxed);
+        }
+        true
+    }
+
+    pub fn capture_sixel_background(&self, background: Color) {
+        if self.sixel_enabled() {
+            self.0.state.lock().sixel_background = Some(background);
+        }
+    }
+
+    pub fn sixel_background(&self) -> Color {
+        self.0
+            .state
+            .lock()
+            .sixel_background
+            .unwrap_or(Color::Named(NamedColor::Background))
+    }
     pub fn drain(&self) -> Vec<GraphicsGridChange> {
         let mut state = self.0.state.lock();
         state.queued_bytes = 0;
@@ -107,6 +285,35 @@ impl GraphicsGridEvents {
         self.0.dirty_line.store(0, Ordering::Relaxed);
         let mut state = self.0.state.lock();
         match &change {
+            GraphicsGridChange::Erase {
+                alternate,
+                top,
+                bottom,
+                left,
+                right,
+            } => {
+                if let Some(GraphicsGridChange::Erase {
+                    alternate: screen,
+                    top: a,
+                    bottom: b,
+                    left: x,
+                    right: y,
+                }) = state.changes.last_mut()
+                    && screen == alternate
+                {
+                    // Only merge exact rectangular unions; an L-shaped union would erase extra pixels.
+                    if a == top && b == bottom && *x <= *right && *left <= *y {
+                        *x = (*x).min(*left);
+                        *y = (*y).max(*right);
+                        return;
+                    }
+                    if x == left && y == right && *a <= *bottom && *top <= *b {
+                        *a = (*a).min(*top);
+                        *b = (*b).max(*bottom);
+                        return;
+                    }
+                }
+            }
             GraphicsGridChange::Scroll {
                 alternate,
                 start,
@@ -165,6 +372,12 @@ impl GraphicsGridEvents {
                 .anchors
                 .retain(|(screen, _), point| screen != alternate || !*history || point.line.0 >= 0),
             GraphicsGridChange::Reset => {
+                self.0.sixel_screens.store(0, Ordering::Relaxed);
+                self.0.fixed_sixel_screens.store(0, Ordering::Relaxed);
+                self.0.sixel_modes.store(0, Ordering::Relaxed);
+                state.sixel_background = None;
+                state.sixel_colors = None;
+                state.sixel_size = None;
                 state.anchors.clear();
                 state.alternate = false;
             }

@@ -443,9 +443,9 @@ impl LocalPtySession {
             return;
         }
         self.palette = palette;
+        let _ = self.notifier.0.send(LocalGraphicsMsg::SetPalette(palette));
         // Unchanged rows still hold colors resolved from the old palette.
         self.term.lock().mark_fully_damaged();
-        self.term.lock().notify_palette_changed();
         self.tmux_display.set_palette(palette);
         for command in self.tmux_display.palette_report_commands() {
             let _ = self.write_control_bytes(command, None);
@@ -1094,7 +1094,7 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
         next_row.line_id = line_id;
         snapshot.lines[row] = next_row;
     }
-    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, display_offset);
+    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, palette, display_offset);
     snapshot
 }
 
@@ -1135,7 +1135,7 @@ fn snapshot_from_term_after_scroll_up<T: EventListener>(
         }
         snapshot.lines[row] = next_row;
     }
-    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, 0);
+    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, palette, 0);
     snapshot
 }
 
@@ -1208,7 +1208,7 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
         lines,
         images: Vec::new(),
     };
-    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, display_offset);
+    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, palette, display_offset);
     term.reset_damage();
     snapshot
 }
@@ -1242,6 +1242,8 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
         }
     }
 
+    let mut images = graphics.visible_images(display_offset, requested_rows);
+    resolve_sixel_backgrounds(&mut images, palette, term.colors());
     TerminalSnapshot {
         generation: 0,
         cols: size.cols,
@@ -1252,7 +1254,7 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
         display_offset,
         scrollback_lines,
         lines: rows,
-        images: graphics.visible_images(display_offset, requested_rows),
+        images,
     }
 }
 
@@ -1456,6 +1458,7 @@ fn refresh_snapshot_metadata<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
     graphics: &TerminalGraphicsState,
+    palette: &TerminalPalette,
     display_offset: usize,
 ) {
     let content = term.renderable_content();
@@ -1497,6 +1500,7 @@ fn refresh_snapshot_metadata<T: EventListener>(
     snapshot.cursor_row = cursor_row;
     snapshot.cursor_shape = content.cursor.shape.into();
     snapshot.images = graphics.visible_images(display_offset, snapshot.lines.len());
+    resolve_sixel_backgrounds(&mut snapshot.images, palette, term.colors());
     // Damaged rows already carry fresh signatures. Rehash only rows whose cursor or active-input
     // metadata changed instead of walking every visible cell after a small terminal update.
     metadata_rows.sort_unstable();

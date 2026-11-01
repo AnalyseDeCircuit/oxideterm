@@ -325,6 +325,24 @@ pub(crate) fn paint_terminal_image(
     );
 
     let mut clip = bounds;
+    let scale_factor = window.scale_factor();
+    if let Some(sixel) = &image.image.snapshot.sixel {
+        bounds.origin.x += px(sixel.column_offset as f32 * metrics.cell_width_f32());
+        bounds.size = native_image_size(
+            size(
+                image.image.snapshot.pixel_width,
+                image.image.snapshot.pixel_height,
+            ),
+            scale_factor,
+        );
+        clip = sixel_clip_bounds(
+            bounds,
+            size(image.image.snapshot.cols, image.image.snapshot.rows),
+            point(sixel.clip_left, sixel.clip_top),
+            point(sixel.clip_right, sixel.clip_bottom),
+            size(px(metrics.cell_width_f32()), px(metrics.line_height_f32())),
+        );
+    }
     if let Some(kitty) = &image.image.snapshot.kitty {
         if let Some(region) = &kitty.unicode {
             clip.size = size(
@@ -343,6 +361,7 @@ pub(crate) fn paint_terminal_image(
             ),
             point(kitty.offset_x, kitty.offset_y),
             kitty.scaled,
+            scale_factor,
         );
         if kitty.unicode.is_none() {
             clip.origin.y += px(kitty.clip_top as f32 * metrics.line_height_f32());
@@ -365,6 +384,14 @@ pub(crate) fn paint_terminal_image(
         window.request_animation_frame_after(delay, cx);
     }
     window.with_content_mask(Some(gpui::ContentMask { bounds: clip }), |window| {
+        if let Some(sixel) = &image.image.snapshot.sixel
+            && let Some([r, g, b]) = sixel.background_rgb()
+        {
+            window.paint_quad(fill(
+                bounds,
+                rgba((u32::from(r) << 24) | (u32::from(g) << 16) | (u32::from(b) << 8) | 255),
+            ));
+        }
         let _ = window.paint_image(
             bounds,
             bounds,
@@ -376,17 +403,48 @@ pub(crate) fn paint_terminal_image(
     });
 }
 
+fn sixel_clip_bounds(
+    mut pixels: Bounds<Pixels>,
+    cells: gpui::Size<usize>,
+    start: Point<usize>,
+    end: Point<usize>,
+    cell: gpui::Size<Pixels>,
+) -> Bounds<Pixels> {
+    let left = cell.width * start.x as f32;
+    let top = cell.height * start.y as f32;
+    let right = pixels
+        .size
+        .width
+        .min(cell.width * cells.width.saturating_sub(end.x) as f32);
+    let bottom = pixels
+        .size
+        .height
+        .min(cell.height * cells.height.saturating_sub(end.y) as f32);
+    pixels.origin += point(left, top);
+    pixels.size = size((right - left).max(px(0.0)), (bottom - top).max(px(0.0)));
+    pixels
+}
+
+fn native_image_size(source: gpui::Size<u32>, scale_factor: f32) -> gpui::Size<Pixels> {
+    size(
+        px(source.width as f32 / scale_factor),
+        px(source.height as f32 / scale_factor),
+    )
+}
+
 fn kitty_image_bounds(
     mut cells: Bounds<Pixels>,
     source: gpui::Size<u32>,
     offset: Point<u32>,
     scaled: bool,
+    scale_factor: f32,
 ) -> Bounds<Pixels> {
-    cells.origin.x += px(offset.x as f32);
-    cells.origin.y += px(offset.y as f32);
+    // Protocol geometry uses device pixels; GPUI painting uses logical pixels.
+    cells.origin.x += px(offset.x as f32 / scale_factor);
+    cells.origin.y += px(offset.y as f32 / scale_factor);
     if scaled {
-        cells.size.width = (cells.size.width - px(offset.x as f32)).max(px(0.0));
-        cells.size.height = (cells.size.height - px(offset.y as f32)).max(px(0.0));
+        cells.size.width = (cells.size.width - px(offset.x as f32 / scale_factor)).max(px(0.0));
+        cells.size.height = (cells.size.height - px(offset.y as f32 / scale_factor)).max(px(0.0));
         let ratio = (f32::from(cells.size.width) / source.width.max(1) as f32)
             .min(f32::from(cells.size.height) / source.height.max(1) as f32);
         let fitted = size(
@@ -397,7 +455,7 @@ fn kitty_image_bounds(
         cells.origin.y += (cells.size.height - fitted.height) / 2.0;
         cells.size = fitted;
     } else {
-        cells.size = size(px(source.width as f32), px(source.height as f32));
+        cells.size = native_image_size(source, scale_factor);
     }
     cells
 }
@@ -407,15 +465,78 @@ mod image_geometry_tests {
     use super::*;
 
     #[test]
+    fn sixel_clips_partial_cell_rows_without_stretching() {
+        let bounds = Bounds::new(point(px(4.0), px(8.0)), size(px(20.0), px(7.0)));
+        assert_eq!(
+            sixel_clip_bounds(
+                bounds,
+                size(2, 2),
+                point(0, 0),
+                point(0, 1),
+                size(px(10.0), px(6.0))
+            ),
+            Bounds::new(point(px(4.0), px(8.0)), size(px(20.0), px(6.0)))
+        );
+        let narrow = Bounds::new(point(px(-4.0), px(8.0)), size(px(7.0), px(6.0)));
+        assert_eq!(
+            sixel_clip_bounds(
+                narrow,
+                size(2, 1),
+                point(1, 0),
+                point(0, 0),
+                size(px(4.0), px(6.0))
+            ),
+            Bounds::new(point(px(0.0), px(8.0)), size(px(3.0), px(6.0)))
+        );
+        assert_eq!(
+            sixel_clip_bounds(
+                bounds,
+                size(2, 2),
+                point(0, 1),
+                point(0, 0),
+                size(px(10.0), px(6.0))
+            ),
+            Bounds::new(point(px(4.0), px(14.0)), size(px(20.0), px(1.0)))
+        );
+    }
+
+    #[test]
     fn native_pixels_and_explicit_cell_boxes_have_distinct_sizes() {
         let cells = Bounds::new(point(px(20.0), px(40.0)), size(px(20.0), px(40.0)));
         assert_eq!(
-            kitty_image_bounds(cells, size(8, 4), point(2, 4), false),
+            kitty_image_bounds(cells, size(8, 4), point(2, 4), false, 1.0),
             Bounds::new(point(px(22.0), px(44.0)), size(px(8.0), px(4.0)))
         );
         assert_eq!(
-            kitty_image_bounds(cells, size(8, 4), point(2, 4), true),
+            kitty_image_bounds(cells, size(8, 4), point(2, 4), true, 1.0),
             Bounds::new(point(px(22.0), px(57.5)), size(px(18.0), px(9.0)))
+        );
+    }
+
+    #[test]
+    fn retina_native_images_fit_their_physical_cell_box() {
+        let cells = Bounds::new(point(px(10.0), px(20.0)), size(px(20.0), px(20.0)));
+        let image = kitty_image_bounds(cells, size(40, 40), point(0, 0), false, 2.0);
+        assert_eq!(image.size, size(px(20.0), px(20.0)));
+        let sixel = Bounds::new(cells.origin, native_image_size(size(40, 40), 2.0));
+        assert_eq!(
+            sixel_clip_bounds(
+                sixel,
+                size(2, 2),
+                point(0, 0),
+                point(0, 0),
+                size(px(10.0), px(10.0))
+            ),
+            sixel
+        );
+        let offset = kitty_image_bounds(cells, size(40, 20), point(2, 4), false, 2.0);
+        assert_eq!(
+            offset,
+            Bounds::new(point(px(11.0), px(22.0)), size(px(20.0), px(10.0)))
+        );
+        assert_eq!(
+            kitty_image_bounds(cells, size(40, 20), point(2, 4), true, 2.0),
+            Bounds::new(point(px(11.0), px(26.25)), size(px(19.0), px(9.5)))
         );
     }
 }

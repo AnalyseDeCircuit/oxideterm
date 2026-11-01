@@ -462,6 +462,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             kitty: None,
+            sixel: None,
             clipped_rows: 0,
             version: 1,
             data: Some(Arc::new(TerminalImageData {
@@ -509,6 +510,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             kitty: None,
+            sixel: None,
             clipped_rows: 0,
             version: 1,
             data: Some(Arc::new(TerminalImageData {
@@ -625,6 +627,7 @@ mod tests {
             z_index: 0,
             placeholder: true,
             kitty: None,
+            sixel: None,
             clipped_rows: 0,
             version: 1,
             data: Some(Arc::new(TerminalImageData {

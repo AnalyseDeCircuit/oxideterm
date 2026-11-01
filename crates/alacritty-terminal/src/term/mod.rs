@@ -432,8 +432,42 @@ impl<T> Term<T> {
         events
     }
 
+    /// Advance raster output without writing text or invoking newline-mode carriage returns.
+    pub fn advance_graphics_cursor(&mut self, rows: usize, column: usize)
+    where
+        T: EventListener,
+    {
+        for _ in 0..rows {
+            self.linefeed();
+        }
+        self.damage_cursor();
+        self.grid.cursor.point.column = Column(column.min(self.columns().saturating_sub(1)));
+        self.grid.cursor.input_needs_wrap = false;
+        self.damage_cursor();
+    }
+
+    pub fn capture_sixel_background(&self) {
+        if let Some(events) = &self.graphics_events {
+            events.capture_sixel_background(self.grid.cursor.template.bg);
+        }
+    }
+
     fn record_graphics_change(&self, change: graphics::GraphicsGridChange) {
         if let Some(events) = &self.graphics_events { events.record(change); }
+    }
+
+    #[inline]
+    fn erase_sixel(&self, top: i32, bottom: i32, left: usize, right: usize) {
+        if let Some(events) = &self.graphics_events {
+            events.erase_sixel(self.mode.contains(TermMode::ALT_SCREEN), top, bottom, left, right);
+        }
+    }
+
+    fn shift_sixel_columns(&self, line: i32, start: usize, count: usize, insert: bool) {
+        if let Some(events) = &self.graphics_events {
+            let delta = if insert { count as i32 } else { -(count as i32) };
+            events.shift_sixel(self.mode.contains(TermMode::ALT_SCREEN), line, start, self.columns(), delta);
+        }
     }
     #[inline]
     pub fn scroll_display(&mut self, scroll: Scroll)
@@ -1127,6 +1161,14 @@ impl<T> Term<T> {
         let flags = self.grid.cursor.template.flags;
         let extra = self.grid.cursor.template.extra.clone();
 
+        if let Some(events) = &self.graphics_events
+            && events.has_sixel(self.mode.contains(TermMode::ALT_SCREEN)) {
+            let point = self.grid.cursor.point;
+            let flags = self.grid[point.line].cell(point.column).flags;
+            let left = point.column.0.saturating_sub(usize::from(flags.contains(Flags::WIDE_CHAR_SPACER)));
+            let right = (point.column.0 + 1 + usize::from(flags.contains(Flags::WIDE_CHAR))).min(self.columns());
+            self.erase_sixel(point.line.0, point.line.0 + 1, left, right);
+        }
         let mut cursor_cell = self.grid.cursor_cell();
 
         // Clear all related cells when overwriting a fullwidth cell.
@@ -1203,6 +1245,8 @@ impl<T: EventListener> Term<T> {
             }
 
             self.grid[line].cell_mut(column).push_zerowidth(c);
+            let width = if self.grid[line].cell(column).flags.contains(Flags::WIDE_CHAR) { 2 } else { 1 };
+            self.erase_sixel(line.0, line.0 + 1, column.0, (column.0 + width).min(self.columns()));
             return;
         }
 
@@ -1216,6 +1260,7 @@ impl<T: EventListener> Term<T> {
         if self.mode.contains(TermMode::INSERT) && self.grid.cursor.point.column + width < columns {
             let line = self.grid.cursor.point.line;
             let col = self.grid.cursor.point.column;
+            self.shift_sixel_columns(line.0, col.0, width, true);
             let row = self.grid[line].as_mut_slice();
 
             for col in (col.0..(columns - width)).rev() {
@@ -1335,6 +1380,7 @@ impl<T: EventListener> Handler for Term<T> {
             let write_len = (columns - start).min(bytes.len() - processed);
             if let Some(events) = &self.damage.graphics { events.dirty_row(line.0); }
             let end = start + write_len;
+            self.erase_sixel(line.0, line.0 + 1, start, end);
 
             let template = self.grid.cursor.template.clone();
             // This span will be written by either path. Inspect the writable screen cells
@@ -1389,7 +1435,9 @@ impl<T: EventListener> Handler for Term<T> {
     fn input_text_lines(&mut self, text: &str, line_count: usize, max_line_length: usize) {
         let active_charset = self.grid.cursor.charsets[self.active_charset];
         let full_scroll_region = Line(0)..Line(self.screen_lines() as i32);
+        // Scroll-before-write batching is equivalent only for images that scroll with text.
         let supports_batch = active_charset == StandardCharset::Ascii
+            && !self.graphics_events.as_ref().is_some_and(|e| e.has_fixed_sixel(self.mode.contains(TermMode::ALT_SCREEN)))
             && self.mode.contains(TermMode::LINE_WRAP)
             && !self.mode.contains(TermMode::INSERT)
             && !self.grid.cursor.input_needs_wrap
@@ -1440,6 +1488,7 @@ impl<T: EventListener> Handler for Term<T> {
             for offset in 0..batch_lines {
                 let line = next_ascii_line(text, &mut text_offset);
                 let line_index = first_line + offset as i32;
+                self.erase_sixel(line_index.0, line_index.0 + 1, 0, line.len());
                 if let Some(events) = &self.damage.graphics { events.dirty_row(line_index.0); }
                 for (cell, byte) in self.grid[line_index].cells_mut(0..line.len())
                     .iter_mut()
@@ -1462,6 +1511,7 @@ impl<T: EventListener> Handler for Term<T> {
     #[inline]
     fn decaln(&mut self) {
         trace!("Decalnning");
+        self.erase_sixel(0, self.screen_lines() as i32, 0, self.columns());
 
         for line in (0..self.screen_lines()).map(Line::from) {
             for column in 0..self.columns() {
@@ -1518,6 +1568,7 @@ impl<T: EventListener> Handler for Term<T> {
         let num_cells = self.columns() - destination;
 
         let line = cursor.point.line;
+        self.shift_sixel_columns(line.0, source.0, count, true);
         self.damage.damage_line(line.0 as usize, 0, self.columns() - 1);
 
         let row = self.grid[line].as_mut_slice();
@@ -1580,7 +1631,11 @@ impl<T: EventListener> Handler for Term<T> {
         match intermediate {
             None => {
                 trace!("Reporting primary device attributes");
-                let text = String::from("\x1b[?6c");
+                let text = if self.graphics_events.as_ref().is_some_and(|e| e.sixel_enabled()) {
+                    String::from("\x1b[?62;4c")
+                } else {
+                    String::from("\x1b[?6c")
+                };
                 self.event_proxy.send_event(Event::PtyWrite(text));
             },
             Some('>') => {
@@ -1856,6 +1911,7 @@ impl<T: EventListener> Handler for Term<T> {
         // Cleared cells have current background color set.
         let bg = self.grid.cursor.template.bg;
         let line = cursor.point.line;
+        self.erase_sixel(line.0, line.0 + 1, start.0, end.0);
         self.damage.damage_line(line.0 as usize, start.0, end.0);
         let row = &mut self.grid[line];
         for cell in row.cells_mut(start.0..end.0) {
@@ -1870,13 +1926,14 @@ impl<T: EventListener> Handler for Term<T> {
         let bg = cursor.template.bg;
 
         // Ensure deleting within terminal bounds.
-        let count = cmp::min(count, columns);
+        let count = cmp::min(count, columns - cursor.point.column.0);
 
         let start = cursor.point.column.0;
-        let end = cmp::min(start + count, columns - 1);
+        let end = start + count;
         let num_cells = columns - end;
 
         let line = cursor.point.line;
+        self.shift_sixel_columns(line.0, start, count, false);
         self.damage.damage_line(line.0 as usize, 0, self.columns() - 1);
         let row = self.grid[line].as_mut_slice();
 
@@ -1976,6 +2033,7 @@ impl<T: EventListener> Handler for Term<T> {
         };
 
         self.damage.damage_line(point.line.0 as usize, left.0, right.0 - 1);
+        self.erase_sixel(point.line.0, point.line.0 + 1, left.0, right.0);
 
         let row = &mut self.grid[point.line];
         for cell in row.cells_mut(left.0..right.0) {
@@ -2088,9 +2146,11 @@ impl<T: EventListener> Handler for Term<T> {
         match mode {
             ansi::ClearMode::Above => {
                 let cursor = self.grid.cursor.point;
+                self.erase_sixel(0, cursor.line.0, 0, self.columns());
+                self.erase_sixel(cursor.line.0, cursor.line.0 + 1, 0, cursor.column.0 + 1);
 
                 // If clearing more than one line.
-                if cursor.line > 1 {
+                if cursor.line > 0 {
                     // Fully clear all lines before the current line.
                     self.grid.reset_region(..cursor.line);
                 }
@@ -2107,6 +2167,8 @@ impl<T: EventListener> Handler for Term<T> {
             ansi::ClearMode::Below => {
                 let cursor = self.grid.cursor.point;
                 let columns = self.columns();
+                self.erase_sixel(cursor.line.0, cursor.line.0 + 1, cursor.column.0, columns);
+                self.erase_sixel(cursor.line.0 + 1, screen_lines as i32, 0, columns);
                 for cell in self.grid[cursor.line].cells_mut(cursor.column.0..columns) {
                     *cell = bg.into();
                 }
@@ -2272,6 +2334,9 @@ impl<T: EventListener> Handler for Term<T> {
         let mode = match mode {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
+                if self.graphics_events.as_ref().is_some_and(|e| e.set_sixel_mode(mode, true)) {
+                    return;
+                }
                 debug!("Ignoring unknown mode {mode} in set_private_mode");
                 return;
             },
@@ -2337,6 +2402,9 @@ impl<T: EventListener> Handler for Term<T> {
         let mode = match mode {
             PrivateMode::Named(mode) => mode,
             PrivateMode::Unknown(mode) => {
+                if self.graphics_events.as_ref().is_some_and(|e| e.set_sixel_mode(mode, false)) {
+                    return;
+                }
                 debug!("Ignoring unknown mode {mode} in unset_private_mode");
                 return;
             },
@@ -2384,6 +2452,16 @@ impl<T: EventListener> Handler for Term<T> {
     }
 
     #[inline]
+    fn graphics_attribute(&mut self, item: u16, action: u16, value: [u16; 2]) {
+        if let Some(response) = self
+            .graphics_events
+            .as_ref()
+            .and_then(|e| e.sixel_attribute(item, action, value))
+        {
+            self.event_proxy.send_event(Event::PtyWrite(response));
+        }
+    }
+
     fn report_private_mode(&mut self, mode: PrivateMode) {
         trace!("Reporting private mode {mode:?}");
         let state = match mode {
@@ -2429,7 +2507,10 @@ impl<T: EventListener> Handler for Term<T> {
                 NamedPrivateMode::ColumnMode => ModeState::NotSupported,
                 NamedPrivateMode::Win32Input => self.mode.contains(TermMode::WIN32_INPUT).into(),
             },
-            PrivateMode::Unknown(_) => ModeState::NotSupported,
+            PrivateMode::Unknown(mode) => self.graphics_events.as_ref()
+                .and_then(|e| e.sixel_mode(mode))
+                .map(ModeState::from)
+                .unwrap_or(ModeState::NotSupported),
         };
 
         self.event_proxy.send_event(Event::PtyWrite(format!(

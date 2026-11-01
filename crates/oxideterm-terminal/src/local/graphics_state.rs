@@ -23,7 +23,8 @@ impl TerminalGraphicsState {
                 self.alternate_screen = alternate;
                 None
             }
-            TerminalGraphicsEvent::MoveCursor { .. } => None,
+            TerminalGraphicsEvent::MoveCursor { .. }
+            | TerminalGraphicsEvent::SixelCursor { .. } => None,
             TerminalGraphicsEvent::ImageReady(mut image) => {
                 self.placements.retain(|placement| placement.id != image.id);
                 image.version = self.allocate_image_version();
@@ -36,7 +37,10 @@ impl TerminalGraphicsState {
                 None
             }
             TerminalGraphicsEvent::Place(placement) => {
-                if let Some(kitty) = &placement.kitty {
+                if let Some(sixel) = &placement.sixel {
+                    self.placements
+                        .retain(|old| old.sixel.as_ref().is_none_or(|s| s.serial != sixel.serial));
+                } else if let Some(kitty) = &placement.kitty {
                     self.placements.retain(|existing| {
                         existing
                             .kitty
@@ -51,8 +55,10 @@ impl TerminalGraphicsState {
                 None
             }
             TerminalGraphicsEvent::DeletePlacement { serial } => {
-                self.placements
-                    .retain(|p| p.kitty.as_ref().is_none_or(|k| k.serial != serial));
+                self.placements.retain(|p| {
+                    p.kitty.as_ref().is_none_or(|k| k.serial != serial)
+                        && p.sixel.as_ref().is_none_or(|s| s.serial != serial)
+                });
                 None
             }
             TerminalGraphicsEvent::Delete { id } => {
@@ -147,6 +153,7 @@ impl TerminalGraphicsState {
                     z_index: placement.z_index,
                     placeholder: placement.placeholder,
                     kitty: placement.kitty.clone(),
+                    sixel: placement.sixel.clone(),
                     clipped_rows: signed_row.saturating_neg().max(0) as usize,
                     version: self
                         .images
@@ -164,14 +171,35 @@ impl TerminalGraphicsState {
     }
 }
 
+fn resolve_sixel_backgrounds(
+    images: &mut [TerminalImageSnapshot],
+    palette: &TerminalPalette,
+    colors: &alacritty_terminal::term::color::Colors,
+) {
+    use alacritty_terminal::vte::ansi::{Color, Rgb};
+    for image in images {
+        if let Some(sixel) = &mut image.sixel
+            && let Some(background) = sixel.background
+        {
+            let rgb = crate::color::color_to_rgb(background, palette, colors);
+            sixel.background = Some(Color::Spec(Rgb {
+                r: rgb.r,
+                g: rgb.g,
+                b: rgb.b,
+            }));
+        }
+    }
+}
+
 pub(crate) fn apply_graphics_terminal_event<T: EventListener>(
     term: &mut Term<T>,
     event: &TerminalGraphicsEvent,
 ) {
-    use alacritty_terminal::vte::ansi::Handler;
     if let TerminalGraphicsEvent::MoveCursor { cols, rows } = event {
-        term.move_forward(*cols);
-        term.move_down(*rows);
+        let column = term.grid().cursor.point.column.0.saturating_add(*cols);
+        term.advance_graphics_cursor(*rows, column);
+    } else if let TerminalGraphicsEvent::SixelCursor { rows, column } = event {
+        term.advance_graphics_cursor(*rows, *column);
     }
 }
 
@@ -180,6 +208,7 @@ pub(crate) fn graphics_cursor_from_term<T: EventListener>(
     size: TerminalSize,
 ) -> GraphicsCursor {
     term.capture_graphics_placeholders();
+    term.capture_sixel_background();
     let content = term.renderable_content();
     let line = content.cursor.point.line.0;
     GraphicsCursor {

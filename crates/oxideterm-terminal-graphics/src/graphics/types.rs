@@ -251,7 +251,30 @@ pub struct TerminalImagePlacement {
     pub z_index: i32,
     pub placeholder: bool,
     pub kitty: Option<KittyPlacement>,
+    pub sixel: Option<SixelPlacement>,
     pub alternate_screen: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SixelPlacement {
+    pub serial: u64,
+    pub fixed: bool,
+    pub clip_top: usize,
+    pub clip_bottom: usize,
+    pub clip_left: usize,
+    pub clip_right: usize,
+    pub column_offset: i64,
+    /// Opaque Sixel backgrounds are resolved against the terminal palette in snapshots.
+    pub background: Option<alacritty_terminal::vte::ansi::Color>,
+}
+
+impl SixelPlacement {
+    pub fn background_rgb(&self) -> Option<[u8; 3]> {
+        match self.background {
+            Some(alacritty_terminal::vte::ansi::Color::Spec(rgb)) => Some([rgb.r, rgb.g, rgb.b]),
+            _ => None,
+        }
+    }
 }
 
 /// Protocol placement identity is independent of the shared pixel resource.
@@ -289,6 +312,7 @@ pub enum TerminalGraphicsEvent {
     DeletePlacement { serial: u64 },
     Screen { alternate: bool },
     MoveCursor { cols: usize, rows: usize },
+    SixelCursor { rows: usize, column: usize },
     Batch(Vec<TerminalGraphicsEvent>),
     Respond(Vec<u8>),
     Error(String),
@@ -368,17 +392,21 @@ enum ParserState {
     DcsEsc(Vec<u8>),
     Apc(Vec<u8>),
     ApcEsc(Vec<u8>),
+    DiscardString { osc: bool, escape: bool },
 }
 
 pub struct GraphicsIngress {
     options: GraphicsOptions,
     state: ParserState,
+    utf8_remaining: u8,
     next_image_id: u64,
     kitty_chunks: HashMap<u64, KittyChunkAssembly>,
     kitty_images: HashMap<TerminalImageId, TerminalImageData>,
     kitty_numbers: HashMap<(bool, u32), Vec<TerminalImageId>>,
     kitty_wire_ids: HashMap<(bool, u32), TerminalImageId>,
     kitty_placements: Vec<TerminalImagePlacement>,
+    sixel_placements: Vec<TerminalImagePlacement>,
+    sixel_state: Option<Box<SixelState>>,
     next_placement_serial: u64,
     grid_events: Option<alacritty_terminal::term::graphics::GraphicsGridEvents>,
     alternate_screen: bool,

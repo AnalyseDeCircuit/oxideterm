@@ -42,7 +42,7 @@ use oxideterm_terminal_graphics::{
 use polling::{Event as PollingEvent, Events, PollMode, Poller};
 
 use crate::{
-    TerminalEvent, TerminalOutputProcessor, TerminalSize,
+    LocalProtocolReplies, TerminalEvent, TerminalOutputProcessor, TerminalPalette, TerminalSize,
     backpressure::{
         LOCAL_MAX_LOCKED_PARSE_BYTES, LOCAL_PTY_READ_BUFFER_BYTES, MagicScanWindow,
         TerminalMagicKind, Utf8ResidualGuard,
@@ -66,6 +66,7 @@ pub(crate) enum LocalGraphicsMsg {
     Shutdown,
     Resize(WindowSize),
     SetEncoding(TerminalEncoding),
+    SetPalette(TerminalPalette),
     SetOutputProcessor(Option<TerminalOutputProcessor>),
     SetOutputEventsEnabled(bool),
     SetTriggerRules(Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>),
@@ -98,7 +99,7 @@ pub(crate) struct LocalGraphicsEventLoop<U: EventListener> {
     tx: Sender<LocalGraphicsMsg>,
     terminal: Arc<FairMutex<Term<U>>>,
     event_proxy: U,
-    protocol_rx: crossbeam_channel::Receiver<String>,
+    protocol_rx: Option<crossbeam_channel::Receiver<Event>>,
     drain_on_exit: bool,
     read_eof: bool,
     graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
@@ -119,7 +120,7 @@ where
     pub(crate) fn new(
         terminal: Arc<FairMutex<Term<U>>>,
         event_proxy: U,
-        protocol_rx: crossbeam_channel::Receiver<String>,
+        protocol_rx: crossbeam_channel::Receiver<Event>,
         pty: tty::Pty,
         drain_on_exit: bool,
         graphics_tx: CrossbeamSender<TerminalGraphicsEvent>,
@@ -145,7 +146,7 @@ where
             tx,
             terminal,
             event_proxy,
-            protocol_rx,
+            protocol_rx: Some(protocol_rx),
             drain_on_exit,
             read_eof: false,
             graphics_tx,
@@ -180,6 +181,7 @@ where
         let mut priority_writes = Vec::new();
         {
             let graphics = &mut state.graphics;
+            let protocol = &state.protocol;
             let parser = &mut state.parser;
             let encoding_detector = &mut state.encoding_detector;
             let output_decoder = &mut state.output_decoder;
@@ -237,6 +239,7 @@ where
                                 },
                             );
                         }
+                        priority_writes.extend(protocol.drain(terminal, size));
                         cursor.set(graphics_cursor_from_term(terminal, size));
                     }
                     TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Respond(bytes)) => {
@@ -484,6 +487,10 @@ where
                 LocalGraphicsMsg::SetEncoding(encoding) => {
                     state.set_encoding(encoding);
                 }
+                LocalGraphicsMsg::SetPalette(palette) => {
+                    state.protocol.palette = palette;
+                    self.terminal.lock().notify_palette_changed();
+                }
                 LocalGraphicsMsg::SetOutputProcessor(processor) => {
                     state.output_processor = processor;
                     state.utf8_guard = Utf8ResidualGuard::default();
@@ -697,9 +704,11 @@ where
     }
 
     fn queue_protocol_replies(&self, state: &mut LocalGraphicsState) {
-        for reply in self.protocol_rx.try_iter() {
-            state.push_priority_write(Cow::Owned(reply.into_bytes()));
+        if state.protocol.rx.is_empty() {
+            return;
         }
+        let replies = state.protocol.drain(&self.terminal.lock(), self.size);
+        state.push_priority_writes(replies);
     }
 
     fn pty_write(&mut self, state: &mut LocalGraphicsState) -> io::Result<()> {
@@ -783,6 +792,9 @@ where
                         .take()
                         .expect("local tmux controller must be transferred once"),
                     self.recording_sink.take(),
+                    self.protocol_rx
+                        .take()
+                        .expect("local protocol replies belong to the PTY reader"),
                 );
                 if let Some(sink) = &state.recording_sink {
                     let poll = self.poll.clone();
@@ -1082,6 +1094,7 @@ impl LocalGraphicsEventLoopSender {
 }
 
 struct LocalGraphicsState {
+    protocol: LocalProtocolReplies,
     priority_writes: VecDeque<Writing>,
     write_list: VecDeque<Writing>,
     writing: Option<Writing>,
@@ -1109,11 +1122,16 @@ impl LocalGraphicsState {
         modem_wake: Arc<dyn Fn() + Send + Sync + 'static>,
         tmux_controller: crate::tmux::TmuxController,
         recording_sink: Option<oxideterm_audit::RecordingSink>,
+        protocol_rx: crossbeam_channel::Receiver<Event>,
     ) -> Self {
         let recording_pending = recording_sink
             .as_ref()
             .map(|sink| Rc::new(RefCell::new(RecordingOutput::new(sink.clone()))));
         Self {
+            protocol: LocalProtocolReplies {
+                rx: protocol_rx,
+                palette: TerminalPalette::default(),
+            },
             priority_writes: VecDeque::new(),
             write_list: VecDeque::new(),
             writing: None,

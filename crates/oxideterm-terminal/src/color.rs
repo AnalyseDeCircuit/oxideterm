@@ -107,7 +107,11 @@ pub(crate) fn attrs_from_flags(flags: Flags) -> TerminalAttrs {
     )
 }
 
-fn color_to_rgb(color: Color, palette: &TerminalPalette, overrides: &Colors) -> TerminalColor {
+pub(crate) fn color_to_rgb(
+    color: Color,
+    palette: &TerminalPalette,
+    overrides: &Colors,
+) -> TerminalColor {
     match color {
         Color::Named(named) => palette_slot_color(named as usize, palette, overrides),
         Color::Spec(rgb) => TerminalColor::rgb(rgb.r, rgb.g, rgb.b),

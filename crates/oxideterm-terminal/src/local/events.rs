@@ -1,7 +1,7 @@
 #[derive(Clone)]
 struct LocalEventListener {
     tx: Sender<AlacEvent>,
-    protocol_tx: Option<Sender<String>>,
+    protocol_tx: Option<Sender<AlacEvent>>,
     wakeup_pending: Arc<std::sync::atomic::AtomicBool>,
     activity: crate::activity::TerminalActivitySender,
 }
@@ -10,6 +10,31 @@ struct LocalEventReceiver {
     rx: Receiver<AlacEvent>,
     wakeup_pending: Arc<std::sync::atomic::AtomicBool>,
     activity: TerminalActivityReceiver,
+}
+
+pub(crate) struct LocalProtocolReplies {
+    pub(crate) rx: Receiver<AlacEvent>,
+    pub(crate) palette: TerminalPalette,
+}
+
+impl LocalProtocolReplies {
+    pub(crate) fn drain<T>(&self, term: &Term<T>, size: TerminalSize) -> Vec<Cow<'static, [u8]>> {
+        self.rx
+            .try_iter()
+            .filter_map(|event| {
+                let text = match event {
+                    AlacEvent::PtyWrite(text) => text,
+                    AlacEvent::ColorRequest(index, formatter) => formatter(
+                        color_for_alacritty_request(index, &self.palette, term.colors()),
+                    ),
+                    AlacEvent::TextAreaSizeRequest(formatter) => formatter(window_size(size)),
+                    AlacEvent::ColorSchemeRequest => self.palette.color_scheme_report().to_owned(),
+                    _ => return None,
+                };
+                Some(Cow::Owned(text.into_bytes()))
+            })
+            .collect()
+    }
 }
 
 fn local_event_channel() -> (LocalEventListener, LocalEventReceiver) {
@@ -59,12 +84,17 @@ impl LocalEventReceiver {
 
 impl EventListener for LocalEventListener {
     fn send_event(&self, event: AlacEvent) {
-        if let AlacEvent::PtyWrite(text) = &event
-            && let Some(tx) = &self.protocol_tx
+        if matches!(
+            &event,
+            AlacEvent::PtyWrite(_)
+                | AlacEvent::ColorRequest(..)
+                | AlacEvent::TextAreaSizeRequest(_)
+                | AlacEvent::ColorSchemeRequest
+        ) && let Some(tx) = &self.protocol_tx
         {
-            // ConPTY waits for cursor reports after resize. Reply on the PTY
-            // worker even when the pane is hidden or the UI thread is busy.
-            let _ = tx.send(text.clone());
+            // Image clients read replies before leaving raw mode. UI-delayed replies
+            // can arrive after they exit and become input to the shell instead.
+            let _ = tx.send(event);
             return;
         }
         let is_wakeup = matches!(event, AlacEvent::Wakeup);
