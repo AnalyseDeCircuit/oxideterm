@@ -183,6 +183,8 @@
       "empty": "Nessun container corrispondente",
       "unavailable": "Docker non è disponibile su questo host.",
       "error": "Comando Docker non riuscito: {{error}}",
+      "incomplete": "Impossibile ottenere l’elenco completo dei container. Aggiorna per riprovare.",
+      "output_limit": "La raccolta dei dati dell’host ha superato il limite di output. Impossibile caricare l’elenco dei container.",
       "columns": {
         "container": "Container / Immagine",
         "image": "Immagine",

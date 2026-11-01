@@ -183,6 +183,8 @@
       "empty": "没有匹配的容器",
       "unavailable": "此主机上 Docker 不可用。",
       "error": "Docker 命令失败：{{error}}",
+      "incomplete": "未能获取完整的容器列表，请刷新重试。",
+      "output_limit": "主机采样输出超出上限，无法加载容器列表。",
       "columns": {
         "container": "容器 / 镜像",
         "image": "镜像",

@@ -2951,6 +2951,7 @@ fn public_command_error(error: SshTransportError) -> String {
             "The command may have executed, but its result could not be confirmed; check the remote state before retrying".to_owned()
         }
         SshTransportError::Timeout => "The remote command timed out".to_owned(),
+        SshTransportError::SampleOutputLimit { .. } => "Sample output exceeded the size limit".to_owned(),
         SshTransportError::DnsResolution { .. } => {
             "The SSH host name could not be resolved".to_owned()
         }

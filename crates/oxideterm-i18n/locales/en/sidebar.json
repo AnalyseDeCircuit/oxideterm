@@ -183,6 +183,8 @@
       "empty": "No containers match",
       "unavailable": "Docker is not available on this host.",
       "error": "Docker command failed: {{error}}",
+      "incomplete": "Could not retrieve a complete container list. Refresh to retry.",
+      "output_limit": "Host sampling exceeded the output limit. The container list could not be loaded.",
       "columns": {
         "container": "Container / Image",
         "image": "Image",

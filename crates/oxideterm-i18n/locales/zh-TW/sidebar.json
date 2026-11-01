@@ -183,6 +183,8 @@
       "empty": "沒有符合的容器",
       "unavailable": "此主機上 Docker 無法使用。",
       "error": "Docker 命令失敗：{{error}}",
+      "incomplete": "未能取得完整的容器清單，請重新整理後重試。",
+      "output_limit": "主機採樣輸出超過上限，無法載入容器清單。",
       "columns": {
         "container": "容器 / 映像檔",
         "image": "映像檔",

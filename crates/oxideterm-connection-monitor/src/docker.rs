@@ -21,6 +21,8 @@ pub enum ResourceDockerStatus {
     Unknown,
     Available,
     Unavailable,
+    Incomplete,
+    OutputLimit,
     Error {
         message: String,
     },
@@ -82,16 +84,28 @@ struct DockerInspectOverride {
 const DOCKER_UNAVAILABLE_MARKER: &str = "__OXIDE_DOCKER_UNAVAILABLE__";
 const DOCKER_ERROR_MARKER: &str = "__OXIDE_DOCKER_ERROR__";
 
+// Generate JSON keys inside the template so legacy PowerShell native argument passing
+// cannot strip their quotes. Only fields consumed by this panel cross the SSH channel.
+macro_rules! docker_ps_format {
+    () => { r#"{ {{json `ID`}}:{{json .ID}},{{json `Names`}}:{{json .Names}},{{json `Image`}}:{{json .Image}},{{json `State`}}:{{json .State}},{{json `Status`}}:{{json .Status}},{{json `Ports`}}:{{json .Ports}}}"# };
+}
+
+macro_rules! docker_inspect_format {
+    () => {
+        r#"{ {{json `Id`}}:{{json .Id}},{{json `Name`}}:{{json .Name}},{{json `Config`}}:{ {{json `Image`}}:{{json .Config.Image}}}}"#
+    };
+}
+
 const DOCKER_SAMPLE_COMMAND_UNIX: &str = concat!(
     "echo '===DOCKER==='; ",
     "if command -v docker >/dev/null 2>&1; then ",
     "oxide_docker_ps=$(docker ps -a --no-trunc --format '",
-    "{{json .}}",
+    docker_ps_format!(),
     "' 2>&1); ",
     "oxide_docker_status=$?; ",
     "if [ \"$oxide_docker_status\" -ne 0 ]; then ",
     "oxide_docker_ps=$(sudo -n docker ps -a --no-trunc --format '",
-    "{{json .}}",
+    docker_ps_format!(),
     "' 2>&1); ",
     "oxide_docker_status=$?; ",
     "fi; ",
@@ -105,12 +119,12 @@ const DOCKER_SAMPLE_COMMAND_UNIX: &str = concat!(
     "fi; ",
     "if [ \"$oxide_docker_ids_status\" -eq 0 ] && [ -n \"$oxide_docker_ids\" ]; then ",
     "oxide_docker_inspect=$(docker inspect --format '",
-    "{{json .}}",
+    docker_inspect_format!(),
     "' $oxide_docker_ids 2>/dev/null); ",
     "oxide_docker_inspect_status=$?; ",
     "if [ \"$oxide_docker_inspect_status\" -ne 0 ]; then ",
     "oxide_docker_inspect=$(sudo -n docker inspect --format '",
-    "{{json .}}",
+    docker_inspect_format!(),
     "' $oxide_docker_ids 2>/dev/null); ",
     "oxide_docker_inspect_status=$?; ",
     "fi; ",
@@ -131,14 +145,14 @@ const DOCKER_SAMPLE_COMMAND_WINDOWS: &str = concat!(
     "Write-Output '===DOCKER===';",
     "if(Get-Command docker -ErrorAction SilentlyContinue){",
     "$oxideDockerPs=& docker ps -a --no-trunc --format '",
-    "{{json .}}",
+    docker_ps_format!(),
     "' 2>&1;",
     "if($LASTEXITCODE -eq 0){",
     "$oxideDockerPs|ForEach-Object{Write-Output ('PS'+[char]9+$_)};",
     "$oxideDockerIds=& docker ps -aq --no-trunc 2>$null;",
     "if($LASTEXITCODE -eq 0 -and $oxideDockerIds){",
     "$oxideDockerInspect=& docker inspect --format '",
-    "{{json .}}",
+    docker_inspect_format!(),
     "' $oxideDockerIds 2>$null;",
     "if($LASTEXITCODE -eq 0){$oxideDockerInspect|ForEach-Object{Write-Output ('INSPECT'+[char]9+$_)}}",
     "}",
@@ -158,7 +172,14 @@ pub fn docker_sample_command(os_type: &str) -> &'static str {
 
 pub fn parse_docker_snapshot(output: &str) -> ResourceDockerSnapshot {
     let Some(section) = extract_section(output, "DOCKER") else {
-        return ResourceDockerSnapshot::default();
+        return ResourceDockerSnapshot {
+            status: if output.lines().any(|line| line.trim() == "===DOCKER===") {
+                ResourceDockerStatus::Incomplete
+            } else {
+                ResourceDockerStatus::Unknown
+            },
+            containers: Vec::new(),
+        };
     };
 
     let mut containers = Vec::new();
@@ -464,8 +485,18 @@ fn compact_docker_command_message(value: &str) -> Option<String> {
 fn extract_section<'a>(output: &'a str, name: &str) -> Option<&'a str> {
     let start = format!("==={name}===");
     let end = format!("==={name}_END===");
-    let after_start = output.split_once(&start)?.1;
-    Some(after_start.split_once(&end)?.0.trim())
+    // Match whole lines: PTY command echo and JSON string values may contain marker text.
+    let mut section_start = None;
+    let mut offset = 0;
+    for line in output.split_inclusive('\n') {
+        if line.trim() == start {
+            section_start = Some(offset + line.len());
+        } else if line.trim() == end {
+            return section_start.map(|start| output[start..offset].trim());
+        }
+        offset += line.len();
+    }
+    None
 }
 
 #[cfg(test)]
@@ -565,6 +596,22 @@ mod tests {
 
     #[test]
     fn docker_parser_reports_unavailable_and_errors() {
+        for output in [
+            "===DOCKER===\nPS\t{\"ID\":\"abc123def456\",\"Names\":\"web\"}\n",
+            "===DOCKER===\nPS\t{\"ID\":\"abc123def456\",\"Names\":\"===DOCKER_END===\"}\n",
+        ] {
+            let snapshot = parse_docker_snapshot(output);
+            assert_eq!(snapshot.status, ResourceDockerStatus::Incomplete);
+            assert!(snapshot.containers.is_empty());
+        }
+        assert_eq!(
+            parse_docker_snapshot("echo '===DOCKER==='; echo '===DOCKER_END==='\n").status,
+            ResourceDockerStatus::Unknown
+        );
+        assert_eq!(
+            parse_docker_snapshot("===DOCKER===\n===DOCKER_END===\n").status,
+            ResourceDockerStatus::Available
+        );
         assert_eq!(
             parse_docker_snapshot("===DOCKER===\n__OXIDE_DOCKER_UNAVAILABLE__\n===DOCKER_END===")
                 .status,
@@ -642,12 +689,14 @@ mod tests {
 
     #[test]
     fn docker_sample_command_keeps_machine_readable_format() {
-        let expected_format = "{{json .}}";
-        assert!(docker_sample_command("Linux").contains(expected_format));
-        assert!(docker_sample_command("Windows").contains(expected_format));
-        assert!(docker_sample_command("Linux").contains("--no-trunc"));
-        assert!(docker_sample_command("Windows").contains("--no-trunc"));
-        assert!(docker_sample_command("Linux").contains("docker inspect --format"));
-        assert!(docker_sample_command("Windows").contains("docker inspect --format"));
+        for os in ["Linux", "Windows"] {
+            let command = docker_sample_command(os);
+            assert!(
+                !command.contains("{{json .}}"),
+                "{os}: do not collect full configs or labels"
+            );
+            assert!(command.contains(r#"docker ps -a --no-trunc --format '{ {{json `ID`}}:{{json .ID}},{{json `Names`}}:{{json .Names}},{{json `Image`}}:{{json .Image}},{{json `State`}}:{{json .State}},{{json `Status`}}:{{json .Status}},{{json `Ports`}}:{{json .Ports}}}'"#));
+            assert!(command.contains(r#"docker inspect --format '{ {{json `Id`}}:{{json .Id}},{{json `Name`}}:{{json .Name}},{{json `Config`}}:{ {{json `Image`}}:{{json .Config.Image}}}}'"#));
+        }
     }
 }

@@ -183,6 +183,8 @@
       "empty": "일치하는 컨테이너가 없습니다",
       "unavailable": "이 호스트에서 Docker를 사용할 수 없습니다.",
       "error": "Docker 명령 실패: {{error}}",
+      "incomplete": "전체 컨테이너 목록을 가져오지 못했습니다. 새로고침하여 다시 시도하세요.",
+      "output_limit": "호스트 데이터 수집이 출력 한도를 초과하여 컨테이너 목록을 불러오지 못했습니다.",
       "columns": {
         "container": "컨테이너 / 이미지",
         "image": "이미지",

@@ -183,6 +183,8 @@
       "empty": "Aucun conteneur correspondant",
       "unavailable": "Docker n’est pas disponible sur cet hôte.",
       "error": "La commande Docker a échoué : {{error}}",
+      "incomplete": "Impossible de récupérer la liste complète des conteneurs. Actualisez pour réessayer.",
+      "output_limit": "La collecte des données de l’hôte a dépassé la limite de sortie. Impossible de charger la liste des conteneurs.",
       "columns": {
         "container": "Conteneur / Image",
         "image": "Image",

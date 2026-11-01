@@ -60,10 +60,11 @@ const SYSTEM_INFO_COMMAND_UNIX: &str = concat!(
 );
 
 const METRICS_COMMAND_LINUX_SYSTEM: &str = concat!(
-    "echo '===STAT==='; grep -E '^cpu[0-9]* ' /proc/stat 2>/dev/null; ",
+    "echo '===STAT==='; awk '/^cpu[0-9]* / && NF>=9 {print $1,$2,$3,$4,$5,$6,$7,$8,$9}' /proc/stat 2>/dev/null; ",
     "echo '===MEMINFO==='; grep -E '^(MemTotal|MemAvailable|MemFree|Buffers|Cached|SReclaimable|SwapTotal|SwapFree):' /proc/meminfo 2>/dev/null; ",
-    "echo '===LOADAVG==='; cat /proc/loadavg 2>/dev/null; ",
-    "echo '===NETDEV==='; cat /proc/net/dev 2>/dev/null; ",
+    "echo '===LOADAVG==='; awk '{print $1,$2,$3}' /proc/loadavg 2>/dev/null; ",
+    // Match the parser's interface exclusions and retain only byte counters in its wire layout.
+    "echo '===NETDEV==='; awk -F: 'NF==2 {name=$1;gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",name);if(name==\"lo\" || name~/^(veth|docker|br-|virbr|cni|flannel)/)next;data=$2;sub(/^[[:space:]]+/,\"\",data);n=split(data,v,/[[:space:]]+/);if(n>=9)printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",name,v[1],v[9]}' /proc/net/dev 2>/dev/null; ",
     "echo '===NPROC==='; (nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || true); ",
     "echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'"
 );
@@ -186,6 +187,27 @@ impl ProfilerFailure {
 
 pub type ResourceSamplerFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
+#[derive(Debug)]
+pub enum ResourceSampleError {
+    OutputLimit { channel_reusable: bool },
+    Failed(String),
+}
+
+impl From<String> for ResourceSampleError {
+    fn from(message: String) -> Self {
+        Self::Failed(message)
+    }
+}
+
+impl std::fmt::Display for ResourceSampleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::OutputLimit { .. } => f.write_str("Sample output exceeded the size limit"),
+            Self::Failed(message) => f.write_str(message),
+        }
+    }
+}
+
 pub trait ResourceSampleShell: Send {
     fn sample_until<'a>(
         &'a mut self,
@@ -193,7 +215,7 @@ pub trait ResourceSampleShell: Send {
         end_marker: &'a str,
         timeout: Duration,
         max_output_size: usize,
-    ) -> ResourceSamplerFuture<'a, Result<String, String>>;
+    ) -> ResourceSamplerFuture<'a, Result<String, ResourceSampleError>>;
 
     fn close<'a>(&'a mut self) -> ResourceSamplerFuture<'a, Result<(), String>>;
 }
@@ -599,8 +621,16 @@ fn build_windows_sample_command(
     include_system_info: bool,
 ) -> String {
     let mut script = String::from("$ErrorActionPreference='SilentlyContinue';");
-    if config.system || config.processes {
-        script.push_str("$os=Get-CimInstance Win32_OperatingSystem;");
+    if config.system {
+        script.push_str("$os=Get-CimInstance Win32_OperatingSystem -Property TotalVisibleMemorySize,FreePhysicalMemory,TotalVirtualMemorySize,FreeVirtualMemory");
+        if include_system_info {
+            script.push_str(",Caption,Version,BuildNumber,OSArchitecture,LastBootUpTime");
+        }
+        script.push(';');
+    } else if config.processes {
+        script.push_str(
+            "$os=Get-CimInstance Win32_OperatingSystem -Property TotalVisibleMemorySize;",
+        );
     }
     if include_system_info && config.system {
         script.push_str(concat!(
@@ -619,7 +649,8 @@ fn build_windows_sample_command(
     if config.system {
         script.push_str(concat!(
             "Write-Output '===CPU_DIRECT===';",
-            "$cpu=(Get-CimInstance Win32_Processor|Measure-Object -Property LoadPercentage -Average).Average;",
+            "$cpuInfo=Get-CimInstance Win32_Processor -Property LoadPercentage,NumberOfLogicalProcessors;",
+            "$cpu=($cpuInfo|Measure-Object -Property LoadPercentage -Average).Average;",
             "if($cpu -ne $null){[Math]::Round($cpu,1)};",
             "Write-Output '===MEMINFO===';",
             "if($os){",
@@ -631,10 +662,10 @@ fn build_windows_sample_command(
             "Write-Output ('SwapFree: '+$sf+' kB');",
             "};",
             "Write-Output '===NPROC===';",
-            "$cores=(Get-CimInstance Win32_Processor|Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum;",
+            "$cores=($cpuInfo|Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum;",
             "if($cores){$cores};",
             "Write-Output '===DISKS===';",
-            "Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3'|ForEach-Object{",
+            "Get-CimInstance Win32_LogicalDisk -Property DeviceID,Size,FreeSpace -Filter 'DriveType=3'|ForEach-Object{",
             "$total=[UInt64]$_.Size;$free=[UInt64]$_.FreeSpace;$used=$total-$free;",
             "$pct=if($total -gt 0){[Math]::Round(($used*100)/$total,1)}else{0};",
             "Write-Output ($_.DeviceID+[char]9+$used+[char]9+$total+[char]9+$pct)",
@@ -648,7 +679,7 @@ fn build_windows_sample_command(
     if config.gpu {
         script.push_str(concat!(
             "Write-Output '===GPUS===';",
-            "$gpuControllers=@(Get-CimInstance Win32_VideoController);",
+            "$gpuControllers=@(Get-CimInstance Win32_VideoController -Property Name,AdapterRAM);",
             "$gpuUtil=@{};$gpuMem=@{};",
             "try{",
             "$samples=(Get-Counter '\\GPU Engine(*)\\Utilization Percentage').CounterSamples;",
@@ -695,9 +726,13 @@ fn build_windows_sample_command(
         script.push_str(&docker_sample_command("Windows"));
     }
     script.push_str("Write-Output '===END===';");
-    // OpenSSH on Windows may start cmd.exe or PowerShell; invoking PowerShell
-    // explicitly keeps the sampler independent from the user's default shell.
-    format!("powershell -NoProfile -ExecutionPolicy Bypass -Command \"{script}\"\r\n")
+    // Keep quotes and variables intact through either cmd.exe or PowerShell. Encoding UTF-8
+    // instead of UTF-16 leaves the full probe below cmd.exe's 8191-character command limit.
+    use base64::Engine as _;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(script.as_bytes());
+    format!(
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"& ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}'))))\"\r\n"
+    )
 }
 
 pub fn shell_init_command(os_type: &str) -> &'static str {
@@ -825,6 +860,9 @@ async fn sample_loop(
                         let timestamp_ms = now_ms();
                         let mut metrics =
                             parse_resource_metrics(&output, previous_sample.as_ref(), timestamp_ms);
+                        if config.docker && matches!(metrics.docker.status, crate::ResourceDockerStatus::Unknown) {
+                            metrics.docker.status = crate::ResourceDockerStatus::Incomplete;
+                        }
                         if !system_info_sampled {
                             system_info_sampled = true;
                             if let Some(system_info) = metrics.system_info.clone() {
@@ -866,21 +904,26 @@ async fn sample_loop(
                         previous_sample = previous_sample_from_metrics(&metrics, &output);
                         record_and_emit(&registry, &update_tx, connection_id.clone(), metrics);
                     }
-                    Err(_) => {
+                    Err(error) => {
+                        let channel_reusable = matches!(error, ResourceSampleError::OutputLimit { channel_reusable: true });
                         registry.record_failure(&connection_id, ProfilerFailure::ReadSample);
                         consecutive_failures = consecutive_failures.saturating_add(1);
+                        let mut failed_metrics = empty_metrics_with_cached_system_info(
+                            now_ms(), MetricsSource::Failed, cached_system_info.as_ref(),
+                        );
+                        if config.docker {
+                            failed_metrics.docker.status = match error {
+                                ResourceSampleError::OutputLimit { .. } => crate::ResourceDockerStatus::OutputLimit,
+                                ResourceSampleError::Failed(_) => crate::ResourceDockerStatus::Incomplete,
+                            };
+                        }
                         if consecutive_failures >= RESOURCE_MAX_CONSECUTIVE_FAILURES {
                             registry.mark_degraded(&connection_id);
-                            let timestamp_ms = now_ms();
                             record_and_emit(
                                 &registry,
                                 &update_tx,
                                 connection_id.clone(),
-                                empty_metrics_with_cached_system_info(
-                                    timestamp_ms,
-                                    MetricsSource::Unsupported,
-                                    cached_system_info.as_ref(),
-                                ),
+                                failed_metrics,
                             );
                             let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
                             break;
@@ -889,6 +932,12 @@ async fn sample_loop(
                         // failure and then tries to reopen the persistent shell
                         // once. Without that update, the native UI can look
                         // inert until the profiler finally degrades.
+                        // Retire only this sampler's channel before acquiring its replacement.
+                        if channel_reusable {
+                            record_and_emit(&registry, &update_tx, connection_id.clone(), failed_metrics);
+                            continue;
+                        }
+                        let _ = tokio::time::timeout(RESOURCE_SAMPLE_TIMEOUT, shell.close()).await;
                         let reopened = tokio::select! {
                             biased;
                             _ = &mut stop_rx => {
@@ -904,11 +953,7 @@ async fn sample_loop(
                             &registry,
                             &update_tx,
                             connection_id.clone(),
-                            empty_metrics_with_cached_system_info(
-                                now_ms(),
-                                MetricsSource::Failed,
-                                cached_system_info.as_ref(),
-                            ),
+                            failed_metrics,
                         );
                     }
                 }
@@ -1091,10 +1136,96 @@ mod tests {
                 docker: true,
             },
         );
-        assert!(docker_only.contains("===DOCKER==="));
-        assert!(!docker_only.contains("Win32_OperatingSystem"));
-        assert!(!docker_only.contains("===TOPPROCS==="));
-        assert!(!docker_only.contains("===PORTS==="));
+        use base64::Engine as _;
+        let encoded = docker_only
+            .split_once("FromBase64String('")
+            .unwrap()
+            .1
+            .split_once('\'')
+            .unwrap()
+            .0;
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded)
+            .unwrap();
+        let script = String::from_utf8(bytes).unwrap();
+        assert!(script.contains("===DOCKER==="));
+        assert!(script.contains("{{json `Image`}}:{{json .Config.Image}}"));
+        assert!(!script.contains("Win32_OperatingSystem"));
+        assert!(!script.contains("===TOPPROCS==="));
+        assert!(!script.contains("===PORTS==="));
+        assert!(
+            build_sample_command("Windows").len() <= 8191,
+            "cmd.exe must accept the full probe"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linux_field_filters_preserve_consumed_counters() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        for (section, args, input, expected) in [
+            (
+                "STAT",
+                vec![],
+                "cpu 10 20 30 40 50 60 70 80 900 1000\ncpu0 1 2 3 4 5 6 7 8 90 100\nintr 123\n",
+                "cpu 10 20 30 40 50 60 70 80\ncpu0 1 2 3 4 5 6 7 8\n",
+            ),
+            (
+                "LOADAVG",
+                vec![],
+                "0.25 0.50 0.75 2/500 12345\n",
+                "0.25 0.50 0.75\n",
+            ),
+            (
+                "NETDEV",
+                vec!["-F:"],
+                concat!(
+                    "Inter-| Receive | Transmit\n",
+                    " eth0: 100 1 2 3 4 5 6 7 200 8 9 10 11 12 13 14\n",
+                    " lo: 300 0 0 0 0 0 0 0 400\n",
+                    " veth123: 300 0 0 0 0 0 0 0 400\n",
+                    " docker0: 300 0 0 0 0 0 0 0 400\n",
+                    " br-123: 300 0 0 0 0 0 0 0 400\n",
+                    " virbr0: 300 0 0 0 0 0 0 0 400\n",
+                    " cni0: 300 0 0 0 0 0 0 0 400\n",
+                    " flannel.1: 300 0 0 0 0 0 0 0 400\n",
+                    " wlan0: 9007199254740993 0 0 0 0 0 0 0 8007199254740993\n",
+                ),
+                "eth0: 100 0 0 0 0 0 0 0 200\nwlan0: 9007199254740993 0 0 0 0 0 0 0 8007199254740993\n",
+            ),
+        ] {
+            let marker = format!("echo '==={section}==='; ");
+            let command = METRICS_COMMAND_LINUX_SYSTEM.split_once(&marker).unwrap().1;
+            let program = command
+                .split_once('\'')
+                .unwrap()
+                .1
+                .split_once('\'')
+                .unwrap()
+                .0;
+            let mut child = Command::new("awk")
+                .args(args)
+                .arg(program)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(input.as_bytes())
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert!(output.status.success());
+            assert_eq!(
+                String::from_utf8(output.stdout).unwrap(),
+                expected,
+                "{section}"
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -1273,7 +1404,9 @@ mod tests {
         );
         for (output, failure, cpu) in [
             (
-                Err("synthetic-private-error-content".into()),
+                Err(ResourceSampleError::Failed(
+                    "synthetic-private-error-content".into(),
+                )),
                 Some(ProfilerFailure::ReadSample),
                 None,
             ),
@@ -1310,8 +1443,64 @@ mod tests {
         registry.stop("failure-stages");
     }
 
+    #[tokio::test]
+    async fn oversized_docker_samples_report_failure_and_recover() {
+        let registry = ProfilerRegistry::new();
+        let (requests, mut samples) = mpsc::unbounded_channel();
+        let (updates, mut updated) = mpsc::channel(1);
+        let opens = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        registry.start_with_sampler(
+            "docker-limit",
+            Arc::new(ControlledSampler {
+                requests,
+                opens: opens.clone(),
+            }),
+            "Linux",
+            Some(updates),
+        );
+        for (output, expected) in [
+            (
+                Err(ResourceSampleError::OutputLimit {
+                    channel_reusable: true,
+                }),
+                crate::ResourceDockerStatus::OutputLimit,
+            ),
+            (
+                Ok("===DOCKER===\n===DOCKER_END===\n===END===\n".into()),
+                crate::ResourceDockerStatus::Available,
+            ),
+        ] {
+            let response = tokio::time::timeout(Duration::from_secs(1), samples.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            response.send(output).unwrap();
+            tokio::time::timeout(Duration::from_secs(1), updated.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                registry
+                    .snapshot("docker-limit")
+                    .unwrap()
+                    .metrics
+                    .unwrap()
+                    .docker
+                    .status,
+                expected
+            );
+            registry.request_refresh("docker-limit");
+        }
+        registry.stop("docker-limit");
+        assert_eq!(
+            opens.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "a drained sample must reuse its channel"
+        );
+    }
+
     struct ControlledSampler {
-        requests: mpsc::UnboundedSender<oneshot::Sender<Result<String, String>>>,
+        requests: mpsc::UnboundedSender<oneshot::Sender<Result<String, ResourceSampleError>>>,
         opens: Arc<std::sync::atomic::AtomicUsize>,
     }
 
@@ -1329,7 +1518,9 @@ mod tests {
         }
     }
 
-    struct ControlledShell(mpsc::UnboundedSender<oneshot::Sender<Result<String, String>>>);
+    struct ControlledShell(
+        mpsc::UnboundedSender<oneshot::Sender<Result<String, ResourceSampleError>>>,
+    );
 
     impl ResourceSampleShell for ControlledShell {
         fn sample_until<'a>(
@@ -1338,7 +1529,7 @@ mod tests {
             _: &'a str,
             _: Duration,
             _: usize,
-        ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+        ) -> ResourceSamplerFuture<'a, Result<String, ResourceSampleError>> {
             Box::pin(async move {
                 let (tx, rx) = oneshot::channel();
                 self.0.send(tx).unwrap();
@@ -1429,7 +1620,7 @@ mod tests {
             _: &'a str,
             _: Duration,
             _: usize,
-        ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+        ) -> ResourceSamplerFuture<'a, Result<String, ResourceSampleError>> {
             Box::pin(async move {
                 self.entered.notify_one();
                 std::future::pending().await

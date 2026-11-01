@@ -137,6 +137,19 @@ impl server::Handler for Peer {
             return session.close(channel);
         }
         let command = std::str::from_utf8(data).unwrap();
+        if command.starts_with("sample-overflow") || command.starts_with("sample-unfinished") {
+            self.counts.payloads.fetch_add(1, Ordering::SeqCst);
+            session.data(channel, vec![b'x'; 512])?;
+            if command.starts_with("sample-overflow") {
+                session.data(channel, b"\nold tail\n===EN".to_vec())?;
+                session.data(channel, b"D===\n".to_vec())?;
+            }
+            return Ok(());
+        }
+        if command.starts_with("sample-next") {
+            self.counts.payloads.fetch_add(1, Ordering::SeqCst);
+            return session.data(channel, b"fresh\n===END===\n".to_vec());
+        }
         if command.contains("__OXIDE_PROBE_")
             || command.contains("__OXIDE_READY_")
             || command.contains("__OXIDE_MONITOR_READY__")
@@ -247,6 +260,80 @@ async fn fixture(
         detected_at: 0,
     });
     (handle, counts, task)
+}
+
+#[tokio::test]
+async fn shell_sampling_drains_overflow_before_the_next_sample() {
+    let (handle, counts, server) = fixture(Mode::Shell).await;
+    let mut shell = handle
+        .open_sampling_shell_channel("", false, Duration::from_secs(1))
+        .await
+        .unwrap();
+    let result = shell
+        .sample_until("sample-overflow\n", "===END===", Duration::from_secs(1), 64)
+        .await;
+    assert!(matches!(
+        result,
+        Err(SshTransportError::SampleOutputLimit {
+            channel_reusable: true
+        })
+    ));
+    assert_eq!(
+        shell
+            .sample_until("sample-next\n", "===END===", Duration::from_secs(1), 64)
+            .await
+            .unwrap(),
+        "fresh\n===END===\n"
+    );
+    shell.close().await.unwrap();
+
+    use oxideterm_connection_monitor::{ResourceSampleError, ResourceSampler};
+    let mut sampler = handle.open_shell("", Duration::from_secs(1)).await.unwrap();
+    assert!(matches!(
+        sampler
+            .sample_until("sample-overflow\n", "===END===", Duration::from_secs(1), 64)
+            .await,
+        Err(ResourceSampleError::OutputLimit {
+            channel_reusable: true
+        })
+    ));
+    assert_eq!(
+        counts.payloads.load(Ordering::SeqCst),
+        3,
+        "overflow must not replay via PTY or exec"
+    );
+    sampler.close().await.unwrap();
+    let mut unfinished = handle
+        .open_sampling_shell_channel("", false, Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert!(matches!(
+        unfinished
+            .sample_until(
+                "sample-unfinished\n",
+                "===END===",
+                Duration::from_millis(50),
+                64
+            )
+            .await,
+        Err(SshTransportError::SampleOutputLimit {
+            channel_reusable: false
+        })
+    ));
+    let mut replacement = handle
+        .open_sampling_shell_channel("", false, Duration::from_secs(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        replacement
+            .sample_until("sample-next\n", "===END===", Duration::from_secs(1), 64)
+            .await
+            .unwrap(),
+        "fresh\n===END===\n"
+    );
+    replacement.close().await.unwrap();
+    assert_eq!(counts.authentications.load(Ordering::SeqCst), 1);
+    server.abort();
 }
 
 #[tokio::test]

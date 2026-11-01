@@ -183,6 +183,8 @@
       "empty": "Không có container phù hợp",
       "unavailable": "Docker không khả dụng trên máy chủ này.",
       "error": "Lệnh Docker thất bại: {{error}}",
+      "incomplete": "Không thể lấy danh sách container đầy đủ. Hãy làm mới để thử lại.",
+      "output_limit": "Dữ liệu thu thập từ máy chủ vượt quá giới hạn đầu ra. Không thể tải danh sách container.",
       "columns": {
         "container": "Container / Image",
         "image": "Image",

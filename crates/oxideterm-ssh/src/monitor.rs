@@ -4,12 +4,13 @@
 use std::{sync::Arc, time::Duration};
 
 use oxideterm_connection_monitor::{
-    RESOURCE_CHANNEL_OPEN_TIMEOUT, ResourceSampleShell, ResourceSampler, ResourceSamplerFuture,
+    RESOURCE_CHANNEL_OPEN_TIMEOUT, ResourceSampleError, ResourceSampleShell, ResourceSampler,
+    ResourceSamplerFuture,
 };
 
 use crate::{
     ConnectionConsumer, DedicatedConnectionLease, ManagedKeyResolver, NodeId, NodeRouter,
-    SshConnectionHandle, SshPromptHandler, SshShellChannel,
+    SshConnectionHandle, SshPromptHandler, SshShellChannel, SshTransportError,
 };
 
 pub struct DedicatedNodeResourceSampler {
@@ -117,7 +118,7 @@ impl ResourceSampleShell for SshResourceSampleShell {
         end_marker: &'a str,
         timeout: Duration,
         max_output_size: usize,
-    ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+    ) -> ResourceSamplerFuture<'a, Result<String, ResourceSampleError>> {
         Box::pin(async move {
             match self
                 .shell
@@ -125,6 +126,9 @@ impl ResourceSampleShell for SshResourceSampleShell {
                 .await
             {
                 Ok(output) => Ok(output),
+                Err(SshTransportError::SampleOutputLimit { channel_reusable }) => {
+                    Err(ResourceSampleError::OutputLimit { channel_reusable })
+                }
                 // Multiplexed servers may fall back to one-shot exec. A
                 // single-channel lease fails instead of opening a second channel.
                 Err(error) => {
@@ -144,21 +148,27 @@ impl ResourceSampleShell for SshResourceSampleShell {
                             .await
                         {
                             self.shell = shell;
-                            if let Ok(output) = self
+                            match self
                                 .shell
                                 .sample_until(command, end_marker, timeout, max_output_size)
                                 .await
                             {
-                                return Ok(output);
+                                Ok(output) => return Ok(output),
+                                Err(SshTransportError::SampleOutputLimit { channel_reusable }) => {
+                                    return Err(ResourceSampleError::OutputLimit {
+                                        channel_reusable,
+                                    });
+                                }
+                                Err(_) => {}
                             }
                         }
                     }
                     match self.fallback.as_ref() {
-                        Some(fallback) => fallback
-                            .run_command(command, timeout, max_output_size)
-                            .await
-                            .map_err(|error| error.to_string()),
-                        None => Err(error.to_string()),
+                        Some(fallback) => {
+                            sample_exec(fallback, command, end_marker, timeout, max_output_size)
+                                .await
+                        }
+                        None => Err(error.to_string().into()),
                     }
                 }
             }
@@ -179,19 +189,54 @@ impl ResourceSampleShell for SshExecResourceSampleShell {
     fn sample_until<'a>(
         &'a mut self,
         command: &'a str,
-        _end_marker: &'a str,
+        end_marker: &'a str,
         timeout: Duration,
         max_output_size: usize,
-    ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+    ) -> ResourceSamplerFuture<'a, Result<String, ResourceSampleError>> {
         Box::pin(async move {
-            self.connection
-                .run_command(command, timeout, max_output_size)
-                .await
-                .map_err(|error| error.to_string())
+            sample_exec(
+                &self.connection,
+                command,
+                end_marker,
+                timeout,
+                max_output_size,
+            )
+            .await
         })
     }
 
     fn close<'a>(&'a mut self) -> ResourceSamplerFuture<'a, Result<(), String>> {
         Box::pin(async { Ok(()) })
     }
+}
+
+async fn sample_exec(
+    connection: &SshConnectionHandle,
+    command: &str,
+    end_marker: &str,
+    timeout: Duration,
+    max_output_size: usize,
+) -> Result<String, ResourceSampleError> {
+    let output = connection
+        .run_command_capture(command, timeout, max_output_size)
+        .await
+        .map_err(|error| ResourceSampleError::Failed(error.to_string()))?;
+    if output.truncated {
+        return Err(ResourceSampleError::OutputLimit {
+            channel_reusable: true,
+        });
+    }
+    if output.exit_code.is_some_and(|code| code != 0) {
+        return Err(ResourceSampleError::Failed("Sample command failed".into()));
+    }
+    if !output
+        .stdout
+        .lines()
+        .any(|line| line.trim_end_matches('\r') == end_marker)
+    {
+        return Err(ResourceSampleError::Failed(
+            "Sample ended without its completion marker".into(),
+        ));
+    }
+    Ok(output.stdout)
 }

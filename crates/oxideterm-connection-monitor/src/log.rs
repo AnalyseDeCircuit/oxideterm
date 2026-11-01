@@ -239,7 +239,11 @@ fn build_linux_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
             "echo '===HOST_LOGS==='; ",
             "if command -v journalctl >/dev/null 2>&1; then ",
             "echo '__OXIDE_LOG_CAPABILITY__\tfull\tlinux_systemd'; ",
-            "oxide_logs=$(journalctl {journal_args} -n {limit} --no-pager -o json 2>&1); ",
+            // Field selection requires systemd 236; older hosts keep their existing log support.
+            "oxide_log_fields=''; ",
+            "if journalctl --help 2>/dev/null | grep -q -- '--output-fields'; then ",
+            "oxide_log_fields='--output-fields=MESSAGE,PRIORITY,SYSLOG_IDENTIFIER,_COMM,_TRANSPORT,_SYSTEMD_UNIT,UNIT,__REALTIME_TIMESTAMP,_SOURCE_REALTIME_TIMESTAMP,__MONOTONIC_TIMESTAMP'; fi; ",
+            "oxide_logs=$(journalctl {journal_args} -n {limit} --no-pager -o json $oxide_log_fields 2>&1); ",
             "oxide_status=$?; ",
             "if [ \"$oxide_status\" -eq 0 ]; then printf '%s\\n' \"$oxide_logs\" | sed 's/^/JSON\t/'; ",
             "else printf '__OXIDE_LOG_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_logs\" | head -n 1 | tr '\\t' ' ')\"; fi; ",
@@ -255,6 +259,7 @@ fn build_linux_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
             "tail -n {limit} \"$oxide_log_file\" 2>/dev/null{file_filter} | awk -v src=\"$oxide_log_file\" '{{ gsub(/\\t/, \" \"); printf \"ROW\\t\\tinfo\\t%s\\t\\t%s\\n\", src, $0 }}'; ",
             "done | tail -n {limit}; ",
             "else echo '__OXIDE_LOG_UNAVAILABLE__'; ",
+            "fi; ",
             "fi; ",
             "echo '===HOST_LOGS_END==='"
         ),
@@ -877,5 +882,53 @@ mod tests {
         }
         let follow = build_log_follow_command("Linux", LogPreset::Kernel).unwrap();
         assert!(follow.command.contains("journalctl -k -f --no-pager"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn journal_field_selection_preserves_entries_on_new_and_old_hosts() {
+        let fixture = r#"journalctl() {
+            if [ "$1" = --help ]; then printf '%s\n' "$JOURNAL_HELP"; return; fi
+            fields=''; for arg; do case "$arg" in --output-fields=*) fields=$arg;; esac; done
+            [ "$fields" = "$EXPECTED_FIELDS" ] || return 1
+            printf '%s\n' '{"MESSAGE":"service started","PRIORITY":"6","_COMM":"worker","UNIT":"worker.service","_SOURCE_REALTIME_TIMESTAMP":"123456"}'
+        }; "#;
+        let command = build_log_snapshot_command("Linux", LogPreset::All, 300).unwrap();
+        for supported in [true, false] {
+            let expected = if supported {
+                "--output-fields=MESSAGE,PRIORITY,SYSLOG_IDENTIFIER,_COMM,_TRANSPORT,_SYSTEMD_UNIT,UNIT,__REALTIME_TIMESTAMP,_SOURCE_REALTIME_TIMESTAMP,__MONOTONIC_TIMESTAMP"
+            } else {
+                ""
+            };
+            let output = std::process::Command::new("sh")
+                .args(["-c", &format!("{fixture}{}", command.command)])
+                .env(
+                    "JOURNAL_HELP",
+                    if supported {
+                        "--output-fields=LIST"
+                    } else {
+                        "--output=MODE"
+                    },
+                )
+                .env("EXPECTED_FIELDS", expected)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let snapshot = parse_log_snapshot(&String::from_utf8(output.stdout).unwrap());
+            assert_eq!(
+                snapshot.entries,
+                vec![ResourceLogEntry {
+                    timestamp: "123456".into(),
+                    level: "info".into(),
+                    source: "worker".into(),
+                    unit: "worker.service".into(),
+                    message: "service started".into(),
+                }]
+            );
+        }
     }
 }

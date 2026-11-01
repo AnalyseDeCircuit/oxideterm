@@ -143,7 +143,7 @@ async fn sample_loop(
                         }
                     }
                     Err(error) => {
-                        emit_error(&update_tx, &connection_id, &error);
+                        emit_error(&update_tx, &connection_id, &error.to_string());
                         let _ = shell.close().await;
                         match open_gpu_shell(sampler.as_ref(), &os_type).await {
                             Ok(reopened) => shell = reopened,
@@ -258,7 +258,7 @@ mod tests {
             _end_marker: &'a str,
             _timeout: Duration,
             _max_output_size: usize,
-        ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+        ) -> ResourceSamplerFuture<'a, Result<String, crate::ResourceSampleError>> {
             Box::pin(async move {
                 self.sample_count.fetch_add(1, Ordering::SeqCst);
                 Ok(self.output.clone())

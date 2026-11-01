@@ -183,6 +183,8 @@
       "empty": "No hay contenedores coincidentes",
       "unavailable": "Docker no está disponible en este host.",
       "error": "El comando Docker falló: {{error}}",
+      "incomplete": "No se pudo obtener la lista completa de contenedores. Actualiza para reintentar.",
+      "output_limit": "La consulta del host superó el límite de salida. No se pudo cargar la lista de contenedores.",
       "columns": {
         "container": "Contenedor / Imagen",
         "image": "Imagen",

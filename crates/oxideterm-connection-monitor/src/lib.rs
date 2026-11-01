@@ -89,8 +89,8 @@ pub use profiler::{
     ConnectionProfilerSnapshot, ProfilerFailure, ProfilerRegistry, ProfilerState, ProfilerUpdate,
     RESOURCE_CHANNEL_OPEN_TIMEOUT, RESOURCE_END_MARKER, RESOURCE_MAX_CONSECUTIVE_FAILURES,
     RESOURCE_MAX_OUTPUT_SIZE, RESOURCE_SAMPLE_INTERVAL, RESOURCE_SAMPLE_TIMEOUT,
-    ResourceSampleShell, ResourceSampler, ResourceSamplerFuture, ResourceSamplingConfig,
-    build_sample_command, build_sample_command_for, shell_init_command,
+    ResourceSampleError, ResourceSampleShell, ResourceSampler, ResourceSamplerFuture,
+    ResourceSamplingConfig, build_sample_command, build_sample_command_for, shell_init_command,
 };
 pub use scheduled_task::{
     ResourceScheduledTask, ResourceScheduledTaskSnapshot, ResourceScheduledTaskStatus,

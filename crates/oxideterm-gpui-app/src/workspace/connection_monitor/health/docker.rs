@@ -146,7 +146,7 @@ struct HostDockerPanelSnapshot {
     connections: Vec<MonitorConnectionOption>,
     selected_connection_id: String,
     rows: Vec<ResourceDockerContainer>,
-    visible_count: usize,
+    visible_count: Option<usize>,
     status: ResourceDockerStatus,
     has_metrics: bool,
 }
@@ -173,14 +173,22 @@ impl HostToolsEntity {
                 )
             })
             .unwrap_or_default();
-        let status = metrics
+        let mut status = metrics
             .map(|metrics| metrics.docker.status.clone())
             .unwrap_or_default();
+        if matches!(status, ResourceDockerStatus::Unknown)
+            && self
+                .profiler_registry()
+                .failure(&selected_connection_id)
+                .is_some()
+        {
+            status = ResourceDockerStatus::Incomplete;
+        }
 
         Some(HostDockerPanelSnapshot {
             connections,
             selected_connection_id,
-            visible_count: rows.len(),
+            visible_count: matches!(status, ResourceDockerStatus::Available).then_some(rows.len()),
             rows,
             status,
             has_metrics: current.is_some(),
@@ -319,7 +327,7 @@ impl HostToolsEntity {
 
     fn render_host_docker_status_row(
         &self,
-        visible_count: usize,
+        visible_count: Option<usize>,
         selected_connection_id: String,
         tokens: &ThemeTokens,
         i18n: &I18n,
@@ -334,11 +342,13 @@ impl HostToolsEntity {
             .min_w_0()
             .text_size(px(11.0))
             .text_color(rgb(theme.text_muted))
-            .child(div().flex_none().child(format!(
-                "{} {}",
-                visible_count,
-                i18n.t("sidebar.host_docker.count_suffix")
-            )))
+            .child(div().flex_none().when_some(visible_count, |this, count| {
+                this.child(format!(
+                    "{} {}",
+                    count,
+                    i18n.t("sidebar.host_docker.count_suffix")
+                ))
+            }))
             .child(host_tools_tooltip_icon_button(
                 tokens,
                 LucideIcon::RefreshCw,
@@ -406,7 +416,30 @@ impl HostToolsEntity {
                     cx,
                 );
             }
-            ResourceDockerStatus::Unknown | ResourceDockerStatus::Available => {}
+            ResourceDockerStatus::Unknown => {
+                return host_tools_center_state(
+                    LucideIcon::Layers,
+                    tokens.ui.text_muted,
+                    i18n.t("sidebar.host_docker.sampling"),
+                    selectable_text,
+                    cx,
+                );
+            }
+            ResourceDockerStatus::Incomplete | ResourceDockerStatus::OutputLimit => {
+                let key = if matches!(status, ResourceDockerStatus::OutputLimit) {
+                    "sidebar.host_docker.output_limit"
+                } else {
+                    "sidebar.host_docker.incomplete"
+                };
+                return host_tools_center_state(
+                    LucideIcon::AlertTriangle,
+                    MONITOR_RED,
+                    i18n.t(key),
+                    selectable_text,
+                    cx,
+                );
+            }
+            ResourceDockerStatus::Available => {}
         }
         if rows.is_empty() {
             return host_tools_center_state(

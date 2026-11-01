@@ -2179,7 +2179,10 @@ mod tests {
             end_marker: &'a str,
             _timeout: Duration,
             _max_output_size: usize,
-        ) -> ResourceSamplerFuture<'a, Result<String, String>> {
+        ) -> ResourceSamplerFuture<
+            'a,
+            Result<String, oxideterm_connection_monitor::ResourceSampleError>,
+        > {
             Box::pin(async move {
                 if end_marker == GPU_END_MARKER {
                     return Ok(concat!(

@@ -183,6 +183,8 @@
       "empty": "Keine passenden Container",
       "unavailable": "Docker ist auf diesem Host nicht verfügbar.",
       "error": "Docker-Befehl fehlgeschlagen: {{error}}",
+      "incomplete": "Die vollständige Containerliste konnte nicht abgerufen werden. Bitte aktualisieren.",
+      "output_limit": "Die Host-Abfrage hat das Ausgabelimit überschritten. Die Containerliste konnte nicht geladen werden.",
       "columns": {
         "container": "Container / Image",
         "image": "Image",

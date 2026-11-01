@@ -198,6 +198,8 @@ pub enum SshTransportError {
     DnsResolution { address: String, message: String },
     #[error("SSH connection timed out")]
     Timeout,
+    #[error("Sample output exceeded the size limit")]
+    SampleOutputLimit { channel_reusable: bool },
     #[error("No verified SSH command channel is available")]
     CommandChannelUnavailable,
     #[error("The server rejected the command request")]
@@ -788,6 +790,53 @@ pub struct SshShellChannel {
     with_pty: bool,
 }
 
+struct ShellSampleCapture<'a> {
+    output: Zeroizing<Vec<u8>>,
+    marker: &'a [u8],
+    marker_position: usize,
+    line_matches: bool,
+    limit: usize,
+    overflow: bool,
+}
+
+impl<'a> ShellSampleCapture<'a> {
+    fn new(marker: &'a str, limit: usize) -> Self {
+        Self {
+            output: Zeroizing::new(Vec::new()),
+            marker: marker.as_bytes(),
+            marker_position: 0,
+            line_matches: true,
+            limit,
+            overflow: false,
+        }
+    }
+
+    fn feed(&mut self, data: &[u8]) -> bool {
+        for &byte in data {
+            if self.output.len() < self.limit {
+                self.output.push(byte);
+            } else {
+                self.overflow = true;
+            }
+            if matches!(byte, b'\r' | b'\n') {
+                let done = self.line_matches && self.marker_position == self.marker.len();
+                self.marker_position = 0;
+                self.line_matches = true;
+                if done {
+                    return true;
+                }
+            } else if self.line_matches {
+                if self.marker.get(self.marker_position) == Some(&byte) {
+                    self.marker_position += 1;
+                } else {
+                    self.line_matches = false;
+                }
+            }
+        }
+        false
+    }
+}
+
 impl SshShellChannel {
     pub async fn sample_until(
         &mut self,
@@ -807,20 +856,13 @@ impl SshShellChannel {
             .await
             .map_err(|error| SshTransportError::Channel(error.to_string()))?;
 
-        let mut output = Vec::new();
-        tokio::time::timeout(timeout, async {
+        let mut capture = ShellSampleCapture::new(end_marker, max_output_size);
+        let result = tokio::time::timeout(timeout, async {
             loop {
                 match self.channel.wait().await {
                     Some(ChannelMsg::Data { data }) => {
-                        output.extend_from_slice(&data);
-                        if output.len() > max_output_size {
-                            output.truncate(max_output_size);
-                            break;
-                        }
-                        if let Ok(text) = std::str::from_utf8(&output)
-                            // Gateways may echo the command itself, including its quoted marker.
-                            && text.split(['\r', '\n']).any(|line| line == end_marker)
-                        {
+                        // Continue draining after overflow so this persistent shell stays framed.
+                        if capture.feed(&data) {
                             break;
                         }
                     }
@@ -846,9 +888,21 @@ impl SshShellChannel {
             Ok(())
         })
         .await
-        .map_err(|_| SshTransportError::Timeout)??;
+        .map_err(|_| SshTransportError::Timeout)
+        .and_then(|result| result);
 
-        String::from_utf8(output)
+        if result.is_err() && capture.overflow {
+            // Only retire the sampling channel, never the shared SSH connection.
+            let _ = tokio::time::timeout(timeout, self.channel.close()).await;
+        }
+        if capture.overflow {
+            return Err(SshTransportError::SampleOutputLimit {
+                channel_reusable: result.is_ok(),
+            });
+        }
+        result?;
+
+        String::from_utf8(std::mem::take(&mut *capture.output))
             .map(|output| {
                 if self.with_pty {
                     // Keep terminal Enter/echo framing out of the line-based metrics parser.
