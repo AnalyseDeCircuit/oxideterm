@@ -345,7 +345,11 @@ mod markdown_preview_tests {
             ),
             oxideterm_theme::default_tokens(),
             IdeLabels::default(),
-            IdeRuntimeSettings::default(),
+            IdeRuntimeSettings {
+                // Preview fixtures have no remote agent to sample when mounted.
+                agent_mode: NodeAgentMode::Disabled,
+                ..Default::default()
+            },
             Arc::new(tokio::runtime::Runtime::new().unwrap()),
             cx,
         );
