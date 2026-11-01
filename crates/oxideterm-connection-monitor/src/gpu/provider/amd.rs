@@ -15,14 +15,29 @@ pub(super) fn sample_command() -> String {
         "echo unavailable; ",
         "else ",
         "echo available; ",
-        "echo '===AMD_DATA==='; ",
-        "amd_output=$(LC_ALL=C amd-smi --json 2>&1); ",
-        "amd_exit=$?; printf '%s\\n' \"$amd_output\"; ",
+        // Capability and inventory caches belong to this sampling shell, not the host filesystem.
+        "if [ -z \"${oxideterm_amd_metric_flags+x}\" ]; then ",
+        "amd_help=$(LC_ALL=C amd-smi metric --help 2>/dev/null); oxideterm_amd_metric_flags=''; ",
+        "for flag in --usage --mem-usage --power --temperature --fan; do ",
+        "if printf '%s' \"$amd_help\" | grep -q -- \"$flag\"; then oxideterm_amd_metric_flags=\"$oxideterm_amd_metric_flags $flag\"; fi; done; ",
+        "oxideterm_amd_limit_flag=''; if LC_ALL=C amd-smi static --help 2>/dev/null | grep -q -- '--limit'; then oxideterm_amd_limit_flag='--limit'; fi; fi; ",
+        "if [ -z \"${oxideterm_amd_static+x}\" ] || [ \"${oxideterm_amd_static_tick:-0}\" -ge 30 ]; then ",
+        "oxideterm_amd_static=$(LC_ALL=C amd-smi static --asic --bus --driver --vram $oxideterm_amd_limit_flag --json 2>&1); ",
+        "oxideterm_amd_static_exit=$?; oxideterm_amd_static_tick=0; fi; ",
+        "echo '===AMD_STATIC==='; printf '%s\\n' \"$oxideterm_amd_static\"; ",
+        "amd_exit=$oxideterm_amd_static_exit; ",
+        "if [ \"$amd_exit\" -eq 0 ] && [ -n \"$oxideterm_amd_metric_flags\" ]; then ",
+        "amd_output=$(LC_ALL=C amd-smi metric $oxideterm_amd_metric_flags --json 2>&1); amd_exit=$?; ",
+        "echo '===AMD_METRICS==='; printf '%s\\n' \"$amd_output\"; ",
+        "if [ \"$amd_exit\" -ne 0 ]; then echo '===AMD_ERROR==='; printf '%s\\n' \"$amd_output\"; unset oxideterm_amd_static; ",
+        "else echo '===AMD_PROCESSES==='; LC_ALL=C amd-smi process --general --json 2>/dev/null; fi; ",
+        "else echo '===AMD_ERROR==='; ",
+        "if [ \"$amd_exit\" -ne 0 ]; then printf '%s\\n' \"$oxideterm_amd_static\"; ",
+        "else printf '%s\\n' 'AMD metric selection unavailable'; amd_exit=1; unset oxideterm_amd_metric_flags; fi; ",
+        "unset oxideterm_amd_static; fi; ",
+        "oxideterm_amd_static_tick=$((${oxideterm_amd_static_tick:-0}+1)); ",
         "echo '===AMD_QUERY_EXIT==='; echo \"$amd_exit\"; ",
-        "if [ \"$amd_exit\" -ne 0 ]; then ",
-        "echo '===AMD_ERROR==='; printf '%s\\n' \"$amd_output\"; ",
         "fi; ",
-        "fi; "
     )
     .to_string()
 }
@@ -39,136 +54,149 @@ pub(super) fn parse(output: &str) -> ProviderSnapshot {
     }
     if query_exit.is_some_and(|exit| exit != 0) {
         let message = sanitized_error(output, "AMD_ERROR", "AMD amd-smi query failed");
-        if message.to_ascii_lowercase().contains("no gpu") {
+        if message.to_ascii_lowercase().contains("no gpu")
+            || message.to_ascii_lowercase().contains("no devices")
+        {
             return empty_snapshot(ProviderStatus::NoDevices);
         }
         return empty_snapshot(ProviderStatus::Error(format!("AMD: {message}")));
     }
 
-    let Some(payload) = section(output, "AMD_DATA") else {
-        return empty_snapshot(ProviderStatus::NoDevices);
-    };
-    let normalized_payload = payload.to_ascii_lowercase();
-    if normalized_payload.contains("no gpu") || normalized_payload.contains("no devices") {
-        return empty_snapshot(ProviderStatus::NoDevices);
-    }
-    let json = match parse_json_payload(payload) {
-        Ok(json) => json,
-        Err(error) => {
-            return empty_snapshot(ProviderStatus::Error(format!(
-                "AMD: invalid amd-smi JSON: {error}"
-            )));
-        }
-    };
-    let root = default_payload(&json);
-    let driver_version = root
-        .get("version_info")
-        .and_then(|value| value.get("amdgpu version"))
-        .and_then(text_value);
-    let mut devices = root
-        .get("gpu_info_list")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|value| parse_device(value, driver_version.as_deref()))
-        .collect::<Vec<_>>();
-    devices.sort_by_key(|device| device.index);
-    let mut processes = root
-        .get("processes")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|value| parse_process(value, &devices))
-        .collect::<Vec<_>>();
-    processes.sort_by(|left, right| {
-        left.gpu_uuid
-            .cmp(&right.gpu_uuid)
-            .then_with(|| left.pid.cmp(&right.pid))
-    });
+    parse_selected_snapshot(output)
+}
 
-    ProviderSnapshot {
-        status: if devices.is_empty() {
+fn gpu_records(value: &Value) -> Option<&Vec<Value>> {
+    value.get("gpu_data").unwrap_or(value).as_array()
+}
+
+fn parse_selected_snapshot(output: &str) -> ProviderSnapshot {
+    let inventory = section(output, "AMD_STATIC").and_then(|text| parse_json_payload(text).ok());
+    let Some(records) = inventory.as_ref().and_then(gpu_records) else {
+        return empty_snapshot(ProviderStatus::Error("AMD: invalid static GPU data".into()));
+    };
+    let mut devices: Vec<_> = records
+        .iter()
+        .filter_map(|value| {
+            let index = u32::try_from(value.get("gpu").and_then(integer_value)?).ok()?;
+            let pci_bus_id = value
+                .pointer("/bus/bdf")
+                .and_then(text_value)
+                .unwrap_or_else(|| format!("AMD:{index}"));
+            Some(GpuDevice {
+                provider: GpuProvider::Amd,
+                index,
+                uuid: amd_device_id(index, &pci_bus_id),
+                pci_bus_id,
+                name: value
+                    .pointer("/asic/market_name")
+                    .and_then(text_value)
+                    .unwrap_or_else(|| format!("AMD GPU {index}")),
+                driver_version: value.pointer("/driver/version").and_then(text_value),
+                memory_total: value
+                    .pointer("/vram/size")
+                    .and_then(|v| bytes_value(v, ByteUnit::Mibibytes)),
+                // ROCm 7 split power caps by PPT sensor; ROCm 6 exposes the socket cap directly.
+                power_limit_watts: value
+                    .pointer("/limit/ppt0/socket_power_limit")
+                    .or_else(|| value.pointer("/limit/socket_power"))
+                    .and_then(watts_value),
+                performance_state: None,
+                health_status: None,
+                utilization_percent: None,
+                memory_utilization_percent: None,
+                memory_used: None,
+                temperature_celsius: None,
+                power_draw_watts: None,
+                fan_speed_percent: None,
+            })
+        })
+        .collect();
+    if devices.is_empty() {
+        return empty_snapshot(if records.is_empty() {
             ProviderStatus::NoDevices
         } else {
-            ProviderStatus::Available
-        },
+            ProviderStatus::Error("AMD: missing GPU identities".into())
+        });
+    }
+    let metrics = section(output, "AMD_METRICS").and_then(|text| parse_json_payload(text).ok());
+    let Some(metrics) = metrics.as_ref().and_then(gpu_records) else {
+        return empty_snapshot(ProviderStatus::Error("AMD: invalid GPU metrics".into()));
+    };
+    for metric in metrics {
+        let Some(device) = devices
+            .iter_mut()
+            .find(|d| Some(u64::from(d.index)) == metric.get("gpu").and_then(integer_value))
+        else {
+            continue;
+        };
+        device.utilization_percent = metric.pointer("/usage/gfx_activity").and_then(number_value);
+        device.memory_utilization_percent =
+            metric.pointer("/usage/umc_activity").and_then(number_value);
+        device.memory_used = metric
+            .pointer("/mem_usage/used_vram")
+            .and_then(|v| bytes_value(v, ByteUnit::Mibibytes));
+        device.memory_total = metric
+            .pointer("/mem_usage/total_vram")
+            .and_then(|v| bytes_value(v, ByteUnit::Mibibytes))
+            .or(device.memory_total);
+        device.temperature_celsius = metric
+            .pointer("/temperature/hotspot")
+            .and_then(number_value);
+        device.power_draw_watts = metric.pointer("/power/socket_power").and_then(watts_value);
+        device.fan_speed_percent = metric.pointer("/fan/usage").and_then(number_value);
+    }
+    let process_data =
+        section(output, "AMD_PROCESSES").and_then(|text| parse_json_payload(text).ok());
+    let mut processes = Vec::new();
+    for gpu in process_data
+        .as_ref()
+        .and_then(gpu_records)
+        .into_iter()
+        .flatten()
+    {
+        let Some(device) = devices
+            .iter()
+            .find(|d| Some(u64::from(d.index)) == gpu.get("gpu").and_then(integer_value))
+        else {
+            continue;
+        };
+        for process in gpu
+            .get("process_list")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(info) = process.get("process_info") else {
+                continue;
+            };
+            let Some(pid) = info
+                .get("pid")
+                .and_then(integer_value)
+                .and_then(|id| u32::try_from(id).ok())
+            else {
+                continue;
+            };
+            processes.push(GpuProcess {
+                provider: GpuProvider::Amd,
+                gpu_uuid: device.uuid.clone(),
+                pid,
+                process_name: info
+                    .get("name")
+                    .and_then(text_value)
+                    .unwrap_or_else(|| format!("PID {pid}")),
+                used_memory: info
+                    .get("mem_usage")
+                    .and_then(|v| bytes_value(v, ByteUnit::Bytes)),
+            });
+        }
+    }
+    devices.sort_by_key(|device| device.index);
+    processes.sort_by(|a, b| a.gpu_uuid.cmp(&b.gpu_uuid).then(a.pid.cmp(&b.pid)));
+    ProviderSnapshot {
+        status: ProviderStatus::Available,
         devices,
         processes,
     }
-}
-
-fn parse_device(value: &Value, driver_version: Option<&str>) -> Option<GpuDevice> {
-    let index = value.get("gpu_id").and_then(integer_value)? as u32;
-    let pci_bus_id = value
-        .get("bdf")
-        .and_then(text_value)
-        .unwrap_or_else(|| format!("AMD:{index}"));
-    let name = value
-        .get("market_name")
-        .and_then(text_value)
-        .unwrap_or_else(|| format!("AMD GPU {index}"));
-    let uuid = amd_device_id(index, &pci_bus_id);
-
-    Some(GpuDevice {
-        provider: GpuProvider::Amd,
-        index,
-        uuid,
-        pci_bus_id,
-        name,
-        driver_version: driver_version.map(str::to_string),
-        performance_state: None,
-        health_status: None,
-        utilization_percent: value.get("gfx_util").and_then(number_value),
-        memory_utilization_percent: value.get("mem_util").and_then(number_value),
-        memory_used: value
-            .get("mem_usage")
-            .and_then(|memory| memory.get("used_vram"))
-            .and_then(|memory| bytes_value(memory, ByteUnit::Mibibytes)),
-        memory_total: value
-            .get("mem_usage")
-            .and_then(|memory| memory.get("total_vram"))
-            .and_then(|memory| bytes_value(memory, ByteUnit::Mibibytes)),
-        temperature_celsius: value.get("temp").and_then(number_value),
-        power_draw_watts: value
-            .get("power_usage")
-            .and_then(|power| power.get("current_power"))
-            .and_then(watts_value),
-        power_limit_watts: value
-            .get("power_usage")
-            .and_then(|power| power.get("power_limit"))
-            .and_then(watts_value),
-        fan_speed_percent: value.get("fan").and_then(number_value),
-    })
-}
-
-fn parse_process(value: &Value, devices: &[GpuDevice]) -> Option<GpuProcess> {
-    let gpu_index = value.get("gpu").and_then(integer_value)? as u32;
-    let pid = value.get("pid").and_then(integer_value)? as u32;
-    let gpu_uuid = devices
-        .iter()
-        .find(|device| device.index == gpu_index)
-        .map(|device| device.uuid.clone())?;
-    let process_name = value
-        .get("name")
-        .and_then(text_value)
-        .unwrap_or_else(|| format!("PID {pid}"));
-
-    Some(GpuProcess {
-        provider: GpuProvider::Amd,
-        gpu_uuid,
-        pid,
-        process_name,
-        used_memory: value
-            .get("mem_usage")
-            .and_then(|memory| bytes_value(memory, ByteUnit::Bytes)),
-    })
-}
-
-fn default_payload(value: &Value) -> &Value {
-    value
-        .as_array()
-        .and_then(|values| values.first())
-        .unwrap_or(value)
 }
 
 fn parse_json_payload(payload: &str) -> Result<Value, serde_json::Error> {
@@ -259,6 +287,7 @@ fn bytes_value(value: &Value, default_unit: ByteUnit) -> Option<u64> {
         .and_then(Value::as_str)
         .or_else(|| value.as_str()?.split_whitespace().nth(1));
     let multiplier = match unit.map(|unit| unit.to_ascii_lowercase()) {
+        Some(unit) if matches!(unit.as_str(), "b" | "bytes") => 1.0,
         Some(unit) if matches!(unit.as_str(), "kb" | "kib") => 1024.0,
         Some(unit) if matches!(unit.as_str(), "mb" | "mib") => 1024.0 * 1024.0,
         Some(unit) if matches!(unit.as_str(), "gb" | "gib") => 1024.0 * 1024.0 * 1024.0,
@@ -289,67 +318,95 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_multiple_amd_gpus_metrics_and_processes() {
-        let output = r#"===AMD_STATUS===
-available
-===AMD_DATA===
-[{"version_info":{"amdgpu version":"6.14.4"},"gpu_info_list":[{"gpu_id":0,"market_name":"AMD Instinct MI300A","bdf":"0000:01:00.0","mem_util":12,"gfx_util":45,"temp":67,"power_usage":{"current_power":110,"power_limit":550},"mem_usage":{"used_vram":1024,"total_vram":96432},"fan":20},{"gpu_id":1,"market_name":"AMD Radeon PRO W7900","bdf":"0000:02:00.0","mem_util":{"value":3,"unit":"%"},"gfx_util":{"value":9,"unit":"%"},"temp":{"value":51,"unit":"C"},"power_usage":{"current_power":{"value":87500,"unit":"mW"},"power_limit":{"value":295,"unit":"W"}},"mem_usage":{"used_vram":{"value":2,"unit":"GiB"},"total_vram":{"value":48,"unit":"GiB"}},"fan":"N/A"}],"processes":[{"gpu":0,"pid":12345,"name":"python3","mem_usage":"4.13 GB"},{"gpu":1,"pid":99,"name":"N/A","mem_usage":{"value":512,"unit":"MiB"}}]}]
-===AMD_QUERY_EXIT===
-0
-===GPU_NPU_SAMPLE_END==="#;
-
-        let snapshot = parse(output);
-
-        assert_eq!(snapshot.status, ProviderStatus::Available);
-        assert_eq!(snapshot.devices.len(), 2);
-        assert_eq!(snapshot.devices[0].provider, GpuProvider::Amd);
-        assert_eq!(snapshot.devices[0].memory_used, Some(1024 * 1024 * 1024));
-        assert_eq!(snapshot.devices[1].power_draw_watts, Some(87.5));
-        assert_eq!(
-            snapshot.devices[1].memory_total,
-            Some(48 * 1024 * 1024 * 1024)
-        );
-        assert_eq!(snapshot.processes.len(), 2);
-        assert_eq!(snapshot.processes[0].process_name, "python3");
-        assert_eq!(snapshot.processes[1].process_name, "PID 99");
+    fn parses_selected_rocm_6_and_7_metrics_by_gpu_id() {
+        let inventory = r#"[{"gpu":1,"asic":{"market_name":"AMD Radeon PRO W7900"},"bus":{"bdf":"0000:02:00.0"},"driver":{"version":"6.14.4"},"vram":{"size":{"value":48,"unit":"GiB"}},"limit":{"ppt0":{"socket_power_limit":{"value":295,"unit":"W"}}}},
+            {"gpu":0,"asic":{"market_name":"AMD Instinct MI300A"},"bus":{"bdf":"0000:01:00.0"},"driver":{"version":"6.14.4"},"vram":{"size":96432},"limit":{"socket_power":550}}]"#;
+        let metrics = r#"[{"gpu":0,"usage":{"gfx_activity":45,"umc_activity":12},"mem_usage":{"used_vram":1024,"total_vram":96432},"temperature":{"hotspot":67},"power":{"socket_power":110},"fan":{"usage":20}},
+            {"gpu":1,"usage":{"gfx_activity":{"value":9,"unit":"%"},"umc_activity":3},"mem_usage":{"used_vram":{"value":2147483648,"unit":"B"}},"temperature":{"hotspot":{"value":51,"unit":"C"}},"power":{"socket_power":{"value":87500,"unit":"mW"}},"fan":{"usage":"N/A"}}]"#;
+        let processes = r#"[{"gpu":1,"process_list":[{"process_info":{"pid":99,"name":"N/A","mem_usage":{"value":512,"unit":"MiB"}}}]},
+            {"gpu":0,"process_list":[{"process_info":{"pid":12345,"name":"python3","mem_usage":{"value":4096,"unit":"B"}}},{"process_info":"No running processes detected"}]}]"#;
+        for wrapped in [false, true] {
+            // ROCm 6 emits an array; ROCm 7 nests the same records under gpu_data.
+            let payload = |data: &str| {
+                if wrapped {
+                    format!(r#"{{"gpu_data":{data}}}"#)
+                } else {
+                    data.into()
+                }
+            };
+            let output = format!(
+                "===AMD_STATUS===\navailable\n===AMD_STATIC===\n[WARNING] render group\n{}\n===AMD_METRICS===\n{}\n===AMD_PROCESSES===\n{}\n===AMD_QUERY_EXIT===\n0\n",
+                payload(inventory),
+                payload(metrics),
+                payload(processes)
+            );
+            let snapshot = parse(&output);
+            assert_eq!(snapshot.status, ProviderStatus::Available);
+            assert_eq!(snapshot.devices.len(), 2);
+            let first = &snapshot.devices[0];
+            assert_eq!(first.index, 0);
+            assert_eq!(first.name, "AMD Instinct MI300A");
+            assert_eq!(first.driver_version.as_deref(), Some("6.14.4"));
+            assert_eq!(first.memory_used, Some(1_073_741_824));
+            assert_eq!(first.memory_total, Some(101_116_280_832));
+            assert_eq!(first.utilization_percent, Some(45.0));
+            assert_eq!(first.memory_utilization_percent, Some(12.0));
+            assert_eq!(first.temperature_celsius, Some(67.0));
+            assert_eq!(first.power_draw_watts, Some(110.0));
+            assert_eq!(first.power_limit_watts, Some(550.0));
+            assert_eq!(first.fan_speed_percent, Some(20.0));
+            let second = &snapshot.devices[1];
+            assert_eq!(second.uuid, "AMD-0000:02:00.0");
+            assert_eq!(second.memory_used, Some(2_147_483_648));
+            assert_eq!(second.memory_total, Some(51_539_607_552));
+            assert_eq!(second.power_draw_watts, Some(87.5));
+            assert_eq!(second.power_limit_watts, Some(295.0));
+            assert_eq!(second.fan_speed_percent, None);
+            assert_eq!(
+                snapshot
+                    .processes
+                    .iter()
+                    .map(|p| (
+                        p.gpu_uuid.as_str(),
+                        p.pid,
+                        p.process_name.as_str(),
+                        p.used_memory
+                    ))
+                    .collect::<Vec<_>>(),
+                vec![
+                    ("AMD-0000:01:00.0", 12345, "python3", Some(4096)),
+                    ("AMD-0000:02:00.0", 99, "PID 99", Some(536_870_912))
+                ]
+            );
+        }
     }
 
     #[test]
     fn distinguishes_unavailable_empty_invalid_and_failed_states() {
-        let unavailable = parse("===AMD_STATUS===\nunavailable\n===GPU_NPU_SAMPLE_END===");
-        let empty = parse(
-            "===AMD_STATUS===\navailable\n===AMD_DATA===\n[{\"gpu_info_list\":[],\"processes\":[]}]\n===AMD_QUERY_EXIT===\n0\n===GPU_NPU_SAMPLE_END===",
-        );
-        let invalid = parse(
-            "===AMD_STATUS===\navailable\n===AMD_DATA===\nnot-json\n===AMD_QUERY_EXIT===\n0\n===GPU_NPU_SAMPLE_END===",
-        );
-        let failed = parse(
-            "===AMD_STATUS===\navailable\n===AMD_DATA===\npermission denied\n===AMD_QUERY_EXIT===\n1\n===AMD_ERROR===\npermission denied\n===GPU_NPU_SAMPLE_END===",
-        );
-
-        assert_eq!(unavailable.status, ProviderStatus::Unavailable);
-        assert_eq!(empty.status, ProviderStatus::NoDevices);
-        assert!(matches!(invalid.status, ProviderStatus::Error(_)));
-        assert_eq!(
-            failed.status,
-            ProviderStatus::Error("AMD: permission denied".into())
-        );
-    }
-
-    #[test]
-    fn accepts_valid_json_surrounded_by_tool_warnings() {
-        let output = concat!(
-            "===AMD_STATUS===\navailable\n",
-            "===AMD_DATA===\nwarning: render group is recommended\n",
-            "[{\"gpu_info_list\":[{\"gpu_id\":0,\"market_name\":\"AMD Test GPU\",\"bdf\":\"0000:01:00.0\"}],\"processes\":[]}]\n",
-            "warning: partial process names\n",
-            "===AMD_QUERY_EXIT===\n0\n",
-            "===GPU_NPU_SAMPLE_END==="
-        );
-
-        let snapshot = parse(output);
-
-        assert_eq!(snapshot.status, ProviderStatus::Available);
-        assert_eq!(snapshot.devices.len(), 1);
+        for (body, expected) in [
+            ("===AMD_STATUS===\nunavailable", ProviderStatus::Unavailable),
+            (
+                "===AMD_STATUS===\navailable\n===AMD_STATIC===\n[]\n===AMD_QUERY_EXIT===\n0",
+                ProviderStatus::NoDevices,
+            ),
+            (
+                "===AMD_STATUS===\navailable\n===AMD_STATIC===\nnot-json\n===AMD_QUERY_EXIT===\n0",
+                ProviderStatus::Error("AMD: invalid static GPU data".into()),
+            ),
+            (
+                "===AMD_STATUS===\navailable\n===AMD_STATIC===\n[{\"gpu\":0}]\n===AMD_METRICS===\nnot-json\n===AMD_QUERY_EXIT===\n0",
+                ProviderStatus::Error("AMD: invalid GPU metrics".into()),
+            ),
+            (
+                "===AMD_STATUS===\navailable\n===AMD_QUERY_EXIT===\n1\n===AMD_ERROR===\npermission denied",
+                ProviderStatus::Error("AMD: permission denied".into()),
+            ),
+            (
+                "===AMD_STATUS===\navailable\n===AMD_QUERY_EXIT===\n1\n===AMD_ERROR===\nNo GPUs detected",
+                ProviderStatus::NoDevices,
+            ),
+        ] {
+            assert_eq!(parse(body).status, expected, "{body}");
+        }
     }
 }

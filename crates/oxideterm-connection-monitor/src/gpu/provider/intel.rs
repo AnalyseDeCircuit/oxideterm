@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Intel XPU SMI command protocol and daemonless JSON parser.
+//! Intel XPU SMI selected queries and legacy daemonless JSON parser.
 
 use std::collections::BTreeMap;
 
@@ -16,36 +16,45 @@ pub(super) fn sample_command() -> String {
     format!(
         concat!(
             "echo '===INTEL_STATUS==='; ",
-            "if ! command -v xpu-smi >/dev/null 2>&1; then ",
-            "echo unavailable; ",
+            "if ! command -v xpu-smi >/dev/null 2>&1; then echo unavailable; else echo available; ",
+            "if [ -z \"${{oxideterm_intel_query_mode+x}}\" ]; then ",
+            "if LC_ALL=C xpu-smi --help 2>/dev/null | grep -q -- '--query-gpu'; then oxideterm_intel_query_mode=fields; else oxideterm_intel_query_mode=legacy; fi; fi; ",
+            "if [ \"$oxideterm_intel_query_mode\" = fields ]; then ",
+            "if [ -z \"${{oxideterm_intel_static+x}}\" ] || [ \"${{oxideterm_intel_static_tick:-0}}\" -ge 30 ]; then ",
+            "oxideterm_intel_static=$(LC_ALL=C xpu-smi --query-gpu=index,uuid,pci.bus_id,driver_version,memory.total,name --format=csv,noheader,nounits 2>&1); ",
+            "oxideterm_intel_static_exit=$?; oxideterm_intel_static_tick=0; unset oxideterm_intel_health_cache; fi; ",
+            "echo '===INTEL_STATIC_CSV==='; printf '%s\\n' \"$oxideterm_intel_static\"; ",
+            "oxideterm_intel_exit=$oxideterm_intel_static_exit; oxideterm_intel_error=$oxideterm_intel_static; ",
+            "if [ \"$oxideterm_intel_exit\" -eq 0 ]; then ",
+            "intel_metrics=$(LC_ALL=C xpu-smi --query-gpu=index,utilization.gpu,utilization.memory,memory.used,temperature.gpu,power.draw --format=csv,noheader,nounits 2>&1); ",
+            "oxideterm_intel_exit=$?; oxideterm_intel_error=$intel_metrics; ",
+            "echo '===INTEL_METRICS_CSV==='; printf '%s\\n' \"$intel_metrics\"; fi; ",
+            "if [ \"$oxideterm_intel_exit\" -ne 0 ]; then unset oxideterm_intel_static; fi; ",
+            "oxideterm_intel_static_tick=$((${{oxideterm_intel_static_tick:-0}}+1)); ",
             "else ",
-            "echo available; ",
-            "if [ -z \"${{oxideterm_intel_discovery_cache+x}}\" ]; then ",
+            "if [ -z \"${{oxideterm_intel_discovery_cache+x}}\" ] || [ \"${{oxideterm_intel_discovery_tick:-0}}\" -ge 30 ]; then ",
             "oxideterm_intel_discovery_cache=$(LC_ALL=C xpu-smi discovery -j 2>&1); ",
-            "oxideterm_intel_exit=$?; ",
+            "oxideterm_intel_exit=$?; oxideterm_intel_discovery_tick=0; ",
             "if [ \"$oxideterm_intel_exit\" -eq 0 ]; then ",
             "oxideterm_intel_ids=$(printf '%s\\n' \"$oxideterm_intel_discovery_cache\" | sed -n 's/.*\"device_id\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p'); ",
             "oxideterm_intel_details_cache=$(for intel_id in $oxideterm_intel_ids; do LC_ALL=C xpu-smi discovery -d \"$intel_id\" -j 2>/dev/null || true; done); ",
-            "oxideterm_intel_health_cache=$(LC_ALL=C xpu-smi health -l -j 2>/dev/null || true); ",
-            "oxideterm_intel_health_tick=0; ",
-            "else unset oxideterm_intel_discovery_cache; fi; ",
-            "fi; ",
+            "unset oxideterm_intel_health_cache; ",
+            "else oxideterm_intel_error=$oxideterm_intel_discovery_cache; unset oxideterm_intel_discovery_cache; fi; fi; ",
             "echo '===INTEL_DISCOVERY==='; printf '%s\\n' \"$oxideterm_intel_discovery_cache\"; ",
-            "echo '===INTEL_QUERY_EXIT==='; echo \"$oxideterm_intel_exit\"; ",
             "if [ \"$oxideterm_intel_exit\" -eq 0 ]; then ",
             "echo '===INTEL_DETAILS==='; printf '%s\\n' \"$oxideterm_intel_details_cache\"; ",
             "echo '===INTEL_STATS==='; ",
-            "for intel_id in $oxideterm_intel_ids; do LC_ALL=C xpu-smi stats -d \"$intel_id\" -j 2>/dev/null || true; done; ",
-            "if [ \"${{oxideterm_intel_health_tick:-0}}\" -ge {health_refresh_ticks} ]; then ",
-            "oxideterm_intel_health_cache=$(LC_ALL=C xpu-smi health -l -j 2>/dev/null || true); ",
-            "oxideterm_intel_health_tick=0; fi; ",
+            "for intel_id in $oxideterm_intel_ids; do LC_ALL=C xpu-smi stats -d \"$intel_id\" -j 2>/dev/null || true; done; fi; ",
+            "oxideterm_intel_discovery_tick=$((${{oxideterm_intel_discovery_tick:-0}}+1)); fi; ",
+            "echo '===INTEL_QUERY_EXIT==='; echo \"$oxideterm_intel_exit\"; ",
+            "if [ \"$oxideterm_intel_exit\" -eq 0 ]; then ",
+            "if [ -z \"${{oxideterm_intel_health_cache+x}}\" ] || [ \"${{oxideterm_intel_health_tick:-0}}\" -ge {health_refresh_ticks} ]; then ",
+            "oxideterm_intel_health_cache=$(LC_ALL=C xpu-smi health -l -j 2>/dev/null); ",
+            "if [ \"$?\" -ne 0 ]; then unset oxideterm_intel_health_cache; fi; oxideterm_intel_health_tick=0; fi; ",
             "echo '===INTEL_HEALTH==='; printf '%s\\n' \"$oxideterm_intel_health_cache\"; ",
-            "oxideterm_intel_health_tick=$((oxideterm_intel_health_tick + 1)); ",
+            "oxideterm_intel_health_tick=$((${{oxideterm_intel_health_tick:-0}}+1)); ",
             "echo '===INTEL_PROCESSES==='; LC_ALL=C xpu-smi ps -j 2>/dev/null || true; ",
-            "else ",
-            "echo '===INTEL_ERROR==='; printf '%s\\n' \"$oxideterm_intel_discovery_cache\"; ",
-            "fi; ",
-            "fi; "
+            "else echo '===INTEL_ERROR==='; printf '%s\\n' \"$oxideterm_intel_error\"; fi; fi; ",
         ),
         health_refresh_ticks = HEALTH_REFRESH_TICKS,
     )
@@ -61,45 +70,57 @@ pub(super) fn parse(output: &str) -> ProviderSnapshot {
     let query_exit =
         first_section_line(output, "INTEL_QUERY_EXIT").and_then(|value| value.parse::<i32>().ok());
     if query_exit.is_some_and(|exit| exit != 0) {
-        let message = sanitized_error(output, "INTEL_ERROR", "xpu-smi discovery failed");
+        let message = sanitized_error(output, "INTEL_ERROR", "xpu-smi query failed");
         if reports_no_devices(&message) {
             return empty_snapshot(ProviderStatus::NoDevices);
         }
         return empty_snapshot(ProviderStatus::Error(format!("Intel: {message}")));
     }
 
-    let discovery_values = section(output, "INTEL_DISCOVERY")
-        .map(parse_json_stream)
-        .unwrap_or_default();
-    if discovery_values.is_empty() {
-        return empty_snapshot(ProviderStatus::Error(
-            "Intel: invalid xpu-smi discovery JSON".into(),
-        ));
-    }
-    if let Some(error) = discovery_values.iter().find_map(json_error) {
-        if reports_no_devices(&error) {
-            return empty_snapshot(ProviderStatus::NoDevices);
+    let mut devices = if let Some(inventory) = section(output, "INTEL_STATIC_CSV") {
+        let Some(devices) = parse_selected_devices(
+            inventory,
+            section(output, "INTEL_METRICS_CSV").unwrap_or_default(),
+        ) else {
+            return empty_snapshot(ProviderStatus::Error(
+                "Intel: invalid selected GPU data".into(),
+            ));
+        };
+        devices
+    } else {
+        let discovery_values = section(output, "INTEL_DISCOVERY")
+            .map(parse_json_stream)
+            .unwrap_or_default();
+        if discovery_values.is_empty() {
+            return empty_snapshot(ProviderStatus::Error(
+                "Intel: invalid xpu-smi discovery JSON".into(),
+            ));
         }
-        return empty_snapshot(ProviderStatus::Error(format!("Intel: {error}")));
-    }
+        if let Some(error) = discovery_values.iter().find_map(json_error) {
+            if reports_no_devices(&error) {
+                return empty_snapshot(ProviderStatus::NoDevices);
+            }
+            return empty_snapshot(ProviderStatus::Error(format!("Intel: {error}")));
+        }
 
-    let mut devices = BTreeMap::new();
-    for value in &discovery_values {
-        collect_inventory(value, &mut devices);
-    }
-    if let Some(payload) = section(output, "INTEL_DETAILS") {
-        for value in parse_json_stream(payload) {
-            collect_inventory(&value, &mut devices);
+        let mut devices = BTreeMap::new();
+        for value in &discovery_values {
+            collect_inventory(value, &mut devices);
         }
-    }
+        if let Some(payload) = section(output, "INTEL_DETAILS") {
+            for value in parse_json_stream(payload) {
+                collect_inventory(&value, &mut devices);
+            }
+        }
+        if let Some(payload) = section(output, "INTEL_STATS") {
+            for value in parse_json_stream(payload) {
+                apply_statistics(&value, &mut devices);
+            }
+        }
+        devices
+    };
     if devices.is_empty() {
         return empty_snapshot(ProviderStatus::NoDevices);
-    }
-
-    if let Some(payload) = section(output, "INTEL_STATS") {
-        for value in parse_json_stream(payload) {
-            apply_statistics(&value, &mut devices);
-        }
     }
     if let Some(payload) = section(output, "INTEL_HEALTH") {
         for value in parse_json_stream(payload) {
@@ -118,6 +139,68 @@ pub(super) fn parse(output: &str) -> ProviderSnapshot {
         devices: devices.into_values().collect(),
         processes,
     }
+}
+
+fn parse_selected_devices(inventory: &str, metrics: &str) -> Option<BTreeMap<u32, GpuDevice>> {
+    let mut devices = BTreeMap::new();
+    for line in inventory.lines().filter(|line| !line.trim().is_empty()) {
+        // xpu-smi emits unquoted CSV. Keep the only free-form field last.
+        let fields = line.splitn(6, ',').map(str::trim).collect::<Vec<_>>();
+        let [index, uuid, bus, driver, total, name] = fields.as_slice() else {
+            return None;
+        };
+        let index = index.parse::<u32>().ok()?;
+        let pci_bus_id = optional_text(bus).unwrap_or_else(|| format!("INTEL:{index}"));
+        devices.insert(
+            index,
+            GpuDevice {
+                provider: GpuProvider::Intel,
+                index,
+                uuid: optional_text(uuid).unwrap_or_else(|| intel_device_id(index, &pci_bus_id)),
+                pci_bus_id,
+                name: optional_text(name)?,
+                driver_version: optional_text(driver),
+                memory_total: query_number(total).map(mibibytes),
+                performance_state: None,
+                health_status: None,
+                utilization_percent: None,
+                memory_utilization_percent: None,
+                memory_used: None,
+                temperature_celsius: None,
+                power_draw_watts: None,
+                power_limit_watts: None,
+                fan_speed_percent: None,
+            },
+        );
+    }
+    for line in metrics.lines().filter(|line| !line.trim().is_empty()) {
+        let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
+        let [
+            index,
+            utilization,
+            memory_utilization,
+            memory,
+            temperature,
+            power,
+        ] = fields.as_slice()
+        else {
+            return None;
+        };
+        let index = index.parse::<u32>().ok()?;
+        let Some(device) = devices.get_mut(&index) else {
+            continue;
+        };
+        device.utilization_percent = query_number(utilization);
+        device.memory_utilization_percent = query_number(memory_utilization);
+        device.memory_used = query_number(memory).map(mibibytes);
+        device.temperature_celsius = query_number(temperature);
+        device.power_draw_watts = query_number(power);
+    }
+    Some(devices)
+}
+
+fn query_number(value: &str) -> Option<f64> {
+    value.parse::<f64>().ok().filter(|value| value.is_finite())
 }
 
 fn collect_inventory(value: &Value, devices: &mut BTreeMap<u32, GpuDevice>) {
@@ -279,9 +362,12 @@ fn apply_health(value: &Value, devices: &mut BTreeMap<u32, GpuDevice>) {
         "core_temperature",
         "memory_temperature",
         "power",
+        "power_health",
         "memory",
+        "memory_health",
         "xe_link_port",
         "frequency",
+        "frequency_health",
     ]
     .iter()
     .filter_map(|component| value.get(component))
@@ -380,7 +466,11 @@ fn byte_count(value: &Value) -> Option<u64> {
 }
 
 fn text_value(value: &Value) -> Option<String> {
-    let text = value.as_str()?.trim();
+    optional_text(value.as_str()?)
+}
+
+fn optional_text(text: &str) -> Option<String> {
+    let text = text.trim();
     (!matches!(
         text.to_ascii_lowercase().as_str(),
         "" | "n/a" | "unknown" | "not supported" | "not available"
@@ -420,6 +510,58 @@ fn empty_snapshot(status: ProviderStatus) -> ProviderSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_selected_query_fields_and_current_health_names() {
+        let output = r#"===INTEL_STATUS===
+available
+===INTEL_STATIC_CSV===
+1, intel-1, 0000:5e:00.0, 2.3.0, 16384, Intel Test, Engineering GPU
+0, intel-0, 0000:4d:00.0, 2.3.0, 65536, Intel Data Center GPU Max 1550
+===INTEL_METRICS_CSV===
+0, 75, 12, 8192, 68, 310.5
+1, N/A, 3, 512, 51, N/A
+===INTEL_QUERY_EXIT===
+0
+===INTEL_HEALTH===
+{"device_list":[{"device_id":1,"memory_health":{"status":"Warning"},"power_health":{"status":"Ok"}},{"device_id":0,"frequency_health":{"status":"Ok"}}]}
+===INTEL_PROCESSES===
+{"device_util_by_proc_list":[{"device_id":1,"process_id":42,"process_name":"worker","mem_size":1966}]}
+===GPU_NPU_SAMPLE_END==="#;
+        let snapshot = parse(output);
+        assert_eq!(snapshot.status, ProviderStatus::Available);
+        assert_eq!(snapshot.devices.len(), 2);
+        let first = &snapshot.devices[0];
+        assert_eq!(first.uuid, "intel-0");
+        assert_eq!(first.pci_bus_id, "0000:4d:00.0");
+        assert_eq!(first.driver_version.as_deref(), Some("2.3.0"));
+        assert_eq!(first.memory_total, Some(68_719_476_736));
+        assert_eq!(first.memory_used, Some(8_589_934_592));
+        assert_eq!(first.utilization_percent, Some(75.0));
+        assert_eq!(first.memory_utilization_percent, Some(12.0));
+        assert_eq!(first.temperature_celsius, Some(68.0));
+        assert_eq!(first.power_draw_watts, Some(310.5));
+        assert_eq!(first.health_status.as_deref(), Some("Ok"));
+        let second = &snapshot.devices[1];
+        assert_eq!(second.name, "Intel Test, Engineering GPU");
+        assert_eq!(second.memory_used, Some(536_870_912));
+        assert_eq!(second.utilization_percent, None);
+        assert_eq!(second.power_draw_watts, None);
+        assert_eq!(second.health_status.as_deref(), Some("Warning"));
+        assert_eq!(
+            snapshot
+                .processes
+                .iter()
+                .map(|p| (
+                    p.gpu_uuid.as_str(),
+                    p.pid,
+                    p.process_name.as_str(),
+                    p.used_memory
+                ))
+                .collect::<Vec<_>>(),
+            vec![("intel-1", 42, "worker", Some(2_013_184))]
+        );
+    }
 
     #[test]
     fn parses_multiple_intel_devices_metrics_health_and_processes() {
@@ -484,5 +626,23 @@ warning: partial telemetry
             failed.status,
             ProviderStatus::Error("Intel: permission denied".into())
         );
+        for (inventory, metrics, expected) in [
+            ("", "", ProviderStatus::NoDevices),
+            (
+                "not-csv",
+                "",
+                ProviderStatus::Error("Intel: invalid selected GPU data".into()),
+            ),
+            (
+                "0, gpu-0, 0000:4d:00.0, 2.3, 1024, Intel GPU",
+                "invalid",
+                ProviderStatus::Error("Intel: invalid selected GPU data".into()),
+            ),
+        ] {
+            let output = format!(
+                "===INTEL_STATUS===\navailable\n===INTEL_STATIC_CSV===\n{inventory}\n===INTEL_METRICS_CSV===\n{metrics}\n===INTEL_QUERY_EXIT===\n0\n"
+            );
+            assert_eq!(parse(&output).status, expected);
+        }
     }
 }
