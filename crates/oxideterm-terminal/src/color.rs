@@ -254,10 +254,15 @@ pub(crate) fn style_origin_for_cell(
     if attrs.inverse() {
         std::mem::swap(&mut foreground, &mut background);
     }
-    TerminalStyleOrigin::new(
+    let origin = TerminalStyleOrigin::new(
         !matches!(foreground, Color::Named(NamedColor::Foreground)),
         !matches!(background, Color::Named(NamedColor::Background)),
-    )
+    );
+    if matches!(foreground, Color::Named(NamedColor::Background)) {
+        origin.with_foreground_default_background()
+    } else {
+        origin
+    }
 }
 
 #[cfg(test)]

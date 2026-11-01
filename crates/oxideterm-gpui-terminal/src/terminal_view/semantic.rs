@@ -141,6 +141,7 @@ fn append_semantic_line_band(
         col: 0,
         cells: snapshot.cols,
         color,
+        powerline_cutout: None,
     }));
 }
 

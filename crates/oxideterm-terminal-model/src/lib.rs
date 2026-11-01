@@ -91,6 +91,7 @@ pub struct TerminalStyleOrigin(u8);
 impl TerminalStyleOrigin {
     const FOREGROUND_EXPLICIT: u8 = 1 << 0;
     const BACKGROUND_EXPLICIT: u8 = 1 << 1;
+    const FOREGROUND_DEFAULT_BACKGROUND: u8 = 1 << 2;
 
     pub const fn new(foreground_explicit: bool, background_explicit: bool) -> Self {
         Self(
@@ -114,6 +115,16 @@ impl TerminalStyleOrigin {
     #[inline]
     pub const fn background_explicit(self) -> bool {
         self.0 & Self::BACKGROUND_EXPLICIT != 0
+    }
+
+    /// Preserve the default background's identity when reverse video moves it to the foreground.
+    pub const fn with_foreground_default_background(mut self) -> Self {
+        self.0 |= Self::FOREGROUND_DEFAULT_BACKGROUND;
+        self
+    }
+
+    pub const fn foreground_is_default_background(self) -> bool {
+        self.0 & Self::FOREGROUND_DEFAULT_BACKGROUND != 0
     }
 }
 

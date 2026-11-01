@@ -131,6 +131,7 @@ pub(crate) struct TerminalRect {
     pub(crate) col: usize,
     pub(crate) cells: usize,
     pub(crate) color: Hsla,
+    pub(crate) powerline_cutout: Option<char>,
 }
 
 #[derive(Clone)]
@@ -207,6 +208,7 @@ struct TerminalRowRect {
     col: usize,
     cells: usize,
     color: Hsla,
+    powerline_cutout: Option<char>,
 }
 
 #[derive(Clone)]
@@ -1159,7 +1161,29 @@ impl TerminalElement {
             };
             let cell_width = if cell.wide { 2 } else { 1 };
 
-            if bg != terminal_background {
+            let cutout = powerline_background_cutout(
+                cell,
+                self.transparent_background,
+                block_cursor
+                    || highlight_layout
+                        .foreground_for_cell(row_index, col_index)
+                        .is_some(),
+            );
+
+            if let Some(ch) = cutout {
+                if let Some(rect) = current_background.take() {
+                    backgrounds.push(rect);
+                }
+                // Paint only the part outside the glyph; a full-cell quad would hide the image.
+                if bg != terminal_background || cell.style_origin.background_explicit() {
+                    backgrounds.push(TerminalRowRect {
+                        col: paint_col,
+                        cells: cell_width,
+                        color: bg,
+                        powerline_cutout: Some(ch),
+                    });
+                }
+            } else if bg != terminal_background {
                 extend_or_push_row_rect(
                     &mut current_background,
                     &mut backgrounds,
@@ -1189,7 +1213,7 @@ impl TerminalElement {
                 continue;
             }
 
-            if cell.ch == '\u{10eeee}' {
+            if cutout.is_some() || cell.ch == '\u{10eeee}' {
                 if let Some(run) = current_run.take() {
                     text_runs.push(run);
                 }
@@ -1261,6 +1285,7 @@ impl TerminalElement {
                 self.grid_cursor_visible(),
                 self.snapshot.cursor_shape,
                 &self.theme,
+                self.transparent_background,
                 highlight_layout,
                 &mut text_runs,
             );
@@ -1317,6 +1342,7 @@ impl TerminalElement {
         self.theme.foreground.hash(&mut hasher);
         self.theme.header_foreground.hash(&mut hasher);
         self.theme.selection_background.hash(&mut hasher);
+        self.transparent_background.hash(&mut hasher);
         self.hash_semantic_layout(logical_line.range.clone(), semantic_role, &mut hasher);
         self.bidi_enabled.hash(&mut hasher);
         self.detect_file_paths_as_links.hash(&mut hasher);
@@ -1566,12 +1592,14 @@ fn append_cached_row_layout(
         col: rect.col,
         cells: rect.cells,
         color: rect.color,
+        powerline_cutout: rect.powerline_cutout,
     }));
     selections.extend(row_layout.selections.iter().map(|rect| TerminalRect {
         row: row_index,
         col: rect.col,
         cells: rect.cells,
         color: rect.color,
+        powerline_cutout: None,
     }));
     text_runs.extend(row_layout.text_runs.iter().map(|run| BatchedTextRun {
         row: row_index,
@@ -1613,7 +1641,12 @@ fn extend_or_push_row_rect(
     if let Some(rect) = current.take() {
         rects.push(rect);
     }
-    *current = Some(TerminalRowRect { col, cells, color });
+    *current = Some(TerminalRowRect {
+        col,
+        cells,
+        color,
+        powerline_cutout: None,
+    });
 }
 
 fn logical_line_range_for_row(
@@ -1712,6 +1745,7 @@ fn absolute_highlight_rect(start_row: usize, rect: &TerminalRowOffsetRect) -> Te
         col: rect.col,
         cells: rect.cells,
         color: rect.color,
+        powerline_cutout: None,
     }
 }
 
@@ -2005,6 +2039,7 @@ fn push_visual_text_runs(
     cursor_visible: bool,
     cursor_shape: TerminalCursorShape,
     theme: &TerminalUiTheme,
+    transparent_background: bool,
     highlight_layout: &TerminalHighlightLayout,
     text_runs: &mut Vec<PendingTerminalRowTextRun>,
 ) {
@@ -2023,6 +2058,21 @@ fn push_visual_text_runs(
 
         let block_cursor =
             cursor_visible && cell.cursor && cursor_shape == TerminalCursorShape::Block;
+        if powerline_background_cutout(
+            cell,
+            transparent_background,
+            block_cursor
+                || highlight_layout
+                    .foreground_for_cell(source_row_index, cluster.logical_col)
+                    .is_some(),
+        )
+        .is_some()
+        {
+            if let Some(run) = current_run.take() {
+                text_runs.push(run);
+            }
+            continue;
+        }
         let fg = if block_cursor {
             to_hsla(terminal_color_from_hex(theme.background))
         } else if let Some(highlight_fg) =
@@ -2120,6 +2170,7 @@ fn map_rects_to_visual(
                 col: range.start,
                 cells: range.end.saturating_sub(range.start),
                 color: rect.color,
+                powerline_cutout: rect.powerline_cutout,
             });
         }
     }
@@ -2725,6 +2776,89 @@ mod cache_tests {
                     .map(|rect| (rect.col, rect.cells))
                     .collect::<Vec<_>>(),
                 vec![expected]
+            );
+        }
+    }
+
+    #[test]
+    fn powerline_background_toggle_refreshes_cached_shapes_and_preserves_selection_and_cursor() {
+        use crate::terminal_view::selection::{TerminalGridPoint, TerminalSelectionMode};
+        use oxideterm_terminal::TerminalStyleOrigin;
+
+        // Include RTL text to exercise visual ordering as well as the ordinary row path.
+        for bidi in [false, true] {
+            let mut row = row_with_text_and_cursor(0, "\u{e0b0}\u{e0b0}א", 2);
+            for cell in &mut row.cells_mut()[..2] {
+                cell.fg = terminal_color_from_hex(TerminalUiTheme::default().background);
+                cell.bg = TerminalColor::rgb(0, 128, 128);
+                cell.style_origin = TerminalStyleOrigin::new(true, true);
+            }
+            row.cells_mut()[0].style_origin = row.cells[0]
+                .style_origin
+                .with_foreground_default_background();
+            row.refresh_signature();
+            let mut view = element(snapshot(0, vec![row]));
+            view.snapshot.cols = 3;
+            view.snapshot.cursor_col = 2;
+            view.bidi_enabled = bidi;
+            view.selection = Some(TerminalSelection {
+                anchor: TerminalGridPoint { line: 0, col: 0 },
+                head: TerminalGridPoint { line: 0, col: 2 },
+                mode: TerminalSelectionMode::Simple,
+            });
+            let mut cache = TerminalLayoutCache::default();
+            for transparent in [false, true, false, true] {
+                view.transparent_background = transparent;
+                let layout = view.layout_for_rows(0..1, Some(&mut cache));
+                let row = &layout.cached_rows[0].layout;
+                assert_eq!(
+                    row.backgrounds
+                        .iter()
+                        .filter_map(|rect| rect.powerline_cutout)
+                        .collect::<Vec<_>>(),
+                    if transparent {
+                        vec!['\u{e0b0}']
+                    } else {
+                        vec![]
+                    }
+                );
+                assert_eq!(
+                    row.text_runs
+                        .iter()
+                        .flat_map(|run| run.text.chars())
+                        .filter(|ch| *ch == '\u{e0b0}')
+                        .count(),
+                    if transparent { 1 } else { 2 },
+                    "explicit RGB must remain a painted glyph"
+                );
+                assert_eq!(
+                    row.selections
+                        .iter()
+                        .map(|rect| (rect.col, rect.cells, rect.color))
+                        .collect::<Vec<_>>(),
+                    vec![(0, 3, view.theme.selection_background)]
+                );
+            }
+
+            view.snapshot.lines[0].cells_mut()[2].cursor = false;
+            view.snapshot.lines[0].cells_mut()[0].cursor = true;
+            view.snapshot.lines[0].refresh_signature();
+            view.snapshot.cursor_col = 0;
+            let layout = view.layout_for_rows(0..1, Some(&mut cache));
+            let row = &layout.cached_rows[0].layout;
+            assert!(
+                row.backgrounds
+                    .iter()
+                    .all(|rect| rect.powerline_cutout.is_none())
+            );
+            let cursor = row.cursor.expect("block cursor");
+            assert_eq!(
+                row.backgrounds
+                    .iter()
+                    .find(|rect| rect.col == cursor.col)
+                    .unwrap()
+                    .color,
+                to_hsla(terminal_color_from_hex(view.theme.header_foreground))
             );
         }
     }

@@ -515,6 +515,7 @@ fn rects_for_match(cells: &[TextCell], color: Hsla) -> Vec<TerminalRect> {
             col: cell.col,
             cells: cell.cells,
             color,
+            powerline_cutout: None,
         });
     }
     rects

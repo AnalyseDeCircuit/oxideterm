@@ -143,6 +143,22 @@ pub(crate) struct PowerlineSeparator {
     pub(crate) shape: PowerlineShape,
 }
 
+pub(crate) fn powerline_background_cutout(
+    cell: &TerminalCell,
+    transparent_background: bool,
+    foreground_overridden: bool,
+) -> Option<char> {
+    if !transparent_background
+        || foreground_overridden
+        || !cell.style_origin.foreground_is_default_background()
+        || !cell.zerowidth().is_empty()
+    {
+        return None;
+    }
+    let separator = powerline_separator(cell.ch)?;
+    (separator.weight == PowerlineWeight::Filled).then_some(cell.ch)
+}
+
 pub(crate) fn powerline_separator(ch: char) -> Option<PowerlineSeparator> {
     match ch as u32 {
         0xe0b0 => Some(PowerlineSeparator {

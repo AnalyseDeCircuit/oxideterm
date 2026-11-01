@@ -54,7 +54,14 @@ pub(crate) fn paint_terminal_rect(
     window: &mut Window,
 ) {
     paint_terminal_rect_at(
-        rect.row, rect.col, rect.cells, rect.color, origin, metrics, window,
+        rect.row,
+        rect.col,
+        rect.cells,
+        rect.color,
+        rect.powerline_cutout,
+        origin,
+        metrics,
+        window,
     );
 }
 
@@ -66,7 +73,14 @@ pub(crate) fn paint_terminal_row_rect(
     window: &mut Window,
 ) {
     paint_terminal_rect_at(
-        row, rect.col, rect.cells, rect.color, origin, metrics, window,
+        row,
+        rect.col,
+        rect.cells,
+        rect.color,
+        rect.powerline_cutout,
+        origin,
+        metrics,
+        window,
     );
 }
 
@@ -75,6 +89,7 @@ fn paint_terminal_rect_at(
     col: usize,
     cells: usize,
     color: Hsla,
+    powerline_cutout: Option<char>,
     origin: gpui::Point<Pixels>,
     metrics: &TerminalMetrics,
     window: &mut Window,
@@ -90,7 +105,17 @@ fn paint_terminal_rect_at(
             metrics.line_height,
         ),
     );
-    window.paint_quad(fill(bounds, color));
+    if let Some(ch) = powerline_cutout {
+        let bounds = Bounds::from_corners(
+            window.pixel_snap_point(bounds.origin),
+            window.pixel_snap_point(point(bounds.right(), bounds.bottom())),
+        );
+        if let Some(path) = powerline_background_path(ch, bounds) {
+            window.paint_path(path, color);
+        }
+    } else {
+        window.paint_quad(fill(bounds, color));
+    }
 }
 
 pub(crate) fn paint_terminal_underline(
@@ -844,7 +869,9 @@ pub(crate) fn paint_grid_text_run(
 ) {
     if let Some(color) = run.style.background_color {
         // Preedit owns an opaque grid surface so application colors and glyphs cannot bleed through.
-        paint_terminal_rect_at(run.row, run.col, run.cells, color, origin, metrics, window);
+        paint_terminal_rect_at(
+            run.row, run.col, run.cells, color, None, origin, metrics, window,
+        );
     }
     for segment in ghost_text_grid_segments(&run.text) {
         let position = origin
@@ -1021,6 +1048,81 @@ fn paint_powerline_separators(
     }
 
     true
+}
+
+fn powerline_background_path(ch: char, bounds: Bounds<Pixels>) -> Option<gpui::Path<Pixels>> {
+    let separator = powerline_separator(ch)?;
+    if separator.weight != PowerlineWeight::Filled {
+        return None;
+    }
+    // The opaque complement stays inside this cell; the transparent glyph needs no seam overlap.
+    let metrics = PowerlinePaintMetrics {
+        seam_overlap: px(0.0),
+        thin_stroke_width: px(0.0),
+    };
+    let outer_x = match separator.direction {
+        PowerlineDirection::Right => bounds.right(),
+        PowerlineDirection::Left => bounds.left(),
+    };
+    let mut builder = PathBuilder::fill();
+    match separator.shape {
+        PowerlineShape::Triangle => {
+            let [top, bottom, tip] = powerline_separator_points(ch, bounds, metrics)?;
+            builder.add_polygon(&[top, point(outer_x, top.y), tip], true);
+            builder.add_polygon(&[tip, point(outer_x, bottom.y), bottom], true);
+        }
+        PowerlineShape::HalfCircle => {
+            let curve = powerline_half_circle_curve(ch, bounds, metrics)?;
+            builder.move_to(curve.start);
+            builder.line_to(point(outer_x, curve.start.y));
+            builder.line_to(point(outer_x, curve.end.y));
+            builder.line_to(curve.end);
+            builder.cubic_bezier_to(curve.start, curve.end_control, curve.start_control);
+            builder.close();
+        }
+    }
+    builder.build().ok()
+}
+
+#[cfg(test)]
+mod powerline_background_tests {
+    use super::*;
+
+    #[test]
+    fn powerline_cutouts_leave_the_glyph_interior_unpainted() {
+        let bounds = Bounds::new(point(px(10.0), px(20.0)), size(px(8.0), px(16.0)));
+        for (ch, left) in [
+            ('\u{e0b0}', false),
+            ('\u{e0b2}', true),
+            ('\u{e0b4}', false),
+            ('\u{e0b6}', true),
+        ] {
+            let path = powerline_background_path(ch, bounds).expect("filled separator path");
+            // Sample the tessellated paint geometry, not a second implementation of the curve.
+            for (x, y, painted) in [
+                (0.1, 0.5, false),
+                (0.7, 0.5, false),
+                (0.9, 0.1, true),
+                (0.9, 0.9, true),
+            ] {
+                let x = if left { 1.0 - x } else { x };
+                let sample = point(px(10.0 + x * 8.0), px(20.0 + y * 16.0));
+                let covered = path.vertices.chunks_exact(3).any(|triangle| {
+                    let cross = |a: Point<Pixels>, b: Point<Pixels>| {
+                        f32::from(b.x - a.x) * f32::from(sample.y - a.y)
+                            - f32::from(b.y - a.y) * f32::from(sample.x - a.x)
+                    };
+                    let signs = [
+                        cross(triangle[0].xy_position, triangle[1].xy_position),
+                        cross(triangle[1].xy_position, triangle[2].xy_position),
+                        cross(triangle[2].xy_position, triangle[0].xy_position),
+                    ];
+                    signs.iter().all(|s| *s >= 0.0) || signs.iter().all(|s| *s <= 0.0)
+                });
+                assert_eq!(covered, painted, "{ch}: sample ({x}, {y})");
+            }
+        }
+    }
 }
 
 pub(crate) fn powerline_separator_points(

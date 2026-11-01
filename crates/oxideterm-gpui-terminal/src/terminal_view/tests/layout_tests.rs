@@ -325,6 +325,52 @@ fn terminal_element_keeps_powerline_separators_as_cell_painted_runs() {
 }
 
 #[test]
+fn transparent_powerline_default_background_is_not_painted_as_a_solid_glyph() {
+    let mut snapshot = selection_snapshot("\u{e0b0}\u{e0b2}\u{e0b4}\u{e0b6}");
+    snapshot.cols = 4;
+    snapshot.lines[0].cells_mut().truncate(4);
+    for cell in snapshot.lines[0].cells_mut().iter_mut().take(4) {
+        cell.fg = terminal_color_from_hex(TerminalUiTheme::default().background);
+        cell.bg = TerminalColor::rgb(0, 128, 128);
+        cell.style_origin = oxideterm_terminal::TerminalStyleOrigin::new(true, true)
+            .with_foreground_default_background();
+    }
+    snapshot.lines[0].refresh_signature();
+    let layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .transparent_background(true)
+    .layout();
+
+    assert!(
+        layout.text_runs.is_empty(),
+        "transparent separators must leave the image visible"
+    );
+    assert_eq!(
+        layout
+            .backgrounds
+            .iter()
+            .map(|rect| (rect.col, rect.cells, rect.powerline_cutout, rect.color))
+            .collect::<Vec<_>>(),
+        ['\u{e0b0}', '\u{e0b2}', '\u{e0b4}', '\u{e0b6}']
+            .into_iter()
+            .enumerate()
+            .map(|(col, ch)| (col, 1, Some(ch), gpui::Hsla::from(rgb(0x008080))))
+            .collect::<Vec<_>>(),
+        "each separator needs its own shaped background rather than one solid rectangle"
+    );
+}
+
+#[test]
 fn terminal_element_prepaint_clips_layout_to_visible_rows() {
     let mut snapshot = multirow_snapshot(&[
         "visible zero",

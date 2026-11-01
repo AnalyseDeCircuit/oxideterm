@@ -1537,6 +1537,29 @@ mod incremental_snapshot_tests {
     }
 
     #[test]
+    fn snapshot_preserves_powerline_default_background_through_reverse_video() {
+        let size = TerminalSize { cols: 4, rows: 1, cell_width: 0, cell_height: 0 };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        // Oh My Posh's transparent foreground uses SGR 49 followed by SGR 7.
+        // The second cell explicitly requests the same RGB and must remain opaque.
+        parser.advance(&mut term, "\x1b[0m\x1b[36;49m\x1b[7m\u{e0b0}\x1b[0m\x1b[36;48;2;13;15;18m\x1b[7m\u{e0b0}\x1b[27m".as_bytes());
+        let snapshot = snapshot_from_term(
+            &term, size, &TerminalGraphicsState::default(), &TerminalPalette::default(),
+        );
+        let cells = &snapshot.lines[0].cells;
+        for cell in &cells[..2] {
+            assert_eq!((cell.ch, cell.fg, cell.bg), (
+                '\u{e0b0}', TerminalColor::rgb(13, 15, 18), TerminalColor::rgb(0x56, 0xc7, 0xda),
+            ));
+        }
+        assert!(cells[0].style_origin.foreground_is_default_background());
+        assert!(!cells[1].style_origin.foreground_is_default_background());
+        assert!(!cells[2].style_origin.foreground_is_default_background());
+    }
+
+    #[test]
     fn snapshot_style_runs_preserve_contrast_attributes_and_link_boundaries() {
         let size = TerminalSize {
             cols: 100,
