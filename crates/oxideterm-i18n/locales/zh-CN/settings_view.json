@@ -2043,6 +2043,8 @@
         "remoteDesktop.paste": "粘贴到远程桌面",
         "terminal.wordBackward": "向左移动一个单词",
         "terminal.wordForward": "向右移动一个单词",
+        "terminal.suggestPrevious": "选择上一条命令提示",
+        "terminal.suggestNext": "选择下一条命令提示",
         "terminal.scrollPageUp": "向上滚动一页",
         "terminal.scrollPageDown": "向下滚动一页",
         "terminal.scrollLineUp": "向上滚动一行",

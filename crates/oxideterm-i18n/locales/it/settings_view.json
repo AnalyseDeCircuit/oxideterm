@@ -2043,6 +2043,8 @@
         "remoteDesktop.paste": "Incolla nel desktop remoto",
         "terminal.wordBackward": "Sposta indietro di una parola",
         "terminal.wordForward": "Sposta avanti di una parola",
+        "terminal.suggestPrevious": "Seleziona il suggerimento di comando precedente",
+        "terminal.suggestNext": "Seleziona il suggerimento di comando successivo",
         "terminal.scrollPageUp": "Scorri una pagina in alto",
         "terminal.scrollPageDown": "Scorri una pagina in basso",
         "terminal.scrollLineUp": "Scorri una riga in alto",

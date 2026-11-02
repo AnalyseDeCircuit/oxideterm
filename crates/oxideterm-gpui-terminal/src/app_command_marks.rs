@@ -629,11 +629,16 @@ struct TerminalInputTracker {
     value: String,
     cursor_index: usize,
     untracked: bool,
+    screen_recovery_allowed: bool,
+    recovered_from_screen: bool,
+    recovered_input_edited: bool,
 }
 
 impl TerminalInputTracker {
     fn tracked_state(&self) -> Option<TerminalAutosuggestInputState> {
-        (!self.untracked).then(|| self.state())
+        // Screen recovery is for suggestions; other editing and submission consumers
+        // still require a line reconstructed entirely from observed user input.
+        (!self.untracked && !self.recovered_from_screen).then(|| self.state())
     }
 
     fn state(&self) -> TerminalAutosuggestInputState {
@@ -645,6 +650,9 @@ impl TerminalInputTracker {
     }
 
     fn apply_bytes(&mut self, bytes: &[u8]) -> Option<String> {
+        if self.recovered_from_screen && !bytes.is_empty() {
+            self.recovered_input_edited = true;
+        }
         let data = String::from_utf8_lossy(bytes);
         if data.contains("\u{1b}[200~") || data.contains("\u{1b}[201~") {
             self.invalidate();
@@ -659,12 +667,17 @@ impl TerminalInputTracker {
             // History/completion is rendered by the shell, not echoed from these
             // bytes. Do not record search terms or subsequent edits as a command.
             if self.untracked && !matches!(ch, '\r' | '\n' | '\u{3}') {
+                if matches!(ch, '\u{12}' | '\u{13}' | '\t')
+                    || (ch == '\u{1b}' && !history_arrow_sequence(&chars[index..]))
+                {
+                    self.screen_recovery_allowed = false;
+                }
                 index += 1;
                 continue;
             }
             match ch {
                 '\r' | '\n' => {
-                    if !self.value.trim().is_empty() {
+                    if !self.recovered_from_screen && !self.value.trim().is_empty() {
                         completed_command = Some(self.value.clone());
                     }
                     self.reset();
@@ -674,7 +687,12 @@ impl TerminalInputTracker {
                     self.reset();
                     index += 1;
                 }
-                '\u{12}' | '\u{13}' | '\u{10}' | '\u{e}' | '\t' => {
+                '\u{10}' | '\u{e}' => {
+                    self.invalidate();
+                    self.screen_recovery_allowed = true;
+                    index += 1;
+                }
+                '\u{12}' | '\u{13}' | '\t' => {
                     self.invalidate();
                     index += 1;
                 }
@@ -700,6 +718,12 @@ impl TerminalInputTracker {
                     index += 1;
                 }
                 '\u{1b}' => {
+                    if history_arrow_sequence(&chars[index..]) {
+                        self.invalidate();
+                        self.screen_recovery_allowed = true;
+                        index += 3;
+                        continue;
+                    }
                     let consumed = self.apply_escape_sequence(&chars[index..]);
                     if consumed > 0 {
                         index += consumed;
@@ -722,6 +746,16 @@ impl TerminalInputTracker {
         zeroize::Zeroize::zeroize(&mut self.value);
         self.cursor_index = 0;
         self.untracked = false;
+        self.screen_recovery_allowed = false;
+        self.recovered_from_screen = false;
+        self.recovered_input_edited = false;
+    }
+
+    fn recover(&mut self, value: zeroize::Zeroizing<String>) {
+        self.reset();
+        self.value.push_str(&value);
+        self.cursor_index = self.value.len();
+        self.recovered_from_screen = true;
     }
 
     fn invalidate(&mut self) {
@@ -792,6 +826,10 @@ impl TerminalInputTracker {
         }
         0
     }
+}
+
+fn history_arrow_sequence(chars: &[char]) -> bool {
+    matches!(chars, ['\u{1b}', '[' | 'O', 'A' | 'B', ..])
 }
 
 fn starts_with_chars(chars: &[char], prefix: &[char]) -> bool {
@@ -1086,6 +1124,9 @@ fn input_tracker_handles_submission_editing_state_and_reset_sequences() {
         assert!(tracker.state().value.is_empty());
         assert_eq!(tracker.apply_bytes(b" edited\r"), None);
         assert_eq!(tracker.apply_bytes(b"pwd\r"), Some("pwd".into()));
+        tracker.recover(zeroize::Zeroizing::new("echo recalled".into()));
+        assert!(tracker.tracked_state().is_none());
+        assert_eq!(tracker.apply_bytes(b" edited\r"), None);
     }
 
     #[test]

@@ -1305,6 +1305,25 @@ impl WorkspaceApp {
                     .t("terminal.kitty_file_transmission.failed_description"),
             },
             autosuggest_labels: TerminalAutosuggestLabels {
+                selection_shortcut: Some({
+                    let shortcuts = ["terminal.suggestPrevious", "terminal.suggestNext"]
+                        .into_iter()
+                        .filter_map(crate::keybindings::action_definition)
+                        .flat_map(|definition| {
+                            crate::keybindings::effective_combos(
+                                definition,
+                                &settings.keybindings.overrides,
+                                crate::keybindings::KeybindingSide::current(),
+                            )
+                        })
+                        .map(|combo| crate::keybindings::format_combo(&combo))
+                        .collect::<Vec<_>>();
+                    if shortcuts.is_empty() {
+                        self.i18n.t("settings_view.keybindings.unbound")
+                    } else {
+                        shortcuts.join(" / ")
+                    }
+                }),
                 history_source: self.i18n.t("terminal.command_bar.source_history"),
                 matches: self.i18n.t("terminal.autosuggest.matches"),
                 navigation_hint: self.i18n.t("terminal.autosuggest.navigation_hint"),

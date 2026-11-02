@@ -52,6 +52,7 @@ fn terminal_autosuggest_hints(labels: &TerminalAutosuggestLabels, macos: bool) -
     } else {
         ("Alt+↑/↓", "Enter", "Shift+Delete")
     };
+    let select = labels.selection_shortcut.as_deref().unwrap_or(select);
     (
         labels
             .navigation_hint
@@ -246,6 +247,7 @@ impl Render for TerminalPane {
                 #[cfg(feature = "bench")]
                 let snapshot_state_started = Instant::now();
                 self.snapshot = self.stamp_snapshot_with_selection(snapshot, selection);
+                self.recover_terminal_autosuggest_input();
                 #[cfg(feature = "bench")]
                 {
                     self.benchmark_snapshot_state_micros = snapshot_state_started
@@ -3399,6 +3401,12 @@ mod tests {
                 "Alt+↑/↓ 选择 · Enter 执行 · 单击填充".into(),
                 "Esc 关闭 · Shift+Delete 移除".into(),
             )
+        );
+        let mut custom = labels;
+        custom.selection_shortcut = Some("↑ / Ctrl+N".into());
+        assert_eq!(
+            super::terminal_autosuggest_hints(&custom, true).0,
+            "↑ / Ctrl+N 选择 · Return 执行 · 单击填充"
         );
     }
 

@@ -2043,6 +2043,8 @@
         "remoteDesktop.paste": "Paste to remote desktop",
         "terminal.wordBackward": "Move backward one word",
         "terminal.wordForward": "Move forward one word",
+        "terminal.suggestPrevious": "Select previous command suggestion",
+        "terminal.suggestNext": "Select next command suggestion",
         "terminal.scrollPageUp": "Scroll up one page",
         "terminal.scrollPageDown": "Scroll down one page",
         "terminal.scrollLineUp": "Scroll up one line",

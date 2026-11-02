@@ -714,6 +714,16 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             KeyCombo::ctrl("v"),
         ),
     ]);
+    for (id, key) in [
+        ("terminal.suggestPrevious", "arrowup"),
+        ("terminal.suggestNext", "arrowdown"),
+    ] {
+        let combo = KeyCombo {
+            alt: true,
+            ..KeyCombo::plain(key)
+        };
+        actions.push(def(id, ActionScope::Terminal, combo.clone(), combo));
+    }
     actions.extend([
         def(
             "terminal.wordBackward",
@@ -904,7 +914,7 @@ pub(crate) fn effective_combo(
         .unwrap_or_else(|| Some(definition.default_combo(side).clone()))
 }
 
-fn effective_combos(
+pub(crate) fn effective_combos(
     definition: &ActionDefinition,
     overrides: &Map<String, Value>,
     side: KeybindingSide,
@@ -1532,6 +1542,48 @@ mod tests {
     use gpui::{Keystroke, Modifiers};
 
     #[gpui::test]
+    fn suggestion_navigation_uses_existing_overrides_and_unbinding(cx: &mut gpui::TestAppContext) {
+        use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
+        let mut overrides = Map::new();
+        cx.update(|cx| install_context_keybindings(&overrides, cx));
+        cx.read(|cx| {
+            let bindings = cx.global::<TerminalKeybindings>();
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("alt-up").unwrap()),
+                Some(TerminalShortcut::SuggestPrevious)
+            );
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("alt-down").unwrap()),
+                Some(TerminalShortcut::SuggestNext)
+            );
+        });
+        set_override(
+            &mut overrides,
+            "terminal.suggestPrevious",
+            KeybindingSide::current(),
+            KeyCombo::plain("arrowup"),
+        );
+        set_unbound_override(
+            &mut overrides,
+            "terminal.suggestNext",
+            KeybindingSide::current(),
+        );
+        cx.update(|cx| install_context_keybindings(&overrides, cx));
+        cx.read(|cx| {
+            let bindings = cx.global::<TerminalKeybindings>();
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("up").unwrap()),
+                Some(TerminalShortcut::SuggestPrevious)
+            );
+            assert_eq!(bindings.resolve(&Keystroke::parse("alt-up").unwrap()), None);
+            assert_eq!(
+                bindings.resolve(&Keystroke::parse("alt-down").unwrap()),
+                None
+            );
+        });
+    }
+
+    #[gpui::test]
     fn terminal_word_shortcuts_can_be_rebound_and_disabled(cx: &mut gpui::TestAppContext) {
         use oxideterm_gpui_terminal::{TerminalKeybindings, TerminalShortcut};
         let side = KeybindingSide::current();
@@ -2148,6 +2200,11 @@ pub(crate) fn install_context_keybindings(overrides: &Map<String, Value>, cx: &m
         ("terminal.killTask", TerminalShortcut::Kill),
         ("terminal.wordBackward", TerminalShortcut::WordBackward),
         ("terminal.wordForward", TerminalShortcut::WordForward),
+        (
+            "terminal.suggestPrevious",
+            TerminalShortcut::SuggestPrevious,
+        ),
+        ("terminal.suggestNext", TerminalShortcut::SuggestNext),
         ("terminal.scrollPageUp", TerminalShortcut::PageUp),
         ("terminal.scrollPageDown", TerminalShortcut::PageDown),
         ("terminal.scrollLineUp", TerminalShortcut::LineUp),
@@ -2259,6 +2316,8 @@ fn terminal_leaf_action(id: &str) -> bool {
                 | "terminal.pasteAlternate"
                 | "terminal.wordBackward"
                 | "terminal.wordForward"
+                | "terminal.suggestPrevious"
+                | "terminal.suggestNext"
                 | "terminal.terminateTask"
                 | "terminal.killTask"
         )

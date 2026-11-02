@@ -392,6 +392,7 @@ pub struct TerminalNotice {
 
 #[derive(Clone, Debug)]
 pub struct TerminalAutosuggestLabels {
+    pub selection_shortcut: Option<String>,
     pub history_source: String,
     pub matches: String,
     pub navigation_hint: String,
@@ -401,6 +402,7 @@ pub struct TerminalAutosuggestLabels {
 impl Default for TerminalAutosuggestLabels {
     fn default() -> Self {
         Self {
+            selection_shortcut: None,
             history_source: "history".to_string(),
             matches: "{{count}} matches".into(),
             navigation_hint: "{{select}} select · {{run}} run · Click fill".into(),

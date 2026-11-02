@@ -2043,6 +2043,8 @@
         "remoteDesktop.paste": "Dán vào máy tính từ xa",
         "terminal.wordBackward": "Di chuyển sang trái một từ",
         "terminal.wordForward": "Di chuyển sang phải một từ",
+        "terminal.suggestPrevious": "Chọn gợi ý lệnh trước",
+        "terminal.suggestNext": "Chọn gợi ý lệnh tiếp theo",
         "terminal.scrollPageUp": "Cuộn lên một trang",
         "terminal.scrollPageDown": "Cuộn xuống một trang",
         "terminal.scrollLineUp": "Cuộn lên một dòng",

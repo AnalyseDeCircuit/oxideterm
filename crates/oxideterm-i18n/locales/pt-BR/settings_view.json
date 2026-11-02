@@ -2043,6 +2043,8 @@
         "remoteDesktop.paste": "Colar na área de trabalho remota",
         "terminal.wordBackward": "Mover uma palavra para trás",
         "terminal.wordForward": "Mover uma palavra para frente",
+        "terminal.suggestPrevious": "Selecionar a sugestão de comando anterior",
+        "terminal.suggestNext": "Selecionar a próxima sugestão de comando",
         "terminal.scrollPageUp": "Rolar uma página para cima",
         "terminal.scrollPageDown": "Rolar uma página para baixo",
         "terminal.scrollLineUp": "Rolar uma linha para cima",

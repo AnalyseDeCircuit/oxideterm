@@ -111,6 +111,8 @@ pub enum TerminalShortcut {
     Kill,
     WordBackward,
     WordForward,
+    SuggestPrevious,
+    SuggestNext,
     PageUp,
     PageDown,
     LineUp,
@@ -582,6 +584,7 @@ pub struct TerminalPane {
     command_history: SharedTerminalCommandHistory,
     // Shell integration opens this boundary at a prompt and command submission closes it.
     autosuggest_prompt_active: bool,
+    autosuggest_input_start: Option<oxideterm_terminal::TerminalCommandPosition>,
     autosuggest_selected_index: Option<usize>,
     autosuggest_scroll: gpui::ScrollHandle,
     autosuggest_dismissed_query: Option<String>,
@@ -1375,6 +1378,7 @@ impl TerminalPane {
             input_tracker: TerminalInputTracker::default(),
             command_history: preferences.command_history.clone(),
             autosuggest_prompt_active: false,
+            autosuggest_input_start: None,
             autosuggest_selected_index: None,
             autosuggest_scroll: gpui::ScrollHandle::new(),
             autosuggest_dismissed_query: None,
@@ -1780,6 +1784,7 @@ impl TerminalPane {
             && self.autosuggest_prompt_active
             && self.history_input_available(mode)
             && !self.input_tracker.untracked
+            && !self.input_tracker.recovered_from_screen
             && self.input_tracker.value.is_empty()
             && self.marked_text.is_none()
             && self.pending_paste.is_none()
@@ -1888,6 +1893,7 @@ impl TerminalPane {
             .get(self.snapshot.cursor_row)
             .is_some_and(|row| row.active_input);
         if !self.preferences.autosuggest_enabled
+            || (self.input_tracker.recovered_from_screen && self.autosuggest_input_start.is_none())
             || (!self.autosuggest_prompt_active
                 && !self.is_serial_transport()
                 && !matches!(
@@ -1931,15 +1937,65 @@ impl TerminalPane {
         cx.notify();
     }
 
+    fn recover_terminal_autosuggest_input(&mut self) {
+        if (!self.input_tracker.untracked && !self.input_tracker.recovered_from_screen)
+            || (self.input_tracker.untracked && !self.input_tracker.screen_recovery_allowed)
+            // After an edit, the local prediction includes input the shell may not have echoed.
+            || self.input_tracker.recovered_input_edited
+            || !self.history_input_available(self.render_mode)
+            || self.marked_text.is_some()
+            || self.privilege_prompt_inline_hint.is_some()
+        {
+            return;
+        }
+        let Some(value) = self
+            .autosuggest_input_start
+            .and_then(|start| interactions::terminal_prompt_input(&self.snapshot, start))
+        else {
+            if self.input_tracker.recovered_from_screen {
+                self.input_tracker.invalidate();
+                self.input_tracker.screen_recovery_allowed = true;
+                self.autosuggest_selected_index = None;
+            }
+            return;
+        };
+        if !self.input_tracker.untracked
+            && self.input_tracker.value == *value
+            && self.input_tracker.cursor_index == value.len()
+        {
+            return;
+        }
+        self.input_tracker.recover(value);
+        self.autosuggest_selected_index = None;
+        self.autosuggest_dismissed_query = None;
+    }
+
     fn fill_terminal_autosuggest_command(
         &mut self,
         command: &str,
         append_enter: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(state) = self.input_tracker.tracked_state() else {
+        if self.input_tracker.untracked {
             return false;
-        };
+        }
+        let state = self.input_tracker.state();
+        if self.input_tracker.recovered_from_screen {
+            // A shell redraw can lag newer input. Never edit or execute against a stale line.
+            let (snapshot, mode) = {
+                let terminal = self.terminal.lock();
+                (terminal.snapshot(), terminal.mode())
+            };
+            if !self.history_input_available(mode) {
+                return false;
+            }
+            let confirmed = self
+                .autosuggest_input_start
+                .and_then(|start| interactions::terminal_prompt_input(&snapshot, start));
+            if confirmed.as_deref().map(|text| text.as_str()) != Some(state.value.as_str()) {
+                return false;
+            }
+        }
         let mode = self.terminal.lock().mode();
         let Some(bytes) =
             interactions::terminal_autosuggest_edit_bytes(&state, command, append_enter, mode)
@@ -4131,6 +4187,15 @@ impl TerminalPane {
                 TerminalEventEffect::default()
             }
             TerminalEvent::ShellIntegration(event) => {
+                self.autosuggest_input_start = match event.kind {
+                    oxideterm_terminal::ShellIntegrationEventKind::CommandStart => {
+                        Some(oxideterm_terminal::TerminalCommandPosition {
+                            line: event.line,
+                            column: event.col,
+                        })
+                    }
+                    _ => None,
+                };
                 if event.kind == oxideterm_terminal::ShellIntegrationEventKind::PromptStart {
                     self.input_tracker.reset();
                     self.autosuggest_selected_index = None;
@@ -4225,14 +4290,21 @@ impl TerminalPane {
                         }
                     }
                     TerminalCommandMarkEvent::Reset => {
+                        self.autosuggest_input_start = None;
                         self.clear_visual_command_marks();
                     }
                     TerminalCommandMarkEvent::HistoryTrimmed { lines } => {
+                        self.autosuggest_input_start =
+                            self.autosuggest_input_start.and_then(|mut start| {
+                                start.line = start.line.checked_sub(lines)?;
+                                Some(start)
+                            });
                         self.command_marks
                             .retain_mut(|mark| mark.trim_history(lines));
                         self.command_fact_ledger.trim_history(lines);
                     }
                     TerminalCommandMarkEvent::Reflowed { cols, rows, marks } => {
+                        self.autosuggest_input_start = None;
                         self.apply_reflowed_command_marks(cols, rows, marks);
                     }
                 }
@@ -4826,6 +4898,7 @@ impl TerminalPane {
             self.snapshot = self.stamp_snapshot(snapshot);
             self.mark_terminal_content_changed(cx);
             if grid_changed {
+                self.autosuggest_input_start = None;
                 // Keep collapse identities while the parser publishes rebased boundaries.
                 self.command_reflow_pending = true;
             }

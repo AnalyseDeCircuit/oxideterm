@@ -187,7 +187,7 @@ impl TerminalPane {
             return true;
         }
 
-        if self.handle_terminal_autosuggest_key(key, modifiers, cx) {
+        if self.handle_terminal_autosuggest_key(&event.keystroke, cx) {
             return true;
         }
 
@@ -374,44 +374,70 @@ impl TerminalPane {
 
     fn handle_terminal_autosuggest_key(
         &mut self,
-        key: &str,
-        modifiers: Modifiers,
+        keystroke: &gpui::Keystroke,
         cx: &mut Context<Self>,
     ) -> bool {
-        if modifiers.platform || modifiers.control {
-            return false;
-        }
+        let key = keystroke.key.as_str();
+        let modifiers = keystroke.modifiers;
         let candidates = self.terminal_autosuggest_candidates();
         if candidates.is_empty() {
             self.autosuggest_selected_index = None;
             return false;
         }
+        let bindings = cx.try_global::<TerminalKeybindings>();
+        let selection = bindings
+            .and_then(|bindings| bindings.resolve(keystroke))
+            .or_else(|| {
+                (bindings.is_none()
+                    && modifiers.alt
+                    && !modifiers.shift
+                    && !modifiers.control
+                    && !modifiers.platform)
+                    .then(|| match key {
+                        "up" => Some(TerminalShortcut::SuggestPrevious),
+                        "down" => Some(TerminalShortcut::SuggestNext),
+                        _ => None,
+                    })
+                    .flatten()
+            });
+        match selection {
+            Some(TerminalShortcut::SuggestNext) => {
+                self.autosuggest_selected_index = Some(
+                    self.autosuggest_selected_index
+                        .map(|i| (i + 1) % candidates.len())
+                        .unwrap_or(0),
+                );
+            }
+            Some(TerminalShortcut::SuggestPrevious) => {
+                self.autosuggest_selected_index = Some(
+                    self.autosuggest_selected_index
+                        .and_then(|i| i.checked_sub(1))
+                        .unwrap_or(candidates.len() - 1),
+                );
+            }
+            _ => {
+                return self.handle_terminal_autosuggest_action(key, modifiers, &candidates, cx);
+            }
+        }
+        self.autosuggest_scroll
+            .scroll_to_item(self.autosuggest_selected_index.unwrap_or(0));
+        cx.notify();
+        true
+    }
 
+    fn handle_terminal_autosuggest_action(
+        &mut self,
+        key: &str,
+        modifiers: Modifiers,
+        candidates: &[crate::command_facts::TerminalAutosuggestCandidate],
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if modifiers.platform || modifiers.control {
+            return false;
+        }
         match key {
             "escape" if !modifiers.alt => {
                 self.dismiss_terminal_autosuggest(cx);
-                true
-            }
-            "down" if modifiers.alt && !modifiers.shift => {
-                self.autosuggest_selected_index = Some(
-                    self.autosuggest_selected_index
-                        .map(|index| (index + 1) % candidates.len())
-                        .unwrap_or(0),
-                );
-                self.autosuggest_scroll
-                    .scroll_to_item(self.autosuggest_selected_index.unwrap_or(0));
-                cx.notify();
-                true
-            }
-            "up" if modifiers.alt && !modifiers.shift => {
-                self.autosuggest_selected_index = Some(
-                    self.autosuggest_selected_index
-                        .map(|index| index.checked_sub(1).unwrap_or(candidates.len() - 1))
-                        .unwrap_or(candidates.len() - 1),
-                );
-                self.autosuggest_scroll
-                    .scroll_to_item(self.autosuggest_selected_index.unwrap_or(0));
-                cx.notify();
                 true
             }
             "down" | "up" if !modifiers.alt => {
@@ -442,7 +468,11 @@ impl TerminalPane {
                     return false;
                 };
                 let command = Zeroizing::new(candidate.command.clone());
-                self.fill_terminal_autosuggest_command(&command, true, cx)
+                self.fill_terminal_autosuggest_command(&command, true, cx);
+                // Failed validation must not turn suggestion acceptance into a plain Enter.
+                self.autosuggest_selected_index = None;
+                cx.notify();
+                true
             }
             _ => false,
         }
@@ -3219,6 +3249,73 @@ fn free_type_selection_move_bytes(
     Some(bytes)
 }
 
+pub(super) fn terminal_prompt_input(
+    snapshot: &TerminalSnapshot,
+    start: oxideterm_terminal::TerminalCommandPosition,
+) -> Option<Zeroizing<String>> {
+    if snapshot.display_offset != 0
+        || snapshot.cursor_shape == oxideterm_terminal::TerminalCursorShape::Hidden
+    {
+        return None;
+    }
+    let first_row = start.line.checked_sub(snapshot.scrollback_lines)?;
+    let last_row = snapshot.cursor_row;
+    if first_row > last_row
+        || start.column >= snapshot.cols
+        || (first_row == last_row && snapshot.cursor_col < start.column)
+    {
+        return None;
+    }
+    let cursor_row = snapshot.lines.get(last_row)?;
+    // Text beyond the cursor can be a suffix, a completion menu, or shell ghost text.
+    // Without a shell buffer protocol none is safe to treat as an editable whole line.
+    if cursor_row.wrapped
+        || cursor_row
+            .cells
+            .get(snapshot.cursor_col..)?
+            .iter()
+            .any(|cell| cell.ch != ' ' || !cell.zerowidth().is_empty())
+    {
+        return None;
+    }
+    let mut text = Zeroizing::new(String::new());
+    for index in first_row..=last_row {
+        let row = snapshot.lines.get(index)?;
+        if !row.active_input || (index < last_row && !row.wrapped) {
+            return None;
+        }
+        if index < last_row
+            && row.cells.last().is_some_and(|cell| cell.ch == ' ')
+            && snapshot
+                .lines
+                .get(index + 1)?
+                .cells
+                .first()
+                .is_some_and(|cell| cell.wide)
+        {
+            // The paint snapshot cannot distinguish a wide-wrap spacer from a typed space.
+            return None;
+        }
+        let begin = if index == first_row { start.column } else { 0 };
+        let end = if index == last_row {
+            snapshot.cursor_col
+        } else {
+            snapshot.cols
+        };
+        let mut column = begin;
+        while column < end {
+            let cell = row.cells.get(column)?;
+            if cell.ch.is_control() || (cell.wide && column + 1 >= end) {
+                return None;
+            }
+            text.push(cell.ch);
+            text.push_str(cell.zerowidth());
+            column += if cell.wide { 2 } else { 1 };
+        }
+    }
+    (text.chars().count() <= TERMINAL_FREE_TYPE_MAX_CURSOR_STEPS).then_some(text)
+}
+
 pub(super) fn terminal_autosuggest_edit_bytes(
     state: &TerminalAutosuggestInputState,
     command: &str,
@@ -3553,14 +3650,16 @@ mod tests {
     }
 
     #[gpui::test]
-    fn plain_arrows_remain_owned_by_shell_when_history_suggestions_are_visible(
+    fn history_suggestions_recover_after_navigation_without_stale_execution(
         cx: &mut TestAppContext,
     ) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalScrollTestRoot);
         let pane = cx.update(|window, cx| {
             let mut preferences = TerminalUiPreferences::default();
-            preferences.command_history =
-                SharedTerminalCommandHistory::from_commands(vec!["ls -la".to_string()]);
+            preferences.command_history = SharedTerminalCommandHistory::from_commands(vec![
+                "ls -la".to_string(),
+                "git status".into(),
+            ]);
             cx.new(|cx| {
                 TerminalPane::new_recording_playback(
                     DEFAULT_COLS,
@@ -3579,19 +3678,242 @@ mod tests {
             pane.autosuggest_prompt_active = true;
             pane.observe_autosuggest_input_bytes(b"ls", cx);
 
-            assert!(pane.handle_terminal_autosuggest_key(
-                "down",
-                Modifiers {
-                    alt: true,
-                    ..Modifiers::default()
-                },
-                cx,
-            ));
+            assert!(
+                pane.handle_terminal_autosuggest_key(
+                    &gpui::Keystroke::parse("alt-down").unwrap(),
+                    cx,
+                )
+            );
             assert_eq!(pane.autosuggest_selected_index, Some(0));
 
-            assert!(!pane.handle_terminal_autosuggest_key("up", Modifiers::default(), cx));
+            assert!(
+                !pane.handle_terminal_autosuggest_key(&gpui::Keystroke::parse("up").unwrap(), cx)
+            );
             assert_eq!(pane.autosuggest_selected_index, None);
             assert_eq!(pane.autosuggest_dismissed_query.as_deref(), Some("ls"));
+            pane.handle_terminal_event(
+                TerminalEvent::ShellIntegration(oxideterm_terminal::ShellIntegrationEvent {
+                    kind: oxideterm_terminal::ShellIntegrationEventKind::CommandStart,
+                    source: oxideterm_terminal::ShellIntegrationSource::Osc133,
+                    line: 0,
+                    col: 2,
+                    sequence: "B".into(),
+                    raw: "133;B".into(),
+                    command: None,
+                    exit_code: None,
+                }),
+                cx,
+            );
+            pane.observe_autosuggest_input_bytes(b"\x1b[A\x15git", cx);
+            assert!(pane.input_tracker.tracked_state().is_none());
+            pane.terminal.lock().feed_recording_output(b"$ gi");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.recover_terminal_autosuggest_input();
+            assert_eq!(pane.input_tracker.state().value, "gi");
+            pane.terminal.lock().feed_recording_output(b"t");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.recover_terminal_autosuggest_input();
+            assert_eq!(pane.input_tracker.state().value, "git");
+            assert!(
+                pane.input_tracker.tracked_state().is_none(),
+                "screen recovery must not authorize unrelated command editing"
+            );
+            assert_eq!(
+                pane.terminal_autosuggest_candidates()
+                    .iter()
+                    .map(|c| c.command.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["git status"]
+            );
+            assert_eq!(pane.autosuggest_selected_index, None);
+            assert!(
+                !pane
+                    .handle_terminal_autosuggest_key(&gpui::Keystroke::parse("enter").unwrap(), cx)
+            );
+
+            let attempted = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
+            let writes = attempted.clone();
+            pane.set_plugin_input_interceptor(Some(Arc::new(move |bytes| {
+                writes.lock().unwrap().push(bytes.to_vec());
+                super::super::TerminalInputInterceptorResult::Suppress
+            })));
+            assert!(
+                pane.handle_terminal_autosuggest_key(
+                    &gpui::Keystroke::parse("alt-down").unwrap(),
+                    cx
+                )
+            );
+            pane.recover_terminal_autosuggest_input();
+            assert_eq!(pane.autosuggest_selected_index, Some(0));
+            // The live emulator has a newer line than the selected suggestion's snapshot.
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"\r\x1b[2K$ echo safe");
+            assert!(
+                pane.handle_terminal_autosuggest_key(&gpui::Keystroke::parse("enter").unwrap(), cx)
+            );
+            assert!(
+                attempted.lock().unwrap().is_empty(),
+                "stale selection must send neither replacement nor Enter"
+            );
+
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"\r\x1b[2K$ git");
+            assert!(
+                pane.handle_terminal_autosuggest_key(
+                    &gpui::Keystroke::parse("alt-down").unwrap(),
+                    cx
+                )
+            );
+            assert!(
+                pane.handle_terminal_autosuggest_key(&gpui::Keystroke::parse("enter").unwrap(), cx)
+            );
+            assert_eq!(*attempted.lock().unwrap(), vec![b" status\r".to_vec()]);
+
+            pane.observe_autosuggest_input_bytes(b" status", cx);
+            pane.terminal.lock().feed_recording_output(b" st");
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.recover_terminal_autosuggest_input();
+            assert_eq!(
+                pane.input_tracker.state().value,
+                "git status",
+                "partial echo must not overwrite newer user input"
+            );
+            assert!(!pane.fill_terminal_autosuggest_command("git status --short", true, cx));
+            assert_eq!(*attempted.lock().unwrap(), vec![b" status\r".to_vec()]);
+
+            // Search/completion interfaces are not a shell command buffer, even on the same row.
+            for sequence in [b"\x12git".as_slice(), b"\tgit".as_slice()] {
+                pane.input_tracker.reset();
+                pane.observe_autosuggest_input_bytes(sequence, cx);
+                pane.recover_terminal_autosuggest_input();
+                assert!(pane.input_tracker.tracked_state().is_none());
+            }
+            pane.observe_autosuggest_input_bytes(b"\x03git", cx);
+            assert_eq!(pane.input_tracker.tracked_state().unwrap().value, "git");
+        });
+    }
+
+    #[gpui::test]
+    fn autosuggest_selection_uses_only_configured_keys_and_requires_candidates(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.set_global(TerminalKeybindings {
+                bindings: vec![
+                    (
+                        gpui::KeyBinding::new("up", gpui::NoAction {}, None),
+                        TerminalShortcut::SuggestPrevious,
+                    ),
+                    (
+                        gpui::KeyBinding::new("ctrl-n", gpui::NoAction {}, None),
+                        TerminalShortcut::SuggestNext,
+                    ),
+                ],
+                normalize: |key| Some(key.clone()),
+            });
+            let mut preferences = TerminalUiPreferences::default();
+            preferences.command_history = SharedTerminalCommandHistory::from_commands(vec![
+                "git status".into(),
+                "git diff".into(),
+            ]);
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(40, 2, preferences, window, cx).unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.test_accepts_input = true;
+            pane.autosuggest_prompt_active = true;
+            pane.snapshot.lines[0].active_input = true;
+            assert!(
+                !pane.handle_terminal_autosuggest_key(&gpui::Keystroke::parse("up").unwrap(), cx)
+            );
+            pane.observe_autosuggest_input_bytes(b"git", cx);
+            assert!(
+                !pane.handle_terminal_autosuggest_key(
+                    &gpui::Keystroke::parse("alt-down").unwrap(),
+                    cx
+                )
+            );
+            assert!(
+                pane.handle_terminal_autosuggest_key(
+                    &gpui::Keystroke::parse("ctrl-n").unwrap(),
+                    cx
+                )
+            );
+            assert_eq!(pane.autosuggest_selected_index, Some(0));
+            assert!(
+                pane.handle_terminal_autosuggest_key(&gpui::Keystroke::parse("up").unwrap(), cx)
+            );
+            assert_eq!(pane.autosuggest_selected_index, Some(1));
+            cx.global_mut::<TerminalKeybindings>().bindings.clear();
+            assert!(
+                !pane.handle_terminal_autosuggest_key(
+                    &gpui::Keystroke::parse("alt-up").unwrap(),
+                    cx
+                )
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn prompt_recovery_preserves_unicode_and_rejects_ambiguous_cursor_positions(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    12,
+                    3,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+        pane.update(cx, |pane, _| {
+            for (output, expected) in [
+                ("$ ", Some("")),
+                ("$ abcd", Some("abcd")),
+                ("$ 设置", Some("设置")),
+                ("$ e\u{301}", Some("e\u{301}")),
+                ("$ abcdefghijkl", Some("abcdefghijkl")),
+                ("$ abc\u{1b}[D", None),
+                ("$ abc\u{1b}[5D", None),
+                ("$ abc\u{1b}[?25l", None),
+                ("$ abc\u{1b}[2;1H", None),
+                ("$ 123456789设置", None),
+            ] {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(b"\x1b[?25h\x1b[2J\x1b[3J\x1b[H");
+                terminal.feed_recording_output(output.as_bytes());
+                let snapshot = terminal.snapshot();
+                let recovered = terminal_prompt_input(
+                    &snapshot,
+                    oxideterm_terminal::TerminalCommandPosition { line: 0, column: 2 },
+                );
+                assert_eq!(
+                    recovered.as_ref().map(|text| text.as_str()),
+                    expected,
+                    "{output:?}: cursor=({}, {}), history={}, shape={:?}, active={:?}",
+                    snapshot.cursor_row,
+                    snapshot.cursor_col,
+                    snapshot.scrollback_lines,
+                    snapshot.cursor_shape,
+                    snapshot
+                        .lines
+                        .iter()
+                        .map(|row| row.active_input)
+                        .collect::<Vec<_>>()
+                );
+            }
         });
     }
 
