@@ -79,6 +79,7 @@ struct DockerInspectOverride {
     id: String,
     name: Option<String>,
     image: Option<String>,
+    state: Option<String>,
 }
 
 const DOCKER_UNAVAILABLE_MARKER: &str = "__OXIDE_DOCKER_UNAVAILABLE__";
@@ -86,13 +87,14 @@ const DOCKER_ERROR_MARKER: &str = "__OXIDE_DOCKER_ERROR__";
 
 // Generate JSON keys inside the template so legacy PowerShell native argument passing
 // cannot strip their quotes. Only fields consumed by this panel cross the SSH channel.
+// Docker CLI before 20.10 has no .State in ps templates; inspect supplies the exact state.
 macro_rules! docker_ps_format {
-    () => { r#"{ {{json `ID`}}:{{json .ID}},{{json `Names`}}:{{json .Names}},{{json `Image`}}:{{json .Image}},{{json `State`}}:{{json .State}},{{json `Status`}}:{{json .Status}},{{json `Ports`}}:{{json .Ports}}}"# };
+    () => { r#"{ {{json `ID`}}:{{json .ID}},{{json `Names`}}:{{json .Names}},{{json `Image`}}:{{json .Image}},{{json `Status`}}:{{json .Status}},{{json `Ports`}}:{{json .Ports}}}"# };
 }
 
 macro_rules! docker_inspect_format {
     () => {
-        r#"{ {{json `Id`}}:{{json .Id}},{{json `Name`}}:{{json .Name}},{{json `Config`}}:{ {{json `Image`}}:{{json .Config.Image}}}}"#
+        r#"{ {{json `Id`}}:{{json .Id}},{{json `Name`}}:{{json .Name}},{{json `Config`}}:{ {{json `Image`}}:{{json .Config.Image}}},{{json `State`}}:{ {{json `Status`}}:{{json .State.Status}}}}"#
     };
 }
 
@@ -367,7 +369,16 @@ fn parse_docker_inspect_line(line: &str) -> Option<DockerInspectOverride> {
         .and_then(|config| clean_json_container_field(config, "Image"))
         .or_else(|| clean_json_container_field(&value, "Image"));
 
-    Some(DockerInspectOverride { id, name, image })
+    let state = value
+        .get("State")
+        .and_then(|state| clean_json_container_field(state, "Status"));
+
+    Some(DockerInspectOverride {
+        id,
+        name,
+        image,
+        state,
+    })
 }
 
 fn parse_docker_container_json_line(line: &str) -> Option<ResourceDockerContainer> {
@@ -378,6 +389,9 @@ fn parse_docker_container_json_line(line: &str) -> Option<ResourceDockerContaine
         return None;
     }
 
+    let status = clean_json_container_field(&value, "Status").unwrap_or_else(|| "-".to_string());
+    let state = clean_json_container_field(&value, "State")
+        .unwrap_or_else(|| docker_state_from_status(&status).to_string());
     Some(ResourceDockerContainer {
         id: id.to_string(),
         name: clean_json_container_field(&value, "Names")
@@ -385,10 +399,24 @@ fn parse_docker_container_json_line(line: &str) -> Option<ResourceDockerContaine
             .map(clean_container_name)
             .unwrap_or_else(|| id.to_string()),
         image: clean_json_container_field(&value, "Image").unwrap_or_else(|| "-".to_string()),
-        state: clean_json_container_field(&value, "State").unwrap_or_else(|| "unknown".to_string()),
-        status: clean_json_container_field(&value, "Status").unwrap_or_else(|| "-".to_string()),
+        state,
+        status,
         ports: clean_json_container_field(&value, "Ports"),
     })
+}
+
+fn docker_state_from_status(status: &str) -> &'static str {
+    // Inspect can fail independently of ps, for example if a container disappears mid-sample.
+    match status.split_whitespace().next() {
+        Some("Up") if status.ends_with("(Paused)") => "paused",
+        Some("Up") => "running",
+        Some("Restarting") => "restarting",
+        Some("Exited") => "exited",
+        Some("Created") => "created",
+        Some("Dead") => "dead",
+        _ if status == "Removal In Progress" => "removing",
+        _ => "unknown",
+    }
 }
 
 fn apply_docker_inspect_overrides(
@@ -404,6 +432,9 @@ fn apply_docker_inspect_overrides(
         }
         if let Some(image) = inspect.image.as_ref() {
             container.image = image.clone();
+        }
+        if let Some(state) = inspect.state.as_ref() {
+            container.state = state.clone();
         }
     }
 }
@@ -560,14 +591,14 @@ mod tests {
                 concat!(
                     "===DOCKER===\n",
                     "PS\t{\"ID\":\"abc123def4567890\",\"Names\":\"...\",\"Image\":\"...\",\"State\":\"running\",\"Status\":\"Up 7 weeks\",\"Ports\":\"127.0.0.1:2375->2375/tcp\"}\n",
-                    "INSPECT\t{\"Id\":\"abc123def4567890\",\"Name\":\"/oxideterm-cloud-sync\",\"Config\":{\"Image\":\"ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest\"}}\n",
+                    "INSPECT\t{\"Id\":\"abc123def4567890\",\"Name\":\"/oxideterm-cloud-sync\",\"Config\":{\"Image\":\"ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest\"},\"State\":{\"Status\":\"paused\"}}\n",
                     "===DOCKER_END===",
                 ),
                 vec![(
                     "abc123def4567890",
                     "oxideterm-cloud-sync",
                     "ghcr.io/analyse-decircuit/oxideterm-cloud-sync:latest",
-                    "running",
+                    "paused",
                     "Up 7 weeks",
                     Some("127.0.0.1:2375->2375/tcp"),
                 )],
@@ -590,6 +621,101 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected,
                 "{case}"
+            );
+        }
+    }
+
+    #[test]
+    fn docker_status_text_preserves_actions_when_inspect_is_unavailable() {
+        for (status, state, live, label) in [
+            (
+                "Up 2 hours",
+                "running",
+                true,
+                "sidebar.host_docker.states.running",
+            ),
+            (
+                "Up 2 hours (healthy)",
+                "running",
+                true,
+                "sidebar.host_docker.states.running",
+            ),
+            (
+                "Up 2 hours (unhealthy)",
+                "running",
+                true,
+                "sidebar.host_docker.states.running",
+            ),
+            (
+                "Up 2 hours (Paused)",
+                "paused",
+                true,
+                "sidebar.host_docker.states.paused",
+            ),
+            (
+                "Restarting (1) 5 seconds ago",
+                "restarting",
+                true,
+                "sidebar.host_docker.states.restarting",
+            ),
+            (
+                "Exited (0) 3 days ago",
+                "exited",
+                false,
+                "sidebar.host_docker.states.exited",
+            ),
+            (
+                "Created",
+                "created",
+                false,
+                "sidebar.host_docker.states.created",
+            ),
+            (
+                "Removal In Progress",
+                "removing",
+                false,
+                "sidebar.host_docker.states.removing",
+            ),
+            ("Dead", "dead", false, "sidebar.host_docker.states.dead"),
+            ("", "unknown", false, "sidebar.host_docker.states.unknown"),
+            (
+                "Unexpected status",
+                "unknown",
+                false,
+                "sidebar.host_docker.states.unknown",
+            ),
+        ] {
+            let output = format!(
+                "===DOCKER===\nPS\t{{\"ID\":\"abc123def456\",\"Names\":\"web\",\"Image\":\"nginx:alpine\",\"Status\":{}}}\n===DOCKER_END===",
+                serde_json::to_string(status).unwrap(),
+            );
+            let snapshot = parse_docker_snapshot(&output);
+            assert_eq!(
+                snapshot.containers,
+                vec![ResourceDockerContainer {
+                    id: "abc123def456".into(),
+                    name: "web".into(),
+                    image: "nginx:alpine".into(),
+                    state: state.into(),
+                    status: if status.is_empty() { "-" } else { status }.into(),
+                    ports: None,
+                }],
+                "{status}"
+            );
+            assert_eq!(
+                docker_action_availability(&snapshot.containers[0].state),
+                DockerActionAvailability {
+                    can_start: !live,
+                    can_stop: live,
+                    can_restart: live,
+                    can_use_live_tools: live,
+                },
+                "{status}"
+            );
+            assert_eq!(
+                docker_state_label_key(&snapshot.containers[0].state),
+                label,
+                "{status}"
             );
         }
     }
@@ -695,8 +821,8 @@ mod tests {
                 !command.contains("{{json .}}"),
                 "{os}: do not collect full configs or labels"
             );
-            assert!(command.contains(r#"docker ps -a --no-trunc --format '{ {{json `ID`}}:{{json .ID}},{{json `Names`}}:{{json .Names}},{{json `Image`}}:{{json .Image}},{{json `State`}}:{{json .State}},{{json `Status`}}:{{json .Status}},{{json `Ports`}}:{{json .Ports}}}'"#));
-            assert!(command.contains(r#"docker inspect --format '{ {{json `Id`}}:{{json .Id}},{{json `Name`}}:{{json .Name}},{{json `Config`}}:{ {{json `Image`}}:{{json .Config.Image}}}}'"#));
+            assert!(command.contains(r#"docker ps -a --no-trunc --format '{ {{json `ID`}}:{{json .ID}},{{json `Names`}}:{{json .Names}},{{json `Image`}}:{{json .Image}},{{json `Status`}}:{{json .Status}},{{json `Ports`}}:{{json .Ports}}}'"#));
+            assert!(command.contains(r#"docker inspect --format '{ {{json `Id`}}:{{json .Id}},{{json `Name`}}:{{json .Name}},{{json `Config`}}:{ {{json `Image`}}:{{json .Config.Image}}},{{json `State`}}:{ {{json `Status`}}:{{json .State.Status}}}}'"#));
         }
     }
 }
