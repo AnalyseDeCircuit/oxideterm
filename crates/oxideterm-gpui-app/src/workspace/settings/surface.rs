@@ -1265,6 +1265,12 @@ impl WorkspaceApp {
     ) {
         if previous_settings.keybindings != settings.keybindings {
             crate::keybindings::install_context_keybindings(&settings.keybindings.overrides, cx);
+            #[cfg(target_os = "macos")]
+            {
+                let menus = crate::platform::app_menus(settings);
+                // Settings callbacks install the new bindings after this settings update.
+                cx.defer(move |cx| cx.set_menus(menus));
+            }
         }
         install_application_proxy_policy_from_settings(settings, &self.connection_store);
         if previous_settings.appearance.app_icon != settings.appearance.app_icon {

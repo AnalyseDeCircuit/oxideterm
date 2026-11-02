@@ -267,6 +267,8 @@ fn main() {
         }
         cx.activate(true);
         cx.on_action(quit);
+        #[cfg(target_os = "macos")]
+        platform::install_window_actions(cx);
         cx.bind_keys(platform::app_key_bindings(&startup_settings));
         keybindings::install_context_keybindings(&startup_settings.keybindings.overrides, cx);
         cx.set_menus(platform::app_menus(&startup_settings));

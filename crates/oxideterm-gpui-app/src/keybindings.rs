@@ -15,6 +15,10 @@ use crate::{
 
 const CONTEXT: &str = "Workspace";
 
+// Window commands stay available in text fields, but must not fire while recording a shortcut.
+#[cfg(target_os = "macos")]
+const WINDOW_ACTION_CONTEXT: &str = "!KeybindingRecording";
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ActionScope {
     Global,
@@ -331,6 +335,16 @@ pub(crate) static ACTION_DEFINITIONS: LazyLock<Vec<ActionDefinition>> = LazyLock
             },
         ),
     ];
+
+    #[cfg(target_os = "macos")]
+    for (id, combo) in [
+        ("app.hide", KeyCombo::cmd("h")),
+        ("app.hideOthers", KeyCombo::cmd_alt("h")),
+        ("app.minimize", KeyCombo::cmd("m")),
+        ("app.minimizeAll", KeyCombo::cmd_alt("m")),
+    ] {
+        actions.push(def(id, ActionScope::Global, combo.clone(), combo));
+    }
 
     for index in 1..=9 {
         actions.push(def(
@@ -1412,7 +1426,13 @@ pub(crate) fn startup_key_bindings(overrides: &Map<String, Value>) -> Vec<KeyBin
                 NoAction {},
                 Some(CONTEXT),
             ));
-            if matches!(definition.id.as_ref(), "app.commandPalette" | "app.quit") {
+            if let Some(context) = window_action_context(&definition.id) {
+                bindings.push(KeyBinding::new(
+                    &default_keystroke,
+                    NoAction {},
+                    Some(context),
+                ));
+            } else if matches!(definition.id.as_ref(), "app.commandPalette" | "app.quit") {
                 bindings.push(KeyBinding::new(&default_keystroke, NoAction {}, None));
             }
         }
@@ -1450,7 +1470,13 @@ pub(crate) fn runtime_rebind_key_bindings(
                 NoAction {},
                 Some(CONTEXT),
             ));
-            if matches!(action_id, "app.commandPalette" | "app.quit") {
+            if let Some(context) = window_action_context(action_id) {
+                bindings.push(KeyBinding::new(
+                    &previous_keystroke,
+                    NoAction {},
+                    Some(context),
+                ));
+            } else if matches!(action_id, "app.commandPalette" | "app.quit") {
                 bindings.push(KeyBinding::new(&previous_keystroke, NoAction {}, None));
             }
         }
@@ -1473,6 +1499,17 @@ pub(crate) fn runtime_rebind_key_bindings(
     bindings
 }
 
+fn window_action_context(_action_id: &str) -> Option<&'static str> {
+    #[cfg(target_os = "macos")]
+    if matches!(
+        _action_id,
+        "app.hide" | "app.hideOthers" | "app.minimize" | "app.minimizeAll"
+    ) {
+        return Some(WINDOW_ACTION_CONTEXT);
+    }
+    None
+}
+
 fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &KeyCombo) {
     let keystroke = combo_to_gpui(combo);
     macro_rules! push_binding {
@@ -1486,6 +1523,13 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
             bindings.push(KeyBinding::new(&keystroke, $action.clone(), Some(CONTEXT)));
             bindings.push(KeyBinding::new(&keystroke, $action, None));
         }};
+        ($action:expr, window) => {
+            bindings.push(KeyBinding::new(
+                &keystroke,
+                $action,
+                window_action_context(action_id),
+            ))
+        };
     }
     match action_id {
         "app.newTerminal" => push_binding!(NewTerminal),
@@ -1495,6 +1539,14 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
         "app.newConnection" => push_binding!(NewConnection),
         "app.settings" => push_binding!(OpenSettings),
         "app.quit" => push_binding!(Quit, workspace_and_global),
+        #[cfg(target_os = "macos")]
+        "app.hide" => push_binding!(crate::platform::Hide, window),
+        #[cfg(target_os = "macos")]
+        "app.hideOthers" => push_binding!(crate::platform::HideOthers, window),
+        #[cfg(target_os = "macos")]
+        "app.minimize" => push_binding!(crate::platform::Minimize, window),
+        #[cfg(target_os = "macos")]
+        "app.minimizeAll" => push_binding!(crate::platform::MinimizeAll, window),
         "app.toggleSidebar" => push_binding!(ToggleSidebar),
         "app.commandPalette" => push_binding!(CommandPalette, workspace_and_global),
         "app.zenMode" => push_binding!(ZenMode),
@@ -1540,6 +1592,111 @@ fn push_action_binding(bindings: &mut Vec<KeyBinding>, action_id: &str, combo: &
 mod tests {
     use super::*;
     use gpui::{Keystroke, Modifiers};
+
+    #[test]
+    fn macos_window_shortcuts_are_registered_only_on_macos() {
+        for (id, chord) in [
+            ("app.hide", "cmd-h"),
+            ("app.hideOthers", "cmd-alt-h"),
+            ("app.minimize", "cmd-m"),
+            ("app.minimizeAll", "cmd-alt-m"),
+        ] {
+            if cfg!(target_os = "macos") {
+                let definition = action_definition(id).expect("missing macOS window action");
+                assert_eq!(definition.scope, ActionScope::Global);
+                assert!(keystroke_matches_action(
+                    &Keystroke::parse(chord).unwrap(),
+                    id,
+                    &Map::new(),
+                ));
+            } else {
+                assert!(action_definition(id).is_none(), "{id}");
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn window_shortcuts_follow_focus_overrides_and_recording() {
+        use crate::platform::{Hide, HideOthers, Minimize, MinimizeAll};
+        use gpui::{Action, KeyContext, Keymap};
+
+        let cases: [(&str, &str, Box<dyn Action>); 4] = [
+            ("app.hide", "cmd-h", Box::new(Hide)),
+            ("app.hideOthers", "cmd-alt-h", Box::new(HideOthers)),
+            ("app.minimize", "cmd-m", Box::new(Minimize)),
+            ("app.minimizeAll", "cmd-alt-m", Box::new(MinimizeAll)),
+        ];
+        for (id, chord, action) in cases {
+            let definition = action_definition(id).unwrap();
+            let original = definition.mac.clone();
+            let mut keymap = Keymap::default();
+            keymap.add_bindings(startup_key_bindings(&Map::new()));
+            let input = [Keystroke::parse(chord).unwrap()];
+            for leaf in ["Terminal", "Editor", "Input", "Modal", "Workspace"] {
+                let contexts = [
+                    KeyContext::parse("Workspace").unwrap(),
+                    KeyContext::parse(leaf).unwrap(),
+                ];
+                let (bindings, _) = keymap.bindings_for_input(&input, &contexts);
+                assert_eq!(
+                    bindings
+                        .iter()
+                        .map(|b| b.action().name())
+                        .collect::<Vec<_>>(),
+                    vec![action.name()],
+                    "{id}: {leaf}",
+                );
+            }
+            let recording = [
+                KeyContext::parse("Workspace KeybindingRecording").unwrap(),
+                KeyContext::parse("Input").unwrap(),
+            ];
+            assert!(
+                keymap.bindings_for_input(&input, &recording).0.is_empty(),
+                "{id}"
+            );
+
+            let mut custom = KeyCombo::cmd_alt("m");
+            custom.shift = true;
+            let custom_input = [Keystroke::parse("cmd-alt-shift-m").unwrap()];
+            let contexts = [KeyContext::parse("Workspace").unwrap()];
+            for (previous, next, expected) in [
+                (Some(&original), Some(&custom), Some(&custom_input)),
+                (Some(&custom), None, None),
+                (None, Some(&original), Some(&input)),
+            ] {
+                keymap.add_bindings(runtime_rebind_key_bindings(id, previous, next));
+                for keys in [&input, &custom_input] {
+                    let bindings = keymap.bindings_for_input(keys, &contexts).0;
+                    let expected_names = if expected == Some(keys) {
+                        vec![action.name()]
+                    } else {
+                        Vec::new()
+                    };
+                    assert_eq!(
+                        bindings
+                            .iter()
+                            .map(|b| b.action().name())
+                            .collect::<Vec<_>>(),
+                        expected_names,
+                        "{id}",
+                    );
+                }
+                // Native menus obtain their displayed shortcut from this same lookup.
+                let menu_bindings = keymap
+                    .bindings_for_action(action.as_ref())
+                    .collect::<Vec<_>>();
+                match expected {
+                    Some(keys) => {
+                        assert_eq!(menu_bindings.len(), 1, "{id}");
+                        assert_eq!(menu_bindings[0].match_keystrokes(keys), Some(false), "{id}");
+                    }
+                    None => assert!(menu_bindings.is_empty(), "{id}"),
+                }
+            }
+        }
+    }
 
     #[gpui::test]
     fn suggestion_navigation_uses_existing_overrides_and_unbinding(cx: &mut gpui::TestAppContext) {

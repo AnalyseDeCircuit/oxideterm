@@ -373,6 +373,15 @@ impl WorkspaceApp {
 
         let mut key_context = gpui::KeyContext::new_with_defaults();
         key_context.add("Workspace");
+        #[cfg(target_os = "macos")]
+        if self
+            .settings_workspace
+            .read(cx)
+            .keybinding_recording_action_id()
+            .is_some()
+        {
+            key_context.add("KeybindingRecording");
+        }
         if self.active_window_modal_owner(cx).is_some() && !self.ide_modal_owns_input(cx) {
             // IDE dialogs register this context on their independently observed window layer.
             key_context.add(oxideterm_gpui_ui::modal::MODAL_KEY_CONTEXT);
