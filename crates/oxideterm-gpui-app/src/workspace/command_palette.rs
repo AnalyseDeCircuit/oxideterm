@@ -1,3 +1,6 @@
+use super::session_manager::{
+    SessionManagerDisplayItem, SessionManagerOpenTarget, saved_session_manager_items,
+};
 use super::*;
 mod entity;
 
@@ -70,6 +73,7 @@ enum PaletteAction {
     ActivateTab(TabId),
     OpenSavedConnection(String),
     OpenSavedLocalTerminal(String),
+    OpenSavedProfile(SessionManagerOpenTarget),
     QuickConnectHost {
         username: String,
         host: String,
@@ -596,6 +600,9 @@ impl WorkspaceApp {
             }
             PaletteAction::OpenSavedLocalTerminal(profile_id) => {
                 self.open_saved_local_terminal_profile(&profile_id, window, cx);
+            }
+            PaletteAction::OpenSavedProfile(target) => {
+                self.open_session_manager_target_with_sftp(target, false, window, cx);
             }
             PaletteAction::QuickConnectHost {
                 username,
@@ -1160,7 +1167,10 @@ impl WorkspaceApp {
 
         let command_items = self.command_palette_command_items();
         let session_items = self.command_palette_session_items(cx);
-        let mut connection_items = Self::command_palette_connection_items(&self.connection_store);
+        let mut connection_items = Self::command_palette_connection_items(
+            &self.connection_store,
+            self.saved_ssh_tunnels(),
+        );
         connection_items.extend(self.command_palette_ssh_config_items(&ssh_config_hosts));
         let plugin_items = self.command_palette_plugin_items(cx);
         let help_items = self.command_palette_help_items();
@@ -1336,53 +1346,111 @@ impl WorkspaceApp {
             .collect()
     }
 
-    fn command_palette_connection_items(store: &ConnectionStore) -> Vec<PaletteItem> {
-        store
-            .connection_infos()
+    fn command_palette_connection_items(
+        store: &ConnectionStore,
+        tunnels: Vec<oxideterm_forwarding::PersistedForward>,
+    ) -> Vec<PaletteItem> {
+        saved_session_manager_items(store, tunnels)
             .into_iter()
-            .map(|conn| {
-                let label =
-                    command_palette_connection_label(&conn.name, &conn.username, &conn.host);
-                let mut detail = command_palette_connection_detail(
-                    &conn.name,
-                    &conn.username,
-                    &conn.host,
-                    conn.port,
-                );
-                for field in conn.group.iter().chain(conn.tags.iter()) {
-                    if !field.is_empty() {
-                        detail.push(' ');
-                        detail.push_str(field);
+            .map(|item| {
+                let (prefix, icon) = match &item {
+                    SessionManagerDisplayItem::Connection(_) => ("conn", LucideIcon::Server),
+                    SessionManagerDisplayItem::LocalTerminal(_) => {
+                        ("local-profile", LucideIcon::Terminal)
                     }
+                    SessionManagerDisplayItem::Tunnel(_) => ("tunnel", LucideIcon::Network),
+                    SessionManagerDisplayItem::Plugin(_) => ("plugin-profile", LucideIcon::Puzzle),
+                    SessionManagerDisplayItem::Serial(_) => ("serial-profile", LucideIcon::Radio),
+                    SessionManagerDisplayItem::Ble(_) => ("ble-profile", LucideIcon::Bluetooth),
+                    SessionManagerDisplayItem::Telnet(_) => {
+                        ("telnet-profile", LucideIcon::Terminal)
+                    }
+                    SessionManagerDisplayItem::Ftp(_) => ("ftp-profile", LucideIcon::FolderSync),
+                    SessionManagerDisplayItem::Mosh(_) => ("mosh-profile", LucideIcon::Wifi),
+                    SessionManagerDisplayItem::StandaloneSftp(_) => {
+                        ("sftp-profile", LucideIcon::FolderSync)
+                    }
+                    SessionManagerDisplayItem::RemoteDesktop(_) => {
+                        ("remote-desktop-profile", LucideIcon::Monitor)
+                    }
+                    SessionManagerDisplayItem::SshConfig(_) => {
+                        ("ssh-config", LucideIcon::FileTerminal)
+                    }
+                };
+                let (label, mut detail, action) = match &item {
+                    SessionManagerDisplayItem::Connection(conn) => {
+                        let label = command_palette_connection_label(
+                            &conn.name,
+                            &conn.username,
+                            &conn.host,
+                        );
+                        let mut detail = command_palette_connection_detail(
+                            &conn.name,
+                            &conn.username,
+                            &conn.host,
+                            conn.port,
+                        );
+                        for tag in &conn.tags {
+                            if !tag.is_empty() {
+                                detail.push(' ');
+                                detail.push_str(tag);
+                            }
+                        }
+                        (
+                            label,
+                            detail,
+                            PaletteAction::OpenSavedConnection(conn.id.clone()),
+                        )
+                    }
+                    SessionManagerDisplayItem::LocalTerminal(profile) => (
+                        profile.name.clone(),
+                        format!(
+                            "{} {}",
+                            profile.shell_id.as_deref().unwrap_or_default(),
+                            profile.cwd.as_deref().unwrap_or_default()
+                        )
+                        .trim()
+                        .to_string(),
+                        PaletteAction::OpenSavedLocalTerminal(profile.id.clone()),
+                    ),
+                    _ => {
+                        let mut detail = item.subtitle();
+                        if let SessionManagerDisplayItem::RemoteDesktop(profile) = &item {
+                            detail = format!(
+                                "{} · {detail}",
+                                profile.protocol.provider_id().to_uppercase()
+                            );
+                        }
+                        let label = if item.name().trim().is_empty() {
+                            detail.clone()
+                        } else {
+                            item.name().to_string()
+                        };
+                        (
+                            label,
+                            detail,
+                            PaletteAction::OpenSavedProfile(item.open_target()),
+                        )
+                    }
+                };
+                if let Some(group) = item.group().filter(|group| !group.is_empty()) {
+                    if !detail.is_empty() {
+                        detail.push(' ');
+                    }
+                    detail.push_str(group);
                 }
                 PaletteItem {
-                    id: format!("conn:{}", conn.id),
-                    label: label,
+                    id: format!("{prefix}:{}", item.id()),
+                    label,
                     section: PaletteSection::Connections,
-                    icon: LucideIcon::Server,
+                    icon,
                     detail: Some(detail),
                     shortcut: None,
-                    value: conn.search_text(),
-                    action: PaletteAction::OpenSavedConnection(conn.id),
+                    value: item.search_text(),
+                    action,
                     disabled: false,
                 }
             })
-            .chain(store.local_terminal_profiles().iter().map(|profile| {
-                let shell = profile.shell_id.as_deref().unwrap_or_default();
-                let cwd = profile.cwd.as_deref().unwrap_or_default();
-                let group = profile.group.as_deref().unwrap_or_default();
-                PaletteItem {
-                    id: format!("local-profile:{}", profile.id),
-                    label: profile.name.clone(),
-                    section: PaletteSection::Connections,
-                    icon: LucideIcon::Terminal,
-                    detail: Some(format!("{shell} {cwd} {group}").trim().to_string()),
-                    shortcut: None,
-                    value: format!("{} {shell} {cwd} {group}", profile.name),
-                    action: PaletteAction::OpenSavedLocalTerminal(profile.id.clone()),
-                    disabled: false,
-                }
-            }))
             .collect()
     }
 
@@ -1557,7 +1625,12 @@ impl WorkspaceApp {
         let palette: CommandPaletteView = self.command_palette.read(cx).view();
         let selected_connection = ranked_items
             .get(self.command_palette.read(cx).selected_index())
-            .filter(|ranked| matches!(ranked.item.action, PaletteAction::OpenSavedConnection(_)))
+            .filter(|ranked| {
+                matches!(
+                    ranked.item.action,
+                    PaletteAction::OpenSavedConnection(_) | PaletteAction::OpenSavedProfile(_)
+                )
+            })
             .map(|ranked| &ranked.item);
         let preview =
             selected_connection.map(|item| command_palette_connection_preview(&self.tokens, item));
@@ -3123,8 +3196,120 @@ mod panel_layout_tests {
     use super::*;
     use gpui::{Render, ScrollHandle, TestAppContext, size};
 
+    #[test]
+    fn all_saved_connection_types_are_searchable_with_distinct_open_targets() {
+        use oxideterm_connections::*;
+        use oxideterm_forwarding::{ForwardRule, ForwardType, PersistedForward, SshTunnelProfile};
+        use serde_json::json;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("connections.json");
+        let now = chrono::Utc::now();
+        let mut data = json!({
+            "connections": [{"host":"ssh.example","username":"operator","auth":{"type":"agent"},"created_at":now}],
+            "local_terminal_profiles": [{"shell_id":"zsh","cwd":"/work","created_at":now,"updated_at":now}],
+            "serial_profiles": [SerialProfile::new("", "/dev/ttyUSB0")],
+            "ble_profiles": [BleProfile::new("", "0000180f-0000-1000-8000-00805f9b34fb")],
+            "telnet_profiles": [TelnetProfile::new("", "telnet.example", 23)],
+            "mosh_profiles": [MoshProfile::new("", "mosh.example", 22, "operator", SavedAuth::Agent)],
+            "standalone_sftp_profiles": [StandaloneSftpProfile::new("", "sftp.example", 22, "operator", SavedAuth::Agent)],
+            "ftp_profiles": [FtpProfile::new("".into(), "ftp.example".into(), "operator".into(), FtpSecurity::Plain)],
+            "plugin_profiles": [{"plugin_id":"test.provider","type_id":"device","config":{},"credential_refs":{},"created_at":now,"updated_at":now}],
+            "remote_desktop_profiles": [
+                RemoteDesktopProfile::new("", RemoteDesktopProtocol::Rdp, "rdp.example", 3389),
+                RemoteDesktopProfile::new("", RemoteDesktopProtocol::Vnc, "vnc.example", 5900)
+            ]
+        });
+        // Reused IDs across profile stores must not collide in search or recent items.
+        for profiles in data.as_object_mut().unwrap().values_mut() {
+            for (index, profile) in profiles.as_array_mut().unwrap().iter_mut().enumerate() {
+                profile["id"] = json!(if index == 0 { "shared" } else { "vnc" });
+                profile["name"] = json!("shared target");
+                profile["group"] = json!("production");
+            }
+        }
+        std::fs::write(&path, serde_json::to_vec(&data).unwrap()).unwrap();
+        let store = ConnectionStore::load(path).unwrap();
+        let tunnel = PersistedForward {
+            id: "shared".into(),
+            session_id: String::new(),
+            owner_connection_id: Some("shared".into()),
+            forward_type: ForwardType::Local,
+            rule: ForwardRule::local("127.0.0.1", 15432, "db.example", 5432),
+            created_at: now,
+            updated_at: None,
+            auto_start: false,
+            version: 1,
+            tunnel: Some(SshTunnelProfile {
+                name: "shared target".into(),
+                group: Some("production".into()),
+                connect_on_startup: false,
+            }),
+        };
+        let items = WorkspaceApp::command_palette_connection_items(&store, vec![tunnel]);
+        let mut results = rank_palette_section(items.clone(), "shared target");
+        results.sort_by(|a, b| a.item.id.cmp(&b.item.id));
+        let actual = results
+            .iter()
+            .map(|result| {
+                let target = match &result.item.action {
+                    PaletteAction::OpenSavedConnection(id) => {
+                        SessionManagerOpenTarget::Connection(id.clone())
+                    }
+                    PaletteAction::OpenSavedLocalTerminal(id) => {
+                        SessionManagerOpenTarget::LocalTerminal(id.clone())
+                    }
+                    PaletteAction::OpenSavedProfile(target) => target.clone(),
+                    _ => panic!("saved result must open a saved target"),
+                };
+                (result.item.id.as_str(), target)
+            })
+            .collect::<Vec<_>>();
+        use SessionManagerOpenTarget as Target;
+        assert_eq!(
+            actual,
+            vec![
+                ("ble-profile:shared", Target::Ble("shared".into())),
+                ("conn:shared", Target::Connection("shared".into())),
+                ("ftp-profile:shared", Target::Ftp("shared".into())),
+                (
+                    "local-profile:shared",
+                    Target::LocalTerminal("shared".into())
+                ),
+                ("mosh-profile:shared", Target::Mosh("shared".into())),
+                ("plugin-profile:shared", Target::Plugin("shared".into())),
+                (
+                    "remote-desktop-profile:shared",
+                    Target::RemoteDesktop("shared".into())
+                ),
+                (
+                    "remote-desktop-profile:vnc",
+                    Target::RemoteDesktop("vnc".into())
+                ),
+                ("serial-profile:shared", Target::Serial("shared".into())),
+                (
+                    "sftp-profile:shared",
+                    Target::StandaloneSftp("shared".into())
+                ),
+                ("telnet-profile:shared", Target::Telnet("shared".into())),
+                ("tunnel:shared", Target::Tunnel("shared".into())),
+            ]
+        );
+        let results = rank_palette_section(items, "rdp.example production");
+        assert_eq!(
+            results
+                .iter()
+                .map(|r| r.item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["remote-desktop-profile:shared"]
+        );
+        assert_eq!(
+            results[0].item.detail.as_deref(),
+            Some("RDP · rdp.example:3389 production")
+        );
+    }
+
     #[gpui::test]
-    fn ssh_config_source_is_searchable_in_the_visible_locale(cx: &mut TestAppContext) {
+    fn saved_rdp_open_and_ssh_config_search_use_existing_palette_flows(cx: &mut TestAppContext) {
         let executable = std::env::current_exe().unwrap();
         let fixture_key = "OXIDETERM_PALETTE_TEST_DIR";
         let Some(fixture_dir) = std::env::var_os(fixture_key) else {
@@ -3181,6 +3366,39 @@ mod panel_layout_tests {
                 assert!(matches!(&results[0].item.action, PaletteAction::QuickConnectAlias(alias) if alias == "prod"));
             }
         });
+        cx.update(|window, cx| workspace.update(cx, |workspace, cx| {
+            workspace.settings_store.settings_mut().ssh_config.auto_load_hosts = false;
+            workspace.connection_store.upsert_remote_desktop_profile(
+                oxideterm_connections::SaveRemoteDesktopProfileRequest {
+                    id: Some("palette-rdp".into()),
+                    name: "Palette Desktop".into(),
+                    protocol: RemoteDesktopProtocol::Rdp,
+                    host: "desktop.example".into(),
+                    port: 3390,
+                    username: Some("operator".into()),
+                    ssh_gateway_connection_id: Some("gateway-profile".into()),
+                    ..Default::default()
+                }
+            ).unwrap();
+            workspace.open_command_palette(window, cx);
+            workspace.command_palette.update(cx, |palette, cx| palette.push_query_text("#Palette Desktop", cx));
+            let results = workspace.filtered_command_palette_items(cx);
+            assert_eq!(results.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), vec!["remote-desktop-profile:palette-rdp"]);
+            workspace.execute_selected_command_palette_item(window, cx);
+            let form = workspace.connection_form_state(cx).form.as_ref().expect("missing RDP password opens the existing connection form");
+            assert_eq!(form.transport, crate::workspace::new_connection::NewConnectionTransport::Rdp);
+            assert_eq!(form.host, "desktop.example");
+            assert_eq!(form.port, "3390");
+            assert_eq!(form.username, "operator");
+            assert_eq!(form.remote_desktop_profile_id.as_deref(), Some("palette-rdp"));
+            assert_eq!(form.remote_desktop_ssh_gateway_connection_id.as_deref(), Some("gateway-profile"));
+            assert_eq!(form.focused_field, NewConnectionField::Password);
+            assert_eq!(form.error.as_deref(), Some(workspace.i18n.t("modals.new_connection.remote_desktop_password_required").as_str()));
+            workspace.open_command_palette(window, cx);
+            let recent = workspace.ranked_command_palette_items(cx).into_iter().filter(|result| result.item.section == PaletteSection::Recent).collect::<Vec<_>>();
+            assert_eq!(recent.iter().map(|r| r.item.id.as_str()).collect::<Vec<_>>(), vec!["remote-desktop-profile:palette-rdp"]);
+            assert!(matches!(&recent[0].item.action, PaletteAction::OpenSavedProfile(SessionManagerOpenTarget::RemoteDesktop(id)) if id == "palette-rdp"));
+        }));
     }
 
     #[test]
@@ -3206,7 +3424,7 @@ mod panel_layout_tests {
         }
         for (query, expected) in [("wsl", vec!["wsl", "PowerShell"]), ("ubuntu", vec!["wsl"])] {
             let results = rank_palette_section(
-                WorkspaceApp::command_palette_connection_items(&store),
+                WorkspaceApp::command_palette_connection_items(&store, Vec::new()),
                 query,
             );
             assert_eq!(

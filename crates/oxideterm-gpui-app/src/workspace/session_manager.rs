@@ -1076,6 +1076,9 @@ pub(in crate::workspace) use self::helpers::{
     save_request_from_form_with_existing_auth, save_request_from_form_with_proxy_hop_prefix,
     saved_upstream_proxy_policy_from_form, upstream_proxy_config_from_form,
 };
+pub(in crate::workspace) use self::views::{
+    SessionManagerDisplayItem, SessionManagerOpenTarget, saved_session_manager_items,
+};
 
 #[cfg(test)]
 mod tests;

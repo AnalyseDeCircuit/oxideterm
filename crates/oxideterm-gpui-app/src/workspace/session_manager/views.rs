@@ -22,7 +22,7 @@ impl Render for SessionManagerDrag {
 }
 
 #[derive(Clone)]
-pub(super) enum SessionManagerDisplayItem {
+pub(in crate::workspace) enum SessionManagerDisplayItem {
     Tunnel(TunnelDisplayItem),
     Plugin(oxideterm_connections::PluginConnectionProfile),
     Connection(ConnectionInfo),
@@ -38,14 +38,14 @@ pub(super) enum SessionManagerDisplayItem {
 }
 
 #[derive(Clone)]
-pub(super) struct TunnelDisplayItem {
+pub(in crate::workspace) struct TunnelDisplayItem {
     forward: oxideterm_forwarding::PersistedForward,
     profile: oxideterm_forwarding::SshTunnelProfile,
     host: Option<ConnectionInfo>,
 }
 
 #[derive(Clone)]
-pub(super) struct SessionManagerSshConfigDisplayItem {
+pub(in crate::workspace) struct SessionManagerSshConfigDisplayItem {
     alias: String,
     hostname: Option<String>,
     user: Option<String>,
@@ -66,8 +66,8 @@ impl From<&SshConfigHost> for SessionManagerSshConfigDisplayItem {
     }
 }
 
-#[derive(Clone)]
-pub(super) enum SessionManagerOpenTarget {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SessionManagerOpenTarget {
     Tunnel(String),
     Plugin(String),
     Connection(String),
@@ -131,7 +131,7 @@ pub(super) fn session_manager_item_pointer_action(
 }
 
 impl SessionManagerDisplayItem {
-    pub(super) fn id(&self) -> &str {
+    pub(in crate::workspace) fn id(&self) -> &str {
         match self {
             Self::Tunnel(item) => &item.forward.id,
             Self::Connection(connection) => &connection.id,
@@ -216,7 +216,7 @@ impl SessionManagerDisplayItem {
         }
     }
 
-    pub(super) fn open_target(&self) -> SessionManagerOpenTarget {
+    pub(in crate::workspace) fn open_target(&self) -> SessionManagerOpenTarget {
         match self {
             Self::Tunnel(item) => SessionManagerOpenTarget::Tunnel(item.forward.id.clone()),
             Self::Plugin(profile) => SessionManagerOpenTarget::Plugin(profile.id.clone()),
@@ -241,7 +241,7 @@ impl SessionManagerDisplayItem {
         }
     }
 
-    pub(super) fn name(&self) -> &str {
+    pub(in crate::workspace) fn name(&self) -> &str {
         match self {
             Self::Tunnel(item) => &item.profile.name,
             Self::Plugin(profile) => &profile.name,
@@ -258,7 +258,7 @@ impl SessionManagerDisplayItem {
         }
     }
 
-    pub(super) fn group(&self) -> Option<&str> {
+    pub(in crate::workspace) fn group(&self) -> Option<&str> {
         match self {
             Self::Tunnel(item) => item.profile.group.as_deref(),
             Self::Plugin(profile) => profile.group.as_deref(),
@@ -362,7 +362,7 @@ impl SessionManagerDisplayItem {
         }
     }
 
-    pub(super) fn subtitle(&self) -> String {
+    pub(in crate::workspace) fn subtitle(&self) -> String {
         match self {
             Self::Tunnel(item) => {
                 let rule = &item.forward.rule;
@@ -424,7 +424,7 @@ impl SessionManagerDisplayItem {
         }
     }
 
-    pub(super) fn search_text(&self) -> String {
+    pub(in crate::workspace) fn search_text(&self) -> String {
         match self {
             Self::Tunnel(item) => format!(
                 "{}\n{}\n{}\n{}\nssh tunnel",
@@ -582,6 +582,92 @@ impl SessionManagerDisplayItem {
     }
 }
 
+pub(in crate::workspace) fn saved_session_manager_items(
+    store: &ConnectionStore,
+    tunnels: Vec<PersistedForward>,
+) -> Vec<SessionManagerDisplayItem> {
+    let tunnel_hosts = store.connection_infos();
+    store
+        .connection_infos()
+        .into_iter()
+        .map(SessionManagerDisplayItem::Connection)
+        .chain(tunnels.into_iter().filter_map(|forward| {
+            let profile = forward.tunnel.clone()?;
+            let host = tunnel_hosts
+                .iter()
+                .find(|host| Some(host.id.as_str()) == forward.owner_connection_id.as_deref());
+            Some(SessionManagerDisplayItem::Tunnel(TunnelDisplayItem {
+                forward,
+                profile,
+                host: host.cloned(),
+            }))
+        }))
+        .chain(
+            store
+                .plugin_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::Plugin),
+        )
+        .chain(
+            store
+                .serial_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::Serial),
+        )
+        .chain(
+            store
+                .ble_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::Ble),
+        )
+        .chain(
+            store
+                .local_terminal_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::LocalTerminal),
+        )
+        .chain(
+            store
+                .telnet_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::Telnet),
+        )
+        .chain(
+            store
+                .ftp_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::Ftp),
+        )
+        .chain(
+            store
+                .mosh_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::Mosh),
+        )
+        .chain(
+            store
+                .standalone_sftp_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::StandaloneSftp),
+        )
+        .chain(
+            store
+                .remote_desktop_profiles()
+                .iter()
+                .cloned()
+                .map(SessionManagerDisplayItem::RemoteDesktop),
+        )
+        .collect()
+}
+
 impl WorkspaceApp {
     fn session_manager_card_surface(&self, radius: f32, has_background: bool) -> Div {
         let surface = oxideterm_gpui_ui::semantic_surface(
@@ -598,105 +684,28 @@ impl WorkspaceApp {
     }
 
     pub(super) fn session_manager_display_items(&self, cx: &App) -> Vec<SessionManagerDisplayItem> {
-        let tunnel_hosts = self.connection_store.connection_infos();
         let query = self
             .session_manager
             .read(cx)
             .search_query
             .trim()
             .to_lowercase();
-        let mut items = self
-            .connection_store
-            .connection_infos()
-            .into_iter()
-            .map(SessionManagerDisplayItem::Connection)
-            .chain(self.saved_ssh_tunnels().into_iter().filter_map(|forward| {
-                let profile = forward.tunnel.clone()?;
-                let host = tunnel_hosts
-                    .iter()
-                    .find(|host| Some(host.id.as_str()) == forward.owner_connection_id.as_deref());
-                Some(SessionManagerDisplayItem::Tunnel(TunnelDisplayItem {
-                    forward,
-                    profile,
-                    host: host.cloned(),
-                }))
-            }))
-            .chain(
-                self.connection_store
-                    .plugin_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::Plugin),
-            )
-            .chain(
-                self.connection_store
-                    .serial_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::Serial),
-            )
-            .chain(
-                self.connection_store
-                    .ble_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::Ble),
-            )
-            .chain(
-                self.connection_store
-                    .local_terminal_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::LocalTerminal),
-            )
-            .chain(
-                self.connection_store
-                    .telnet_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::Telnet),
-            )
-            .chain(
-                self.connection_store
-                    .ftp_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::Ftp),
-            )
-            .chain(
-                self.connection_store
-                    .mosh_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::Mosh),
-            )
-            .chain(
-                self.connection_store
-                    .standalone_sftp_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::StandaloneSftp),
-            )
-            .chain(
-                self.connection_store
-                    .remote_desktop_profiles()
-                    .iter()
-                    .cloned()
-                    .map(SessionManagerDisplayItem::RemoteDesktop),
-            )
-            .chain(
-                self.session_manager
-                    .read(cx)
-                    .ssh_config_hosts
-                    .iter()
-                    .filter(|host| !host.already_imported)
-                    .map(SessionManagerSshConfigDisplayItem::from)
-                    .map(SessionManagerDisplayItem::SshConfig),
-            )
-            .filter(|item| {
-                query.is_empty() || item.search_text().to_lowercase().contains(query.as_str())
-            })
-            .collect::<Vec<_>>();
+        let mut items =
+            saved_session_manager_items(&self.connection_store, self.saved_ssh_tunnels())
+                .into_iter()
+                .chain(
+                    self.session_manager
+                        .read(cx)
+                        .ssh_config_hosts
+                        .iter()
+                        .filter(|host| !host.already_imported)
+                        .map(SessionManagerSshConfigDisplayItem::from)
+                        .map(SessionManagerDisplayItem::SshConfig),
+                )
+                .filter(|item| {
+                    query.is_empty() || item.search_text().to_lowercase().contains(query.as_str())
+                })
+                .collect::<Vec<_>>();
         self.sort_session_manager_display_items(&mut items, cx);
         items
     }
@@ -3151,7 +3160,7 @@ impl WorkspaceApp {
         )
     }
 
-    pub(super) fn open_session_manager_target_with_sftp(
+    pub(in crate::workspace) fn open_session_manager_target_with_sftp(
         &mut self,
         target: SessionManagerOpenTarget,
         open_sftp_on_connect_override: bool,
