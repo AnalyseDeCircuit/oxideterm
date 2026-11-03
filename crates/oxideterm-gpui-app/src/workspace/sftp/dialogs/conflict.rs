@@ -24,6 +24,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let Some((conflict, conflict_count, apply_all, target_path)) = ({
             let sftp_view = self.sftp_view().read(cx);
@@ -78,7 +79,7 @@ impl WorkspaceApp {
                     .border_1()
                     .border_color(rgb(theme.border))
                     .bg(rgb(theme.bg_panel))
-                    .text_size(px(SFTP_TEXT_SM))
+                    .text_size(px(ui.text_sm))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .child(
                         div()
@@ -96,7 +97,7 @@ impl WorkspaceApp {
                         div()
                             .mt(px(4.0))
                             .truncate()
-                            .text_size(px(SFTP_TEXT_XS))
+                            .text_size(px(ui.text_xs))
                             .font_weight(gpui::FontWeight::NORMAL)
                             .text_color(rgb(theme.text_muted))
                             .child(target_path),
@@ -168,7 +169,7 @@ impl WorkspaceApp {
                         )
                         .child(
                             div()
-                                .text_size(px(SFTP_TEXT_SM))
+                                .text_size(px(ui.text_sm))
                                 .text_color(rgb(theme.text_muted))
                                 .cursor_pointer()
                                 .child(
@@ -200,6 +201,7 @@ impl WorkspaceApp {
         modified: Option<i64>,
         _has_background: bool,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         div()
             .p(px(12.0))
@@ -220,7 +222,7 @@ impl WorkspaceApp {
                     .mb(px(8.0))
                     .flex()
                     .items_center()
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text_muted))
                     .child(self.i18n.t(label_key).to_uppercase())
@@ -237,11 +239,11 @@ impl WorkspaceApp {
                 div()
                     .flex()
                     .gap(px(8.0))
-                    .text_size(px(SFTP_TEXT_SM))
+                    .text_size(px(ui.text_sm))
                     .text_color(rgb(theme.text))
                     .child(Self::render_lucide_icon(
                         LucideIcon::HardDrive,
-                        SFTP_ICON_MD,
+                        ui.size(SFTP_ICON_MD),
                         rgb(theme.text_muted),
                     ))
                     .child(format_file_size(size)),
@@ -251,11 +253,11 @@ impl WorkspaceApp {
                     .mt(px(6.0))
                     .flex()
                     .gap(px(8.0))
-                    .text_size(px(SFTP_TEXT_SM))
+                    .text_size(px(ui.text_sm))
                     .text_color(rgb(theme.text))
                     .child(Self::render_lucide_icon(
                         LucideIcon::Clock,
-                        SFTP_ICON_MD,
+                        ui.size(SFTP_ICON_MD),
                         rgb(theme.text_muted),
                     ))
                     .child(format_conflict_modified(modified)),

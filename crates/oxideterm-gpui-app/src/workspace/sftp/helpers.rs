@@ -865,6 +865,7 @@ pub(in crate::workspace::sftp) fn diff_cell(
     highlighted: bool,
     border: u32,
     left: bool,
+    number_column_width: f32,
 ) -> AnyElement {
     div()
         .flex_1()
@@ -882,7 +883,7 @@ pub(in crate::workspace::sftp) fn diff_cell(
         })
         .child(
             div()
-                .w(px(SFTP_DIFF_LINE_NUMBER_COL))
+                .w(px(number_column_width))
                 .flex_none()
                 .px(px(8.0))
                 .py(px(2.0))

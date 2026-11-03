@@ -1,5 +1,29 @@
 use super::*;
 
+#[derive(Clone, Copy)]
+pub(super) struct SftpUiMetrics {
+    pub(super) text_xs: f32,
+    pub(super) text_sm: f32,
+    pub(super) text_small: f32,
+    scale: f32,
+}
+
+impl SftpUiMetrics {
+    fn from_tokens(tokens: &ThemeTokens) -> Self {
+        let scale = tokens.metrics.ui_text_xs / SFTP_TEXT_XS;
+        Self {
+            text_xs: tokens.metrics.ui_text_xs,
+            text_sm: tokens.metrics.ui_text_sm,
+            text_small: (SFTP_TEXT_10 * scale * 2.0).round() / 2.0,
+            scale,
+        }
+    }
+
+    pub(super) fn size(self, base: f32) -> f32 {
+        (base * self.scale * 2.0).round() / 2.0
+    }
+}
+
 fn adjusted_sftp_pane_ratio(start_ratio: f32, delta_x: f32, viewport_width: f32) -> f32 {
     // Store the split as a ratio so it remains useful when the window or sidebars resize.
     let delta_ratio = delta_x / viewport_width.max(1.0);
@@ -13,6 +37,10 @@ fn adjusted_sftp_queue_height(start_height: f32, delta_y: f32, viewport_height: 
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace::sftp) fn sftp_ui_metrics(&self) -> SftpUiMetrics {
+        SftpUiMetrics::from_tokens(&self.tokens)
+    }
+
     fn sftp_pane_layout_width(&self, window: &Window, cx: &App) -> f32 {
         let width = f32::from(
             self.sftp_view()

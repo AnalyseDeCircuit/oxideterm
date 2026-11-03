@@ -82,6 +82,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        let ui = self.sftp_ui_metrics();
         self.sftp_presentation_request.as_ref()?;
         let theme = self.tokens.ui;
         let choice = |preference, icon, title_key, description_key, cx: &mut Context<Self>| {
@@ -100,14 +101,14 @@ impl WorkspaceApp {
                 .child(Self::render_lucide_icon(icon, 20.0, rgb(theme.accent)))
                 .child(
                     div()
-                        .text_size(px(SFTP_TEXT_SM))
+                        .text_size(px(ui.text_sm))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(theme.text))
                         .child(self.i18n.t(title_key)),
                 )
                 .child(
                     div()
-                        .text_size(px(SFTP_TEXT_XS))
+                        .text_size(px(ui.text_xs))
                         .text_color(rgb(theme.text_muted))
                         .child(self.i18n.t(description_key)),
                 )
@@ -146,14 +147,14 @@ impl WorkspaceApp {
                         })
                         .child(
                             div()
-                                .text_size(px(18.0))
+                                .text_size(px(ui.size(18.0)))
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(rgb(theme.text))
                                 .child(self.i18n.t("sftp.presentation.title")),
                         )
                         .child(
                             div()
-                                .text_size(px(SFTP_TEXT_SM))
+                                .text_size(px(ui.text_sm))
                                 .text_color(rgb(theme.text_muted))
                                 .child(self.i18n.t("sftp.presentation.description")),
                         )
@@ -178,7 +179,7 @@ impl WorkspaceApp {
                         )
                         .child(
                             div()
-                                .text_size(px(SFTP_TEXT_XS))
+                                .text_size(px(ui.text_xs))
                                 .text_color(rgb(theme.text_muted))
                                 .child(self.i18n.t("sftp.presentation.remember_hint")),
                         ),
@@ -192,6 +193,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let _scope = self.enter_sftp_surface(SftpSurfaceId::Sidebar);
         let theme = self.tokens.ui;
         if self
@@ -207,7 +209,7 @@ impl WorkspaceApp {
                 .justify_center()
                 .gap_2()
                 .px_4()
-                .text_size(px(SFTP_TEXT_XS))
+                .text_size(px(ui.text_xs))
                 .text_color(rgb(theme.text_muted))
                 .child(self.i18n.t("sftp.sidebar.active_tab_notice"))
                 .into_any_element();
@@ -222,7 +224,7 @@ impl WorkspaceApp {
                 .justify_center()
                 .gap_2()
                 .px_4()
-                .text_size(px(SFTP_TEXT_XS))
+                .text_size(px(ui.text_xs))
                 .text_color(rgb(theme.text_muted))
                 .child(Self::render_lucide_icon(
                     LucideIcon::FolderOpen,
@@ -291,7 +293,7 @@ impl WorkspaceApp {
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
-                                    .text_size(px(SFTP_TEXT_XS))
+                                    .text_size(px(ui.text_xs))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .child(node_title),
                             )
@@ -442,13 +444,14 @@ impl WorkspaceApp {
         focused_input: Option<SftpInput>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let focused = focused_input == Some(SftpInput::RemotePath);
         let mut path_bar = div()
             .id("sftp-sidebar-path-input")
             .w_full()
             .min_w(px(0.0))
-            .h(px(24.0))
+            .h(px(ui.size(24.0)))
             .flex()
             .items_center()
             .gap_1()
@@ -485,7 +488,7 @@ impl WorkspaceApp {
                         .hover(move |button| button.bg(rgb(theme.bg_hover)))
                         .child(Self::render_lucide_icon(
                             LucideIcon::CornerDownLeft,
-                            SFTP_ICON_SM,
+                            ui.size(SFTP_ICON_SM),
                             rgb(theme.text),
                         ))
                         .on_mouse_down(
@@ -503,7 +506,7 @@ impl WorkspaceApp {
                     div()
                         .min_w(px(0.0))
                         .truncate()
-                        .text_size(px(SFTP_TEXT_10))
+                        .text_size(px(ui.text_small))
                         .text_color(rgb(theme.text_muted))
                         .child(path.to_string()),
                 )
@@ -917,6 +920,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let input = if pane == SftpPane::Local {
             SftpInput::LocalPath
@@ -924,7 +928,7 @@ impl WorkspaceApp {
             SftpInput::RemotePath
         };
         let mut header = div()
-            .h(px(SFTP_PANE_HEADER_HEIGHT))
+            .h(px(ui.size(SFTP_PANE_HEADER_HEIGHT)))
             .flex()
             .flex_row()
             .items_center()
@@ -944,7 +948,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .min_w(px(SFTP_PANE_HEADER_TITLE_MIN_WIDTH))
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(theme.text_muted))
                     .child(self.render_display_text_with_role(
@@ -1074,13 +1078,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let focused = focused_input == Some(input);
         let value = if editing { path_input } else { path };
         let path_bar = div()
             .flex_1()
             .min_w(px(0.0))
-            .h(px(24.0))
+            .h(px(ui.size(24.0)))
             .flex()
             .flex_row()
             .items_center()
@@ -1116,7 +1121,7 @@ impl WorkspaceApp {
                         .hover(move |button| button.bg(rgb(theme.bg_hover)))
                         .child(Self::render_lucide_icon(
                             LucideIcon::CornerDownLeft,
-                            SFTP_ICON_SM,
+                            ui.size(SFTP_ICON_SM),
                             rgb(theme.text),
                         ))
                         .on_mouse_down(
@@ -1186,6 +1191,7 @@ impl WorkspaceApp {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let pane_is_remote = pane == SftpPane::Remote
             || (pane == SftpPane::Local && self.sftp_pair_primary_remote_id(cx).is_some());
@@ -1204,7 +1210,7 @@ impl WorkspaceApp {
             if index > 0 {
                 inner = inner.child(Self::render_lucide_icon(
                     LucideIcon::ChevronRight,
-                    SFTP_ICON_MD,
+                    ui.size(SFTP_ICON_MD),
                     rgb(theme.text_muted),
                 ));
             }
@@ -1222,7 +1228,7 @@ impl WorkspaceApp {
             inner = inner.child(
                 div()
                     .max_w(px(120.0))
-                    .h(px(20.0))
+                    .h(px(ui.size(20.0)))
                     .px(px(SFTP_BREADCRUMB_SEGMENT_PADDING))
                     .flex()
                     .flex_row()
@@ -1249,7 +1255,7 @@ impl WorkspaceApp {
                                 (SftpPane::Local, true) => LucideIcon::HardDrive,
                                 (SftpPane::Local, false) => LucideIcon::Home,
                             },
-                            SFTP_ICON_MD,
+                            ui.size(SFTP_ICON_MD),
                             rgb(theme.text_muted),
                         ))
                     })
@@ -1287,7 +1293,7 @@ impl WorkspaceApp {
             .items_center()
             .overflow_hidden()
             .track_scroll(&scroll_handle)
-            .text_size(px(SFTP_TEXT_SM))
+            .text_size(px(ui.text_sm))
             .on_scroll_wheel(self.sftp_listener(
                 cx,
                 move |this, event: &ScrollWheelEvent, _window, cx| {
@@ -1309,8 +1315,9 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         div()
-            .h(px(25.0))
+            .h(px(ui.size(25.0)))
             .flex()
             .flex_row()
             .items_center()
@@ -1319,7 +1326,7 @@ impl WorkspaceApp {
             .bg(sftp_panel_bg(self.tokens.ui.bg_panel, has_background, 0xff))
             .border_b_1()
             .border_color(sftp_border(self.tokens.ui.border, has_background))
-            .text_size(px(SFTP_TEXT_XS))
+            .text_size(px(ui.text_xs))
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(self.render_sftp_sort_header(
                 pane,
@@ -1336,7 +1343,7 @@ impl WorkspaceApp {
                 sort_field,
                 sort_direction,
                 self.i18n.t("sftp.file_list.col_size"),
-                Some(SFTP_SIZE_COL),
+                Some(ui.size(SFTP_SIZE_COL)),
                 cx,
             ))
             .child(self.render_sftp_sort_header(
@@ -1345,7 +1352,7 @@ impl WorkspaceApp {
                 sort_field,
                 sort_direction,
                 self.i18n.t("sftp.file_list.col_modified"),
-                Some(SFTP_MODIFIED_COL),
+                Some(ui.size(SFTP_MODIFIED_COL)),
                 cx,
             ))
             .into_any_element()
@@ -1361,6 +1368,7 @@ impl WorkspaceApp {
         width: Option<f32>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let field_key = match field {
             SftpSortField::Name => "name",
@@ -1415,7 +1423,7 @@ impl WorkspaceApp {
                 };
                 header.child(Self::render_lucide_icon(
                     icon,
-                    SFTP_ICON_SM,
+                    ui.size(SFTP_ICON_SM),
                     rgb(theme.accent),
                 ))
             })
@@ -1437,6 +1445,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let input = if pane == SftpPane::Local {
             SftpInput::LocalFilter
         } else {
@@ -1445,7 +1454,7 @@ impl WorkspaceApp {
         let focused = focused_input == Some(input);
         let theme = self.tokens.ui;
         div()
-            .h(px(30.0))
+            .h(px(ui.size(30.0)))
             .flex()
             .flex_row()
             .items_center()
@@ -1461,7 +1470,7 @@ impl WorkspaceApp {
             .border_color(sftp_border(theme.border, has_background))
             .child(Self::render_lucide_icon(
                 LucideIcon::Search,
-                SFTP_ICON_SM,
+                ui.size(SFTP_ICON_SM),
                 rgb(theme.text_muted),
             ))
             .child(self.render_sftp_inline_text(
@@ -1475,7 +1484,7 @@ impl WorkspaceApp {
             .when(!filter.is_empty(), |row| {
                 row.child(
                     div()
-                        .text_size(px(SFTP_TEXT_XS))
+                        .text_size(px(ui.text_xs))
                         .text_color(rgb(theme.text_muted))
                         .hover(move |x| x.text_color(rgb(theme.text)))
                         .cursor_pointer()
@@ -1524,6 +1533,7 @@ impl WorkspaceApp {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let target = WorkspaceImeTarget::Sftp(self.sftp_surface_id(), input);
         let control = self
             .workspace_text_input(
@@ -1545,7 +1555,7 @@ impl WorkspaceApp {
             .px(px(0.0))
             .border_0()
             .bg(rgba(0x00000000))
-            .text_size(px(SFTP_TEXT_XS));
+            .text_size(px(ui.text_xs));
 
         // Path completion reads the same frame-local anchor stored by the shared IME primitive.
         self.text_input_with_workspace_ime(

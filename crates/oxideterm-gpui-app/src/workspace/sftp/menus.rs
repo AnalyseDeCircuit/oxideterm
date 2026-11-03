@@ -9,6 +9,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let viewport = window.viewport_size();
         let placement = browser_behavior::clamp_context_menu_position(
@@ -16,8 +17,8 @@ impl WorkspaceApp {
             menu.y,
             f32::from(viewport.width),
             f32::from(viewport.height),
-            SFTP_CONTEXT_MENU_WIDTH,
-            SFTP_CONTEXT_MENU_MAX_HEIGHT,
+            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT),
             8.0,
         );
         let tree_mode = menu.tree;
@@ -61,7 +62,7 @@ impl WorkspaceApp {
         };
         let popup = context_menu_event_boundary(
             div()
-                .w(px(SFTP_CONTEXT_MENU_WIDTH))
+                .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
                 .p(px(SFTP_CONTEXT_MENU_PADDING))
                 .rounded(px(self.tokens.radii.sm))
                 .border_1()
@@ -263,13 +264,14 @@ impl WorkspaceApp {
         listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let disabled = disabled
             || self.sftp_view().read(cx).context_menu_presence.phase()
                 == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let color = if danger { SFTP_RED } else { theme.text };
         let item = div()
-            .h(px(SFTP_CONTEXT_MENU_ITEM_HEIGHT))
+            .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
             .w_full()
             .flex()
             .flex_row()
@@ -278,9 +280,13 @@ impl WorkspaceApp {
             .px(px(12.0))
             .py(px(6.0))
             .rounded(px(self.tokens.radii.xs))
-            .text_size(px(SFTP_TEXT_XS))
+            .text_size(px(ui.text_xs))
             .text_color(rgb(color))
-            .child(Self::render_lucide_icon(icon, SFTP_ICON_SM, rgb(color)))
+            .child(Self::render_lucide_icon(
+                icon,
+                ui.size(SFTP_ICON_SM),
+                rgb(color),
+            ))
             .child(div().truncate().child(self.render_display_text_with_role(
                 SelectableTextRole::NonSelectable,
                 "sftp-context-menu",
@@ -321,6 +327,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let viewport = window.viewport_size();
         let placement = browser_behavior::clamp_context_menu_position(
@@ -328,8 +335,8 @@ impl WorkspaceApp {
             menu.y,
             f32::from(viewport.width),
             f32::from(viewport.height),
-            SFTP_CONTEXT_MENU_WIDTH,
-            SFTP_CONTEXT_MENU_MAX_HEIGHT,
+            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT),
             8.0,
         );
         let Some(remote_id) = self.sftp_view().read(cx).current_remote_id.clone() else {
@@ -354,7 +361,7 @@ impl WorkspaceApp {
 
         let save_item = {
             let item = div()
-                .h(px(SFTP_CONTEXT_MENU_ITEM_HEIGHT))
+                .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
                 .w_full()
                 .flex()
                 .flex_row()
@@ -363,7 +370,7 @@ impl WorkspaceApp {
                 .px(px(12.0))
                 .py(px(6.0))
                 .rounded(px(self.tokens.radii.xs))
-                .text_size(px(SFTP_TEXT_XS))
+                .text_size(px(ui.text_xs))
                 .text_color(rgb(if can_save {
                     theme.text
                 } else {
@@ -371,7 +378,7 @@ impl WorkspaceApp {
                 }))
                 .child(Self::render_lucide_icon(
                     LucideIcon::Star,
-                    SFTP_ICON_SM,
+                    ui.size(SFTP_ICON_SM),
                     rgb(theme.text),
                 ))
                 .child(
@@ -445,8 +452,8 @@ impl WorkspaceApp {
 
         let popup = context_menu_event_boundary(
             div()
-                .w(px(SFTP_CONTEXT_MENU_WIDTH))
-                .max_h(px(SFTP_CONTEXT_MENU_MAX_HEIGHT))
+                .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
+                .max_h(px(ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT)))
                 .p(px(SFTP_CONTEXT_MENU_PADDING))
                 .rounded(px(self.tokens.radii.sm))
                 .border_1()
@@ -461,8 +468,8 @@ impl WorkspaceApp {
                     // child here would collapse to zero height and hide every
                     // saved bookmark beneath the save row.
                     div()
-                        .max_h(px(SFTP_CONTEXT_MENU_MAX_HEIGHT
-                            - SFTP_CONTEXT_MENU_ITEM_HEIGHT
+                        .max_h(px(ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT)
+                            - ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)
                             - SFTP_CONTEXT_MENU_PADDING * 2.0))
                         .overflow_y_scrollbar()
                         .children(rows),
@@ -483,14 +490,15 @@ impl WorkspaceApp {
     }
 
     fn render_sftp_bookmark_empty_row(&self) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         div()
-            .h(px(SFTP_CONTEXT_MENU_ITEM_HEIGHT))
+            .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
             .w_full()
             .flex()
             .items_center()
             .px(px(12.0))
-            .text_size(px(SFTP_TEXT_XS))
+            .text_size(px(ui.text_xs))
             .text_color(rgb(theme.text_muted))
             .child(self.i18n.t("sftp.bookmarks.empty"))
             .into_any_element()
@@ -502,6 +510,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let surface = self.sftp_surface_id();
         let style = ContextMenuActionableStyle {
@@ -541,7 +550,7 @@ impl WorkspaceApp {
             )
             .child(Self::render_lucide_icon(
                 LucideIcon::Pencil,
-                SFTP_ICON_SM,
+                ui.size(SFTP_ICON_SM),
                 rgb(theme.text_muted),
             ));
 
@@ -569,12 +578,12 @@ impl WorkspaceApp {
             )
             .child(Self::render_lucide_icon(
                 LucideIcon::Trash2,
-                SFTP_ICON_SM,
+                ui.size(SFTP_ICON_SM),
                 rgb(SFTP_RED),
             ));
 
         let row = div()
-            .h(px(SFTP_CONTEXT_MENU_ITEM_HEIGHT))
+            .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
             .w_full()
             .flex()
             .flex_row()
@@ -583,11 +592,11 @@ impl WorkspaceApp {
             .px(px(12.0))
             .py(px(6.0))
             .rounded(px(self.tokens.radii.xs))
-            .text_size(px(SFTP_TEXT_XS))
+            .text_size(px(ui.text_xs))
             .text_color(rgb(theme.text))
             .child(Self::render_lucide_icon(
                 LucideIcon::Star,
-                SFTP_ICON_SM,
+                ui.size(SFTP_ICON_SM),
                 rgb(theme.text_muted),
             ))
             .child(

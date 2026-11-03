@@ -53,6 +53,7 @@ impl WorkspaceApp {
         _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let (language, encoding, editor, editor_saving, editor_dirty, editor_last_atomic_write) = {
             let sftp_view = self.sftp_view().read(cx);
@@ -112,7 +113,7 @@ impl WorkspaceApp {
             )
             .child(
                 div()
-                    .h(px(32.0))
+                    .h(px(ui.size(32.0)))
                     .flex_none()
                     .px(px(16.0))
                     .border_t_1()
@@ -121,7 +122,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(
                         div()
@@ -165,6 +166,7 @@ impl WorkspaceApp {
         status: Option<(String, gpui::Rgba)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let (save_error, network_error, retry_count) = {
             let sftp_view = self.sftp_view().read(cx);
             (
@@ -192,7 +194,7 @@ impl WorkspaceApp {
                             .text_color(rgb(SFTP_ORANGE))
                             .child(Self::render_lucide_icon(
                                 LucideIcon::WifiOff,
-                                SFTP_ICON_MD,
+                                ui.size(SFTP_ICON_MD),
                                 rgb(SFTP_ORANGE),
                             ))
                             .child(div().max_w(px(320.0)).truncate().child(
@@ -207,13 +209,13 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
-                            .h(px(20.0))
+                            .h(px(ui.size(20.0)))
                             .px(px(8.0))
                             .rounded(px(self.tokens.radii.sm))
                             .flex()
                             .items_center()
                             .gap(px(4.0))
-                            .text_size(px(SFTP_TEXT_XS))
+                            .text_size(px(ui.text_xs))
                             .text_color(rgb(SFTP_ORANGE))
                             .hover(|style| {
                                 style.bg(rgba((SFTP_ORANGE << 8) | SFTP_EDITOR_RETRY_HOVER_ALPHA))
@@ -228,7 +230,7 @@ impl WorkspaceApp {
                             )
                             .child(Self::render_lucide_icon(
                                 LucideIcon::RefreshCcw,
-                                SFTP_ICON_SM,
+                                ui.size(SFTP_ICON_SM),
                                 rgb(SFTP_ORANGE),
                             ))
                             .child(label),
@@ -256,9 +258,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace::sftp) fn render_sftp_preview_text(&self, text: String) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         div()
             .font_family(settings_mono_font_family(self.settings_store.settings()))
-            .text_size(px(SFTP_TEXT_XS))
+            .text_size(px(ui.text_xs))
             .child(text)
             .into_any_element()
     }

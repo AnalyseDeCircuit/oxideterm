@@ -7,6 +7,7 @@ impl WorkspaceApp {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let dialog_visible = self.sftp_view().read(cx).dialog_presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         if let SftpDialog::EditorCloseConfirm { name } = dialog.clone() {
@@ -181,7 +182,7 @@ impl WorkspaceApp {
                                     .flex()
                                     .items_center()
                                     .gap(px(8.0))
-                                    .text_size(px(SFTP_TEXT_SM))
+                                    .text_size(px(ui.text_sm))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text_heading))
                                     .when(matches!(&dialog, SftpDialog::Conflict), |row| {
@@ -217,9 +218,9 @@ impl WorkspaceApp {
                                         .mt(px(6.0))
                                         .text_size(px(
                                             if matches!(&dialog, SftpDialog::Diff { .. }) {
-                                                SFTP_TEXT_XS
+                                                ui.text_xs
                                             } else {
-                                                SFTP_TEXT_SM
+                                                ui.text_sm
                                             },
                                         ))
                                         .text_color(rgb(theme.text_muted))
@@ -304,6 +305,7 @@ impl WorkspaceApp {
         _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let (footer_px, footer_py) = match dialog {
             SftpDialog::Preview { .. } | SftpDialog::Editor { .. } | SftpDialog::Diff { .. } => {
@@ -347,7 +349,7 @@ impl WorkspaceApp {
                         .min_w(px(0.0))
                         .px(px(8.0))
                         .truncate()
-                        .text_size(px(SFTP_TEXT_XS))
+                        .text_size(px(ui.text_xs))
                         .text_color(rgb(theme.text_muted))
                         .child(path),
                 )
@@ -450,7 +452,7 @@ impl WorkspaceApp {
                         .min_w(px(0.0))
                         .px(px(8.0))
                         .truncate()
-                        .text_size(px(SFTP_TEXT_XS))
+                        .text_size(px(ui.text_xs))
                         .text_color(rgb(theme.text_muted))
                         .child(path),
                 )
@@ -520,7 +522,7 @@ impl WorkspaceApp {
                         .items_center()
                         .flex_1()
                         .min_w(px(0.0))
-                        .text_size(px(SFTP_TEXT_XS))
+                        .text_size(px(ui.text_xs))
                         .text_color(rgb(theme.text_muted))
                         .child(
                             self.i18n

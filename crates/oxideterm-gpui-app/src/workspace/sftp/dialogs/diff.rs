@@ -10,6 +10,7 @@ impl WorkspaceApp {
         _has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let lines = compute_sftp_diff(local_content, remote_content);
         let stats = sftp_diff_stats(&lines);
@@ -30,7 +31,7 @@ impl WorkspaceApp {
                     .flex()
                     .border_b_1()
                     .border_color(rgb(theme.border))
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .child(
                         div()
                             .flex_1()
@@ -42,7 +43,7 @@ impl WorkspaceApp {
                             .bg(rgba((0x7f1d1d << 8) | SFTP_DIFF_HEADER_BG_ALPHA))
                             .child(Self::render_lucide_icon(
                                 LucideIcon::File,
-                                SFTP_ICON_SM,
+                                ui.size(SFTP_ICON_SM),
                                 rgb(SFTP_RED),
                             ))
                             .child(
@@ -91,7 +92,7 @@ impl WorkspaceApp {
                             .bg(rgba((0x14532d << 8) | SFTP_DIFF_HEADER_BG_ALPHA))
                             .child(Self::render_lucide_icon(
                                 LucideIcon::File,
-                                SFTP_ICON_SM,
+                                ui.size(SFTP_ICON_SM),
                                 rgb(SFTP_GREEN),
                             ))
                             .child(
@@ -137,7 +138,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .selectable_overflow_y_scroll(&self.sftp_view().read(cx).diff_document_scroll)
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
                     .when(line_count == 0, |body| {
                         body.child(
@@ -158,7 +159,7 @@ impl WorkspaceApp {
                                 line_count,
                                 diff_scroll,
                                 TauriVirtualListSpec::new(
-                                    px(SFTP_DIFF_ROW_HEIGHT),
+                                    px(ui.size(SFTP_DIFF_ROW_HEIGHT)),
                                     SFTP_DIFF_VIRTUAL_OVERSCAN,
                                 ),
                                 move |range, _window, _cx| {
@@ -169,7 +170,7 @@ impl WorkspaceApp {
                                             let added = line.kind == SftpDiffLineKind::Added;
                                             div()
                                                 .w_full()
-                                                .h(px(SFTP_DIFF_ROW_HEIGHT))
+                                                .h(px(ui.size(SFTP_DIFF_ROW_HEIGHT)))
                                                 .flex()
                                                 .border_b_1()
                                                 .border_color(rgba(
@@ -182,6 +183,7 @@ impl WorkspaceApp {
                                                     removed,
                                                     theme.border,
                                                     true,
+                                                    ui.size(SFTP_DIFF_LINE_NUMBER_COL),
                                                 ))
                                                 .child(diff_cell(
                                                     &line.right_line_num,
@@ -189,6 +191,7 @@ impl WorkspaceApp {
                                                     added,
                                                     theme.border,
                                                     false,
+                                                    ui.size(SFTP_DIFF_LINE_NUMBER_COL),
                                                 ))
                                                 .into_any_element()
                                         })

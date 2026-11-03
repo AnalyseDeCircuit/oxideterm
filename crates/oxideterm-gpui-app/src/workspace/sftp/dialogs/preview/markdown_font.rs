@@ -56,6 +56,7 @@ impl WorkspaceApp {
         mime_type: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let (font_error, font_family, font_size) = {
             let sftp_view = self.sftp_view().read(cx);
@@ -104,7 +105,7 @@ impl WorkspaceApp {
                         div()
                             .w(px(52.0))
                             .text_center()
-                            .text_size(px(SFTP_TEXT_XS))
+                            .text_size(px(ui.text_xs))
                             .text_color(rgb(theme.text_muted))
                             .child(format!("{font_size:.0}px")),
                     )
@@ -138,7 +139,7 @@ impl WorkspaceApp {
                             .ml(px(8.0))
                             .min_w(px(0.0))
                             .truncate()
-                            .text_size(px(SFTP_TEXT_XS))
+                            .text_size(px(ui.text_xs))
                             .text_color(rgb(theme.text_muted))
                             .child(font_family),
                     ),
@@ -220,6 +221,7 @@ impl WorkspaceApp {
         active: bool,
         on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let text_color = if active {
             rgb(theme.text)
@@ -244,7 +246,7 @@ impl WorkspaceApp {
                     28.0,
                     28.0,
                     8.0,
-                    SFTP_TEXT_XS,
+                    ui.text_xs,
                 )
             },
             on_click,
@@ -260,6 +262,7 @@ impl WorkspaceApp {
         font_size: f32,
         line_height: f32,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         div()
             .flex()
@@ -274,7 +277,7 @@ impl WorkspaceApp {
                             .ui_font_family
                             .as_str(),
                     ))
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(title),
             )

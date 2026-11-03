@@ -85,7 +85,6 @@ const SFTP_INCOMPLETE_TRANSFER_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const SFTP_INCOMPLETE_TRANSFER_LIST_ESTIMATED_HEIGHT: f32 = 52.0;
 const SFTP_INCOMPLETE_TRANSFER_LIST_OVERSCAN: usize = 4;
 const SFTP_TEXT_XS: f32 = 12.0; // Tauri text-xs
-const SFTP_TEXT_SM: f32 = 14.0; // Tauri text-sm
 const SFTP_TEXT_10: f32 = 10.0; // Tauri text-[10px]
 const SFTP_ICON_SM: f32 = 12.0; // Tauri h-3 w-3
 const SFTP_ICON_MD: f32 = 14.0; // Tauri h-3.5 w-3.5
@@ -166,11 +165,11 @@ fn configured_transfer_protocol(
     }
 }
 
-fn sftp_file_list_virtual_spec() -> TauriVirtualListSpec {
+fn sftp_file_list_virtual_spec(row_height: f32) -> TauriVirtualListSpec {
     // Tauri SFTP FileList uses the same row estimate and overscan for rendering
     // and keyboard reveal. Keep them as one named native spec so scrollIntoView
     // parity does not split from virtualized row rendering.
-    TauriVirtualListSpec::new(px(SFTP_ROW_HEIGHT), SFTP_VIRTUAL_OVERSCAN)
+    TauriVirtualListSpec::new(px(row_height), SFTP_VIRTUAL_OVERSCAN)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -1067,6 +1066,7 @@ pub(super) struct SftpWorkspaceEntity {
     local_selected: HashSet<String>,
     remote_selected: HashSet<String>,
     local_file_scroll: UniformListScrollHandle,
+    file_row_height: f32,
     remote_file_scroll: UniformListScrollHandle,
     local_path_scroll: ScrollHandle,
     remote_path_scroll: ScrollHandle,
@@ -1203,6 +1203,7 @@ impl Default for SftpWorkspaceEntity {
             local_selected: HashSet::new(),
             remote_selected: HashSet::new(),
             local_file_scroll: UniformListScrollHandle::new(),
+            file_row_height: SFTP_ROW_HEIGHT,
             remote_file_scroll: UniformListScrollHandle::new(),
             local_path_scroll: ScrollHandle::new(),
             remote_path_scroll: ScrollHandle::new(),

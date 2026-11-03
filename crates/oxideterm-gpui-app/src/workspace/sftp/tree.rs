@@ -52,7 +52,7 @@ impl SftpWorkspaceEntity {
         scroll_tauri_virtual_list_to_index(
             &self.remote_file_scroll,
             next,
-            sftp_file_list_virtual_spec(),
+            sftp_file_list_virtual_spec(self.file_row_height),
             TauriVirtualScrollAlign::Nearest,
         );
         true

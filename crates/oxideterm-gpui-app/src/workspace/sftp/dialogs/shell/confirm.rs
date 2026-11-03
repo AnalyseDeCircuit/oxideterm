@@ -6,6 +6,7 @@ impl WorkspaceApp {
         name: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let dialog_visible = self.sftp_view().read(cx).dialog_presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
@@ -71,7 +72,7 @@ impl WorkspaceApp {
                             )
                             .child(
                                 div()
-                                    .text_size(px(SFTP_TEXT_SM))
+                                    .text_size(px(ui.text_sm))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text))
                                     .text_center()
@@ -93,7 +94,7 @@ impl WorkspaceApp {
                                         (theme.border << 8) | SFTP_DIALOG_DIVIDER_ALPHA,
                                     ))
                                     .text_center()
-                                    .text_size(px(SFTP_TEXT_SM))
+                                    .text_size(px(ui.text_sm))
                                     .font_weight(gpui::FontWeight::MEDIUM)
                                     .text_color(rgb(theme.text_muted))
                                     .hover(move |button| {
@@ -119,7 +120,7 @@ impl WorkspaceApp {
                                     .flex_1()
                                     .py(px(10.0))
                                     .text_center()
-                                    .text_size(px(SFTP_TEXT_SM))
+                                    .text_size(px(ui.text_sm))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.accent))
                                     .hover(move |button| {

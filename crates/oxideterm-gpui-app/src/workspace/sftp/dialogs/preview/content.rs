@@ -90,6 +90,7 @@ impl WorkspaceApp {
         has_more: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
         let theme = self.tokens.ui;
         let showing = offset.saturating_add(chunk_size).min(total_size);
         let loading_more = self.sftp_view().read(cx).preview_hex_loading_more;
@@ -102,7 +103,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(8.0))
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(self.render_selectable_display_text(
                         "sftp-preview-hex-header",
@@ -140,7 +141,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(SFTP_TEXT_XS))
+                    .text_size(px(ui.text_xs))
                     .line_height(px(20.0))
                     .text_color(rgb(theme.text))
                     .child(self.render_selectable_display_text(
