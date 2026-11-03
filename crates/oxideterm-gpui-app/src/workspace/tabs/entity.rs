@@ -2624,14 +2624,40 @@ mod tests {
             extra,
             Some(PaneNode::leaf(c, TerminalSessionId(3))),
         ));
-        host.split_pane(
+        assert!(host.split_pane(
             extra,
             c,
             extra_group,
             SplitDirection::Horizontal,
             d,
             TerminalSessionId(4),
-        );
+        ));
+        // Exercise the configured boundary rather than assuming the former four-pane limit.
+        for index in 2..MAX_PANES_PER_TAB - panes.len() {
+            let pane = host.alloc_pane_id();
+            let group = host.alloc_pane_id();
+            assert!(host.split_pane(
+                extra,
+                c,
+                group,
+                SplitDirection::Horizontal,
+                pane,
+                TerminalSessionId(index as u64 + 3),
+            ));
+        }
+        assert!(host.can_receive_tab_drop(extra, combined.id));
+        let overflow = host.alloc_pane_id();
+        let overflow_group = host.alloc_pane_id();
+        assert!(host.split_pane(
+            extra,
+            c,
+            overflow_group,
+            SplitDirection::Horizontal,
+            overflow,
+            TerminalSessionId(MAX_PANES_PER_TAB as u64 + 1),
+        ));
+        let roots_before_drop =
+            [extra, combined.id].map(|id| host.tab_by_id(id).unwrap().root_pane.clone());
         assert!(!host.can_receive_tab_drop(extra, combined.id));
         assert!(
             host.combine_pages_at(
@@ -2644,6 +2670,44 @@ mod tests {
             .is_none()
         );
         assert_eq!(host.active_tab_id(), Some(combined.id));
+        assert_eq!(
+            [extra, combined.id].map(|id| host.tab_by_id(id).unwrap().root_pane.clone()),
+            roots_before_drop
+        );
+        assert_eq!(host.container_tab_id(source), combined.id);
+        for (session, pane) in [(TerminalSessionId(1), a), (TerminalSessionId(2), b)] {
+            assert_eq!(
+                host.terminal_location(session),
+                Some(TerminalLocation {
+                    tab_id: combined.id,
+                    pane_id: pane
+                })
+            );
+        }
+        host.close_pane(extra, overflow).unwrap();
+        let (at_limit, _) = host
+            .combine_pages_at(
+                extra,
+                combined.id,
+                Some(a),
+                SplitDirection::Horizontal,
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            at_limit.root_pane.as_ref().unwrap().pane_count(),
+            MAX_PANES_PER_TAB
+        );
+        assert_eq!(host.container_tab_id(source), at_limit.id);
+        for (session, pane) in [(TerminalSessionId(1), a), (TerminalSessionId(2), b)] {
+            assert_eq!(
+                host.terminal_location(session),
+                Some(TerminalLocation {
+                    tab_id: at_limit.id,
+                    pane_id: pane
+                })
+            );
+        }
     }
 
     #[test]
