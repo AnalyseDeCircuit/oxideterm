@@ -241,6 +241,49 @@ impl WorkspaceApp {
         true
     }
 
+    pub(in crate::workspace) fn tile_selected_terminal_panes(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let panes = self.selected_terminal_tile_panes(cx);
+        let previous = self.active_tab_id(cx);
+        let title = self.i18n.t("terminal.broadcast.tiled_title");
+        let viewport = window.viewport_size();
+        let Some((tab, removed)) = self.tab_host.update(cx, |host, _| {
+            host.tile_terminal_panes(&panes, title, viewport.width >= viewport.height)
+        }) else {
+            cx.notify();
+            return;
+        };
+        for id in removed {
+            self.ai_runtime_context
+                .update(cx, |runtime, _| runtime.revoke_app_surface(id));
+        }
+        self.register_tab_surface(&tab, cx);
+        self.dismiss_terminal_broadcast_menu(cx);
+        self.close_tab_context_menu();
+        self.finish_split_drag(cx);
+        self.reveal_tab_scope(tab.id, cx);
+        self.apply_main_window_active_tab_change(previous, Some(tab.id), cx);
+        self.sync_active_tab_surface(cx);
+        self.focus_tab_terminal(tab.id, window, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn selected_terminal_tile_panes(&self, cx: &App) -> Vec<PaneId> {
+        let terminal = self.terminal.read(cx);
+        let members = terminal
+            .sync_groups()
+            .panes(terminal.selected_broadcast_group_id());
+        // Match the visible checklist order, not the set's iteration order.
+        self.terminal_broadcast_entries(cx)
+            .into_iter()
+            .filter(|entry| members.contains(&entry.pane_id))
+            .map(|entry| entry.pane_id)
+            .collect()
+    }
+
     pub(in crate::workspace) fn move_terminal_pane_out(
         &mut self,
         source_id: TabId,
@@ -1488,7 +1531,7 @@ impl WorkspaceApp {
             );
         }
         // Release TabHost's read guard before rendering without cloning the
-        // complete Tab; the pane tree is bounded to four panes.
+        // complete Tab; the pane tree is bounded by MAX_PANES_PER_TAB.
         let Some((title, tab_kind, root_pane)) = self.tab_by_id(tab_id, cx).map(|tab| {
             (
                 self.tab_display_title(tab),

@@ -1351,6 +1351,8 @@
     "hint_unbound": "Zen モード — コマンドパレットから終了できます"
   },
   "tabbar": {
+    "zoom_pane": "ペインを拡大",
+    "restore_pane_layout": "分割レイアウトに戻す",
     "drag_to_dock": "ドラッグしてドッキング",
     "workspace": "ワークスペース",
     "merge_into_horizontal": "「{{title}}」に結合（左右分割）",

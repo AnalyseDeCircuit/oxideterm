@@ -6,7 +6,7 @@ pub use command_palette::{
     CommandPaletteMatch, CommandPaletteMode, command_palette_match, parse_command_palette_query,
 };
 
-pub const MAX_PANES_PER_TAB: usize = 4;
+pub const MAX_PANES_PER_TAB: usize = 16;
 pub const MIN_PANE_FRACTION: f32 = 10.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -148,6 +148,53 @@ pub enum PaneNode {
 }
 
 impl PaneNode {
+    /// Arranges existing leaves without changing their pane or session identities.
+    pub fn tiled(
+        nodes: Vec<Self>,
+        landscape: bool,
+        mut next_group_id: impl FnMut() -> PaneId,
+    ) -> Option<Self> {
+        let count = nodes.len();
+        if count == 0 {
+            return None;
+        }
+        let across = (count as f32).sqrt().ceil() as usize;
+        let bands = count.div_ceil(across);
+        let (outer, inner) = if landscape {
+            (SplitDirection::Vertical, SplitDirection::Horizontal)
+        } else {
+            (SplitDirection::Horizontal, SplitDirection::Vertical)
+        };
+        let mut remaining = nodes.into_iter();
+        let mut rows = Vec::with_capacity(bands);
+        for band in 0..bands {
+            let row_count = remaining.len().div_ceil(bands - band);
+            let mut row = remaining.by_ref().take(row_count).collect::<Vec<_>>();
+            let node = if row.len() == 1 {
+                row.pop().unwrap()
+            } else {
+                Self::Group {
+                    id: next_group_id(),
+                    direction: inner,
+                    children: row
+                        .into_iter()
+                        .map(|node| PaneSplitChild::new(node, 100.0 / row_count as f32))
+                        .collect(),
+                }
+            };
+            rows.push(PaneSplitChild::new(node, 100.0 / bands as f32));
+        }
+        Some(if rows.len() == 1 {
+            rows.pop().unwrap().node
+        } else {
+            Self::Group {
+                id: next_group_id(),
+                direction: outer,
+                children: rows,
+            }
+        })
+    }
+
     pub fn leaf(pane_id: PaneId, session_id: TerminalSessionId) -> Self {
         Self::Leaf {
             pane_id,
@@ -528,6 +575,79 @@ mod tests {
             PaneSplitChild::new(PaneNode::leaf(pane_a, session_a), sizes[0]),
             PaneSplitChild::new(PaneNode::leaf(pane_b, session_b), sizes[1]),
         ]
+    }
+
+    #[test]
+    fn tiled_terminals_keep_order_and_balanced_rows() {
+        for (count, expected_rows) in [
+            (4, vec![2, 2]),
+            (6, vec![3, 3]),
+            (10, vec![4, 3, 3]),
+            (16, vec![4, 4, 4, 4]),
+        ] {
+            for landscape in [true, false] {
+                let nodes = (1..=count)
+                    .map(|n| PaneNode::leaf(PaneId(n), TerminalSessionId(n)))
+                    .collect();
+                let mut group_id = 100;
+                let root = PaneNode::tiled(nodes, landscape, || {
+                    group_id += 1;
+                    PaneId(group_id)
+                })
+                .unwrap();
+                let mut sessions = Vec::new();
+                root.collect_session_ids(&mut sessions);
+                assert_eq!(
+                    sessions,
+                    (1..=count).map(TerminalSessionId).collect::<Vec<_>>()
+                );
+                let PaneNode::Group {
+                    direction,
+                    children,
+                    ..
+                } = root
+                else {
+                    panic!("grid root")
+                };
+                assert_eq!(
+                    direction,
+                    if landscape {
+                        SplitDirection::Vertical
+                    } else {
+                        SplitDirection::Horizontal
+                    }
+                );
+                assert_eq!(
+                    children
+                        .iter()
+                        .map(|row| row.node.pane_count())
+                        .collect::<Vec<_>>(),
+                    expected_rows
+                );
+                for row in children {
+                    assert!((row.size - 100.0 / expected_rows.len() as f32).abs() < 0.001);
+                    let PaneNode::Group {
+                        direction,
+                        children,
+                        ..
+                    } = row.node
+                    else {
+                        panic!("grid row")
+                    };
+                    assert_eq!(
+                        direction,
+                        if landscape {
+                            SplitDirection::Horizontal
+                        } else {
+                            SplitDirection::Vertical
+                        }
+                    );
+                    for cell in &children {
+                        assert!((cell.size - 100.0 / children.len() as f32).abs() < 0.001);
+                    }
+                }
+            }
+        }
     }
 
     #[test]

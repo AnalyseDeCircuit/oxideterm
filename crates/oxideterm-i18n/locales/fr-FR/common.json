@@ -1351,6 +1351,8 @@
     "hint_unbound": "Mode Zen — Quittez depuis la palette de commandes"
   },
   "tabbar": {
+    "zoom_pane": "Agrandir le volet",
+    "restore_pane_layout": "Rétablir la disposition",
     "drag_to_dock": "Glisser pour ancrer",
     "workspace": "Espace de travail",
     "merge_into_horizontal": "Fusionner avec « {{title}} » (côte à côte)",

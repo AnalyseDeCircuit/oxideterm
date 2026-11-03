@@ -590,6 +590,9 @@
       "error_busy": "Una destinazione è usata da un altro invio"
     },
     "broadcast": {
+      "tile_selected": "Affianca i terminali selezionati",
+      "tile_selection_hint": "Seleziona da 2 a {{max}} terminali nella finestra principale.",
+      "tiled_title": "Terminali affiancati",
       "members_hint": "Seleziona i singoli terminali, poi attiva la sincronizzazione. I nuovi terminali non vengono aggiunti automaticamente. Rimuovi un terminale dal gruppo attuale prima di spostarlo.",
       "isolate_member": "Isola",
       "resume_member": "Riprendi",

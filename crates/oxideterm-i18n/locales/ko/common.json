@@ -1351,6 +1351,8 @@
     "hint_unbound": "Zen 모드 — 명령 팔레트에서 종료할 수 있습니다"
   },
   "tabbar": {
+    "zoom_pane": "창 영역 확대",
+    "restore_pane_layout": "분할 배치 복원",
     "drag_to_dock": "드래그하여 도킹",
     "workspace": "작업 공간",
     "merge_into_horizontal": "“{{title}}”에 합치기 (좌우 분할)",

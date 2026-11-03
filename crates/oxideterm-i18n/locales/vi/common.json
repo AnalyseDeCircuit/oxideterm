@@ -1351,6 +1351,8 @@
     "hint_unbound": "Chế độ Zen — Thoát qua bảng lệnh"
   },
   "tabbar": {
+    "zoom_pane": "Phóng to ô",
+    "restore_pane_layout": "Khôi phục bố cục chia ô",
     "drag_to_dock": "Kéo để ghép",
     "workspace": "Không gian làm việc",
     "merge_into_horizontal": "Ghép vào “{{title}}” (cạnh nhau)",

@@ -590,6 +590,9 @@
       "error_busy": "Otro emisor está usando un destino"
     },
     "broadcast": {
+      "tile_selected": "Distribuir terminales seleccionados",
+      "tile_selection_hint": "Selecciona entre 2 y {{max}} terminales de la ventana principal.",
+      "tiled_title": "Terminales en mosaico",
       "members_hint": "Selecciona terminales concretos y activa la sincronización. Los nuevos terminales no se unen automáticamente. Quita un terminal de su grupo actual antes de moverlo.",
       "isolate_member": "Aislar",
       "resume_member": "Reanudar",

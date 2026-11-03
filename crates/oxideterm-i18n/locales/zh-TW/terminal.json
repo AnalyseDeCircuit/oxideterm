@@ -590,6 +590,9 @@
       "error_busy": "目標正由另一個傳送工作使用"
     },
     "broadcast": {
+      "tile_selected": "平鋪所選終端",
+      "tile_selection_hint": "請選擇主視窗中的 2–{{max}} 個終端。",
+      "tiled_title": "平鋪終端",
       "members_hint": "選擇個別終端後啟用同步，新開終端不會自動加入。移動終端前，請先將其移出原群組。",
       "isolate_member": "臨時隔離",
       "resume_member": "恢復同步",

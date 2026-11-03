@@ -1214,6 +1214,34 @@ impl WorkspaceApp {
             );
         }
 
+        let tiled_panes = self.selected_terminal_tile_panes(cx);
+        let can_tile = self.tab_host.read(cx).can_tile_terminal_panes(&tiled_panes);
+        menu = menu.child(
+            div()
+                .px(px(6.0))
+                .py(px(4.0))
+                .child(self.terminal_sync_action_button(
+                    self.i18n.t("terminal.broadcast.tile_selected"),
+                    can_tile,
+                    |this, _, window, cx| {
+                        this.tile_selected_terminal_panes(window, cx);
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+                .when(!can_tile, |row| {
+                    row.child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(rgb(theme.text_muted))
+                            .child(
+                                self.i18n
+                                    .t("terminal.broadcast.tile_selection_hint")
+                                    .replace("{{max}}", &MAX_PANES_PER_TAB.to_string()),
+                            ),
+                    )
+                }),
+        );
         let enabled = self.terminal.read(cx).broadcast_enabled();
         let selected_count = self
             .terminal

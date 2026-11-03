@@ -1351,6 +1351,8 @@
     "hint_unbound": "Modalità Zen — Esci dalla tavolozza dei comandi"
   },
   "tabbar": {
+    "zoom_pane": "Ingrandisci riquadro",
+    "restore_pane_layout": "Ripristina disposizione",
     "drag_to_dock": "Trascina per ancorare",
     "workspace": "Area di lavoro",
     "merge_into_horizontal": "Unisci a «{{title}}» (affiancati)",

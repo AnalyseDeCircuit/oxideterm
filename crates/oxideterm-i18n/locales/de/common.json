@@ -1351,6 +1351,8 @@
     "hint_unbound": "Zen-Modus — Über die Befehlspalette beenden"
   },
   "tabbar": {
+    "zoom_pane": "Bereich vergrößern",
+    "restore_pane_layout": "Bereichsanordnung wiederherstellen",
     "drag_to_dock": "Zum Andocken ziehen",
     "workspace": "Arbeitsbereich",
     "merge_into_horizontal": "Mit „{{title}}“ zusammenführen (nebeneinander)",

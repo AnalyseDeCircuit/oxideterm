@@ -14,6 +14,7 @@ pub(in crate::workspace) struct WorkspaceTabHostEntity {
     scope_selections: HashMap<TabScope, TabId>,
     // Utility descriptors retain their IDs while only their container appears in the tab strip.
     embedded_pages: HashMap<TabId, TabId>,
+    zoomed_panes: HashMap<TabId, PaneId>,
     active_tab_id: Option<TabId>,
     active_tab_index_cache: Cell<Option<(TabId, usize)>>,
     next_tab_id: u64,
@@ -155,6 +156,7 @@ impl WorkspaceTabHostEntity {
         Self {
             tabs: Vec::new(),
             embedded_pages: HashMap::new(),
+            zoomed_panes: HashMap::new(),
             active_tab_id: None,
             scope: TabScope::All,
             affinities: HashMap::new(),
@@ -486,6 +488,19 @@ impl WorkspaceTabHostEntity {
             return false;
         }
         tab.active_pane_id = Some(pane_id);
+        let id = tab.id;
+        let terminal = tab
+            .root_pane
+            .as_ref()
+            .and_then(|root| root.session_id_for_pane(pane_id))
+            .is_some();
+        if self.zoomed_panes.contains_key(&id) {
+            if terminal {
+                self.zoomed_panes.insert(id, pane_id);
+            } else {
+                self.zoomed_panes.remove(&id);
+            }
+        }
         true
     }
 
@@ -501,11 +516,19 @@ impl WorkspaceTabHostEntity {
         let Some(tab) = self.tab_mut_by_id(tab_id) else {
             return false;
         };
+        if tab
+            .root_pane
+            .as_ref()
+            .is_some_and(|root| root.pane_count() >= MAX_PANES_PER_TAB)
+        {
+            return false;
+        }
         let split = tab.root_pane.as_mut().is_some_and(|root_pane| {
             root_pane.split_active(active_pane_id, group_id, direction, pane_id, session_id)
         });
         if split {
             tab.active_pane_id = Some(pane_id);
+            self.zoomed_panes.remove(&tab_id);
         }
         split
     }
@@ -553,7 +576,8 @@ impl WorkspaceTabHostEntity {
 
     pub(in crate::workspace) fn surface_is_visible(&self, page: TabId) -> bool {
         let container = self.container_tab_id(page);
-        self.active_tab_id == Some(container) || self.is_detached(container)
+        (self.active_tab_id == Some(container) || self.is_detached(container))
+            && (page == container || self.zoomed_pane(container).is_none())
     }
 
     pub(in crate::workspace) fn unembed_page(&mut self, page: TabId) -> Option<TabId> {
@@ -572,6 +596,7 @@ impl WorkspaceTabHostEntity {
 
     pub(in crate::workspace) fn focus_content_page(&mut self, page: TabId) {
         let container = self.container_tab_id(page);
+        self.zoomed_panes.remove(&container);
         if let Some(tab) = self.tab_mut_by_id(container) {
             if let Some(pane) = tab.root_pane.as_ref().and_then(|root| root.page_pane(page)) {
                 tab.active_pane_id = Some(pane);
@@ -675,6 +700,7 @@ impl WorkspaceTabHostEntity {
             .collect::<Vec<_>>();
         self.tabs.retain(|tab| !removed.contains(&tab.id));
         for old in &removed {
+            self.zoomed_panes.remove(old);
             self.tabs_with_unread_terminal_output.remove(old);
         }
         let mut sessions = Vec::new();
@@ -694,6 +720,155 @@ impl WorkspaceTabHostEntity {
         };
         self.insert_and_select_main_tab(tab.clone());
         Some((tab, removed))
+    }
+
+    pub(in crate::workspace) fn can_tile_terminal_panes(&self, panes: &[PaneId]) -> bool {
+        let unique = panes.iter().copied().collect::<HashSet<_>>();
+        (2..=MAX_PANES_PER_TAB).contains(&panes.len())
+            && unique.len() == panes.len()
+            && panes.iter().all(|pane| {
+                self.panes.contains_key(pane)
+                    && self.terminal_locations.iter().any(|(session, location)| {
+                        location.pane_id == *pane
+                            && !self.is_outside_main_window(location.tab_id)
+                            && self
+                                .tab_by_id(location.tab_id)
+                                .and_then(|tab| tab.root_pane.as_ref())
+                                .and_then(|root| root.session_id_for_pane(*pane))
+                                == Some(*session)
+                    })
+            })
+    }
+
+    /// Validate and prepare every source tree before committing the layout change.
+    /// Terminal entities, subscriptions, and connection consumers stay owned here.
+    pub(in crate::workspace) fn tile_terminal_panes(
+        &mut self,
+        panes: &[PaneId],
+        title: String,
+        landscape: bool,
+    ) -> Option<(Tab, Vec<TabId>)> {
+        if !self.can_tile_terminal_panes(panes) {
+            return None;
+        }
+        let selected = panes.iter().copied().collect::<HashSet<_>>();
+        let mut sources = Vec::new();
+        let mut leaves = HashMap::new();
+        for tab in &self.tabs {
+            let Some(mut root) = tab.root_pane.clone() else {
+                continue;
+            };
+            let mut ids = Vec::new();
+            root.collect_pane_ids(&mut ids);
+            let moving = ids
+                .into_iter()
+                .filter(|id| selected.contains(id))
+                .collect::<Vec<_>>();
+            if moving.is_empty() {
+                continue;
+            }
+            let mut empty = false;
+            for pane in moving {
+                let session = root.session_id_for_pane(pane)?;
+                leaves.insert(pane, PaneNode::leaf(pane, session));
+                if root.pane_count() == 1 {
+                    empty = true;
+                } else {
+                    root.close_pane(pane)?;
+                    if let Some(only) = root.single_child_replacement() {
+                        root = only;
+                    }
+                }
+            }
+            let next_active = tab
+                .active_pane_id
+                .filter(|id| !selected.contains(id))
+                .unwrap_or_else(|| root.first_pane_id());
+            sources.push((tab.id, (!empty).then_some(root), next_active));
+        }
+        let nodes = panes
+            .iter()
+            .map(|id| leaves.remove(id))
+            .collect::<Option<Vec<_>>>()?;
+        let root = PaneNode::tiled(nodes, landscape, || self.alloc_pane_id())?;
+        let active = self
+            .active_tab()
+            .and_then(|tab| tab.active_pane_id)
+            .filter(|id| selected.contains(id))
+            .unwrap_or(panes[0]);
+        let id = self.alloc_tab_id();
+        let mut removed = Vec::new();
+        for (source, root, active) in sources {
+            self.zoomed_panes.remove(&source);
+            if let Some(root) = root {
+                let page_title = match &root {
+                    PaneNode::Page { tab_id, .. } => self
+                        .tab_by_id(*tab_id)
+                        .map(|page| (page.title.clone(), page.title_source.clone())),
+                    _ => None,
+                };
+                let tab = self.tab_mut_by_id(source).unwrap();
+                if let Some((title, title_source)) = page_title {
+                    tab.title = title;
+                    tab.title_source = title_source;
+                }
+                tab.root_pane = Some(root);
+                tab.active_pane_id = Some(active);
+            } else {
+                removed.push(source);
+            }
+        }
+        self.tabs.retain(|tab| !removed.contains(&tab.id));
+        for old in &removed {
+            self.tabs_with_unread_terminal_output.remove(old);
+            self.affinities.remove(old);
+        }
+        for location in self.terminal_locations.values_mut() {
+            if selected.contains(&location.pane_id) {
+                location.tab_id = id;
+            }
+        }
+        let tab = Tab {
+            id,
+            kind: TabKind::Workspace,
+            title,
+            title_source: TabTitleSource::Static,
+            root_pane: Some(root),
+            active_pane_id: Some(active),
+        };
+        self.insert_and_select_main_tab(tab.clone());
+        Some((tab, removed))
+    }
+
+    pub(in crate::workspace) fn zoomed_pane(&self, tab: TabId) -> Option<PaneId> {
+        self.zoomed_panes.get(&tab).copied().filter(|pane| {
+            self.tab_by_id(tab)
+                .and_then(|tab| tab.root_pane.as_ref())
+                .is_some_and(|root| root.pane_count() > 1 && root.contains_pane(*pane))
+        })
+    }
+
+    pub(in crate::workspace) fn toggle_pane_zoom(
+        &mut self,
+        tab_id: TabId,
+        pane_id: PaneId,
+    ) -> bool {
+        let Some(root) = self
+            .tab_by_id(tab_id)
+            .and_then(|tab| tab.root_pane.as_ref())
+        else {
+            return false;
+        };
+        if root.pane_count() < 2 || root.session_id_for_pane(pane_id).is_none() {
+            return false;
+        }
+        if self.zoomed_pane(tab_id) == Some(pane_id) {
+            self.zoomed_panes.remove(&tab_id);
+        } else {
+            self.zoomed_panes.insert(tab_id, pane_id);
+        }
+        self.tab_mut_by_id(tab_id).unwrap().active_pane_id = Some(pane_id);
+        true
     }
 
     /// Moving a pane preserves its Entity, session, subscriptions, and runtime consumers.
@@ -754,6 +929,9 @@ impl WorkspaceTabHostEntity {
         tab_id: TabId,
         pane_id: PaneId,
     ) -> Option<PaneId> {
+        if self.zoomed_panes.get(&tab_id) == Some(&pane_id) {
+            self.zoomed_panes.remove(&tab_id);
+        }
         let tab = self.tab_mut_by_id(tab_id)?;
         let previous_active = tab.active_pane_id;
         let root_pane = tab.root_pane.as_mut()?;
@@ -994,11 +1172,15 @@ impl WorkspaceTabHostEntity {
                 if self.surface_is_visible(tab.id)
                     && let Some(root) = &tab.root_pane
                 {
-                    root.collect_pane_ids(&mut visible);
+                    if let Some(pane) = self.zoomed_pane(tab.id) {
+                        visible.push(pane);
+                    } else {
+                        root.collect_pane_ids(&mut visible);
+                    }
                 }
             }
         }
-        // Detached windows and every split pane remain visible, even without keyboard focus.
+        // Zoom hides sibling rendering without releasing their terminal sessions.
         for (id, pane) in &self.panes {
             let active = visible.contains(id);
             if pane.read(cx).render_cache_visible() != active {
@@ -1208,6 +1390,7 @@ impl WorkspaceTabHostEntity {
     }
 
     pub(in crate::workspace) fn close_tab_mount(&mut self, tab_id: TabId) -> TabMountCleanupPlan {
+        self.zoomed_panes.remove(&tab_id);
         self.pending_detach_mounts.remove(&tab_id);
         let detached_window = match self.tab_mounts.remove(&tab_id) {
             Some(TabMount::Detached { handle, .. }) => Some(handle),
@@ -1577,6 +1760,210 @@ mod tests {
     struct TabHostEventRecorder {
         events: Vec<WorkspaceTabHostEvent>,
         _subscription: Option<Subscription>,
+    }
+
+    #[gpui::test]
+    fn tiling_live_terminals_preserves_content_and_supports_zoom_and_extraction(
+        cx: &mut TestAppContext,
+    ) {
+        let main = cx.add_window(|_, _| TabHostTestRoot);
+        let panes = main
+            .update(cx, |_, window, cx| {
+                (0..17)
+                    .map(|index| {
+                        cx.new(|cx| {
+                            let mut pane = TerminalPane::new_recording_playback(
+                                80,
+                                24,
+                                Default::default(),
+                                window,
+                                cx,
+                            )
+                            .unwrap();
+                            pane.feed_recording_output(format!("server-{index}").as_bytes(), cx);
+                            pane
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap();
+        let host = cx.new(|_| WorkspaceTabHostEntity::new());
+        host.update(cx, |host, cx| {
+            let pane_ids = (0..17).map(|_| host.alloc_pane_id()).collect::<Vec<_>>();
+            let sessions = (0..17).map(|_| host.alloc_session_id()).collect::<Vec<_>>();
+            let tabs = (0..17).map(|_| host.alloc_tab_id()).collect::<Vec<_>>();
+            for index in 0..17 {
+                if index == 10 {
+                    continue;
+                }
+                host.insert_tab(test_tab(
+                    tabs[index],
+                    Some(PaneNode::leaf(pane_ids[index], sessions[index])),
+                ));
+            }
+            let group = host.alloc_pane_id();
+            assert!(host.split_pane(
+                tabs[0],
+                pane_ids[0],
+                group,
+                SplitDirection::Horizontal,
+                pane_ids[10],
+                sessions[10]
+            ));
+            for index in 0..17 {
+                host.register_terminal_pane(
+                    pane_ids[index],
+                    sessions[index],
+                    panes[index].clone(),
+                    main.into(),
+                    cx,
+                );
+                host.bind_terminal_location(
+                    sessions[index],
+                    TerminalLocation {
+                        tab_id: if index == 10 { tabs[0] } else { tabs[index] },
+                        pane_id: pane_ids[index],
+                    },
+                );
+            }
+            host.select_main_tab(Some(tabs[0]));
+            host.set_active_pane(Some(tabs[0]), pane_ids[0]);
+            let original_roots = host
+                .tabs
+                .iter()
+                .map(|tab| (tab.id, tab.root_pane.clone()))
+                .collect::<Vec<_>>();
+            for selection in [
+                vec![pane_ids[0]],
+                vec![pane_ids[0], pane_ids[0]],
+                vec![pane_ids[0], PaneId(9999)],
+                pane_ids.clone(),
+            ] {
+                assert!(
+                    host.tile_terminal_panes(&selection, "Tiled".into(), true)
+                        .is_none()
+                );
+                assert_eq!(
+                    host.tabs
+                        .iter()
+                        .map(|tab| (tab.id, tab.root_pane.clone()))
+                        .collect::<Vec<_>>(),
+                    original_roots
+                );
+            }
+            let mount = host.begin_detach(tabs[9]).unwrap();
+            assert!(
+                host.tile_terminal_panes(&pane_ids[..10], "Tiled".into(), true)
+                    .is_none()
+            );
+            assert_eq!(
+                host.tabs
+                    .iter()
+                    .map(|tab| (tab.id, tab.root_pane.clone()))
+                    .collect::<Vec<_>>(),
+                original_roots
+            );
+            assert!(host.rollback_detach(tabs[9], mount));
+
+            let (tiled, removed) = host
+                .tile_terminal_panes(&pane_ids[..10], "Tiled".into(), true)
+                .unwrap();
+            assert_eq!(removed, tabs[1..10]);
+            assert_eq!(tiled.active_pane_id, Some(pane_ids[0]));
+            assert_eq!(
+                host.tab_by_id(tabs[0]).unwrap().root_pane,
+                Some(PaneNode::leaf(pane_ids[10], sessions[10]))
+            );
+            let mut tiled_ids = Vec::new();
+            tiled
+                .root_pane
+                .as_ref()
+                .unwrap()
+                .collect_pane_ids(&mut tiled_ids);
+            assert_eq!(tiled_ids, pane_ids[..10]);
+            for index in 0..17 {
+                assert_eq!(
+                    host.terminal_pane_for_target(pane_ids[index], sessions[index]),
+                    Some(panes[index].clone())
+                );
+                assert_eq!(
+                    panes[index].read(cx).ai_buffer_snapshot().trim(),
+                    format!("server-{index}")
+                );
+                assert_eq!(
+                    host.terminal_location(sessions[index]).unwrap().tab_id,
+                    if index < 10 {
+                        tiled.id
+                    } else if index == 10 {
+                        tabs[0]
+                    } else {
+                        tabs[index]
+                    }
+                );
+            }
+
+            assert!(host.toggle_pane_zoom(tiled.id, pane_ids[0]));
+            host.sync_terminal_render_caches(true, cx);
+            assert_eq!(
+                panes
+                    .iter()
+                    .map(|pane| pane.read(cx).render_cache_visible())
+                    .collect::<Vec<_>>(),
+                (0..17).map(|index| index == 0).collect::<Vec<_>>()
+            );
+            assert_eq!(host.tab_by_id(tiled.id).unwrap().root_pane, tiled.root_pane);
+            assert!(host.set_active_pane(Some(tiled.id), pane_ids[1]));
+            assert_eq!(host.zoomed_pane(tiled.id), Some(pane_ids[1]));
+            assert!(host.toggle_pane_zoom(tiled.id, pane_ids[1]));
+            host.sync_terminal_render_caches(true, cx);
+            assert_eq!(
+                panes
+                    .iter()
+                    .map(|pane| pane.read(cx).render_cache_visible())
+                    .collect::<Vec<_>>(),
+                (0..17).map(|index| index < 10).collect::<Vec<_>>()
+            );
+
+            let extracted = host.alloc_tab_id();
+            assert!(host.move_terminal_pane_to_tab(
+                tiled.id,
+                pane_ids[2],
+                test_tab(extracted, Some(PaneNode::leaf(pane_ids[2], sessions[2]))),
+                main.into()
+            ));
+            assert_eq!(
+                host.terminal_location(sessions[2]),
+                Some(TerminalLocation {
+                    tab_id: extracted,
+                    pane_id: pane_ids[2]
+                })
+            );
+            assert_eq!(
+                host.terminal_pane_for_target(pane_ids[2], sessions[2]),
+                Some(panes[2].clone())
+            );
+            assert!(host.toggle_pane_zoom(tiled.id, pane_ids[3]));
+            host.close_pane(tiled.id, pane_ids[3]).unwrap();
+            host.remove_terminal_pane(pane_ids[3]);
+            assert_eq!(host.zoomed_pane(tiled.id), None);
+            let mut remaining = Vec::new();
+            host.tab_by_id(tiled.id)
+                .unwrap()
+                .root_pane
+                .as_ref()
+                .unwrap()
+                .collect_pane_ids(&mut remaining);
+            assert_eq!(
+                remaining,
+                [0, 1, 4, 5, 6, 7, 8, 9].map(|index| pane_ids[index])
+            );
+            for index in [0, 1, 4, 5, 6, 7, 8, 9] {
+                assert_eq!(
+                    host.terminal_pane_for_target(pane_ids[index], sessions[index]),
+                    Some(panes[index].clone())
+                );
+            }
+        });
     }
 
     #[gpui::test]

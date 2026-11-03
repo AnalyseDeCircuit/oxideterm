@@ -1351,6 +1351,8 @@
     "hint_unbound": "Modo Zen — Sal desde la paleta de comandos"
   },
   "tabbar": {
+    "zoom_pane": "Ampliar panel",
+    "restore_pane_layout": "Restaurar distribución",
     "drag_to_dock": "Arrastrar para acoplar",
     "workspace": "Espacio de trabajo",
     "merge_into_horizontal": "Combinar con «{{title}}» (lado a lado)",

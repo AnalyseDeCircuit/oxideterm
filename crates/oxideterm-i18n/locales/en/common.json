@@ -1351,6 +1351,8 @@
     "hint_unbound": "Zen Mode — Exit from the command palette"
   },
   "tabbar": {
+    "zoom_pane": "Enlarge pane",
+    "restore_pane_layout": "Restore pane layout",
     "drag_to_dock": "Drag to dock",
     "workspace": "Workspace",
     "merge_into_horizontal": "Merge into “{{title}}” (side by side)",

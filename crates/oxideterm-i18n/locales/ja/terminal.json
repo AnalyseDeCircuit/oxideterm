@@ -590,6 +590,9 @@
       "error_busy": "送信先は別の送信タスクで使用中です"
     },
     "broadcast": {
+      "tile_selected": "選択したターミナルを並べる",
+      "tile_selection_hint": "メインウィンドウのターミナルを2～{{max}}個選択してください。",
+      "tiled_title": "並べたターミナル",
       "members_hint": "対象の端末を選択して同期を有効にします。新しい端末は自動参加しません。別のグループに移す前に現在のグループから外してください。",
       "isolate_member": "一時的に分離",
       "resume_member": "同期を再開",

@@ -590,6 +590,9 @@
       "error_busy": "Une cible est utilisée par un autre émetteur"
     },
     "broadcast": {
+      "tile_selected": "Disposer les terminaux sélectionnés",
+      "tile_selection_hint": "Sélectionnez 2 à {{max}} terminaux dans la fenêtre principale.",
+      "tiled_title": "Terminaux en mosaïque",
       "members_hint": "Sélectionnez les terminaux, puis activez la synchronisation. Les nouveaux terminaux ne sont pas ajoutés automatiquement. Retirez un terminal de son groupe actuel avant de le déplacer.",
       "isolate_member": "Isoler",
       "resume_member": "Reprendre",

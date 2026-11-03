@@ -590,6 +590,9 @@
       "error_busy": "Ein Ziel wird von einem anderen Sender verwendet"
     },
     "broadcast": {
+      "tile_selected": "Ausgewählte Terminals anordnen",
+      "tile_selection_hint": "Wählen Sie 2–{{max}} Terminals im Hauptfenster.",
+      "tiled_title": "Angeordnete Terminals",
       "members_hint": "Einzelne Terminals auswählen und dann die Synchronisation aktivieren. Neue Terminals treten nicht automatisch bei. Vor dem Wechsel ein Terminal aus seiner bisherigen Gruppe entfernen.",
       "isolate_member": "Isolieren",
       "resume_member": "Fortsetzen",

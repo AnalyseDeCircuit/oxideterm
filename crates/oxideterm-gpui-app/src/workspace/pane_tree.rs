@@ -1045,6 +1045,23 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    fn toggle_terminal_pane_zoom(
+        &mut self,
+        tab_id: TabId,
+        pane_id: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .tab_host
+            .update(cx, |host, _| host.toggle_pane_zoom(tab_id, pane_id))
+        {
+            self.finish_split_drag(cx);
+            self.focus_tab_terminal(tab_id, window, cx);
+            cx.notify();
+        }
+    }
+
     fn render_terminal_pane_header(
         &self,
         tab_id: TabId,
@@ -1071,7 +1088,33 @@ impl WorkspaceApp {
                     .truncate()
                     .child(self.terminal_pane_label(pane_id, cx)),
             )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    if event.click_count == 2 {
+                        this.toggle_terminal_pane_zoom(tab_id, pane_id, window, cx);
+                        cx.stop_propagation();
+                    }
+                }),
+            )
             .child(format!("#{}", pane_id.0))
+            .child(self.pane_header_action(
+                if self.tab_host.read(cx).zoomed_pane(tab_id) == Some(pane_id) {
+                    LucideIcon::Layers
+                } else {
+                    LucideIcon::Square
+                },
+                if self.tab_host.read(cx).zoomed_pane(tab_id) == Some(pane_id) {
+                    "tabbar.restore_pane_layout"
+                } else {
+                    "tabbar.zoom_pane"
+                },
+                move |this, _, window, cx| {
+                    this.toggle_terminal_pane_zoom(tab_id, pane_id, window, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ))
             .child(self.pane_header_action(
                 LucideIcon::AppWindow,
                 "tabbar.move_pane_to_tab",
@@ -1201,6 +1244,22 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if node.pane_count() > 1 {
+            if let Some((pane, session)) = tab_id
+                .and_then(|id| self.tab_host.read(cx).zoomed_pane(id))
+                .and_then(|pane| {
+                    node.session_id_for_pane(pane)
+                        .map(|session| (pane, session))
+                })
+            {
+                return self.render_pane_tree_for_tab(
+                    tab_id,
+                    &PaneNode::leaf(pane, session),
+                    window,
+                    cx,
+                );
+            }
+        }
         let active_pane_id = tab_id
             .and_then(|tab_id| self.tab_by_id(tab_id, cx))
             .and_then(|tab| tab.active_pane_id);
@@ -1327,8 +1386,8 @@ impl WorkspaceApp {
                     .id(("workspace-pane", pane_id.0))
                     .size_full()
                     .relative()
-                    .min_w(px(self.tokens.metrics.min_pane_width))
-                    .min_h(px(self.tokens.metrics.min_pane_height))
+                    .min_w_0()
+                    .min_h_0()
                     .overflow_hidden()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1419,9 +1478,10 @@ impl WorkspaceApp {
                         div()
                             .flex_none()
                             .flex_basis(basis)
+                            .flex_shrink_1()
                             .relative()
-                            .min_w(px(self.tokens.metrics.min_pane_width))
-                            .min_h(px(self.tokens.metrics.min_pane_height))
+                            .min_w_0()
+                            .min_h_0()
                             .overflow_hidden()
                             .child(
                                 div()
@@ -1563,15 +1623,19 @@ impl WorkspaceApp {
                 }
 
                 let direction = *direction;
+                let handle_extent =
+                    self.tokens.metrics.split_handle_size * children.len().saturating_sub(1) as f32;
                 div()
                     .size_full()
                     .child(group)
                     .on_children_prepainted(move |bounds, _, _| {
                         if let Some(bounds) = bounds.first() {
-                            extent.set(f32::from(match direction {
-                                SplitDirection::Horizontal => bounds.size.width,
-                                SplitDirection::Vertical => bounds.size.height,
-                            }));
+                            extent.set(
+                                f32::from(match direction {
+                                    SplitDirection::Horizontal => bounds.size.width,
+                                    SplitDirection::Vertical => bounds.size.height,
+                                }) - handle_extent,
+                            );
                         }
                     })
                     .into_any_element()

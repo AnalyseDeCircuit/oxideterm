@@ -1351,6 +1351,8 @@
     "hint_unbound": "禪模式 — 可在命令面板中退出"
   },
   "tabbar": {
+    "zoom_pane": "放大窗格",
+    "restore_pane_layout": "恢復分割配置",
     "drag_to_dock": "拖曳停靠",
     "workspace": "工作區",
     "merge_into_horizontal": "併入「{{title}}」（左右分割）",

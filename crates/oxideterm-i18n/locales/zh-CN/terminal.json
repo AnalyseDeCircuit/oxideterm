@@ -163,6 +163,9 @@
       "error_busy": "目标正在被另一个发送任务使用"
     },
     "broadcast": {
+      "tile_selected": "平铺所选终端",
+      "tile_selection_hint": "请选择主窗口中的 2–{{max}} 个终端。",
+      "tiled_title": "平铺终端",
       "members_hint": "选择具体终端后启用同步，新开终端不会自动加入。移动终端前，请先将其移出原组。",
       "isolate_member": "临时隔离",
       "resume_member": "恢复同步",

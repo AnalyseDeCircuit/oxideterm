@@ -590,6 +590,9 @@
       "error_busy": "Um destino está em uso por outro envio"
     },
     "broadcast": {
+      "tile_selected": "Organizar terminais selecionados",
+      "tile_selection_hint": "Selecione de 2 a {{max}} terminais na janela principal.",
+      "tiled_title": "Terminais lado a lado",
       "members_hint": "Selecione os terminais e ative a sincronização. Novos terminais não entram automaticamente. Remova um terminal do grupo atual antes de movê-lo.",
       "isolate_member": "Isolar",
       "resume_member": "Retomar",

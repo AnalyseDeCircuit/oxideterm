@@ -590,6 +590,9 @@
       "error_busy": "Một đích đang được tác vụ gửi khác sử dụng"
     },
     "broadcast": {
+      "tile_selected": "Xếp các cửa sổ dòng lệnh đã chọn",
+      "tile_selection_hint": "Chọn từ 2 đến {{max}} cửa sổ dòng lệnh trong cửa sổ chính.",
+      "tiled_title": "Các cửa sổ dòng lệnh đã xếp",
       "members_hint": "Chọn từng phiên terminal rồi bật đồng bộ. Phiên mới không tự động tham gia. Hãy xóa phiên khỏi nhóm hiện tại trước khi chuyển nhóm.",
       "isolate_member": "Cách ly",
       "resume_member": "Tiếp tục đồng bộ",
