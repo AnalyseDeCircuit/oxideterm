@@ -39,6 +39,26 @@ This document describes the native system's components, data and control paths, 
 
 ## Design Principles
 
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Desktop["GPUI desktop workspace"]
+    Fast["Terminal data path<br/>input, output, resize"]
+    Control["Management operations<br/>files, forwards, AI, sync"]
+    Owners["Explicit runtime owners<br/>nodes, sessions, tasks"]
+    Shared["Node capabilities<br/>shared connection consumers"]
+    Local["Local settings and saved profiles"]
+    Secrets["Separate secret storage"]
+
+    Desktop --> Fast
+    Desktop --> Control
+    Fast --> Owners
+    Control --> Owners
+    Owners --> Shared
+    Control --> Local
+    Control --> Secrets
+```
+
 ### Core Principles
 
 1. **Desktop app first** - The GPUI desktop app is the primary user surface. The CLI is a companion for automation and diagnostics.
@@ -65,88 +85,93 @@ This document describes the native system's components, data and control paths, 
 
 ## Architecture Overview
 
+The overview separates application coordination, reusable runtime domains, durable state and external resources. Thick arrows mean lifecycle ownership or a retained handle, solid arrows mean calls or data flow, and dotted arrows mean scoped access or metadata delivery. A retained handle can refer to a shared resource; it does not imply exclusive ownership.
+
 ```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
-    subgraph App["Desktop App (GPUI)"]
-        Shell["Workspace Shell<br/>tabs · panes · activity bar · command palette"]
-        Sessions["Sessions<br/>saved connections · active nodes"]
-        Monitor["Connection Monitor / Host Tools<br/>pool · health · resources · reconnect"]
-        TermUI["Terminal UI<br/>local + SSH panes"]
-        SftpUI["SFTP / File Manager"]
-        IdeUI["IDE Workspace"]
-        ForwardUI["Port Forwarding"]
-        GraphicsUI["Graphics / VNC Viewer"]
-        AiUI["OxideSens AI Sidebar"]
-        PluginUI["Plugin Manager"]
-        SyncUI["Cloud Sync / Backups"]
-        SettingsUI["Settings"]
+    subgraph Core["Application coordination and runtime domains"]
+        direction TB
+        Views["Windows and workspace controls<br/>tabs, scopes, sidebars, dialogs"]
+        App["WorkspaceApp<br/>actions, subscriptions, shutdown"]
+        Tabs["WorkspaceTabHostEntity<br/>pane trees, terminal entities, window mounts"]
+        Terminal["TerminalPane / TerminalSession<br/>local, SSH, Mosh, Telnet, serial, BLE"]
+        Grid["vte / alacritty_terminal / terminal-graphics<br/>ANSI, grid, history, protocol images"]
+        Paint["oxideterm-gpui-terminal / GPUI<br/>snapshots, row caches, glyphs, image uploads"]
+        Media["Background media and effects<br/>decode, animation, composition"]
+        Services["File, forwarding and monitor coordinators<br/>SFTP / IDE / transfers / host tools"]
+        Consumers["SFTP sessions / IDE file access<br/>forwarding listeners / host samplers"]
+        WslX11["WSL graphics / SSH X11 forwarding<br/>process startup, display and channel bridges"]
+        Runtime["WorkspaceRuntimeEntity<br/>connect, probe, reconnect, restore"]
+        Router["NodeRouter / NodeRuntimeStore<br/>node identity, state, routing"]
+        Registry["SshConnectionRegistry<br/>shared connections and consumer leases"]
+        DesktopSession["Remote desktop session and viewer<br/>helper lifecycle, frames, input, monitor layout"]
+        Plugins["PluginWorkspaceEntity<br/>install, enable, delivery, shutdown"]
+        PluginRuntime["Plugin registry / host API / WASM runtime<br/>manifests, capabilities, hooks, packages"]
+        AcpSessions["AcpWorkspaceEntity<br/>agent sessions and process delivery"]
+        Automation["Public MCP / ACP host tools<br/>authentication, approval, target validation"]
+        AiContext["AI context and approval boundaries<br/>target handles, generations, permissions"]
+        AI["oxideterm-ai / ai-tasks<br/>provider streams, tools, RAG, MCP client"]
+    end
+    subgraph Durable["Configuration, durable data and secrets"]
+        direction TB
+        Stores["Connections / settings / sync services<br/>validation, save, import, export"]
+        Bundles["Sync snapshots / backups / .oxide bundles"]
+        Metadata["Settings and saved profiles<br/>plugin metadata, secret references"]
+        Secrets["OS keychain / encrypted secret storage<br/>credential values, provider keys, tokens"]
+        Knowledge["AI conversations / RAG storage<br/>optional audit and session recordings"]
+    end
+    subgraph Outside["OS resources, helper processes and remote endpoints"]
+        direction TB
+        LocalIO["Local PTY and shell<br/>Mosh / Telnet endpoints / serial / BLE devices"]
+        SSH["SSH servers and jump hosts"]
+        Helpers["Plugin-provided RDP/VNC helpers"]
+        AgentProcesses["ACP agent processes"]
+        Providers["AI providers / external MCP servers"]
+        SyncRemote["Cloud sync backend"]
     end
 
-    subgraph Runtime["Runtime Domains"]
-        ConnStore["Saved Connection Store"]
-        NodeRuntime["Node Runtime Store"]
-        SshPool["SSH Connection Registry"]
-        Reconnect["Reconnect Orchestrator"]
-        SftpRuntime["SFTP Session + Transfer Manager"]
-        ForwardRuntime["Forwarding Manager"]
-        IdeRuntime["IDE FS / Editor State"]
-        HostToolsRuntime["Host Tools Samplers"]
-        GraphicsRuntime["WSL Graphics · Remote Desktop Helpers · VNC Worker"]
-        ModemRuntime["Modem Transfer Engine"]
-        AiRuntime["AI Context · Tools · RAG · MCP"]
-        PluginRuntime["Plugin Registry · Host API · Settings"]
-        SyncRuntime["Cloud Sync · Backup · Portable Runtime"]
-    end
-
-    subgraph Persistence["Persistence And Secrets"]
-        Settings["Settings Files"]
-        Connections["Connection Records"]
-        Keychain["Secret Storage"]
-        Backups["Backups / Support Bundles"]
-        Portable["Portable Runtime"]
-    end
-
-    Shell --> Sessions
-    Shell --> TermUI
-    Shell --> SftpUI
-    Shell --> IdeUI
-    Shell --> ForwardUI
-    Shell --> GraphicsUI
-    Shell --> AiUI
-    Shell --> PluginUI
-    Shell --> SyncUI
-    Shell --> SettingsUI
-
-    Sessions --> ConnStore
-    Sessions --> NodeRuntime
-    Monitor --> SshPool
-    Monitor --> Reconnect
-    Monitor --> HostToolsRuntime
-    TermUI --> NodeRuntime
-    TermUI --> SshPool
-    TermUI --> ModemRuntime
-    SftpUI --> SftpRuntime
-    IdeUI --> IdeRuntime
-    ForwardUI --> ForwardRuntime
-    GraphicsUI --> GraphicsRuntime
-    AiUI --> AiRuntime
-    PluginUI --> PluginRuntime
-    SyncUI --> SyncRuntime
-    SettingsUI --> Settings
-
-    NodeRuntime --> SshPool
-    SftpRuntime --> SshPool
-    ForwardRuntime --> SshPool
-    IdeRuntime --> SshPool
-    HostToolsRuntime --> SshPool
-    AiRuntime --> NodeRuntime
-    PluginRuntime --> NodeRuntime
-
-    ConnStore --> Connections
-    SettingsUI --> Settings
-    ConnStore --> Keychain
-    SyncRuntime --> Backups
-    SyncRuntime --> Portable
+    Views --> App
+    App ==> Tabs
+    App --> Media
+    App ==> Services
+    App --> WslX11
+    App ==> Runtime
+    App --> DesktopSession
+    App ==> Plugins
+    App ==> AcpSessions
+    App ==> AiContext
+    App --> Stores
+    Tabs ==> Terminal
+    Terminal --> Grid
+    Terminal -->|SSH channels| Router
+    Terminal --> LocalIO
+    Grid --> Paint
+    Media --> Paint
+    Services --> Consumers
+    Consumers -->|node capabilities| Router
+    WslX11 -->|SSH X11 path| Router
+    Runtime --> Router
+    Runtime -->|authentication| Secrets
+    Router --> Registry
+    Registry --> SSH
+    DesktopSession -->|optional SSH gateway| Router
+    DesktopSession ==>|RDP/VNC session worker| Helpers
+    Plugins --> PluginRuntime
+    PluginRuntime -.->|verified provider metadata| DesktopSession
+    PluginRuntime -.->|verified adapter package| AcpSessions
+    PluginRuntime --> Metadata
+    AcpSessions -->|host tool requests| Automation
+    AcpSessions ==> AgentProcesses
+    AiContext --> Automation
+    AiContext --> AI
+    AI -->|provider credentials| Secrets
+    AI --> Knowledge
+    AI --> Providers
+    Stores --> Bundles
+    Stores --> Metadata
+    Stores -->|secret-aware writes| Secrets
+    Stores -->|sync plan and apply| SyncRemote
 ```
 
 ### System Context
@@ -280,33 +305,34 @@ Secret-bearing data must cross into secret-aware storage rather than ordinary JS
 ### Plane Interaction
 
 ```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
-    Input["Keyboard / Mouse / AI Approval"] --> Router["Workspace Command Router"]
+    Input["Ordinary terminal input"]
+    Pane["Terminal pane<br/>focus and input encoding"]
+    Runtime["PTY or protocol session<br/>read / write and protocol replies"]
+    Model["Parser, grid and history"]
+    Draw["Row snapshots and cached GPUI drawing"]
+    Action["User management action<br/>or authorized application tool"]
+    Route["Workspace command routing<br/>target and operation validation"]
+    Owner["Domain owner<br/>node, file, forward, settings or sync"]
+    Persist["Durable configuration stores<br/>metadata and safe references"]
+    Secret["Secret-aware storage<br/>credential values"]
+    Result["Structured outcome<br/>domain state and scoped UI update"]
 
-    subgraph DataPlane["Data Plane"]
-        TermIn["Terminal Input"]
-        PtyOrSsh["Local PTY or SSH Channel"]
-        TermOut["Terminal Output"]
-        Renderer["Terminal Renderer"]
-        TermIn --> PtyOrSsh --> TermOut --> Renderer
-    end
-
-    subgraph ControlPlane["Control Plane"]
-        Router --> Cmd["Structured Command"]
-        Cmd --> Domain["Domain Runtime"]
-        Domain --> Result["Result / Error / Notification"]
-    end
-
-    subgraph PersistencePlane["Persistence Plane"]
-        Domain --> SettingsStore["Settings Store"]
-        Domain --> ConnectionStore["Connection Store"]
-        Domain --> SecretStore["Secret Store"]
-        Domain --> BackupStore["Backup / Sync Store"]
-    end
-
-    Input --> TermIn
-    Result --> Renderer
+    Input --> Pane
+    Pane --> Runtime
+    Runtime --> Model
+    Model --> Draw
+    Action --> Route
+    Route --> Owner
+    Owner --> Persist
+    Owner --> Secret
+    Owner --> Result
 ```
+
+The two input paths are separate: ordinary typing does not pass through management approval. Management outcomes update their owning surface; they are not all terminal output. Persistence is a durable boundary used by control operations, not a stage in every terminal frame.
+
+Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs), [terminal_entity](../../../crates/oxideterm-gpui-app/src/workspace/terminal_entity.rs).
 
 ---
 
@@ -340,64 +366,41 @@ crates/oxideterm-gpui-app/src/workspace/knowledge.rs
 ### Layer Dependency Shape
 
 ```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
-    subgraph UI["Layer 1: GPUI App"]
-        Workspace["Workspace Shell"]
-        Surfaces["Tabs / Sidebars / Dialogs"]
-        Notifications["Notifications"]
-    end
+    Shell["GPUI application shell<br/>windows, actions and shared controls"]
+    Views["Workspace surfaces<br/>tabs, sidebars, dialogs, notifications"]
+    Owners["App entities and services<br/>ownership, orchestration and cancellation"]
+    Terminal["Terminal domains<br/>protocol, grid, graphics and rendering"]
+    Remote["Remote domains<br/>SSH, SFTP, forwarding and host tools"]
+    Editor["IDE / editor domains<br/>project model, text and file adapters"]
+    Extensions["AI / plugin domains<br/>context, policy, providers and capabilities"]
+    Persistence["Configuration / sync domains<br/>validation and durable mutations"]
+    Pty["OS PTY and protocol endpoints"]
+    Node["NodeRouter / connection registry<br/>SSH channels and consumer leases"]
+    External["Provider streams / owned helpers"]
+    Disk["Configuration, documents and backups"]
+    Vault["Separate credential storage boundary"]
 
-    subgraph Domain["Layer 2: Domain Crates"]
-        Ssh["oxideterm-ssh"]
-        Sftp["oxideterm-sftp"]
-        MonitorDomain["oxideterm-connection-monitor"]
-        ModemDomain["oxideterm-modem-transfer"]
-        Ai["oxideterm-ai"]
-        SettingsDomain["oxideterm-settings"]
-        PluginsDomain["oxideterm-plugin-*"]
-        SyncDomain["oxideterm-cloud-sync"]
-    end
-
-    subgraph RuntimeIntegration["Layer 3: Runtime Integrations"]
-        PtyRuntime["Local PTY"]
-        SshRuntime["SSH Transport"]
-        SftpRuntime["SFTP Session"]
-        ForwardRuntime["Forward Listener"]
-        HostSampler["Host Samplers"]
-        GraphicsRuntime["VNC Viewer Worker"]
-        ProviderRuntime["AI Provider Stream"]
-        PluginRuntime["Plugin Lifecycle"]
-    end
-
-    subgraph Durable["Layer 4: Durable State"]
-        SettingsFiles["Settings Files"]
-        ConnectionFiles["Connection Records"]
-        Keychain["Secret Storage"]
-        Backups["Backups / Sync Snapshots"]
-    end
-
-    Workspace --> Surfaces
-    Surfaces --> Ssh
-    Surfaces --> Sftp
-    Surfaces --> MonitorDomain
-    Surfaces --> ModemDomain
-    Surfaces --> GraphicsRuntime
-    Surfaces --> Ai
-    Surfaces --> SettingsDomain
-    Surfaces --> PluginsDomain
-    Surfaces --> SyncDomain
-    Ssh --> SshRuntime
-    Sftp --> SftpRuntime
-    MonitorDomain --> HostSampler
-    ModemDomain --> PtyRuntime
-    Ai --> ProviderRuntime
-    PluginsDomain --> PluginRuntime
-    SshRuntime --> Keychain
-    SettingsDomain --> SettingsFiles
-    Ssh --> ConnectionFiles
-    SyncDomain --> Backups
-    Notifications --> Surfaces
+    Shell --> Views
+    Views --> Owners
+    Owners --> Terminal
+    Owners --> Remote
+    Owners --> Editor
+    Owners --> Extensions
+    Owners --> Persistence
+    Terminal --> Pty
+    Terminal -->|SSH path| Node
+    Remote --> Node
+    Editor -->|remote adapters| Node
+    Extensions --> External
+    Persistence --> Disk
+    Persistence -->|secret-aware operations| Vault
 ```
+
+This is a responsibility-layer map, not an exhaustive Cargo dependency graph. App owners connect the views to domain APIs; reusable text/project models remain transport-free. Forward listeners, graphics helpers and samplers have concrete runtime owners described in their chapters. Saved connection files belong to the connections store rather than the SSH transport crate.
+
+Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs), [lib](../../../crates/oxideterm-ide-core/src/lib.rs), [lib](../../../crates/oxideterm-connections/src/lib.rs).
 
 ### Layer 2: Domain Crates
 
@@ -462,24 +465,54 @@ saved connection
 ```
 
 ```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
-    Saved["Saved Connection<br/>durable user configuration"] --> NodeId["Node Identity<br/>stable remote workspace key"]
-    NodeId --> NodeRuntime["Node Runtime<br/>live · stale · reconnecting · failed"]
+    subgraph Ownership["Workspace, consumers and shared SSH transport"]
+        direction TB
+        Owner["WorkspaceApp"]
+        Host["WorkspaceTabHostEntity<br/>pane entities, mounts, subscriptions"]
+        PaneA["Terminal pane A"]
+        SessionA["Terminal session A<br/>shell channel and consumer registration"]
+        PaneB["Terminal pane B"]
+        SessionB["Terminal session B<br/>shell channel and consumer registration"]
+        ServiceOwner["SFTP / IDE / forwarding services"]
+        Files["SFTP / IDE file channels"]
+        Forwards["Forward listeners / remote bindings"]
+        NodeOwner["WorkspaceRuntimeEntity<br/>connection attempts, health, recovery"]
+        Recovery["Reconnect orchestrator<br/>probe, retry, consumer restoration"]
+        Profile["Saved profile<br/>connection metadata and secret references"]
+        NodeRouter["NodeRouter<br/>node routes and runtime state"]
+        ConnectionRegistry["SshConnectionRegistry"]
+        Connection["Shared SSH connection<br/>physical transport"]
+        Parent["Jump-host parent transport<br/>retained while required"]
+        Capabilities["AI / plugin target projections<br/>validated handles and snapshots"]
+    end
 
-    NodeRuntime --> Shell["SSH Shell Channels<br/>terminal panes"]
-    NodeRuntime --> Sftp["SFTP Sessions<br/>file browser · transfers · preview"]
-    NodeRuntime --> Ide["IDE Workspace<br/>tree · editor buffers · save path"]
-    NodeRuntime --> Forward["Forward Rules<br/>local · remote · dynamic"]
-    NodeRuntime --> AiTarget["AI Capability Handles<br/>commands · files · observations"]
-    NodeRuntime --> PluginConsumers["Plugin Host Snapshots<br/>host API calls · terminal hooks"]
-
-    Shell --> TerminalTabs["Visible Terminal Tabs"]
-    Sftp --> SftpTabs["SFTP / File Manager Tabs"]
-    Ide --> IdeTabs["IDE Tabs"]
-    Forward --> ForwardSurface["Forwarding Surface"]
-    AiTarget --> AiSidebar["OxideSens Sidebar"]
-    PluginConsumers --> PluginSurfaces["Plugin Surfaces"]
+    Owner ==> Host
+    Owner ==> ServiceOwner
+    Owner ==> NodeOwner
+    Host ==> PaneA
+    Host ==> PaneB
+    PaneA ==> SessionA
+    SessionA -->|channel / consumer lease| Connection
+    PaneB ==> SessionB
+    SessionB -->|channel / consumer lease| Connection
+    ServiceOwner ==> Files
+    ServiceOwner ==> Forwards
+    Files -->|channel / consumer lease| Connection
+    Forwards -->|channel / consumer lease| Connection
+    NodeOwner ==> Recovery
+    NodeOwner --> NodeRouter
+    Recovery -->|reconnect and restore| NodeRouter
+    Profile -->|open node| NodeRouter
+    NodeRouter --> ConnectionRegistry
+    ConnectionRegistry ==> Connection
+    Connection ==>|jump route only: transport lease| Parent
+    Capabilities -.->|target resolution| Host
+    Capabilities -.->|validated access| NodeRouter
 ```
+
+The thick arrows identify lifecycle holders; channel and consumer-lease arrows identify use of the shared connection. Closing one pane removes that terminal consumer. SFTP, IDE and forwarding retain their own consumers. Reconnect work belongs to the workspace runtime, and jump-host routes retain the parent transport while it is needed. AI and plugin target projections provide validated access without becoming owners of the physical SSH connection.
 
 ### Stable And Transient Objects
 
@@ -512,6 +545,37 @@ Jump-host routing has two related ownership layers:
 ---
 
 ## Desktop Workspace Architecture
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Actions["Tab, scope and layout actions"]
+    Host["WorkspaceTabHostEntity<br/>pane entities, subscriptions and locations"]
+    Filter["Window-local scope<br/>membership and last-active tab"]
+    Visible["Visible tab list<br/>navigation, reorder, bulk close"]
+    Validate["Validate source / destination<br/>pane count and ownership"]
+    Reject["Rejected operation<br/>both layouts and locations unchanged"]
+    Move["Move existing pane IDs<br/>tile, split, extract or detach"]
+    Layout["PaneNode tree<br/>terminal and utility leaves, up to 16"]
+    Mount["Main / detached window and zoom<br/>derive visible panes"]
+    View["Render active pane surfaces"]
+    Transport["Existing session / node owners<br/>unchanged by layout moves"]
+
+    Actions --> Host
+    Host --> Filter
+    Filter --> Visible
+    Host --> Validate
+    Validate -->|invalid| Reject
+    Validate -->|valid| Move
+    Move --> Layout
+    Layout --> Mount
+    Mount --> View
+    Move -->|preserve| Transport
+```
+
+Scope filtering changes presentation, while layout operations move existing resources after validation. Neither is an implicit reconnect. Mixed tabs retain all pane memberships instead of being split by a filter.
+
+Implementation: [entity](../../../crates/oxideterm-gpui-app/src/workspace/tabs/entity.rs), [scope](../../../crates/oxideterm-gpui-app/src/workspace/tabs/scope.rs), [split_drop](../../../crates/oxideterm-gpui-app/src/workspace/tabs/split_drop.rs).
 
 ### Workspace Shell
 
@@ -546,6 +610,12 @@ Tabs are closeable views. They are not the durable source of truth for saved con
 
 Tab scopes are window-local filters: all tabs, global pages, local terminals, or a specific connection. Mixed layouts combine their panes' memberships and stay intact in every matching scope. Scope selection and last-active-tab memory affect presentation, not runtime ownership, and are not persisted across restart. Rendering, keyboard navigation, reordering, bulk closing, and scroll positioning share the visible tab list and content-based widths.
 
+`PaneNode` represents terminal leaves, utility-page leaves and nested groups. A tab can contain up to 16 panes, as defined by `MAX_PANES_PER_TAB`. Splitting and combining tabs use this same limit. The host validates the source and destination before changing their layouts; a rejected drop leaves both trees and their session locations unchanged.
+
+`WorkspaceTabHostEntity` owns terminal entities, subscriptions, window mounts and session-to-pane locations. Tiling moves 2 to 16 existing terminal panes into one layout while preserving their pane IDs, sessions and runtime consumers. Pane zoom changes which pane is visible without replacing the underlying pane tree. Extraction moves an existing pane into another tab. These operations do not reconnect the terminal transport.
+
+See the [pane model](../../../crates/oxideterm-workspace/src/lib.rs) and [tab host](../../../crates/oxideterm-gpui-app/src/workspace/tabs/entity.rs) for layout limits, validation and ownership transitions.
+
 ### Activity Bar
 
 The left activity bar opens connection management and global pages. The right bar opens OxideSens and individual Host Tools, with overflow only when height is insufficient. The top bar owns scope selection, command-palette access, Zen mode, theme switching, and background-task summary. It remains visible in full screen and hides in Zen mode.
@@ -561,6 +631,36 @@ Knowledge settings remain a configuration surface for embedding and retrieval be
 ### Notifications
 
 Notifications turn asynchronous domain events into user-visible messages. They should help users decide what to inspect next: connection monitor, settings, SFTP, cloud sync, plugin manager, or support bundle.
+
+### Knowledge Draft And Storage
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Select["Collection / document selection"]
+    Owner["Knowledge workspace state<br/>document identity and load generation"]
+    Load["Load document revision from RAG store"]
+    Draft["Canonical Markdown draft<br/>TextEditorView and undo history"]
+    Preview["Read-only native Markdown preview"]
+    Save["Explicit or delayed autosave<br/>expected revision and dirty-leave guard"]
+    Store["RAG document storage<br/>durable content and revision"]
+    Index["Background chunk / index refresh"]
+    Conflict["Save failure or revision conflict<br/>retain local draft for a decision"]
+
+    Select --> Owner
+    Owner --> Load
+    Load -->|current document only| Draft
+    Draft --> Preview
+    Draft --> Save
+    Save -->|accepted| Store
+    Save -->|failed| Conflict
+    Store --> Index
+```
+
+Source and Preview use the same draft. A preview switch does not create another editable copy; indexing is derived work after document storage, and an old load must not replace a newly selected document.
+
+Implementation: [knowledge](../../../crates/oxideterm-gpui-app/src/workspace/knowledge.rs), [operations](../../../crates/oxideterm-gpui-app/src/workspace/knowledge/operations.rs).
+
 
 ---
 
@@ -596,6 +696,8 @@ SSH terminal responsibilities:
 - Reuse the node-owned SSH transport while keeping shell-channel state pane-local.
 - Resolve privilege credential scope through the active terminal's owning node, not through host/title/prompt heuristics.
 
+The terminal session interface also has Telnet, Mosh, serial and BLE backends. They adapt their transport to terminal input, output, resize and lifecycle operations. BLE uses a GATT notification/write stream and shares serial send/display options; it does not acquire an SSH node merely to display terminal text. Transport-specific state lives in `oxideterm-terminal/src/session/` and the corresponding protocol crates.
+
 ### Terminal Rendering And Graphics
 
 The terminal renderer combines several layers:
@@ -603,11 +705,77 @@ The terminal renderer combines several layers:
 - The emulator text grid and scrollback.
 - Cursor, selection, command marks, and inline hints.
 - Terminal image protocols such as Kitty/Sixel/iTerm2.
-- App-level background images, opacity, and blur.
+- App-level background images, video, generated effects, opacity, and blur.
 - Native whole-window opacity, applied separately from background-image opacity.
 - Context-menu and command-bar overlays.
 
-Only emulator text belongs to the terminal buffer. Background images and app overlays are rendering state. Terminal image placements are protocol state tied to the current screen buffer, so alternate-screen transitions clear image placements to avoid drawing TUI previews after apps such as yazi exit.
+The emulator owns the text grid and scrollback. `oxideterm-terminal-graphics` tracks protocol images and their placements alongside grid events. Background media and application overlays belong to presentation state.
+
+Kitty resources and placements are scoped to the normal or alternate screen. Entering the alternate screen clears its previous Kitty resources while retaining normal-screen images. Screen selection, erasure, scrolling, history trimming and reset update the corresponding graphics state. Sixel placements also follow grid changes and cell geometry. The renderer displays placements for the active screen; an ordinary screen switch is not a request to discard every protocol image.
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    subgraph TerminalFlow["Terminal output: protocol state, display caches and GPU submission"]
+        direction TB
+        Transport["PTY / SSH / other terminal backends"]
+        Ingress["GraphicsIngress<br/>ordered text and graphics segments; OSC scan"]
+        ShellMarks["Shell integration<br/>command boundaries and recordable text"]
+        Parser["vte / ANSI processor"]
+        TextGrid["alacritty_terminal<br/>screen grid and compact history"]
+        Snapshot["Row snapshots<br/>shared cells, line IDs, signatures"]
+        Roles["Logical lines and semantic roles<br/>command-mark snapshot version"]
+        RowLayout["Row layout cache<br/>selection, cursor, links, theme"]
+        RunCache["Unchanged text runs<br/>font shaping and paint-cache reuse"]
+        GlyphBatch["Prepared glyph batches<br/>raster baseline, colors, live decorations"]
+        Scene["Scene construction<br/>glyphs, image primitives, clipping, opacity"]
+        GPU["Platform GPU backend<br/>submit and present"]
+        ProtocolImages["Protocol images and placements<br/>screen, grid anchors, pixel leases"]
+        ImageCache["Image render cache<br/>image version, crop, animation clock"]
+        Replies["Protocol replies<br/>local PTY priority write queue"]
+        Visibility["Tab / detached window / lock / zoom<br/>release hidden presentation resources"]
+        Background["Background media and UI overlays"]
+    end
+
+    Transport -->|output bytes| Ingress
+    Ingress -->|text segments| ShellMarks
+    Ingress -->|graphics events| ProtocolImages
+    Ingress --> Replies
+    ShellMarks --> Parser
+    ShellMarks -->|command marks| Roles
+    Parser --> TextGrid
+    Parser --> Replies
+    TextGrid --> Snapshot
+    TextGrid -.->|erase / scroll / screen changes| ProtocolImages
+    Snapshot --> Roles
+    Snapshot --> RowLayout
+    Roles --> RowLayout
+    RowLayout --> RunCache
+    RunCache --> GlyphBatch
+    GlyphBatch --> Scene
+    Scene --> GPU
+    ProtocolImages --> ImageCache
+    ImageCache --> Scene
+    Visibility -.->|invalidate / rebuild| RowLayout
+    Visibility -.->|suspend / resume| ImageCache
+    Background --> Scene
+```
+
+Terminal drawing passes through these boundaries:
+
+| Stage | Owner | Reuse and invalidation |
+|---|---|---|
+| Transport output and protocol parsing | `oxideterm-terminal`, `oxideterm-terminal-graphics`, `vte` and `alacritty_terminal` | Ordered graphics/control parsing feeds the text grid and graphics events. OSC payload scanning stops at BEL or ESC and preserves the storage limit and partial-input state. |
+| Grid and history | `alacritty_terminal` | Writable rows use dense cells. History can use repeated-tail or packed storage when beneficial; read-only iteration does not expand compact rows. |
+| Display snapshots | `oxideterm-terminal-model` and the terminal runtime | Rows share cell data through `Arc`, with stable line identities and paint-relevant signatures. |
+| Row layout and text shaping | `TerminalLayoutCache` in `oxideterm-gpui-terminal` | Row keys include content, selection, cursor, theme and highlight state. When a row changes, unchanged text runs can retain shaping and paint caches if text, column, cell count and complete style match. Font size, cell width and line height changes invalidate run reuse. |
+| Semantic roles | Terminal logical-line layout | Classification uses absolute logical-line ranges, active-input state and the immutable command-mark snapshot. A weak snapshot reference detects replacement without retaining command text. |
+| Glyph batches and decorations | GPUI `LinePaintCache` | Prepared glyph data is reused while layout, colors, scale and renderer resources remain valid. Uniform full-run underlines and strikethroughs reuse glyphs and draw their strokes with current styles. Partial decorations use the general painter. |
+| Protocol image display | Terminal image cache and GPUI image resources | Image identity, version and source crop determine cache reuse. Shared pixel leases track decoded memory; bounded display caches and visibility control renderer-resource retention. |
+
+For glyphs that share a baseline and use integer vertical rasterization, the batch anchor is the rounded device baseline. Vertical scrolling can then translate the batch without repeating glyph preparation or changing rasterized positions. Glyphs with additional vertical shaping offsets retain device-phase invalidation. Prepared colors normalize hue once, while each draw applies current opacity. Blank cells avoid unused foreground conversion, and theme-default backgrounds reuse the converted background color.
+
+The [row layout](../../../crates/oxideterm-gpui-terminal/src/terminal_view/element.rs), [GPUI glyph painter](../../../crates/gpui-ce/gpui/src/text_system/line.rs), [image cache](../../../crates/oxideterm-gpui-terminal/src/app/image_cache.rs) and [graphics/grid synchronization](../../../crates/oxideterm-terminal-graphics/src/graphics/grid.rs) own these boundaries.
 
 ### Privilege And File-Transfer Helpers
 
@@ -630,6 +798,38 @@ Closing a terminal pane closes that pane. It should not be interpreted as deleti
 ---
 
 ## SSH Connection Registry And Runtime
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Node["NodeRouter<br/>logical node, parent route and policy"]
+    Registry["SshConnectionRegistry<br/>connection identity and physical state"]
+    Shared["Shared physical connection"]
+    Dedicated["Dedicated terminal transport<br/>separate registry key"]
+    Consumers["Registered consumers<br/>terminal, SFTP, IDE, forwarding, router"]
+    Release["Release one consumer"]
+    Retain["Other consumers remain<br/>keep transport usable"]
+    Idle["No remaining references<br/>idle / keep-alive policy"]
+    Cleanup["Timeout rechecks identity and idle generation<br/>disconnect only the eligible connection"]
+    Runtime["WorkspaceRuntimeEntity<br/>node events, probes and reconnect jobs"]
+    Monitor["Connection Monitor<br/>read-only runtime projection"]
+
+    Node --> Registry
+    Registry --> Shared
+    Registry --> Dedicated
+    Shared --> Consumers
+    Consumers --> Release
+    Release -->|in use| Retain
+    Release -->|unused| Idle
+    Idle -->|timeout eligible| Cleanup
+    Registry -->|state events| Runtime
+    Runtime -->|recovery state| Monitor
+    Registry -->|connection snapshots| Monitor
+```
+
+The release path is based on registered consumers and connection identity, not foreground-tab visibility. A jump child retains its parent route while it needs that transport. AI and plugin handles are not additional ConnectionConsumer enum variants.
+
+Implementation: [connection_registry](../../../crates/oxideterm-ssh/src/connection_registry.rs), [runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs).
 
 The SSH connection pool keeps remote runtime state separate from UI tabs.
 
@@ -696,9 +896,74 @@ Architecture rules:
 - The monitor surface owns neither SSH transport nor reconnect lifecycle.
 - Heavy or repeated host sampling must not block terminal input or become the source of truth for SSH connection ownership.
 
+### Host Tools Sampling And Actions
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Page["Host Tools page<br/>selected node, tool and visibility"]
+    Owner["HostToolsEntity<br/>sampling and user-action state"]
+    Domain["oxideterm-connection-monitor<br/>command construction and parsers"]
+    Route["Owning node / runtime boundary"]
+    Sample["Page-scoped sampling"]
+    Action["Confirmed user operation"]
+    SampleQueue["Sampler delivery and snapshot cache"]
+    Reliable["Separate reliable-result delivery"]
+    Check["Validate target / request freshness"]
+    Ui["Metrics, resource lists and action outcome"]
+
+    Page --> Owner
+    Owner --> Domain
+    Domain --> Route
+    Route --> Sample
+    Route --> Action
+    Sample --> SampleQueue
+    Action --> Reliable
+    SampleQueue --> Check
+    Reliable --> Check
+    Check --> Ui
+```
+
+The paths distinguish periodic observations from user-requested results. Sampling traffic must not delay an operation result. Hiding a page changes sampling activity; it does not transfer SSH ownership to the page.
+
+Implementation: [entity](../../../crates/oxideterm-gpui-app/src/workspace/connection_monitor/entity.rs), [lib](../../../crates/oxideterm-connection-monitor/src/lib.rs).
+
+
 ---
 
 ## SFTP Architecture
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Ui["SFTP surface<br/>node, path and selection"]
+    Node["NodeRouter<br/>shared connection acquisition"]
+    Browse["SFTP session<br/>list, stat and preview reads"]
+    Preview["Preview limits and content renderer<br/>separate from full download"]
+    Request["Transfer request<br/>direction, file / directory, protocol"]
+    Manager["SftpTransferManager<br/>node controls, concurrency and snapshots"]
+    Sftp["SFTP worker<br/>offset restart where supported"]
+    Scp["Selected SCP worker<br/>existing node exec channel"]
+    Control["Pause / cancel / node interruption"]
+    Outcome["Progress and completion / error<br/>record retains protocol and strategy"]
+    Resume["Reconnect / retry decision<br/>SFTP offset or SCP from zero"]
+
+    Ui --> Node
+    Node --> Browse
+    Browse --> Preview
+    Ui --> Request
+    Request --> Manager
+    Manager --> Sftp
+    Manager --> Scp
+    Control --> Manager
+    Sftp --> Outcome
+    Scp --> Outcome
+    Outcome --> Resume
+```
+
+Browsing and preview use SFTP; selecting SCP for a transfer does not create an SFTP implementation or a second SSH transport. Transfer controls and records belong to the manager, not the currently displayed progress row.
+
+Implementation: [transfer_manager](../../../crates/oxideterm-sftp/src/transfer_manager.rs), [preview](../../../crates/oxideterm-sftp/src/session/preview.rs), [scp](../../../crates/oxideterm-sftp/src/scp.rs).
 
 Remote file transfer is a node-level capability. SFTP remains the structured browsing and preferred transfer protocol; legacy SCP is a compatibility transport for connected POSIX hosts whose SFTP subsystem is unavailable. Neither protocol should be treated as a terminal-pane feature.
 
@@ -730,36 +995,234 @@ The transfer record stores the selected protocol. SFTP may restart from a saved 
 
 Remote file writes are real writes on the target host. Before overwriting important files, users should verify path, target, and backup state. AI and plugins should use explicit targets and approvals for file writes.
 
+### Directory Strategy And Path Boundaries
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Request["Directory transfer<br/>root path and selected protocol"]
+    Sftp["SFTP strategy selection<br/>capabilities for this live connection"]
+    Archive["Archive helper when eligible"]
+    Files["Directory scheduler<br/>bounded per-file parallelism"]
+    Scp["Legacy SCP records<br/>bounded C / D / E parsing"]
+    Path["Validate names and local containment<br/>reject unsafe path records"]
+    Progress["Aggregate bytes and items<br/>retain actual strategy"]
+    Cleanup["Cancellation / failure cleanup<br/>explicit retry semantics"]
+
+    Request -->|SFTP| Sftp
+    Request -->|SCP| Scp
+    Sftp --> Archive
+    Sftp --> Files
+    Scp --> Path
+    Archive --> Progress
+    Files --> Progress
+    Path --> Progress
+    Progress --> Cleanup
+```
+
+Directory strategies are not interchangeable with single-file streaming. Capability caches are connection-scoped. SCP validates protocol names and destination containment before writes, and never interprets a persisted byte count as a resume offset.
+
+Implementation: [directory_scheduler](../../../crates/oxideterm-sftp/src/session/directory_scheduler.rs), [tar_transfer](../../../crates/oxideterm-sftp/src/tar_transfer.rs), [paths](../../../crates/oxideterm-sftp/src/scp/paths.rs).
+
+
 ---
 
 ## IDE Architecture
 
-The IDE workspace is a remote project surface.
+The IDE has separate owners for project state, text editing, syntax analysis and file access. A project can be opened from an SSH node or by converting a terminal's current Shell environment. These entry points share the editor surface but have different transport and recovery lifetimes.
 
 ### Responsibilities
 
-- Open a project root for a connected node.
-- Maintain file tree state.
-- Maintain editor tabs.
-- Track dirty buffers.
-- Save or discard changes explicitly.
-- Preserve project context separately from terminal panes.
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Registry["IdeWorkspaceEntity<br/>surface registry, node index, subscriptions"]
+    Surface["IdeSurface<br/>one project owner and async coordination"]
+    Model["IdeWorkspace / ide-core<br/>transport-free project state"]
+    Editor["TextEditorView / gpui-editor<br/>input, IME, viewport, drawing"]
+    Fs["NodeAgentIdeFileSystem / ide-fs<br/>selected backend and scoped owner"]
+    Tasks["Surface-owned tasks<br/>search, sampling, watch, backend preparation"]
+    State["Project root, tree, tabs<br/>saved versions, dirty and close state"]
+    Text["TextBuffer / editor-core<br/>text, selection, undo, search"]
+    Lease["Node IDE: independent consumer lease<br/>Shell IDE: bound ShellChannel"]
+    Lifetime["Visibility, generation and cleanup<br/>stale results cannot update a new project"]
+
+    Registry -->|register / restore / remove| Surface
+    Surface -->|owns| Model
+    Surface -->|owns per-tab views| Editor
+    Surface -->|dispatches file work| Fs
+    Surface -->|owns task lifecycle| Tasks
+    Model --> State
+    Editor --> Text
+    Fs --> Lease
+    Tasks --> Lifetime
+```
+
+| Layer | Owned state and boundary |
+|-------|--------------------------|
+| `IdeWorkspaceEntity` in the app | Registers project surfaces by tab and node, retains subscriptions and close history, and coordinates reconnect. It does not own the SSH transport. |
+| `IdeSurface` in `oxideterm-gpui-ide` | Owns one project's core model, editor views, file backend, search state, Markdown previews and background task handles. It applies asynchronous results to the current project. |
+| `IdeWorkspace` in `oxideterm-ide-core` | Owns the root, file tree, editor-tab metadata, buffer snapshots, saved versions and dirty-close decisions. It has no GPUI, SSH or SFTP dependency. |
+| `TextEditorView` and `oxideterm-editor-core` | Own interactive text, cursor and selection, undo/redo, find/replace, IME handling and viewport drawing. The surface synchronizes live text into the project model before save, close and snapshot operations. |
+| `oxideterm-editor-syntax` | Computes syntax metadata from text snapshots. It neither paints GPUI elements nor changes editor text. |
+| `oxideterm-ide-fs` | Implements file operations and owns scoped backend resources. Node-based IDE consumers share the connection through `NodeRouter`; terminal-bound IDEs use their selected Shell channel. |
+
+### Editor And Syntax Pipeline
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Input["TextEditorView<br/>keyboard, pointer, IME, find / replace"]
+    Buffer["TextBuffer<br/>edit transaction and new text version"]
+    Grammar["EditorLanguagePlugins<br/>loaded grammar and query definitions"]
+    Request["Syntax request<br/>shared text snapshot, edit, generation"]
+    Worker["Background SyntaxSession<br/>Tree-sitter parse and structure extraction"]
+    Check["Publish only while visible and current<br/>generation, text version, language match"]
+    Metadata["Highlight spans, folds<br/>bracket pairs and indent guides"]
+    Viewport["Viewport and layout caches<br/>visible rows, wrapping and selection"]
+    Paint["GPUI editor drawing"]
+    Owner["IdeSurface synchronizes editor text<br/>before save, close and snapshots"]
+
+    Input --> Buffer
+    Buffer --> Request
+    Grammar --> Request
+    Request --> Worker
+    Worker --> Check
+    Check --> Metadata
+    Buffer --> Viewport
+    Metadata --> Paint
+    Viewport --> Paint
+    Buffer -->|shared text| Owner
+```
+
+`TextBuffer` supplies versioned text snapshots. The editor schedules Tree-sitter work on a background executor, using grammar and query definitions from the language-plugin registry. Highlighting, folding, bracket matching and indent guides return as byte-range metadata. The foreground applies a result only when its generation, text version and language still match and the editor's render cache is active.
+
+While syntax work is running, the editor retains the latest pending request instead of starting overlapping parsers. Hiding the editor invalidates pending syntax work and releases derived syntax/layout caches while retaining the buffer. Showing it schedules fresh syntax work. Large-file and missing-grammar paths can continue displaying text without syntax metadata.
+
+IDE and SFTP editors share the search bar and search model. Search supports case sensitivity, regular expressions, multiline input, and capture-group replacement; terminal search uses the same matching capability with a single-line default. Text-input viewports keep caret, selection, and IME coordinates aligned, and editing histories belong to individual inputs. Markdown previews are owned by the project surface and rendered through the native Markdown renderer.
 
 ### Relationship To SFTP
 
-IDE file operations may use the remote file layer, but the IDE is not simply an SFTP table. It owns editor state, project root, active editor tab, and dirty-buffer decisions.
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Node["Node project entry<br/>node identity and selected access mode"]
+    Shell["Terminal conversion<br/>current user, container and directory"]
+    Router["NodeRouter<br/>IDE consumer on shared SSH connection"]
+    BoundShell["Bound ShellChannel<br/>Commands or Agent only"]
+    Sftp["NodeSftpIdeFileSystem<br/>node-backed SFTP subsystem"]
+    Channel["IDE-owned SSH channel<br/>Commands or Agent"]
+    Commands["Pure Shell protocol<br/>file operations and bounded search"]
+    Agent["Remote Agent RPC<br/>files, search and symbol services"]
+    Watch["Directory watch<br/>requires backend capability<br/>unavailable for terminal-bound IDE"]
+    Results["Typed file results and errors<br/>text format and saved-file version"]
 
-File access is selected explicitly: SFTP, SSH pure Shell, or the remote agent. Terminal conversion binds the IDE to the current terminal environment, retaining its user, container, and directory instead of assuming the node's default login context. Pure Shell operations have bounded search execution and result sizes; writes retain conflict checks and restricted temporary-file permissions. The agent adds watching and symbol services.
+    Node --> Router
+    Shell --> BoundShell
+    Router -->|SFTP selected| Sftp
+    Router -->|Commands / Agent selected| Channel
+    Channel --> Commands
+    Channel --> Agent
+    BoundShell --> Commands
+    BoundShell --> Agent
+    Sftp --> Results
+    Commands --> Results
+    Agent --> Results
+    Agent -->|when supported| Watch
+```
 
-IDE and SFTP editors share the search bar and search model. Search supports case sensitivity, regular expressions, multiline input, and capture-group replacement; terminal search uses the same matching capability with a single-line default. Text-input viewports keep caret, selection, and IME coordinates aligned, and editing histories belong to individual inputs.
+The diagram shows explicitly selected file backends. SFTP is one implementation of file access; project state and editor buffers remain in the IDE owners. The core defines synchronous and asynchronous file-system contracts for reads, directory listings, version checks and writes. `LocalIdeFileSystem` also implements the local-disk contract, but the project surface shown here is wired through `NodeAgentIdeFileSystem`.
+
+| Access path | Environment and capabilities |
+|-------------|------------------------------|
+| Node + SFTP | Acquires the node's SFTP subsystem and an independent IDE consumer. Closing an unrelated terminal does not release this consumer. |
+| Node + Commands or Agent | Opens an IDE-owned channel through the node. Commands provide Shell-based file operations; Agent provides RPC file operations and symbol services. |
+| Terminal + Commands or Agent | Binds to the current Shell, retaining its user, container and working directory. It cannot substitute the node's SFTP or default exec environment. |
+
+Pure Shell operations have bounded search execution and result sizes; writes retain version-conflict checks and restricted temporary-file permissions. Agent symbol-definition requests can locate and open a file at the returned line and column. Directory watching additionally depends on backend capability and is disabled for terminal-bound IDEs. Tree-sitter syntax metadata and Agent symbol lookup are separate paths; they do not constitute a general LSP client.
+
+### Save, Close, And Recovery
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Trigger["Save request<br/>manual, save-before-close, configured autosave"]
+    Snapshot["Synchronize editor into IdeWorkspace<br/>capture text, revision, format and file version"]
+    Serial["Serialize saves for this file tab<br/>coalesce further save requests"]
+    Write["Backend write with expected version<br/>atomic replacement when supported"]
+    Completion["Completion still belongs to this project<br/>and the same file tab"]
+    Success["Write succeeded<br/>compare current state with submitted snapshot"]
+    Conflict["Remote version conflict<br/>cancel, reload or explicitly overwrite"]
+    Failure["Write failed<br/>retain dirty text and report error"]
+    Clean["No newer edits<br/>mark clean; finish pending close if applicable"]
+    Dirty["Newer edits remain dirty<br/>another write needs a pending save request"]
+
+    Trigger --> Snapshot
+    Snapshot --> Serial
+    Serial --> Write
+    Write --> Completion
+    Completion -->|success| Success
+    Completion -->|conflict| Conflict
+    Completion -->|other error| Failure
+    Success -->|matches| Clean
+    Success -->|changed| Dirty
+```
+
+File contents travel with their encoding, BOM and line-ending format, plus a saved-file version used for conflict checks. The surface selects atomic replacement only when the backend reports support. A successful write records the submitted text and revision; edits made during that write remain dirty. Repeated save requests are serialized and coalesced rather than issuing concurrent writes for the same tab. Configured autosave currently saves a dirty editor when switching away from its tab.
+
+| Lifecycle event | State and cleanup rule |
+|-----------------|------------------------|
+| Close a dirty file or leave a project | The owner requests save, discard or cancel. A failed save or newer edits cannot silently complete a pending close. |
+| Hide an IDE surface | Stop page sampling and directory watching; suspend hidden editor caches. Retain buffers and the node consumer. Visibility does not cancel user-requested file operations. |
+| Node connection interrupted | Stop sampling/watch work, invalidate search results, mark the project disconnected and release its old backend consumer. The reconnect snapshot carries project path, open files, dirty text and file formats. |
+| Restore a node IDE | Rebind the selected backend and restore the same project. An already-open different project or a project closed after the snapshot is not replaced. Snapshot dirty text is applied only to clean buffers, so newer local edits win. |
+| Terminal-bound IDE | It is excluded from the node IDE reconnect snapshot. Its binding belongs to the source Shell; returning to the terminal follows the dirty-buffer decision path. |
+| Release a surface | Cancel backend preparation and owned sampling/watch tasks; complete watch cleanup and release only this owner's resources. Other IDE or AI consumers keep their own leases. |
+
+Reconnect snapshots are runtime recovery state, not proof that unsaved text has been written to disk. Generation checks prevent stale project/search/syntax completions from being applied to a replacement owner or newer request.
+
+Implementation references: [app registry and reconnect](../../../crates/oxideterm-gpui-app/src/workspace/ide.rs), [surface lifecycle](../../../crates/oxideterm-gpui-ide/src/surface/lifecycle.rs), [editor actions and save completion](../../../crates/oxideterm-gpui-ide/src/surface/editor_actions.rs), [syntax scheduling](../../../crates/oxideterm-gpui-editor/src/surface/syntax_task.rs), [file-system contract](../../../crates/oxideterm-ide-core/src/filesystem.rs), and [backend binding](../../../crates/oxideterm-ide-fs/src/agent/binding.rs).
 
 ### User Rule
 
-Before closing an IDE tab or reconnecting an unstable host, check unsaved buffers. The connection can be rebuilt, but unsaved editor state still requires an explicit save/discard decision.
+Before closing an IDE tab or reconnecting an unstable host, check unsaved buffers. Recovery can restore access and in-memory project state; saving or discarding edits remains a separate decision.
 
 ---
 
 ## Port Forwarding Architecture
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Rule["Saved rule or manual request<br/>node identity, direction and endpoints"]
+    Service["ForwardingRuntimeService<br/>managers and SSH consumer bindings"]
+    Local["Local listener<br/>accepted socket to SSH direct channel"]
+    Remote["Remote bind request<br/>forwarded channel to local endpoint"]
+    Socks["Dynamic listener<br/>SOCKS target to SSH direct channel"]
+    Bridge["Owned bidirectional bridge tasks"]
+    Snapshot["Rule state, traffic and errors"]
+    View["Forwarding / monitor surfaces"]
+    Stop["Stop, node loss or app shutdown"]
+    Cleanup["Close listeners and bridge work<br/>release matching consumer bindings"]
+    Restore["Reconnect restoration<br/>saved / suspended rules on new connection"]
+
+    Rule --> Service
+    Service --> Local
+    Service --> Remote
+    Service --> Socks
+    Local --> Bridge
+    Remote --> Bridge
+    Socks --> Bridge
+    Bridge --> Snapshot
+    Snapshot --> View
+    Stop --> Cleanup
+    Cleanup --> Snapshot
+    Restore --> Service
+```
+
+The service owns live listeners independently of UI mounts. Closing a terminal or hiding the forwarding page does not stop a rule. Stopping a saved rule does not connect its host just to perform cleanup; reconnect restoration must use the new connection identity.
+
+Implementation: [runtime_service](../../../crates/oxideterm-gpui-app/src/workspace/forwards/runtime_service.rs), [reconnect](../../../crates/oxideterm-gpui-app/src/workspace/forwards/reconnect.rs).
 
 Port forwarding is a connection-level capability.
 
@@ -785,6 +1248,30 @@ Use auto-start only for forwards that should start whenever the owning connectio
 
 ## Graphics And VNC Sessions
 
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Profile["Saved RDP/VNC profile<br/>metadata and secret references"]
+    Provider["Trusted plugin provider"]
+    Owner["Remote desktop session owner<br/>helper startup and shutdown"]
+    Helper["RDP/VNC protocol helper"]
+    Viewer["GPUI viewer<br/>framebuffer, input and local fitting"]
+    Layout["Requested display layout<br/>viewport or active monitors"]
+    Wsl["WSL graphics runtime<br/>distro, server and child processes"]
+    Vnc["WSL VNC endpoint"]
+    X11["SSH X11 forwarding<br/>DISPLAY, xauth and channel bridge"]
+    XServer["Local X server"]
+
+    Profile --> Owner
+    Provider --> Owner
+    Owner --> Helper
+    Helper -->|frames and input protocol| Viewer
+    Layout --> Helper
+    Wsl --> Vnc
+    Vnc --> Viewer
+    X11 --> XServer
+```
+
 Graphics sessions are visual runtime surfaces. They are separate from terminal buffers even when a terminal or command launches the remote visual program.
 
 Visual remoting has three related but separate ownership paths:
@@ -809,9 +1296,105 @@ For RDP/VNC sessions, `oxideterm-connections` owns saved profile metadata and se
 
 Display layout and viewer fitting are separate. Single-monitor mode may request a resolution from the viewport. All-monitor mode uses active physical monitor topology; window resize changes local fitting rather than replacing that topology. Display changes and reconnect must refresh the session layout, including external-monitor and closed-laptop-screen cases.
 
+### Frame Delivery And Helper Lifetime
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Session["App session owner<br/>session ID and worker generation"]
+    Worker["Remote desktop worker<br/>helper startup, requests and shutdown"]
+    Engine["Trusted RDP / VNC helper<br/>protocol engine outside app"]
+    Frames["Frame reader<br/>graphics epoch and frame updates"]
+    Queue["Bounded frame delivery queue<br/>base frame and dirty regions"]
+    Recovery["Missing lineage or queue overflow<br/>request a new base frame"]
+    Validate["Validate worker and graphics generation"]
+    View["GPUI viewer<br/>framebuffer and input coordinates"]
+    Input["Keyboard / pointer requests"]
+    Close["Close or provider replacement<br/>release input, stop and reap helper"]
+
+    Session --> Worker
+    Worker --> Engine
+    Engine --> Frames
+    Frames --> Queue
+    Queue -->|recovery required| Recovery
+    Queue -->|deliverable| Validate
+    Validate --> View
+    Input --> Worker
+    Close --> Worker
+```
+
+Input dispatch and frame delivery have separate paths. A new graphics epoch waits for a base frame rather than applying old-size deltas to a new framebuffer. Worker identity prevents a retired session from updating the current viewer. Helper retirement finishes before its executable is replaced.
+
+Implementation: [worker](../../../crates/oxideterm-remote-desktop/src/worker.rs), [frame_queue](../../../crates/oxideterm-remote-desktop/src/frame_queue.rs), [remote_desktop](../../../crates/oxideterm-gpui-app/src/workspace/remote_desktop.rs).
+
+### Remote Layout Versus Local Fitting
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Change["Connect / reconnect / display change"]
+    Mode["Session display mode"]
+    Single["Single monitor<br/>viewport-derived remote size"]
+    Multi["All local monitors<br/>active physical topology"]
+    Validate["Validate layout and negotiated capability"]
+    Send["Deduplicate / schedule session resize request"]
+    Remote["Helper / remote server<br/>new desktop layout"]
+    Window["Window size change"]
+    Fit["Local viewer fitting and input mapping"]
+
+    Change --> Mode
+    Mode -->|single| Single
+    Mode -->|multi| Multi
+    Single --> Validate
+    Multi --> Validate
+    Validate --> Send
+    Send --> Remote
+    Window --> Fit
+    Window -->|single mode only| Single
+```
+
+All-monitor topology is not overwritten by a later viewport-size request. Window fitting remains local in that mode; active-display changes use the topology path again. These controls are distinct from graphics-epoch validation in frame delivery.
+
+Implementation: [remote_desktop](../../../crates/oxideterm-gpui-app/src/workspace/remote_desktop.rs), [model](../../../crates/oxideterm-remote-desktop/src/model.rs).
+
+
 ---
 
 ## Reconnect And Recovery
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Detect["Node health / transport event"]
+    Owner["WorkspaceRuntimeEntity<br/>one owned reconnect job per affected node"]
+    Snapshot["Snapshot affected consumers<br/>terminals, forwards, transfers, IDE"]
+    Grace["Grace probe where applicable"]
+    Recovered["Existing transport recovered<br/>refresh observed state"]
+    Connect["Rebuild transport / parent route<br/>bounded retry policy"]
+    Identity["Check active job and connection identity"]
+    Restore["Restore consumer resources<br/>terminal, forwards, transfer retry, IDE"]
+    Report["Stage results and remaining failures<br/>monitor and targeted notifications"]
+    Cancel["User disconnect / removal / shutdown"]
+    Stop["Cancel owned attempts and probes<br/>reject late completions"]
+    Capability["AI / plugin resource generations<br/>refresh or reacquire on later use"]
+
+    Detect --> Owner
+    Owner --> Snapshot
+    Snapshot --> Grace
+    Grace -->|alive| Recovered
+    Grace -->|expired / lost| Connect
+    Connect -->|connected| Identity
+    Connect -->|exhausted / failed| Report
+    Identity --> Restore
+    Recovered --> Report
+    Restore --> Report
+    Cancel --> Stop
+    Identity --> Capability
+```
+
+Recovery is coordinated by the runtime, not a monitor-page timer. A connected transport does not prove every consumer restored successfully. Cancellation and job identity gate late work; AI and plugin capabilities are refreshed through their own runtime boundaries, not as an unconditional reconnect stage.
+
+Implementation: [runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs), [nodes_reconnect_helpers](../../../crates/oxideterm-gpui-app/src/workspace/tabs/nodes_reconnect_helpers.rs).
 
 Reconnect is a workflow across several subsystems, not a terminal-only event.
 
@@ -856,6 +1439,37 @@ invalidate, refresh, or reacquire resources on a later call.
 
 ## Settings And Persistence
 
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Ui["Desktop settings draft"]
+    Cli["CLI settings mutation"]
+    Model["Shared PersistedSettings model"]
+    Validate["Sanitize / normalize<br/>validation warnings and changed sections"]
+    Metadata["Configuration values and secret references"]
+    Write["SettingsStore / shared save path<br/>durable atomic file replacement"]
+    File["Settings envelope on disk"]
+    Apply["Desktop applies loaded changes<br/>theme, terminals and domain owners"]
+    Secret["Explicit secret input"]
+    Store["Secret-aware write boundary<br/>keychain or encrypted storage"]
+    Error["Validation / persistence failure<br/>report the actual outcome"]
+
+    Ui --> Model
+    Cli --> Model
+    Model --> Validate
+    Validate --> Metadata
+    Metadata --> Write
+    Write -->|saved| File
+    Write -->|failed| Error
+    File -->|desktop reload / apply| Apply
+    Secret --> Store
+    Store -->|reference only| Metadata
+```
+
+Shared persistence does not mean an external CLI mutation immediately changes every mounted view. The desktop must load and apply the new state. Secret values use their own store; settings retain only the safe metadata or reference.
+
+Implementation: [store](../../../crates/oxideterm-settings/src/store.rs), [normalize](../../../crates/oxideterm-settings/src/normalize.rs), [settings](../../../crates/oxideterm-gpui-app/src/workspace/settings.rs).
+
 Settings are durable application state. The desktop Settings surface is the primary way to edit them interactively.
 
 ### Settings Domains
@@ -897,6 +1511,38 @@ configuration, use the desktop Settings surface.
 
 ## Cloud Sync, Backups, And Portable Bundles
 
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Start["Manual or configured automatic sync<br/>selected scope and direction"]
+    Recover["Recover pending local journal<br/>through live configuration owners"]
+    Prepare["CloudSyncOperationService<br/>operation permit and PreparedSync"]
+    Replica["Local replica plus remote publications<br/>causal field history"]
+    Plan["Plan summary and conflict candidates"]
+    Review["Direction / candidate selection<br/>first sync and conflicts require review"]
+    Apply["PreparedSync.apply<br/>re-read live owners before merging"]
+    Journal["Recovery journal and durable local changes"]
+    Refresh["Refresh affected runtime projections"]
+    Publish["AppliedSync.publish<br/>publish when direction requires it"]
+    Outcome["Applied / published / pending / conflicts<br/>distinct outcome fields"]
+
+    Start --> Recover
+    Recover --> Prepare
+    Prepare --> Replica
+    Replica --> Plan
+    Plan --> Review
+    Review -->|accepted choices| Apply
+    Plan -->|eligible automatic sync| Apply
+    Apply --> Journal
+    Journal --> Refresh
+    Journal --> Publish
+    Publish --> Outcome
+```
+
+This is the current causal sync path. Applying local values and publishing remote data are separate steps. The apply step rereads live owners so edits made during network work participate in the merge. Automatic execution requires the configured conditions and no unresolved preview conflicts; pending publication or cleanup is not reported as complete success.
+
+Implementation: [synchronize](../../../crates/oxideterm-cloud-sync/src/operation/synchronize.rs), [recovery](../../../crates/oxideterm-cloud-sync/src/sync_v3/recovery.rs), [causal](../../../crates/oxideterm-gpui-app/src/workspace/cloud_sync/causal.rs).
+
 Cloud sync, backups, and `.oxide` bundles operate on persisted state, not on live terminal bytes.
 
 ### Cloud Sync
@@ -929,9 +1575,76 @@ Backups protect users before high-impact changes:
 
 Every import, restore, or sync apply should be previewable. Support bundles should be reviewed before sharing.
 
+### Portable Import And Rollback
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    State["Selected durable domains<br/>connections, settings, forwards, plugin settings"]
+    Export["Export selection and secret inclusion policy"]
+    Bundle["Encrypted .oxide bundle"]
+    Backup["Local rollback backup"]
+    Import["Read / decrypt / validate input"]
+    Preview["Import or restore preview<br/>selected mutations and conflicts"]
+    Confirm["Confirm selected apply"]
+    Safety["Create safety backup when required"]
+    Owner["Apply through owning stores<br/>ordinary state and secret boundaries"]
+    Result["Report applied / skipped / failed items"]
+
+    State --> Export
+    Export --> Bundle
+    State --> Backup
+    Bundle --> Import
+    Backup --> Import
+    Import --> Preview
+    Preview --> Confirm
+    Confirm --> Safety
+    Safety --> Owner
+    Owner --> Result
+```
+
+Portable import and rollback restore are reviewable mutations of durable state. Their backup files are distinct from the causal synchronization recovery journal. Neither export includes live terminal byte streams or recreates a running SSH transport.
+
+Implementation: [local_file](../../../crates/oxideterm-cloud-sync/src/operation/local_file.rs), [apply](../../../crates/oxideterm-cloud-sync/src/operation/apply.rs).
+
+
 ---
 
 ## OxideSens AI Architecture
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Turn["Conversation and user request"]
+    Context["Context assembly<br/>history, selected resources, RAG, redaction"]
+    Skills["Skill catalog / on-demand resources<br/>instructions grant no capabilities"]
+    Native["Native provider request<br/>model protocol and supported reasoning fields"]
+    Acp["AcpWorkspaceEntity<br/>agent process, session and configuration"]
+    Stream["Native stream and tool rounds"]
+    Events["ACP session events and host requests"]
+    Delivery["Conversation / turn route validation"]
+    Transcript["Assistant text, usage and tool results"]
+    Tools["Application tool boundary<br/>policy, approval and live target validation"]
+    Cancel["Cancel / session shutdown<br/>owned stream or ACP process lifecycle"]
+
+    Turn --> Context
+    Skills --> Context
+    Context --> Native
+    Context --> Acp
+    Native --> Stream
+    Acp --> Events
+    Stream --> Delivery
+    Events --> Delivery
+    Delivery --> Transcript
+    Stream --> Tools
+    Events --> Tools
+    Cancel --> Native
+    Cancel --> Acp
+```
+
+Native provider requests and ACP sessions share UI and application-tool boundaries, not a single protocol or process owner. ACP reasoning options remain session configuration. Delivery must still match the conversation and turn; a response arriving after cancellation is not authority to execute an action.
+
+Implementation: [acp_workspace](../../../crates/oxideterm-gpui-app/src/workspace/acp_workspace.rs), [core](../../../crates/oxideterm-gpui-app/src/workspace/sidebar/ai/actions/stream/core.rs).
 
 OxideSens is a workspace-aware assistant. It uses configured providers and local app context; it does not require an OxideTerm account.
 
@@ -989,9 +1702,73 @@ AI actions are classified by risk:
 
 Writes, terminal input, command execution, file changes, and destructive operations should be explicit and reviewable. Secrets should never be pasted into prompts.
 
+### Tool Authority And Result Flow
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Proposal["Parsed application tool proposal"]
+    Policy["Tool policy<br/>operation class, arguments and intent"]
+    Approval["Required approval<br/>specific operation and target"]
+    Resolve["Resolve live resource reference<br/>owner, generation and capability"]
+    Reject["Deny / cancel / stale target<br/>no domain side effect"]
+    Owner["Dispatch to real domain owner<br/>terminal, node, file, IDE or settings"]
+    Result["Structured result and safe error"]
+    Record["Transcript / audit evidence<br/>record outcome, not secret payload"]
+
+    Proposal --> Policy
+    Policy -->|denied| Reject
+    Policy -->|approval needed| Approval
+    Policy -->|allowed without prompt| Resolve
+    Approval -->|not approved| Reject
+    Approval -->|approved| Resolve
+    Resolve -->|invalid / stale| Reject
+    Resolve -->|valid| Owner
+    Owner --> Result
+    Result --> Record
+    Reject --> Record
+```
+
+Approval and capability validation answer different questions. Permission to attempt an action does not make an old target reference current. A denial or stale reference terminates the execution branch; the transcript can still record that outcome.
+
+Implementation: [policy](../../../crates/oxideterm-ai/src/policy.rs), [registry](../../../crates/oxideterm-ai/src/runtime_context/registry.rs), [capability](../../../crates/oxideterm-ai/src/runtime_context/capability.rs).
+
+
 ---
 
 ## Plugin Architecture
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Package["Installed package and manifest"]
+    Registry["Plugin registry<br/>host / platform compatibility and trust"]
+    Gate["Enabled and compatible capability"]
+    Blocked["Activation blocked<br/>retain files, settings and enable preference"]
+    Runtime["Ordinary plugin runtime<br/>scoped host API and UI contributions"]
+    Grammar["Language package<br/>grammar / queries and editor refresh"]
+    Helper["Helper provider resolution"]
+    Desktop["Remote desktop session owner<br/>RDP / VNC binary protocol"]
+    Mosh["Mosh session owner<br/>terminal-transport protocol"]
+    Acp["ACP workspace owner<br/>direct ACP stdio session"]
+    Retire["Disable / update / remove<br/>retire runtime and reap helpers before replacement"]
+
+    Package --> Registry
+    Registry -->|incompatible / untrusted| Blocked
+    Registry -->|activation allowed| Gate
+    Gate --> Runtime
+    Gate --> Grammar
+    Gate --> Helper
+    Helper --> Desktop
+    Helper --> Mosh
+    Helper --> Acp
+    Runtime --> Retire
+    Helper --> Retire
+```
+
+These branches describe execution ownership, not three aliases for the ordinary plugin supervisor. Language resources are consumed by editors; protocol helpers are launched and retired by their domain owners. Compatibility checks run for installed packages as well as marketplace version selection.
+
+Implementation: [compatibility](../../../crates/oxideterm-plugin-registry/src/compatibility.rs), [plugin_entity](../../../crates/oxideterm-gpui-app/src/workspace/plugin_entity.rs), [plugin](../../../crates/oxideterm-editor-syntax/src/plugin.rs).
 
 Plugins extend the app through manifest-declared capabilities and host-provided surfaces.
 
@@ -1013,9 +1790,75 @@ Plugins extend the app through manifest-declared capabilities and host-provided 
 - Plugin permissions should be reviewed before enabling a plugin.
 - A plugin should not receive unrelated app internals by default.
 
+### Host Calls And Activation Lifetime
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Instance["Plugin runtime instance<br/>plugin ID and activation generation"]
+    Call["Host API request / subscription"]
+    Gate["Declared capability and current instance checks"]
+    Denied["Denied or retired request<br/>scoped error only"]
+    Snapshot["Read scoped host snapshot"]
+    Mutation["Mutation request<br/>target checks and confirmation where required"]
+    Owner["Application domain owner"]
+    Delivery["Generation-tagged result delivery"]
+    Ui["Plugin surface / action result"]
+    Storage["Plugin settings metadata"]
+    Secrets["Separate plugin secret boundary"]
+
+    Instance --> Call
+    Call --> Gate
+    Gate -->|invalid| Denied
+    Gate -->|read| Snapshot
+    Gate -->|change| Mutation
+    Mutation --> Owner
+    Owner --> Delivery
+    Snapshot --> Delivery
+    Delivery -->|current generation| Ui
+    Owner --> Storage
+    Owner --> Secrets
+```
+
+Host snapshots do not grant unrestricted access to the app. Calls are capability-scoped, late results from retired instances are rejected, and settings remain separate from secrets. A visible plugin panel is not an SSH transport owner.
+
+Implementation: [host_api_snapshot](../../../crates/oxideterm-gpui-app/src/workspace/plugin_lifecycle/host_api_snapshot.rs), [plugin_entity](../../../crates/oxideterm-gpui-app/src/workspace/plugin_entity.rs), [lib](../../../crates/oxideterm-plugin-host-api/src/lib.rs).
+
+
 ---
 
 ## CLI Companion Boundary
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Cli["oxideterm CLI<br/>parsed command and structured arguments"]
+    Manage["Persistent-state management"]
+    Plan["Validation / dry-run plan<br/>confirmation where required"]
+    Store["Shared domain stores<br/>settings, profiles, backups and sync"]
+    Secrets["Secret input / resolution<br/>secret-aware storage only"]
+    Open["connections open / ssh<br/>saved or temporary GUI launch"]
+    Desktop["Desktop launch / runtime owner<br/>authentication and session lifecycle"]
+    Bridge["mcp bridge<br/>stdio to authenticated loopback endpoint"]
+    Policy["App MCP policy<br/>client tool scope, approval and target"]
+    Result["Structured output / exit status<br/>no raw secret values"]
+
+    Cli --> Manage
+    Manage --> Plan
+    Plan --> Store
+    Secrets --> Store
+    Cli --> Open
+    Open --> Desktop
+    Cli --> Bridge
+    Bridge --> Policy
+    Policy --> Desktop
+    Store --> Result
+    Desktop --> Result
+```
+
+Management commands operate on persisted stores; GUI launches and MCP calls reach desktop-owned live resources through explicit boundaries. A successful CLI store write is not evidence that a remote session is connected. Secret input and diagnostic output have different disclosure rules.
+
+Implementation: [main](../../../crates/oxideterm-cli/src/main.rs), [public_mcp](../../../crates/oxideterm-gpui-app/src/workspace/public_mcp.rs).
 
 The `oxideterm` CLI companion shares configuration and data paths with the desktop app, but it is not the primary interactive interface.
 
@@ -1035,6 +1878,26 @@ Most management commands operate directly on persisted stores. `connections open
 ---
 
 ## Security Design
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Input["Credential input<br/>passwords, keys, tokens"]
+    SecretBoundary["Secret-aware handling<br/>bounded lifetime and controlled access"]
+    Use["Authorized authentication or protocol use"]
+    Vault["Keychain or encrypted secret store"]
+    Metadata["Ordinary settings<br/>metadata and secret references"]
+    Output["Outgoing context and diagnostics"]
+    Redact["Redaction and scope checks"]
+    Dest["AI prompts, logs, support bundles<br/>plugin messages, CLI JSON, sync snapshots"]
+
+    Input --> SecretBoundary
+    SecretBoundary --> Use
+    SecretBoundary --> Vault
+    Metadata -->|resolve reference when needed| SecretBoundary
+    Output --> Redact
+    Redact --> Dest
+```
 
 ### Secret Categories
 
@@ -1070,6 +1933,37 @@ Treat these as output boundaries:
 
 ## Performance Design
 
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Session["Protocol runtime<br/>parse and maintain current terminal state"]
+    Visibility["Host-derived visibility<br/>tab, window, lock and pane zoom"]
+    Hidden["Hidden presentation<br/>release row, glyph and display-image caches"]
+    Retained["Retain session, protocol image pixels<br/>and animation clocks"]
+    Snapshot["Visible snapshot<br/>shared row content and changed state"]
+    Layout["Row / style / metric cache keys"]
+    Reuse["Reuse valid layout and glyph batches<br/>including decoration metadata"]
+    Rebuild["Rebuild invalidated rows / runs"]
+    Scene["Build scene and submit GPU drawing"]
+    Background["Unrelated domain work<br/>I/O, sync, AI and sampling"]
+    Budget["Owned workers and bounded UI delivery"]
+
+    Session --> Snapshot
+    Visibility -->|hidden| Hidden
+    Hidden --> Retained
+    Visibility -->|visible| Snapshot
+    Snapshot --> Layout
+    Layout -->|cache hit| Reuse
+    Layout -->|invalidated| Rebuild
+    Reuse --> Scene
+    Rebuild --> Scene
+    Background --> Budget
+```
+
+These are separate cost centers: parsing, snapshot generation, layout, scene construction and presentation. Cache reuse depends on content, style and metrics; visibility controls presentation resources rather than transport ownership. CPU microbenchmarks cannot establish whole-window latency or cross-platform gains.
+
+Implementation: [lib](../../../crates/oxideterm-gpui-terminal/src/lib.rs), [delivery](../../../crates/oxideterm-gpui-app/src/workspace/delivery.rs), [performance-and-benchmarking](../../../docs/development/performance-and-benchmarking.md).
+
 ### Terminal Responsiveness
 
 Terminal hot-path work should avoid:
@@ -1080,6 +1974,10 @@ Terminal hot-path work should avoid:
 - Large plugin scans.
 - Long AI summarization.
 - Heavy settings serialization.
+
+The tab host derives render-cache visibility from the active tab, detached windows, workspace lock and pane zoom. A hidden terminal releases row layouts, retained glyph batches and prepared display images; its terminal session, protocol pixels and animation clocks remain owned by the runtime/pane. Showing it again rebuilds presentation resources from current state. Hiding a pane does not disconnect its shared SSH node.
+
+The rendering path above is shared across supported platforms. Measurements distinguish parsing, snapshot generation, row layout, scene construction and GPU presentation. CPU benchmark results alone do not establish input-to-display latency or performance on another platform. See [Performance and Benchmarking](../../development/performance-and-benchmarking.md) for paired workloads, results and retained or rejected experiments.
 
 ### Virtualized Views
 
@@ -1106,35 +2004,36 @@ Long-running operations should show progress and avoid blocking the main workspa
 This section maps the user-visible architecture to the native module layout. The purpose is not to document every file, but to make ownership clear enough that a user or contributor can understand where a behavior belongs.
 
 ```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
 flowchart TB
-    Workspace["oxideterm-gpui-app<br/>workspace orchestration"] --> AppSurfaces["Workspace Surfaces<br/>sessions · terminal · SFTP · IDE · AI · settings"]
+    App["workspace.rs<br/>app composition and action routing"]
+    Layout["tabs / pane_tree / window registry<br/>view locations and layout ownership"]
+    Runtime["runtime_entity / node flows<br/>connect, probes and reconnect"]
+    Remote["sftp / ide / forwards / connection_monitor<br/>domain-specific UI and coordination"]
+    Extension["AI / ACP / public MCP / plugin entities<br/>scoped requests and owned delivery"]
+    Persist["settings / cloud_sync / knowledge<br/>configuration and document coordination"]
+    Term["terminal_entity / terminal panes<br/>terminal and modem-transfer crates"]
+    Graphics["graphics / remote_desktop<br/>session helper and viewer owners"]
+    Core["Domain crates<br/>ssh, sftp, forwarding, ide-core / ide-fs"]
+    Capability["Host API / runtime capability validation"]
+    Stores["Owning stores<br/>connections, settings, RAG, sync, secrets"]
 
-    AppSurfaces --> SshDomain["oxideterm-ssh<br/>node routing · registry · reconnect"]
-    AppSurfaces --> SftpDomain["oxideterm-sftp<br/>sessions · file ops · transfers"]
-    AppSurfaces --> MonitorDomain["oxideterm-connection-monitor<br/>resources · profilers · host tools"]
-    AppSurfaces --> AiDomain["oxideterm-ai<br/>providers · tools · policy · context"]
-    AppSurfaces --> SettingsDomain["oxideterm-settings<br/>settings model · validation"]
-    AppSurfaces --> PluginDomain["oxideterm-plugin-*<br/>manifest · host API · lifecycle"]
-    AppSurfaces --> SyncDomain["oxideterm-cloud-sync<br/>preview · backup · apply"]
-    AppSurfaces --> TerminalDomain["terminal crates<br/>rendering · PTY · command marks"]
-    AppSurfaces --> ModemDomain["oxideterm-modem-transfer<br/>X/Y/ZMODEM · protocol state"]
-    AppSurfaces --> GraphicsDomain["graphics surfaces<br/>VNC viewer · frames · input"]
-    AppSurfaces --> IdeDomain["IDE/editor crates<br/>tree · buffers · save operations"]
-
-    SshDomain --> SshTransport["SSH Transport"]
-    SftpDomain --> SshTransport
-    MonitorDomain --> SshTransport
-    IdeDomain --> SshTransport
-    PluginDomain --> HostApi["Host API Snapshot"]
-    AiDomain --> ToolExecutor["Tool Executor"]
-    ToolExecutor --> SshDomain
-    ToolExecutor --> SftpDomain
-    ToolExecutor --> MonitorDomain
-    ToolExecutor --> SettingsDomain
-    SyncDomain --> DurableState["Durable State"]
-    SettingsDomain --> DurableState
-    PluginDomain --> DurableState
+    App --> Layout
+    App --> Runtime
+    App --> Remote
+    App --> Extension
+    App --> Persist
+    Layout --> Term
+    Layout --> Graphics
+    Runtime --> Core
+    Remote --> Core
+    Extension --> Capability
+    Persist --> Stores
 ```
+
+This map locates implementation responsibilities. The tables below identify the concrete files; the subsystem diagrams explain channel acquisition, mutation and cleanup. A line to a domain family is not permission for every UI module to open a transport directly.
+
+Implementation: [workspace](../../../crates/oxideterm-gpui-app/src/workspace.rs), [runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs), [entity](../../../crates/oxideterm-gpui-app/src/workspace/tabs/entity.rs).
 
 ### GPUI Workspace Modules
 
@@ -1289,24 +2188,33 @@ The saved connection remains durable metadata. The live node is created only aft
 ```mermaid
 sequenceDiagram
     actor User
-    participant Sessions as Sessions Surface
-    participant Store as Connection Store
-    participant Auth as Auth / Host-Key Flow
-    participant SSH as SSH Transport
-    participant Router as Node Router
-    participant Monitor as Connection Monitor
-    participant Tabs as Workspace Tabs
-
-    User->>Sessions: Open saved connection
-    Sessions->>Store: Load connection record
-    Store-->>Sessions: Metadata without raw secrets
-    Sessions->>Auth: Collect missing credentials and trust decision
-    Auth->>SSH: Start transport
-    SSH-->>Router: Connected handle or reconnectable failure
-    Router->>Monitor: Publish node health
-    Router->>Tabs: Create requested consumer tab
-    Monitor-->>User: Show connected / reconnecting / failed state
+    participant App as Connection flow
+    participant Store as Saved profile / secret boundary
+    participant Trust as Authentication and host-key flow
+    participant Runtime as Node runtime / registry
+    participant Surface as Requested consumer surface
+    User->>App: Open saved connection
+    App->>Store: Resolve metadata and credentials
+    Store-->>App: Profile and bounded credential handoff
+    App->>Trust: Authenticate and verify host key
+    alt Cancelled or failed
+        Trust-->>App: Safe failure or cancellation
+        App-->>User: Show result, no ready consumer
+    else Transport established
+        Trust-->>Runtime: Register connected transport
+        Runtime-->>App: Current node / connection identity
+        App->>Runtime: Acquire requested consumer capability
+        alt Consumer setup succeeds
+            Runtime-->>Surface: Channel or resource binding
+            Surface-->>User: Ready view
+        else Consumer setup fails
+            Runtime-->>App: Consumer-specific error
+            App-->>User: Report failure separately from node state
+        end
+    end
 ```
+
+Authentication failure and consumer-setup failure occur at different boundaries. A connected node can remain useful to other consumers when one view fails to open.
 
 ### Terminal Input And Output
 
@@ -1321,6 +2229,8 @@ For SSH terminals:
 ```text
 keyboard input -> terminal pane -> node shell channel -> SSH transport -> output stream -> renderer
 ```
+
+Both paths produce display state through protocol/ANSI parsing, grid and history updates, row snapshots, cached layout and GPUI drawing. Local PTY protocol replies are queued by the event loop with priority over ordinary input, so terminal queries can receive a response without waiting for a UI redraw. Shell integration supplies command marks to workspace controls and semantic coloring; search reads terminal text snapshots.
 
 Terminal text is not a reliable structured API. Features that need file metadata, transfer progress, forward state, or tool results should use domain APIs rather than scraping terminal output.
 
@@ -1357,21 +2267,31 @@ Single-file transfers can stream directly. SFTP directory transfers may use arch
 ```mermaid
 sequenceDiagram
     actor User
-    participant UI as SFTP Surface
-    participant Manager as Transfer Manager
-    participant Session as SFTP Session
-    participant SSH as SSH Node
-    participant Notify as Notification Center
-
-    User->>UI: Start upload or download
-    UI->>Manager: Enqueue transfer request
-    Manager->>Session: Acquire node session
-    Session->>SSH: Stream file bytes
-    SSH-->>Session: Progress / error / completion
-    Session-->>Manager: Structured transfer event
-    Manager-->>UI: Update row state and progress
-    Manager-->>Notify: Completion, retry, or failure notification
+    participant UI as Transfer surface
+    participant Manager as SftpTransferManager
+    participant Node as NodeRouter connection
+    participant Worker as Selected protocol worker
+    User->>UI: Upload or download file / directory
+    UI->>Manager: Register node, paths, protocol and control
+    Manager->>Node: Acquire existing connection capability
+    alt SFTP selected
+        Node-->>Worker: SFTP session
+    else SCP selected
+        Node-->>Worker: Exec channel on same SSH connection
+    end
+    Worker-->>Manager: Progress, strategy and item counts
+    Manager-->>UI: Structured transfer snapshot
+    alt User cancels or node is interrupted
+        UI->>Manager: Cancel request, node events may interrupt
+        Manager->>Worker: Signal owned control
+        Worker-->>Manager: Cleanup and terminal outcome
+    else Transfer finishes
+        Worker-->>Manager: Completion or error
+    end
+    Manager-->>UI: Final state and protocol-specific retry options
 ```
+
+Cancel and node interruption are distinct control reasons. The manager records the worker outcome; retry must honor the original protocol rather than converting an SCP progress count into an SFTP-style offset.
 
 ### IDE Open And Save
 
@@ -1382,7 +2302,7 @@ open IDE workspace
   -> open file into editor buffer
   -> edit locally in workspace state
   -> save through remote write path
-  -> clear dirty state or show save failure
+  -> reconcile the saved revision; retain newer edits or report failure
 ```
 
 The editor buffer is a view/workspace object. The remote file is durable state on the node. Save is the explicit bridge between them.
@@ -1419,98 +2339,101 @@ AI tools do not get implicit shell ownership. A command, file read, file write, 
 ```mermaid
 sequenceDiagram
     actor User
-    participant Sidebar as AI Sidebar
-    participant Context as Context Builder
-    participant Provider as AI Provider
-    participant Policy as Tool Policy
-    participant Approval as Approval UI
-    participant Executor as Tool Executor
-    participant Domain as Domain Runtime
-
-    User->>Sidebar: Send message
-    Sidebar->>Context: Build redacted context
-    Context->>Provider: Stream request
-    Provider-->>Sidebar: Tool proposal
-    Sidebar->>Policy: Check tool, intent, and target
-    alt Approval required
-        Policy->>Approval: Request user approval
-        Approval-->>Policy: Approved or rejected
+    participant AI as AI turn owner
+    participant Policy as Tool policy / approval
+    participant Targets as Runtime capability registry
+    participant Domain as Domain owner
+    AI->>Policy: Tool proposal with arguments and target
+    opt Approval required
+        Policy->>User: Review concrete operation
+        User-->>Policy: Approve, reject or cancel
     end
-    Policy->>Executor: Execute allowed tool
-    Executor->>Domain: Run command / read file / update state
-    Domain-->>Executor: Structured result
-    Executor-->>Sidebar: Append tool result to transcript
+    alt Policy denies or approval absent
+        Policy-->>AI: Record rejected outcome
+    else Policy permits attempt
+        Policy->>Targets: Validate owner, generation and capability
+        alt Missing, revoked or stale handle
+            Targets-->>AI: Reject without domain execution
+        else Current allowed target
+            Targets-->>AI: Validated resource
+            AI->>Domain: Execute operation through owner
+            Domain-->>AI: Structured result or safe error
+        end
+    end
+    AI-->>User: Transcript reflects actual outcome
 ```
 
 ### Cloud Sync Apply And Backup
 
-```text
-user opens sync
-  -> load local state summary
-  -> fetch or read remote snapshot
-  -> build preview/plan
-  -> ask for confirmation when applying changes
-  -> create backup if required
-  -> apply selected mutations
-  -> show result and conflicts
-```
-
-The preview step is part of the architecture, not a decorative screen. It gives users a chance to understand mutations before persistent state changes.
+Causal sync first recovers any pending local journal, prepares a scoped plan and resolves direction or conflicts when required. It then applies through live configuration owners and publishes only when the direction requires it. Configured automatic runs may apply an eligible conflict-free plan. Portable-file import and backup restore instead use their own preview and safety-backup path.
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant Sync as Cloud Sync Surface
-    participant Planner as Sync Planner
-    participant Backup as Backup Runtime
-    participant Store as Local State
-    participant Remote as Remote Snapshot
-
-    User->>Sync: Open sync or restore action
-    Sync->>Store: Load local summary
-    Sync->>Remote: Fetch remote snapshot
-    Sync->>Planner: Build preview plan
-    Planner-->>User: Show mutations and conflicts
-    User->>Sync: Confirm selected apply
-    Sync->>Backup: Create safety backup when required
-    Sync->>Store: Apply selected mutations
-    Store-->>Sync: Result and conflicts
+    participant UI as Sync controller
+    participant Service as CloudSyncOperationService
+    participant Stores as Live configuration owners
+    participant Remote as Remote backend
+    UI->>Stores: Recover pending local journal
+    UI->>Service: Prepare selected scope and direction
+    Service->>Remote: Read published replicas
+    Remote-->>Service: Publications or fetch error
+    Service-->>UI: Prepared plan / conflicts or failure
+    alt Preparation failed or user cancels
+        UI-->>User: Report outcome, do not apply
+    else Plan available
+        opt Review required
+            UI->>User: Direction and conflict candidates
+            User-->>UI: Confirm choices
+        end
+        UI->>Stores: Apply plan using current owner values
+        Stores-->>UI: Journaled local outcome or apply failure
+        alt Local apply succeeded
+            UI->>Service: Publish if required by direction
+            opt Publication required by direction
+                Service->>Remote: Write publication
+                Remote-->>Service: Published or pending / failure
+            end
+            Service-->>UI: Distinct local and remote outcome
+        else Local apply failed
+            UI-->>User: Report failure and recovery state
+        end
+    end
 ```
+
+This sequence covers causal sync. Portable-file import and backup restore use the separate preview/backup/apply path described above. Automatic sync can use an eligible conflict-free plan; local apply and remote publication still remain distinct outcomes.
 
 ### Plugin Enable
 
-```text
-plugin manager
-  -> discover manifest
-  -> validate metadata and permissions
-  -> load settings defaults
-  -> request credentials if needed
-  -> enable lifecycle hooks
-  -> expose host API snapshot
-  -> render plugin-provided surfaces or actions
-```
-
-Plugins receive snapshots and host API calls. They should not directly own SSH transports, terminal panes, or secret storage.
+Enabling a package rechecks its supported kind, host compatibility, trust and declared capabilities. Ordinary plugin instances receive scoped host APIs; language resources refresh editors; helper providers become available to domain session owners. These branches do not all start the same runtime or immediately launch a process.
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant PM as Plugin Manager
-    participant Registry as Plugin Registry
-    participant Lifecycle as Plugin Lifecycle
-    participant Secrets as Plugin Secret Boundary
-    participant Host as Host API Snapshot
-    participant Surface as App Surface
-
-    User->>PM: Enable plugin
-    PM->>Registry: Discover and validate manifest
-    Registry-->>PM: Metadata, permissions, defaults
-    PM->>Secrets: Request credentials if required
-    PM->>Lifecycle: Start hooks and runtime state
-    Lifecycle->>Host: Build scoped host API snapshot
-    Host-->>Surface: Register actions, menus, or views
-    Surface-->>User: Show plugin-provided capability
+    participant UI as Plugin Manager
+    participant Registry as Plugin registry
+    participant Owner as Runtime or domain owner
+    participant Host as Scoped host boundary
+    User->>UI: Enable installed plugin
+    UI->>Registry: Recheck manifest, trust and compatibility
+    alt Activation blocked
+        Registry-->>UI: Reason, retain installed state
+        UI-->>User: Explain unavailable capability
+    else Activation allowed
+        Registry-->>UI: Supported runtime kind and permissions
+        UI->>Owner: Activate runtime, language resource or helper provider
+        Owner->>Host: Register allowed contributions / calls
+        Host-->>UI: Capability available or activation error
+    end
+    opt Disable, update or remove
+        User->>UI: Request lifecycle change
+        UI->>Owner: Retire old instance and owned work
+        Owner-->>UI: Cleanup / helper reap completed
+        UI->>Registry: Continue package change when applicable
+    end
 ```
+
+Registration of a helper provider is not the same as launching a session. Its domain owner starts the helper when needed and must retire it before package replacement.
 
 ---
 
@@ -1530,30 +2453,49 @@ sequenceDiagram
 ### SSH Node Lifecycle
 
 ```mermaid
-stateDiagram-v2
-    [*] --> SavedOnly
-    SavedOnly --> Connecting: user opens connection
-    Connecting --> Connected: transport established
-    Connecting --> Failed: auth / network / host-key failure
-    Connected --> Idle: no foreground consumers
-    Idle --> Connected: consumer attaches
-    Connected --> Stale: health check fails
-    Idle --> Stale: network changes
-    Stale --> Reconnecting: retry policy starts
-    Reconnecting --> Connected: transport recovered
-    Reconnecting --> Failed: retry exhausted
-    Failed --> Connecting: user retries or edits config
-    Connected --> Disconnected: user closes node
-    Failed --> Disconnected: user dismisses runtime
-    Disconnected --> [*]
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Saved["Saved profile only"]
+    Connecting["Connecting"]
+    Connected["Connected"]
+    Failed["Failed<br/>authentication / trust / network"]
+    Idle["Idle<br/>last registered reference released"]
+    Reuse["Consumer attaches<br/>connection becomes active again"]
+    Timeout["Eligible idle timeout<br/>no keep-alive and no new reference"]
+    Stale["Stale transport<br/>from active or idle state"]
+    Probe["Grace probe where applicable"]
+    Alive["Existing transport recovered"]
+    Reconnect["Reconnecting<br/>bounded attempts and job identity"]
+    Restore["Connected transport<br/>restore consumers and report each outcome"]
+    Exhausted["Retry exhausted<br/>failed until explicit retry"]
+    Disconnect["Explicit disconnect / cancel<br/>applies to live or reconnecting runtime"]
+    Closed["Disconnected<br/>runtime cleanup; saved profile remains"]
+
+    Saved --> Connecting
+    Connecting -->|ready| Connected
+    Connecting -->|failed| Failed
+    Connected --> Idle
+    Idle -->|new consumer| Reuse
+    Idle -->|unused| Timeout
+    Timeout --> Closed
+    Stale --> Probe
+    Probe -->|healthy| Alive
+    Probe -->|rebuild| Reconnect
+    Reconnect -->|success| Restore
+    Reconnect -->|failed| Exhausted
+    Disconnect --> Closed
 ```
+
+The three paths separate opening/idle ownership, transport recovery, and explicit teardown. The same Connected stage can be reached by opening, reacquisition or recovery; repeated labels avoid long return arrows. The table describes user-facing stages rather than raw registry enum values.
+
+Implementation: [connection_registry](../../../crates/oxideterm-ssh/src/connection_registry.rs), [runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs).
 
 | State | Meaning | User Impact |
 |---|---|---|
 | Saved only | Profile exists, no live connection | Can be connected later |
 | Connecting | Transport is being opened | Dependent views wait or show progress |
 | Connected | Node is live and usable | Terminal, SFTP, IDE, forwards, AI tools can target it |
-| Idle | Node is connected but has no active foreground consumer | Monitor can still show it |
+| Idle | Node is connected but has no remaining registered references | Monitor can still show it |
 | Stale | Last known connection is no longer trustworthy | Consumers should pause or refresh |
 | Reconnecting | Retry policy is attempting recovery | Views should avoid destructive assumptions |
 | Failed | Connection attempt or recovery failed | User action is required |
@@ -1573,33 +2515,44 @@ stateDiagram-v2
 ### File Transfer Lifecycle
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Queued
-    Queued --> Running: worker starts
-    Running --> Completed: bytes finished
-    Running --> Retrying: recoverable error
-    Retrying --> Running: retry succeeds
-    Retrying --> Failed: retry exhausted
-    Running --> Suspended: node unavailable
-    Suspended --> Running: node recovered
-    Suspended --> Canceled: user cancels
-    Running --> Canceled: user cancels
-    Failed --> Queued: user retries
-    Completed --> [*]
-    Canceled --> [*]
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Pending["Pending<br/>registered or resumed"]
+    Active["Active<br/>worker moving data"]
+    Completed["Completed<br/>worker reports success"]
+    Pause["Pause requested<br/>from Pending or Active"]
+    Paused["Paused<br/>live worker retained"]
+    Resume["Resume control<br/>snapshot returns to Pending"]
+    Fault["Setup / I/O error or node interruption<br/>from any unfinished state"]
+    Error["Error<br/>attempt ended; progress retained"]
+    Retry["New attempt when requested<br/>protocol-specific restart position"]
+    Cancel["User cancellation<br/>from any unfinished state"]
+    Cancelled["Cancelled<br/>worker cleanup and final outcome"]
+
+    Pending --> Active
+    Active --> Completed
+    Pause --> Paused
+    Paused --> Resume
+    Fault --> Error
+    Error --> Retry
+    Cancel --> Cancelled
 ```
 
-| State | Meaning | User Impact |
-|---|---|---|
-| Queued | Transfer request exists | Waiting for worker capacity or node readiness |
-| Running | Bytes are moving | Progress is visible |
-| Retrying | A recoverable failure occurred | Progress may pause |
-| Suspended | Node or app state prevents progress | User can reconnect or cancel |
-| Completed | Transfer finished | Result is visible in transfer history |
-| Failed | Transfer cannot continue | Error and retry options should be shown |
-| Canceled | User stopped the transfer | Partial output may require cleanup |
+Each lane describes one transition family of BackgroundTransferState. Pause/resume acts on a live control; retry after Error is orchestration of another attempt. This separates recovery semantics without drawing every error and cancel edge across the main path.
 
-For SCP, `Suspended --> Running` means a new retry from byte zero after the node recovers. It must not reuse the saved transferred-byte count as an SCP protocol offset.
+Implementation: [transfer_manager](../../../crates/oxideterm-sftp/src/transfer_manager.rs).
+
+| State | Meaning | Recovery or next action |
+|---|---|---|
+| `Pending` | Registered or resumed; waiting for worker capacity | Start when the worker can proceed |
+| `Active` | The worker is transferring data | Pause, cancel, complete or report an error |
+| `Paused` | Live control has paused the worker | Resume changes the snapshot to `Pending`; the worker can become active again |
+| `Completed` | Worker reported success | Inspect the resulting file or history |
+| `Error` | Setup, I/O or node interruption stopped the attempt | Retry or reconnect using the recorded protocol and strategy |
+| `Cancelled` | Cancellation completed | Inspect any partial output and cleanup result |
+
+SFTP may restart from a saved offset when supported. SCP can resume a live paused channel, but after channel loss a new attempt starts from byte zero. Reconnect orchestration is outside this worker-state enum.
+
 
 ### Modem Transfer Lifecycle
 
@@ -1647,25 +2600,41 @@ For SCP, `Suspended --> Running` means a new retry from byte zero after the node
 ### AI Tool Lifecycle
 
 ```mermaid
-stateDiagram-v2
-    [*] --> Proposed
-    Proposed --> PolicyChecked: parse tool call
-    PolicyChecked --> WaitingApproval: approval required
-    PolicyChecked --> Running: safe and target valid
-    PolicyChecked --> Rejected: policy denies
-    WaitingApproval --> Running: user approves
-    WaitingApproval --> Rejected: user rejects
-    Running --> Result: domain returns success
-    Running --> Failed: execution error
-    Result --> [*]
-    Rejected --> [*]
-    Failed --> [*]
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Proposed["Proposed<br/>parse operation and arguments"]
+    Policy["Policy checked"]
+    Approval["Waiting approval when required"]
+    Target["Validate target<br/>owner, generation, capability"]
+    Running["Running<br/>domain owner executes"]
+    Result["Result<br/>structured success"]
+    Failure["Failed<br/>domain execution error"]
+    Denial["Policy denial, approval rejected / cancelled<br/>or stale / revoked target"]
+    Rejected["Rejected<br/>no domain execution"]
+    Transcript["Record actual outcome"]
+
+    Proposed --> Policy
+    Policy -->|required| Approval
+    Policy -->|no prompt required| Target
+    Approval -->|approved| Target
+    Target -->|valid| Running
+    Running -->|success| Result
+    Running -->|error| Failure
+    Denial --> Rejected
+    Result --> Transcript
+    Failure --> Transcript
+    Rejected --> Transcript
 ```
+
+The denial lane applies at policy, approval and target validation. It has no edge into Running. See the tool-call sequence above for the exact branching order; approval never revives a revoked resource handle.
+
+Implementation: [policy](../../../crates/oxideterm-ai/src/policy.rs), [registry](../../../crates/oxideterm-ai/src/runtime_context/registry.rs).
 
 | State | Meaning | User Impact |
 |---|---|---|
 | Proposed | Model requested a tool | No side effect yet |
 | Policy checked | Tool was compared against policy and target state | May proceed, reject, or require approval |
+| Validating target | Resolve the current owner, generation and required capability | Reject stale or revoked references before execution |
 | Waiting approval | User decision is required | Execution is paused |
 | Running | Tool is executing | Result should be streamed or summarized |
 | Result | Tool completed | Transcript records structured output |
@@ -1676,19 +2645,42 @@ stateDiagram-v2
 
 | Area | States | Meaning |
 |---|---|---|
-| Cloud sync | Unconfigured, ready, previewing, applying, conflict, completed, failed | Sync is a plan-and-apply workflow, not silent background mutation |
+| Cloud sync | Unconfigured, preparing, review/conflict, applying, publishing, pending cleanup/publication, completed, failed | Preparation, local apply and remote publication have separate outcomes; eligible automatic runs use the same domain checks |
 | Plugin | Discovered, installed, enabled, failed, disabled, updated, removed | Plugin availability is separate from plugin runtime health |
 
 ---
 
 ## Ownership And Persistence Matrix
 
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Concept["Workspace object"]
+    Config["Durable configuration<br/>profiles, settings, rules"]
+    Live["Live runtime state<br/>channels, listeners, viewers"]
+    Secret["Credential value"]
+    Buffer["Unsaved editor buffer"]
+    Store["Configuration stores"]
+    Restore["Reopen or rebuild after restart/reconnect"]
+    Vault["Secret-aware store"]
+    Decision["Explicit save or discard<br/>reconnect does not save the buffer"]
+
+    Concept --> Config
+    Concept --> Live
+    Concept --> Secret
+    Concept --> Buffer
+    Config --> Store
+    Live --> Restore
+    Secret --> Vault
+    Buffer --> Decision
+```
+
 | User Concept | Runtime Owner | Persisted Owner | Secret Owner | Survives App Close | Survives Reconnect | User Recovery |
 |---|---|---|---|---|---|---|
 | Saved connection | Session manager / connection store | Connection record | Keychain or secret-aware store | Yes | Yes | Edit, delete, import, export |
 | SSH node | SSH router / registry | None as a live handle | SSH auth layer | No | Not as the same socket | Reconnect or open again |
 | Terminal session | Terminal pane/runtime | Optional history/settings only | None by default | Usually no | Only if backing node recovers and channel is recreated | Reopen terminal |
-| Terminal image placement | Terminal graphics state | None | None | No | Cleared on screen-buffer transition | Re-render from application output |
+| Terminal image placement | Terminal graphics state | None | None | No | Depends on session reset; placements follow their screen and grid lifecycle | Re-render from application output |
 | Privilege credential | Settings privilege surface / terminal helper | Scope metadata only | Secret storage | Yes when saved | Yes through local or saved-node scope | Edit scope, re-enter secret, disable helper |
 | Modem transfer | Terminal runtime / modem worker | Destination files only | None by default | No | Usually cancel and retry | Retry transfer or choose another path |
 | SFTP session | SFTP runtime | None as a live handle | SSH auth layer | No | Reacquire after reconnect | Refresh or reconnect |
@@ -1711,52 +2703,35 @@ stateDiagram-v2
 ## Event And Notification Model
 
 ```mermaid
-flowchart LR
-    subgraph Sources["Event Sources"]
-        SSH["SSH node events"]
-        Term["Terminal readiness"]
-        Modem["Modem transfer"]
-        Graphics["Graphics / VNC"]
-        SFTP["SFTP progress"]
-        HostTools["Host tools"]
-        Forward["Forward status"]
-        IDE["IDE save/conflict"]
-        AI["AI tool events"]
-        Plugin["Plugin lifecycle"]
-        Sync["Sync / backup events"]
-    end
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Node["SSH registry / node events"]
+    Runtime["WorkspaceRuntimeEntity<br/>probe, reconnect and node state"]
+    Resource["Host Tools sampling and actions"]
+    Host["HostToolsEntity<br/>separate sample and reliable-result queues"]
+    Other["Transfers, IDE, AI, plugins, sync<br/>each has its own owner"]
+    Domain["Per-domain subscriptions / delivery<br/>not a global event bus"]
+    RuntimeUi["Runtime projection and monitor"]
+    HostUi["Host resource projection and action result"]
+    DomainUi["Owning surface and scoped output"]
+    Boundary["Concrete output boundary<br/>severity, scope and redaction"]
+    Output["Notifications / badges / transcript / diagnostics<br/>only where the producer publishes them"]
 
-    subgraph EntityLayer["Domain Entities And Delivery Channels"]
-        RuntimeEntities["Workspace / domain entities"]
-        Delivery["Subscriptions / bounded task channels"]
-    end
-
-    subgraph Consumers["Consumers"]
-        ActiveSurface["Active Surface Refresh"]
-        Notifications["Notification Center"]
-        Badges["Sidebar Badges"]
-        Transcript["AI Transcript Events"]
-        Logs["Diagnostic Logs"]
-    end
-
-    SSH --> RuntimeEntities
-    Term --> RuntimeEntities
-    Modem --> RuntimeEntities
-    Graphics --> RuntimeEntities
-    SFTP --> RuntimeEntities
-    HostTools --> RuntimeEntities
-    Forward --> RuntimeEntities
-    IDE --> RuntimeEntities
-    AI --> RuntimeEntities
-    Plugin --> RuntimeEntities
-    Sync --> RuntimeEntities
-    RuntimeEntities --> Delivery
-    Delivery --> ActiveSurface
-    Delivery --> Notifications
-    Delivery --> Badges
-    Delivery --> Transcript
-    Delivery --> Logs
+    Node --> Runtime
+    Runtime --> RuntimeUi
+    Resource --> Host
+    Host --> HostUi
+    Other --> Domain
+    Domain --> DomainUi
+    RuntimeUi --> Boundary
+    HostUi --> Boundary
+    DomainUi --> Boundary
+    Boundary --> Output
 ```
+
+The lanes are examples of independent delivery paths, not mandatory hops through a common dispatcher. Each owner keeps its own subscriptions and cleanup. Output policy is applied at concrete consumers; not every event becomes a toast, transcript entry or log.
+
+Implementation: [runtime_entity](../../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs), [entity](../../../crates/oxideterm-gpui-app/src/workspace/connection_monitor/entity.rs), [delivery](../../../crates/oxideterm-gpui-app/src/workspace/delivery.rs).
 
 ### Event Sources
 
@@ -1810,9 +2785,70 @@ Staleness means "the app cannot prove this state is current." It does not automa
 - A stale forward should show suspended or failed state rather than pretending traffic is flowing.
 - A stale AI target should require target re-selection or tool rejection.
 
+### Wakeups, Budgets, And Stale Results
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Producer["Background producer"]
+    Queue["Owner-specific result channel"]
+    Wake["ActiveDeliveryWake<br/>coalesce wakeups, retain channel values"]
+    Drain["UI delivery batch<br/>item-count and elapsed-time budget"]
+    Validate["Owner-specific identity checks<br/>generation, node, request or path"]
+    Apply["Apply current result and notify"]
+    Discard["Discard stale completion"]
+    Backlog["Remaining backlog<br/>schedule another wakeup"]
+    Stop["Owner teardown<br/>stop wakeups and owned work"]
+
+    Producer --> Queue
+    Queue --> Wake
+    Wake --> Drain
+    Drain --> Validate
+    Validate -->|current| Apply
+    Validate -->|stale| Discard
+    Drain -->|budget exhausted| Backlog
+    Backlog --> Wake
+    Stop --> Wake
+```
+
+A bounded drain limits UI work per wakeup; it does not make every underlying channel bounded. Coalescing wakeups also does not discard reliable results. Identity validation belongs to each consumer and differs by subsystem.
+
+Implementation: [delivery](../../../crates/oxideterm-gpui-app/src/workspace/delivery.rs).
+
+
 ---
 
 ## Failure Model
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    Symptom["Observed symptom"]
+    Locate["Inspect the owning surface and subsystem"]
+    Config["Identity, trust, permissions or configuration"]
+    Node["Stale node or lost transport"]
+    Data["Write conflict or unsaved state"]
+    View["Stale view, cache or media state"]
+    Review["Verify fingerprint / credentials / settings"]
+    Reconnect["Reconnect, resume or retry as supported"]
+    Resolve["Resolve conflict; save or discard explicitly"]
+    Refresh["Refresh or reopen affected surface"]
+    Verify["Verify the actual operation result"]
+
+    Symptom --> Locate
+    Locate --> Config
+    Locate --> Node
+    Locate --> Data
+    Locate --> View
+    Config --> Review
+    Node --> Reconnect
+    Data --> Resolve
+    View --> Refresh
+    Review --> Verify
+    Reconnect --> Verify
+    Resolve --> Verify
+    Refresh --> Verify
+```
 
 | Symptom | First Surface To Check | Subsystem | Likely Cause | Recovery Action |
 |---|---|---|---|---|
@@ -1859,11 +2895,42 @@ Staleness means "the app cannot prove this state is current." It does not automa
 
 ## Native Crate Map
 
+This map groups responsibilities, not every Cargo dependency. Short crate names below omit the `oxideterm-` prefix except for `vte` and `alacritty_terminal`; the table gives the full names.
+
+```mermaid
+%%{init: {"layout": "dagre", "flowchart": {"nodeSpacing": 45, "rankSpacing": 75, "curve": "basis"}}}%%
+flowchart TB
+    App["oxideterm-gpui-app<br/>workspace composition"]
+    SharedUI["gpui-ui / gpui-platform<br/>workspace / theme"]
+    TerminalUI["oxideterm-gpui-terminal"]
+    Terminal["terminal / terminal-model / terminal-*<br/>vte / alacritty_terminal"]
+    Remote["ssh / sftp / forwarding<br/>connection-monitor / topology"]
+    Editor["gpui-ide / gpui-editor / gpui-markdown<br/>ide-core / ide-fs / editor-*"]
+    Graphics["gpui-remote-desktop / remote-desktop<br/>wsl-graphics / marketplace helpers"]
+    AI["ai / ai-tasks / skills<br/>acp-host-tools / public-mcp"]
+    Plugin["plugin-manifest / plugin-registry<br/>plugin-host-api / plugin-wasm-runtime"]
+    Durable["connections / settings / secret-store<br/>cloud-sync / portable-runtime"]
+    CLI["oxideterm-cli"]
+
+    App --> SharedUI
+    App --> TerminalUI
+    TerminalUI --> Terminal
+    App --> Remote
+    App --> Editor
+    App --> Graphics
+    App --> AI
+    App --> Plugin
+    App --> Durable
+    CLI --> Durable
+```
+
 | Area | Crates |
 |---|---|
 | Desktop shell and workspace glue | `oxideterm-gpui-app`, `oxideterm-workspace` |
 | Shared GPUI components and platform helpers | `oxideterm-gpui-ui`, `oxideterm-gpui-platform`, `oxideterm-theme` |
 | Terminal rendering and terminal domain | `oxideterm-gpui-terminal`, `oxideterm-terminal`, `oxideterm-terminal-*` |
+| Terminal parsing, grid and history | Workspace forks of `vte` and `alacritty_terminal`; display snapshots in `oxideterm-terminal-model` |
+| BLE terminal transport | `oxideterm-ble`, `oxideterm-terminal/src/session/ble.rs` |
 | Terminal modem transfers | `oxideterm-modem-transfer`, terminal modem worker integration |
 | SSH, node routing, reconnect | `oxideterm-ssh`, `oxideterm-topology`, `oxideterm-session-adapter` |
 | Host Tools and connection monitoring | `oxideterm-connection-monitor`, app connection monitor surface |
