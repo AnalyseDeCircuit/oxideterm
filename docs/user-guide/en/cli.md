@@ -78,11 +78,16 @@ Restore commands should be reviewed in dry-run form before `--yes`.
 oxideterm cloud-sync status --json
 oxideterm cloud-sync diff --dirty-only --format table
 oxideterm cloud-sync backend webdav configure --endpoint https://example.invalid/sync --dry-run
-oxideterm cloud-sync push --dry-run --json
-oxideterm cloud-sync pull --dry-run --json
-oxideterm cloud-sync apply --from remote --strategy merge --dry-run
+oxideterm cloud-sync sync --dry-run --json
+oxideterm cloud-sync sync --yes --json
 oxideterm cloud-sync secrets status --json
 ```
+
+Close the desktop app before running CLI sync, including a dry-run: the command requires exclusive access to the configuration. `sync --dry-run` prepares a plan from the remote backend without applying or publishing it. `preview` and `diff` inspect cached state. Review the plan before using `--yes`.
+
+The current causal sync merges independent changes. The retained `push`, `pull` and `apply --from remote` commands use the same merge coordinator; their names do not select upload-only or download-only behavior. `pull` and `apply` accept only the merge strategy. Choose individual remote conflict candidates in the desktop preview. `resolve --strategy local-wins` selects local candidates for conflicts; inspect its dry-run before applying. Archive-import strategies such as skip, rename and replace belong to `.oxide` imports.
+
+Local application and remote publication have separate outcomes. If publication fails after local changes were applied, retain the configuration and retry sync. See [conflicts and interrupted sync](cloud-sync-and-backups.md#conflicts-and-interrupted-sync) for recovery.
 
 Secret commands must only print hints or status. Use stdin or environment variables for secret writes.
 

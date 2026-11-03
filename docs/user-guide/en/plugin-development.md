@@ -48,7 +48,7 @@ hello-native/
     hello.js
 ```
 
-The process entry must be a real executable inside the plugin directory. On macOS/Linux, give the script an executable bit:
+The JavaScript runner below requires Node.js on macOS/Linux and an executable shebang script inside the plugin directory. The host starts `runtime.entry` directly with piped stdio; it does not invoke Node.js or a shell automatically. On Windows, package a real `.exe` entry, such as a native runner or a packaged Node application, and point the Windows package manifest at it. A `.js` file association is not sufficient. On macOS/Linux, give the script an executable bit:
 
 ```sh
 chmod +x hello-native/bin/hello.js
@@ -731,12 +731,15 @@ TypeScript, TSX, Zig, Nginx, Terraform/HCL, and Protobuf. TypeScript and TSX are
 Nginx uses dedicated filenames such as `nginx.conf` or `.nginx` extensions, not
 generic `.conf` files. HCL handles `.tf`, `.tfvars`, and `.hcl`; JSON variants
 remain JSON. Protobuf uses `.proto`.
-File type
-recognition stays in the host. When support is missing or disabled, the editor keeps
-the document editable and offers a link to Plugin Manager. Installing or enabling
+The host resolves file types from built-in associations and language-package declarations.
+From host 2.2.2, packages can declare `displayName`, `grammarName`, `extensions` and literal
+`fileNames` for dynamic language IDs. Exact filenames take precedence; extension matching
+uses the longest matching suffix, while existing built-in core-language associations remain
+the default. Installed definitions precede compatible marketplace hints. When support is
+missing or disabled, the editor keeps the document editable and offers a link to Plugin Manager. Installing or enabling
 support loads the parser on demand; updates and disabling refresh open documents
-without discarding their text or undo history. Header files ending in `.h`
-continue to select C++ support.
+without discarding their text or undo history. The existing `.h` fallback selects C++
+when no applicable package declaration overrides it.
 
 A language package declares `runtime.kind: "language"` and `contributes.language`.
 It contains a Tree-sitter WebAssembly parser, highlight queries, their SHA-256
@@ -746,6 +749,23 @@ general-purpose WASI plugin host API. The marketplace repository maintains the
 Each language has its own directory under `plugins/`, version, and release asset.
 Language plugin files use Apache-2.0, with upstream licenses retained separately.
 Packages require a host strictly newer than 2.2.0 with the language loader.
+
+The dynamic declaration fields and bundled embedded grammars require host 2.2.2 or later;
+declare that minimum in `engines.oxideterm` when using them. Older published language
+packages retain their existing fallback associations.
+
+`contributes.language.injections` can bundle up to eight embedded grammars inside the
+parent package. Each entry declares its `id`, optional `grammarName`, parser, highlight
+query and parent selector query, with SHA-256 checksums for all three files. The selector
+must capture `injection.content`. Child parsing and highlighting stay within the selected
+regions and retain the original document's byte coordinates across edits. Embedded grammars
+do not register independent file associations or require separately installed child packages.
+Each document owns its embedded parser state and cancellation.
+
+See the [manifest types](../../../crates/oxideterm-plugin-manifest/src/manifest.rs),
+[file matching](../../../crates/oxideterm-gpui-editor/src/languages.rs), and
+[verified grammar loader](../../../crates/oxideterm-editor-syntax/src/plugin.rs).
+
 
 ## Process Runtime Plugin
 
@@ -1447,6 +1467,16 @@ interface NativePluginContributes {
     highlights: string;
     parserSha256: string;
     highlightsSha256: string;
+    injections?: Array<{
+      id: string;
+      grammarName?: string;
+      parser: string;
+      highlights: string;
+      query: string;
+      parserSha256: string;
+      highlightsSha256: string;
+      querySha256: string;
+    }>;
   };
   tabs?: NativePluginTabDef[];
   sidebarPanels?: NativePluginSidebarDef[];

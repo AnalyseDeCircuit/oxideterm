@@ -9,8 +9,9 @@ The workspace is intentionally split by responsibility. Start from the user-visi
 | Terminal protocol and model | `crates/oxideterm-terminal` | `alacritty-terminal`, `vte`, `oxideterm-terminal-model`, `oxideterm-terminal-encoding`, `oxideterm-terminal-graphics`, `oxideterm-terminal-semantic`, `oxideterm-terminal-unicode` | Bytes enter the terminal model before a UI snapshot is rendered |
 | SSH nodes and authentication | `crates/oxideterm-ssh` | `oxideterm-ssh-launch`, `oxideterm-connections`, `oxideterm-topology`, `oxideterm-network-proxy`, `russh` | `SshConnectionRegistry` and `NodeRouter` own shared transport lifetime |
 | SFTP and local files | `crates/oxideterm-sftp`, `crates/oxideterm-local-files`, `crates/oxideterm-gpui-app/src/workspace/sftp.rs` | `russh-sftp`, `oxideterm-preview` | SFTP is a node consumer, not a terminal-pane side effect |
-| Editing and search | `oxideterm-gpui-editor`, `oxideterm-gpui-ide`, `oxideterm-ide-fs` | `oxideterm-editor-*`, shared UI inputs | IDE and SFTP reuse editor/search behavior; the selected file backend owns remote operations |
-| Port forwarding | `crates/oxideterm-forwarding`, `crates/oxideterm-gpui-app/src/workspace/forwards.rs` | `oxideterm-ssh`, `oxideterm-connections` | A forwarding owner retains its listener, bridge tasks, and cancellation path |
+| Project state and file access | `oxideterm-gpui-ide`, `oxideterm-ide-core`, `oxideterm-ide-fs` | App `workspace/ide.rs`, `NodeRouter` | `IdeSurface` owns the project and async coordination; transport-free `IdeWorkspace` tracks versions and dirty-close decisions; the scoped backend owns file access |
+| Text editing, syntax and search | `oxideterm-gpui-editor`, `oxideterm-editor-core`, `oxideterm-editor-syntax` | Language plugins, shared UI inputs, `oxideterm-gpui-markdown` | Text/undo state, background syntax metadata and GPUI presentation have separate owners; IDE and SFTP reuse the editor/search path |
+| Port forwarding | `crates/oxideterm-forwarding`, `crates/oxideterm-gpui-app/src/workspace/forwards/runtime_service.rs` | `oxideterm-ssh`, `oxideterm-connections` | `ForwardingRuntimeService` retains managers, listeners and SSH consumer bindings independently of page mounts |
 | Settings, secrets, and data | `crates/oxideterm-settings`, `crates/oxideterm-settings-model` | `oxideterm-secret-store`, `oxideterm-atomic-file`, `oxideterm-portable-runtime`, `oxideterm-cloud-sync` | Settings contain safe data; secret storage owns credentials |
 | Internationalization and theme | `crates/oxideterm-i18n/locales`, `crates/oxideterm-theme` | `oxideterm-gpui-ui` | Every user-visible UI key must exist in every locale catalog |
 | Remote desktop and media | `crates/oxideterm-remote-desktop`, `crates/oxideterm-gpui-remote-desktop` | Marketplace `plugins/rdp` and `plugins/vnc` in `oxideterm-plugins`; host audio in `oxideterm-pcm-audio` | Protocol helpers are installed plugins; the host owns profiles and viewer sessions separately from terminal and SSH-node consumers |
@@ -31,6 +32,20 @@ GPUI event
 ```
 
 Keep these stages separate. Render code should project existing state rather than create a network task; a protocol task should report state through its owner rather than mutate a view directly. This is especially important for terminal output, SFTP listings, connection status, and remote-desktop frames.
+
+## State And Delivery Entry Points
+
+| Question | Start here |
+| --- | --- |
+| Who retains panes, window mounts and session locations? | [Tab host](../../crates/oxideterm-gpui-app/src/workspace/tabs/entity.rs) |
+| Who owns probes, reconnect jobs and cancellation? | [Workspace runtime](../../crates/oxideterm-gpui-app/src/workspace/runtime_entity.rs) |
+| Why did an IDE save leave newer edits dirty? | [Save completion](../../crates/oxideterm-gpui-ide/src/surface/editor_actions.rs) |
+| Why did an old syntax result not apply? | [Syntax scheduling](../../crates/oxideterm-gpui-editor/src/surface/syntax_task.rs) |
+| Where are remote desktop frame lineage and queue limits checked? | [Frame queue](../../crates/oxideterm-remote-desktop/src/frame_queue.rs) |
+| Where are local sync apply and remote publication separated? | [Sync coordinator](../../crates/oxideterm-cloud-sync/src/operation/synchronize.rs) and [live-owner integration](../../crates/oxideterm-gpui-app/src/workspace/cloud_sync/causal.rs) |
+| Who budgets UI result delivery? | [Delivery primitives](../../crates/oxideterm-gpui-app/src/workspace/delivery.rs); identity checks remain in each domain consumer |
+
+The [architecture guide](../user-guide/en/architecture.md) maps these owners and their failure/recovery paths. Use the entry points here to inspect the current implementation.
 
 ## Common Traces
 

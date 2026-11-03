@@ -48,7 +48,7 @@ hello-native/
     hello.js
 ```
 
-进程入口必须是插件目录内的真实可执行文件。macOS/Linux 上需要给脚本加可执行权限：
+下方 JavaScript 示例在 macOS/Linux 上要求已安装 Node.js，并使用插件目录内带 shebang 的可执行脚本。宿主通过管道直接启动 `runtime.entry`，不会自动调用 Node.js 或 Shell。Windows 包应提供真实的 `.exe` 入口，例如原生运行程序或打包后的 Node 应用，并在 Windows 包清单中指向它；仅有关联程序的 `.js` 文件不足以启动。在 macOS/Linux 上，给脚本执行权限：
 
 ```sh
 chmod +x hello-native/bin/hello.js
@@ -727,9 +727,12 @@ JavaScript、Objective-C、Perl、PHP、R、Ruby、Rust、Scala、Swift、TypeSc
 Nginx 根据 `nginx.conf` 等专用文件名或 `.nginx` 扩展名识别，不覆盖通用 `.conf`。
 HCL 识别 `.tf`、`.tfvars` 和 `.hcl`，JSON 变体仍按 JSON 处理；Protobuf 识别 `.proto`。
 TypeScript 与 TSX 分别打包为独立插件。
-文件类型识别保留在主程序中。未安装或已禁用时，文档仍可编辑，并提供插件管理器入口。
+主程序结合内置关联与语言包声明解析文件类型。从宿主 2.2.2 起，包可为动态语言 ID 声明
+`displayName`、`grammarName`、`extensions` 和字面文件名 `fileNames`。精确文件名优先，
+扩展名选择最长匹配后缀；已有内置核心语言关联仍作为默认。已安装声明优先于兼容的市场提示。
+未安装或已禁用时，文档仍可编辑，并提供插件管理器入口。
 安装或启用后按需加载解析器；更新与禁用会刷新已打开文档的语法状态，保留文本和撤销历史。
-`.h` 头文件继续识别为 C++。
+没有适用语言包声明覆盖时，已有 `.h` 回退关联仍选择 C++。
 
 语言包声明 `runtime.kind: "language"` 和 `contributes.language`，包含 Tree-sitter
 WebAssembly 解析器、高亮查询、各自的 SHA-256 校验值、宿主版本范围及上游许可证。
@@ -737,6 +740,18 @@ WebAssembly 解析器、高亮查询、各自的 SHA-256 校验值、宿主版�
 [固定版本的构建配方与发布流程](https://github.com/AnalyseDeCircuit/oxideterm-plugins/blob/main/docs/language-plugins.md)。
 每种语言在 `plugins/` 下有独立目录、版本和发布资产。
 语言插件自身采用 Apache-2.0，上游许可证单独保留；安装需要严格高于 2.2.0 且包含语言加载能力的主程序。
+
+动态声明字段与打包的嵌入语法要求宿主 2.2.2 或更高版本，使用时应在 `engines.oxideterm` 中声明该最低版本。此前已发布的语言包保留已有回退关联。
+
+`contributes.language.injections` 可在父包内打包最多八个嵌入语法。每项声明 `id`、可选的
+`grammarName`、解析器、高亮查询和父语法选择查询，并为三个文件分别提供 SHA-256。选择查询
+必须捕获 `injection.content`。子解析与高亮限定在所选区域内，编辑后仍使用原文档字节坐标。
+嵌入语法不注册独立文件关联，也不要求单独安装子语言包。每份文档管理自己的嵌入解析状态与取消。
+
+实现参考：[清单类型](../../../crates/oxideterm-plugin-manifest/src/manifest.rs)、
+[文件匹配](../../../crates/oxideterm-gpui-editor/src/languages.rs)与
+[校验后的语法加载](../../../crates/oxideterm-editor-syntax/src/plugin.rs)。
+
 
 ## 进程运行时插件
 
@@ -1394,6 +1409,16 @@ interface NativePluginContributes {
     highlights: string;
     parserSha256: string;
     highlightsSha256: string;
+    injections?: Array<{
+      id: string;
+      grammarName?: string;
+      parser: string;
+      highlights: string;
+      query: string;
+      parserSha256: string;
+      highlightsSha256: string;
+      querySha256: string;
+    }>;
   };
   tabs?: NativePluginTabDef[];
   sidebarPanels?: NativePluginSidebarDef[];

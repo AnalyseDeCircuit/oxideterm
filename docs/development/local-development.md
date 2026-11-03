@@ -58,7 +58,7 @@ cargo test -p oxideterm-gpui-terminal bundled_conpty_delivers_distinct_ctrl_j_an
 
 The CI dependency list is maintained in [`scripts/ci/install-linux-deps.sh`](../../scripts/ci/install-linux-deps.sh). On an Ubuntu-like development machine, review that list and install the matching packages before building. Test the compositor path that is affected: Wayland and X11 have separate native code paths.
 
-Linux packaging uses Ubuntu 22.04, and the native platform check uses Ubuntu 24.04. A distribution with different package names may need equivalent development packages for X11/XKB, font rendering, GStreamer, audio, Kerberos, OpenSSL, and Vulkan. Keep package substitutions local; do not edit the CI installer merely to match one workstation.
+Linux packaging and the main workspace CI job use Ubuntu 22.04. That workspace job compiles the Linux backend and application; the separate native platform workflow checks Windows and macOS. See the [verification matrix](verification.md#ci-mapping) and the workflow files for current targets. A distribution with different package names may need equivalent development packages for X11/XKB, font rendering, GStreamer, audio, Kerberos, OpenSSL, and Vulkan. Keep package substitutions local; do not edit the CI installer merely to match one workstation.
 
 ### Nix and Git Dependency Hashes
 

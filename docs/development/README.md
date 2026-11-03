@@ -38,6 +38,7 @@ Move inward only when evidence says the outer layer is correct. For example, an 
 
 | Need | Read |
 | --- | --- |
+| Understand subsystem ownership and data flow | [Architecture](../user-guide/en/architecture.md) |
 | Find the correct crate or entry point | [Crate map](crate-map.md) |
 | Build a product page with existing controls, focus, IME, and overlays | [GPUI product UI](gpui-product-ui.md) |
 | Change tab scopes, shared search, or motion | [Product UI contracts](gpui-product-ui.md) and [workspace behavior](../user-guide/en/workspace.md) |

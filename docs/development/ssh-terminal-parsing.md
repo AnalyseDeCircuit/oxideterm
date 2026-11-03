@@ -8,7 +8,8 @@ Previously, the UI drove SSH decoding, protocol processing and VT parsing in 4 K
 
 | Owner | State |
 | --- | --- |
-| Registry / NodeRouter | Physical SSH connection, reconnect, SFTP/forwarding consumers and jump-host ancestry |
+| Registry / NodeRouter | Physical SSH connection, consumer registrations, node routes and jump-host ancestry |
+| `WorkspaceRuntimeEntity` | Active probes, reconnect scheduling, cancellation and consumer restoration |
 | `SshPtySession` facade | Control submission, cancellation signal and UI activity receiver |
 | Worker and its `SshPtyCore` | Startup task, terminal consumer lease, ordered output receiver, retained chunks/permits, lifecycle and runtime reference |
 | `SshParser` inside the core | VT processor, encoding state, modem/trzsz consumers, shell integration, prompts, triggers, graphics and tmux controller |

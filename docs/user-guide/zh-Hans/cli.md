@@ -78,11 +78,16 @@ oxideterm backup restore ./oxideterm-backup.json --section settings --dry-run --
 oxideterm cloud-sync status --json
 oxideterm cloud-sync diff --dirty-only --format table
 oxideterm cloud-sync backend webdav configure --endpoint https://example.invalid/sync --dry-run
-oxideterm cloud-sync push --dry-run --json
-oxideterm cloud-sync pull --dry-run --json
-oxideterm cloud-sync apply --from remote --strategy merge --dry-run
+oxideterm cloud-sync sync --dry-run --json
+oxideterm cloud-sync sync --yes --json
 oxideterm cloud-sync secrets status --json
 ```
+
+运行 CLI 同步前先关闭桌面应用，包括试运行：命令需要独占配置。`sync --dry-run` 从远端后端准备计划，不应用也不发布；`preview` 和 `diff` 查看缓存状态。检查计划后再使用 `--yes`。
+
+当前因果同步会合并独立变更。保留的 `push`、`pull` 和 `apply --from remote` 命令使用同一合并协调器，名称不表示仅上传或仅下载。`pull` 和 `apply` 只接受 merge 策略。逐项选择远端冲突候选应使用桌面预览；`resolve --strategy local-wins` 为冲突选择本地候选，应用前先检查试运行结果。skip、rename、replace 等归档导入策略用于 `.oxide` 导入。
+
+本地应用与远端发布具有独立结果。本地变更应用后若发布失败，应保留配置并重试同步。恢复步骤参见[冲突与中断恢复](cloud-sync-and-backups.md#冲突与中断恢复)。
 
 凭据命令只能输出提示或状态。写入凭据时使用标准输入或环境变量。
 

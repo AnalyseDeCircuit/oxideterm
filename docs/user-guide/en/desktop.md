@@ -259,9 +259,13 @@ Use **Export summaries as JSON** or **Export summaries as CSV** for the selected
 
 ## IDE Workspace
 
-Use the IDE workspace for project-style remote editing. Open it from a connected node, choose a remote folder, then work with file tabs inside the IDE surface.
+Open IDE from a connected node and choose a remote folder. Select SFTP, Pure Shell commands or Agent file access. From an idle terminal, **Convert to IDE** instead uses the current Shell's user, container and directory; choose Commands or Agent for that environment. See [IDE access and language support](app.md#ide-workspace).
 
-Before saving important changes, confirm the connection is still healthy. Dirty editor buffers belong to the IDE workspace, so do not close the IDE tab until you have saved, discarded, or intentionally kept the edits.
+Directory watching requires a supported Agent backend and is unavailable in a terminal-converted IDE. Language highlighting runs on this device and can require a language plugin; installing the remote Agent does not install those grammars.
+
+Save reports conflicts or write errors while retaining your edits. If you keep typing during a save, the later edits remain unsaved. When autosave is enabled, switching away from a dirty editor tab triggers a save; check the result before closing the project.
+
+Node IDE recovery can restore the project, open files and unsaved text, but does not write those edits to remote files. A terminal-converted IDE follows its source Shell's lifetime and is excluded from node IDE recovery. Before returning to the terminal or leaving a project, handle the save, discard or cancel decision.
 
 ## AI Sidebar
 

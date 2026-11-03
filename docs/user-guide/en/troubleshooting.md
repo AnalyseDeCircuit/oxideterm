@@ -37,7 +37,7 @@ For Host Tools issues, refresh the tool page first. If the sampler or action sti
 
 For RDP/VNC issues, first check that the corresponding plugin is installed, enabled, and compatible with the app in Plugin Manager. Then check the saved profile, remote service, and optional SSH gateway before reconnecting. Windows WSL Graphics has a separate built-in viewer; check its distribution and graphics-session status instead.
 
-For terminal background issues, reopen Settings and confirm the background image is enabled for the current tab type. Native currently treats the background as a selected image slot; adding a new image replaces the current selection.
+For background issues, check that backgrounds are enabled for the current surface, that the intended image, animation or video is selected in the material library, and that material opacity is visible. Try a still image to distinguish media playback from surface visibility or composition. Keep the failing material and report the platform, format and whether rapid switching triggers the failure.
 
 For stale blocks after a full-screen TUI exits, first try `clear` or reopen the terminal pane. If the issue repeats with a command such as `yazi`, treat it as terminal graphics/image-placement state and include the command name in the bug report.
 

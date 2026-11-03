@@ -17,12 +17,15 @@ Workspace runtime
 | Resource | Owner | Consumer rule |
 | --- | --- | --- |
 | Authenticated SSH transport | `SshConnectionRegistry` and `NodeRouter` | Consumers acquire a registered identity; they do not create unmanaged duplicate transports |
-| Terminal pane | The tab/pane runtime | Closing it releases only its terminal consumer |
-| SFTP surface or transfer | Its SFTP runtime | It acquires a node-backed SFTP consumer and may remain usable without a terminal pane |
-| Port forward | The forwarding owner | It retains listener, bridge-task, and cancellation ownership until the rule or owning node stops |
-| Health check and reconnect | Node/runtime owner | UI observes emitted node state; it does not infer liveness from terminal existence |
+| Terminal pane | `WorkspaceTabHostEntity` retains the pane; its terminal session owns the channel | Closing it releases only its terminal consumer |
+| SFTP surface or transfer | SFTP runtime and `SftpTransferManager` | It acquires a node-backed SFTP consumer and may remain usable without a terminal pane |
+| Port forward | `ForwardingRuntimeService` and its forwarding managers | It retains listener, bridge-task, and cancellation ownership until the rule or owning node stops |
+| Health check and reconnect | Registry health work and `WorkspaceRuntimeEntity` probes/reconnect jobs | UI observes emitted node state; it does not infer liveness from terminal existence |
 | Jump-host child node | Child node runtime plus recorded parent dependency | The parent transport remains retained while the child needs it |
 | Standalone SSH tunnel | Tunnel/forwarding runtime | Retains its own connection consumer without a terminal; explicit stop or app shutdown ends it |
+| Node IDE | `IdeWorkspaceEntity` registers `IdeSurface`; the surface holds a scoped file backend | Retains an independent IDE consumer; hiding it stops sampling/watch work while keeping buffers and the node lease |
+| Terminal-converted IDE | `IdeSurface` with a bound `ShellChannel` | Retains the selected user/container/directory; does not substitute node SFTP and is excluded from node IDE reconnect snapshots |
+| Host Tools | `HostToolsEntity` | Sampling follows page visibility; reliable action results use a separate delivery path |
 | RDP/VNC session | Remote-desktop session owner | Owns its plugin helper and optional gateway consumer; viewer fitting does not own remote display topology |
 
 ## Lifecycle Walkthroughs
@@ -43,6 +46,14 @@ SFTP registers an SFTP consumer and opens a node-backed SFTP session. A forward 
 
 Health checks and reconnect jobs belong to the node/runtime owner. A reconnect replaces or reattaches the node transport while preserving valid consumer identities where the runtime contract allows it. Explicit node disconnect is different: it is the cascade boundary that stops dependent consumers, child topology, and owned background work.
 
+### IDE Saves And Recovery
+
+`TextEditorView` owns interactive text and undo history. `IdeSurface` synchronizes text into `IdeWorkspace` before saves, close decisions and snapshots. The surface captures the submitted text and revision; the file backend receives the text, format and expected remote version. Save completion acknowledges that revision; later edits must remain dirty, and a failed save cannot silently complete a pending close.
+
+Reconnect snapshots restore node IDE access and in-memory project state. They do not persist unsaved changes to the remote file. A clean buffer may receive snapshot dirty text; newer local dirty text takes precedence. A terminal-converted IDE retains its Shell binding and follows a separate return-to-terminal path.
+
+See [IDE lifecycle](../../crates/oxideterm-gpui-ide/src/surface/lifecycle.rs), [save completion](../../crates/oxideterm-gpui-ide/src/surface/editor_actions.rs), and the [architecture diagrams](../user-guide/en/architecture.md#ide-architecture).
+
 ### Jump Hosts
 
 Child-node topology must use recorded parent-child identities. A child that still needs a jump transport retains the parent dependency even when no terminal pane is visible. Matching host strings is not a valid substitute because multiple saved profiles can address the same host differently.
@@ -62,6 +73,8 @@ The layout model is in [oxideterm-workspace](../../crates/oxideterm-workspace/sr
 [WorkspaceTabHostEntity](../../crates/oxideterm-gpui-app/src/workspace/tabs/entity.rs) owns these mappings. Use `container_tab_id`, `focused_page_id`, and `focus_content_page` where the operation needs them. A Settings or SFTP page can be focused inside a container whose top-level kind is `Workspace`; searching only the visible tab strip loses that page's identity.
 
 ### Move, Close, And Reopen
+
+The shared layout limit is `MAX_PANES_PER_TAB` (16). Split, combination and tiling validate this limit before changing source/destination trees or session locations. Layout moves reuse existing panes and sessions; rejected operations leave both layouts intact.
 
 Tab filtering does not move or close resources. Resolve membership from the actual page/connection binding, including plugin pages and mixed layouts. Each window owns its current scope and last-selected tab per scope. Use the same visible list for navigation and bulk operations; only explicit user navigation may reveal another scope. Host actions still resolve the active pane or selected tool connection, never the scope label.
 

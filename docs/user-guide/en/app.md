@@ -102,7 +102,7 @@ Before overwriting important remote files, confirm the path and keep a backup. R
 
 Use the IDE surface when you need a project-style remote file workflow. Open an IDE workspace for a connected node, choose a remote folder, and work with project files in tabs.
 
-Choose **SFTP** or **SSH** file access. SSH offers **Pure Shell commands** or an agent installed, updated, or reused on demand. Pure Shell access uses the selected environment's Linux utilities without installing an agent; agent access adds watching and symbol services. From an idle terminal, **Convert to IDE** keeps the current user, container, and working directory. Terminal input pauses during conversion, and you can return to the original terminal.
+Choose **SFTP** or **SSH** file access. SSH offers **Pure Shell commands** or an agent installed, updated, or reused on demand. Pure Shell access uses the selected environment's Linux utilities without installing an agent; agent access provides symbol services and directory watching when supported. Watching is unavailable for terminal-converted IDEs. From an idle terminal, **Convert to IDE** keeps the current user, container, and working directory. Terminal input pauses during conversion, and you can return to the original terminal.
 
 IDE and SFTP editing share the same search and replacement controls: case sensitivity, regular expressions, multiline paste, explicit newline insertion, capture-group replacement, and replace all. Each input has its own undo history. Dragging a text selection beyond the editor's top or bottom edge scrolls the document.
 
