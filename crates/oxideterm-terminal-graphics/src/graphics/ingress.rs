@@ -221,6 +221,21 @@ impl GraphicsIngress {
                 }
                 continue;
             }
+            if let ParserState::Osc(data) = &mut self.state {
+                // OSC payload is opaque until BEL or ESC. Keep the scalar path's
+                // exact admission boundary so its next byte still triggers discard.
+                let available = encoded_storage_limit()
+                    .saturating_sub(1)
+                    .saturating_sub(data.len());
+                let end = index + available.min(bytes.len() - index);
+                let run_len = memchr::memchr2(0x07, 0x1b, &bytes[index..end])
+                    .unwrap_or(end - index);
+                if run_len != 0 {
+                    data.extend_from_slice(&bytes[index..index + run_len]);
+                    index += run_len;
+                    continue;
+                }
+            }
             if matches!(self.state, ParserState::Ground) {
                 let remaining = &bytes[index..];
                 let escape = memchr::memchr2_iter(0x1b, 0x90, remaining).find(|index| {

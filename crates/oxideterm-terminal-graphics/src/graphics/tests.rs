@@ -305,6 +305,46 @@ mod tests {
     }
 
     #[test]
+    fn osc_payload_batches_preserve_opaque_bytes_and_split_terminators() {
+        let payload: Vec<_> = (0..=255).filter(|byte| !matches!(byte, 0x07 | 0x1b)).collect();
+        for terminator in [b"\x07".as_slice(), b"\x1b\\"] {
+            let mut input = b"before\x1b]2;".to_vec();
+            input.extend_from_slice(&payload);
+            input.extend_from_slice(terminator);
+            input.extend_from_slice(b"after\x1b[31mred\x1b[0m");
+            let mut expected = b"before\x1b]2;".to_vec();
+            expected.extend_from_slice(&payload);
+            // The existing graphics ingress canonicalizes forwarded OSC endings to BEL.
+            expected.extend_from_slice(b"\x07after\x1b[31mred\x1b[0m");
+            for split in 0..=input.len() {
+                let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+                let mut terminal = Vec::new();
+                for chunk in [&input[..split], &input[split..]] {
+                    ingress.advance_ordered(chunk, |segment| match segment {
+                        TerminalGraphicsSegment::Terminal(bytes) => terminal.extend_from_slice(&bytes),
+                        TerminalGraphicsSegment::Event(event) => panic!("unexpected event: {event:?}"),
+                    }, cursor);
+                }
+                assert_eq!(terminal, expected, "split={split}, terminator={terminator:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn osc_payload_batch_keeps_the_encoded_limit_and_recovers_after_discard() {
+        let limit = encoded_storage_limit();
+        let mut data = Vec::with_capacity(limit);
+        data.resize(limit - 3, b'x');
+        let mut ingress = GraphicsIngress::new(GraphicsOptions::default());
+        ingress.state = ParserState::Osc(data);
+        let result = ingress.advance(b"XXY\x07after", cursor());
+        assert_eq!(result.terminal_bytes, b"after");
+        assert!(matches!(result.events.as_slice(), [TerminalGraphicsEvent::Error(message)]
+            if message == &GraphicsError::StorageLimitExceeded.to_string()));
+        assert_eq!(ingress.advance(b"\x1b]2;ok\x07", cursor()).terminal_bytes, b"\x1b]2;ok\x07");
+    }
+
+    #[test]
     fn gif_payload_preserves_animation_frames() {
         let mut bytes = Vec::new();
         {

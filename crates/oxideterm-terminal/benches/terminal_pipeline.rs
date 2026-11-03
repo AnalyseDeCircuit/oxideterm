@@ -418,6 +418,32 @@ fn benchmark_terminal_input_breakdown(criterion: &mut Criterion) {
                 );
             },
         );
+        if matches!(name, "osc-title" | "osc-links") {
+            group.bench_with_input(
+                BenchmarkId::new("pipeline-no-graphics", name),
+                &corpus,
+                |bencher, corpus| {
+                    bencher.iter_batched(
+                        || {
+                            TerminalSession::recording_playback(
+                                BENCHMARK_COLS,
+                                BENCHMARK_ROWS,
+                                GraphicsOptions {
+                                    enabled: false,
+                                    ..GraphicsOptions::default()
+                                },
+                                20_000,
+                            )
+                        },
+                        |mut terminal| {
+                            terminal.feed_recording_output(black_box(corpus));
+                            black_box(terminal)
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+        }
     }
 
     group.finish();

@@ -1,6 +1,9 @@
 use criterion::{
     BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
+use oxideterm_terminal_encoding::{
+    EncodingMismatchDetector, TerminalEncoding, TerminalOutputDecoder,
+};
 use std::time::Duration;
 
 // Include the private scanner directly without expanding the production API.
@@ -42,10 +45,18 @@ fn benchmark_privilege_prompt_stream(criterion: &mut Criterion) {
             repeated_corpus(b"time:12:34:56 level:info module:terminal message:healthy\r\n"),
         ),
         ("long-line", vec![b'x'; BENCHMARK_CORPUS_BYTES]),
+        (
+            "osc-title",
+            repeated_corpus(format!("\x1b]2;{}\x07", "terminal title ".repeat(128)).as_bytes()),
+        ),
+        (
+            "osc-links",
+            repeated_corpus(b"\x1b]8;;https://example.com/builds/123456789/logs\x1b\\linked output\x1b]8;;\x1b\\\r\n"),
+        ),
     ];
 
     let mut group = criterion.benchmark_group("privilege_prompt_stream");
-    for (name, corpus) in workloads {
+    for (name, corpus) in &workloads {
         group.throughput(Throughput::Bytes(corpus.len() as u64));
         group.bench_with_input(
             BenchmarkId::from_parameter(name),
@@ -62,6 +73,53 @@ fn benchmark_privilege_prompt_stream(criterion: &mut Criterion) {
                 );
             },
         );
+    }
+    group.finish();
+
+    // Measure the production scanner stages without SSH or PTY delivery noise.
+    // Unicode is kept in complete codepoints, as it is after the live UTF-8 residual guard.
+    let mut group = criterion.benchmark_group("shell_outer_scanners");
+    for (name, corpus) in &workloads {
+        let text = std::str::from_utf8(corpus).unwrap();
+        let mut chunks = Vec::new();
+        let mut start = 0;
+        while start < corpus.len() {
+            let mut end = (start + TERMINAL_OUTPUT_CHUNK_BYTES).min(corpus.len());
+            while !text.is_char_boundary(end) {
+                end -= 1;
+            }
+            chunks.push(&corpus[start..end]);
+            start = end;
+        }
+        group.throughput(Throughput::Bytes(corpus.len() as u64));
+        for combined in [false, true] {
+            group.bench_with_input(
+                BenchmarkId::new(if combined { "combined" } else { "encoding" }, name),
+                &chunks,
+                |bencher, chunks| {
+                    bencher.iter_batched(
+                        || {
+                            (
+                                EncodingMismatchDetector::new(TerminalEncoding::Utf8),
+                                TerminalOutputDecoder::new(TerminalEncoding::Utf8),
+                                TerminalPrivilegePromptStream::default(),
+                            )
+                        },
+                        |(mut detector, mut decoder, mut prompt)| {
+                            for chunk in chunks {
+                                black_box(detector.observe(black_box(chunk)));
+                                if combined {
+                                    let decoded = decoder.decode_to_utf8_bytes(chunk);
+                                    black_box(prompt.observe(decoded.as_ref()));
+                                }
+                            }
+                            black_box(detector);
+                        },
+                        BatchSize::SmallInput,
+                    );
+                },
+            );
+        }
     }
     group.finish();
 }

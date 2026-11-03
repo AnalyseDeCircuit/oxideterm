@@ -74,6 +74,14 @@ fn benchmark_graphics_ingress(criterion: &mut Criterion) {
                 b"\x1b[1;2;3;4;5;7;8;9;22;23;24;25;27;28;29;38;2;72;183;255mworkload\x1b[0m\r\n",
             ),
         ),
+        (
+            "osc-title",
+            repeated_payload(format!("\x1b]2;{}\x07", "terminal title ".repeat(128)).as_bytes()),
+        ),
+        (
+            "osc-links",
+            repeated_payload(b"\x1b]8;id=build;https://example.com/builds/123456789/logs\x1b\\linked output\x1b]8;;\x1b\\\r\n"),
+        ),
     ];
     let mut group = criterion.benchmark_group("graphics_ingress");
     group.throughput(Throughput::Bytes(PAYLOAD_BYTES as u64));
