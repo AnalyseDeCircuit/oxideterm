@@ -98,6 +98,9 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
     HostScheduleConfirm {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
+    HostPackageConfirm {
+        phase: oxideterm_gpui_ui::motion::ExitPhase,
+    },
     HostScheduleLogs,
     NativePluginConfirm {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
@@ -165,35 +168,36 @@ impl ActiveWindowModalOwner {
             Self::NodeDisconnect { .. } => 17,
             Self::TabClose { .. } => 18,
             Self::HostProcessConfirm { .. } => 19,
-            Self::HostDockerConfirm { .. } => 20,
-            Self::HostDockerLogs => 21,
-            Self::HostServiceConfirm { .. } => 22,
-            Self::HostServiceLogs => 23,
-            Self::HostTmuxConfirm { .. } => 24,
-            Self::HostTmuxInput => 25,
-            Self::HostScheduleConfirm { .. } => 26,
-            Self::HostScheduleLogs => 27,
-            Self::NativePluginConfirm { .. } => 28,
-            Self::TabRename => 29,
-            Self::ArchiveCommand => 30,
+            Self::HostDockerConfirm { .. } => 21,
+            Self::HostDockerLogs => 22,
+            Self::HostServiceConfirm { .. } => 23,
+            Self::HostServiceLogs => 24,
+            Self::HostTmuxConfirm { .. } => 25,
+            Self::HostTmuxInput => 26,
+            Self::HostScheduleConfirm { .. } => 27,
+            Self::HostScheduleLogs => 28,
+            Self::HostPackageConfirm { .. } => 20,
+            Self::NativePluginConfirm { .. } => 29,
+            Self::TabRename => 30,
+            Self::ArchiveCommand => 31,
             Self::SshTunnel => 1,
-            Self::ActiveTabWindowModal { .. } => 31,
-            Self::TerminalCastPlayer => 32,
-            Self::ThemeEditor { .. } => 33,
-            Self::SettingsSshConfigImport { .. } => 34,
-            Self::TerminalCommandSpecsEditor => 35,
-            Self::QuickCommandsManager => 36,
-            Self::AiTextEditor => 37,
-            Self::OxideImport { .. } => 38,
-            Self::OxideExport { .. } => 39,
-            Self::CommandPalette => 40,
-            Self::VersionMigration => 41,
-            Self::Onboarding => 42,
-            Self::LegalNotice { .. } => 43,
-            Self::NativeUpdateReleaseNotes { .. } => 44,
-            Self::Shortcuts => 45,
-            Self::AppLockDialog => 46,
-            Self::MermaidZoom => 47,
+            Self::ActiveTabWindowModal { .. } => 32,
+            Self::TerminalCastPlayer => 33,
+            Self::ThemeEditor { .. } => 34,
+            Self::SettingsSshConfigImport { .. } => 35,
+            Self::TerminalCommandSpecsEditor => 36,
+            Self::QuickCommandsManager => 37,
+            Self::AiTextEditor => 38,
+            Self::OxideImport { .. } => 39,
+            Self::OxideExport { .. } => 40,
+            Self::CommandPalette => 41,
+            Self::VersionMigration => 42,
+            Self::Onboarding => 43,
+            Self::LegalNotice { .. } => 44,
+            Self::NativeUpdateReleaseNotes { .. } => 45,
+            Self::Shortcuts => 46,
+            Self::AppLockDialog => 47,
+            Self::MermaidZoom => 48,
         }
     }
 
@@ -217,6 +221,7 @@ impl ActiveWindowModalOwner {
             | Self::HostServiceConfirm { phase }
             | Self::HostTmuxConfirm { phase }
             | Self::HostScheduleConfirm { phase }
+            | Self::HostPackageConfirm { phase }
             | Self::NativePluginConfirm { phase }
             | Self::ActiveTabWindowModal { phase, .. }
             | Self::ThemeEditor { phase }
@@ -471,6 +476,9 @@ impl ActiveWindowModalProjection {
             }
             connection_monitor::HostToolsWindowModalSnapshot::ScheduleLogs => {
                 ActiveWindowModalOwner::HostScheduleLogs
+            }
+            connection_monitor::HostToolsWindowModalSnapshot::PackageConfirm(phase) => {
+                ActiveWindowModalOwner::HostPackageConfirm { phase }
             }
         });
         let native_plugin_owner = self
@@ -1070,6 +1078,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::ProcessConfirm(phase),
                     event,
+                    window,
                     cx,
                 );
             }
@@ -1077,6 +1086,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::DockerConfirm(phase),
                     event,
+                    window,
                     cx,
                 );
             }
@@ -1084,6 +1094,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::DockerLogs,
                     event,
+                    window,
                     cx,
                 );
             }
@@ -1091,6 +1102,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::ServiceConfirm(phase),
                     event,
+                    window,
                     cx,
                 );
             }
@@ -1098,6 +1110,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::ServiceLogs,
                     event,
+                    window,
                     cx,
                 );
             }
@@ -1105,6 +1118,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::TmuxConfirm(phase),
                     event,
+                    window,
                     cx,
                 );
             }
@@ -1112,6 +1126,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::TmuxInput,
                     event,
+                    window,
                     cx,
                 );
             }
@@ -1119,6 +1134,15 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::ScheduleConfirm(phase),
                     event,
+                    window,
+                    cx,
+                );
+            }
+            ActiveWindowModalOwner::HostPackageConfirm { phase } => {
+                let _ = self.handle_host_tools_window_modal_key(
+                    connection_monitor::HostToolsWindowModalSnapshot::PackageConfirm(phase),
+                    event,
+                    window,
                     cx,
                 );
             }
@@ -1126,6 +1150,7 @@ impl WorkspaceApp {
                 let _ = self.handle_host_tools_window_modal_key(
                     connection_monitor::HostToolsWindowModalSnapshot::ScheduleLogs,
                     event,
+                    window,
                     cx,
                 );
             }

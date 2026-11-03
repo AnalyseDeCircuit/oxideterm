@@ -43,6 +43,10 @@ pub struct LocalPtyConfig {
     pub shell: Option<ShellInfo>,
     pub cwd: Option<PathBuf>,
     pub env: HashMap<String, String>,
+    /// Inherited variables the child must not receive. A terminal created by
+    /// the application is not the pane that launched it, so a multiplexer's
+    /// pane identity would be stale here.
+    pub remove_env: Vec<String>,
     pub load_profile: bool,
     pub current_directory_shell_integration: bool,
     pub oh_my_posh_enabled: bool,
@@ -55,6 +59,7 @@ impl Default for LocalPtyConfig {
             shell: None,
             cwd: None,
             env: HashMap::new(),
+            remove_env: Vec::new(),
             load_profile: true,
             current_directory_shell_integration: false,
             oh_my_posh_enabled: false,

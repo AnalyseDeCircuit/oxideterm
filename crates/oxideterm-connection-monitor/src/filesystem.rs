@@ -120,7 +120,7 @@ pub fn build_filesystem_snapshot_command(os_type: &str) -> FilesystemCaptureComm
 pub fn build_filesystem_diagnostic_command(os_type: &str) -> String {
     match filesystem_os(os_type) {
         FilesystemOs::Windows => concat!(
-            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;",
             "Get-Volume | Format-Table -AutoSize; ",
             "Get-PSDrive -PSProvider FileSystem | Format-Table -AutoSize; ",
             "Get-ChildItem -Path C:\\ -Force -ErrorAction SilentlyContinue | ",
@@ -467,13 +467,19 @@ fn build_windows_filesystem_snapshot_command() -> String {
     // Windows snapshots also avoid Get-ChildItem -Recurse. Deep NTFS scans can
     // dominate slow OpenSSH sessions and should only run in explicit terminals.
     concat!(
-        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;",
         "Write-Output '===FILESYSTEMS===';",
         "Write-Output ('__OXIDE_FILESYSTEM_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_powershell');",
         "$volumeError=$null;$psdriveError=$null;",
+        // Get-Volume reports the mount point as `C:` + `\\`, so the path is
+        // built from one backslash; PSDrive repeats the same drives and is
+        // only used for roots Get-Volume did not report (mapped network
+        // drives).
+        "$seen=@{};",
         "try{",
         "Get-Volume|ForEach-Object{",
-        "$path=if($_.DriveLetter){$_.DriveLetter+':\\\\'}else{$_.Path};",
+        "$path=if($_.DriveLetter){$_.DriveLetter+':\\'}else{$_.Path};",
+        "if($_.DriveLetter){$seen[[string]$_.DriveLetter]=$true};",
         "$size=[int64]($_.Size);$free=[int64]($_.SizeRemaining);$used=$size-$free;",
         "$pct=if($size -gt 0){[math]::Round(($used*100.0)/$size,1)}else{0};",
         "$ro=if($_.OperationalStatus -contains 'Read-only'){'true'}else{'false'};",
@@ -482,6 +488,7 @@ fn build_windows_filesystem_snapshot_command() -> String {
         "}catch{$volumeError=$_.Exception.Message};",
         "try{",
         "Get-PSDrive -PSProvider FileSystem|ForEach-Object{",
+        "if($_.Name.Length -eq 1 -and $seen.ContainsKey($_.Name)){return};",
         "$root=$_.Root;$used=[int64]($_.Used);$free=[int64]($_.Free);$size=$used+$free;$pct=if($size -gt 0){[math]::Round(($used*100.0)/$size,1)}else{0};",
         "Write-Output ('WINVOL'+[char]9+$root+[char]9+$_.Name+[char]9+''+[char]9+$size+[char]9+$used+[char]9+$free+[char]9+$pct+[char]9+'false'+[char]9+'PSDrive')",
         "}",

@@ -84,7 +84,7 @@ pub(super) const HOST_PORT_PID_COLUMN_WIDTH: f32 = 58.0;
 pub(super) const HOST_PORT_PROCESS_COLUMN_WIDTH: f32 = 96.0;
 pub(super) const HOST_PORT_REMOTE_COLUMN_WIDTH: f32 = 132.0;
 pub(super) const HOST_PORT_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 680.0;
-pub(super) const HOST_PORT_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(8);
+pub(super) const HOST_PORT_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(20);
 pub(super) const HOST_PORT_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 256 * 1024;
 pub(super) const HOST_SCHEDULE_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
 pub(super) const HOST_SCHEDULE_TABLE_HEADER_HEIGHT: f32 = 28.0;
@@ -95,7 +95,7 @@ pub(super) const HOST_SCHEDULE_ENABLED_COLUMN_WIDTH: f32 = 72.0;
 pub(super) const HOST_SCHEDULE_NEXT_COLUMN_WIDTH: f32 = 112.0;
 pub(super) const HOST_SCHEDULE_LAST_COLUMN_WIDTH: f32 = 112.0;
 pub(super) const HOST_SCHEDULE_CONTEXT_COLUMNS_MIN_WIDTH: f32 = 720.0;
-pub(super) const HOST_SCHEDULE_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(10);
+pub(super) const HOST_SCHEDULE_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(20);
 pub(super) const HOST_SCHEDULE_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 256 * 1024;
 pub(super) const HOST_SCHEDULE_ACTION_TIMEOUT: Duration = Duration::from_secs(12);
 pub(super) const HOST_SCHEDULE_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
@@ -220,6 +220,8 @@ pub(super) struct MonitorConnectionOption {
     pub(super) host: String,
     pub(super) port: u16,
     pub(super) username: String,
+    // The local target has no endpoint, so it carries its localized label.
+    pub(super) label: Option<String>,
 }
 
 impl MonitorConnectionOption {
@@ -229,6 +231,7 @@ impl MonitorConnectionOption {
             host: connection.host,
             port: connection.port,
             username: connection.username,
+            label: None,
         }
     }
 
@@ -238,6 +241,17 @@ impl MonitorConnectionOption {
             host: summary.host.clone(),
             port: summary.port,
             username: summary.username.clone(),
+            label: None,
+        }
+    }
+
+    pub(super) fn local(label: String) -> Self {
+        Self {
+            connection_id: LOCAL_HOST_CONNECTION_ID.to_string(),
+            host: String::new(),
+            port: 0,
+            username: String::new(),
+            label: Some(label),
         }
     }
 }
@@ -427,6 +441,7 @@ pub(in crate::workspace) enum HostToolsWindowModalSnapshot {
     TmuxInput,
     ScheduleConfirm(oxideterm_gpui_ui::motion::ExitPhase),
     ScheduleLogs,
+    PackageConfirm(oxideterm_gpui_ui::motion::ExitPhase),
 }
 
 impl HostSnapshotFeedback {
@@ -697,9 +712,20 @@ pub(super) struct HostPackageSnapshotDelivery {
     pub(super) result: Result<SshCommandOutput, ()>,
 }
 
+/// Packages uninstall through a confirmation because the terminal command
+/// removes installed software as soon as the shell receives it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct HostPackageUninstallRequest {
+    pub(super) connection_id: String,
+    pub(super) manager: String,
+    pub(super) package_id: String,
+    pub(super) package_name: String,
+}
+
 pub(super) struct HostPackagesState {
     pub(super) filter: PackageFilter,
     pub(super) expanded_index: Option<usize>,
+    pub(super) pending_confirm: Option<HostToolConfirmState<HostPackageUninstallRequest>>,
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<ResourcePackageSnapshot>,
     pub(super) running: Option<HostPackageSnapshotRequest>,
@@ -713,6 +739,7 @@ impl HostPackagesState {
         Self {
             filter: PackageFilter::All,
             expanded_index: None,
+            pending_confirm: None,
             snapshot_connection_id: None,
             snapshot: None,
             running: None,
@@ -902,6 +929,7 @@ pub(in crate::workspace) struct HostToolsMessages {
     pub(super) schedule_unknown_error: String,
     pub(super) tmux_unknown_error: String,
     pub(super) tmux_unavailable: String,
+    pub(super) local_connection_label: String,
 }
 
 impl HostToolsMessages {
@@ -916,6 +944,7 @@ impl HostToolsMessages {
             schedule_unknown_error: i18n.t("sidebar.host_schedules.toast.unknown_error"),
             tmux_unknown_error: i18n.t("sidebar.host_tmux.toast.unknown_error"),
             tmux_unavailable: i18n.t("sidebar.host_tmux.unavailable"),
+            local_connection_label: i18n.t("sidebar.host_connection.local_machine"),
         }
     }
 }

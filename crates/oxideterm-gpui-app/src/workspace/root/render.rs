@@ -1353,6 +1353,10 @@ impl WorkspaceApp {
                 |root, dialog| root.child(dialog),
             )
             .when_some(
+                self.render_host_package_confirm_dialog(cx),
+                |root, dialog| root.child(dialog),
+            )
+            .when_some(
                 self.render_host_docker_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),
             )

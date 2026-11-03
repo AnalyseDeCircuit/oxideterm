@@ -78,7 +78,7 @@ From the Sessions area, select a saved connection and open it. The app creates r
 
 If a host disconnects, use the connection pool or monitor to understand whether the runtime is reconnecting, stale, or unavailable. Reconnect from the app state instead of recreating the saved profile.
 
-Host Tools belong to the connected node. A graphics/VNC session may instead belong to a saved RDP/VNC profile; node-launched graphics use the SSH node as their runtime owner. Opening or closing these views should not rewrite saved profiles, and stale state should be refreshed through the owning profile or node.
+Host Tools belong to the connected node. The local machine is also a Host Tools target: tools run the same generated commands locally, and sampling views use one-shot local captures. A graphics/VNC session may instead belong to a saved RDP/VNC profile; node-launched graphics use the SSH node as their runtime owner. Opening or closing these views should not rewrite saved profiles, and stale state should be refreshed through the owning profile or node.
 
 ## SFTP and Remote Files
 

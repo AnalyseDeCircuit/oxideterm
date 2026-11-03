@@ -105,6 +105,9 @@
     "active_session_count": "Active sessions: {{count}}",
     "no_sessions": "No Sessions",
     "add_new_connection": "Click + to add a new connection",
+    "host_connection": {
+      "local_machine": "This machine"
+    },
     "host_gpu": {
       "count_suffix": "accelerators",
       "refresh_interval": "Updates every 2 seconds",
@@ -584,6 +587,8 @@
       "actions": {
         "refresh": "Refresh ports",
         "diagnostic": "Open diagnostic terminal",
+        "kill_process": "Stop process",
+        "copy_kill_command": "Copy stop command",
         "copy_endpoint": "Copy address",
         "jump_process": "Find process"
       },
@@ -597,6 +602,7 @@
         "exec_terminal_missing": "No live SSH terminal route is available for diagnostics.",
         "diagnostic_opened": "Opened port diagnostics.",
         "copied_endpoint": "Copied {{endpoint}}.",
+        "kill_command_copied": "Copied: {{command}}",
         "partial_support": "Port inspection is partial on {{os}}.",
         "unknown_error": "Unknown port scan error."
       }
@@ -707,7 +713,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "Package",
@@ -729,8 +736,16 @@
       },
       "actions": {
         "refresh": "Refresh packages",
+        "uninstall": "Uninstall package",
+        "upgrade": "Update package",
         "inspect": "Open package details",
+        "copy_id": "Copy package ID",
         "copy_name": "Copy package name"
+      },
+      "confirm": {
+        "uninstall_title": "Uninstall package",
+        "uninstall_description": "Uninstall {{name}}? winget removes it from this host.",
+        "uninstall": "Uninstall"
       },
       "inspect_title": "Package details",
       "toast": {
@@ -743,6 +758,11 @@
         "inspect_unsupported": "Package details are not supported for {{manager}} yet.",
         "inspect_opened": "Opened details for {{name}}.",
         "copied_name": "Copied {{name}}.",
+        "copied_id": "Copied {{id}}.",
+        "uninstall_opened": "Uninstalling {{name}} in a terminal.",
+        "uninstall_unsupported": "Uninstalling through {{manager}} is not supported.",
+        "upgrade_opened": "Updating {{name}}.",
+        "upgrade_unsupported": "Updating {{manager}} packages is not supported yet.",
         "partial_support": "Package inspection is read-only on {{os}}.",
         "unknown_error": "Unknown package scan error."
       }

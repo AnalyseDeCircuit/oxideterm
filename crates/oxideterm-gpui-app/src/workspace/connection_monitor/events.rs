@@ -141,6 +141,10 @@ pub(in crate::workspace) enum HostToolsNotice {
     },
     PortUnavailable,
     PortSnapshotFailed,
+    /// Reports the force-stop command the user copied for one port owner.
+    PortKillCommandCopied {
+        command: String,
+    },
     /// Reports the endpoint that the user explicitly copied from the port table.
     PortEndpointCopied {
         endpoint: String,
@@ -173,6 +177,17 @@ pub(in crate::workspace) enum HostToolsNotice {
     /// Reports the package name that the user explicitly copied from the package table.
     PackageNameCopied {
         package_name: String,
+    },
+    /// Reports the package identifier that the user explicitly copied.
+    PackageIdCopied {
+        package_id: String,
+    },
+    /// Reports the package manager whose upgrade command is not available.
+    PackageUninstallUnsupported {
+        manager: String,
+    },
+    PackageUpgradeUnsupported {
+        manager: String,
     },
     ScheduleSnapshotAlreadyRunning,
     ScheduleConnectionMissing,

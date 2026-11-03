@@ -1778,6 +1778,9 @@ impl HostToolsEntity {
         self.host_tmux.snapshot_running = None;
         let (snapshot, notice) = match delivery.result {
             Ok(mut output) => {
+                // The error-marker payload quotes raw host output, which can
+                // carry credentials; only the request's fallback copy may
+                // reach renderable state.
                 let mut snapshot =
                     tmux_capture_snapshot(&output.stdout, &output.stderr, output.exit_code);
                 zeroize::Zeroize::zeroize(&mut output.stdout);

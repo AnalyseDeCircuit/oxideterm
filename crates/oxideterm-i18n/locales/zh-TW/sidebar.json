@@ -105,6 +105,9 @@
     "active_session_count": "{{count}} 個作用中工作階段",
     "no_sessions": "無工作階段",
     "add_new_connection": "按 + 新增連線",
+    "host_connection": {
+      "local_machine": "本機"
+    },
     "host_gpu": {
       "count_suffix": "個加速裝置",
       "refresh_interval": "每 2 秒更新",
@@ -584,6 +587,8 @@
       "actions": {
         "refresh": "重新整理連接埠",
         "diagnostic": "開啟診斷終端",
+        "kill_process": "關閉處理程序",
+        "copy_kill_command": "複製關閉處理程序命令",
         "copy_endpoint": "複製位址",
         "jump_process": "查找行程"
       },
@@ -597,6 +602,7 @@
         "exec_terminal_missing": "沒有可用的 SSH 終端路由可用於診斷。",
         "diagnostic_opened": "已開啟連接埠診斷。",
         "copied_endpoint": "已複製 {{endpoint}}。",
+        "kill_command_copied": "已複製：{{command}}",
         "partial_support": "{{os}} 上的連接埠檢查為部分支援。",
         "unknown_error": "未知的連接埠掃描錯誤。"
       }
@@ -707,7 +713,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "套件",
@@ -729,8 +736,16 @@
       },
       "actions": {
         "refresh": "重新整理套件",
+        "uninstall": "解除安裝應用程式",
+        "upgrade": "更新套件",
         "inspect": "開啟套件詳細資訊",
+        "copy_id": "複製套件 ID",
         "copy_name": "複製套件名稱"
+      },
+      "confirm": {
+        "uninstall_title": "解除安裝應用程式",
+        "uninstall_description": "解除安裝 {{name}}？winget 會將其從此主機移除。",
+        "uninstall": "解除安裝"
       },
       "inspect_title": "套件詳細資訊",
       "toast": {
@@ -743,6 +758,11 @@
         "inspect_unsupported": "暫不支援 {{manager}} 的套件詳細資訊命令。",
         "inspect_opened": "已開啟 {{name}} 的詳細資訊。",
         "copied_name": "已複製 {{name}}。",
+        "copied_id": "已複製 {{id}}。",
+        "uninstall_opened": "正在終端機中解除安裝 {{name}}。",
+        "uninstall_unsupported": "不支援透過 {{manager}} 解除安裝。",
+        "upgrade_opened": "正在更新 {{name}}。",
+        "upgrade_unsupported": "暫不支援更新 {{manager}} 套件。",
         "partial_support": "{{os}} 上的套件檢查為唯讀支援。",
         "unknown_error": "未知的套件掃描錯誤。"
       }

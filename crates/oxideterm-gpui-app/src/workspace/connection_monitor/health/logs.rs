@@ -716,12 +716,20 @@ impl HostToolsEntity {
     }
 
     fn sync_host_log_list_state(&self, rows: &[ResourceLogEntry], selected_id: &str) {
-        let signatures = rows.iter().map(log_row_signature).collect::<Vec<_>>();
+        let expanded = self.log_expanded_index();
+        let signatures = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                expandable_row_signature(log_row_signature(row), expanded == Some(index))
+            })
+            .collect::<Vec<_>>();
         let identity = format!(
-            "host-logs:{selected_id}:{}:{}:{}",
+            // Expansion changes one row's height, so it stays out of the identity:
+            // a new identity resets the list and drops the user's scroll offset.
+            "host-logs:{selected_id}:{}:{}",
             self.ui.host_log_search_query,
-            self.log_preset() as u8,
-            self.log_expanded_index().unwrap_or(usize::MAX)
+            self.log_preset() as u8
         );
         self.sync_log_list_signatures(&identity, &signatures);
     }
@@ -906,6 +914,9 @@ impl HostToolsEntity {
         self.host_logs.running = None;
         match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                // The error-marker payload quotes raw host output, which can
+                // carry credentials; only the request's fallback copy may
+                // reach renderable state.
                 let mut snapshot = parse_log_snapshot(&output.stdout);
                 if matches!(&snapshot.status, ResourceLogStatus::Error { .. }) {
                     snapshot.status = ResourceLogStatus::Error {

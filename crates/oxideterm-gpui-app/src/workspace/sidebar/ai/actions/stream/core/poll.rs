@@ -505,6 +505,7 @@ impl WorkspaceApp {
                                             shell: Some(shell),
                                             cwd: Some(resolved_cwd),
                                             env,
+                                            remove_env: Vec::new(),
                                             load_profile: false,
                                             current_directory_shell_integration: false,
                                             oh_my_posh_enabled: false,

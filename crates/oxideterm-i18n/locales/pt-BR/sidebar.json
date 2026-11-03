@@ -105,6 +105,9 @@
     "active_session_count": "Sessões ativas: {{count}}",
     "no_sessions": "Nenhuma sessão",
     "add_new_connection": "Clique em + para adicionar uma conexão",
+    "host_connection": {
+      "local_machine": "Este computador"
+    },
     "host_gpu": {
       "count_suffix": "aceleradores",
       "refresh_interval": "Atualiza a cada 2 segundos",
@@ -584,6 +587,8 @@
       "actions": {
         "refresh": "Atualizar portas",
         "diagnostic": "Abrir terminal de diagnóstico",
+        "kill_process": "Encerrar processo",
+        "copy_kill_command": "Copiar comando de encerramento",
         "copy_endpoint": "Copiar endereço",
         "jump_process": "Encontrar processo"
       },
@@ -597,6 +602,7 @@
         "exec_terminal_missing": "Nenhuma rota de terminal SSH ativa disponível para diagnóstico.",
         "diagnostic_opened": "Diagnóstico de portas aberto.",
         "copied_endpoint": "{{endpoint}} copiado.",
+        "kill_command_copied": "Copiado: {{command}}",
         "partial_support": "A inspeção de portas é parcial em {{os}}.",
         "unknown_error": "Erro desconhecido na varredura de portas."
       }
@@ -707,7 +713,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "Pacote",
@@ -729,8 +736,16 @@
       },
       "actions": {
         "refresh": "Atualizar pacotes",
+        "uninstall": "Desinstalar pacote",
+        "upgrade": "Atualizar pacote",
         "inspect": "Abrir detalhes do pacote",
+        "copy_id": "Copiar ID do pacote",
         "copy_name": "Copiar nome do pacote"
+      },
+      "confirm": {
+        "uninstall_title": "Desinstalar pacote",
+        "uninstall_description": "Desinstalar {{name}}? O winget o remove deste host.",
+        "uninstall": "Desinstalar"
       },
       "inspect_title": "Detalhes do pacote",
       "toast": {
@@ -743,6 +758,11 @@
         "inspect_unsupported": "Detalhes de pacotes ainda não são compatíveis com {{manager}}.",
         "inspect_opened": "Detalhes abertos para {{name}}.",
         "copied_name": "{{name}} copiado.",
+        "copied_id": "{{id}} copiado.",
+        "uninstall_opened": "Desinstalando {{name}} em um terminal.",
+        "uninstall_unsupported": "A desinstalação por {{manager}} não é suportada.",
+        "upgrade_opened": "Atualizando {{name}}.",
+        "upgrade_unsupported": "Atualizar pacotes {{manager}} ainda não é suportado.",
         "partial_support": "A inspeção de pacotes em {{os}} é somente leitura.",
         "unknown_error": "Erro desconhecido ao verificar pacotes."
       }

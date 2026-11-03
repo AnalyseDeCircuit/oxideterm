@@ -959,15 +959,20 @@ impl WorkspaceApp {
 
 impl HostToolsEntity {
     fn sync_filesystem_render_rows(&self, rows: &[ResourceFilesystemEntry], selected_id: &str) {
+        let expanded = self.filesystem_expanded_index();
         let signatures = rows
             .iter()
-            .map(filesystem_row_signature)
+            .enumerate()
+            .map(|(index, row)| {
+                expandable_row_signature(filesystem_row_signature(row), expanded == Some(index))
+            })
             .collect::<Vec<_>>();
         let identity = format!(
-            "host-filesystems:{selected_id}:{}:{}:{}",
+            // Expansion changes one row's height, so it stays out of the identity:
+            // a new identity resets the list and drops the user's scroll offset.
+            "host-filesystems:{selected_id}:{}:{}",
             self.ui.host_filesystem_search_query,
-            self.filesystem_filter() as u8,
-            self.filesystem_expanded_index().unwrap_or(usize::MAX)
+            self.filesystem_filter() as u8
         );
         self.sync_filesystem_list_signatures(&identity, &signatures);
     }

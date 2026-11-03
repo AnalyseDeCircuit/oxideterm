@@ -105,6 +105,9 @@
     "active_session_count": "アクティブなセッション：{{count}}",
     "no_sessions": "セッションなし",
     "add_new_connection": "+ をクリックして新しい接続を追加",
+    "host_connection": {
+      "local_machine": "このコンピューター"
+    },
     "host_gpu": {
       "count_suffix": "アクセラレーター",
       "refresh_interval": "2 秒ごとに更新",
@@ -584,6 +587,8 @@
       "actions": {
         "refresh": "ポートを更新",
         "diagnostic": "診断ターミナルを開く",
+        "kill_process": "プロセスを停止",
+        "copy_kill_command": "停止コマンドをコピー",
         "copy_endpoint": "アドレスをコピー",
         "jump_process": "プロセスを検索"
       },
@@ -597,6 +602,7 @@
         "exec_terminal_missing": "診断に使える SSH ターミナル経路がありません。",
         "diagnostic_opened": "ポート診断を開きました。",
         "copied_endpoint": "{{endpoint}} をコピーしました。",
+        "kill_command_copied": "コピーしました: {{command}}",
         "partial_support": "{{os}} ではポート検査は部分対応です。",
         "unknown_error": "不明なポートスキャンエラーです。"
       }
@@ -707,7 +713,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "パッケージ",
@@ -729,8 +736,16 @@
       },
       "actions": {
         "refresh": "パッケージを更新",
+        "uninstall": "パッケージを削除",
+        "upgrade": "パッケージをアップグレード",
         "inspect": "パッケージ詳細を開く",
+        "copy_id": "パッケージ ID をコピー",
         "copy_name": "パッケージ名をコピー"
+      },
+      "confirm": {
+        "uninstall_title": "パッケージを削除",
+        "uninstall_description": "{{name}} を削除しますか? winget がこのホストから削除します。",
+        "uninstall": "削除"
       },
       "inspect_title": "パッケージ詳細",
       "toast": {
@@ -743,6 +758,11 @@
         "inspect_unsupported": "{{manager}} のパッケージ詳細コマンドはまだ対応していません。",
         "inspect_opened": "{{name}} の詳細を開きました。",
         "copied_name": "{{name}} をコピーしました。",
+        "copied_id": "{{id}} をコピーしました。",
+        "uninstall_opened": "ターミナルで {{name}} を削除しています。",
+        "uninstall_unsupported": "{{manager}} による削除はサポートされていません。",
+        "upgrade_opened": "{{name}} を更新しています。",
+        "upgrade_unsupported": "{{manager}} パッケージの更新はまだサポートされていません。",
         "partial_support": "{{os}} のパッケージ検査は読み取り専用対応です。",
         "unknown_error": "不明なパッケージスキャンエラーです。"
       }

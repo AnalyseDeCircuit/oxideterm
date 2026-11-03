@@ -139,8 +139,9 @@ use oxideterm_connection_monitor::{
     build_docker_action_command, build_docker_exec_shell_command, build_docker_follow_logs_command,
     build_docker_logs_command, build_filesystem_diagnostic_command,
     build_filesystem_snapshot_command, build_log_follow_command, build_log_snapshot_command,
-    build_package_inspect_command, build_package_snapshot_command, build_port_diagnostic_command,
-    build_port_snapshot_command, build_process_action_command, build_scheduled_task_action_command,
+    build_package_inspect_command, build_package_snapshot_command, build_package_uninstall_command,
+    build_package_upgrade_command, build_port_diagnostic_command, build_port_snapshot_command,
+    build_process_action_command, build_scheduled_task_action_command,
     build_scheduled_task_diagnostic_command, build_scheduled_task_logs_command,
     build_scheduled_task_snapshot_command, build_service_action_command,
     build_service_follow_logs_command, build_service_logs_command, build_tmux_action_command,
@@ -151,10 +152,11 @@ use oxideterm_connection_monitor::{
     filesystem_entry_severity, filesystem_filter_label_key, filesystem_kind_label_key,
     filesystem_read_only_label_key, filesystem_row_signature, format_bytes,
     gpu_device_row_signature, log_level_label_key, log_preset_label_key, log_row_signature,
-    package_filter_label_key, package_row_signature, package_status_label_key, parse_log_snapshot,
-    parse_package_snapshot, parse_port_snapshot, percent_level, port_endpoint,
-    port_filter_label_key, port_is_risky_exposure, port_row_signature, port_state_label_key,
-    process_display_command, process_display_name, process_row_signature, process_state_label_key,
+    package_filter_label_key, package_filter_manager, package_filter_options,
+    package_row_signature, package_status_label_key, parse_log_snapshot, parse_package_snapshot,
+    parse_port_snapshot, percent_level, port_endpoint, port_filter_label_key,
+    port_is_risky_exposure, port_row_signature, port_state_label_key, process_display_command,
+    process_display_name, process_row_signature, process_state_label_key,
     scheduled_task_active_label_key, scheduled_task_enabled_label_key,
     scheduled_task_filter_label_key, scheduled_task_row_signature, scheduled_task_source_label_key,
     service_action_succeeded, service_enabled_label_key, service_row_signature,
@@ -362,8 +364,8 @@ pub(super) use virtual_list::{
     uniform_list_edge_autoscroll,
 };
 use virtual_list::{
-    VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
-    sync_tauri_virtual_list_state_by_signatures,
+    VirtualListSignatureCache, expandable_row_signature,
+    sync_tauri_variable_list_state_by_signatures, sync_tauri_virtual_list_state_by_signatures,
 };
 
 const SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 4;

@@ -211,14 +211,14 @@ pub fn build_scheduled_task_logs_command(
         ScheduledTaskOs::Windows => (
             if follow {
                 concat!(
-                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;",
                     "while($true){Get-WinEvent -LogName Microsoft-Windows-TaskScheduler/Operational -MaxEvents 50|",
                     "Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message|Format-Table -Wrap -AutoSize;Start-Sleep -Seconds 5}\""
                 )
                 .to_string()
             } else {
                 format!(
-                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-WinEvent -LogName Microsoft-Windows-TaskScheduler/Operational -MaxEvents {limit}|Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message|Format-Table -Wrap -AutoSize\""
+                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;Get-WinEvent -LogName Microsoft-Windows-TaskScheduler/Operational -MaxEvents {limit}|Select-Object TimeCreated,ProviderName,Id,LevelDisplayName,Message|Format-Table -Wrap -AutoSize\""
                 )
             },
             ScheduledTaskCapability::Partial,
@@ -286,7 +286,7 @@ pub fn build_scheduled_task_action_command(
             let task_args = windows_scheduled_task_args(&id)?;
             Ok(ScheduledTaskActionCommand {
                 command: format!(
-                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Start-ScheduledTask {task_args}\""
+                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;Start-ScheduledTask {task_args}\""
                 ),
                 capability: ScheduledTaskCapability::Partial,
             })
@@ -295,7 +295,7 @@ pub fn build_scheduled_task_action_command(
             let task_args = windows_scheduled_task_args(&id)?;
             Ok(ScheduledTaskActionCommand {
                 command: format!(
-                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Enable-ScheduledTask {task_args}\""
+                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;Enable-ScheduledTask {task_args}\""
                 ),
                 capability: ScheduledTaskCapability::Partial,
             })
@@ -304,7 +304,7 @@ pub fn build_scheduled_task_action_command(
             let task_args = windows_scheduled_task_args(&id)?;
             Ok(ScheduledTaskActionCommand {
                 command: format!(
-                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Disable-ScheduledTask {task_args}\""
+                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;Disable-ScheduledTask {task_args}\""
                 ),
                 capability: ScheduledTaskCapability::Partial,
             })
@@ -324,7 +324,7 @@ pub fn build_scheduled_task_action_command(
 pub fn build_scheduled_task_diagnostic_command(os_type: &str) -> String {
     match scheduled_task_os(os_type) {
         ScheduledTaskOs::Windows => {
-            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"Get-ScheduledTask | Format-Table -AutoSize; Get-ScheduledTaskInfo -TaskName * | Format-Table -AutoSize\"".to_string()
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;Get-ScheduledTask | Format-Table -AutoSize; Get-ScheduledTaskInfo -TaskName * | Format-Table -AutoSize\"".to_string()
         }
         ScheduledTaskOs::MacOs => "launchctl list; find ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons -maxdepth 1 -name '*.plist' -print 2>/dev/null".to_string(),
         ScheduledTaskOs::Bsd => "crontab -l 2>/dev/null; cat /etc/crontab 2>/dev/null; find /etc/cron.d /etc/periodic -maxdepth 2 -type f -print 2>/dev/null".to_string(),
@@ -449,6 +449,38 @@ pub fn scheduled_task_capture_snapshot(
     }
 }
 
+/// Filters worth offering for one snapshot: the source chips only appear for
+/// sources the host actually reports, so a Windows host does not advertise
+/// cron or systemd timers and a Linux host does not advertise Task Scheduler.
+pub fn scheduled_task_filter_options(
+    entries: &[ResourceScheduledTask],
+) -> Vec<ScheduledTaskFilter> {
+    let has_source = |sources: &[&str]| {
+        entries
+            .iter()
+            .any(|entry| sources.contains(&entry.source.as_str()))
+    };
+    let mut options = vec![
+        ScheduledTaskFilter::All,
+        ScheduledTaskFilter::Enabled,
+        ScheduledTaskFilter::Disabled,
+    ];
+    if has_source(&["systemd"]) {
+        options.push(ScheduledTaskFilter::Systemd);
+    }
+    if has_source(&["cron", "anacron"]) {
+        options.push(ScheduledTaskFilter::Cron);
+    }
+    if has_source(&["launchd"]) {
+        options.push(ScheduledTaskFilter::Launchd);
+    }
+    if has_source(&["windows", "task_scheduler"]) {
+        options.push(ScheduledTaskFilter::Windows);
+    }
+    options.push(ScheduledTaskFilter::Failed);
+    options
+}
+
 pub fn visible_scheduled_task_rows(
     entries: &[ResourceScheduledTask],
     query: &str,
@@ -568,7 +600,7 @@ fn build_bsd_scheduled_task_snapshot_command() -> String {
 
 fn build_windows_scheduled_task_snapshot_command() -> String {
     concat!(
-        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;",
         "Write-Output '===SCHEDULED_TASKS===';",
         "Write-Output ('__OXIDE_SCHEDULE_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_task_scheduler');",
         "try{",

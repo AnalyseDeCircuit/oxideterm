@@ -169,6 +169,7 @@ impl LocalPtySession {
                 working_directory,
                 drain_on_exit: true,
                 env: launch.env,
+                env_remove: local_config.remove_env.clone(),
                 #[cfg(target_os = "windows")]
                 escape_args: shell.id.starts_with("wsl"),
             },

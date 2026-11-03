@@ -74,6 +74,7 @@ pub enum PackageFilter {
     Yum,
     Pacman,
     Brew,
+    Winget,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -108,13 +109,86 @@ pub fn build_package_snapshot_command(os_type: &str) -> PackageCaptureCommand {
         ),
         PackageOs::Windows => (
             build_windows_package_snapshot_command(),
-            PackageCommandCapability::Unknown,
+            PackageCommandCapability::Partial,
         ),
     };
     PackageCaptureCommand {
         command,
         capability,
     }
+}
+
+/// Rejects an identifier a shell would interpret, then double-quotes it.
+///
+/// The line reaches cmd.exe, PowerShell, or a POSIX shell, and double quotes do
+/// not stop `$(...)`, backticks, or `%VAR%` expansion. Winget identifiers are
+/// restricted to the characters below, so anything else is refused instead of
+/// escaped: a host reporting a package id such as `Acme.$(notepad)` must not be
+/// able to run a command when the user upgrades or uninstalls that package.
+fn winget_argument(value: &str) -> Result<String, String> {
+    let allowed = |ch: char| {
+        ch.is_ascii_alphanumeric()
+            || matches!(ch, '.' | '-' | '_' | '+' | '\\' | '{' | '}' | '@' | '/')
+    };
+    if value.is_empty() || !value.chars().all(allowed) {
+        return Err("Package id contains characters a shell would interpret.".to_string());
+    }
+    Ok(format!("\"{value}\""))
+}
+
+/// Builds the command a terminal runs to upgrade one package in place.
+///
+/// Only managers whose upgrade verb is unambiguous are covered; the UI only
+/// offers the action for the same set.
+pub fn build_package_upgrade_command(
+    os_type: &str,
+    manager: &str,
+    package_id: &str,
+) -> Result<PackageInspectCommand, String> {
+    let package_id = package_id.trim();
+    if package_id.is_empty() {
+        return Err("Package id is empty.".to_string());
+    }
+    let (command, capability) = match (package_os(os_type), manager.trim()) {
+        (PackageOs::Windows, "winget") => (
+            format!(
+                "winget upgrade --id {} --accept-source-agreements --accept-package-agreements --disable-interactivity",
+                winget_argument(package_id)?
+            ),
+            PackageCommandCapability::Partial,
+        ),
+        (_, manager) => return Err(format!("Upgrading through {manager} is not supported.")),
+    };
+    Ok(PackageInspectCommand {
+        command,
+        capability,
+    })
+}
+
+/// Builds the uninstall command for packages the manager can remove by id.
+pub fn build_package_uninstall_command(
+    os_type: &str,
+    manager: &str,
+    package_id: &str,
+) -> Result<PackageInspectCommand, String> {
+    let package_id = package_id.trim();
+    if package_id.is_empty() {
+        return Err("Package id is empty.".to_string());
+    }
+    let (command, capability) = match (package_os(os_type), manager.trim()) {
+        (PackageOs::Windows, "winget") => (
+            format!(
+                "winget uninstall --id {} --accept-source-agreements --disable-interactivity",
+                winget_argument(package_id)?
+            ),
+            PackageCommandCapability::Partial,
+        ),
+        (_, manager) => return Err(format!("Uninstalling through {manager} is not supported.")),
+    };
+    Ok(PackageInspectCommand {
+        command,
+        capability,
+    })
 }
 
 pub fn build_package_inspect_command(
@@ -148,6 +222,13 @@ pub fn build_package_inspect_command(
             format!("pacman -Qi {quoted}"),
             PackageCommandCapability::Partial,
         ),
+        (PackageOs::Windows, "winget") => (
+            format!(
+                "winget show {} --accept-source-agreements",
+                winget_argument(package_name)?
+            ),
+            PackageCommandCapability::Partial,
+        ),
         _ => {
             return Err(format!(
                 "Package inspection is not supported for manager '{}'.",
@@ -163,7 +244,19 @@ pub fn build_package_inspect_command(
 
 pub fn parse_package_snapshot(output: &str) -> ResourcePackageSnapshot {
     let Some(section) = extract_section(output, "PACKAGES") else {
-        return ResourcePackageSnapshot::default();
+        // Distinguish "no Packages section at all" from "the section was cut
+        // off": only the latter has a start marker without its end marker.
+        return if output.contains("===PACKAGES===") {
+            ResourcePackageSnapshot {
+                status: ResourcePackageStatus::Error {
+                    message: "Package output was truncated.".to_string(),
+                },
+                managers: Vec::new(),
+                entries: Vec::new(),
+            }
+        } else {
+            ResourcePackageSnapshot::default()
+        };
     };
 
     let mut entries = Vec::new();
@@ -258,7 +351,59 @@ pub fn package_filter_label_key(filter: PackageFilter) -> &'static str {
         PackageFilter::Yum => "sidebar.host_packages.filters.yum",
         PackageFilter::Pacman => "sidebar.host_packages.filters.pacman",
         PackageFilter::Brew => "sidebar.host_packages.filters.brew",
+        PackageFilter::Winget => "sidebar.host_packages.filters.winget",
     }
+}
+
+/// The package manager a manager-specific filter selects, if any.
+pub fn package_filter_manager(filter: PackageFilter) -> Option<&'static str> {
+    match filter {
+        PackageFilter::Apt => Some("apt"),
+        PackageFilter::Dnf => Some("dnf"),
+        PackageFilter::Yum => Some("yum"),
+        PackageFilter::Pacman => Some("pacman"),
+        PackageFilter::Brew => Some("brew"),
+        PackageFilter::Winget => Some("winget"),
+        PackageFilter::All
+        | PackageFilter::Upgradable
+        | PackageFilter::Installed
+        | PackageFilter::Services => None,
+    }
+}
+
+/// The manager filter for a manager name reported by a snapshot.
+pub fn package_filter_for_manager(manager: &str) -> Option<PackageFilter> {
+    let manager = manager.trim();
+    [
+        PackageFilter::Apt,
+        PackageFilter::Dnf,
+        PackageFilter::Yum,
+        PackageFilter::Pacman,
+        PackageFilter::Brew,
+        PackageFilter::Winget,
+    ]
+    .into_iter()
+    .find(|filter| package_filter_manager(*filter) == Some(manager))
+}
+
+/// Base filters are always offered; manager filters follow the managers the
+/// selected host reports, so a Linux host never shows `winget` and a Windows
+/// host never shows `apt`.
+pub fn package_filter_options(managers: &[ResourcePackageManager]) -> Vec<PackageFilter> {
+    let mut filters = vec![
+        PackageFilter::All,
+        PackageFilter::Upgradable,
+        PackageFilter::Installed,
+        PackageFilter::Services,
+    ];
+    for manager in managers {
+        if let Some(filter) = package_filter_for_manager(&manager.name)
+            && !filters.contains(&filter)
+        {
+            filters.push(filter);
+        }
+    }
+    filters
 }
 
 pub fn package_status_label_key(status: &str) -> &'static str {
@@ -283,7 +428,12 @@ fn build_linux_package_snapshot_command() -> String {
         "fi; ",
         "oxide_rpm_manager=''; if command -v dnf >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1; then oxide_rpm_manager='dnf'; elif command -v yum >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1; then oxide_rpm_manager='yum'; fi; ",
         "if [ -n \"$oxide_rpm_manager\" ]; then oxide_pkg_any=1; printf 'MANAGER\\t%s\\ttrue\\trpm\\n' \"$oxide_rpm_manager\"; ",
-        "$oxide_rpm_manager --cacheonly check-update -q 2>/dev/null | awk -v manager=\"$oxide_rpm_manager\" 'NF>=3 && $1 !~ /^(Last|Obsoleting|Security:)/ { arch=$1; sub(/^.*\\./,\"\",arch); name=$1; sub(\"\\\\.\" arch \"$\",\"\",name); printf \"ROW\\t%s\\t%s\\t\\t%s\\t%s\\t%s\\tupgradable\\t\\t\\t\\t%s\\n\", name, manager, $2, arch, $3, manager }'; ",
+        "oxide_rpm_out=$($oxide_rpm_manager --cacheonly check-update -q 2>&1); oxide_rpm_status=$?; ",
+        // dnf4 exits 100 when updates are listed and dnf5 exits 0; any other
+        // status is a real failure (for example an empty cache-only metadata
+        // store) that must reach the UI instead of looking like zero packages.
+        "if [ \"$oxide_rpm_status\" -eq 0 ] || [ \"$oxide_rpm_status\" -eq 100 ]; then printf '%s\\n' \"$oxide_rpm_out\" | awk -v manager=\"$oxide_rpm_manager\" 'NF>=3 && $1 !~ /^(Last|Obsoleting|Security:)/ { arch=$1; sub(/^.*\\./,\"\",arch); name=$1; sub(\"\\\\.\" arch \"$\",\"\",name); printf \"ROW\\t%s\\t%s\\t\\t%s\\t%s\\t%s\\tupgradable\\t\\t\\t\\t%s\\n\", name, manager, $2, arch, $3, manager }'; ",
+        "else printf '__OXIDE_PACKAGE_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_rpm_out\" | head -n 1 | tr '\\t' ' ')\"; fi; ",
         "fi; ",
         "if command -v pacman >/dev/null 2>&1; then oxide_pkg_any=1; echo 'MANAGER\tpacman\ttrue\tpacman'; ",
         "pacman -Qu 2>/dev/null | awk 'NF>=4 { printf \"ROW\\t%s\\tpacman\\t%s\\t%s\\t\\t\\tupgradable\\t\\t\\t\\tpacman\\n\", $1, $2, $4 }'; ",
@@ -325,11 +475,41 @@ fn build_bsd_package_snapshot_command() -> String {
 }
 
 fn build_windows_package_snapshot_command() -> String {
+    // `winget list` prints a localized fixed-width table with no JSON output.
+    // The separator is one dash run, so column starts come from the header
+    // labels, measured in display columns: winget pads CJK names by glyph
+    // width, and slicing by .NET character index would split the next column.
     concat!(
         "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;",
         "Write-Output '===PACKAGES===';",
-        "Write-Output ('__OXIDE_PACKAGE_CAPABILITY__'+[char]9+'unknown'+[char]9+'windows_unsupported');",
-        "Write-Output '__OXIDE_PACKAGE_UNAVAILABLE__';",
+        "function Oxide-W([int]$c){if(($c -ge 0x1100 -and $c -le 0x115F) -or ($c -ge 0x2E80 -and $c -le 0x303E) -or ($c -ge 0x3041 -and $c -le 0x33FF) -or ($c -ge 0x3400 -and $c -le 0x4DBF) -or ($c -ge 0x4E00 -and $c -le 0x9FFF) -or ($c -ge 0xA000 -and $c -le 0xA4CF) -or ($c -ge 0xAC00 -and $c -le 0xD7A3) -or ($c -ge 0xF900 -and $c -le 0xFAFF) -or ($c -ge 0xFE30 -and $c -le 0xFE4F) -or ($c -ge 0xFF00 -and $c -le 0xFF60) -or ($c -ge 0xFFE0 -and $c -le 0xFFE6)){2}else{1}};",
+        "function Oxide-S([string]$s,[int]$a,[int]$w){$p=0;$o='';foreach($ch in $s.ToCharArray()){$cw=Oxide-W([int]$ch);if($p -ge $a -and ($p+$cw) -le ($a+$w)){$o+=$ch};$p+=$cw;if($p -ge ($a+$w)){break}};$o.Trim()};",
+        "if(-not (Get-Command winget -ErrorAction SilentlyContinue)){Write-Output '__OXIDE_PACKAGE_UNAVAILABLE__';}else{",
+        "Write-Output ('__OXIDE_PACKAGE_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_winget');",
+        "Write-Output ('MANAGER'+[char]9+'winget'+[char]9+'true'+[char]9+'winget');",
+        "$lines=@(& winget list --accept-source-agreements --disable-interactivity 2>$null);",
+        "$sep=-1;for($i=0;$i -lt $lines.Count;$i++){if($lines[$i] -match '^-{20,}\\s*$'){$sep=$i;break}};",
+        "if($sep -gt 0){",
+        // Localized headers put single spaces inside one label (`장치 ID`), so
+        // only a gap of two or more display columns separates columns. A
+        // layout that does not yield exactly the five known columns is
+        // reported as unavailable instead of being sliced at wrong offsets.
+        "$header=$lines[$sep-1];$starts=@();$p=0;$gap=0;",
+        "foreach($ch in $header.ToCharArray()){$cw=Oxide-W([int]$ch);if($ch -eq ' '){$gap+=$cw}else{if($starts.Count -eq 0 -or $gap -ge 2){$starts+=$p};$gap=0};$p+=$cw};",
+        // winget omits the Available column when nothing is upgradable, so a
+        // four-column table still lists installed packages.
+        "if($starts.Count -eq 4 -or $starts.Count -eq 5){",
+        "$hasAvailable=$starts.Count -eq 5;",
+        "for($i=$sep+1;$i -lt $lines.Count;$i++){",
+        "$line=$lines[$i];if($line.Trim().Length -eq 0){continue};",
+        "$cells=@();",
+        "for($c=0;$c -lt $starts.Count;$c++){$a=$starts[$c];$w=if($c+1 -lt $starts.Count){$starts[$c+1]-$a}else{1000};$cells+=Oxide-S $line $a $w};",
+        "$name=$cells[0];$id=$cells[1];$version=$cells[2];$available='';if($hasAvailable -and $cells.Count -ge 4){$available=$cells[3]};",
+        "$status='installed';if($available.Length -gt 0){$status='upgradable'};",
+        "Write-Output ('ROW'+[char]9+$name+[char]9+'winget'+[char]9+$version+[char]9+$available+[char]9+''+[char]9+$id+[char]9+$status+[char]9+''+[char]9+''+[char]9+''+[char]9+'windows_winget')",
+        "}}else{Write-Output ('__OXIDE_PACKAGE_ERROR__'+[char]9+'winget_list_unavailable')}",
+        "}else{Write-Output ('__OXIDE_PACKAGE_ERROR__'+[char]9+'winget_list_unavailable')}};",
         "Write-Output '===PACKAGES_END==='",
         "\""
     )
@@ -507,6 +687,7 @@ fn package_matches_filter(entry: &ResourcePackageEntry, filter: PackageFilter) -
         PackageFilter::Yum => entry.manager == "yum",
         PackageFilter::Pacman => entry.manager == "pacman",
         PackageFilter::Brew => entry.manager == "brew",
+        PackageFilter::Winget => entry.manager == "winget",
     }
 }
 
@@ -601,15 +782,15 @@ fn clean_marker_message(message: &str, fallback: &str) -> String {
     }
 }
 
+/// Returns the section body, or `None` when the output stops before the end
+/// marker. Every generated package command prints that marker last, so a
+/// missing one means the capture was truncated or killed and the rows it did
+/// return are incomplete.
 fn extract_section<'a>(output: &'a str, name: &str) -> Option<&'a str> {
     let start = format!("==={name}===");
     let end = format!("==={name}_END===");
     let after_start = output.split_once(&start)?.1;
-    Some(
-        after_start
-            .split_once(&end)
-            .map_or(after_start, |(section, _)| section),
-    )
+    after_start.split_once(&end).map(|(section, _)| section)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -695,6 +876,23 @@ mod tests {
                     ),
                 ],
             ),
+            (
+                "windows_winget",
+                "winget",
+                concat!(
+                    "===PACKAGES===\n",
+                    "__OXIDE_PACKAGE_CAPABILITY__\tpartial\twindows_winget\n",
+                    "MANAGER\twinget\ttrue\twinget\n",
+                    "ROW\tCMake\twinget\t4.4.4\t\t\tKitware.CMake\tinstalled\t\t\t\twindows_winget\n",
+                    "ROW\tPowerShell\twinget\t7.6.8.0\t7.6.9.0\t\tMicrosoft.PowerShell\tupgradable\t\t\t\twindows_winget\n",
+                    "===PACKAGES_END===\n"
+                ),
+                vec![
+                    ("PowerShell", "upgradable", "7.6.9.0", "", vec![]),
+                    ("CMake", "installed", "", "", vec![]),
+                ],
+                vec![("powershell", PackageFilter::Winget, vec!["PowerShell"])],
+            ),
         ] {
             let snapshot = parse_package_snapshot(output);
             assert_eq!(
@@ -742,6 +940,90 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn rpm_check_update_failures_are_reported_instead_of_zero_rows() {
+        let command = build_package_snapshot_command("Linux");
+        let fixture = "dnf() { \
+            if [ \"$DNF_MODE\" = updates ]; then \
+            printf '%s\\n' 'Last metadata expiration check: 0:00:01 ago' \
+            'kernel.x86_64 5.14.0-427.el9 rhel9-baseos'; return 100; fi; \
+            if [ \"$DNF_MODE\" = empty ]; then return 0; fi; \
+            echo 'Cache-only enabled but no cache for repo baseos' >&2; return 1; \
+        }; ";
+        let run = |mode: &str| {
+            let output = std::process::Command::new("sh")
+                .args(["-c", &format!("{fixture}{}", command.command)])
+                .env("DNF_MODE", mode)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            parse_package_snapshot(&String::from_utf8(output.stdout).unwrap())
+        };
+
+        let updates = run("updates");
+        assert!(matches!(
+            updates.status,
+            ResourcePackageStatus::Available { .. }
+        ));
+        // The generated command also probes the host's real apt/pacman, so
+        // only the fixture's dnf rows are asserted.
+        fn dnf_rows(snapshot: &ResourcePackageSnapshot) -> Vec<(&str, &str, &str, &str, &str)> {
+            snapshot
+                .entries
+                .iter()
+                .filter(|entry| entry.manager == "dnf")
+                .map(|entry| {
+                    (
+                        entry.name.as_str(),
+                        entry.candidate_version.as_str(),
+                        entry.arch.as_str(),
+                        entry.repository.as_str(),
+                        entry.status.as_str(),
+                    )
+                })
+                .collect()
+        }
+        assert_eq!(
+            dnf_rows(&updates),
+            [(
+                "kernel",
+                "5.14.0-427.el9",
+                "x86_64",
+                "rhel9-baseos",
+                "upgradable"
+            )]
+        );
+
+        let empty = run("empty");
+        assert!(matches!(
+            empty.status,
+            ResourcePackageStatus::Available { .. }
+        ));
+        assert_eq!(
+            empty
+                .managers
+                .iter()
+                .filter(|manager| manager.name == "dnf")
+                .map(|manager| manager.name.as_str())
+                .collect::<Vec<_>>(),
+            ["dnf"]
+        );
+        assert!(dnf_rows(&empty).is_empty());
+
+        let failed = run("failed");
+        assert_eq!(
+            failed.status,
+            ResourcePackageStatus::Error {
+                message: "Cache-only enabled but no cache for repo baseos".to_string()
+            }
+        );
+    }
+
     #[test]
     fn package_commands_keep_managers_read_only() {
         let linux = build_package_snapshot_command("Linux");
@@ -764,16 +1046,111 @@ mod tests {
         assert!(!mac.command.contains("brew update"));
         assert!(bsd.command.contains("pkg version -v"));
         assert!(!bsd.command.contains("pkg query"));
-        assert!(windows.command.contains("__OXIDE_PACKAGE_UNAVAILABLE__"));
+        assert!(windows.command.contains("winget list"));
+        assert!(!windows.command.contains("winget upgrade"));
+        assert!(!windows.command.contains("winget uninstall"));
+        assert!(!windows.command.contains("winget install"));
+    }
+
+    #[test]
+    fn package_filter_options_follow_reported_managers() {
+        let managers = |names: &[&str]| {
+            names
+                .iter()
+                .map(|name| ResourcePackageManager {
+                    name: (*name).to_string(),
+                    available: true,
+                    source: (*name).to_string(),
+                })
+                .collect::<Vec<_>>()
+        };
+        let base = vec![
+            PackageFilter::All,
+            PackageFilter::Upgradable,
+            PackageFilter::Installed,
+            PackageFilter::Services,
+        ];
+        assert_eq!(package_filter_options(&managers(&[])), base);
+        assert_eq!(
+            package_filter_options(&managers(&["apt", "winget"])),
+            [
+                base.clone(),
+                vec![PackageFilter::Apt, PackageFilter::Winget]
+            ]
+            .concat()
+        );
+        assert_eq!(
+            package_filter_options(&managers(&["brew"])),
+            [base, vec![PackageFilter::Brew]].concat()
+        );
+    }
+
+    #[test]
+    fn truncated_package_output_is_reported_instead_of_half_a_list() {
+        let truncated = "===PACKAGES===\nROW\tApp\twinget\t1.0\t\t\tAcme.App\tinstalled\n";
+        let snapshot = parse_package_snapshot(truncated);
+
+        assert!(matches!(
+            snapshot.status,
+            ResourcePackageStatus::Error { .. }
+        ));
+        assert!(snapshot.entries.is_empty());
+        // Output with no Packages section at all stays "no data", not an error.
+        assert!(matches!(
+            parse_package_snapshot("something else").status,
+            ResourcePackageStatus::Unknown
+        ));
+    }
+
+    #[test]
+    fn uninstall_commands_are_id_bound_and_winget_only() {
+        let winget =
+            build_package_uninstall_command("Windows", "winget", "Microsoft.PowerShell").unwrap();
+
+        assert_eq!(
+            winget.command,
+            "winget uninstall --id \"Microsoft.PowerShell\" --accept-source-agreements --disable-interactivity"
+        );
+        assert_eq!(winget.capability, PackageCommandCapability::Partial);
+        assert!(build_package_uninstall_command("Windows", "winget", "bad\"name").is_err());
+        // Double quotes do not stop expansion, so shell syntax is refused.
+        for hostile in [
+            "Acme.$(notepad)",
+            "Acme.`whoami`",
+            "Acme.%PATH%",
+            "Acme.; rm -rf /",
+        ] {
+            assert!(
+                build_package_upgrade_command("Windows", "winget", hostile).is_err(),
+                "{hostile}"
+            );
+            assert!(
+                build_package_uninstall_command("Windows", "winget", hostile).is_err(),
+                "{hostile}"
+            );
+            assert!(
+                build_package_inspect_command("Windows", "winget", hostile).is_err(),
+                "{hostile}"
+            );
+        }
+        assert!(build_package_uninstall_command("Windows", "winget", " ").is_err());
+        assert!(build_package_uninstall_command("Linux", "apt", "curl").is_err());
     }
 
     #[test]
     fn inspect_commands_quote_package_names() {
         let apt = build_package_inspect_command("Linux", "apt", "weird'name").unwrap();
         let brew = build_package_inspect_command("macOS", "brew", "openssl@3").unwrap();
+        let winget =
+            build_package_inspect_command("Windows", "winget", "Microsoft.PowerShell").unwrap();
 
         assert!(apt.command.contains("'weird'\"'\"'name'"));
         assert!(brew.command.contains("HOMEBREW_NO_AUTO_UPDATE=1 brew info"));
+        assert_eq!(
+            winget.command,
+            "winget show \"Microsoft.PowerShell\" --accept-source-agreements"
+        );
+        assert!(build_package_inspect_command("Windows", "winget", "bad\"name").is_err());
         assert!(build_package_inspect_command("Linux", "apt", " ").is_err());
     }
 }

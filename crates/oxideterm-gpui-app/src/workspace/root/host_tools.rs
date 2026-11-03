@@ -1,5 +1,16 @@
 use super::super::*;
-use crate::workspace::connection_monitor::{HostToolsNotice, ScheduleActionNoticeKind};
+use crate::workspace::connection_monitor::{
+    HostToolsNotice, LOCAL_HOST_CONNECTION_ID, ScheduleActionNoticeKind,
+};
+
+/// Pane identity herdr exports into every process of a managed pane.
+const HERDR_PANE_ENV_VARS: [&str; 5] = [
+    "HERDR_ENV",
+    "HERDR_PANE_ID",
+    "HERDR_TAB_ID",
+    "HERDR_WORKSPACE_ID",
+    "HERDR_SOCKET_PATH",
+];
 
 impl WorkspaceApp {
     /// Handles the one-shot window work that must remain with workspace-owned nodes and tabs.
@@ -20,6 +31,18 @@ impl WorkspaceApp {
                 opened_notice,
                 missing_notice,
             } => {
+                if connection_id == LOCAL_HOST_CONNECTION_ID {
+                    self.open_local_host_tool_terminal(
+                        &command,
+                        title,
+                        opened_notice,
+                        missing_notice,
+                        window,
+                        cx,
+                    );
+                    cx.notify();
+                    return;
+                }
                 let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
                     self.push_host_tools_window_notice(
                         missing_notice,
@@ -86,6 +109,54 @@ impl WorkspaceApp {
             HostToolsWindowIntent::SetMonitoringEnabled { tool, enabled } => {
                 self.set_host_tool_monitoring_enabled(tool, enabled, cx);
             }
+        }
+    }
+
+    /// Runs a Host Tools attach line in a fresh local terminal tab. The PTY is
+    /// spawned with the tab, so the line queues immediately and executes once
+    /// the shell starts.
+    fn open_local_host_tool_terminal(
+        &mut self,
+        command: &str,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut config = self.local_terminal_config();
+        // Herdr exports its pane identity into every process of a managed
+        // pane. A terminal created here is not that pane, and carrying the
+        // outer identity makes herdr reject the attach as a nested launch.
+        config.remove_env = HERDR_PANE_ENV_VARS
+            .iter()
+            .map(|name| (*name).to_string())
+            .collect();
+        let opened =
+            match self.create_local_terminal_tab_with_owned_session(config, title, window, cx) {
+                Ok((_session_id, session)) => {
+                    let mut line = command
+                        .trim_end_matches(['\r', '\n'])
+                        .replace("\r\n", "\r")
+                        .replace('\n', "\r");
+                    line.push('\r');
+                    if session.lock().write_text(&line).is_ok() {
+                        true
+                    } else {
+                        // Creation selects the new tab, so this is the one that
+                        // would otherwise stay behind as an empty shell.
+                        if let Some(tab_id) = self.active_tab_id(cx) {
+                            self.close_tab_by_id(tab_id, window, cx);
+                        }
+                        false
+                    }
+                }
+                Err(_) => false,
+            };
+        if opened {
+            self.push_host_tools_window_notice(opened_notice, TerminalNoticeVariant::Success, cx);
+        } else {
+            self.push_host_tools_window_notice(missing_notice, TerminalNoticeVariant::Error, cx);
         }
     }
 
@@ -376,6 +447,13 @@ impl WorkspaceApp {
                 ),
                 TerminalNoticeVariant::Error,
             ),
+            HostToolsNotice::PortKillCommandCopied { command } => (
+                self.i18n_replace(
+                    "sidebar.host_ports.toast.kill_command_copied",
+                    &[("command", command)],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
             HostToolsNotice::PortEndpointCopied { endpoint } => (
                 self.i18n_replace(
                     "sidebar.host_ports.toast.copied_endpoint",
@@ -479,6 +557,27 @@ impl WorkspaceApp {
                     &[("name", package_name)],
                 ),
                 TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::PackageIdCopied { package_id } => (
+                self.i18n_replace(
+                    "sidebar.host_packages.toast.copied_id",
+                    &[("id", package_id)],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
+            HostToolsNotice::PackageUninstallUnsupported { manager } => (
+                self.i18n_replace(
+                    "sidebar.host_packages.toast.uninstall_unsupported",
+                    &[("manager", manager)],
+                ),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::PackageUpgradeUnsupported { manager } => (
+                self.i18n_replace(
+                    "sidebar.host_packages.toast.upgrade_unsupported",
+                    &[("manager", manager)],
+                ),
+                TerminalNoticeVariant::Error,
             ),
             HostToolsNotice::ScheduleSnapshotAlreadyRunning => (
                 self.i18n

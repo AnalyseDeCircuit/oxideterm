@@ -8,6 +8,8 @@ pub(super) struct LocalTerminalInstance {
     pub(super) title: String,
     pub(super) shell: Option<oxideterm_terminal::ShellInfo>,
     pub(super) cwd: Option<std::path::PathBuf>,
+    /// Names only, never values: a split must keep the same launch identity.
+    pub(super) remove_env: Vec<String>,
 }
 
 impl LocalTerminalInstance {
@@ -18,6 +20,7 @@ impl LocalTerminalInstance {
             title,
             shell: config.shell.clone(),
             cwd: config.cwd.clone(),
+            remove_env: config.remove_env.clone(),
         }
     }
 }

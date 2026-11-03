@@ -106,6 +106,9 @@ pub(super) fn host_tools_center_state(
 }
 
 pub(super) fn monitor_connection_label(connection: &MonitorConnectionOption) -> String {
+    if let Some(label) = connection.label.as_ref() {
+        return label.clone();
+    }
     format!(
         "{}@{}:{}",
         connection.username, connection.host, connection.port

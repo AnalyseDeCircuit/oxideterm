@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::shell::shell_quote;
+use crate::shell::{shell_quote, windows_encoded_command};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -341,8 +341,9 @@ fn build_windows_log_snapshot_command(preset: LogPreset, limit: usize) -> String
 }
 
 fn build_windows_log_follow_command(preset: LogPreset) -> String {
-    let script = windows_log_script(preset, 100, true);
-    format!("powershell -NoProfile -ExecutionPolicy Bypass -Command \"{script}\"")
+    // The follow line is typed into a terminal, so it must survive whatever
+    // shell the user runs locally.
+    windows_encoded_command(&windows_log_script(preset, 100, true))
 }
 
 fn windows_log_script(preset: LogPreset, limit: usize, follow: bool) -> String {
@@ -381,7 +382,10 @@ fn windows_log_script(preset: LogPreset, limit: usize, follow: bool) -> String {
         )
     };
     format!(
-        "Write-Output '===HOST_LOGS===';Write-Output ('__OXIDE_LOG_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_powershell');{body}Write-Output '===HOST_LOGS_END===';"
+        // PowerShell 5.1 writes redirected output in the console OEM code page
+        // (936 on Chinese Windows), but the capture decodes UTF-8. Force UTF-8
+        // before any event text reaches stdout or the follow terminal.
+        "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;Write-Output '===HOST_LOGS===';Write-Output ('__OXIDE_LOG_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_powershell');{body}Write-Output '===HOST_LOGS_END===';"
     )
 }
 
