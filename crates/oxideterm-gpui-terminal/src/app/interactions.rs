@@ -3594,12 +3594,12 @@ mod tests {
     #[cfg(unix)]
     use oxideterm_terminal::{
         GraphicsOptions, LocalPtyConfig, ShellInfo, TerminalEditorClipboardOperation,
-        TerminalEncoding, TerminalEvent, TerminalSession, VIM_FREE_TYPE_INTEGRATION_SOURCE,
+        TerminalEncoding, TerminalSession, VIM_FREE_TYPE_INTEGRATION_SOURCE,
     };
     use oxideterm_terminal::{TerminalAttrs, TerminalCell, TerminalColor, TerminalCursorShape};
     use oxideterm_terminal::{
         TerminalEditorApplication, TerminalEditorCapabilities, TerminalEditorIntegrationEvent,
-        TerminalEditorMode, TerminalEditorSelection,
+        TerminalEditorMode, TerminalEditorSelection, TerminalEvent,
     };
 
     struct TerminalScrollTestRoot;

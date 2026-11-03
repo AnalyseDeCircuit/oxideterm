@@ -26,6 +26,481 @@ Use the same fixture size, warm-up count, measured-run count, terminal dimension
 
 ## In-App Performance Work
 
+### Incremental Terminal Drawing (2026-11-03)
+
+Four shared Rust improvements are retained on top of the decoration/color
+changes below, after withdrawal of the architecture-specific ASCII experiment:
+
+- Changed rows reuse an unchanged run's shaping and glyph cache only when its
+  column, cell width, text and complete style match. Font size, cell width and line
+  height changes invalidate reuse. A bounded row-ID-to-key index references the
+  existing row cache; it does not separately retain old text or glyph resources.
+- Glyphs with zero vertical shaping offsets share the renderer's existing integer
+  raster baseline (`SUBPIXEL_VARIANTS_Y == 1`). Anchoring their cached batch at
+  that baseline removes unnecessary rebuilds during fractional vertical scrolling
+  and row movement, without changing rasterized glyph coordinates. Other layouts
+  retain exact device-phase invalidation. Horizontal positioning is unchanged.
+- Semantic roles are cached by absolute logical-line range and active-input state.
+  A weak reference versions the immutable command-mark snapshot without extending
+  command-text lifetimes. Mark changes invalidate the classifications.
+- Blank cells no longer compute unused foreground colors, and theme-default
+  backgrounds reuse the already converted color. Selection, explicit backgrounds,
+  wide-cell spacers, combining marks and cursors keep their existing handling.
+
+Environment: Windows x64, i9-13900HX, Rust 1.97.0, optimized bench profile, native
+DirectWrite fonts in headless windows. No new OS/CPU-specific production branches
+or dependencies were introduced. Initial paired measurements used 20 samples,
+1 s warmup and 3 s measurement. The table compares printed elapsed-time point
+estimates; Criterion's separate change test uses its sample statistics.
+
+| Workload | Before (µs) | After (µs) | Point-estimate change |
+| --- | ---: | ---: | ---: |
+| Long-row suffix editing | 137.12 | 105.85 | -22.8% |
+| Selection dragged across populated rows | 665.29 | 635.86 | -4.4% |
+| Fractional-pixel history scrolling | 312.32 | 245.58 | -21.4% |
+| Sparse viewport rewritten every frame | 1,483.90 | 1,318.00 | -11.2% |
+| 2,000-command history, unchanged redraw | 366.58 | 341.92 | -6.7%, not statistically significant |
+| 2,000-command history, streaming | 1,439.70 | 1,092.40 | -24.1% |
+| Plain streaming text | 1,110.70 | 758.04 | -31.8% |
+| Mixed Unicode streaming | 1,139.10 | 814.33 | -28.5% |
+| Unchanged ordinary text | 206.39 | 205.78 | -0.3%, not statistically significant |
+
+Input scene-construction P50 fell from 38 to 12 µs, scrolling from 105 to 60 µs,
+and sparse-row layout from 422 to 315 µs. Unchanged semantic-role lookup P50 fell
+from 14 to 4 µs; invalidated roles in continuously streaming output instead cost
+9 to 10 µs. This small miss overhead is a tradeoff, not a claim that every semantic
+operation becomes faster. The semantic history fixtures include occasional costly
+highlight rebuilds; the unchanged whole-frame comparison was not significant.
+Selection draw P95/P99 was 0.806/1.009 ms before and 0.818/1.027 ms after, so the
+mean reduction does not establish improved selection tail latency. Scrolling draw
+P95/P99 changed from 0.602/0.849 to 0.569/0.734 ms.
+
+A separate sequential run of the saved baseline and candidate executables used
+30 samples and 4 s measurement for both history workloads and the plain/Unicode
+controls. Plain output measured 1,108.20 to 773.17 µs (-30.2% by printed estimate),
+and Unicode 1,132.90 to 824.00 µs (-27.3%). Streaming command history measured
+1,495.20 to 1,123.70 µs (-24.8%). All three passed Criterion's change test.
+Unchanged command history measured 363.99 to 354.76 µs, still not significant;
+its role-lookup P50 again changed from 14 to 4 µs. The role cache is retained for
+this reproducible stage reduction, not for an established whole-frame speedup.
+No compiler, formatter or test run overlapped either measurement sequence.
+
+The new fixtures use more distinct text revisions than the row-cache capacity,
+actual selection updates and precise-pixel scroll events, and settled viewport
+dimensions. They use synthetic text only. Run the paired workload with:
+
+```sh
+cargo bench --locked -p oxideterm-gpui-terminal --features bench --bench terminal_render -- 'terminal_incremental_|terminal_internal_(plain|unicode|warm)$' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 3 --save-baseline before-incremental-render
+# After changing the implementation:
+cargo bench --locked -p oxideterm-gpui-terminal --features bench --bench terminal_render -- 'terminal_incremental_|terminal_internal_(plain|unicode|warm)$' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 3 --baseline before-incremental-render
+```
+
+Validation: 494 GPUI and 221 terminal-view unit tests passed; four existing ignored
+tests remain unrun. The explicitly run Windows native-font integration test also
+passed. It now compares cached/reference draw commands at six vertical offsets
+and five scales, including an offset glyph that must use the fallback path, and
+checks atlas lookup reuse. New terminal regressions cover changed text/style,
+selection refresh, all three layout metrics, resource release, command-mark
+replacement, viewport movement and active-input changes. Formatting and diff
+whitespace checks passed. These measurements cover CPU layout and scene building,
+not GPU presentation, input-to-display latency, or macOS/Linux runtime performance.
+The existing tracked allocator also adds instrumentation cost.
+
+Raw source snapshots, paired executables, logs, `comparison.json` and
+`confirm-comparison.json` are under
+`target/incremental-render-evaluation/`. No application window was launched for
+these checks.
+
+### Cached Decorations And Prepared Colors (2026-11-03)
+
+Both changes are retained in the shared Rust renderer; there are no new CPU- or
+OS-specific production branches. A nonempty, single full-line decoration run now
+uses the existing glyph batch cache and paints its underline/strikethrough as live
+primitives. The original nested layer, clipping, pixel snapping, zero-advance
+fallback and style/opacity behavior are preserved. Partial/multiple decoration
+runs keep the general painter. No separate decoration geometry cache was added.
+
+Prepared monochrome/subpixel glyphs now hold `SceneHsla`. Hue normalization happens
+once when a decoration color is selected during batch preparation, while replay
+still applies the current clamped opacity. Rebuilding a device-phase-dependent
+batch reuses its boxed cache entry and reserves glyph capacity by channel before
+filling the vectors. These preparation changes removed the initial candidate's
+roughly 3% regression in continuously changing styled output.
+
+The existing native-font terminal fixtures were rebuilt for the baseline after
+withdrawal of the x64 ASCII scanner. Baseline and final binaries used the same
+Windows x64 / i9-13900HX / Rust 1.97.0 / optimized profile and warmed fixtures.
+The confirmation used 30 samples, 1 s warmup and 4 s measurement per case. Printed
+elapsed-time estimates (not GPU presentation or input-to-display latency):
+
+| Workload | Before (µs) | Final (µs) | Estimate change |
+| --- | ---: | ---: | ---: |
+| Plain streaming text | 1,297.10 | 1,144.80 | -11.7% |
+| Styled streaming text | 1,071.60 | 1,028.70 | -4.0% |
+| Mixed Unicode streaming | 1,221.00 | 1,195.70 | -2.1%, not statistically significant |
+| Unchanged text | 207.68 | 200.60 | -3.4% |
+| Unchanged underline + strikethrough | 639.85 | 320.75 | -49.9% |
+| Identical unchanged text without decorations | 220.00 | 215.64 | -2.0% |
+
+For decorated static text, all-observed draw P95/P99 changed from
+0.769/1.289 ms to 0.393/0.500 ms. Mixed Unicode had a noisier full-suite P99
+(1.626 to 2.439 ms), so it was checked again with just that case and no concurrent
+build or formatter. The isolated repeat measured 1.260 to 1.139 ms, with draw
+P95/P99 changing from 1.501/1.925 ms to 1.319/1.625 ms. The earlier tail increase
+did not reproduce; no universal Unicode tail-latency improvement is claimed.
+Stage histograms include calibration/warmup. The terminal benchmark's existing
+tracked allocator adds instrumentation cost, so allocation-related gains are not
+guaranteed production percentages.
+
+The independent batch profiler isolates the prepared-color change from decoration
+painting and cache preparation. For 4,096 glyphs, monochrome expansion changed
+from 21.892 to 16.900 µs (-22.8%), and subpixel expansion from 21.455 to 17.778 µs
+(-17.1%). With half the glyphs clipped, reductions were 35.2% and 33.8% respectively.
+Polychrome controls, which do not normalize hue, stayed within approximately 1%.
+The later preparation refinements do not change this measured expansion loop.
+
+Validation on the final implementation:
+
+- GPUI: 494 tests passed; 3 manual profiling tests are ignored in the normal suite.
+- Terminal UI: 219 tests passed; the existing ConPTY test remained ignored because
+  its adjacent runtime bundle was unavailable.
+- The Windows native-font integration test was explicitly run and passed. It
+  records real draw commands with the existing headless atlas, compares cached
+  and reference glyph/stroke geometry, colors, atlas tiles and order, and checks
+  that opacity/stroke changes do not repeat atlas lookups. It covers regular and
+  bold italic text, CJK, combining marks, emoji, split foreground colors with
+  wrapped hue, clipping, and scales 1, 1.25, 1.5, 2 and 3. The recorder does not
+  claim a GPU screenshot comparison.
+- Formatting and diff whitespace checks passed. macOS/Linux runtime performance
+  and native GPU presentation were not measured on this Windows host.
+
+The native check is opt-in because it needs DirectWrite and installed fonts:
+
+```sh
+cargo test --locked --release -p gpui-pre --no-default-features --features bench,test-support --test cached_line_paint -- --ignored --test-threads=1
+```
+
+Raw comparisons and binaries are under `target/decorated-cache-evaluation/`.
+`terminal-final-comparison.json` records the final full-suite comparison;
+`glyph-comparison.json` records all 12 isolated expansion cases. Logs named
+`unicode-*-overlapping-fmt.log` are excluded because a formatter overlapped those
+measurements; `unicode-before.log` and `unicode-after.log` are the isolated repeat.
+
+### Decoration Cache And Glyph Expansion Evaluation (2026-11-03)
+
+This was the pre-implementation evaluation; the retained change above supersedes
+its proposal. At this stage only measurement infrastructure changed. The independent profiler calls the production
+`Scene::insert_prepared_glyph_batch` directly from a private, manually selected
+test module. No production profiling API or architecture-specific implementation
+was added. Run it explicitly:
+
+```sh
+cargo test --locked --release -p gpui-pre --no-default-features --features bench,test-support --lib scene::benchmarks::prepared_glyph_batch_expansion -- --ignored --nocapture --test-threads=1
+```
+
+Each case uses an existing layer, warmed vector capacity, a translated origin,
+and opacity 0.65. Inputs cover monochrome, subpixel and polychrome batches, with
+64 or 4,096 glyphs and either all visible or every second glyph outside the mask.
+Fixture checks compare the emitted tile identities and order with explicit input
+indices. Timed work includes output-vector clearing, replay-reference release,
+batch reference cloning and the real expansion function. It excludes font work,
+atlas lookup/rasterization, allocation growth, scene sorting and GPU submission.
+The 4,096-glyph case is one synthetic large batch, not an entire terminal frame.
+
+Windows x64 results on the same i9-13900HX, Rust 1.97.0 and optimized release
+profile (20 Criterion samples, 0.5 s warmup, 1 s measurement per case):
+
+| Batch type | Glyphs | All visible (µs) | Half clipped (µs) |
+| --- | ---: | ---: | ---: |
+| Monochrome | 64 | 0.329 | 0.292 |
+| Monochrome | 4,096 | 22.102 | 17.902 |
+| Subpixel | 64 | 0.333 | 0.289 |
+| Subpixel | 4,096 | 21.596 | 18.075 |
+| Polychrome | 64 | 0.226 | 0.203 |
+| Polychrome | 4,096 | 15.364 | 12.611 |
+
+The optimized test binary's actual expansion function was inspected in assembly
+and LLVM IR. Coordinate and clipping components already use vector operations
+(`fadd <2 x float>` in IR; `addps`, `subps` and packed comparisons in assembly).
+The outer glyph loops still advance one element at a time: 64-byte strides for
+monochrome/subpixel and 48-byte strides for polychrome. This is component-level
+vectorization, not widening across multiple glyphs. LLVM documents the distinction
+between [SLP and loop vectorization](https://llvm.org/docs/Vectorizers.html).
+This inspection establishes Windows x64 code generation only, not ARM64 results.
+
+Both colored monochrome/subpixel paths also perform scalar hue normalization
+(`frem` / `fmodf`) per glyph, before rejecting clipped glyphs. Pre-normalizing
+the cached color or deferring conversion until after clipping are possible
+cross-platform follow-ups; neither was implemented or assigned a speedup here.
+The batch-type timings alone cannot isolate the cost of hue normalization.
+
+The higher-priority cache proposal is to support a single full-line decoration
+run in `LineLayout::paint_cached*`: retain the existing prepared glyph batch and
+paint underline/strikethrough separately, preserving current layer ordering,
+snapping, clipping and opacity. General partial-style and wrapped paths should
+continue through the existing painter. In particular, zero-advance glyphs use
+a font-bounds fallback for line width, and decoration colors/thickness/waviness
+must remain live when the glyph cache is reused. The initial implementation need
+not introduce another geometry cache for only two line primitives.
+
+Validation: all 12 profiling cases completed; 5 scene regression tests and 3
+underline-handler geometry tests passed using the same optimized test binary.
+The manual Criterion runner is not counted as an additional correctness test.
+Raw timings, the compiler-emission wrapper and extracted function assembly/IR
+are retained under `target/glyph-evaluation/`. Bulk compiler assembly/IR dumps
+were removed after extraction. Formatting and diff whitespace checks passed.
+
+### Native Terminal Drawing On Windows (2026-11-03)
+
+The `terminal_internal_*` cases in
+[`terminal_render.rs`](../../crates/oxideterm-gpui-terminal/benches/terminal_render.rs)
+measure one terminal's row layout, native text shaping, glyph preparation and
+scene construction. They cover plain output, ANSI styles, mixed CJK/combining/RTL
+text, unchanged text, and identical unchanged text with or without underline and
+strikethrough. The streaming cases feed eight rows per update; the static cases
+invalidate the terminal without changing its contents. Window sizing settles
+before measurement and is checked again afterward.
+
+On Windows, the standard `#[gpui::bench]` macro acquires
+`current_platform(true).text_system()`, which is `NoopTextSystem`. Those results
+cannot establish native text rendering cost. The new cases explicitly acquire
+DirectWrite from the native platform and pass it to the benchmark's test windows;
+they do not open visible application windows. An empty native font list fails the
+fixture instead of silently measuring the empty backend. Other platforms keep
+their headless platform text system. Windows measurements include native shaping
+and glyph rasterization, but exclude final Direct3D submission/presentation.
+The test atlas also uses synthetic texture identities, so its reported batch
+counts must not be interpreted as production GPU draw-call counts.
+
+Workload-specific fonts and glyphs are warmed before the final fixtures begin
+measurement. This matters for styled text: the initial fixture mixed first-use
+italic/decorated text preparation into its samples and showed roughly 53 ms frame
+P99. That observation alone does not establish a sustained rendering stall.
+GPUI stage reports include Criterion calibration/warmup iterations; their P95/P99
+are not interactive GUI input latency measurements.
+
+```sh
+cargo bench --locked -p oxideterm-gpui-terminal --features bench \
+  --bench terminal_render -- terminal_internal_ --noplot \
+  --sample-size 20 --warm-up-time 1 --measurement-time 3
+```
+
+An experiment deferred construction of each cell's temporary `TextRun` until a
+new text run was needed, preserving the existing logical and bidirectional run
+boundaries. On the same Windows x64 / i9-13900HX / balanced power configuration as
+the parser benchmarks, an initial 20-sample comparison was followed by a
+30-sample comparison using saved baseline/candidate executables, without a build
+running concurrently. Both versions used identical native-font fixtures.
+
+| Workload | Row layout P50 before / candidate | Criterion whole-frame change (95% interval) |
+| --- | --- | --- |
+| Plain text | 167 / 158 µs | +0.26% (-1.93% to +2.59%) |
+| ANSI styles | 145 / 137 µs | -0.08% (-32.09% to +49.13%) |
+| Mixed Unicode | 276 / 275 µs | +0.66% (-2.37% to +3.54%) |
+| Unchanged text | Not targeted | +0.55% (-2.34% to +3.80%) |
+
+**The experiment was reverted:** the localized reduction did not establish a
+whole-frame improvement. These comparisons used the initial native-font fixture,
+before workload-specific prewarming was added; do not mix their baselines with
+the final warmed fixtures. Existing row layout caching, prepared glyph batches,
+and adjacent background/selection merging remain unchanged. One concrete next
+measurement target is decorated text: `LineLayout::paint_cached*` currently
+falls back to per-glyph painting for underline/strikethrough. The paired static
+fixtures isolate that path from parsing and changing row contents.
+
+The final warmed fixtures were run twice. The first run's streaming cases were
+noisy (plain text was 2.847 ms versus 1.220 ms on the unchanged-binary repeat), so
+they are not evidence of a renderer regression or a prewarming speedup. The static
+decoration comparison was repeatable:
+
+| Identical static text | First / repeat whole-frame estimate | Repeat scene construction P50 | Repeat frame P95 / P99 |
+| --- | --- | --- | --- |
+| No decorations | 214 / 216 µs | 47 µs | 276 / 376 µs |
+| Underline + strikethrough | 634 / 615 µs | 410 µs | 762 / 977 µs |
+
+This establishes a materially more expensive decorated-text path, not the
+attainable speedup of any proposed cache change: decorations also add primitives,
+and Windows GPU submission is still excluded. The existing renderer was left
+intact. Final validation passed 219 terminal UI tests and 4 terminal-model tests;
+one ConPTY test was ignored because its adjacent runtime bundle was unavailable.
+A pre-existing Windows test compilation failure was repaired by moving the
+`TerminalEvent` test import out of its Unix-only import group. The six final
+benchmarks, formatting check and diff whitespace check passed.
+
+### OSC Processing And Shell-Scanner Breakdown (2026-11-03)
+
+Baseline: `99102cf7aef9b756cb759a892fbb5dca12ef44c5` plus the preceding printable
+ASCII scan candidate documented below. Measurements used the same Windows x64,
+Core i9-13900HX, balanced power plan, Rust 1.97.0 and optimized bench profile.
+The added workloads use synthetic public URLs and text, not live terminal contents.
+The x64-only scan was subsequently withdrawn; these are historical paired results
+with that same scan present in both versions, not a fresh measurement after its removal.
+
+The breakdown separates graphics ingress alone, ANSI/grid processing with graphics
+enabled or disabled, recording playback with graphics enabled or disabled, and the
+production encoding detector/decoder and privilege-prompt scanner used by live
+Shells. The standalone scanner benchmark includes the private production source;
+no production API was added. Combined outer-scanner samples use complete UTF-8
+codepoint boundaries, matching the residual guard's contract. Network transport,
+PTY delivery, trigger rules, recording persistence and GUI rendering are excluded.
+
+The graphics benchmark uses about 1 MiB, a 120×40 grid and 1,000 history rows;
+recording playback uses about 256 KiB, 120×40 and 20,000 history rows. Outer scans
+use about 1 MiB with approximately 8 KiB chunks. Long title bodies repeat
+`terminal title ` 128 times; results should not be generalized to short titles.
+Baseline and first candidate runs used 20 samples, one-second warm-up and two-second
+measurement. Retained OSC improvements were confirmed with 30 samples and a
+three-second measurement. Values below are median elapsed microseconds:
+
+| Layer / workload | Input | Before (µs) | Retained (µs) | Time change |
+| --- | --- | ---: | ---: | ---: |
+| graphics_ingress/ordered/osc-title | 1 MiB | 13000.17 | 91.36 | -99.30% |
+| graphics_ingress/ordered/osc-links | 1 MiB | 13718.34 | 3417.51 | -75.09% |
+| terminal_output/graphics/osc-title | 1 MiB | 14011.38 | 595.44 | -95.75% |
+| terminal_output/graphics/osc-links | 1 MiB | 23302.36 | 12441.45 | -46.61% |
+| terminal_input_breakdown/pipeline/osc-title | 256 KiB | 3904.51 | 401.78 | -89.71% |
+| terminal_input_breakdown/pipeline/osc-links | 256 KiB | 6289.33 | 3903.09 | -37.94% |
+
+The retained change only batches opaque OSC payload bytes in the graphics ingress,
+using the existing `memchr` dependency to stop at BEL or ESC. The terminator and
+protocol dispatch paths remain unchanged, including iTerm2 image handling, forwarded
+OSC terminator canonicalization, private-OSC filtering downstream, and the exact
+encoded-size admission/discard boundary. Ordinary text, ANSI, Unicode and long-CSI
+graphics controls did not show a comparable regression in the initial full sweep.
+This is an input-processing improvement for OSC-heavy workloads, not a terminal-FPS
+or SSH-throughput claim.
+
+**Rejected experiment:** bulk skipping OSC/DCS/APC/PM bodies in the privilege
+scanner improved OSC cases but regressed ordinary and ANSI log scans by about
+20–34%. Outlining the search did not resolve that regression. Both candidate
+implementations were removed; the production privilege scanner and encoding
+detector remain unchanged. The baseline outer-scanner breakdown was:
+
+| Workload | Encoding detector (µs/MiB) | Combined outer scanners (µs/MiB) |
+| --- | ---: | ---: |
+| Plain | 19.17 | 873.01 |
+| ANSI | 18.45 | 978.50 |
+| Unicode | 372.70 | 3414.43 |
+| Colon-heavy log | 18.82 | 5498.73 |
+| OSC title | 18.55 | 1581.61 |
+| OSC links | 18.70 | 1768.29 |
+
+Restoring the original scanner and forcing a fresh compilation produced: plain 872.11 µs (-0.10%); ansi 978.26 µs (-0.02%); unicode 3363.83 µs (-1.48%).
+
+Validation: 36 graphics-protocol tests passed (one existing ignored manual benchmark),
+203 final terminal-core tests passed (three existing ignored tests), and five encoding
+tests passed. New coverage checks opaque OSC byte preservation at every split,
+BEL/ST boundaries, the encoded-size limit and recovery after discard. Existing
+terminal tests cover private-OSC recording filtering and protocol ordering. Workspace
+format and whitespace checks passed. Graphics-library Clippy with `--no-deps` and
+warnings denied passed; the broader invocation was blocked by four pre-existing
+Alacritty lint errors (integer-boundary simplification, missing `is_empty`, MSRV and
+let-and-return).
+The final terminal suite was recompiled after restoring the prompt scanner.
+
+Reproduction uses the repository's existing benchmark targets:
+
+```sh
+cargo bench --locked -p oxideterm-terminal-graphics --bench graphics_ingress -- '^(graphics_ingress|terminal_output)/' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline before-osc-scans
+cargo bench --locked -p oxideterm-terminal --bench terminal_pipeline -- 'terminal_input_breakdown/(grid|pipeline|pipeline-no-graphics)/(osc-title|osc-links)$' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline before-osc-scans
+cargo bench --locked -p oxideterm-terminal --bench privilege_prompt_stream -- '^(privilege_prompt_stream|shell_outer_scanners)/' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline before-osc-scans
+```
+
+After the change, replace `--save-baseline` with `--baseline`. Raw logs, rejected
+candidate source snapshots and comparison JSON are under `target/osc-evaluation/`.
+Criterion retains the samples under `target/criterion/`. Files prefixed `stale-`
+are excluded: a Windows source-copy operation preserved the old modification time
+and Cargo initially reused a candidate binary after source restoration. Rewriting
+the unchanged source bytes forced recompilation before the final restoration check.
+
+### Withdrawn Printable ASCII Scanning Experiment (2026-11-03)
+
+**Withdrawn at the user's request:** the custom SIMD implementation covered x64
+only, while other architectures used a scalar fallback. The user's requirement
+for this optimization is SIMD coverage across the supported architectures.
+The helper, both modified scanning loops, and SIMD-specific tests were reverted.
+The independent split-UTF-8 C1 control fix and its event regression test remain.
+The figures below document the withdrawn experiment, not the current implementation.
+Rollback validation passed 64 VTE all-features tests, 42 no-default-features tests
+(overlapping configurations), and 203 terminal-core tests with 3 existing ignored
+tests. Workspace formatting and diff whitespace checks also passed.
+
+Baseline: `99102cf7aef9b756cb759a892fbb5dca12ef44c5`. Environment: Windows x64,
+Intel Core i9-13900HX, balanced power plan, Rust 1.97.0, the optimized bench
+profile (opt-level 3, thin LTO, one codegen unit). The existing `terminal_pipeline`
+fixtures use approximately 256 KiB of synthetic input, 120 columns, 40 screen rows,
+and 20,000 history rows. No user terminal contents were sampled.
+
+The candidate's VTE printable-span and complete-ASCII-line scans used bounded, unaligned SSE2
+loads on x64 with SSE2 enabled. Other targets retained a scalar scan. ESC searching,
+UTF-8 validation, and the non-ASCII dispatch loop remain in place; no UTF-32
+intermediate buffer, new dependency, or AVX CPU requirement was introduced.
+The scan remains outside the generic dispatcher on x64: the first inlined
+candidate increased the mixed-Unicode parser workload by about 10–12%.
+The outlined candidate still had a smaller parser-only Unicode cost.
+
+Initial measurements covered all 11 corpora at parser, grid, and full-input layers.
+The final confirmation used separately compiled baseline and candidate executables,
+with no compilation during measurement. Each case ran both binaries consecutively,
+alternating which binary ran first between cases. Both used 20 samples, a one-second
+warm-up, and a two-second measurement interval. The table reports median elapsed
+microseconds and elapsed-time change, not throughput change:
+
+| Layer / workload | Baseline (µs) | Candidate (µs) | Time change |
+| --- | ---: | ---: | ---: |
+| parser/ansi | 281.04 | 248.31 | -11.65% |
+| parser/cjk | 239.50 | 239.09 | -0.18% |
+| parser/crlf-ascii | 102.00 | 27.19 | -73.34% |
+| parser/plain | 96.96 | 25.07 | -74.14% |
+| parser/unicode | 319.96 | 333.44 | +4.21% |
+| parser/wrapped-ascii | 113.98 | 15.25 | -86.62% |
+| pipeline/ansi | 2243.89 | 2129.27 | -5.11% |
+| pipeline/cjk | 2247.85 | 2181.29 | -2.96% |
+| pipeline/crlf-ascii | 1593.32 | 1481.85 | -7.00% |
+| pipeline/dec-lines | 2716.67 | 2559.23 | -5.80% |
+| pipeline/long-csi | 819.33 | 813.54 | -0.71% |
+| pipeline/mixed-log | 2406.85 | 2408.89 | +0.08% |
+| pipeline/osc-links | 6612.22 | 6581.86 | -0.46% |
+| pipeline/osc-title | 3662.00 | 3725.30 | +1.73% |
+| pipeline/plain | 1380.67 | 1376.69 | -0.29% |
+| pipeline/unicode | 3453.08 | 3467.87 | +0.43% |
+| pipeline/wrapped-ascii | 1345.26 | 1243.11 | -7.59% |
+
+The full input pipeline benefited most from wrapped ASCII, CRLF ASCII, DEC line
+characters, and ANSI output. Ordinary plain logs and mixed logs were effectively
+unchanged in the paired confirmation. Mixed Unicode parsing was 4.21% slower,
+while its full input pipeline was 0.43% slower; OSC title input was 1.73% slower.
+These tradeoffs do not support a universal no-regression or terminal-FPS claim.
+The pipeline uses recording playback through the real input-processing path; it
+excludes PTY/SSH delivery, desktop rendering, and interactive input latency.
+ARM64 and native macOS/Linux performance were not measured.
+
+The boundary regression fixture also exposed a pre-existing inconsistency:
+a UTF-8 encoded C1 control completed in a later read was printed instead of
+executed. The unchanged parser reproduced the failure. Both partial-UTF-8
+completion branches now agree with whole-buffer dispatch. The experiment's tests covered every
+byte value around vector boundaries and unaligned slice tails, batch line counts
+and maximum widths, and split ANSI/UTF-8 input with explicit expected events.
+
+Validation on Windows x64: VTE's all-features suite passed 65 tests and its
+no-default-features suite passed 43 (overlapping configurations); the terminal
+grid suite passed 154; the application terminal-core suite passed 203 with three
+existing ignored tests. VTE library Clippy with all features and warnings denied,
+workspace format checking, and diff whitespace checking passed. No desktop GUI
+acceptance or other-platform execution is claimed.
+
+Reproduction of the original baseline sweep:
+
+```sh
+cargo bench --locked -p oxideterm-terminal --bench terminal_pipeline -- 'terminal_input_breakdown/(parser|grid|pipeline)/' --noplot --sample-size 20 --warm-up-time 1 --measurement-time 2 --save-baseline before-ascii-scan
+```
+
+The paired confirmation uses the same arguments, with an exact per-case filter
+and baseline names `scalar-final` / `simd-final`, alternating the executable order.
+Raw logs and comparison JSON are under `target/simd-evaluation/`; Criterion samples
+are under `target/criterion/terminal_input_breakdown/`. Source snapshots and both
+benchmark executables are retained in the local evaluation directory.
+
 ### Complete Animation Frame Caching (2026-10-29)
 
 The final playback policy restores decode-once, full-frame reuse for image widgets

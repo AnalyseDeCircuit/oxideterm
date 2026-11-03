@@ -2,7 +2,7 @@ use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::DefaultHasher},
     hash::{Hash, Hasher},
     ops::Range,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, Weak},
     time::{Duration, Instant},
 };
 
@@ -227,14 +227,23 @@ struct PendingTerminalRowTextRun {
     style: TextRun,
 }
 
-impl From<PendingTerminalRowTextRun> for TerminalRowTextRun {
-    fn from(run: PendingTerminalRowTextRun) -> Self {
-        Self {
-            col: run.col,
-            text: SharedString::from(run.text),
-            cells: run.cells,
-            style: run.style,
-            cache: Arc::new(TerminalTextRunCache::default()),
+impl PendingTerminalRowTextRun {
+    fn finish(self, previous: Option<&TerminalRowTextRun>) -> TerminalRowTextRun {
+        let cache = previous
+            .filter(|run| {
+                run.col == self.col
+                    && run.cells == self.cells
+                    && run.text.as_ref() == self.text
+                    && run.style == self.style
+            })
+            .map(|run| run.cache.clone())
+            .unwrap_or_else(|| Arc::new(TerminalTextRunCache::default()));
+        TerminalRowTextRun {
+            col: self.col,
+            text: SharedString::from(self.text),
+            cells: self.cells,
+            style: self.style,
+            cache,
         }
     }
 }
@@ -366,6 +375,10 @@ where
 
 pub(crate) struct TerminalLayoutCache {
     rows: RecentCache<TerminalRowLayoutCacheKey, Arc<TerminalRowLayout>>,
+    recent_row_keys: RecentCache<u64, TerminalRowLayoutCacheKey>,
+    reuse_metrics: Option<[u32; 3]>,
+    semantic_roles: RecentCache<(usize, usize, bool), SemanticLineRole>,
+    semantic_marks: Option<Weak<[TerminalCommandMark]>>,
     highlights: RecentCache<TerminalLogicalHighlightCacheKey, Arc<TerminalLogicalHighlightLayout>>,
     links: RecentCache<TerminalRowLinkCacheKey, Arc<TerminalRowLinkLayout>>,
     performance: TerminalLayoutPerformance,
@@ -377,6 +390,10 @@ impl Default for TerminalLayoutCache {
     fn default() -> Self {
         Self {
             rows: RecentCache::new(TERMINAL_ROW_LAYOUT_CACHE_CAPACITY),
+            recent_row_keys: RecentCache::new(TERMINAL_ROW_LAYOUT_CACHE_CAPACITY),
+            reuse_metrics: None,
+            semantic_roles: RecentCache::new(TERMINAL_ROW_LAYOUT_CACHE_CAPACITY),
+            semantic_marks: None,
             highlights: RecentCache::new(TERMINAL_HIGHLIGHT_CACHE_CAPACITY),
             links: RecentCache::new(TERMINAL_LINK_CACHE_CAPACITY),
             performance: TerminalLayoutPerformance::default(),
@@ -390,11 +407,31 @@ impl TerminalLayoutCache {
     fn get_or_insert_row_with(
         &mut self,
         key: TerminalRowLayoutCacheKey,
+        row_id: u64,
         collect_performance_metrics: bool,
-        build: impl FnOnce() -> TerminalRowLayout,
+        build: impl FnOnce(Option<&TerminalRowLayout>) -> TerminalRowLayout,
     ) -> Arc<TerminalRowLayout> {
-        let (layout, hit) = self.rows.get_or_insert_with(key, || Arc::new(build()));
-        self.record_cache_access(hit, collect_performance_metrics);
+        if let Some(layout) = self.rows.entries.get(&key).cloned() {
+            self.record_cache_access(true, collect_performance_metrics);
+            return layout;
+        }
+        // Keep only keys here: old text and glyph resources remain owned by the bounded row cache.
+        let previous = (row_id != 0)
+            .then(|| self.recent_row_keys.entries.get(&row_id))
+            .flatten()
+            .and_then(|key| self.rows.entries.get(key))
+            .cloned();
+        let (layout, _) = self
+            .rows
+            .get_or_insert_with(key.clone(), || Arc::new(build(previous.as_deref())));
+        if row_id != 0 {
+            if let Some(previous_key) = self.recent_row_keys.entries.get_mut(&row_id) {
+                *previous_key = key;
+            } else {
+                self.recent_row_keys.get_or_insert_with(row_id, || key);
+            }
+        }
+        self.record_cache_access(false, collect_performance_metrics);
         layout
     }
 
@@ -454,6 +491,10 @@ impl TerminalLayoutCache {
 
     pub(crate) fn clear(&mut self) {
         self.rows.clear();
+        self.recent_row_keys.clear();
+        self.reuse_metrics = None;
+        self.semantic_roles.clear();
+        self.semantic_marks = None;
         self.highlights.clear();
         self.links.clear();
         self.performance = TerminalLayoutPerformance::default();
@@ -774,11 +815,23 @@ impl TerminalElement {
         visible_rows: Range<usize>,
         mut cache: Option<&mut TerminalLayoutCache>,
     ) -> TerminalElementLayout {
+        if let Some(cache) = cache.as_deref_mut() {
+            let metrics = [
+                self.metrics.font_size,
+                self.metrics.cell_width,
+                self.metrics.line_height,
+            ]
+            .map(|value| f32::from(value).to_bits());
+            if cache.reuse_metrics != Some(metrics) {
+                cache.recent_row_keys.clear();
+                cache.reuse_metrics = Some(metrics);
+            }
+        }
         let mut backgrounds = Vec::new();
         let logical_lines = self.logical_lines_for_rows(visible_rows.clone());
         #[cfg(feature = "bench")]
         let roles_started = Instant::now();
-        let semantic_roles = self.semantic_roles_for_lines(&logical_lines);
+        let semantic_roles = self.semantic_roles_for_lines(&logical_lines, cache.as_deref_mut());
         #[cfg(feature = "bench")]
         if let Some(cache) = cache.as_deref_mut() {
             cache.performance.semantic_roles_micros = duration_micros(roles_started.elapsed());
@@ -899,16 +952,21 @@ impl TerminalElement {
                     logical_line,
                     semantic_role,
                 );
-                let row_layout =
-                    cache.get_or_insert_row_with(key, self.performance_metrics_enabled, || {
+                let row_layout = cache.get_or_insert_row_with(
+                    key,
+                    row.line_id,
+                    self.performance_metrics_enabled,
+                    |previous| {
                         self.row_layout(
                             row_index,
                             row,
                             &highlight_layout,
                             &link_ranges,
                             terminal_background,
+                            previous,
                         )
-                    });
+                    },
+                );
                 if let Some(row_cursor) = row_layout.cursor {
                     cursor = Some(TerminalCursor {
                         row: row_index,
@@ -929,6 +987,7 @@ impl TerminalElement {
                     &highlight_layout,
                     &link_ranges,
                     terminal_background,
+                    None,
                 );
                 append_cached_row_layout(
                     row_index,
@@ -1110,6 +1169,7 @@ impl TerminalElement {
         highlight_layout: &TerminalHighlightLayout,
         link_ranges: &[TerminalLinkRange],
         terminal_background: Hsla,
+        previous: Option<&TerminalRowLayout>,
     ) -> TerminalRowLayout {
         // Visible link ranges are ordered by row. Restrict cell styling to this row so output in
         // other rows cannot multiply every character lookup in a link-dense terminal.
@@ -1126,6 +1186,7 @@ impl TerminalElement {
         let mut current_run: Option<PendingTerminalRowTextRun> = None;
         let mut current_run_is_drawing = false;
         let visual_line = visual_line_for_row_with_bidi(row, self.bidi_enabled);
+        let default_background = terminal_color_from_hex(self.theme.background);
 
         for (col_index, cell) in row.cells.iter().enumerate() {
             let paint_col = visual_line
@@ -1145,17 +1206,10 @@ impl TerminalElement {
             let block_cursor = self.grid_cursor_visible()
                 && cell.cursor
                 && self.snapshot.cursor_shape == TerminalCursorShape::Block;
-            let fg = if block_cursor {
-                to_hsla(terminal_color_from_hex(self.theme.background))
-            } else if let Some(highlight_fg) =
-                highlight_layout.foreground_for_cell(row_index, col_index)
-            {
-                highlight_fg
-            } else {
-                to_hsla(cell.fg)
-            };
             let bg = if block_cursor {
                 to_hsla(terminal_color_from_hex(self.theme.header_foreground))
+            } else if cell.bg == default_background {
+                terminal_background
             } else {
                 to_hsla(cell.bg)
             };
@@ -1223,6 +1277,15 @@ impl TerminalElement {
                 || !cell.zerowidth().is_empty()
                 || (self.grid_cursor_visible() && cell.cursor)
             {
+                let fg = if block_cursor {
+                    terminal_background
+                } else if let Some(highlight_fg) =
+                    highlight_layout.foreground_for_cell(row_index, col_index)
+                {
+                    highlight_fg
+                } else {
+                    to_hsla(cell.fg)
+                };
                 let link = !block_cursor
                     && (cell.hyperlink().is_some() || is_link_stylable_cell(cell))
                     && link_should_be_styled(
@@ -1301,10 +1364,30 @@ impl TerminalElement {
             text_runs.push(run);
         }
 
+        let mut previous_runs = previous
+            .into_iter()
+            .flat_map(|row| row.text_runs.iter())
+            .peekable();
+        let text_runs = text_runs
+            .into_iter()
+            .map(|run| {
+                while previous_runs
+                    .peek()
+                    .is_some_and(|previous| previous.col < run.col)
+                {
+                    previous_runs.next();
+                }
+                let previous = previous_runs
+                    .peek()
+                    .copied()
+                    .filter(|previous| previous.col == run.col);
+                run.finish(previous)
+            })
+            .collect();
         TerminalRowLayout {
             backgrounds,
             selections,
-            text_runs: text_runs.into_iter().map(Into::into).collect(),
+            text_runs,
             cursor,
         }
     }
@@ -1440,19 +1523,54 @@ impl TerminalElement {
     fn semantic_roles_for_lines(
         &self,
         logical_lines: &TerminalLogicalLineIndex,
+        mut cache: Option<&mut TerminalLayoutCache>,
     ) -> HashMap<Range<usize>, SemanticLineRole> {
         if !self.semantic_coloring {
             return HashMap::new();
         }
         let mut roles = HashMap::new();
+        if let Some(cache) = cache.as_deref_mut() {
+            if cache
+                .semantic_marks
+                .as_ref()
+                .is_none_or(|marks| !std::ptr::eq(marks.as_ptr(), Arc::as_ptr(&self.command_marks)))
+            {
+                cache.semantic_roles.entries.clear();
+                cache.semantic_roles.insertion_order.clear();
+                // Weak identity versions the immutable mark snapshot without retaining command text.
+                cache.semantic_marks = Some(Arc::downgrade(&self.command_marks));
+            }
+        }
+        let viewport_start = self
+            .snapshot
+            .scrollback_lines
+            .saturating_sub(self.snapshot.display_offset);
         // Layout already resolved wrapped ranges; sharing them avoids rescanning
         // the same logical line for each physical row in the viewport.
         for line in &logical_lines.lines {
-            let role = semantic_line_role_for_rows(
-                &self.snapshot,
-                &self.command_marks,
-                line.range.clone(),
-            );
+            let classify = || {
+                semantic_line_role_for_rows(&self.snapshot, &self.command_marks, line.range.clone())
+            };
+            let role = if let Some(cache) = cache
+                .as_deref_mut()
+                .filter(|_| !self.command_marks.is_empty())
+            {
+                let active_input = self
+                    .snapshot
+                    .lines
+                    .get(line.range.clone())
+                    .unwrap_or(&[])
+                    .iter()
+                    .any(|row| row.active_input);
+                let key = (
+                    viewport_start.saturating_add(line.range.start),
+                    viewport_start.saturating_add(line.range.end.saturating_sub(1)),
+                    active_input,
+                );
+                cache.semantic_roles.get_or_insert_with(key, classify).0
+            } else {
+                classify()
+            };
             roles.insert(line.range.clone(), role);
         }
         roles
@@ -2672,6 +2790,154 @@ mod cache_tests {
                 .map(|run| run.text.as_ref())
                 .collect::<Vec<_>>(),
             ["a─\u{301}b"]
+        );
+    }
+
+    #[test]
+    fn edited_row_reuses_only_unchanged_runs_with_matching_metrics() {
+        use crate::terminal_view::selection::{TerminalGridPoint, TerminalSelectionMode};
+
+        let mut input = snapshot(0, vec![row_with_text_and_cursor(42, "alpha beta", 9)]);
+        input.cols = 10;
+        input.cursor_shape = TerminalCursorShape::Hidden;
+        let mut view = element(input);
+        let mut cache = TerminalLayoutCache::default();
+        let first = view.layout_for_rows(0..1, Some(&mut cache));
+        let original = &first.cached_rows[0].layout.text_runs;
+        assert_eq!(
+            original
+                .iter()
+                .map(|run| run.text.as_ref())
+                .collect::<Vec<_>>(),
+            ["alpha", "beta"]
+        );
+
+        view.snapshot.lines[0].cells_mut()[9].ch = 's';
+        view.snapshot.lines[0].refresh_signature();
+        let edited = view.layout_for_rows(0..1, Some(&mut cache));
+        let runs = &edited.cached_rows[0].layout.text_runs;
+        assert_eq!(
+            runs.iter()
+                .map(|run| (run.col, run.text.as_ref()))
+                .collect::<Vec<_>>(),
+            [(0, "alpha"), (6, "bets")]
+        );
+        assert!(Arc::ptr_eq(&original[0].cache, &runs[0].cache));
+        assert!(!Arc::ptr_eq(&original[1].cache, &runs[1].cache));
+
+        view.selection = Some(TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 0 },
+            head: TerminalGridPoint { line: 0, col: 3 },
+            mode: TerminalSelectionMode::Simple,
+        });
+        let selected = view.layout_for_rows(0..1, Some(&mut cache));
+        let selected_row = &selected.cached_rows[0].layout;
+        assert_eq!(
+            selected_row
+                .selections
+                .iter()
+                .map(|rect| (rect.col, rect.cells))
+                .collect::<Vec<_>>(),
+            [(0, 4)]
+        );
+        assert!(Arc::ptr_eq(
+            &runs[0].cache,
+            &selected_row.text_runs[0].cache
+        ));
+        assert!(Arc::ptr_eq(
+            &runs[1].cache,
+            &selected_row.text_runs[1].cache
+        ));
+
+        view.snapshot.lines[0].cells_mut()[0].fg = TerminalColor::rgb(255, 0, 0);
+        view.snapshot.lines[0].refresh_signature();
+        let recolored = view.layout_for_rows(0..1, Some(&mut cache));
+        assert_eq!(
+            recolored.cached_rows[0].layout.text_runs[0].style.color,
+            gpui::rgb(0xff0000).into()
+        );
+        assert!(!Arc::ptr_eq(
+            &original[0].cache,
+            &recolored.cached_rows[0].layout.text_runs[0].cache
+        ));
+
+        let mut previous = recolored;
+        for metric in 0..3 {
+            match metric {
+                0 => view.metrics.font_size += px(1.),
+                1 => view.metrics.cell_width += px(1.),
+                _ => view.metrics.line_height += px(1.),
+            }
+            let resized = view.layout_for_rows(0..1, Some(&mut cache));
+            let before = previous.cached_rows[0].layout.text_runs.last().unwrap();
+            let after = resized.cached_rows[0].layout.text_runs.last().unwrap();
+            assert_eq!(after.text.as_ref(), "bets");
+            assert!(!Arc::ptr_eq(&before.cache, &after.cache));
+            previous = resized;
+        }
+        let retired = Arc::downgrade(&original[0].cache);
+        drop(first);
+        drop(edited);
+        drop(selected);
+        drop(previous);
+        cache.clear();
+        assert!(
+            retired.upgrade().is_none(),
+            "hidden panes must release reused glyph resources"
+        );
+    }
+
+    #[test]
+    fn semantic_role_cache_tracks_mark_versions_viewport_and_active_input() {
+        use crate::terminal_view::tests::test_command_mark;
+
+        let mut row = row_with_text_and_cursor(1, "file", 3);
+        row.active_input = false;
+        let mut view = element(snapshot(0, vec![row]));
+        view.semantic_coloring = true;
+        view.snapshot.scrollback_lines = 1;
+        let mut mark = test_command_mark("listing", 0, Some(3), Some(0));
+        mark.command = Some("ls -l".into());
+        view.command_marks = Arc::from([mark]);
+        let mut cache = TerminalLayoutCache::default();
+        let lines = view.logical_lines_for_rows(0..1);
+        for _ in 0..2 {
+            assert_eq!(
+                view.semantic_roles_for_lines(&lines, Some(&mut cache))[&(0..1)],
+                SemanticLineRole::FileListingOutput
+            );
+        }
+        // The mark version can change without any visible cell changing.
+        Arc::make_mut(&mut view.command_marks)[0].command = Some("git status".into());
+        assert_eq!(
+            view.semantic_roles_for_lines(&lines, Some(&mut cache))[&(0..1)],
+            SemanticLineRole::GitStatusOutput
+        );
+        view.snapshot.lines[0].active_input = true;
+        assert_eq!(
+            view.semantic_roles_for_lines(&lines, Some(&mut cache))[&(0..1)],
+            SemanticLineRole::Command
+        );
+        view.snapshot.lines[0].active_input = false;
+        view.snapshot.scrollback_lines = 4;
+        assert_eq!(
+            view.semantic_roles_for_lines(&lines, Some(&mut cache))[&(0..1)],
+            SemanticLineRole::Unknown
+        );
+        view.snapshot.display_offset = 3;
+        assert_eq!(
+            view.semantic_roles_for_lines(&lines, Some(&mut cache))[&(0..1)],
+            SemanticLineRole::GitStatusOutput
+        );
+        let retired = Arc::downgrade(&view.command_marks);
+        view.command_marks = Arc::from([]);
+        assert!(
+            retired.upgrade().is_none(),
+            "role cache must not retain command text"
+        );
+        assert_eq!(
+            view.semantic_roles_for_lines(&lines, Some(&mut cache))[&(0..1)],
+            SemanticLineRole::Unknown
         );
     }
 

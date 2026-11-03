@@ -417,7 +417,7 @@ fn command_mark_overlays_preserve_boundaries_and_distinguish_selection_from_hove
     }
 }
 
-fn test_command_mark(
+pub(super) fn test_command_mark(
     command_id: &str,
     start_line: usize,
     end_line: Option<usize>,

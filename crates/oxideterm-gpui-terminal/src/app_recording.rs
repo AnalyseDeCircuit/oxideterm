@@ -165,6 +165,39 @@ impl TerminalPane {
 
     #[cfg(feature = "bench")]
     #[doc(hidden)]
+    pub fn benchmark_select_cells(&mut self, row: usize, col: usize, cx: &mut Context<Self>) {
+        use crate::terminal_view::{TerminalGridPoint, TerminalSelectionMode};
+        // Synthetic fixtures stay at the live viewport; use the same selection
+        // update as pointer dragging without clipboard or autoscroll side effects.
+        assert_eq!(self.snapshot.display_offset, 0);
+        self.set_selection(Some(TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 0 },
+            head: TerminalGridPoint {
+                line: row as i32,
+                col,
+            },
+            mode: TerminalSelectionMode::Simple,
+        }));
+        cx.notify();
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
+    pub fn benchmark_scroll_pixels(&mut self, delta: f32, cx: &mut Context<Self>) -> usize {
+        self.handle_scroll(
+            &gpui::ScrollWheelEvent {
+                position: gpui::point(gpui::px(32.), gpui::px(32.)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(delta))),
+                touch_phase: gpui::TouchPhase::Moved,
+                ..Default::default()
+            },
+            cx,
+        );
+        self.visible_scroll_offset()
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
     pub fn benchmark_render_stage_micros(&self) -> (u64, u64, u64, u64, u64) {
         let performance = self.layout_cache.lock().performance();
         (

@@ -18,6 +18,9 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(all(test, feature = "bench"))]
+mod benchmarks;
+
 #[allow(non_camel_case_types, unused)]
 #[expect(missing_docs)]
 pub type PathVertex_ScaledPixels = PathVertex<ScaledPixels>;
@@ -205,13 +208,17 @@ impl Scene {
         opacity: f32,
     ) {
         let layer_order = self.layer_stack.last().copied();
+        let glyph_opacity = opacity.clamp(0.0, 1.0);
         for glyph in &batch.monochrome {
             let mut sprite = MonochromeSprite {
                 order: 0,
                 pad: 0,
                 bounds: glyph.bounds + origin,
                 content_mask,
-                color: glyph.color.opacity(opacity).into(),
+                color: SceneHsla {
+                    a: glyph.color.a * glyph_opacity,
+                    ..glyph.color
+                },
                 tile: glyph.tile,
                 transformation: TransformationMatrix::unit(),
             };
@@ -229,7 +236,10 @@ impl Scene {
                 pad: 0,
                 bounds: glyph.bounds + origin,
                 content_mask,
-                color: glyph.color.opacity(opacity).into(),
+                color: SceneHsla {
+                    a: glyph.color.a * glyph_opacity,
+                    ..glyph.color
+                },
                 tile: glyph.tile,
                 transformation: TransformationMatrix::unit(),
             };
@@ -1351,7 +1361,7 @@ mod tests {
     fn prepared_monochrome_glyph(bounds: Bounds<ScaledPixels>) -> PreparedMonochromeGlyph {
         PreparedMonochromeGlyph {
             bounds,
-            color: crate::Hsla::default(),
+            color: crate::Hsla::default().into(),
             tile: AtlasTile {
                 texture_id: AtlasTextureId {
                     index: 0,
@@ -1481,5 +1491,51 @@ mod tests {
             replayed.monochrome_sprites[0].order,
             scene.monochrome_sprites[0].order
         );
+    }
+
+    #[test]
+    fn prepared_glyph_colors_preserve_wrapped_hue_and_live_opacity() {
+        for (hue, expected_hue) in [(-0.25, 0.75), (2.25, 0.25)] {
+            let mut glyph = prepared_monochrome_glyph(full_bounds());
+            glyph.color = crate::Hsla {
+                h: hue,
+                s: 0.5,
+                l: 0.25,
+                a: 0.8,
+            }
+            .into();
+            let batch = Arc::new(PreparedGlyphBatch {
+                monochrome: vec![glyph],
+                subpixel: vec![glyph],
+                ..Default::default()
+            });
+            for (opacity, alpha) in [(-0.5, 0.0), (0.25, 0.2), (1.5, 0.8)] {
+                let mut scene = Scene::default();
+                scene.push_layer(full_bounds());
+                scene.insert_prepared_glyph_batch(batch.clone(), Point::default(), mask(), opacity);
+                let expected = vec![SceneHsla {
+                    h: expected_hue,
+                    s: 0.5,
+                    l: 0.25,
+                    a: alpha,
+                }];
+                assert_eq!(
+                    scene
+                        .monochrome_sprites
+                        .iter()
+                        .map(|s| s.color)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(
+                    scene
+                        .subpixel_sprites
+                        .iter()
+                        .map(|s| s.color)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
     }
 }

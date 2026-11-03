@@ -165,7 +165,9 @@ fn benchmark_semantic_history(
         }
         assert!(terminal.command_facts().len() >= history.max(1));
     });
-    cx.run_until_idle();
+    cx.settle();
+    std::thread::sleep(IDLE_STARTUP_SETTLE);
+    cx.settle();
     let mut snapshot = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
     let mut layout = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
     let mut scene = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
@@ -643,6 +645,259 @@ fn terminal_playback_output_frame(cx: &mut BenchAppContext<'_, '_>) {
     });
 }
 
+// Change eight rows in one terminal through the production shaping and glyph paint paths.
+fn benchmark_internal_text(cx: &mut BenchAppContext<'_, '_>, sample: &str) {
+    let terminal = benchmark_terminal(cx, true);
+    let grid = benchmark_grid_size(cx, &terminal);
+    let chunks = (0..256)
+        .map(|index| {
+            format!("{index:03} {sample}\r\n")
+                .repeat(OUTPUT_LINES_PER_FRAME)
+                .into_bytes()
+        })
+        .collect::<Vec<_>>();
+    // Resolve this workload's fonts and first glyphs outside the measured loop;
+    // otherwise italic/CJK font discovery is mixed into steady drawing costs.
+    terminal.update(cx, |terminal, cx| {
+        terminal.feed_recording_output(&chunks[0], cx);
+    });
+    cx.settle();
+    let mut index = 0;
+    let mut layout = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+    let mut paint = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+    let mut previous = false;
+    cx.bench_renderer(terminal.clone(), |terminal, _window, cx| {
+        if previous {
+            let (_, _, _, layout_us, paint_us) = terminal.benchmark_render_stage_micros();
+            layout.push(Duration::from_micros(layout_us));
+            paint.push(Duration::from_micros(paint_us));
+        }
+        previous = true;
+        terminal.feed_recording_output(&chunks[index], cx);
+        index = (index + 1) % chunks.len();
+    });
+    assert_eq!(benchmark_grid_size(cx, &terminal), grid);
+    cx.record_stage_samples("line layout", layout);
+    cx.record_stage_samples("scene construction", paint);
+}
+
+fn benchmark_native_text(
+    criterion: &mut criterion::Criterion<gpui::BenchMeasurement>,
+    name: &'static str,
+    benchmark: impl Fn(&mut BenchAppContext<'_, '_>),
+) {
+    // Windows headless platforms use NoopTextSystem. Acquire DirectWrite from a
+    // native platform, but keep benchmark windows on TestPlatform (no visible UI).
+    let native = gpui_platform::current_platform(!cfg!(target_os = "windows"));
+    let text_system = native.text_system();
+    assert!(
+        !text_system.all_font_names().is_empty(),
+        "requires native fonts"
+    );
+    let report = gpui::BenchReport::with_fps(120);
+    criterion.bench_function(name, |bencher| {
+        let mut cx = BenchAppContext::new_with_platform_and_report(
+            gpui::bench_platform(
+                Some(Box::new(gpui_platform::current_headless_renderer)),
+                text_system.clone(),
+            ),
+            Some(name),
+            bencher,
+            report.clone(),
+        );
+        benchmark(&mut cx);
+        cx.teardown();
+    });
+    report.print(name);
+}
+
+fn terminal_internal_plain(criterion: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(criterion, "terminal_internal_plain", |cx| {
+        benchmark_internal_text(
+            cx,
+            "The quick brown fox jumps over the lazy dog. cargo check completed successfully.",
+        );
+    });
+}
+
+fn terminal_internal_styled(criterion: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(criterion, "terminal_internal_styled", |cx| {
+        benchmark_internal_text(
+            cx,
+            "\x1b[1;31mERROR\x1b[0m src/main.rs:42 \x1b[3;4;32mrender pipeline\x1b[0m \x1b[9mold value\x1b[0m -> \x1b[38;5;117mnew value\x1b[0m",
+        );
+    });
+}
+
+fn terminal_internal_unicode(criterion: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(criterion, "terminal_internal_unicode", |cx| {
+        benchmark_internal_text(
+            cx,
+            "终端绘制 中文字体 fallback e\u{301} 日本語 한글 مرحبا بالعالم ABC 123",
+        );
+    });
+}
+
+fn terminal_internal_warm(criterion: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(criterion, "terminal_internal_warm", |cx| {
+        let terminal = benchmark_terminal(cx, false);
+        let grid = benchmark_grid_size(cx, &terminal);
+        cx.bench_renderer(terminal.clone(), |_terminal, _window, cx| cx.notify());
+        assert_eq!(benchmark_grid_size(cx, &terminal), grid);
+    });
+}
+
+#[derive(Clone, Copy)]
+enum IncrementalWorkload {
+    Input,
+    Selection,
+    Scroll,
+    Sparse,
+}
+
+fn benchmark_incremental(cx: &mut BenchAppContext<'_, '_>, workload: IncrementalWorkload) {
+    let terminal = benchmark_terminal(cx, true);
+    let grid = benchmark_grid_size(cx, &terminal);
+    let word = "alpha beta gamma delta ";
+    let prefix = word.repeat(grid.0.saturating_sub(16) / word.len());
+    assert!(prefix.len() >= word.len());
+    let mut chunks = Vec::new();
+    if !matches!(workload, IncrementalWorkload::Scroll) {
+        let mut setup = String::from("\x1b[2J\x1b[H\x1b[?25l");
+        let rows = if matches!(workload, IncrementalWorkload::Selection) {
+            grid.1
+        } else {
+            1
+        };
+        for row in 0..rows {
+            setup.push_str(&format!("\x1b[{};1H{prefix}00000000", row + 1));
+        }
+        setup.push_str("\x1b[H");
+        terminal.update(cx, |terminal, cx| {
+            terminal.set_selection_highlighting_override(Some(false), cx);
+            terminal.feed_recording_output(setup.as_bytes(), cx);
+        });
+        // More distinct revisions than the row cache can retain prevent the
+        // input fixture from becoming a two-state warm-cache redraw benchmark.
+        for index in 0..2048 {
+            let output = if matches!(workload, IncrementalWorkload::Sparse) {
+                (0..grid.1)
+                    .map(|row| format!("\x1b[{};1H\x1b[2K{:08}", row + 1, index * grid.1 + row))
+                    .collect::<String>()
+            } else {
+                format!("\x1b[1;{}H{index:08}", prefix.len() + 1)
+            };
+            chunks.push(output.into_bytes());
+        }
+    } else {
+        let offset = terminal.update(cx, |terminal, cx| terminal.benchmark_scroll_pixels(64., cx));
+        assert!(
+            offset > 0,
+            "precise scroll fixture must start inside history"
+        );
+    }
+    cx.settle();
+    let mut index = 0;
+    let mut previous = false;
+    let mut layout = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+    let mut paint = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+    cx.bench_renderer(terminal.clone(), |terminal, _, cx| {
+        if previous {
+            let (_, _, _, layout_us, paint_us) = terminal.benchmark_render_stage_micros();
+            layout.push(Duration::from_micros(layout_us));
+            paint.push(Duration::from_micros(paint_us));
+        }
+        previous = true;
+        match workload {
+            IncrementalWorkload::Input | IncrementalWorkload::Sparse => {
+                terminal.feed_recording_output(&chunks[index % chunks.len()], cx)
+            }
+            IncrementalWorkload::Selection => {
+                let head = index % (grid.0 * grid.1);
+                terminal.benchmark_select_cells(head / grid.0, head % grid.0, cx);
+            }
+            IncrementalWorkload::Scroll => {
+                let delta = if index % 1024 < 512 { 0.5 } else { -0.5 };
+                terminal.benchmark_scroll_pixels(delta, cx);
+            }
+        }
+        index += 1;
+    });
+    assert_eq!(benchmark_grid_size(cx, &terminal), grid);
+    cx.record_stage_samples("line layout", layout);
+    cx.record_stage_samples("scene construction", paint);
+}
+
+fn terminal_incremental_input(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_incremental_input", |cx| {
+        benchmark_incremental(cx, IncrementalWorkload::Input)
+    });
+}
+fn terminal_incremental_selection(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_incremental_selection", |cx| {
+        benchmark_incremental(cx, IncrementalWorkload::Selection)
+    });
+}
+fn terminal_incremental_scroll(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_incremental_scroll", |cx| {
+        benchmark_incremental(cx, IncrementalWorkload::Scroll)
+    });
+}
+fn terminal_incremental_sparse(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_incremental_sparse", |cx| {
+        benchmark_incremental(cx, IncrementalWorkload::Sparse)
+    });
+}
+fn terminal_incremental_semantic_warm(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_incremental_semantic_warm", |cx| {
+        benchmark_semantic_history(cx, 2000, true, true, None)
+    });
+}
+fn terminal_incremental_semantic_stream(c: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(c, "terminal_incremental_semantic_stream", |cx| {
+        benchmark_semantic_history(cx, 2000, true, false, None)
+    });
+}
+
+fn benchmark_decoration_redraw(cx: &mut BenchAppContext<'_, '_>, decorated: bool) {
+    let terminal = benchmark_terminal(cx, true);
+    let grid = benchmark_grid_size(cx, &terminal);
+    let style = if decorated { "\x1b[4;9m" } else { "\x1b[0m" };
+    let content =
+        format!("{style}render pipeline 0123456789 abcdefghijklmnopqrstuvwxyz\x1b[0m\r\n")
+            .repeat(grid.1);
+    terminal.update(cx, |terminal, cx| {
+        terminal.feed_recording_output(content.as_bytes(), cx);
+    });
+    cx.settle();
+    let mut paint = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+    let mut previous = false;
+    cx.bench_renderer(terminal.clone(), |terminal, _window, cx| {
+        if previous {
+            let (_, _, _, _, paint_us) = terminal.benchmark_render_stage_micros();
+            paint.push(Duration::from_micros(paint_us));
+        }
+        previous = true;
+        cx.notify();
+    });
+    assert_eq!(benchmark_grid_size(cx, &terminal), grid);
+    cx.record_stage_samples("scene construction", paint);
+}
+
+fn terminal_internal_decorated_warm(criterion: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(criterion, "terminal_internal_decorated_warm", |cx| {
+        benchmark_decoration_redraw(cx, true);
+    });
+}
+
+fn terminal_internal_undecorated_warm(
+    criterion: &mut criterion::Criterion<gpui::BenchMeasurement>,
+) {
+    benchmark_native_text(criterion, "terminal_internal_undecorated_warm", |cx| {
+        benchmark_decoration_redraw(cx, false);
+    });
+}
+
 #[gpui::bench(fps = 120)]
 fn terminal_playback_output_pipeline(cx: &mut BenchAppContext<'_, '_>) {
     let terminal = benchmark_terminal(cx, true);
@@ -713,6 +968,18 @@ fn terminal_idle_no_frames(cx: &mut BenchAppContext<'_, '_>) {
 
 gpui::bench_group!(
     terminal_render,
+    terminal_incremental_input,
+    terminal_incremental_selection,
+    terminal_incremental_scroll,
+    terminal_incremental_sparse,
+    terminal_incremental_semantic_warm,
+    terminal_incremental_semantic_stream,
+    terminal_internal_plain,
+    terminal_internal_styled,
+    terminal_internal_unicode,
+    terminal_internal_warm,
+    terminal_internal_decorated_warm,
+    terminal_internal_undecorated_warm,
     terminal_tab_switch_frame,
     semantic_history_stream_small,
     semantic_history_stream_2000,

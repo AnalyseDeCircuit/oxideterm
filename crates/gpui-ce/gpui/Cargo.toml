@@ -84,6 +84,11 @@ name = "gpui"
 path = "src/gpui.rs"
 doctest = false
 
+[[test]]
+name = "cached_line_paint"
+path = "tests/cached_line_paint.rs"
+required-features = ["test-support"]
+
 [dependencies.palette]
 version = "0.7.6"
 features = ["serializing"]

@@ -1,5 +1,6 @@
 // OxideTerm modification: cached line paint can reuse a caller-owned bounded layer.
 use crate::Hsla;
+use crate::util::round_half_toward_zero;
 use crate::window::PreparedGlyphBatch;
 use crate::{
     App, Bounds, DevicePixels, Half, LineLayout, Pixels, Point, RenderGlyphParams, Result,
@@ -10,6 +11,10 @@ use derive_more::{Deref, DerefMut};
 use parking_lot::Mutex;
 use smallvec::SmallVec;
 use std::{ops::Range, sync::Arc};
+
+#[cfg(test)]
+#[path = "line/cached_paint_tests.rs"]
+mod cached_paint_tests;
 
 /// Pre-computed glyph data for efficient painting without per-glyph cache lookups.
 ///
@@ -33,6 +38,7 @@ pub struct LinePaintCache {
 struct PreparedLinePaint {
     key: PreparedLinePaintKey,
     glyphs: Arc<PreparedGlyphBatch>,
+    snap_vertical_origin: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -83,9 +89,23 @@ fn prepare_line_glyphs(
     let baseline_y = (line_height - layout.ascent - layout.descent) / 2.0 + layout.ascent;
     let mut decoration_runs = decoration_runs.iter();
     let mut run_end = 0;
-    let mut color = black();
+    let color = black();
+    let mut prepared_color: SceneHsla = color.into();
     let mut dilation = window.glyph_dilation_for_color(color);
-    let mut glyphs = PreparedGlyphBatch::default();
+    // A scrolling row can need new device-phase data on consecutive frames.
+    // Reserve once per channel rather than growing each run's small vectors.
+    let mut counts = [0; 3];
+    for (index, run) in layout.runs.iter().enumerate() {
+        let emoji_count = run.glyphs.iter().filter(|glyph| glyph.is_emoji).count();
+        counts[2] += emoji_count;
+        let channel = usize::from(subpixel_rendering.get(index).copied().unwrap_or(false));
+        counts[channel] += run.glyphs.len() - emoji_count;
+    }
+    let mut glyphs = PreparedGlyphBatch {
+        monochrome: Vec::with_capacity(counts[0]),
+        subpixel: Vec::with_capacity(counts[1]),
+        polychrome: Vec::with_capacity(counts[2]),
+    };
 
     for (run_index, run) in layout.runs.iter().enumerate() {
         let use_subpixel_rendering = subpixel_rendering.get(run_index).copied().unwrap_or(false);
@@ -102,8 +122,8 @@ fn prepare_line_glyphs(
 
                 if let Some(style_run) = style_run {
                     run_end += style_run.len as usize;
-                    color = style_run.color;
-                    dilation = window.glyph_dilation_for_color(color);
+                    prepared_color = style_run.color.into();
+                    dilation = window.glyph_dilation_for_color(style_run.color);
                 } else {
                     run_end = layout.len;
                 }
@@ -128,7 +148,7 @@ fn prepare_line_glyphs(
                     run.font_id,
                     glyph.id,
                     layout.font_size,
-                    color,
+                    prepared_color,
                     use_subpixel_rendering,
                     dilation,
                     device_origin,
@@ -545,6 +565,19 @@ impl LineLayout {
             .iter()
             .any(|run| run.underline.is_some() || run.strikethrough.is_some())
         {
+            if let [decoration] = decoration_runs
+                && decoration.len as usize == self.len
+                && self.len > 0
+            {
+                return self.paint_uniform_decoration_cached(
+                    origin,
+                    line_height,
+                    decoration,
+                    cache,
+                    window,
+                    cx,
+                );
+            }
             return self.paint(
                 origin,
                 line_height,
@@ -587,6 +620,19 @@ impl LineLayout {
             .iter()
             .any(|run| run.underline.is_some() || run.strikethrough.is_some())
         {
+            if let [decoration] = decoration_runs
+                && decoration.len as usize == self.len
+                && self.len > 0
+            {
+                return self.paint_uniform_decoration_cached(
+                    origin,
+                    line_height,
+                    decoration,
+                    cache,
+                    window,
+                    cx,
+                );
+            }
             return self.paint(
                 origin,
                 line_height,
@@ -613,6 +659,83 @@ impl LineLayout {
         )
     }
 
+    fn paint_uniform_decoration_cached(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        decoration: &DecorationRun,
+        cache: &LinePaintCache,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
+        // Decorated runs previously established their own layer even inside a
+        // caller's row layer. Preserve that ordering for neighboring overhangs.
+        window.paint_layer(
+            Bounds::new(origin, size(self.width, line_height)),
+            |window| {
+                self.paint_cached_in_current_layer_impl(
+                    origin,
+                    line_height,
+                    std::slice::from_ref(decoration),
+                    cache,
+                    window,
+                    cx,
+                )?;
+                let Some((first_run, first_glyph)) = self
+                    .runs
+                    .iter()
+                    .enumerate()
+                    .find_map(|(index, run)| run.glyphs.first().map(|glyph| (index, glyph)))
+                else {
+                    return Ok(());
+                };
+                let mut start_x = origin.x + first_glyph.position.x;
+                // Match paint_line's endpoint even when a leading fallback run is empty.
+                let end_x = if first_run == 0 { start_x } else { origin.x } + self.width;
+                if start_x == end_x {
+                    // Zero-advance glyphs still receive a visible decoration using
+                    // the same final font bounds as the general painter.
+                    if let Some(last_run) = self.runs.last() {
+                        start_x -= cx
+                            .text_system()
+                            .bounding_box(last_run.font_id, self.font_size)
+                            .size
+                            .width
+                            .half();
+                    }
+                }
+                let width = end_x - start_x;
+                // These two primitives stay live: changing a line style or opacity
+                // must not require rebuilding otherwise identical glyph resources.
+                if let Some(style) = decoration.underline {
+                    window.paint_underline(
+                        point(
+                            start_x,
+                            origin.y + underline_y_offset(line_height, self.ascent, self.descent),
+                        ),
+                        width,
+                        &UnderlineStyle {
+                            color: Some(style.color.unwrap_or(decoration.color)),
+                            ..style
+                        },
+                    );
+                }
+                if let Some(style) = decoration.strikethrough {
+                    let baseline_y = (line_height - self.ascent - self.descent) / 2.0 + self.ascent;
+                    window.paint_strikethrough(
+                        point(start_x, origin.y + (self.ascent * 0.5 + baseline_y) * 0.5),
+                        width,
+                        &StrikethroughStyle {
+                            color: Some(style.color.unwrap_or(decoration.color)),
+                            ..style
+                        },
+                    );
+                }
+                Ok(())
+            },
+        )
+    }
+
     fn paint_cached_in_current_layer_impl(
         &self,
         origin: Point<Pixels>,
@@ -623,9 +746,31 @@ impl LineLayout {
         _cx: &mut App,
     ) -> Result<()> {
         let scale_factor = window.scale_factor();
+        let layout_identity = self as *const Self as usize;
+        let mut prepared = cache.prepared.lock();
+        let snap_vertical_origin = prepared
+            .as_ref()
+            .filter(|prepared| prepared.key.layout_identity == layout_identity)
+            .map(|prepared| prepared.snap_vertical_origin)
+            .unwrap_or_else(|| {
+                crate::SUBPIXEL_VARIANTS_Y == 1
+                    && self
+                        .runs
+                        .iter()
+                        .flat_map(|run| &run.glyphs)
+                        .all(|glyph| glyph.position.y == px(0.))
+            });
+        // These glyphs share an integer raster baseline. Anchor the batch there so scrolling
+        // changes only its translation, without changing any glyph's original raster position.
+        let device_y = if snap_vertical_origin {
+            let baseline_y = (line_height - self.ascent - self.descent) / 2.0 + self.ascent;
+            round_half_toward_zero((origin.y + baseline_y).0 * scale_factor)
+        } else {
+            origin.y.0 * scale_factor
+        };
         let device_origin = point(
             ScaledPixels(origin.x.0 * scale_factor),
-            ScaledPixels(origin.y.0 * scale_factor),
+            ScaledPixels(device_y),
         );
         let subpixel_rendering = self
             .runs
@@ -633,19 +778,22 @@ impl LineLayout {
             .map(|run| window.should_use_subpixel_rendering(run.font_id, self.font_size))
             .collect::<SmallVec<[bool; 16]>>();
         let key = PreparedLinePaintKey {
-            layout_identity: self as *const Self as usize,
+            layout_identity,
             renderer_resource_identity: window.renderer_resource_identity(),
             renderer_resource_generation: window.renderer_resource_generation(),
             scale_factor_bits: scale_factor.to_bits(),
             line_height_bits: line_height.0.to_bits(),
             origin_phase_x_bits: device_pixel_phase(device_origin.x.0).to_bits(),
-            origin_phase_y_bits: device_pixel_phase(device_origin.y.0).to_bits(),
+            origin_phase_y_bits: if snap_vertical_origin {
+                0
+            } else {
+                device_pixel_phase(device_origin.y.0).to_bits()
+            },
             decorations: prepared_decoration_keys(decoration_runs),
             subpixel_rendering,
         };
 
         let glyphs = {
-            let mut prepared = cache.prepared.lock();
             if prepared.as_ref().is_none_or(|prepared| prepared.key != key) {
                 let glyphs = prepare_line_glyphs(
                     self,
@@ -656,10 +804,16 @@ impl LineLayout {
                     &key.subpixel_rendering,
                     window,
                 )?;
-                *prepared = Some(Box::new(PreparedLinePaint {
+                let replacement = PreparedLinePaint {
                     key,
                     glyphs: Arc::new(glyphs),
-                }));
+                    snap_vertical_origin,
+                };
+                if let Some(prepared) = prepared.as_mut() {
+                    **prepared = replacement;
+                } else {
+                    *prepared = Some(Box::new(replacement));
+                }
             }
             prepared
                 .as_ref()
@@ -667,6 +821,7 @@ impl LineLayout {
                 .glyphs
                 .clone()
         };
+        drop(prepared);
         window.paint_prepared_glyph_batch(device_origin, glyphs);
         Ok(())
     }
@@ -1915,7 +2070,7 @@ mod tests {
         }
     }
 
-    fn test_underline_handler_at_scales(
+    pub(super) fn test_underline_handler_at_scales(
         cx: &mut TestAppContext,
         paint: impl Fn(&mut Window, &mut App) + 'static,
     ) {
@@ -1927,7 +2082,7 @@ mod tests {
         }
     }
 
-    fn underline_test_line(
+    pub(super) fn underline_test_line(
         text: &str,
         decorations: &[DecorationRun],
         zero_advance: bool,
@@ -1964,7 +2119,7 @@ mod tests {
         line
     }
 
-    fn assert_underline_primitives_eq(actual: &[Underline], expected: &[Underline]) {
+    pub(super) fn assert_underline_primitives_eq(actual: &[Underline], expected: &[Underline]) {
         assert_eq!(actual.len(), expected.len());
         for (actual, expected) in actual.iter().zip(expected) {
             assert_eq!(actual.bounds, expected.bounds);

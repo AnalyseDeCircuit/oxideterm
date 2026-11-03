@@ -1015,7 +1015,8 @@ pub(crate) struct PreparedGlyphBatch {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PreparedMonochromeGlyph {
     pub(crate) bounds: Bounds<ScaledPixels>,
-    pub(crate) color: Hsla,
+    // Hue normalization is invariant across frames; opacity is applied on replay.
+    pub(crate) color: crate::SceneHsla,
     pub(crate) tile: AtlasTile,
 }
 
@@ -5054,7 +5055,7 @@ impl Window {
         font_id: FontId,
         glyph_id: GlyphId,
         font_size: Pixels,
-        color: Hsla,
+        color: crate::SceneHsla,
         subpixel_rendering: bool,
         dilation: u8,
         batch_origin: Point<ScaledPixels>,
