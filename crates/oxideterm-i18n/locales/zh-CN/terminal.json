@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "SSH 往返延迟，包含网络和服务器响应时间。{{seconds}} 秒前更新。",
+      "pending": "正在测量 SSH 延迟…",
+      "timeout": "超时",
+      "unavailable": "SSH 连接不可用",
+      "unsupported": "此设备的兼容模式不支持延迟探测。",
+      "stale": "延迟数据已过期"
+    },
     "archive": {
       "title": "解压压缩包",
       "command": "解压命令",

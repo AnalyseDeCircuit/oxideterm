@@ -81,10 +81,51 @@ impl WorkspaceApp {
         &self,
         target_label: String,
         is_local_terminal: bool,
+        visible: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let tooltip_id = "terminal-command-target-indicator";
+        let latency = self.active_ssh_terminal_node_id(cx).map(|node| {
+            self.workspace_runtime
+                .update(cx, |runtime, _| runtime.ssh_latency(&node, visible))
+        });
+        let (latency_label, latency_detail) = latency
+            .map(|sample| {
+                use oxideterm_ssh::SshLatencySnapshot::*;
+                let (label, key, age) = match sample {
+                    Measured {
+                        millis,
+                        measured_at,
+                    } => (
+                        if millis > 9999 {
+                            ">9999 ms".into()
+                        } else {
+                            format!("{millis} ms")
+                        },
+                        "terminal.ssh_latency.measured",
+                        Some(measured_at.elapsed().as_secs()),
+                    ),
+                    Pending => ("…".into(), "terminal.ssh_latency.pending", None),
+                    Timeout => (
+                        self.i18n.t("terminal.ssh_latency.timeout"),
+                        "terminal.ssh_latency.timeout",
+                        None,
+                    ),
+                    Unavailable => ("—".into(), "terminal.ssh_latency.unavailable", None),
+                    Unsupported => ("—".into(), "terminal.ssh_latency.unsupported", None),
+                    Stale => ("—".into(), "terminal.ssh_latency.stale", None),
+                };
+                let detail = if let Some(seconds) = age {
+                    self.i18n
+                        .t(key)
+                        .replace("{{seconds}}", &seconds.to_string())
+                } else {
+                    self.i18n.t(key)
+                };
+                (Some(label), format!("{target_label}\n{detail}"))
+            })
+            .unwrap_or((None, target_label));
         let icon = if is_local_terminal {
             LucideIcon::Terminal
         } else {
@@ -94,6 +135,7 @@ impl WorkspaceApp {
         div()
             .h(px(20.0))
             .min_w(px(28.0))
+            .when(latency_label.is_some(), |indicator| indicator.w(px(76.0)))
             .flex_none()
             .px(px(6.0))
             .flex()
@@ -102,7 +144,7 @@ impl WorkspaceApp {
             .text_color(rgb(theme.text_muted))
             .id(tooltip_id)
             .on_mouse_move({
-                let title = target_label;
+                let title = latency_detail;
                 cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
                     this.queue_workspace_tooltip(
                         tooltip_id,
@@ -118,7 +160,14 @@ impl WorkspaceApp {
                     this.clear_workspace_tooltip(tooltip_id, cx);
                 }
             }))
-            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
+            .when_some(latency_label.clone(), |indicator, label| {
+                indicator
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .child(label)
+            })
+            .when(latency_label.is_none(), |indicator| {
+                indicator.child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
+            })
             .into_any_element()
     }
 

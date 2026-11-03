@@ -16,6 +16,7 @@ const RECONNECT_MAX_REQUEUE: u32 = 120;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceRuntimeEvent {
     EffectsReady,
+    LatencyUpdated,
 }
 
 #[derive(Debug)]
@@ -295,6 +296,8 @@ pub(in crate::workspace) struct WorkspaceRuntimeEntity {
     active_probe_task: Option<tokio::task::AbortHandle>,
     active_probe_timer_generation: u64,
     active_probe_timer_task: Option<Task<()>>,
+    latency_monitor: oxideterm_ssh::SshLatencyMonitor,
+    latency_timer: Option<Task<()>>,
     reconnect_grace_probe_tasks: HashMap<NodeId, (String, tokio::task::AbortHandle)>,
     remote_shell_integration: settings::RemoteShellIntegrationRuntimeState,
     remote_shell_gate_tasks: HashMap<NodeId, (u64, tokio::task::AbortHandle)>,
@@ -407,6 +410,8 @@ impl WorkspaceRuntimeEntity {
             active_probe_task: None,
             active_probe_timer_generation: 0,
             active_probe_timer_task: None,
+            latency_monitor: oxideterm_ssh::SshLatencyMonitor::default(),
+            latency_timer: None,
             reconnect_grace_probe_tasks: HashMap::new(),
             remote_shell_integration: settings::RemoteShellIntegrationRuntimeState::default(),
             remote_shell_gate_tasks: HashMap::new(),
@@ -414,6 +419,7 @@ impl WorkspaceRuntimeEntity {
         };
         entity.schedule_worker_delivery(cx);
         entity.schedule_active_probe_after(ACTIVE_PROBE_START_DELAY, cx);
+        entity.schedule_latency_sampling(cx);
         entity
     }
 
@@ -1089,6 +1095,8 @@ impl WorkspaceRuntimeEntity {
             return;
         }
         self.lifecycle = WorkspaceRuntimeLifecycle::ShuttingDown;
+        self.latency_timer = None;
+        self.latency_monitor.clear();
 
         // Stop producers and invalidate deferred transitions before touching
         // any node or registry owner they could otherwise reacquire.
@@ -2505,6 +2513,44 @@ impl WorkspaceRuntimeEntity {
             }
         })
         .detach();
+    }
+
+    pub(in crate::workspace) fn ssh_latency(
+        &mut self,
+        node: &NodeId,
+        visible: bool,
+    ) -> oxideterm_ssh::SshLatencySnapshot {
+        let Some(id) = self.node_router.connection_id_for_node(node) else {
+            return oxideterm_ssh::SshLatencySnapshot::Unavailable;
+        };
+        if visible {
+            self.latency_monitor.mark_visible(&id);
+        }
+        self.ssh_registry
+            .get(&id)
+            .map(|handle| self.latency_monitor.snapshot(&handle))
+            .unwrap_or(oxideterm_ssh::SshLatencySnapshot::Unavailable)
+    }
+
+    fn schedule_latency_sampling(&mut self, cx: &mut Context<Self>) {
+        self.latency_timer = Some(cx.spawn(async move |entity, cx| {
+            loop {
+                Timer::after(Duration::from_secs(5)).await;
+                if entity
+                    .update(cx, |entity, cx| {
+                        let changed = entity
+                            .latency_monitor
+                            .refresh(&entity.ssh_registry, entity.task_runtime.handle());
+                        if changed {
+                            cx.emit(WorkspaceRuntimeEvent::LatencyUpdated);
+                        }
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
     }
 
     fn schedule_active_probe_after(&mut self, delay: Duration, cx: &mut Context<Self>) {
@@ -3949,6 +3995,7 @@ mod tests {
                 ("grace-job".to_string(), grace_probe_task.abort_handle()),
             );
             assert!(entity.active_probe_timer_task.is_some());
+            assert!(entity.latency_timer.is_some());
             entity.shutdown_workspace_runtime();
             entity.shutdown_workspace_runtime();
             assert_eq!(entity.lifecycle, WorkspaceRuntimeLifecycle::Stopped);
@@ -3956,6 +4003,7 @@ mod tests {
             assert!(entity.pending_ssh_terminal_opens.is_empty());
             assert!(entity.active_probe_task.is_none());
             assert!(entity.active_probe_timer_task.is_none());
+            assert!(entity.latency_timer.is_none());
             assert!(!entity.ssh_active_probe_in_flight);
             assert!(entity.reconnect_grace_probe_tasks.is_empty());
             assert!(!entity.node_transport_result_is_current(&node_id, attempt_id));

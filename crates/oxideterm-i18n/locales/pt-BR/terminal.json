@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "Tempo de ida e volta SSH, incluindo rede e resposta do servidor. Atualizado há {{seconds}} s.",
+      "pending": "Medindo latência SSH…",
+      "timeout": "Expirou",
+      "unavailable": "Conexão SSH indisponível",
+      "unsupported": "A medição de latência está desativada no modo de compatibilidade deste dispositivo.",
+      "stale": "O valor de latência expirou"
+    },
     "archive": {
       "title": "Extrair arquivo",
       "command": "Comando de extração",

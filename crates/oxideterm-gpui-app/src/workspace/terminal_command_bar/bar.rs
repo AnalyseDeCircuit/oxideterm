@@ -11,7 +11,11 @@ const TERMINAL_RECORDING_MENU_WIDTH: f32 = 220.0;
 const TERMINAL_RECORDING_MENU_BOTTOM: f32 = 30.0;
 
 impl WorkspaceApp {
-    pub(super) fn render_terminal_command_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn render_terminal_command_bar(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         const COMMAND_BAR_BG_ALPHA: u32 = 0xf2; // Tauri bg-theme-bg/95
         const COMMAND_BAR_BORDER_ALPHA: u32 = 0xb3; // Tauri border-theme-border/70
 
@@ -193,6 +197,7 @@ impl WorkspaceApp {
                             .child(self.render_terminal_target_indicator(
                                 target_label,
                                 target_indicator_is_local,
+                                window.is_visible() && !window.is_minimized(),
                                 cx,
                             ))
                             .when(cwd_supported, |row| {

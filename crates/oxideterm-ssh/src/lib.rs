@@ -23,6 +23,8 @@ mod session_tree_plan;
 mod transport;
 mod upstream_proxy;
 
+pub use transport::{SshLatencyMonitor, SshLatencySnapshot};
+
 pub use agent_endpoint::ssh_agent_available;
 pub use algorithms::{
     SshAlgorithmCategory, SshAlgorithmPreferenceError, preferred_algorithms,

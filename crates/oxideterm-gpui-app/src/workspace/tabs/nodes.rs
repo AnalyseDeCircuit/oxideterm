@@ -17,6 +17,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match event {
+            runtime_entity::WorkspaceRuntimeEvent::LatencyUpdated => cx.notify(),
             runtime_entity::WorkspaceRuntimeEvent::EffectsReady => {
                 let effects = self
                     .workspace_runtime

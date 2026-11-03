@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "Tiempo de ida y vuelta SSH, incluida la red y la respuesta del servidor. Actualizado hace {{seconds}} s.",
+      "pending": "Midiendo latencia SSH…",
+      "timeout": "Agotado",
+      "unavailable": "Conexión SSH no disponible",
+      "unsupported": "La medición de latencia está desactivada en el modo de compatibilidad de este dispositivo.",
+      "stale": "El dato de latencia ha caducado"
+    },
     "archive": {
       "title": "Extraer archivo",
       "command": "Comando de extracción",

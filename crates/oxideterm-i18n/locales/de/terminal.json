@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "SSH-Rundlaufzeit einschließlich Netzwerk und Serverantwort. Vor {{seconds}} s aktualisiert.",
+      "pending": "SSH-Latenz wird gemessen…",
+      "timeout": "Zeitlimit",
+      "unavailable": "SSH-Verbindung nicht verfügbar",
+      "unsupported": "Latenzmessung ist im Kompatibilitätsmodus dieses Geräts deaktiviert.",
+      "stale": "Latenzwert ist veraltet"
+    },
     "archive": {
       "title": "Archiv entpacken",
       "command": "Entpackbefehl",

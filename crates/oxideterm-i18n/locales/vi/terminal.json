@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "Thời gian khứ hồi SSH, gồm mạng và phản hồi máy chủ. Cập nhật {{seconds}} giây trước.",
+      "pending": "Đang đo độ trễ SSH…",
+      "timeout": "Hết giờ",
+      "unavailable": "Kết nối SSH không khả dụng",
+      "unsupported": "Chế độ tương thích của thiết bị này không hỗ trợ đo độ trễ.",
+      "stale": "Dữ liệu độ trễ đã hết hạn"
+    },
     "archive": {
       "title": "Giải nén tệp",
       "command": "Lệnh giải nén",

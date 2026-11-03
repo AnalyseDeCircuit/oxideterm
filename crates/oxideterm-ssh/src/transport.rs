@@ -966,6 +966,9 @@ pub struct SshTransportClient {
 mod command;
 pub use command::{SshCommandChannel, SshCommandExecution};
 
+mod latency;
+pub use latency::{SshLatencyMonitor, SshLatencySnapshot};
+
 include!("transport/connection.rs");
 include!("transport/signers.rs");
 include!("transport/security_key.rs");

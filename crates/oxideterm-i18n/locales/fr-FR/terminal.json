@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "Temps aller-retour SSH, réseau et réponse du serveur compris. Mis à jour il y a {{seconds}} s.",
+      "pending": "Mesure de la latence SSH…",
+      "timeout": "Délai",
+      "unavailable": "Connexion SSH indisponible",
+      "unsupported": "La mesure de latence est désactivée dans le mode de compatibilité de cet appareil.",
+      "stale": "La mesure de latence a expiré"
+    },
     "archive": {
       "title": "Extraire l’archive",
       "command": "Commande d’extraction",

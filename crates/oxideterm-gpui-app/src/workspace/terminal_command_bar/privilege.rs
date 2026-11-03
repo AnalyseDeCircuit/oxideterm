@@ -916,7 +916,7 @@ impl WorkspaceApp {
                     .quick_bar_enabled,
                 |surface| surface.child(self.render_terminal_quick_bar(window, cx)),
             )
-            .child(self.render_terminal_command_bar(cx))
+            .child(self.render_terminal_command_bar(window, cx))
             .child(self.render_terminal_quick_commands_panel(cx))
             // The toolbar is the sender header. Hidden, compact, and expanded
             // layouts all retain the same document and running jobs below it.

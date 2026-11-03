@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "ネットワークとサーバーの応答を含む SSH の往復時間。{{seconds}} 秒前に更新。",
+      "pending": "SSH の遅延を測定中…",
+      "timeout": "時間切れ",
+      "unavailable": "SSH 接続を利用できません",
+      "unsupported": "このデバイスの互換モードでは遅延を測定できません。",
+      "stale": "遅延データが古くなっています"
+    },
     "archive": {
       "title": "アーカイブを展開",
       "command": "展開コマンド",

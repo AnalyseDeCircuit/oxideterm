@@ -1,5 +1,13 @@
 {
   "terminal": {
+    "ssh_latency": {
+      "measured": "SSH 往返延遲，包含網路和伺服器回應時間。{{seconds}} 秒前更新。",
+      "pending": "正在測量 SSH 延遲…",
+      "timeout": "逾時",
+      "unavailable": "SSH 連線無法使用",
+      "unsupported": "此裝置的相容模式不支援延遲探測。",
+      "stale": "延遲資料已過期"
+    },
     "archive": {
       "title": "解壓縮檔案",
       "command": "解壓縮命令",
