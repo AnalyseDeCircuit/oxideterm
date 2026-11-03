@@ -789,7 +789,11 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             // If the entire buffer is valid, use the first character and continue parsing.
             Ok(parsed) => {
                 let c = unsafe { parsed.chars().next().unwrap_unchecked() };
-                performer.print(c);
+                // Completed UTF-8 controls must behave identically across read boundaries.
+                match c {
+                    '\u{80}'..='\u{9f}' => performer.execute(c as u8),
+                    _ => performer.print(c),
+                }
 
                 self.partial_utf8_len = 0;
                 c.len_utf8() - old_bytes
@@ -805,7 +809,10 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                         parsed.chars().next().unwrap_unchecked()
                     };
 
-                    performer.print(c);
+                    match c {
+                        '\u{80}'..='\u{9f}' => performer.execute(c as u8),
+                        _ => performer.print(c),
+                    }
 
                     self.partial_utf8_len = 0;
                     return valid_bytes - old_bytes;
@@ -1185,6 +1192,45 @@ mod tests {
         parser.advance(&mut dispatcher, text.as_bytes());
 
         assert_eq!(dispatcher.dispatched, vec![TextDispatch::PrintLines(text)]);
+    }
+
+    #[test]
+    fn printable_runs_preserve_events_across_utf8_and_control_boundaries() {
+        for width in [15, 16, 17, 31, 32, 33, 64] {
+            let prefix = "x".repeat(width);
+            let mut bytes = prefix.as_bytes().to_vec();
+            bytes.extend_from_slice("\t\u{7f}中e\u{301}🦀\u{85}\r\n\u{85}中\x1b[31mZ\x1b[0m".as_bytes());
+            bytes.extend_from_slice(b"\xfftail");
+            let mut expected: Vec<_> = (0..width).map(|_| Sequence::Print('x')).collect();
+            expected.extend([
+                Sequence::Execute(9), Sequence::Print('\u{7f}'), Sequence::Print('中'),
+                Sequence::Print('e'), Sequence::Print('\u{301}'), Sequence::Print('🦀'),
+                Sequence::Execute(0x85), Sequence::Execute(13), Sequence::Execute(10),
+                Sequence::Execute(0x85), Sequence::Print('中'),
+                Sequence::Csi(vec![vec![31]], vec![], false, 'm'), Sequence::Print('Z'),
+                Sequence::Csi(vec![vec![0]], vec![], false, 'm'), Sequence::Print('�'),
+                Sequence::Print('t'), Sequence::Print('a'), Sequence::Print('i'), Sequence::Print('l'),
+            ]);
+            for split in 0..=bytes.len() {
+                for until_terminated in [false, true] {
+                    let mut parser = Parser::new();
+                    let mut dispatcher = Dispatcher::default();
+                    for chunk in [&bytes[..split], &bytes[split..]] {
+                        if until_terminated {
+                            assert_eq!(
+                                parser.advance_until_terminated(&mut dispatcher, chunk), chunk.len(),
+                            );
+                        } else {
+                            parser.advance(&mut dispatcher, chunk);
+                        }
+                    }
+                    assert_eq!(
+                        dispatcher.dispatched, expected,
+                        "width={width}, split={split}, termination={until_terminated}",
+                    );
+                }
+            }
+        }
     }
 
     #[test]
