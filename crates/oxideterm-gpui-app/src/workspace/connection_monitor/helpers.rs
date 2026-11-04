@@ -105,13 +105,6 @@ pub(super) fn host_tools_center_state(
         .into_any_element()
 }
 
-pub(super) fn monitor_connection_label(connection: &MonitorConnectionOption) -> String {
-    format!(
-        "{}@{}:{}",
-        connection.username, connection.host, connection.port
-    )
-}
-
 pub(super) fn monitor_connection_can_switch(connections: &[MonitorConnectionOption]) -> bool {
     // A single Host Tools connection is already identified by the monitor and
     // process headers. Only expose switch affordances when another host exists.

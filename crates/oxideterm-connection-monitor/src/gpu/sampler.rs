@@ -85,7 +85,7 @@ async fn sample_loop(
     update_tx: mpsc::UnboundedSender<GpuUpdate>,
     mut stop_rx: oneshot::Receiver<()>,
 ) {
-    if !gpu_os_supported(&os_type) {
+    if !super::provider::gpu_os_supported(&os_type) {
         emit_snapshot(
             &update_tx,
             &connection_id,
@@ -130,7 +130,8 @@ async fn sample_loop(
                 {
                     Ok(output) => {
                         let snapshot = parse_gpu_snapshot(&output, now_ms());
-                        let sampling_complete = matches!(
+                        let inventory_only = snapshot.devices.first().is_some_and(|device| device.provider == super::GpuProvider::System);
+                        let sampling_complete = inventory_only || matches!(
                             snapshot.status,
                             GpuSnapshotStatus::Unavailable | GpuSnapshotStatus::NoDevices
                         );
@@ -168,13 +169,6 @@ async fn open_gpu_shell(
     sampler
         .open_shell(shell_init_command(os_type), GPU_CHANNEL_OPEN_TIMEOUT)
         .await
-}
-
-fn gpu_os_supported(os_type: &str) -> bool {
-    matches!(
-        os_type,
-        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin"
-    )
 }
 
 fn emit_error(update_tx: &mpsc::UnboundedSender<GpuUpdate>, connection_id: &str, error: &str) {

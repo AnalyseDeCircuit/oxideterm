@@ -145,6 +145,9 @@ impl HostToolsEntity {
         value: Option<&str>,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
+        if connection_id == LOCAL_HOST_ID {
+            return Err("A remote Host Tools connection is required.".into());
+        }
         let runtime = self
             .lifecycle_runtime
             .clone()
@@ -322,6 +325,9 @@ impl HostToolsEntity {
         connection_id: &str,
         resource: &str,
     ) -> serde_json::Value {
+        if connection_id == LOCAL_HOST_ID {
+            return serde_json::Value::Null;
+        }
         let latest_metrics = self.profiler_registry.latest(connection_id);
         match resource {
             "overview" => latest_metrics
@@ -422,6 +428,9 @@ impl HostToolsEntity {
         resource: &str,
         cx: &mut Context<Self>,
     ) -> bool {
+        if connection_id == LOCAL_HOST_ID {
+            return false;
+        }
         let Some(runtime) = self.lifecycle_runtime.clone() else {
             return false;
         };
@@ -720,28 +729,55 @@ impl HostToolsEntity {
     }
 
     pub(super) fn monitor_connections(&self) -> Vec<MonitorConnectionOption> {
-        if !self.pool_summaries.is_empty() {
-            return self
-                .pool_summaries
+        let mut connections = if !self.pool_summaries.is_empty() {
+            self.pool_summaries
                 .iter()
                 .filter(|summary| summary.is_displayed_in_pool())
                 .map(MonitorConnectionOption::from_pool_summary)
-                .collect();
-        }
-
-        let mut connections = self
-            .ssh_registry
-            .list()
-            .into_iter()
-            .map(MonitorConnectionOption::from_connection_info)
-            .collect::<Vec<_>>();
-        connections.sort_by(|left, right| {
-            monitor_connection_label(left).cmp(&monitor_connection_label(right))
+                .collect()
+        } else {
+            let mut connections = self
+                .ssh_registry
+                .list()
+                .into_iter()
+                .map(MonitorConnectionOption::from_connection_info)
+                .collect::<Vec<_>>();
+            connections.sort_by(|left, right| left.label.cmp(&right.label));
+            connections
+        };
+        connections.push(MonitorConnectionOption {
+            connection_id: LOCAL_HOST_ID.into(),
+            label: self
+                .messages
+                .as_ref()
+                .map(|messages| messages.local_device.clone())
+                .unwrap_or_else(|| "localhost".into()),
         });
         connections
     }
 
+    pub(super) fn confirm_target_title(&self, id: &str, title: String) -> String {
+        let label = self
+            .monitor_connections()
+            .into_iter()
+            .find(|host| host.connection_id == id)
+            .map(|host| host.label)
+            .unwrap_or_else(|| id.to_owned());
+        format!("{title} · {label}")
+    }
+
+    fn command_target(&self, id: &str) -> Option<execution::CommandTarget> {
+        if id == LOCAL_HOST_ID {
+            Some(execution::CommandTarget::Local)
+        } else {
+            self.ssh_registry.get(id).map(execution::CommandTarget::Ssh)
+        }
+    }
+
     pub(super) fn connection_os_type(&self, connection_id: &str) -> Option<String> {
+        if connection_id == LOCAL_HOST_ID {
+            return Some(execution::local_os().into());
+        }
         self.ssh_registry.get(connection_id).map(|handle| {
             handle
                 .remote_env()
@@ -774,7 +810,7 @@ impl HostToolsEntity {
                 )),
             )
         });
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             if let Some(audit) = audit {
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
@@ -815,7 +851,7 @@ impl HostToolsEntity {
             .feedback
             .should_toast()
             .then(|| self.host_tool_audit(&request.connection_id, "query_host_ports", None));
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             if let Some(audit) = audit {
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
@@ -856,7 +892,7 @@ impl HostToolsEntity {
             .feedback
             .should_toast()
             .then(|| self.host_tool_audit(&request.connection_id, "query_host_filesystems", None));
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             if let Some(audit) = audit {
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
@@ -899,7 +935,7 @@ impl HostToolsEntity {
             .feedback
             .should_toast()
             .then(|| self.host_tool_audit(&request.connection_id, "query_host_packages", None));
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             if let Some(audit) = audit {
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
@@ -940,7 +976,7 @@ impl HostToolsEntity {
             .feedback
             .should_toast()
             .then(|| self.host_tool_audit(&request.connection_id, "query_host_schedules", None));
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             if let Some(audit) = audit {
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
@@ -984,7 +1020,7 @@ impl HostToolsEntity {
             "query_scheduled_task_logs",
             Some(&format!("task_id={}", request.task_id)),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1024,7 +1060,7 @@ impl HostToolsEntity {
                 request.task_id, request.action
             )),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1085,7 +1121,7 @@ impl HostToolsEntity {
             "process_action",
             Some(&format!("pid={} action={:?}", request.pid, request.action)),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1149,7 +1185,7 @@ impl HostToolsEntity {
                 request.container_id, request.action
             )),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1209,7 +1245,7 @@ impl HostToolsEntity {
             "query_container_logs",
             Some(&format!("container_id={}", request.container_id)),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1241,7 +1277,7 @@ impl HostToolsEntity {
         max_output_size: usize,
         runtime: tokio::runtime::Handle,
     ) -> bool {
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             return false;
         };
         let delivery_tx = self.reliable_delivery_tx.clone();
@@ -1274,7 +1310,7 @@ impl HostToolsEntity {
                 request.service_id, request.action
             )),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1334,7 +1370,7 @@ impl HostToolsEntity {
             "query_service_logs",
             Some(&format!("service_id={}", request.service_id)),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1370,7 +1406,7 @@ impl HostToolsEntity {
             .feedback
             .should_toast()
             .then(|| self.host_tool_audit(&request.connection_id, "query_host_tmux", None));
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             if let Some(audit) = audit {
                 audit.finish(
                     oxideterm_audit::AuditOutcome::Failed,
@@ -1411,7 +1447,7 @@ impl HostToolsEntity {
             "tmux_action",
             Some(&format!("session={}", request.session_id)),
         );
-        let Some(handle) = self.ssh_registry.get(&request.connection_id) else {
+        let Some(handle) = self.command_target(&request.connection_id) else {
             audit.finish(
                 oxideterm_audit::AuditOutcome::Failed,
                 oxideterm_audit::AuditEvidence::Request,
@@ -1531,6 +1567,9 @@ impl HostToolsEntity {
     ) -> bool {
         if self.active_tool == tool {
             return false;
+        }
+        if self.selected_connection_id() == Some(LOCAL_HOST_ID) {
+            self.remove_profiler_connection(LOCAL_HOST_ID);
         }
         self.active_tool = tool;
         cx.notify();
@@ -1678,6 +1717,9 @@ impl HostToolsEntity {
         focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
         cx: &mut Context<Self>,
     ) {
+        if self.selected_connection_id() == Some(LOCAL_HOST_ID) && connection_id != LOCAL_HOST_ID {
+            self.remove_profiler_connection(LOCAL_HOST_ID);
+        }
         self.selected_connection_id = Some(connection_id);
         self.selector_open = false;
         self.selector_highlighted_index = None;
@@ -1874,14 +1916,23 @@ impl HostToolsEntity {
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) {
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+        let mut sampling_config = sampling_config;
+        if connection_id == LOCAL_HOST_ID {
+            // A local PowerShell probe owns a real process tree. Only collect sections consumed by this page.
+            sampling_config.system &= self.active_tool == ContextSidebarTool::Monitor;
+            sampling_config.gpu &= self.active_tool == ContextSidebarTool::Monitor;
+            sampling_config.processes &= matches!(
+                self.active_tool,
+                ContextSidebarTool::Monitor | ContextSidebarTool::Processes
+            );
+            sampling_config.docker &= self.active_tool == ContextSidebarTool::Docker;
+            if sampling_config.is_empty() {
+                return;
+            }
+        }
+        let Some((sampler, os_type)) = self.sampler_for_target(&connection_id) else {
             return;
         };
-        let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
-            // Environment detection owns OS selection; never guess a probe dialect.
-            return;
-        };
-        let sampler = self.resource_sampler(handle);
         self.profiler_registry.start_with_sampler_on_config(
             connection_id,
             sampler,
@@ -1921,13 +1972,9 @@ impl HostToolsEntity {
         if let Some(task) = self.host_gpu.sampling_task.take() {
             task.stop();
         }
-        let Some(handle) = self.ssh_registry.get(&connection_id) else {
+        let Some((sampler, os_type)) = self.sampler_for_target(&connection_id) else {
             return;
         };
-        let Some(os_type) = handle.remote_env().map(|environment| environment.os_type) else {
-            return;
-        };
-        let sampler = self.resource_sampler(handle);
         self.host_gpu.snapshot_connection_id = Some(connection_id.clone());
         self.host_gpu.snapshot = None;
         self.host_gpu.expanded_uuid = None;
@@ -1940,6 +1987,18 @@ impl HostToolsEntity {
             runtime,
         ));
         cx.notify();
+    }
+
+    fn sampler_for_target(&self, id: &str) -> Option<(Arc<dyn ResourceSampler>, String)> {
+        if id == LOCAL_HOST_ID {
+            return Some((
+                Arc::new(execution::LocalSampler),
+                execution::local_os().into(),
+            ));
+        }
+        let handle = self.ssh_registry.get(id)?;
+        let os_type = handle.remote_env()?.os_type;
+        Some((self.resource_sampler(handle), os_type))
     }
 
     fn resource_sampler(
@@ -2147,6 +2206,35 @@ mod tests {
     use oxideterm_ssh::{RemoteEnvInfo, SshCommandOutput};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    #[gpui::test]
+    fn local_tools_are_available_without_ssh_and_unknown_hosts_never_route_locally(
+        cx: &mut TestAppContext,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let entity =
+            cx.new(|cx| HostToolsEntity::new(tx, rx, SshConnectionRegistry::default(), cx));
+        entity.update(cx, |tools, cx| {
+            let ids = tools
+                .monitor_connections()
+                .into_iter()
+                .map(|host| host.connection_id)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                tools.ensure_selected_connection(&ids, cx).as_deref(),
+                Some(LOCAL_HOST_ID)
+            );
+            assert!(matches!(
+                tools.command_target(LOCAL_HOST_ID),
+                Some(execution::CommandTarget::Local)
+            ));
+            assert!(tools.command_target("closed-ssh-connection").is_none());
+            assert_eq!(
+                tools.execute_ai_action(LOCAL_HOST_ID.into(), "process", "signal", "123", None, cx),
+                Err("A remote Host Tools connection is required.".into())
+            );
+        });
+    }
+
     struct VisibilityCountingSampler {
         shell_open_count: Arc<AtomicUsize>,
         shell_close_count: Arc<AtomicUsize>,
@@ -2274,6 +2362,7 @@ mod tests {
             entity.test_resource_sampler = Some(test_sampler);
             entity.test_snapshot_dispatches = Some(Vec::new());
             entity.messages = Some(HostToolsMessages {
+                local_device: "Local device".into(),
                 service_connection_missing: "Service connection missing".to_string(),
                 service_action_failed: "Service action failed".to_string(),
                 log_unknown_error: "Log capture failed".to_string(),
@@ -2685,6 +2774,7 @@ mod tests {
             entity.visibility = HostToolsVisibility::VisibleSidebar;
             entity.lifecycle_runtime = Some(runtime.handle().clone());
             entity.messages = Some(HostToolsMessages {
+                local_device: "Local device".into(),
                 service_connection_missing: "Service connection missing".to_string(),
                 service_action_failed: "Service capture failed".to_string(),
                 log_unknown_error: "Log capture failed".to_string(),

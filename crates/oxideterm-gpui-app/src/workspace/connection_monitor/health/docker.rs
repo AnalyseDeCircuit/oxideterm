@@ -20,9 +20,8 @@ impl WorkspaceApp {
                 .first()
                 .map(|connection| connection.connection_id.as_str())
         });
-        let terminal_available = selected_connection_id
-            .and_then(|connection_id| self.node_router.node_id_for_connection(connection_id))
-            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
+        let terminal_available =
+            selected_connection_id.is_some_and(|id| self.host_tool_terminal_available(id));
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_docker_panel(
                 search_ime,
@@ -125,11 +124,7 @@ impl WorkspaceApp {
             .host_tools
             .read(cx)
             .docker_logs_dialog()
-            .and_then(|dialog| {
-                self.node_router
-                    .node_id_for_connection(&dialog.request.connection_id)
-            })
-            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
+            .is_some_and(|dialog| self.host_tool_terminal_available(&dialog.request.connection_id));
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_docker_logs_dialog(
                 follow_terminal_available,
@@ -1418,7 +1413,10 @@ impl HostToolsEntity {
                         ConfirmDialogVariant::Default
                     },
                     title: div()
-                        .child(i18n.t("sidebar.host_docker.confirm.title"))
+                        .child(self.confirm_target_title(
+                            &request.connection_id,
+                            i18n.t("sidebar.host_docker.confirm.title"),
+                        ))
                         .into_any_element(),
                     description: Some(div().child(description).into_any_element()),
                     cancel_label: div()

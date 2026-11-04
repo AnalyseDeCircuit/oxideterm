@@ -174,10 +174,10 @@ const SERVICE_SAMPLE_COMMAND_WINDOWS: &str = concat!(
     "Write-Output ('__OXIDE_SERVICE_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_powershell');",
     "try{",
     "Get-CimInstance Win32_Service -Property Name,State,Status,StartMode,ProcessId,DisplayName|ForEach-Object{",
-    "$pid=if($_.ProcessId -and $_.ProcessId -ne 0){[string]$_.ProcessId}else{''};",
+    "$servicePid=if($_.ProcessId -and $_.ProcessId -ne 0){[string]$_.ProcessId}else{''};",
     "$enabled=if($_.StartMode){[string]$_.StartMode}else{'unknown'};",
     "$desc=if($_.DisplayName){[string]$_.DisplayName}else{[string]$_.Name};",
-    "Write-Output ('ROW'+[char]9+$_.Name+[char]9+''+[char]9+$_.State+[char]9+$_.Status+[char]9+$enabled+[char]9+$pid+[char]9+$desc)",
+    "Write-Output ('ROW'+[char]9+$_.Name+[char]9+''+[char]9+$_.State+[char]9+$_.Status+[char]9+$enabled+[char]9+$servicePid+[char]9+$desc)",
     "}",
     "}catch{Write-Output ('__OXIDE_SERVICE_ERROR__'+[char]9+$_.Exception.Message)};",
     "Write-Output '===SERVICES_END===';"
@@ -858,6 +858,25 @@ mod tests {
         assert_eq!(command.capability, ServiceCommandCapability::Partial);
         assert!(command.command.starts_with("powershell -NoProfile"));
         assert!(command.command.contains("Get-CimInstance Win32_Service -Property Name,State,Status,StartMode,ProcessId,DisplayName"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_service_probe_emits_the_service_pid() {
+        let script = format!(
+            "function Get-CimInstance {{ [pscustomobject]@{{ Name='Spooler'; ProcessId=741; State='Running'; Status='OK'; StartMode='Auto'; DisplayName='Print Spooler' }} }}; {SERVICE_SAMPLE_COMMAND_WINDOWS}"
+        );
+        let output = std::process::Command::new("powershell.exe")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .output()
+            .unwrap();
+        let snapshot = parse_service_snapshot(&String::from_utf8_lossy(&output.stdout));
+        let records = snapshot
+            .services
+            .iter()
+            .map(|s| (s.id.as_str(), s.main_pid.as_deref()))
+            .collect::<Vec<_>>();
+        assert_eq!(records, [("Spooler", Some("741"))]);
     }
 
     #[cfg(unix)]

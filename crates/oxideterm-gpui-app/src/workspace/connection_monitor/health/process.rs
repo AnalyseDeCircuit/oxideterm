@@ -1105,7 +1105,10 @@ impl HostToolsEntity {
                         ConfirmDialogVariant::Default
                     },
                     title: div()
-                        .child(i18n.t("sidebar.host_processes.confirm.title"))
+                        .child(self.confirm_target_title(
+                            &request.connection_id,
+                            i18n.t("sidebar.host_processes.confirm.title"),
+                        ))
                         .into_any_element(),
                     description: Some(div().child(description).into_any_element()),
                     cancel_label: div()

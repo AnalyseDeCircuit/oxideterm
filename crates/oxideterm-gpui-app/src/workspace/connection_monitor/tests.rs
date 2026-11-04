@@ -11,9 +11,7 @@ fn connection_options(count: usize) -> Vec<MonitorConnectionOption> {
     (0..count)
         .map(|index| MonitorConnectionOption {
             connection_id: format!("conn-{index}"),
-            host: format!("host-{index}"),
-            port: 22,
-            username: "user".to_string(),
+            label: format!("user@host-{index}:22"),
         })
         .collect()
 }

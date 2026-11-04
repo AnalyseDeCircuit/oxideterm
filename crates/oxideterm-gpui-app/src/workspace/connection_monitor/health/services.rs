@@ -23,9 +23,8 @@ impl WorkspaceApp {
                 .first()
                 .map(|connection| connection.connection_id.as_str())
         });
-        let follow_terminal_available = selected_connection_id
-            .and_then(|connection_id| self.node_router.node_id_for_connection(connection_id))
-            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
+        let follow_terminal_available =
+            selected_connection_id.is_some_and(|id| self.host_tool_terminal_available(id));
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_services_panel(
                 search_ime,
@@ -140,10 +139,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let dialog = self.host_tools.read(cx).service_logs_dialog()?;
-        let follow_terminal_available = self
-            .node_router
-            .node_id_for_connection(&dialog.request.connection_id)
-            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
+        let follow_terminal_available =
+            self.host_tool_terminal_available(&dialog.request.connection_id);
         let tokens = self.tokens;
         let i18n = &self.i18n;
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());
@@ -169,7 +166,10 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let (request, phase) = self.service_confirm_view()?;
-        let title = i18n.t("sidebar.host_services.confirm.title");
+        let title = self.confirm_target_title(
+            &request.connection_id,
+            i18n.t("sidebar.host_services.confirm.title"),
+        );
         let description = i18n
             .t(host_service_confirm_description_key(&request.action))
             .replace("{{name}}", &request.description)

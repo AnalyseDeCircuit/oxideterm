@@ -74,9 +74,6 @@ impl HostToolsEntity {
         let gpu_visible = self.monitoring.gpu_enabled
             && visibility.sidebar_is_visible()
             && self.active_tool() == ContextSidebarTool::Gpu;
-        let selected_connection_id = self.selected_connection_id_owned();
-        self.sync_gpu_sampling(gpu_visible, selected_connection_id, runtime.clone(), cx);
-
         let stale = self.pool_refresh_is_stale(MONITOR_POOL_REFRESH_INTERVAL);
         if force_pool_refresh || stale {
             self.refresh_pool_snapshot(cx);
@@ -84,6 +81,7 @@ impl HostToolsEntity {
         if !visibility.sidebar_is_visible() {
             // Runtime tabs only need pool and topology snapshots. Resource
             // samplers belong to the mounted Host Tools sidebar.
+            self.sync_gpu_sampling(false, None, runtime, cx);
             self.stop_profiler_sampling();
             self.pause_service_refreshes();
             return;
@@ -101,7 +99,16 @@ impl HostToolsEntity {
         if force_pool_refresh || stale || selected_missing || profiler_missing {
             // Re-showing Host Tools must restart the page profiler even when
             // the selected connection and cached pool snapshot stayed stable.
-            self.sync_live_connections(connections, sampling_config, runtime, cx);
+            self.sync_live_connections(connections, sampling_config, runtime.clone(), cx);
+        }
+        self.sync_gpu_sampling(
+            gpu_visible,
+            self.selected_connection_id_owned(),
+            runtime,
+            cx,
+        );
+        if selected_missing {
+            self.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
         }
     }
 

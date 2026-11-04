@@ -2,6 +2,14 @@ use super::super::*;
 use crate::workspace::connection_monitor::{HostToolsNotice, ScheduleActionNoticeKind};
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn host_tool_terminal_available(&self, id: &str) -> bool {
+        id == connection_monitor::LOCAL_HOST_ID
+            || self
+                .node_router
+                .node_id_for_connection(id)
+                .is_some_and(|node| self.ssh_nodes.contains_key(&node))
+    }
+
     /// Handles the one-shot window work that must remain with workspace-owned nodes and tabs.
     pub(in crate::workspace) fn handle_host_tools_window_request(
         &mut self,
@@ -20,6 +28,23 @@ impl WorkspaceApp {
                 opened_notice,
                 missing_notice,
             } => {
+                if connection_id == connection_monitor::LOCAL_HOST_ID {
+                    let config = connection_monitor::local_tool_terminal_config(&command);
+                    match self.create_local_terminal_tab_with_config(config, title, window, cx) {
+                        Ok(()) => self.push_host_tools_window_notice(
+                            opened_notice,
+                            TerminalNoticeVariant::Success,
+                            cx,
+                        ),
+                        Err(_) => self.push_host_tools_window_notice(
+                            missing_notice,
+                            TerminalNoticeVariant::Error,
+                            cx,
+                        ),
+                    }
+                    cx.notify();
+                    return;
+                }
                 let Some(node_id) = self.node_router.node_id_for_connection(&connection_id) else {
                     self.push_host_tools_window_notice(
                         missing_notice,

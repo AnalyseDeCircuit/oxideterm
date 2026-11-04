@@ -18,6 +18,7 @@ pub enum GpuProvider {
     Cambricon,
     Intel,
     Mthreads,
+    System,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

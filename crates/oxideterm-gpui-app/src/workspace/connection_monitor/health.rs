@@ -145,7 +145,7 @@ impl HostToolsEntity {
                         "host-tools-connection-endpoint",
                         connection.connection_id.as_str(),
                         0,
-                        monitor_connection_label(connection),
+                        connection.label.clone(),
                         theme.text,
                         cx,
                     )),
@@ -192,7 +192,7 @@ impl HostToolsEntity {
                 popup = popup.child(select_option_action(
                     select_option_highlighted(
                         tokens,
-                        monitor_connection_label(connection),
+                        connection.label.clone(),
                         selected,
                         highlighted,
                     )

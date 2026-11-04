@@ -651,7 +651,10 @@ impl HostToolsEntity {
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Danger,
                 title: div()
-                    .child(i18n.t("sidebar.host_tmux.confirm.title"))
+                    .child(self.confirm_target_title(
+                        &request.connection_id,
+                        i18n.t("sidebar.host_tmux.confirm.title"),
+                    ))
                     .into_any_element(),
                 description: Some(div().child(description).into_any_element()),
                 cancel_label: div()

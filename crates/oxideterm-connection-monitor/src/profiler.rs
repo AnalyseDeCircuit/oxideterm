@@ -682,21 +682,21 @@ fn build_windows_sample_command(
             "$gpuControllers=@(Get-CimInstance Win32_VideoController -Property Name,AdapterRAM);",
             "$gpuUtil=@{};$gpuMem=@{};",
             "try{",
-            "$samples=(Get-Counter '\\GPU Engine(*)\\Utilization Percentage').CounterSamples;",
+            "$samples=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine -Property Name,UtilizationPercentage;",
             "foreach($sample in $samples){",
-            "$instance=$sample.InstanceName;",
+            "$instance=$sample.Name;",
             "$phys=0;",
             "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
-            "$gpuUtil[$phys]=[double]($gpuUtil[$phys])+[double]$sample.CookedValue",
+            "$gpuUtil[$phys]=[double]($gpuUtil[$phys])+[double]$sample.UtilizationPercentage",
             "}",
             "}catch{};",
             "try{",
-            "$memSamples=(Get-Counter '\\GPU Adapter Memory(*)\\Dedicated Usage').CounterSamples;",
+            "$memSamples=Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory -Property Name,DedicatedUsage;",
             "foreach($sample in $memSamples){",
-            "$instance=$sample.InstanceName;",
+            "$instance=$sample.Name;",
             "$phys=0;",
             "if($instance -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
-            "$gpuMem[$phys]=[double]($gpuMem[$phys])+[double]$sample.CookedValue",
+            "$gpuMem[$phys]=[double]($gpuMem[$phys])+[double]$sample.DedicatedUsage",
             "}",
             "}catch{};",
             "for($i=0;$i -lt $gpuControllers.Count;$i++){",
@@ -705,7 +705,7 @@ fn build_windows_sample_command(
             "$total=if($gpu.AdapterRAM){[Math]::Round(([double]$gpu.AdapterRAM)/1MB)}else{''};",
             "$used=if($gpuMem.ContainsKey($i)){[Math]::Round(([double]$gpuMem[$i])/1MB)}else{''};",
             "$util=if($gpuUtil.ContainsKey($i)){[Math]::Min(100,[Math]::Round([double]$gpuUtil[$i],1))}else{''};",
-            "Write-Output ($i+','+$name+','+$util+','+$used+','+$total)",
+            "Write-Output (($i,$name,$util,$used,$total) -join ',')",
             "};"
         ));
     }
@@ -718,7 +718,7 @@ fn build_windows_sample_command(
             "$cpu=if($_.CPU -ne $null){[Math]::Round($_.CPU,1)}else{0};",
             "$rss=[UInt64]$_.WorkingSet64;$vsz=[UInt64]$_.VirtualMemorySize64;",
             "$elapsed=if($_.StartTime){((Get-Date)-$_.StartTime).ToString()}else{''};",
-            "Write-Output ($_.Id+[char]9+''+[char]9+''+[char]9+''+[char]9+$cpu+[char]9+$pct+[char]9+[Math]::Round($rss/1024)+[char]9+[Math]::Round($vsz/1024)+[char]9+$elapsed+[char]9+$_.ProcessName+[char]9+$_.Path)",
+            "Write-Output (($_.Id,'','','',$cpu,$pct,[Math]::Round($rss/1024),[Math]::Round($vsz/1024),$elapsed,$_.ProcessName,$_.Path) -join [char]9)",
             "};"
         ));
     }
@@ -798,6 +798,12 @@ async fn sample_loop(
         }
     };
 
+    // Native Windows CIM and performance counters can take longer than a normal sampling interval.
+    let sample_timeout = if matches!(os_type.as_str(), "Windows" | "windows") {
+        Duration::from_secs(30)
+    } else {
+        RESOURCE_SAMPLE_TIMEOUT
+    };
     let initial_command = build_sample_command_for(&os_type, config);
     let live_command = build_live_sample_command(&os_type, config);
     let mut system_info_sampled = false;
@@ -842,6 +848,7 @@ async fn sample_loop(
                     &initial_command
                 };
                 // Stop must also cancel the in-flight read, not just the interval wait.
+                let started = tokio::time::Instant::now();
                 let sampled = tokio::select! {
                     biased;
                     _ = &mut stop_rx => {
@@ -851,10 +858,11 @@ async fn sample_loop(
                     result = shell.sample_until(
                         command,
                         RESOURCE_END_MARKER,
-                        RESOURCE_SAMPLE_TIMEOUT,
+                        sample_timeout,
                         RESOURCE_MAX_OUTPUT_SIZE,
                     ) => result,
                 };
+                if started.elapsed() >= RESOURCE_SAMPLE_INTERVAL { interval.reset(); }
                 match sampled {
                     Ok(output) => {
                         let timestamp_ms = now_ms();

@@ -9,6 +9,7 @@ mod cambricon;
 mod hygon;
 mod intel;
 mod mthreads;
+mod native;
 mod nvidia;
 
 use super::{GpuDevice, GpuProcess, GpuSnapshot, GpuSnapshotStatus};
@@ -36,6 +37,15 @@ pub fn build_gpu_sample_command(os_type: &str) -> String {
         return format!("echo '===GPU_NPU_STATUS==='; echo unsupported; echo '{GPU_END_MARKER}'\n");
     }
 
+    if matches!(os_type, "Windows" | "windows") {
+        return nvidia::windows_sample_command();
+    }
+    if matches!(os_type, "macOS" | "macos" | "Darwin") {
+        return format!(
+            "/usr/sbin/system_profiler SPDisplaysDataType -json && echo && echo '{GPU_END_MARKER}'\n"
+        );
+    }
+
     let mut command = nvidia::sample_command();
     if matches!(os_type, "Linux" | "linux") {
         command.push_str(&amd::sample_command());
@@ -51,6 +61,9 @@ pub fn build_gpu_sample_command(os_type: &str) -> String {
 
 /// Parses all vendor sections into one provider-neutral snapshot.
 pub fn parse_gpu_snapshot(output: &str, timestamp_ms: u64) -> GpuSnapshot {
+    if output.trim_start().starts_with('{') || section(output, "VIDEO_CONTROLLERS").is_some() {
+        return native::inventory(output, timestamp_ms);
+    }
     if first_section_line(output, "GPU_NPU_STATUS") == Some("unsupported") {
         return GpuSnapshot {
             timestamp_ms,
@@ -165,10 +178,19 @@ pub(super) fn sanitized_error(output: &str, marker: &str, fallback: &str) -> Str
         .collect()
 }
 
-fn gpu_os_supported(os_type: &str) -> bool {
+pub(super) fn gpu_os_supported(os_type: &str) -> bool {
     matches!(
         os_type,
-        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin"
+        "Linux"
+            | "linux"
+            | "Windows"
+            | "windows"
+            | "macOS"
+            | "macos"
+            | "Darwin"
+            | "Windows_MinGW"
+            | "Windows_MSYS"
+            | "Windows_Cygwin"
     )
 }
 
@@ -437,7 +459,7 @@ esac
             } else if os == "Windows_MSYS" {
                 assert!(command.contains("nvidia-smi --query-gpu="));
             } else {
-                assert!(command.contains("echo unsupported"));
+                assert!(command.contains("system_profiler SPDisplaysDataType -json"));
             }
         }
     }

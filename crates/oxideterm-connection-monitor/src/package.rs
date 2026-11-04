@@ -108,7 +108,7 @@ pub fn build_package_snapshot_command(os_type: &str) -> PackageCaptureCommand {
         ),
         PackageOs::Windows => (
             build_windows_package_snapshot_command(),
-            PackageCommandCapability::Unknown,
+            PackageCommandCapability::Partial,
         ),
     };
     PackageCaptureCommand {
@@ -128,6 +128,17 @@ pub fn build_package_inspect_command(
     }
     let quoted = shell_quote(package_name);
     let (command, capability) = match (package_os(os_type), manager.trim()) {
+        (PackageOs::Windows, "registry") => {
+            use base64::{Engine, engine::general_purpose::STANDARD};
+            // The display name is registry data and may contain outer-shell metacharacters.
+            let name = STANDARD.encode(package_name);
+            (
+                format!(
+                    "powershell -NoProfile -ExecutionPolicy Bypass -Command \"$name=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{name}')); {WINDOWS_UNINSTALL_ENTRIES} | Where-Object {{ $_.DisplayName -eq $name }} | Format-List DisplayName,DisplayVersion,Publisher,InstallDate,InstallLocation\""
+                ),
+                PackageCommandCapability::Partial,
+            )
+        }
         (PackageOs::MacOs, "brew") => (
             format!("HOMEBREW_NO_AUTO_UPDATE=1 brew info {quoted}"),
             PackageCommandCapability::Partial,
@@ -324,16 +335,21 @@ fn build_bsd_package_snapshot_command() -> String {
     .to_string()
 }
 
+const WINDOWS_UNINSTALL_ENTRIES: &str = r"Get-ItemProperty -Path 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue";
+
 fn build_windows_package_snapshot_command() -> String {
-    concat!(
-        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
-        "Write-Output '===PACKAGES===';",
-        "Write-Output ('__OXIDE_PACKAGE_CAPABILITY__'+[char]9+'unknown'+[char]9+'windows_unsupported');",
-        "Write-Output '__OXIDE_PACKAGE_UNAVAILABLE__';",
-        "Write-Output '===PACKAGES_END==='",
-        "\""
+    format!(
+        concat!(
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+            "Write-Output '===PACKAGES===';",
+            "('__OXIDE_PACKAGE_CAPABILITY__','partial','windows_registry' -join [char]9);",
+            "('MANAGER','registry','true','registry' -join [char]9);",
+            "{} | Where-Object {{ $_.DisplayName -and $_.SystemComponent -ne 1 }} | ForEach-Object {{ ",
+            "('ROW',($_.DisplayName -replace '[\\t\\r\\n]',' '),'registry',($_.DisplayVersion -replace '[\\t\\r\\n]',' '),'','','','installed',($_.Publisher -replace '[\\t\\r\\n]',' '),'','','registry' -join [char]9) }};",
+            "Write-Output '===PACKAGES_END==='\""
+        ),
+        WINDOWS_UNINSTALL_ENTRIES
     )
-    .to_string()
 }
 
 fn parse_package_capability_line(line: &str) -> Option<(PackageCommandCapability, String)> {
@@ -764,7 +780,8 @@ mod tests {
         assert!(!mac.command.contains("brew update"));
         assert!(bsd.command.contains("pkg version -v"));
         assert!(!bsd.command.contains("pkg query"));
-        assert!(windows.command.contains("__OXIDE_PACKAGE_UNAVAILABLE__"));
+        assert!(windows.command.contains("HKCU:"));
+        assert_eq!(windows.capability, PackageCommandCapability::Partial);
     }
 
     #[test]

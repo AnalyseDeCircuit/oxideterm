@@ -217,27 +217,24 @@ pub(super) struct MonitorConnectionOption {
     // Sidebar monitoring only needs selector/header fields; avoid cloning the
     // full registry connection payload on every scroll-driven render.
     pub(super) connection_id: String,
-    pub(super) host: String,
-    pub(super) port: u16,
-    pub(super) username: String,
+    pub(super) label: String,
 }
 
 impl MonitorConnectionOption {
     pub(super) fn from_connection_info(connection: oxideterm_ssh::ConnectionInfo) -> Self {
         Self {
             connection_id: connection.connection_id,
-            host: connection.host,
-            port: connection.port,
-            username: connection.username,
+            label: format!(
+                "{}@{}:{}",
+                connection.username, connection.host, connection.port
+            ),
         }
     }
 
     pub(super) fn from_pool_summary(summary: &ConnectionPoolEntrySummary) -> Self {
         Self {
             connection_id: summary.id.clone(),
-            host: summary.host.clone(),
-            port: summary.port,
-            username: summary.username.clone(),
+            label: format!("{}@{}:{}", summary.username, summary.host, summary.port),
         }
     }
 }
@@ -893,6 +890,7 @@ impl HostToolsVisibility {
 
 #[derive(Clone)]
 pub(in crate::workspace) struct HostToolsMessages {
+    pub(super) local_device: String,
     pub(super) service_connection_missing: String,
     pub(super) service_action_failed: String,
     pub(super) log_unknown_error: String,
@@ -907,6 +905,7 @@ pub(in crate::workspace) struct HostToolsMessages {
 impl HostToolsMessages {
     pub(in crate::workspace) fn from_i18n(i18n: &I18n) -> Self {
         Self {
+            local_device: i18n.t("plugin.cloud_sync.fields.local_device"),
             service_connection_missing: i18n.t("sidebar.host_services.toast.connection_missing"),
             service_action_failed: i18n.t("sidebar.host_services.toast.action_failed"),
             log_unknown_error: i18n.t("sidebar.host_logs.toast.unknown_error"),

@@ -43,7 +43,22 @@ impl AgentProcess {
         self
     }
 
-    pub async fn output(mut self) -> io::Result<std::process::Output> {
+    pub async fn output(self) -> io::Result<std::process::Output> {
+        self.capture(1024 * 1024, true)
+            .await
+            .map(|(output, _)| output)
+    }
+
+    /// Structured probes need the beginning of each stream and an explicit overflow signal.
+    pub async fn limited_output(self, limit: usize) -> io::Result<(std::process::Output, bool)> {
+        self.capture(limit, false).await
+    }
+
+    async fn capture(
+        mut self,
+        limit: usize,
+        keep_tail: bool,
+    ) -> io::Result<(std::process::Output, bool)> {
         let mut stdout = self.child.stdout.take().unwrap();
         let mut stderr = self.child.stderr.take().unwrap();
         let mut out = zeroize::Zeroizing::new(Vec::new());
@@ -63,37 +78,43 @@ impl AgentProcess {
                     tokio::time::sleep(std::time::Duration::from_millis(20)).await;
                 }
             };
-            tokio::try_join!(
+            let (_, out_cut, err_cut) = tokio::try_join!(
                 exited,
-                capture_output(&mut stdout, &mut out),
-                capture_output(&mut stderr, &mut err)
+                capture_output(&mut stdout, &mut out, limit, keep_tail),
+                capture_output(&mut stderr, &mut err, limit, keep_tail)
             )?;
             self.group = 0;
             let status = self.child.wait().await?;
             if let Some(record) = self.record.take() {
                 record.finish(super::OwnedResourceState::Completed);
             }
-            Ok(std::process::Output {
-                status,
-                stdout: std::mem::take(&mut *out),
-                stderr: std::mem::take(&mut *err),
-            })
+            Ok((
+                std::process::Output {
+                    status,
+                    stdout: std::mem::take(&mut *out),
+                    stderr: std::mem::take(&mut *err),
+                },
+                out_cut || err_cut,
+            ))
         }
         #[cfg(not(unix))]
         {
-            let (status, _, _) = tokio::try_join!(
+            let (status, out_cut, err_cut) = tokio::try_join!(
                 self.child.wait(),
-                capture_output(&mut stdout, &mut out),
-                capture_output(&mut stderr, &mut err)
+                capture_output(&mut stdout, &mut out, limit, keep_tail),
+                capture_output(&mut stderr, &mut err, limit, keep_tail)
             )?;
             if let Some(record) = self.record.take() {
                 record.finish(super::OwnedResourceState::Completed);
             }
-            Ok(std::process::Output {
-                status,
-                stdout: std::mem::take(&mut *out),
-                stderr: std::mem::take(&mut *err),
-            })
+            Ok((
+                std::process::Output {
+                    status,
+                    stdout: std::mem::take(&mut *out),
+                    stderr: std::mem::take(&mut *err),
+                },
+                out_cut || err_cut,
+            ))
         }
     }
 }
@@ -101,16 +122,24 @@ impl AgentProcess {
 async fn capture_output(
     reader: &mut (impl tokio::io::AsyncRead + Unpin),
     output: &mut Vec<u8>,
-) -> io::Result<()> {
-    const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
+    limit: usize,
+    keep_tail: bool,
+) -> io::Result<bool> {
+    let mut truncated = false;
     let mut chunk = zeroize::Zeroizing::new(vec![0u8; 16 * 1024]);
     loop {
         let count = reader.read(&mut chunk).await?;
         if count == 0 {
-            return Ok(());
+            return Ok(truncated);
         }
-        if output.len() + count > MAX_CAPTURE_BYTES {
-            let discard = output.len() + count - MAX_CAPTURE_BYTES;
+        let room = limit - output.len();
+        if count > room {
+            truncated = true;
+            if !keep_tail {
+                output.extend_from_slice(&chunk[..room]);
+                continue;
+            }
+            let discard = count - room;
             output[..discard].fill(0);
             output.drain(..discard);
         }

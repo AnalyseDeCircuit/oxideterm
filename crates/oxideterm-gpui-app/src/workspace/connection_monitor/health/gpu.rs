@@ -408,6 +408,7 @@ impl HostToolsEntity {
             | GpuProvider::Amd
             | GpuProvider::Hygon
             | GpuProvider::Intel
+            | GpuProvider::System
             | GpuProvider::Mthreads => "GPU",
         };
         let utilization = percent_text(device.utilization_percent);

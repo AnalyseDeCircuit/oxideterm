@@ -39,6 +39,24 @@ pub(super) fn sample_command() -> String {
     )
 }
 
+pub(super) fn windows_sample_command() -> String {
+    format!(
+        concat!(
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+            "if (Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue) {{ ",
+            "'===NVIDIA_STATUS===';'available';'===NVIDIA_GPUS===';",
+            "& nvidia-smi.exe '--query-gpu={fields}' '--format=csv,noheader,nounits';",
+            "'===NVIDIA_GPU_QUERY_EXIT===';$LASTEXITCODE;",
+            "'===NVIDIA_PROCESSES===';& nvidia-smi.exe '--query-compute-apps={process_fields}' '--format=csv,noheader,nounits' 2>$null ",
+            "}} else {{ '===VIDEO_CONTROLLERS==='; @(Get-CimInstance Win32_VideoController -ErrorAction Stop | Select-Object Name,PNPDeviceID,DriverVersion) | ConvertTo-Json -Compress }};",
+            "'{end}'\""
+        ),
+        fields = GPU_QUERY_FIELDS,
+        process_fields = GPU_PROCESS_QUERY_FIELDS,
+        end = super::GPU_END_MARKER
+    )
+}
+
 pub(super) fn parse(output: &str) -> ProviderSnapshot {
     let mut devices = section(output, "NVIDIA_GPUS")
         .into_iter()
