@@ -1,9 +1,9 @@
 {
   "terminal": {
     "ssh_latency": {
-      "measured": "Tempo di andata e ritorno SSH, inclusi rete e risposta del server. Aggiornato {{seconds}} s fa.",
+      "measured": "Tempo di andata e ritorno SSH: {{millis}} ms, inclusi rete e risposta del server. Aggiornato {{seconds}} s fa.",
       "pending": "Misurazione della latenza SSH…",
-      "timeout": "Scaduto",
+      "timeout": "Nessuna risposta entro {{seconds}} s. L’attesa continua; questo non indica che la sessione sia disconnessa.",
       "unavailable": "Connessione SSH non disponibile",
       "unsupported": "La misurazione della latenza è disattivata nella modalità di compatibilità di questo dispositivo.",
       "stale": "Il valore di latenza è scaduto"

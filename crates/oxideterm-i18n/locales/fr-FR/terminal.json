@@ -1,9 +1,9 @@
 {
   "terminal": {
     "ssh_latency": {
-      "measured": "Temps aller-retour SSH, réseau et réponse du serveur compris. Mis à jour il y a {{seconds}} s.",
+      "measured": "Temps aller-retour SSH : {{millis}} ms, réseau et réponse du serveur compris. Mis à jour il y a {{seconds}} s.",
       "pending": "Mesure de la latence SSH…",
-      "timeout": "Délai",
+      "timeout": "Aucune réponse depuis {{seconds}} s. L’attente continue ; cela ne signifie pas que la session est déconnectée.",
       "unavailable": "Connexion SSH indisponible",
       "unsupported": "La mesure de latence est désactivée dans le mode de compatibilité de cet appareil.",
       "stale": "La mesure de latence a expiré"

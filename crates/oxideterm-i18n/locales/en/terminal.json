@@ -1,9 +1,9 @@
 {
   "terminal": {
     "ssh_latency": {
-      "measured": "SSH round-trip time; includes network and server response. Updated {{seconds}} s ago.",
+      "measured": "SSH round-trip time: {{millis}} ms, including network and server response. Updated {{seconds}} s ago.",
       "pending": "Measuring SSH latency…",
-      "timeout": "Timeout",
+      "timeout": "No reply within {{seconds}} s. Still waiting; this does not indicate a disconnected session.",
       "unavailable": "SSH connection unavailable",
       "unsupported": "Latency probing is disabled for this device's compatibility mode.",
       "stale": "Latency sample expired"

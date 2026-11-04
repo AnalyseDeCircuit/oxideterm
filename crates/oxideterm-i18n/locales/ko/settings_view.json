@@ -661,6 +661,8 @@
       "autosuggest_local_history_hint": "로컬 zsh/bash/fish 기록을 Command Bar 기록 패널의 소스로 사용합니다. 터미널 내부 ghost text를 켜지는 않습니다.",
       "command_bar": "Command Bar",
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
+      "command_bar_ssh_latency": "SSH 지연 시간 표시",
+      "command_bar_ssh_latency_hint": "도구 모음에 연결 지연 시간을 표시합니다. 끄면 새 지연 측정을 중지하며 SSH 연결 유지에는 영향을 주지 않습니다.",
       "command_bar_git_status": "Git 상태 표시",
       "command_bar_git_status_hint": "로컬 및 SSH 터미널의 활성 저장소 브랜치를 명령 표시줄에 표시합니다.",
       "command_bar_project_tasks": "프로젝트 작업 표시",

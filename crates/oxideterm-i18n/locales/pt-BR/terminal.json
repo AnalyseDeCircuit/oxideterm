@@ -1,9 +1,9 @@
 {
   "terminal": {
     "ssh_latency": {
-      "measured": "Tempo de ida e volta SSH, incluindo rede e resposta do servidor. Atualizado há {{seconds}} s.",
+      "measured": "Tempo de ida e volta SSH: {{millis}} ms, incluindo rede e resposta do servidor. Atualizado há {{seconds}} s.",
       "pending": "Medindo latência SSH…",
-      "timeout": "Expirou",
+      "timeout": "Sem resposta em {{seconds}} s. A espera continua; isso não indica que a sessão esteja desconectada.",
       "unavailable": "Conexão SSH indisponível",
       "unsupported": "A medição de latência está desativada no modo de compatibilidade deste dispositivo.",
       "stale": "O valor de latência expirou"

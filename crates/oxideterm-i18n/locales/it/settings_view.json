@@ -661,6 +661,8 @@
       "autosuggest_local_history_hint": "Usa la cronologia locale zsh/bash/fish come sorgente del pannello cronologia della barra comandi. Non abilita ghost text nel terminale.",
       "command_bar": "Command Bar",
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
+      "command_bar_ssh_latency": "Mostra latenza SSH",
+      "command_bar_ssh_latency_hint": "Mostra la latenza nella barra degli strumenti. Disattivando l’opzione si interrompono le nuove misurazioni, senza modificare il keepalive SSH.",
       "command_bar_git_status": "Mostra stato Git",
       "command_bar_git_status_hint": "Mostra il ramo del repository attivo nella barra comandi per terminali locali e SSH.",
       "command_bar_project_tasks": "Mostra attività progetto",

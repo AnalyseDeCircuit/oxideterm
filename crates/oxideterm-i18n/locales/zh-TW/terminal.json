@@ -1,9 +1,9 @@
 {
   "terminal": {
     "ssh_latency": {
-      "measured": "SSH 往返延遲，包含網路和伺服器回應時間。{{seconds}} 秒前更新。",
+      "measured": "SSH 往返延遲：{{millis}} ms，包含網路和伺服器回應時間。{{seconds}} 秒前更新。",
       "pending": "正在測量 SSH 延遲…",
-      "timeout": "逾時",
+      "timeout": "等待超過 {{seconds}} 秒，尚未收到回應。仍在等待，本次逾時不代表連線已中斷。",
       "unavailable": "SSH 連線無法使用",
       "unsupported": "此裝置的相容模式不支援延遲探測。",
       "stale": "延遲資料已過期"

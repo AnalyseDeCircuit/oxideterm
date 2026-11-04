@@ -967,7 +967,7 @@ mod command;
 pub use command::{SshCommandChannel, SshCommandExecution};
 
 mod latency;
-pub use latency::{SshLatencyMonitor, SshLatencySnapshot};
+pub use latency::{SSH_LATENCY_TIMEOUT, SshLatencyMonitor, SshLatencySnapshot};
 
 include!("transport/connection.rs");
 include!("transport/signers.rs");

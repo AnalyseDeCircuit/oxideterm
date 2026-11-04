@@ -1,9 +1,9 @@
 {
   "terminal": {
     "ssh_latency": {
-      "measured": "네트워크와 서버 응답을 포함한 SSH 왕복 시간입니다. {{seconds}}초 전에 갱신되었습니다.",
+      "measured": "SSH 왕복 지연: {{millis}} ms. 네트워크 및 서버 응답 시간을 포함합니다. {{seconds}}초 전에 갱신되었습니다.",
       "pending": "SSH 지연 시간 측정 중…",
-      "timeout": "시간 초과",
+      "timeout": "{{seconds}}초 동안 응답이 없습니다. 계속 기다리는 중이며, 세션이 끊어졌다는 뜻은 아닙니다.",
       "unavailable": "SSH 연결을 사용할 수 없습니다",
       "unsupported": "이 장치의 호환 모드에서는 지연 시간 측정이 비활성화됩니다.",
       "stale": "지연 시간 데이터가 만료되었습니다"

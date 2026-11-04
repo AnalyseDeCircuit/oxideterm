@@ -1009,6 +1009,14 @@ impl WorkspaceApp {
                     ),
                     self.card_separator(),
                     self.bool_row(
+                        "settings_view.terminal.command_bar_ssh_latency",
+                        "settings_view.terminal.command_bar_ssh_latency_hint",
+                        settings.terminal.command_bar.ssh_latency,
+                        set_command_bar_ssh_latency,
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.bool_row(
                         "settings_view.terminal.command_bar_current_directory_awareness",
                         "settings_view.terminal.command_bar_current_directory_awareness_hint",
                         settings.terminal.command_bar.show_current_directory,

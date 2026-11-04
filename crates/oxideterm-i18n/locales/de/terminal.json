@@ -1,9 +1,9 @@
 {
   "terminal": {
     "ssh_latency": {
-      "measured": "SSH-Rundlaufzeit einschließlich Netzwerk und Serverantwort. Vor {{seconds}} s aktualisiert.",
+      "measured": "SSH-Rundlaufzeit: {{millis}} ms, einschließlich Netzwerk und Serverantwort. Vor {{seconds}} s aktualisiert.",
       "pending": "SSH-Latenz wird gemessen…",
-      "timeout": "Zeitlimit",
+      "timeout": "Seit {{seconds}} s keine Antwort. Es wird weiter gewartet; die Sitzung gilt dadurch nicht als getrennt.",
       "unavailable": "SSH-Verbindung nicht verfügbar",
       "unsupported": "Latenzmessung ist im Kompatibilitätsmodus dieses Geräts deaktiviert.",
       "stale": "Latenzwert ist veraltet"

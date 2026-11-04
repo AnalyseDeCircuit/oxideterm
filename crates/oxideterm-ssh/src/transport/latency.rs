@@ -7,7 +7,7 @@ use std::sync::Weak;
 const FOREGROUND_INTERVAL: Duration = Duration::from_secs(5);
 const BACKGROUND_INTERVAL: Duration = Duration::from_secs(15);
 const VISIBLE_LEASE: Duration = Duration::from_secs(10);
-const SAMPLE_TIMEOUT: Duration = Duration::from_secs(3);
+pub const SSH_LATENCY_TIMEOUT: Duration = Duration::from_secs(3);
 const SAMPLE_MAX_AGE: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -41,9 +41,23 @@ impl Drop for LatencyEntry {
 pub struct SshLatencyMonitor {
     entries: HashMap<String, LatencyEntry>,
     visible: HashMap<String, Instant>,
+    suspended: bool,
 }
 
 impl SshLatencyMonitor {
+    pub fn set_enabled(&mut self, enabled: bool) {
+        let suspended = !enabled;
+        if self.suspended == suspended {
+            return;
+        }
+        self.suspended = suspended;
+        self.visible.clear();
+        // A sent global request cannot be unsent. Drain its reply before another
+        // probe, even across rapid off/on toggles, to keep reply slots bounded.
+        self.entries
+            .retain(|_, entry| entry.task.as_ref().is_some_and(|task| !task.is_finished()));
+    }
+
     pub fn mark_visible(&mut self, connection_id: &str) {
         self.visible
             .insert(connection_id.to_owned(), Instant::now());
@@ -55,10 +69,12 @@ impl SshLatencyMonitor {
     }
 
     pub fn snapshot(&self, handle: &SshConnectionHandle) -> SshLatencySnapshot {
-        if !matches!(
-            handle.state(),
-            ConnectionState::Active | ConnectionState::Idle
-        ) {
+        if self.suspended
+            || !matches!(
+                handle.state(),
+                ConnectionState::Active | ConnectionState::Idle
+            )
+        {
             return SshLatencySnapshot::Unavailable;
         }
         if handle
@@ -136,6 +152,9 @@ impl SshLatencyMonitor {
                 self.entries.remove(&info.connection_id);
                 changed = true;
             }
+            if self.suspended {
+                continue;
+            }
             let entry = self
                 .entries
                 .entry(info.connection_id.clone())
@@ -188,7 +207,10 @@ impl SshLatencyMonitor {
                 .await;
             }));
         }
-        self.entries.retain(|id, _| retained.contains(id));
+        self.entries.retain(|id, entry| {
+            retained.contains(id)
+                && (!self.suspended || entry.task.as_ref().is_some_and(|task| !task.is_finished()))
+        });
         self.visible
             .retain(|id, at| retained.contains(id) && now.duration_since(*at) < VISIBLE_LEASE);
         changed || previous_count != self.entries.len()
@@ -201,7 +223,7 @@ async fn measure_reply(
 ) {
     let started = Instant::now();
     tokio::pin!(reply);
-    let result = match timeout(SAMPLE_TIMEOUT, &mut reply).await {
+    let result = match timeout(SSH_LATENCY_TIMEOUT, &mut reply).await {
         Ok(result) => result,
         Err(_) => {
             *sample.write() = SshLatencySnapshot::Timeout;
@@ -273,9 +295,26 @@ mod tests {
         let second = registry.acquire(config, ConnectionConsumer::Terminal("second".into()));
         assert_eq!(second.connection_id(), handle.connection_id());
         let mut monitor = SshLatencyMonitor::default();
+        monitor.set_enabled(false);
+        monitor.refresh(&registry, &tokio::runtime::Handle::current());
+        assert!(
+            monitor.entries.is_empty(),
+            "disabled sampling must not create a probe"
+        );
+        assert_eq!(monitor.snapshot(&handle), SshLatencySnapshot::Unavailable);
+        assert!(
+            !handle
+                .physical::<PooledSshConnection>()
+                .unwrap()
+                .target
+                .is_closed()
+        );
+        monitor.set_enabled(true);
         monitor.mark_visible(handle.connection_id());
         monitor.refresh(&registry, &tokio::runtime::Handle::current());
         let started = monitor.entries[handle.connection_id()].started_at;
+        monitor.set_enabled(false);
+        monitor.set_enabled(true);
         monitor.refresh(&registry, &tokio::runtime::Handle::current());
         assert_eq!(monitor.entries[handle.connection_id()].started_at, started);
         let task = monitor
@@ -349,13 +388,29 @@ mod tests {
             sample.clone(),
         ));
         tokio::task::yield_now().await;
-        tokio::time::advance(SAMPLE_TIMEOUT).await;
+        tokio::time::advance(SSH_LATENCY_TIMEOUT).await;
         tokio::task::yield_now().await;
         assert_eq!(*sample.read(), SshLatencySnapshot::Timeout);
         assert!(!task.is_finished());
         drop(send);
         task.await.unwrap();
         assert_eq!(*sample.read(), SshLatencySnapshot::Unavailable);
+
+        let (send, receive) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(measure_reply(
+            async move { receive.await.map_err(|_| russh::Error::Disconnect) },
+            sample.clone(),
+        ));
+        tokio::task::yield_now().await;
+        tokio::time::advance(Duration::from_secs(16)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(*sample.read(), SshLatencySnapshot::Timeout);
+        send.send(()).unwrap();
+        task.await.unwrap();
+        assert!(matches!(
+            *sample.read(),
+            SshLatencySnapshot::Measured { millis: 16_000, .. }
+        ));
     }
 
     #[tokio::test]
@@ -373,7 +428,20 @@ mod tests {
             entry.sample.clone(),
         )));
         tokio::task::yield_now().await;
-        drop(entry);
+        let mut monitor = SshLatencyMonitor::default();
+        monitor.entries.insert("unanswered".into(), entry);
+        monitor.set_enabled(false);
+        tokio::task::yield_now().await;
+        assert!(
+            !send.is_closed(),
+            "disabling must drain the already-sent request"
+        );
+        monitor.set_enabled(true);
+        assert!(
+            !send.is_closed(),
+            "re-enabling must not replace the pending request"
+        );
+        monitor.clear();
         tokio::task::yield_now().await;
         assert!(send.send(()).is_err());
     }

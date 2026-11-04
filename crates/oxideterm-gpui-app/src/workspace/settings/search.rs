@@ -258,6 +258,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             &[
                 "settings_view.terminal.command_bar_git_status",
                 "settings_view.terminal.command_bar_project_tasks",
+                "settings_view.terminal.command_bar_ssh_latency",
+                "settings_view.terminal.command_bar_ssh_latency_hint",
                 "settings_view.terminal.command_bar_current_directory_awareness",
                 "settings_view.terminal.autosuggest_local_history",
                 "settings_view.terminal.autosuggest_local_history_hint",

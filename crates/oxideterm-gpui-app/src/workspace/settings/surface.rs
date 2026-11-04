@@ -1366,6 +1366,9 @@ impl WorkspaceApp {
             settings.connection_pool.idle_timeout_secs as u64,
         )));
         self.workspace_runtime.update(cx, |runtime, cx| {
+            runtime.configure_ssh_latency(
+                settings.terminal.command_bar.enabled && settings.terminal.command_bar.ssh_latency,
+            );
             runtime.configure_reconnect(
                 settings.reconnect.enabled,
                 reconnect_timing_from_settings(&settings),

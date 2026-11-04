@@ -661,6 +661,8 @@
       "autosuggest_local_history_hint": "Usa el historial local de zsh/bash/fish como fuente del panel de historial de la barra de comandos. No activa ghost text dentro del terminal.",
       "command_bar": "Command Bar",
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
+      "command_bar_ssh_latency": "Mostrar latencia SSH",
+      "command_bar_ssh_latency_hint": "Muestra la latencia en la barra de herramientas. Al desactivarlo se detienen las nuevas mediciones, sin afectar al mantenimiento de la conexión SSH.",
       "command_bar_git_status": "Mostrar estado de Git",
       "command_bar_git_status_hint": "Muestra la rama del repositorio activo en la barra de comandos para terminales locales y SSH.",
       "command_bar_project_tasks": "Mostrar tareas del proyecto",

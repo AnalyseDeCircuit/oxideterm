@@ -661,6 +661,8 @@
       "autosuggest_local_history_hint": "将本地 zsh/bash/fish 历史作为命令栏历史面板的来源。不会启用终端内 ghost text。",
       "command_bar": "底部命令栏",
       "command_bar_hint": "在终端底部显示 OxideTerm 命令栏，用于命令建议、AI 询问、广播、录制、播放和分栏操作。",
+      "command_bar_ssh_latency": "显示 SSH 延迟",
+      "command_bar_ssh_latency_hint": "在工具栏显示连接延迟。关闭后停止新增延迟探测，不影响 SSH 保活。",
       "command_bar_git_status": "显示 Git 状态",
       "command_bar_git_status_hint": "在命令栏显示本地和 SSH 终端当前仓库的分支。",
       "command_bar_project_tasks": "显示项目任务",

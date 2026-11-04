@@ -281,6 +281,9 @@ impl WorkspaceApp {
             )
         });
         workspace_runtime.update(cx, |runtime, _cx| {
+            runtime.configure_ssh_latency(
+                settings.terminal.command_bar.enabled && settings.terminal.command_bar.ssh_latency,
+            );
             runtime.configure_remote_shell_integration(
                 settings.terminal.remote_shell_integration_mode,
                 settings.terminal.command_bar.current_directory_awareness,

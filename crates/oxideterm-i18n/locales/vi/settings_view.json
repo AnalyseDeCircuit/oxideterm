@@ -661,6 +661,8 @@
       "autosuggest_local_history_hint": "Dùng lịch sử zsh/bash/fish cục bộ làm nguồn cho bảng lịch sử của thanh lệnh. Không bật ghost text trong terminal.",
       "command_bar": "Command Bar",
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
+      "command_bar_ssh_latency": "Hiển thị độ trễ SSH",
+      "command_bar_ssh_latency_hint": "Hiển thị độ trễ trên thanh công cụ. Tắt tùy chọn sẽ dừng các phép đo mới, không ảnh hưởng đến việc duy trì kết nối SSH.",
       "command_bar_git_status": "Hiển thị trạng thái Git",
       "command_bar_git_status_hint": "Hiển thị nhánh kho hiện tại trên thanh lệnh cho terminal cục bộ và SSH.",
       "command_bar_project_tasks": "Hiển thị tác vụ dự án",
