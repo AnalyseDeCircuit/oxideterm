@@ -2515,7 +2515,12 @@ impl WorkspaceRuntimeEntity {
         .detach();
     }
 
-    pub(in crate::workspace) fn configure_ssh_latency(&mut self, enabled: bool) {
+    pub(in crate::workspace) fn configure_ssh_latency(
+        &mut self,
+        enabled: bool,
+        interval_secs: u16,
+    ) {
+        self.latency_monitor.set_interval_secs(interval_secs);
         self.latency_monitor.set_enabled(enabled);
     }
 

@@ -1016,6 +1016,19 @@ impl WorkspaceApp {
                         cx,
                     ),
                     self.card_separator(),
+                    self.select_setting_row(
+                        "settings_view.terminal.ssh_latency_interval",
+                        "settings_view.terminal.ssh_latency_interval_hint",
+                        SettingsSelect::SshLatencyInterval,
+                        settings
+                            .terminal
+                            .command_bar
+                            .ssh_latency_interval_secs
+                            .to_string(),
+                        self.tokens.metrics.settings_select_narrow_width,
+                        cx,
+                    ),
+                    self.card_separator(),
                     self.bool_row(
                         "settings_view.terminal.command_bar_current_directory_awareness",
                         "settings_view.terminal.command_bar_current_directory_awareness_hint",

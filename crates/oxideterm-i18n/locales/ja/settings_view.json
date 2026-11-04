@@ -663,6 +663,8 @@
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
       "command_bar_ssh_latency": "SSH 遅延を表示",
       "command_bar_ssh_latency_hint": "ツールバーに接続の遅延を表示します。オフにすると新しい遅延測定を停止します。SSH の接続維持には影響しません。",
+      "ssh_latency_interval": "SSH 遅延の測定間隔（秒）",
+      "ssh_latency_interval_hint": "バックグラウンドでは測定間隔が 3 倍になります。",
       "command_bar_git_status": "Git 状態を表示",
       "command_bar_git_status_hint": "ローカル端末と SSH 端末のアクティブなリポジトリブランチをコマンドバーに表示します。",
       "command_bar_project_tasks": "プロジェクトタスクを表示",

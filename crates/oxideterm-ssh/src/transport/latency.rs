@@ -4,11 +4,8 @@
 use super::*;
 use std::sync::Weak;
 
-const FOREGROUND_INTERVAL: Duration = Duration::from_secs(5);
-const BACKGROUND_INTERVAL: Duration = Duration::from_secs(15);
-const VISIBLE_LEASE: Duration = Duration::from_secs(10);
+const DEFAULT_INTERVAL: Duration = Duration::from_secs(10);
 pub const SSH_LATENCY_TIMEOUT: Duration = Duration::from_secs(3);
-const SAMPLE_MAX_AGE: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SshLatencySnapshot {
@@ -37,14 +34,29 @@ impl Drop for LatencyEntry {
 }
 
 /// Owned by the workspace runtime, never by an individual terminal consumer.
-#[derive(Default)]
 pub struct SshLatencyMonitor {
+    interval: Duration,
     entries: HashMap<String, LatencyEntry>,
     visible: HashMap<String, Instant>,
     suspended: bool,
 }
 
+impl Default for SshLatencyMonitor {
+    fn default() -> Self {
+        Self {
+            entries: HashMap::new(),
+            visible: HashMap::new(),
+            suspended: false,
+            interval: DEFAULT_INTERVAL,
+        }
+    }
+}
+
 impl SshLatencyMonitor {
+    pub fn set_interval_secs(&mut self, seconds: u16) {
+        self.interval = Duration::from_secs(u64::from(seconds.max(5)));
+    }
+
     pub fn set_enabled(&mut self, enabled: bool) {
         let suspended = !enabled;
         if self.suspended == suspended {
@@ -100,7 +112,7 @@ impl SshLatencyMonitor {
         let sample = *entry.sample.read();
         match sample {
             SshLatencySnapshot::Measured { measured_at, .. }
-                if measured_at.elapsed() > SAMPLE_MAX_AGE =>
+                if measured_at.elapsed() > self.interval * 6 =>
             {
                 SshLatencySnapshot::Stale
             }
@@ -173,11 +185,11 @@ impl SshLatencyMonitor {
             let interval = if self
                 .visible
                 .get(&info.connection_id)
-                .is_some_and(|at| now.duration_since(*at) < VISIBLE_LEASE)
+                .is_some_and(|at| now.duration_since(*at) < self.interval * 2)
             {
-                FOREGROUND_INTERVAL
+                self.interval
             } else {
-                BACKGROUND_INTERVAL
+                self.interval * 3
             };
             if entry.task.as_ref().is_some_and(|task| !task.is_finished())
                 || entry
@@ -212,7 +224,7 @@ impl SshLatencyMonitor {
                 && (!self.suspended || entry.task.as_ref().is_some_and(|task| !task.is_finished()))
         });
         self.visible
-            .retain(|id, at| retained.contains(id) && now.duration_since(*at) < VISIBLE_LEASE);
+            .retain(|id, at| retained.contains(id) && now.duration_since(*at) < self.interval * 2);
         changed || previous_count != self.entries.len()
     }
 }
@@ -340,9 +352,19 @@ mod tests {
 
         *monitor.entries[handle.connection_id()].sample.write() = SshLatencySnapshot::Measured {
             millis: 128,
-            measured_at: Instant::now() - Duration::from_secs(31),
+            measured_at: Instant::now() - Duration::from_secs(61),
         };
         assert_eq!(monitor.snapshot(&handle), SshLatencySnapshot::Stale);
+        let id = handle.connection_id();
+        let previous_start = Instant::now() - Duration::from_secs(12);
+        monitor.entries.get_mut(id).unwrap().started_at = Some(previous_start);
+        monitor.set_interval_secs(30);
+        monitor.mark_visible(id);
+        monitor.refresh(&registry, &tokio::runtime::Handle::current());
+        assert_eq!(monitor.entries[id].started_at, Some(previous_start));
+        monitor.set_interval_secs(10);
+        monitor.refresh(&registry, &tokio::runtime::Handle::current());
+        assert!(monitor.entries[id].started_at.unwrap() > previous_start);
         handle.clear_physical().await;
         assert_eq!(monitor.snapshot(&handle), SshLatencySnapshot::Unavailable);
         monitor.refresh(&registry, &tokio::runtime::Handle::current());

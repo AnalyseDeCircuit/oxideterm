@@ -663,6 +663,8 @@
       "command_bar_hint": "在終端底部顯示 OxideTerm 命令列，用於命令建議、AI 詢問、廣播、錄製、播放和分割操作。",
       "command_bar_ssh_latency": "顯示 SSH 延遲",
       "command_bar_ssh_latency_hint": "在工具列顯示連線延遲。關閉後停止新增延遲探測，不影響 SSH 保活。",
+      "ssh_latency_interval": "SSH 延遲探測間隔（秒）",
+      "ssh_latency_interval_hint": "背景連線的探測間隔為此值的三倍。",
       "command_bar_git_status": "顯示 Git 狀態",
       "command_bar_git_status_hint": "在命令列顯示本地和 SSH 終端目前倉庫的分支。",
       "command_bar_project_tasks": "顯示專案任務",

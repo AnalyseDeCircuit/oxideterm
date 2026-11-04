@@ -663,6 +663,8 @@
       "command_bar_hint": "Affiche une barre en bas du terminal pour les suggestions OxideTerm, le mode question, la diffusion, l’enregistrement, la lecture cast et les divisions.",
       "command_bar_ssh_latency": "Afficher la latence SSH",
       "command_bar_ssh_latency_hint": "Affiche la latence dans la barre d’outils. La désactivation arrête les nouvelles mesures, sans modifier le maintien de la connexion SSH.",
+      "ssh_latency_interval": "Intervalle de mesure de la latence SSH (secondes)",
+      "ssh_latency_interval_hint": "En arrière-plan, cet intervalle est triplé.",
       "command_bar_git_status": "Afficher l’état Git",
       "command_bar_git_status_hint": "Affiche la branche du dépôt actif dans la barre de commande pour les terminaux locaux et SSH.",
       "command_bar_project_tasks": "Afficher les tâches du projet",

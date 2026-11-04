@@ -663,6 +663,8 @@
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
       "command_bar_ssh_latency": "Mostrar latência SSH",
       "command_bar_ssh_latency_hint": "Mostra a latência na barra de ferramentas. Desativar interrompe novas medições, sem alterar o keepalive SSH.",
+      "ssh_latency_interval": "Intervalo de medição da latência SSH (segundos)",
+      "ssh_latency_interval_hint": "Nas conexões em segundo plano, o intervalo é triplicado.",
       "command_bar_git_status": "Mostrar status Git",
       "command_bar_git_status_hint": "Mostra o branch do repositório ativo na barra de comandos para terminais locais e SSH.",
       "command_bar_project_tasks": "Mostrar tarefas do projeto",

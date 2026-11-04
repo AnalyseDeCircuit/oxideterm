@@ -79,6 +79,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::TerminalFontFamily => SelectAnchorId::SettingsTerminalFontFamily,
             Self::TerminalCjkFontFamily => SelectAnchorId::SettingsTerminalCjkFontFamily,
             Self::TerminalEncoding => SelectAnchorId::SettingsTerminalEncoding,
+            Self::SshLatencyInterval => SelectAnchorId::SettingsSshLatencyInterval,
             Self::TerminalBackspaceSequence => SelectAnchorId::SettingsTerminalBackspaceSequence,
             Self::TerminalDeleteSequence => SelectAnchorId::SettingsTerminalDeleteSequence,
             Self::TerminalSessionLogFileMode => SelectAnchorId::SettingsTerminalSessionLogFileMode,

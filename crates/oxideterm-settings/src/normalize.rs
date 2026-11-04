@@ -724,6 +724,7 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             BACKEND_HOT_BUFFER_MIN,
             BACKEND_HOT_BUFFER_MAX,
         ),
+        ("terminal.commandBar.sshLatencyIntervalSecs", 10, 5, 60),
         ("terminal.fontSize", 14, 8, 32),
         (
             "terminal.fontWeight",

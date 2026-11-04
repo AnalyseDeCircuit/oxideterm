@@ -65,6 +65,12 @@ impl WorkspaceApp {
             .t("settings_view.connections.shell_integration.toolbar_action");
         let target_indicator_is_local =
             is_local_terminal && target_label == self.i18n.t("terminal.command_bar.local_shell");
+        let (target_indicator, latency_indicator) = self.render_terminal_indicators(
+            target_label,
+            target_indicator_is_local,
+            window.is_visible() && !window.is_minimized(),
+            cx,
+        );
         let can_split = self.can_split_active_pane(cx);
         let broadcast_targets =
             self.terminal_broadcast_target_panes(active_pane_id.unwrap_or(PaneId(0)), cx);
@@ -194,12 +200,7 @@ impl WorkspaceApp {
                                 },
                                 cx,
                             ))
-                            .child(self.render_terminal_target_indicator(
-                                target_label,
-                                target_indicator_is_local,
-                                window.is_visible() && !window.is_minimized(),
-                                cx,
-                            ))
+                            .child(target_indicator)
                             .when(cwd_supported, |row| {
                                 row.child(self.terminal_command_context_chip_slot(
                                     TERMINAL_COMMAND_CONTEXT_CHIP_MAX_WIDTH,
@@ -225,6 +226,7 @@ impl WorkspaceApp {
                             .flex_none()
                             .items_center()
                             .gap(px(4.0))
+                            .children(latency_indicator)
                             .when(
                                 broadcast_enabled && !broadcast_label.is_empty(),
                                 |actions| {

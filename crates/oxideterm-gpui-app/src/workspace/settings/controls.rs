@@ -680,6 +680,32 @@ impl WorkspaceApp {
                 ));
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::SshLatencyInterval) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for seconds in [5, 10, 15, 30, 60] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            seconds.to_string(),
+                            seconds == settings.terminal.command_bar.ssh_latency_interval_secs,
+                        ),
+                        false,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.close_settings_select();
+                            this.edit_settings(
+                                |settings| {
+                                    settings.terminal.command_bar.ssh_latency_interval_secs =
+                                        seconds
+                                },
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::TerminalEncoding) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &encoding in terminal_encoding_options() {

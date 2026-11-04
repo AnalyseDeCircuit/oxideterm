@@ -99,6 +99,7 @@ pub enum SelectAnchorId {
     SettingsTerminalCjkFontFamily,
     SettingsTerminalFontSizeSlider,
     SettingsTerminalEncoding,
+    SettingsSshLatencyInterval,
     SettingsTerminalBackspaceSequence,
     SettingsTerminalDeleteSequence,
     SettingsTerminalSessionLogFileMode,
@@ -240,6 +241,7 @@ impl SelectAnchorId {
                 | Self::SettingsIdeCjkFontFamily
                 | Self::SettingsTerminalCjkFontFamily
                 | Self::SettingsTerminalEncoding
+                | Self::SettingsSshLatencyInterval
                 | Self::SettingsTerminalBackspaceSequence
                 | Self::SettingsTerminalDeleteSequence
                 | Self::SettingsTerminalCursorStyle

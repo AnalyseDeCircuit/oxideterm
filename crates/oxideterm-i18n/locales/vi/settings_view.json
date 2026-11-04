@@ -663,6 +663,8 @@
       "command_bar_hint": "Show a bottom command bar for OxideTerm suggestions, AI Ask mode, broadcast, recording, cast playback, and split actions.",
       "command_bar_ssh_latency": "Hiển thị độ trễ SSH",
       "command_bar_ssh_latency_hint": "Hiển thị độ trễ trên thanh công cụ. Tắt tùy chọn sẽ dừng các phép đo mới, không ảnh hưởng đến việc duy trì kết nối SSH.",
+      "ssh_latency_interval": "Khoảng cách giữa các lần đo độ trễ SSH (giây)",
+      "ssh_latency_interval_hint": "Kết nối chạy nền được đo với khoảng thời gian dài gấp ba lần.",
       "command_bar_git_status": "Hiển thị trạng thái Git",
       "command_bar_git_status_hint": "Hiển thị nhánh kho hiện tại trên thanh lệnh cho terminal cục bộ và SSH.",
       "command_bar_project_tasks": "Hiển thị tác vụ dự án",

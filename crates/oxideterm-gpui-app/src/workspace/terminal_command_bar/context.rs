@@ -211,15 +211,14 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(super) fn render_terminal_target_indicator(
+    pub(super) fn render_terminal_indicators(
         &self,
         target_label: String,
         is_local_terminal: bool,
         visible: bool,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> (AnyElement, Option<AnyElement>) {
         let theme = self.tokens.ui;
-        let tooltip_id = "terminal-command-target-indicator";
         let latency = self
             .active_ssh_terminal_node_id(cx)
             .filter(|_| {
@@ -233,59 +232,63 @@ impl WorkspaceApp {
                 self.workspace_runtime
                     .update(cx, |runtime, _| runtime.ssh_latency(&node, visible))
             });
-        let (latency_label, latency_detail, latency_color) = latency
-            .map(|sample| {
-                let (label, tone, detail) = ssh_latency_display(sample, &self.i18n);
-                let color = oxideterm_gpui_ui::status_pill_colors(&self.tokens, tone, false).text;
-                (Some(label), format!("{target_label}\n{detail}"), color)
-            })
-            .unwrap_or((None, target_label, rgb(theme.text_muted)));
         let chip_style = ContextChipOptions::new();
         let icon = if is_local_terminal {
             LucideIcon::Terminal
         } else {
             LucideIcon::Server
         };
-
-        div()
+        let with_tooltip = |chip: gpui::Div, tooltip_id: &'static str, title: String| {
+            chip.id(tooltip_id)
+                .on_mouse_move(
+                    cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
+                        this.queue_workspace_tooltip(
+                            tooltip_id,
+                            title.clone(),
+                            f32::from(event.position.x) + 12.0,
+                            f32::from(event.position.y) + 16.0,
+                            cx,
+                        );
+                    }),
+                )
+                .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                    if !*hovered {
+                        this.clear_workspace_tooltip(tooltip_id, cx);
+                    }
+                }))
+                .into_any_element()
+        };
+        let latency_chip = latency.map(|sample| {
+            let (label, tone, detail) = ssh_latency_display(sample, &self.i18n);
+            let chip = div()
+                .h(px(chip_style.height))
+                .px(px(2.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .whitespace_nowrap()
+                .font_family(settings_mono_font_family(self.settings_store.settings()))
+                .text_size(px(chip_style.font_size))
+                .text_color(oxideterm_gpui_ui::status_pill_colors(&self.tokens, tone, false).text)
+                .child(label);
+            with_tooltip(
+                chip,
+                "terminal-command-ssh-latency",
+                format!("{target_label}\n{detail}"),
+            )
+        });
+        let target = div()
             .h(px(chip_style.height))
-            .min_w(px(28.0))
-            .when(latency_label.is_some(), |indicator| indicator.w(px(76.0)))
+            .w(px(28.0))
             .flex_none()
-            .px(px(6.0))
             .flex()
             .items_center()
             .justify_center()
-            .text_color(latency_color)
-            .whitespace_nowrap()
-            .id(tooltip_id)
-            .on_mouse_move({
-                let title = latency_detail;
-                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        tooltip_id,
-                        title.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                })
-            })
-            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                if !*hovered {
-                    this.clear_workspace_tooltip(tooltip_id, cx);
-                }
-            }))
-            .when_some(latency_label.clone(), |indicator, label| {
-                indicator
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(chip_style.font_size))
-                    .child(label)
-            })
-            .when(latency_label.is_none(), |indicator| {
-                indicator.child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)))
-            })
-            .into_any_element()
+            .child(Self::render_lucide_icon(icon, 12.0, rgb(theme.text_muted)));
+        (
+            with_tooltip(target, "terminal-command-target-indicator", target_label),
+            latency_chip,
+        )
     }
 
     pub(super) fn render_terminal_cwd_chip(

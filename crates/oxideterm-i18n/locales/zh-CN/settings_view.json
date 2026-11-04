@@ -663,6 +663,8 @@
       "command_bar_hint": "在终端底部显示 OxideTerm 命令栏，用于命令建议、AI 询问、广播、录制、播放和分栏操作。",
       "command_bar_ssh_latency": "显示 SSH 延迟",
       "command_bar_ssh_latency_hint": "在工具栏显示连接延迟。关闭后停止新增延迟探测，不影响 SSH 保活。",
+      "ssh_latency_interval": "SSH 延迟探测间隔（秒）",
+      "ssh_latency_interval_hint": "后台连接的探测间隔为此值的三倍。",
       "command_bar_git_status": "显示 Git 状态",
       "command_bar_git_status_hint": "在命令栏显示本地和 SSH 终端当前仓库的分支。",
       "command_bar_project_tasks": "显示项目任务",
