@@ -731,20 +731,11 @@ pub(in crate::workspace::sftp) fn format_transfer_speed(bytes_per_second: u64) -
     format!("{}/s", format_file_size(bytes_per_second))
 }
 
-pub(in crate::workspace::sftp) fn format_modified(modified: Option<i64>) -> String {
-    let Some(modified) = modified.filter(|modified| *modified > 0) else {
-        return "-".to_string();
-    };
-    let Some(datetime) = chrono::DateTime::from_timestamp(modified, 0) else {
-        return "-".to_string();
-    };
-    // Tauri renders `new Date(file.modified * 1000).toLocaleDateString()`;
-    // native keeps the same Unix-seconds -> local-date contract instead of
-    // showing UTC or a placeholder date.
-    datetime
-        .with_timezone(&chrono::Local)
-        .format("%Y/%-m/%-d")
-        .to_string()
+pub(in crate::workspace::sftp) fn local_modified_time(
+    modified: Option<i64>,
+) -> Option<chrono::DateTime<chrono::Local>> {
+    let timestamp = modified.filter(|value| *value > 0)?;
+    Some(chrono::DateTime::from_timestamp(timestamp, 0)?.with_timezone(&chrono::Local))
 }
 
 pub(in crate::workspace::sftp) fn format_conflict_modified(modified: Option<i64>) -> String {

@@ -633,7 +633,6 @@ impl WorkspaceApp {
                             } else {
                                 format_file_size(file.size)
                             };
-                        let modified_text = format_modified(file.modified);
                         div()
                             .w_full()
                             .h(px(ui.size(SFTP_ROW_HEIGHT)))
@@ -692,13 +691,29 @@ impl WorkspaceApp {
                                 )
                             })
                             .when(!compact, |row| {
+                                let modified = local_modified_time(file.modified);
+                                let date = modified.map_or_else(
+                                    || "-".to_owned(),
+                                    |time| time.format("%Y/%-m/%-d").to_string(),
+                                );
                                 row.child(
                                     div()
                                         .w(px(ui.size(SFTP_MODIFIED_COL)))
                                         .flex_none()
                                         .text_align(gpui::TextAlign::Right)
                                         .text_color(rgb(theme.text_muted))
-                                        .child(modified_text),
+                                        .child(date)
+                                        .id(format!("sftp-mtime-{}:{}", pane as u64, file.path))
+                                        .when_some(modified, |cell, time| {
+                                            cell.tooltip(move |_, cx| {
+                                                oxideterm_gpui_ui::tooltip::tooltip_view(
+                                                    tokens,
+                                                    time.format("%Y/%-m/%-d %H:%M:%S").to_string(),
+                                                    None,
+                                                    cx,
+                                                )
+                                            })
+                                        }),
                                 )
                             })
                             .on_mouse_down(MouseButton::Left, {
