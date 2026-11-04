@@ -8,8 +8,8 @@ use crate::profiler;
 use crate::{
     Action, AnyDrag, AnyElement, AnyImageCache, AnyTooltip, AnyView, App, AppContext, Arena, Asset,
     AsyncWindowContext, AtlasTile, AvailableSpace, BackdropFilter, Background, BorderStyle, Bounds,
-    BoxShadow, Capslock, Context, Corners, CursorHideMode, CursorStyle, Decorations, DevicePixels,
-    DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, DynamicTexture,
+    BoxShadow, Capslock, Context, CornerShape, Corners, CursorHideMode, CursorStyle, Decorations,
+    DevicePixels, DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, DynamicTexture,
     DynamicTextureParams, Edges, Effect, Entity, EntityId, EventEmitter, FileDropEvent, Filter,
     FilterBoundary, FontId, Global, GlobalElementId, GlyphId, GpuSpecs, InputHandler, IsZero,
     KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId, Lerp,
@@ -1199,6 +1199,7 @@ pub struct Window {
     text_system: Arc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
     rem_size: Pixels,
+    corner_shape: CornerShape,
     /// The stack of override values for the window's rem size.
     ///
     /// This is used by `with_rem_size` to allow rendering an element tree with
@@ -2135,6 +2136,7 @@ impl Window {
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),
             rem_size: px(16.),
+            corner_shape: CornerShape::default(),
             rem_size_override_stack: SmallVec::new(),
             viewport_size: content_size,
             layout_engine: Some(TaffyLayoutEngine::new()),
@@ -4679,6 +4681,16 @@ impl Window {
         result
     }
 
+    /// Select rounded UI contours for this window. Circles and capsules keep their arcs.
+    /// Changing the contour invalidates cached element scenes as well as the root view.
+    pub fn set_corner_shape(&mut self, shape: CornerShape) {
+        if self.corner_shape != shape {
+            self.corner_shape = shape;
+            self.refreshing = true;
+            self.refresh();
+        }
+    }
+
     /// Paint the drop (non-inset) shadows from `shadows` into the scene at the current
     /// z-index. Inset shadows are skipped; paint those with [`Self::paint_inset_shadows`]
     /// after the element's background so they layer on top of the fill.
@@ -4712,7 +4724,7 @@ impl Window {
                 element_bounds,
                 element_corner_radii,
                 inset: 0,
-                pad: 0,
+                corner_shape: self.corner_shape.for_bounds(bounds, corner_radii),
             });
         }
     }
@@ -4757,7 +4769,7 @@ impl Window {
                 element_bounds,
                 element_corner_radii,
                 inset: 1,
-                pad: 0,
+                corner_shape: self.corner_shape.for_bounds(bounds, corner_radii),
             });
         }
     }
@@ -4791,6 +4803,7 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(BackdropFilter {
             order: 0,
+            corner_shape: self.corner_shape.for_bounds(bounds, corner_radii),
             bounds: self.snap_bounds(bounds),
             content_mask: self.snapped_content_mask(),
             corner_radii: corner_radii.scale(scale_factor),
@@ -4847,6 +4860,7 @@ impl Window {
         // `.blur(r).opacity(0.5)` would render at 0.25 instead of 0.5).
         let boundary = FilterBoundary {
             order: 0,
+            corner_shape: self.corner_shape.for_bounds(bounds, corner_radii),
             bounds: self.snap_bounds(bounds),
             content_mask: self.snapped_content_mask(),
             corner_radii: corner_radii.scale(scale_factor),
@@ -4928,6 +4942,8 @@ impl Window {
             corner_radii: quad.corner_radii.scale(self.scale_factor()),
             border_widths: snapped_border_widths,
             border_style: quad.border_style,
+            corner_shape: self.corner_shape.for_bounds(quad.bounds, quad.corner_radii),
+            pad: [0; 3],
         };
 
         if !quad.background.is_transparent() {
@@ -5333,7 +5349,7 @@ impl Window {
 
             self.next_frame.scene.insert_primitive(PolychromeSprite {
                 order: 0,
-                pad: 0,
+                corner_shape: 0,
                 grayscale: false.into(),
                 bounds,
                 corner_radii: Default::default(),
@@ -5511,6 +5527,7 @@ impl Window {
         };
 
         let content_mask = self.snapped_content_mask();
+        let corner_shape = self.corner_shape.for_bounds(visible_bounds, corner_radii);
         let corner_radii = corner_radii
             .clamp_radii_for_quad_size(visible_bounds.size)
             .scale(self.scale_factor());
@@ -5518,7 +5535,7 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(PolychromeSprite {
             order: 0,
-            pad: 0,
+            corner_shape,
             grayscale: grayscale.into(),
             bounds: visible_bounds_snapped,
             content_mask,
@@ -5610,6 +5627,7 @@ impl Window {
     ) -> Result<()> {
         self.invalidator.debug_assert_paint();
 
+        let corner_shape = self.corner_shape.for_bounds(bounds, corner_radii);
         let bounds = self.snap_bounds(bounds);
         let key: crate::AtlasKey = DynamicTextureParams {
             texture_id: data.id,
@@ -5630,7 +5648,7 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(PolychromeSprite {
             order: 0,
-            pad: 0,
+            corner_shape,
             grayscale: grayscale.into(),
             bounds,
             content_mask,

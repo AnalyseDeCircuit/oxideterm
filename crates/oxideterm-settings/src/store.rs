@@ -638,6 +638,41 @@ mod tests {
     }
 
     #[test]
+    fn appearance_corner_style_preserves_radius_and_defaults_to_circular() {
+        use crate::CornerStyle;
+        for (raw, expected) in [
+            (
+                json!({"appearance": {"borderRadius": 12}}),
+                CornerStyle::Circular,
+            ),
+            (
+                json!({"appearance": {"borderRadius": 12, "cornerStyle": "continuous"}}),
+                CornerStyle::Continuous,
+            ),
+            (
+                json!({"appearance": {"borderRadius": 12, "cornerStyle": "circular"}}),
+                CornerStyle::Circular,
+            ),
+            (
+                json!({"appearance": {"borderRadius": 12, "cornerStyle": "invalid"}}),
+                CornerStyle::Circular,
+            ),
+        ] {
+            let settings = sanitize_settings_value(raw).unwrap().settings;
+            assert_eq!(settings.appearance.corner_style, expected);
+            assert_eq!(settings.appearance.border_radius, 12);
+            assert_eq!(
+                settings.to_value()["appearance"]["cornerStyle"],
+                if expected == CornerStyle::Continuous {
+                    "continuous"
+                } else {
+                    "circular"
+                }
+            );
+        }
+    }
+
+    #[test]
     fn terminal_padding_defaults_and_saved_axes_are_independent() {
         let defaults = sanitize_settings_value(json!({})).unwrap().settings;
         assert_eq!(

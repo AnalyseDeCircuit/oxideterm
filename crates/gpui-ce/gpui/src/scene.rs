@@ -254,7 +254,7 @@ impl Scene {
         for glyph in &batch.polychrome {
             let mut sprite = PolychromeSprite {
                 order: 0,
-                pad: 0,
+                corner_shape: 0,
                 grayscale: false.into(),
                 opacity,
                 bounds: glyph.bounds + origin,
@@ -794,6 +794,31 @@ impl PrimitiveBatch {
     }
 }
 
+/// The contour used for rounded UI rectangles. Circular remains the default.
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+pub enum CornerShape {
+    /// A circular arc at each corner.
+    #[default]
+    Circular,
+    /// Cubic Bézier corners with zero curvature at the straight edges.
+    Continuous,
+}
+
+impl CornerShape {
+    pub(crate) fn for_bounds(
+        self,
+        bounds: Bounds<crate::Pixels>,
+        radii: Corners<crate::Pixels>,
+    ) -> u32 {
+        // Full-radius shapes denote circles or capsules, not rounded panels.
+        let capsule = radii.top_left == radii.top_right
+            && radii.top_left == radii.bottom_left
+            && radii.top_left == radii.bottom_right
+            && radii.top_left >= bounds.size.width.min(bounds.size.height) / 2.0;
+        u32::from(self == Self::Continuous && !capsule)
+    }
+}
+
 #[derive(Default, Debug, Copy, Clone)]
 #[repr(C)]
 #[expect(missing_docs)]
@@ -806,6 +831,8 @@ pub struct Quad {
     pub border_color: SceneHsla,
     pub corner_radii: Corners<ScaledPixels>,
     pub border_widths: Edges<ScaledPixels>,
+    pub corner_shape: u32,
+    pub pad: [u32; 3],
 }
 
 impl From<Quad> for Primitive {
@@ -847,7 +874,7 @@ pub struct Shadow {
     pub element_corner_radii: Corners<ScaledPixels>,
     /// 0 = drop shadow (rendered outside the element), 1 = inset shadow (rendered inside).
     pub inset: u32,
-    pub pad: u32, // align to 8 bytes
+    pub corner_shape: u32,
 }
 
 impl From<Shadow> for Primitive {
@@ -863,6 +890,7 @@ impl From<Shadow> for Primitive {
 #[expect(missing_docs)]
 pub struct BackdropFilter {
     pub order: DrawOrder,
+    pub corner_shape: u32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub corner_radii: Corners<ScaledPixels>,
@@ -891,6 +919,7 @@ impl From<BackdropFilter> for Primitive {
 #[expect(missing_docs)]
 pub struct FilterBoundary {
     pub order: DrawOrder,
+    pub corner_shape: u32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub corner_radii: Corners<ScaledPixels>,
@@ -1068,7 +1097,7 @@ impl From<SubpixelSprite> for Primitive {
 #[expect(missing_docs)]
 pub struct PolychromeSprite {
     pub order: DrawOrder,
-    pub pad: u32,
+    pub corner_shape: u32,
     pub grayscale: PaddedBool32,
     pub opacity: f32,
     pub bounds: Bounds<ScaledPixels>,
@@ -1306,6 +1335,22 @@ mod tests {
         }
     }
 
+    #[test]
+    fn continuous_corners_preserve_circles_and_capsules() {
+        use crate::{point, px, size};
+        for (width, height, radius, expected) in [
+            (100.0, 60.0, 12.0, 1),
+            (24.0, 24.0, 12.0, 0),
+            (100.0, 24.0, 12.0, 0),
+            (24.0, 100.0, 1000.0, 0),
+        ] {
+            let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(width), px(height)));
+            let radii = Corners::all(px(radius));
+            assert_eq!(CornerShape::Continuous.for_bounds(bounds, radii), expected);
+            assert_eq!(CornerShape::default().for_bounds(bounds, radii), 0);
+        }
+    }
+
     fn quad() -> Quad {
         Quad {
             bounds: full_bounds(),
@@ -1337,6 +1382,7 @@ mod tests {
     fn boundary(is_start: bool) -> FilterBoundary {
         FilterBoundary {
             order: 0,
+            corner_shape: 0,
             bounds: full_bounds(),
             content_mask: mask(),
             corner_radii: Corners::default(),

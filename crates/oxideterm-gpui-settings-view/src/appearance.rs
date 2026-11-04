@@ -178,8 +178,8 @@ pub fn settings_appearance_radius_control(
     radius: i64,
     slider: AnyElement,
 ) -> AnyElement {
-    // Radius preview is display-only. The app supplies the slider because drag
-    // state and settings mutation live at the workspace boundary.
+    // Keep the preview larger than twice the maximum radius so it never becomes
+    // a circle, which deliberately retains circular corners in either mode.
     div()
         .flex()
         .flex_row()
@@ -187,7 +187,7 @@ pub fn settings_appearance_radius_control(
         .gap(px(12.0))
         .child(
             div()
-                .size(px(28.0))
+                .size(px(40.0))
                 .rounded(px(radius as f32))
                 .border_1()
                 .border_color(rgb(tokens.ui.border))

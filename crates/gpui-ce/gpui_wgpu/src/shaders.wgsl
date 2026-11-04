@@ -330,9 +330,59 @@ fn erf(v: vec2<f32>) -> vec2<f32> {
     return s - s / (r2 * r2);
 }
 
-fn blur_along_x(x: f32, y: f32, sigma: f32, corner: f32, half_size: vec2<f32>) -> f32 {
+// Two mirrored cubics join at (0.78, 0.78). The first half has control points
+// (0,1), (0.5,1), (0.56,1), (0.78,0.78), giving zero curvature at the edge.
+fn continuous_corner(t: f32) -> vec2<f32> {
+    return vec2<f32>(t * (1.5 + t * (-1.32 + 0.6 * t)), 1.0 - 0.22 * t * t * t);
+}
+
+fn continuous_half_sdf(point: vec2<f32>, radii: vec2<f32>) -> f32 {
+    var p = point;
+    var r = max(radii, vec2<f32>(0.0001, 0.0001));
+    var t = clamp(p.x / (0.78 * r.x), 0.0, 1.0);
+    // Only rounded-corner fragments reach this bounded closest-point solve.
+    for (var i = 0; i < 6; i += 1) {
+        var b = continuous_corner(t) * r;
+        var d = vec2<f32>(1.5 + t * (-2.64 + 1.8 * t), -0.66 * t * t) * r;
+        var dd = vec2<f32>(-2.64 + 3.6 * t, -1.32 * t) * r;
+        t = clamp(t - dot(b - p, d) / max(dot(d, d) + dot(b - p, dd), 0.0001), 0.0, 1.0);
+    }
+    var b = continuous_corner(t) * r;
+    var d = vec2<f32>(1.5 + t * (-2.64 + 1.8 * t), -0.66 * t * t) * r;
+    var distance = min(length(p - b), min(length(p - vec2<f32>(0.0, r.y)), length(p - 0.78 * r)));
+    return select(distance, -distance, dot(p - b, vec2<f32>(-d.y, d.x)) < 0.0);
+}
+
+fn continuous_corner_sdf(p: vec2<f32>, radii: vec2<f32>) -> f32 {
+    if (radii.x == radii.y) {
+        return continuous_half_sdf(vec2<f32>(min(p.x, p.y), max(p.x, p.y)), radii);
+    }
+    var a = continuous_half_sdf(p, radii);
+    var b = continuous_half_sdf(p.yx, radii.yx);
+    return select(b, a, abs(a) < abs(b));
+}
+
+// Horizontal intersection of the same contour, used by the shadow integral.
+fn continuous_corner_x(input_y: f32) -> f32 {
+    let y = clamp(input_y, 0.0, 1.0);
+    if (y >= 0.78) {
+        return continuous_corner(pow((1.0 - y) / 0.22, 1.0 / 3.0)).x;
+    }
+    var t = y / 0.78;
+    for (var i = 0; i < 5; i += 1) {
+        var x = continuous_corner(t).x;
+        var dx = 1.5 + t * (-2.64 + 1.8 * t);
+        t = clamp(t - (x - y) / dx, 0.0, 1.0);
+    }
+    return continuous_corner(t).y;
+}
+
+fn blur_along_x(x: f32, y: f32, sigma: f32, corner: f32, half_size: vec2<f32>, corner_shape: u32) -> f32 {
   let delta = min(half_size.y - corner - abs(y), 0.0);
-  let curved = half_size.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+  var curved = half_size.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+  if (corner_shape != 0u && corner > 0.0) {
+      curved = half_size.x - corner + corner * continuous_corner_x(-delta / corner);
+  }
   let integral = 0.5 + 0.5 * erf((x + vec2<f32>(-curved, curved)) * (sqrt(0.5) / sigma));
   return integral.y - integral.x;
 }
@@ -359,17 +409,20 @@ fn pick_corner_radius(center_to_point: vec2<f32>, radii: Corners) -> f32 {
 //
 // See comments on similar code using `quad_sdf_impl` in `fs_quad` for
 // explanation.
-fn quad_sdf(point: vec2<f32>, bounds: Bounds, corner_radii: Corners) -> f32 {
+fn quad_sdf(point: vec2<f32>, bounds: Bounds, corner_radii: Corners, corner_shape: u32) -> f32 {
     let half_size = bounds.size / 2.0;
     let center = bounds.origin + half_size;
     let center_to_point = point - center;
     let corner_radius = pick_corner_radius(center_to_point, corner_radii);
     let corner_to_point = abs(center_to_point) - half_size;
     let corner_center_to_point = corner_to_point + corner_radius;
-    return quad_sdf_impl(corner_center_to_point, corner_radius);
+    return quad_sdf_impl(corner_center_to_point, corner_radius, corner_shape);
 }
 
-fn quad_sdf_impl(corner_center_to_point: vec2<f32>, corner_radius: f32) -> f32 {
+fn quad_sdf_impl(corner_center_to_point: vec2<f32>, corner_radius: f32, corner_shape: u32) -> f32 {
+    if (corner_shape != 0u && corner_radius > 0.0 && min(corner_center_to_point.x, corner_center_to_point.y) > 0.0) {
+        return continuous_corner_sdf(corner_center_to_point, vec2<f32>(corner_radius));
+    }
     if (corner_radius == 0.0) {
         // Fast path for unrounded corners.
         return max(corner_center_to_point.x, corner_center_to_point.y);
@@ -551,6 +604,8 @@ struct Quad {
     border_color: Hsla,
     corner_radii: Corners,
     border_widths: Edges,
+    corner_shape: u32,
+    pad: array<u32, 3>,
 }
 
 struct QuadVarying {
@@ -681,7 +736,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
 
     // Signed distance of the point to the outside edge of the quad's border. It
     // is positive outside this edge, and negative inside.
-    let outer_sdf = quad_sdf_impl(corner_center_to_point, corner_radius);
+    let outer_sdf = quad_sdf_impl(corner_center_to_point, corner_radius, quad.corner_shape);
 
     // Approximate signed distance of the point to the inside edge of the quad's
     // border. It is negative outside this edge (within the border), and
@@ -704,7 +759,11 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
         inner_sdf = -(outer_sdf + reduced_border.x);
     } else {
         let ellipse_radii = max(vec2<f32>(0.0), corner_radius - reduced_border);
-        inner_sdf = quarter_ellipse_sdf(corner_center_to_point, ellipse_radii);
+        if (quad.corner_shape != 0u) {
+            inner_sdf = -continuous_corner_sdf(corner_center_to_point, ellipse_radii);
+        } else {
+            inner_sdf = quarter_ellipse_sdf(corner_center_to_point, ellipse_radii);
+        }
     }
 
     // Negative when inside the border
@@ -987,7 +1046,7 @@ struct Shadow {
     element_corner_radii: Corners,
     // 0 = drop shadow, 1 = inset shadow.
     inset: u32,
-    pad: u32, // align to 8 bytes
+    corner_shape: u32,
 }
 
 struct ShadowVarying {
@@ -1038,7 +1097,7 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
 
     var alpha: f32;
     if (shadow.blur_radius == 0.0) {
-        let distance = quad_sdf(input.position.xy, shadow.bounds, shadow.corner_radii);
+        let distance = quad_sdf(input.position.xy, shadow.bounds, shadow.corner_radii, shadow.corner_shape);
         alpha = saturate(0.5 - distance);
     } else {
         // The signal is only non-zero in a limited range, so don't waste samples
@@ -1053,7 +1112,7 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
         alpha = 0.0;
         for (var i = 0; i < 4; i += 1) {
             let blur = blur_along_x(center_to_point.x, center_to_point.y - y,
-                shadow.blur_radius, corner_radius, half_size);
+                shadow.blur_radius, corner_radius, half_size, shadow.corner_shape);
             alpha +=  blur * gaussian(y, shadow.blur_radius) * step;
             y += step;
         }
@@ -1064,7 +1123,7 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
         // `saturate(0.5 - d)` gives a 1-pixel antialiased edge: d <= -0.5 -> 1, d >= 0.5 -> 0.
         alpha = 1.0 - alpha;
         let element_distance = quad_sdf(input.position.xy, shadow.element_bounds,
-                                        shadow.element_corner_radii);
+                                        shadow.element_corner_radii, shadow.corner_shape);
         alpha *= saturate(0.5 - element_distance);
     }
 
@@ -1283,7 +1342,7 @@ fn fs_mono_sprite(input: MonoSpriteVarying) -> @location(0) vec4<f32> {
 
 struct PolychromeSprite {
     order: u32,
-    pad: u32,
+    corner_shape: u32,
     grayscale: u32,
     opacity: f32,
     bounds: Bounds,
@@ -1321,7 +1380,7 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
     }
 
     let sprite = load_poly_sprite(input.sprite_id);
-    let distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii);
+    let distance = quad_sdf(input.position.xy, sprite.bounds, sprite.corner_radii, sprite.corner_shape);
 
     var color = sample;
     if (sprite.grayscale != 0u) {
@@ -1415,6 +1474,10 @@ struct BlurParams {
     // 1.0 = snapped 2:1 box downsample (anchor the half-res grid to a fixed 2px grid at the origin
     // so a stationary element blurs identically at every window size); 0.0 = 1:1 copy (scene blit).
     downsample: f32,
+    corner_shape: u32,
+    corner_shape_padding_0: u32,
+    corner_shape_padding_1: u32,
+    corner_shape_padding_2: u32,
 }
 
 @group(1) @binding(0) var<uniform> blur_locals: BlurParams;
@@ -1505,7 +1568,7 @@ fn fs_blur_composite(input: BlurVarying) -> @location(0) vec4<f32> {
     // Backdrop blur clips to the rounded rect (the frosted panel has a defined shape). Content
     // blur does not — it bleeds past the element box like CSS `filter: blur`, so the soft fade
     // isn't sharply truncated at the edge; its shape comes from the blurred group's own alpha.
-    let distance = quad_sdf(input.position.xy, blur_locals.bounds, corner_radii);
+    let distance = quad_sdf(input.position.xy, blur_locals.bounds, corner_radii, blur_locals.corner_shape);
     let coverage = select(1.0, saturate(0.5 - distance), blur_locals.clip_rounded > 0.5);
 
     // The blurred sample is premultiplied (blurring against the transparent, rgb=0 surround scales

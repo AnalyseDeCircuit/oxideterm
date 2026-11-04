@@ -355,6 +355,45 @@ impl WorkspaceApp {
         )
     }
 
+    fn appearance_corner_style_control(
+        &self,
+        selected: oxideterm_settings::CornerStyle,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use oxideterm_settings::CornerStyle;
+        oxideterm_gpui_ui::tabs::tabs_list(&self.tokens)
+            .children(
+                [
+                    (
+                        CornerStyle::Circular,
+                        "settings_view.appearance.corner_circular",
+                    ),
+                    (
+                        CornerStyle::Continuous,
+                        "settings_view.appearance.corner_continuous",
+                    ),
+                ]
+                .into_iter()
+                .enumerate()
+                .map(|(index, (style, key))| {
+                    oxideterm_gpui_ui::tabs::tabs_trigger(
+                        &self.tokens,
+                        self.i18n.t(key),
+                        selected == style,
+                    )
+                    .id(("appearance-corner-style", index))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.close_settings_select();
+                        this.blur_text_inputs(cx);
+                        this.finish_settings_slider_drag(cx);
+                        this.edit_settings(|settings| settings.appearance.corner_style = style, cx);
+                        cx.stop_propagation();
+                    }))
+                }),
+            )
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn appearance_layout_card(
         &self,
         settings: &PersistedSettings,
@@ -373,6 +412,11 @@ impl WorkspaceApp {
                         self.tokens.metrics.settings_select_width,
                         cx,
                     ),
+                ),
+                self.appearance_row(
+                    "settings_view.appearance.corner_style",
+                    "settings_view.appearance.corner_style_hint",
+                    self.appearance_corner_style_control(settings.appearance.corner_style, cx),
                 ),
                 self.appearance_row(
                     "settings_view.appearance.border_radius",

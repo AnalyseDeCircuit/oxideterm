@@ -91,6 +91,7 @@ fn rounded_clip_preserves_pixels_and_parent_background() -> Result<()> {
             });
             let boundary = FilterBoundary {
                 order: 0,
+                corner_shape: 0,
                 bounds,
                 content_mask: ContentMask { bounds },
                 corner_radii: Corners::all(ScaledPixels(20.)),

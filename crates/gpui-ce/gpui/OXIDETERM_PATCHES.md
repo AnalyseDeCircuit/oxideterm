@@ -199,6 +199,43 @@ ownership is added to the parent registry only after renderer and platform setup
 registration at that commit boundary: registering earlier can leave a destroyed child recorded as
 blocking, causing the parent window to reject all later input.
 
+### Optional continuous Bézier corners
+
+`crates/gpui-ce/gpui/src/scene.rs` defines `CornerShape`, and
+`crates/gpui-ce/gpui/src/window.rs` exposes `Window::set_corner_shape`.
+Circular corners remain the default. The application maps its persisted
+`appearance.cornerStyle` setting to this window-local option for both main and
+detached windows; the existing radius setting continues to control corner size.
+Changing the shape invalidates cached element scenes. Equal-radius circles and
+capsules retain their circular arcs in either mode.
+
+Preserve the following parts together during framework refreshes:
+
+- The continuous contour uses two mirrored cubic Bézier segments per corner,
+  with zero curvature where they meet the straight edges. Metal, HLSL, and WGSL
+  evaluate the same contour; ordinary circular distance calculations remain
+  available through the default branch.
+- Quads, shadows, polychrome sprites, backdrop filters, and filter boundaries
+  carry an explicit `corner_shape` value (`0` circular, `1` continuous). Fills,
+  equal- and unequal-width borders, image clipping, rounded subtree clipping,
+  and blur compositing use that choice. Blurred shadows use a horizontal
+  intersection of the same curve rather than the circular shadow formula.
+- `gpui_apple/src/metal_renderer.rs`, `gpui_windows/src/directx_renderer.rs`, and
+  `gpui_wgpu/src/wgpu_renderer.rs` pass the shape through their scene and blur
+  uploads. Keep their corresponding shader declarations synchronized with the
+  core structures and WGPU transfer structures.
+- The quad transfer record is 176 bytes, including initialized padding; the
+  fixed WebGL decoder in `gpui_wgpu/src/shaders_webgl.wgsl` consumes 11 texels per
+  quad. Shadow and polychrome-sprite records reuse their former padding word.
+  Blur uniforms are 96 bytes. Preserve the Naga offset/stride audits and WebGL
+  decoder checks when changing these layouts.
+
+`continuous_corners_preserve_circles_and_capsules` protects shape selection.
+The Metal headless regression `corner_contours_match_across_paint_paths` checks
+actual pixels for fills, rounded clips, images, sharp and blurred shadows, and
+equal- and unequal-width borders. Settings persistence, the selector, and its
+11 localized labels remain product-owned rather than framework APIs.
+
 ### Transparent border-only quad overdraw
 
 `crates/gpui-ce/gpui/src/window.rs` limits transparent, border-only quads to four clipped
@@ -743,3 +780,15 @@ after upload failure, and texture retirement. VM qualification remains a
 separate runtime gate: exercise Vulkan and OpenGL fallback on representative
 VMware, VirtualBox, Hyper-V, and QEMU/virtio configurations. Compilation alone
 does not verify driver compatibility.
+
+### Continuous-corner validation — 2026-11-03
+
+Passed on macOS: application compilation with `cargo check`, settings
+serialization/default checks, circle/capsule preservation, Metal shader
+compilation and headless pixel regression, the WGPU test suite including
+Naga/WebGL transfer checks, and the 11-locale audit. The Metal output was also
+visually inspected without launching another application instance.
+
+Windows Rust/HLSL compilation, native Windows/Linux rendering, and interactive
+application acceptance remain pending. Run those checks on the matching hosts
+before marking the patch platform-qualified.

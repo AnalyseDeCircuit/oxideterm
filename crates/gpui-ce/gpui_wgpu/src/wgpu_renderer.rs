@@ -138,6 +138,10 @@ struct BlurParams {
     /// origin, so a stationary element blurs identically at every window size); 0.0 = 1:1 copy
     /// (the scene blit, which must not downsample). Downsample pass only.
     downsample: f32,
+    corner_shape: u32,
+    corner_shape_padding_0: u32,
+    corner_shape_padding_1: u32,
+    corner_shape_padding_2: u32,
 }
 
 #[repr(C)]
@@ -327,6 +331,8 @@ struct GpuQuad {
     border_color: GpuHsla,
     corner_radii: GpuCorners,
     border_widths: GpuEdges,
+    corner_shape: u32,
+    pad: [u32; 3],
 }
 
 impl From<&Quad> for GpuQuad {
@@ -344,6 +350,8 @@ impl From<&Quad> for GpuQuad {
             border_color: quad.border_color.into(),
             corner_radii: (&quad.corner_radii).into(),
             border_widths: (&quad.border_widths).into(),
+            corner_shape: quad.corner_shape,
+            pad: [0; 3],
         }
     }
 }
@@ -360,7 +368,7 @@ struct GpuShadow {
     element_bounds: PodBounds,
     element_corner_radii: GpuCorners,
     inset: u32,
-    pad: u32,
+    corner_shape: u32,
 }
 
 impl From<&Shadow> for GpuShadow {
@@ -375,7 +383,7 @@ impl From<&Shadow> for GpuShadow {
             element_bounds: shadow.element_bounds.into(),
             element_corner_radii: (&shadow.element_corner_radii).into(),
             inset: shadow.inset,
-            pad: 0,
+            corner_shape: shadow.corner_shape,
         }
     }
 }
@@ -450,7 +458,7 @@ impl From<&SubpixelSprite> for GpuTextSprite {
 #[derive(Clone, Copy, Default, Pod, Zeroable)]
 struct GpuPolychromeSprite {
     order: u32,
-    pad: u32,
+    corner_shape: u32,
     grayscale: u32,
     opacity: f32,
     bounds: PodBounds,
@@ -463,7 +471,7 @@ impl From<&PolychromeSprite> for GpuPolychromeSprite {
     fn from(sprite: &PolychromeSprite) -> Self {
         Self {
             order: sprite.order,
-            pad: 0,
+            corner_shape: sprite.corner_shape,
             grayscale: u32::from(sprite.grayscale),
             opacity: sprite.opacity,
             bounds: sprite.bounds.into(),
@@ -2434,6 +2442,7 @@ impl WgpuRendererCore {
                                     max_blur_radius(&boundary.filters),
                                     boundary.opacity,
                                     boundary.clip_rounded,
+                                    boundary.corner_shape,
                                 );
                                 current_target = parent;
                                 pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -2669,6 +2678,7 @@ impl WgpuRendererCore {
         opacity: f32,
         // Backdrop clips to the rounded rect; content (`filter`) bleeds past its bounds.
         clip_rounded: bool,
+        corner_shape: u32,
     ) {
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
@@ -2777,6 +2787,7 @@ impl WgpuRendererCore {
             corner_radii,
             opacity,
             clip_rounded: if clip_rounded { 1.0 } else { 0.0 },
+            corner_shape,
             downsample: if sigma > 0.0 { 1.0 } else { 0.0 },
             ..Default::default()
         };
@@ -2824,6 +2835,7 @@ impl WgpuRendererCore {
             max_blur_radius(&filter.filters),
             filter.opacity,
             true,
+            filter.corner_shape,
         );
     }
 
@@ -3976,6 +3988,8 @@ mod upstream_tests {
             border_color: color.into(),
             corner_radii: Corners::default(),
             border_widths: Edges::default(),
+            corner_shape: 0,
+            pad: [0; 3],
         }
     }
 
@@ -4191,6 +4205,8 @@ mod upstream_tests {
                 bottom: 32.0.into(),
                 left: 33.0.into(),
             },
+            corner_shape: 1,
+            pad: [0; 3],
         };
 
         let encoded = GpuQuad::from(&quad);
@@ -4239,13 +4255,17 @@ mod upstream_tests {
                 31.0_f32.to_bits(),
                 32.0_f32.to_bits(),
                 33.0_f32.to_bits(),
+                1,
+                0,
+                0,
+                0,
             ]
         );
     }
 
     #[test]
     fn webgl_record_sizes_match_shader_word_strides() {
-        assert_eq!(std::mem::size_of::<GpuQuad>(), 40 * 4);
+        assert_eq!(std::mem::size_of::<GpuQuad>(), 44 * 4);
         assert_eq!(std::mem::size_of::<GpuShadow>(), 28 * 4);
         assert_eq!(std::mem::size_of::<PathRasterizationVertex>(), 26 * 4);
         assert_eq!(std::mem::size_of::<PathSprite>(), 4 * 4);
@@ -4459,11 +4479,11 @@ mod tests {
         });
         assert_struct_layout!(&module, GpuQuad => "Quad" {
             order, border_style, bounds, content_mask, background, border_color,
-            corner_radii, border_widths
+            corner_radii, border_widths, corner_shape, pad
         });
         assert_struct_layout!(&module, GpuShadow => "Shadow" {
             order, blur_radius, bounds, corner_radii, content_mask, color, element_bounds,
-            element_corner_radii, inset, pad
+            element_corner_radii, inset, corner_shape
         });
         assert_struct_layout!(&module, PathRasterizationVertex => "PathRasterizationVertex" {
             xy_position, st_position, color, bounds
@@ -4476,14 +4496,14 @@ mod tests {
             order, pad, bounds, content_mask, color, tile, transformation
         });
         assert_struct_layout!(&module, GpuPolychromeSprite => "PolychromeSprite" {
-            order, pad, grayscale, opacity, bounds, content_mask, corner_radii, tile
+            order, corner_shape, grayscale, opacity, bounds, content_mask, corner_radii, tile
         });
         assert_struct_layout!(&module, SurfaceParams => "SurfaceParams" {
             bounds, content_mask, opacity, rotation, sample_size
         });
         assert_struct_layout!(&module, BlurParams => "BlurParams" {
             bounds, content_mask, corner_radii, direction, sigma, opacity, tap_count, tap_step,
-            clip_rounded, downsample
+            clip_rounded, downsample, corner_shape, corner_shape_padding_0, corner_shape_padding_1, corner_shape_padding_2
         });
     }
 
@@ -4636,7 +4656,7 @@ mod tests {
     fn polychrome_grayscale_is_encoded_as_initialized_u32() {
         let mut sprite = PolychromeSprite {
             order: 7,
-            pad: u32::MAX,
+            corner_shape: 1,
             grayscale: true.into(),
             opacity: 0.5,
             bounds: Bounds::default(),
@@ -4655,7 +4675,7 @@ mod tests {
 
         let encoded = GpuPolychromeSprite::from(&sprite);
         assert_eq!(encoded.grayscale, 1);
-        assert_eq!(encoded.pad, 0);
+        assert_eq!(encoded.corner_shape, 1);
         assert_eq!(encoded.tile.texture_id.kind, 1);
 
         sprite.grayscale = false.into();

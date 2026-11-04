@@ -138,7 +138,7 @@ fn read_transformation(cursor: ptr<function, InstanceCursor>) -> TransformationM
 fn load_quad(instance_id: u32) -> Quad {
     // Keep this fixed-layout decoder explicit. Some WebGL shader compilers fail
     // to optimize the cursor's branches and dynamic vector indexing for quads.
-    let first_texel_index = instance_id * 10u;
+    let first_texel_index = instance_id * 11u;
     let width = textureDimensions(t_instances).x;
     let texel0 = fetch_instance_texel(first_texel_index, width);
     let texel1 = fetch_instance_texel(first_texel_index + 1u, width);
@@ -150,6 +150,7 @@ fn load_quad(instance_id: u32) -> Quad {
     let texel7 = fetch_instance_texel(first_texel_index + 7u, width);
     let texel8 = fetch_instance_texel(first_texel_index + 8u, width);
     let texel9 = fetch_instance_texel(first_texel_index + 9u, width);
+    let texel10 = fetch_instance_texel(first_texel_index + 10u, width);
 
     let values0 = bitcast<vec4<f32>>(texel0);
     let values1 = bitcast<vec4<f32>>(texel1);
@@ -187,6 +188,8 @@ fn load_quad(instance_id: u32) -> Quad {
         Hsla(values7.x, values7.y, values7.z, values7.w),
         Corners(values8.x, values8.y, values8.z, values8.w),
         Edges(values9.x, values9.y, values9.z, values9.w),
+        texel10.x,
+        array<u32, 3>(texel10.y, texel10.z, texel10.w),
     );
 }
 

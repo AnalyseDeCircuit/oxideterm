@@ -571,6 +571,7 @@ impl DirectXRenderer {
                                 max_blur_radius(&filter.filters),
                                 filter.opacity,
                                 true,
+                                filter.corner_shape,
                             )?;
                         }
                         Ok::<(), anyhow::Error>(())
@@ -615,6 +616,7 @@ impl DirectXRenderer {
                                 max_blur_radius(&boundary.filters),
                                 boundary.opacity,
                                 boundary.clip_rounded,
+                                boundary.corner_shape,
                             )
                         } else {
                             Ok(())
@@ -1179,6 +1181,7 @@ impl DirectXRenderer {
         opacity: f32,
         // Backdrop clips to the rounded rect; content (`filter`) bleeds past its bounds.
         clip_rounded: bool,
+        corner_shape: u32,
     ) -> Result<()> {
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
@@ -1282,6 +1285,7 @@ impl DirectXRenderer {
                 corner_radii,
                 opacity,
                 clip_rounded: if clip_rounded { 1.0 } else { 0.0 },
+                corner_shape,
                 downsample: if sigma > 0.0 { 1.0 } else { 0.0 },
                 ..Default::default()
             },
@@ -1641,7 +1645,7 @@ struct GlobalParams {
     _pad: [u32; 3],
 }
 
-/// Mirrors the `BlurParams` cbuffer (register b1) in `shaders.hlsl`. 80 bytes (a multiple of 16,
+/// Mirrors the `BlurParams` cbuffer (register b1) in `shaders.hlsl`. 96 bytes (a multiple of 16,
 /// as constant buffers require). Updated per blur pass via `update_buffer`.
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -1663,6 +1667,8 @@ struct BlurParams {
     /// Spacing between taps in pixels (gaussian passes only); >1 lets `tap_count` taps span very
     /// large radii without truncating the gaussian, matching the wgpu backend.
     tap_step: f32,
+    corner_shape: u32,
+    corner_shape_padding: [u32; 3],
 }
 
 impl Default for BlurParams {
@@ -1677,6 +1683,8 @@ impl Default for BlurParams {
             tap_count: 0.0,
             clip_rounded: 0.0,
             downsample: 0.0,
+            corner_shape: 0,
+            corner_shape_padding: [0; 3],
             tap_step: 0.0,
         }
     }

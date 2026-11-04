@@ -966,6 +966,13 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     );
     sanitize_enum(
         &mut settings,
+        &["appearance", "cornerStyle"],
+        &["circular", "continuous"],
+        "circular",
+        &mut validation_warnings,
+    );
+    sanitize_enum(
+        &mut settings,
         &["appearance", "uiDensity"],
         &["compact", "comfortable", "spacious"],
         "comfortable",

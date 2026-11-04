@@ -203,6 +203,8 @@ struct BlurUniform {
     /// Spacing between taps in pixels (gaussian passes only); >1 lets `tap_count` taps span very
     /// large radii without truncating the gaussian, matching the wgpu backend.
     tap_step: f32,
+    corner_shape: u32,
+    corner_shape_padding: [u32; 3],
 }
 
 impl Default for BlurUniform {
@@ -217,6 +219,8 @@ impl Default for BlurUniform {
             tap_count: 0.0,
             clip_rounded: 0.0,
             downsample: 0.0,
+            corner_shape: 0,
+            corner_shape_padding: [0; 3],
             tap_step: 0.0,
         }
     }
@@ -964,6 +968,7 @@ impl MetalRenderer {
                                 max_blur_radius(&filter.filters),
                                 filter.opacity,
                                 true,
+                                filter.corner_shape,
                             );
                         }
                     }
@@ -1015,6 +1020,7 @@ impl MetalRenderer {
                                     max_blur_radius(&boundary.filters),
                                     boundary.opacity,
                                     boundary.clip_rounded,
+                                    boundary.corner_shape,
                                 );
                             }
                             current_target = parent;
@@ -1119,6 +1125,7 @@ impl MetalRenderer {
         opacity: f32,
         // Backdrop clips to the rounded rect; content (`filter`) bleeds past its bounds.
         clip_rounded: bool,
+        corner_shape: u32,
     ) {
         // Sigma is halved because the blur runs at half resolution.
         let sigma = (blur_radius * 0.5).max(0.0);
@@ -1199,6 +1206,7 @@ impl MetalRenderer {
                 corner_radii,
                 opacity,
                 clip_rounded: if clip_rounded { 1.0 } else { 0.0 },
+                corner_shape,
                 downsample: if sigma > 0.0 { 1.0 } else { 0.0 },
                 ..Default::default()
             },
@@ -2125,6 +2133,160 @@ mod tests {
     use super::*;
 
     #[test]
+    fn corner_contours_match_across_paint_paths() {
+        use gpui::{
+            AtlasKey, DynamicTexture, DynamicTextureParams, PlatformAtlas, PolychromeSprite, Quad,
+            Shadow,
+        };
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
+        renderer.opaque = false;
+        let bounds = Bounds::new(
+            point(ScaledPixels(8.0), ScaledPixels(8.0)),
+            size(ScaledPixels(96.0), ScaledPixels(80.0)),
+        );
+        let mask = ContentMask { bounds };
+        let radii = Corners::all(ScaledPixels(24.0));
+        let dimensions = size(DevicePixels(1), DevicePixels(1));
+        let texture = DynamicTexture::new(dimensions);
+        let key: AtlasKey = DynamicTextureParams {
+            texture_id: texture.id,
+        }
+        .into();
+        let tile = renderer
+            .sprite_atlas
+            .get_or_insert_with(key, &mut || {
+                Ok(Some((
+                    dimensions,
+                    std::borrow::Cow::Borrowed(&[255, 255, 255, 255]),
+                )))
+            })
+            .unwrap()
+            .unwrap();
+        let mut blurred_corner_alpha = [0u8; 2];
+        for corner_shape in [0, 1] {
+            for path in 0..7 {
+                let mut scene = Scene::default();
+                let quad = Quad {
+                    bounds,
+                    content_mask: mask,
+                    corner_radii: radii,
+                    corner_shape,
+                    background: gpui::rgb(0xffffff).into(),
+                    ..Default::default()
+                };
+                match path {
+                    0 => scene.insert_primitive(quad),
+                    1 => {
+                        let boundary = FilterBoundary {
+                            order: 0,
+                            bounds,
+                            content_mask: mask,
+                            corner_radii: radii,
+                            corner_shape,
+                            filters: Default::default(),
+                            opacity: 1.0,
+                            clip_rounded: true,
+                            is_start: true,
+                        };
+                        scene.insert_primitive(boundary.clone());
+                        scene.insert_primitive(Quad {
+                            corner_radii: Corners::default(),
+                            ..quad
+                        });
+                        scene.insert_primitive(FilterBoundary {
+                            is_start: false,
+                            ..boundary
+                        });
+                    }
+                    2 => scene.insert_primitive(PolychromeSprite {
+                        order: 0,
+                        corner_shape,
+                        grayscale: false.into(),
+                        opacity: 1.0,
+                        bounds,
+                        content_mask: mask,
+                        corner_radii: radii,
+                        tile,
+                    }),
+                    3 | 5 => scene.insert_primitive(Shadow {
+                        order: 0,
+                        blur_radius: ScaledPixels(if path == 5 { 2.0 } else { 0.0 }),
+                        bounds,
+                        corner_radii: radii,
+                        content_mask: mask,
+                        color: gpui::hsla(0.0, 0.0, 1.0, 1.0).into(),
+                        element_bounds: bounds,
+                        element_corner_radii: radii,
+                        inset: 0,
+                        corner_shape,
+                    }),
+                    _ => scene.insert_primitive(Quad {
+                        border_color: gpui::hsla(0.6, 1.0, 0.5, 1.0).into(),
+                        border_widths: if path == 6 {
+                            gpui::Edges {
+                                top: ScaledPixels(1.0),
+                                bottom: ScaledPixels(1.0),
+                                left: ScaledPixels(4.0),
+                                right: ScaledPixels(4.0),
+                            }
+                        } else {
+                            gpui::Edges::all(ScaledPixels(2.0))
+                        },
+                        ..quad
+                    }),
+                }
+                scene.finish();
+                let image = renderer
+                    .render_scene_to_image(&scene, size(DevicePixels(112), DevicePixels(96)))
+                    .unwrap();
+                if path == 5 {
+                    blurred_corner_alpha[corner_shape as usize] = image.get_pixel(14, 14).0[3];
+                    continue;
+                }
+                if path >= 4 && corner_shape == 1 {
+                    let border = image.get_pixel(14, 14).0;
+                    // The sample is within half a pixel of the inner edge, so it
+                    // blends with the white fill but must remain predominantly blue.
+                    assert!(
+                        border[2] > 240 && border[0] < 128,
+                        "path={path}, border={border:?}"
+                    );
+                    assert_eq!(image.get_pixel(56, 48).0, [255; 4]);
+                }
+                // At 1/4 radius from both edges the circle is outside, while the
+                // continuous corner (diagonal intercept 0.22r) is inside.
+                for (x, y) in [(14, 14), (97, 14), (14, 81), (97, 81)] {
+                    assert_eq!(
+                        image.get_pixel(x, y).0[3],
+                        if corner_shape == 0 { 0 } else { 255 },
+                        "shape={corner_shape}, path={path}, pixel={x},{y}"
+                    );
+                }
+                assert_eq!(
+                    image.get_pixel(8, 8).0[3],
+                    0,
+                    "shape={corner_shape}, path={path}"
+                );
+                assert_eq!(
+                    image.get_pixel(56, 9).0[3],
+                    255,
+                    "shape={corner_shape}, path={path}"
+                );
+                assert_eq!(
+                    image.get_pixel(56, 48).0[3],
+                    255,
+                    "shape={corner_shape}, path={path}"
+                );
+            }
+        }
+        assert!(
+            blurred_corner_alpha[1] > blurred_corner_alpha[0].saturating_add(20),
+            "blurred corners: {blurred_corner_alpha:?}"
+        );
+    }
+
+    #[test]
     fn native_video_surfaces_preserve_color_opacity_orientation_and_gpu_blur() {
         use core_foundation::{base::CFType, dictionary::CFDictionary, string::CFString};
         use core_video::pixel_buffer::CVPixelBuffer;
@@ -2186,6 +2348,7 @@ mod tests {
         let mut scene = Scene::default();
         let boundary = FilterBoundary {
             order: 0,
+            corner_shape: 0,
             bounds,
             content_mask: ContentMask { bounds },
             corner_radii: Default::default(),
@@ -2245,7 +2408,7 @@ mod tests {
         let mut scene = Scene::default();
         scene.insert_primitive(PolychromeSprite {
             order: 0,
-            pad: 0,
+            corner_shape: 0,
             grayscale: false.into(),
             opacity: 1.0,
             bounds: Bounds {

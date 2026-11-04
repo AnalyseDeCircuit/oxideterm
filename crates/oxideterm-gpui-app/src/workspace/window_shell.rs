@@ -360,13 +360,22 @@ impl WorkspaceWindowNativeStyle {
                     });
                 }));
         }
-        let (vibrancy_mode, window_opacity) = session.read_with(cx, |session, _cx| {
-            (
-                effective_vibrancy_mode(session.settings_store.settings(), &session.render_policy),
-                normalized_window_opacity(
-                    session.settings_store.settings().appearance.window_opacity,
-                ),
-            )
+        let (vibrancy_mode, window_opacity, corner_style) =
+            session.read_with(cx, |session, _cx| {
+                (
+                    effective_vibrancy_mode(
+                        session.settings_store.settings(),
+                        &session.render_policy,
+                    ),
+                    normalized_window_opacity(
+                        session.settings_store.settings().appearance.window_opacity,
+                    ),
+                    session.settings_store.settings().appearance.corner_style,
+                )
+            });
+        window.set_corner_shape(match corner_style {
+            oxideterm_settings::CornerStyle::Circular => gpui::CornerShape::Circular,
+            oxideterm_settings::CornerStyle::Continuous => gpui::CornerShape::Continuous,
         });
         if self.applied_window_opacity != Some(window_opacity) {
             let _ = apply_window_opacity(window, window_opacity as f64);

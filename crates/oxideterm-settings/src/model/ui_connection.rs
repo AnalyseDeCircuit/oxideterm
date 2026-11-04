@@ -55,6 +55,14 @@ impl AppearanceScheme {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CornerStyle {
+    #[default]
+    Circular,
+    Continuous,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppearanceSettings {
@@ -70,6 +78,8 @@ pub struct AppearanceSettings {
     pub sidebar_collapsed_default: bool,
     pub ui_density: UiDensity,
     pub border_radius: i64,
+    #[serde(default)]
+    pub corner_style: CornerStyle,
     #[serde(default = "default_ui_font_size")]
     pub ui_font_size: i64,
     pub ui_font_family: String,
@@ -95,6 +105,7 @@ impl Default for AppearanceSettings {
             sidebar_collapsed_default: false,
             ui_density: UiDensity::Comfortable,
             border_radius: 6,
+            corner_style: CornerStyle::default(),
             ui_font_size: default_ui_font_size(),
             ui_font_family: String::new(),
             show_window_titlebar: true,

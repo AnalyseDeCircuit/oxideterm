@@ -395,6 +395,9 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             &[
                 "settings_view.appearance.density",
                 "settings_view.appearance.border_radius",
+                "settings_view.appearance.corner_style",
+                "settings_view.appearance.corner_circular",
+                "settings_view.appearance.corner_continuous",
                 "settings_view.appearance.ui_font",
                 "settings_view.appearance.ui_font_size",
             ],
