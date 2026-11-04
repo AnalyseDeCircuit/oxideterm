@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "Khởi động các đường hầm đã chọn",
+    "start_failed": "Không thể khởi động đường hầm.",
     "description": "Chuyển tiếp cổng qua máy chủ SSH đã lưu.",
     "title": "Đường hầm SSH",
     "name": "Tên đường hầm",

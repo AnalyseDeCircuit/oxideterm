@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "선택한 터널 시작",
+    "start_failed": "터널을 시작하지 못했습니다.",
     "description": "저장된 SSH 호스트를 통해 포트를 전달합니다.",
     "title": "SSH 터널",
     "name": "터널 이름",

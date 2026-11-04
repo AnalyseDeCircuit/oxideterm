@@ -959,7 +959,7 @@ mod tests {
                 node_id.clone(),
                 ForwardingRuntimeSnapshot {
                     rules: vec![rule],
-                    stats_by_forward_id: HashMap::new(),
+                    ..Default::default()
                 },
             );
         });

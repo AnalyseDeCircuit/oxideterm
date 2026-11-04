@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "Start selected tunnels",
+    "start_failed": "Could not start the tunnel.",
     "description": "Forward ports through a saved SSH host.",
     "title": "SSH tunnel",
     "name": "Tunnel name",

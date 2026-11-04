@@ -25,6 +25,7 @@ impl WorkspaceApp {
                 let changed = effects.into_iter().fold(false, |changed, effect| {
                     self.apply_workspace_runtime_effect(effect, window, cx) || changed
                 });
+                self.start_waiting_tunnel_connections(cx);
                 if changed {
                     self.refresh_ssh_terminal_input_locks(cx);
                     cx.notify();
@@ -321,9 +322,7 @@ impl WorkspaceApp {
                     let connection_failure_notice = (!active_reconnect_job)
                         .then(|| self.connection_failure_notice_for_node(&node_id, &error, cx))
                         .flatten();
-                    self.workspace_runtime.update(cx, |runtime, _cx| {
-                        runtime.abort_connection_chain_for_node(&node_id);
-                    });
+                    self.abort_failed_connection_chain(&node_id, cx);
                     if !connection_chain_node {
                         self.workspace_runtime.update(cx, |runtime, _cx| {
                             runtime.unlock_connecting_node(&node_id);
@@ -1548,7 +1547,10 @@ impl WorkspaceApp {
         true
     }
 
-    fn node_connection_is_active_or_connecting(&self, node_id: &NodeId) -> bool {
+    pub(in crate::workspace) fn node_connection_is_active_or_connecting(
+        &self,
+        node_id: &NodeId,
+    ) -> bool {
         let Some(connection_id) = self.node_router.connection_id_for_node(node_id) else {
             return false;
         };
@@ -1617,12 +1619,28 @@ impl WorkspaceApp {
             Some(step.trace_plan.as_ref()),
             cx,
         ) {
-            self.workspace_runtime.update(cx, |runtime, _cx| {
-                runtime.abort_connection_chain_for_node(&step.node_id);
-            });
+            self.abort_failed_connection_chain(&step.node_id, cx);
             return false;
         }
         true
+    }
+
+    fn abort_failed_connection_chain(&mut self, failed: &NodeId, cx: &mut Context<Self>) {
+        let step = self.workspace_runtime.read(cx).connection_chain_next_step();
+        if self.workspace_runtime.update(cx, |runtime, _| {
+            runtime.abort_connection_chain_for_node(failed)
+        }) && let Some(step) = step
+            && let Some(index) = step
+                .trace_plan
+                .node_ids
+                .iter()
+                .position(|node| node == failed)
+        {
+            // A failed jump host never produces a readiness event for the unreached target.
+            for node in &step.trace_plan.node_ids[index..] {
+                self.fail_queued_tunnels(node, cx);
+            }
+        }
     }
 
     fn advance_connection_chain_after_node_connected(

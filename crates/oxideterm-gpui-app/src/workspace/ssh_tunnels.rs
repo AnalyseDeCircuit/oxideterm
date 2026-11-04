@@ -6,11 +6,26 @@ use oxideterm_forwarding::{
 
 mod form;
 
+fn group_tunnels_by_host(
+    tunnels: impl Iterator<Item = (String, String)>,
+) -> VecDeque<(String, Vec<String>)> {
+    let mut groups: VecDeque<(String, Vec<String>)> = VecDeque::new();
+    for (host, id) in tunnels {
+        if let Some((_, ids)) = groups.iter_mut().find(|(owner, _)| owner == &host) {
+            ids.push(id);
+        } else {
+            groups.push_back((host, vec![id]));
+        }
+    }
+    groups
+}
+
 #[derive(Default)]
 pub(in crate::workspace) struct SshTunnels {
     pub form: Option<TunnelForm>,
-    pub pending_auth: Option<String>,
+
     pending_starts: HashMap<NodeId, VecDeque<String>>,
+    waiting_connections: VecDeque<NodeId>,
     active_start_nodes: HashSet<NodeId>,
     pending_stops: HashMap<String, bool>,
     jobs: HashMap<String, Task<()>>,
@@ -206,44 +221,84 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.ssh_tunnels.jobs.contains_key(id) || self.ssh_tunnels.pending_stops.contains_key(id)
-        {
-            return;
-        }
-        let Some(rule) = self
+        self.start_ssh_tunnels(&[id.to_owned()], automatic, window, cx);
+    }
+
+    pub(in crate::workspace) fn start_ssh_tunnels(
+        &mut self,
+        ids: &[String],
+        automatic: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ids: HashSet<_> = ids.iter().collect();
+        let candidates = self
             .saved_ssh_tunnels()
             .into_iter()
-            .find(|rule| rule.id == id)
-        else {
-            return;
-        };
-        let Some(host_id) = rule.owner_connection_id.as_deref() else {
-            return;
-        };
-        let Some(host) = self.connection_store.get(host_id).cloned() else {
-            self.push_command_palette_toast(
-                self.i18n.t("ssh_tunnel.title"),
-                Some(self.i18n.t("ssh_tunnel.missing_host")),
-                TerminalNoticeVariant::Error,
-                cx,
-            );
-            return;
-        };
-        if let Some(node) = self.indexed_saved_ssh_node_for_connection(host_id, &host)
-            && self.node_is_ready_for_forwarding(&node)
-        {
-            self.queue_ssh_tunnel_start(id, node, window, cx);
-            return;
-        }
-        let config = oxideterm_session_adapter::ssh_config_from_saved_connection(
-            &self.connection_store,
-            self.settings_store.settings(),
-            &host,
-        );
-        let Some(config) = config else {
-            if automatic {
+            .filter(|rule| {
+                ids.contains(&rule.id)
+                    && !self.ssh_tunnels.pending_stops.contains_key(&rule.id)
+                    && !matches!(
+                        self.ssh_tunnel_status(&rule.id),
+                        ForwardStatus::Starting | ForwardStatus::Active | ForwardStatus::Suspended
+                    )
+            })
+            .filter_map(|rule| Some((rule.owner_connection_id?, rule.id)));
+        self.start_tunnel_groups(group_tunnels_by_host(candidates), automatic, window, cx);
+    }
+
+    fn tunnel_names(&self, ids: &[String]) -> String {
+        let saved = self.saved_ssh_tunnels();
+        ids.iter()
+            .map(|id| {
+                saved
+                    .iter()
+                    .find(|s| s.id == *id)
+                    .and_then(|s| s.tunnel.as_ref())
+                    .map_or(id.as_str(), |p| p.name.as_str())
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
+    pub(in crate::workspace) fn start_tunnel_groups(
+        &mut self,
+        mut groups: VecDeque<(String, Vec<String>)>,
+        automatic: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        while let Some((host_id, ids)) = groups.pop_front() {
+            let Some(host) = self.connection_store.get(&host_id).cloned() else {
                 self.push_command_palette_toast(
-                    rule.tunnel.as_ref().unwrap().name.clone(),
+                    self.tunnel_names(&ids),
+                    Some(self.i18n.t("ssh_tunnel.missing_host")),
+                    TerminalNoticeVariant::Error,
+                    cx,
+                );
+                continue;
+            };
+            if let Some(node) = self.indexed_saved_ssh_node_for_connection(&host_id, &host)
+                && (self.node_is_ready_for_forwarding(&node)
+                    || self.node_connection_is_active_or_connecting(&node)
+                    || self
+                        .ssh_tunnels
+                        .pending_starts
+                        .get(&node)
+                        .is_some_and(|ids| !ids.is_empty()))
+            {
+                self.queue_ssh_tunnel_starts(ids, node, cx);
+                continue;
+            }
+            if let Some(config) = oxideterm_session_adapter::ssh_config_from_saved_connection(
+                &self.connection_store,
+                self.settings_store.settings(),
+                &host,
+            ) {
+                self.connect_ssh_tunnels_with_config(host_id, ids, config, cx);
+            } else if automatic {
+                self.push_command_palette_toast(
+                    self.tunnel_names(&ids),
                     Some(
                         self.i18n
                             .t("sessionManager.edit_properties.password_required"),
@@ -252,41 +307,28 @@ impl WorkspaceApp {
                     cx,
                 );
             } else {
-                self.ssh_tunnels.pending_auth = Some(id.to_string());
                 self.open_saved_connection_prompt(
-                    host_id,
+                    &host_id,
                     SavedConnectionPromptAction::Tunnel,
                     None,
                     window,
                     cx,
                 );
+                groups.push_front((host_id, ids));
+                self.update_connection_form_state(cx, |state| state.tunnel_start_groups = groups);
+                return;
             }
-            return;
-        };
-        self.connect_ssh_tunnel_with_config(id, config, window, cx);
+        }
     }
 
-    pub(in crate::workspace) fn connect_ssh_tunnel_with_config(
+    pub(in crate::workspace) fn connect_ssh_tunnels_with_config(
         &mut self,
-        id: &str,
+        host_id: String,
+        ids: Vec<String>,
         config: SshConfig,
-        window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
-        let Some(rule) = self
-            .saved_ssh_tunnels()
-            .into_iter()
-            .find(|rule| rule.id == id)
-        else {
-            return;
-        };
-        let Some(host_id) = rule.owner_connection_id else {
-            return;
-        };
-        let Some(host) = self.connection_store.get(&host_id) else {
-            return;
-        };
-        let title = host.name.clone();
+    ) -> Option<NodeId> {
+        let title = self.connection_store.get(&host_id)?.name.clone();
         let node = if config
             .proxy_chain
             .as_ref()
@@ -296,41 +338,93 @@ impl WorkspaceApp {
                 Ok(expansion) => expansion.target_node_id,
                 Err(error) => {
                     self.push_command_palette_toast(
-                        self.i18n.t("ssh_tunnel.title"),
+                        self.tunnel_names(&ids),
                         Some(error.to_string()),
                         TerminalNoticeVariant::Error,
                         cx,
                     );
-                    return;
+                    return None;
                 }
             }
         } else {
             self.materialize_ssh_root_node(config, title, Some(host_id))
         };
-        self.queue_ssh_tunnel_start(id, node, window, cx);
+        self.queue_ssh_tunnel_starts(ids, node.clone(), cx);
+        Some(node)
     }
 
-    fn queue_ssh_tunnel_start(
-        &mut self,
-        id: &str,
-        node: NodeId,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.forwarding_service.set_tunnel_start_requested(id, true);
-        self.open_forwards_tab(node.clone(), window, cx);
+    fn queue_ssh_tunnel_starts(&mut self, ids: Vec<String>, node: NodeId, cx: &mut Context<Self>) {
         let queue = self
             .ssh_tunnels
             .pending_starts
             .entry(node.clone())
             .or_default();
-        if !queue.iter().any(|queued| queued == id) {
-            queue.push_back(id.to_string());
+        for id in ids {
+            if !queue.contains(&id) && !self.ssh_tunnels.jobs.contains_key(&id) {
+                self.forwarding_service
+                    .set_tunnel_start_requested(&id, true);
+                queue.push_back(id);
+            }
         }
         if self.node_is_ready_for_forwarding(&node) {
             self.resume_ssh_tunnel_starts(&node, &NodeReadiness::Ready, cx);
-        } else if !self.ensure_node_connection_started(&node, cx) {
-            self.ssh_tunnels.pending_starts.remove(&node);
+        } else if !self.ssh_tunnels.waiting_connections.contains(&node)
+            && !self
+                .workspace_runtime
+                .read(cx)
+                .connection_chain_contains(&node)
+            && !self.node_connection_is_active_or_connecting(&node)
+        {
+            self.ssh_tunnels.waiting_connections.push_back(node);
+            self.start_waiting_tunnel_connections(cx);
+        }
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn start_waiting_tunnel_connections(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        // The SSH runtime authenticates one connection chain at a time, including jump hosts.
+        while !self.ssh_tunnels.waiting_connections.is_empty()
+            && !self
+                .workspace_runtime
+                .read(cx)
+                .has_active_connection_chain()
+        {
+            let node = self.ssh_tunnels.waiting_connections.pop_front().unwrap();
+            if !self
+                .ssh_tunnels
+                .pending_starts
+                .get(&node)
+                .is_some_and(|ids| !ids.is_empty())
+            {
+                continue;
+            }
+            if self.node_is_ready_for_forwarding(&node) {
+                self.resume_ssh_tunnel_starts(&node, &NodeReadiness::Ready, cx);
+            } else if !self.node_connection_is_active_or_connecting(&node)
+                && !self.ensure_node_connection_started(&node, cx)
+            {
+                self.fail_queued_tunnels(&node, cx);
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn fail_queued_tunnels(
+        &mut self,
+        node: &NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(ids) = self.ssh_tunnels.pending_starts.remove(node)
+            && !ids.is_empty()
+        {
+            self.push_command_palette_toast(
+                self.tunnel_names(&Vec::from(ids)),
+                Some(self.i18n.t("ssh_tunnel.start_failed")),
+                TerminalNoticeVariant::Error,
+                cx,
+            );
         }
     }
 
@@ -344,7 +438,7 @@ impl WorkspaceApp {
             readiness,
             NodeReadiness::Error | NodeReadiness::Disconnected
         ) {
-            self.ssh_tunnels.pending_starts.remove(node);
+            self.fail_queued_tunnels(node, cx);
             return;
         }
         if *readiness != NodeReadiness::Ready {
@@ -372,6 +466,7 @@ impl WorkspaceApp {
         let node = node.clone();
         let worker_node = node.clone();
         let worker_id = id.clone();
+        let tunnel_name = self.tunnel_names(std::slice::from_ref(&id));
         // The workspace owns pending starts; closing the forwarding page cannot cancel them.
         let worker =
             tokio_util::task::AbortOnDropHandle::new(self.forwarding_runtime.spawn(async move {
@@ -389,14 +484,14 @@ impl WorkspaceApp {
                 match outcome {
                     Ok(Ok(())) => this.queue_cloud_sync_dirty_refresh(cx),
                     Ok(Err(error)) => this.push_command_palette_toast(
-                        this.i18n.t("ssh_tunnel.title"),
+                        tunnel_name.clone(),
                         Some(error),
                         TerminalNoticeVariant::Error,
                         cx,
                     ),
                     Err(_) => this.push_command_palette_toast(
-                        this.i18n.t("ssh_tunnel.title"),
-                        Some(this.i18n.t("ssh_tunnel.save_failed")),
+                        tunnel_name,
+                        Some(this.i18n.t("ssh_tunnel.start_failed")),
                         TerminalNoticeVariant::Error,
                         cx,
                     ),
@@ -416,14 +511,19 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        for saved in self.saved_ssh_tunnels() {
-            if saved
-                .tunnel
-                .as_ref()
-                .is_some_and(|profile| profile.connect_on_startup)
-            {
-                self.open_ssh_tunnel(&saved.id, true, window, cx);
-            }
+        let ids: Vec<_> = self
+            .saved_ssh_tunnels()
+            .into_iter()
+            .filter(|saved| {
+                saved
+                    .tunnel
+                    .as_ref()
+                    .is_some_and(|profile| profile.connect_on_startup)
+            })
+            .map(|saved| saved.id)
+            .collect();
+        if !ids.is_empty() {
+            self.start_ssh_tunnels(&ids, true, window, cx);
         }
     }
 

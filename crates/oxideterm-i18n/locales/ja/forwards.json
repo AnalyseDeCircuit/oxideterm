@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "選択したトンネルを開始",
+    "start_failed": "トンネルを開始できませんでした。",
     "description": "保存済みの SSH ホストを経由してポートを転送します。",
     "title": "SSH トンネル",
     "name": "トンネル名",

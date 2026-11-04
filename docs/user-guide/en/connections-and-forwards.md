@@ -171,7 +171,9 @@ Use a standalone tunnel when you need a forwarded port without opening a termina
 4. Choose **Save** for later use, or **Save and Start** to connect now.
 5. Enable **Connect on application startup** only if this tunnel should connect whenever OxideTerm starts. Authentication may still require your input.
 
-Manage saved tunnels from **Session Manager** and inspect running rules in **Port Forwarding**. A tunnel retains its own SSH connection usage, so closing an unrelated terminal does not stop it. Stop the tunnel explicitly when it is no longer needed. Exiting OxideTerm stops its tunnels; they do not run as an independent background service.
+To start several tunnels, select their rows in **Session Manager** and click **Start selected tunnels**. You stay on the same tab. Tunnels using the same saved SSH host share one connection and start in sequence; a failure notice names the affected tunnel. **Port Forwarding** lists saved tunnel names alongside their addresses.
+
+A tunnel retains its own SSH connection usage, so closing an unrelated terminal does not stop it. Stop the tunnel explicitly when it is no longer needed. Exiting OxideTerm stops its tunnels; they do not run as an independent background service.
 
 Tunnel profiles participate in cloud sync and encrypted `.oxide` import/export. Running connections are not synchronized. After moving a profile to another device, check the associated SSH host, authentication, and local bind port before starting it.
 

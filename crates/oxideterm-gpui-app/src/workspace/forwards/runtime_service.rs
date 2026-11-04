@@ -70,6 +70,7 @@ pub(in crate::workspace) struct ReconnectForwardRestoreRequest {
 #[derive(Clone, Default, Eq, PartialEq)]
 pub(super) struct ForwardingRuntimeSnapshot {
     pub(super) rules: Vec<ForwardRule>,
+    pub(super) names: HashMap<String, String>,
     pub(super) stats_by_forward_id: HashMap<String, ForwardStats>,
 }
 
@@ -733,7 +734,17 @@ impl ForwardingRuntimeService {
     pub(super) fn snapshot_for_node(&self, node_id: &NodeId) -> ForwardingRuntimeSnapshot {
         let manager = self.manager_for_node(node_id);
         let hidden_forward_ids = self.remote_desktop_tunnel_forward_ids();
-        let mut rules = self.saved_rules_for_node(node_id);
+        let mut names = HashMap::new();
+        let mut rules: Vec<_> = self
+            .saved_records_for_node(node_id)
+            .into_iter()
+            .map(|saved| {
+                if let Some(profile) = saved.tunnel {
+                    names.insert(saved.rule.id.clone(), profile.name);
+                }
+                saved.rule
+            })
+            .collect();
         // Runtime state wins, but a stopped saved rule does not need a live SSH manager.
         for rule in manager.iter().flat_map(|manager| manager.list_forwards()) {
             rules.retain(|saved| saved.id != rule.id);
@@ -759,23 +770,33 @@ impl ForwardingRuntimeService {
             })
             .collect();
         ForwardingRuntimeSnapshot {
+            names,
             rules,
             stats_by_forward_id,
         }
     }
 
     fn saved_rules_for_node(&self, node_id: &NodeId) -> Vec<ForwardRule> {
+        self.saved_records_for_node(node_id)
+            .into_iter()
+            .map(|saved| saved.rule)
+            .collect()
+    }
+
+    fn saved_records_for_node(
+        &self,
+        node_id: &NodeId,
+    ) -> Vec<oxideterm_forwarding::PersistedForward> {
         let owner = self
             .node_router
             .node_metadata(node_id)
             .and_then(|node| node.origin.saved_connection_id().map(str::to_owned));
-        let saved = match owner {
+        match owner {
             Some(owner) => self.registry.load_owned_forwards(&owner),
             None => self
                 .registry
                 .load_persisted_forwards(&Self::session_id_for_node(node_id)),
-        };
-        saved.into_iter().map(|saved| saved.rule).collect()
+        }
     }
 
     fn remote_desktop_tunnel_state(&self) -> MutexGuard<'_, RemoteDesktopTunnelState> {
@@ -1611,7 +1632,26 @@ mod tests {
             },
         );
         rule.status = ForwardStatus::Stopped;
-        assert_eq!(service.snapshot_for_node(&node).rules, vec![rule]);
+        assert!(service.snapshot_for_node(&node).names.is_empty());
+        service
+            .registry
+            .saved_store()
+            .unwrap()
+            .update_tunnel_profile(
+                &rule.id,
+                oxideterm_forwarding::SshTunnelProfile {
+                    name: "PROD MySQL".into(),
+                    group: None,
+                    connect_on_startup: false,
+                },
+            )
+            .unwrap();
+        let snapshot = service.snapshot_for_node(&node);
+        assert_eq!(
+            snapshot.names,
+            HashMap::from([(rule.id.clone(), "PROD MySQL".into())])
+        );
+        assert_eq!(snapshot.rules, vec![rule]);
         assert!(
             service
                 .snapshot_for_node(&NodeId::new("other-node"))

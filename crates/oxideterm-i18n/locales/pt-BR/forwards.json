@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "Iniciar túneis selecionados",
+    "start_failed": "Não foi possível iniciar o túnel.",
     "description": "Encaminhe portas por um host SSH salvo.",
     "title": "Túnel SSH",
     "name": "Nome do túnel",

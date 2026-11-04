@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "啟動所選通道",
+    "start_failed": "無法啟動通道。",
     "description": "透過已儲存的 SSH 主機轉送連接埠。",
     "title": "SSH 通道",
     "name": "通道名稱",

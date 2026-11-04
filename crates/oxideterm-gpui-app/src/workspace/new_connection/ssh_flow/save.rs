@@ -2930,12 +2930,19 @@ impl WorkspaceApp {
 
         match action {
             SavedConnectionPromptAction::Tunnel => {
-                if let Some(tunnel_id) = self.ssh_tunnels.pending_auth.take() {
-                    self.update_connection_form_state(cx, |state| state.form = None);
-                    self.connect_ssh_tunnel_with_config(&tunnel_id, config, window, cx);
-                    if let Some(node) = self.saved_ssh_nodes.get(&id).cloned() {
+                let mut groups = self.update_connection_form_state(cx, |state| {
+                    let groups = std::mem::take(&mut state.tunnel_start_groups);
+                    state.clear();
+                    groups
+                });
+                if let Some((owner, ids)) = groups.pop_front()
+                    && owner == id
+                {
+                    if let Some(node) = self.connect_ssh_tunnels_with_config(owner, ids, config, cx)
+                    {
                         self.arm_saved_auth_save(&node, auth_save_target);
                     }
+                    self.start_tunnel_groups(groups, false, window, cx);
                 }
             }
             SavedConnectionPromptAction::Connect => {

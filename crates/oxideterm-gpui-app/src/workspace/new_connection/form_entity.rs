@@ -23,6 +23,7 @@ pub(in crate::workspace) struct ConnectionFormState {
     pub(in crate::workspace) editing_saved_connection_connect_after_save_node_id: Option<NodeId>,
     pub(in crate::workspace) duplicating_saved_connection_id: Option<String>,
     pub(in crate::workspace) saved_connection_prompt_action: Option<SavedConnectionPromptAction>,
+    pub(in crate::workspace) tunnel_start_groups: std::collections::VecDeque<(String, Vec<String>)>,
     pub(in crate::workspace) open_select: Option<NewConnectionSelect>,
     pub(in crate::workspace) select_focus_origin: Option<BrowserFocusOrigin>,
     /// Laid-out width of the BLE scan table captured by a bounds probe. The
@@ -44,6 +45,7 @@ impl ConnectionFormState {
             editing_saved_connection_connect_after_save_node_id: None,
             duplicating_saved_connection_id: None,
             saved_connection_prompt_action: None,
+            tunnel_start_groups: Default::default(),
             open_select: None,
             select_focus_origin: None,
             ble_scan_table_width: None,
@@ -72,6 +74,7 @@ impl ConnectionFormState {
         self.editing_saved_connection_connect_after_save_node_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
+        self.tunnel_start_groups.clear();
         self.close_select();
         self.presence.reopen();
     }
@@ -84,6 +87,7 @@ impl ConnectionFormState {
         self.editing_saved_connection_connect_after_save_node_id = None;
         self.duplicating_saved_connection_id = None;
         self.saved_connection_prompt_action = None;
+        self.tunnel_start_groups.clear();
         self.close_select();
         self.jump_server_exit_commits = false;
         self.jump_server_presence.reopen();

@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "Iniciar túneles seleccionados",
+    "start_failed": "No se pudo iniciar el túnel.",
     "description": "Reenvía puertos a través de un host SSH guardado.",
     "title": "Túnel SSH",
     "name": "Nombre del túnel",

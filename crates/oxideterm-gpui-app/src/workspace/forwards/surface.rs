@@ -335,6 +335,7 @@ impl WorkspaceApp {
                     tab_id,
                     snapshot.rules,
                     snapshot.stats_by_forward_id,
+                    snapshot.names,
                     has_background,
                     cx,
                 )
@@ -478,6 +479,7 @@ impl WorkspaceApp {
         tab_id: TabId,
         forwards: Vec<ForwardRule>,
         stats_by_forward_id: HashMap<String, ForwardStats>,
+        names: HashMap<String, String>,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -491,6 +493,7 @@ impl WorkspaceApp {
         let refresh_node_id = node_id.clone();
         let row_node_id = node_id;
         let row_stats_by_forward_id = stats_by_forward_id;
+
         let row_forwards = forwards.clone();
         let row_has_background = has_background;
         div()
@@ -608,6 +611,7 @@ impl WorkspaceApp {
                                         this.render_forward_row(
                                             node_id,
                                             tab_id,
+                                            names.get(&rule.id).cloned(),
                                             rule,
                                             stats,
                                             index + 1 == forward_count,
@@ -655,6 +659,7 @@ impl WorkspaceApp {
         .border_color(forwards_theme_border(theme.border, has_background))
         .text_size(px(self.tokens.metrics.ui_text_sm))
         .text_color(rgb(theme.text_muted))
+        .child(self.forward_cell(1.2, self.i18n.t("ssh_tunnel.name")))
         .child(self.forward_cell(0.9, self.i18n.t("forwards.table.type")))
         .child(self.forward_cell(1.35, self.i18n.t("forwards.table.local_address")))
         .child(self.forward_cell(1.35, self.i18n.t("forwards.table.remote_address")))
@@ -673,6 +678,7 @@ impl WorkspaceApp {
         &self,
         node_id: NodeId,
         tab_id: TabId,
+        tunnel_name: Option<String>,
         rule: ForwardRule,
         stats: Option<ForwardStats>,
         rounded_bottom: bool,
@@ -705,6 +711,7 @@ impl WorkspaceApp {
         .border_color(forwards_theme_border_half(theme.border, has_background))
         .hover(move |row| row.bg(forwards_theme_hover_bg(theme.bg_hover, has_background)))
         .text_size(px(self.tokens.metrics.ui_text_sm))
+        .child(self.forward_cell(1.2, tunnel_name.unwrap_or_else(|| "—".into())))
         .child(self.forward_cell_element(0.9, self.render_forward_type_badge(rule.forward_type)))
         .child(self.render_forward_address_cell(&rule, local, tab_id, cx))
         .child(self.forward_mono_cell(1.35, remote))

@@ -1147,6 +1147,117 @@ fn batch_console_profile_delete_retires_its_history_scope(cx: &mut TestAppContex
 }
 
 #[gpui::test]
+fn selected_tunnels_share_host_auth_and_leave_manager_active(cx: &mut TestAppContext) {
+    let Some(dir) = isolated_workspace_fixture(cx, "OXIDETERM_TUNNEL_BATCH_TEST_DIR") else {
+        return;
+    };
+    cx.executor().allow_parking();
+    let (workspace, cx) = workspace_with_console_profiles(cx, &dir);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut host = saved_connection_fixture(SavedAuth::Password {
+        empty_password: false,
+        keychain_id: None,
+        plaintext_password: None,
+    });
+    host.host = "127.0.0.1".into();
+    host.port = listener.local_addr().unwrap().port();
+    let mut other = host.clone();
+    other.id = "other".into();
+    other.username = "other".into();
+    let path = dir.join("tunnel-hosts.json");
+    std::fs::write(
+        &path,
+        serde_json::to_vec(&ConnectionStoreData {
+            connections: vec![host, other],
+            ..Default::default()
+        })
+        .unwrap(),
+    )
+    .unwrap();
+
+    let window = cx.windows()[0];
+    window
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |ws, cx| {
+                ws.connection_store = ConnectionStore::load(path).unwrap();
+                ws.open_session_manager_tab(window, cx);
+                let manager = ws.active_tab_id(cx).unwrap();
+                let store = ws.forwarding_service.registry().saved_store().unwrap();
+                for (id, owner) in [
+                    ("dev", "conn-1"),
+                    ("other-dev", "other"),
+                    ("uat", "conn-1"),
+                    ("prod", "conn-1"),
+                ] {
+                    let mut rule = oxideterm_forwarding::ForwardRule::local(
+                        "127.0.0.1",
+                        3307,
+                        "localhost",
+                        3306,
+                    );
+                    rule.id = id.into();
+                    let mut saved = oxideterm_forwarding::PersistedForward::new(
+                        id.into(),
+                        String::new(),
+                        Some(owner.into()),
+                        rule.forward_type,
+                        rule,
+                        false,
+                    );
+                    saved.tunnel = Some(oxideterm_forwarding::SshTunnelProfile {
+                        name: id.into(),
+                        group: None,
+                        connect_on_startup: false,
+                    });
+                    store.persist_forward(saved).unwrap();
+                }
+                ws.start_ssh_tunnels(
+                    &["dev".into(), "uat".into(), "other-dev".into()],
+                    false,
+                    window,
+                    cx,
+                );
+                let first = ws.saved_ssh_nodes["conn-1"].clone();
+                let other = ws.saved_ssh_nodes["other"].clone();
+                assert_ne!(first, other);
+                assert_eq!(
+                    ws.ssh_tunnel_status("dev"),
+                    oxideterm_forwarding::ForwardStatus::Starting
+                );
+                assert_eq!(
+                    ws.ssh_tunnel_status("uat"),
+                    oxideterm_forwarding::ForwardStatus::Starting
+                );
+                assert_eq!(
+                    ws.ssh_tunnel_status("prod"),
+                    oxideterm_forwarding::ForwardStatus::Stopped
+                );
+                assert_eq!(
+                    ws.ssh_tunnel_status("other-dev"),
+                    oxideterm_forwarding::ForwardStatus::Starting
+                );
+                // A failed transport clears exactly the rules sharing that host's authentication.
+                ws.resume_ssh_tunnel_starts(&first, &NodeReadiness::Error, cx);
+                assert_eq!(
+                    ws.ssh_tunnel_status("dev"),
+                    oxideterm_forwarding::ForwardStatus::Stopped
+                );
+                assert_eq!(
+                    ws.ssh_tunnel_status("uat"),
+                    oxideterm_forwarding::ForwardStatus::Stopped
+                );
+                assert_eq!(
+                    ws.ssh_tunnel_status("other-dev"),
+                    oxideterm_forwarding::ForwardStatus::Starting
+                );
+                assert_eq!(ws.active_tab_id(cx), Some(manager));
+                assert!(ws.tabs(cx).iter().all(|tab| tab.kind != TabKind::Forwards));
+            })
+        })
+        .unwrap();
+}
+
+#[gpui::test]
 fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext) {
     let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_IDE_ACCESS_PROMPT_TEST_DIR")
     else {

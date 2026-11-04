@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "启动所选隧道",
+    "start_failed": "无法启动隧道。",
     "description": "通过已保存的 SSH 主机转发端口。",
     "title": "SSH 隧道",
     "name": "隧道名称",

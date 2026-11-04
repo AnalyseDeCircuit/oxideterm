@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "Ausgewählte Tunnel starten",
+    "start_failed": "Tunnelstart fehlgeschlagen.",
     "description": "Ports über einen gespeicherten SSH-Host weiterleiten.",
     "title": "SSH-Tunnel",
     "name": "Tunnelname",

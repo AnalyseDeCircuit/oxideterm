@@ -12,6 +12,16 @@ impl WorkspaceApp {
             let manager = self.session_manager.read(cx);
             (manager.selected_items.len(), manager.search_query.clone())
         };
+        let selected_tunnels = self
+            .session_manager
+            .read(cx)
+            .selected_items
+            .iter()
+            .map(|target| match target {
+                SessionManagerSelectionTarget::Tunnel(id) => Some(id.clone()),
+                _ => None,
+            })
+            .collect::<Option<Vec<_>>>();
         let viewport_width = f32::from(window.viewport_size().width);
         let show_primary_labels = viewport_width >= MANAGER_RESPONSIVE_SM;
         let show_secondary_labels = viewport_width >= MANAGER_RESPONSIVE_MD;
@@ -94,6 +104,29 @@ impl WorkspaceApp {
                                 .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(theme.text_muted))
                                 .child(selected_count_label(&self.i18n, selected_count)),
+                        )
+                        .when_some(
+                            selected_tunnels.filter(|ids| {
+                                ids.iter().any(|id| {
+                                    !matches!(
+                                        self.ssh_tunnel_status(id),
+                                        oxideterm_forwarding::ForwardStatus::Active
+                                            | oxideterm_forwarding::ForwardStatus::Starting
+                                            | oxideterm_forwarding::ForwardStatus::Suspended
+                                    )
+                                })
+                            }),
+                            |actions, ids| {
+                                actions.child(self.render_session_manager_button(
+                                    LucideIcon::Play,
+                                    self.i18n.t("ssh_tunnel.start_selected"),
+                                    ButtonVariant::Ghost,
+                                    cx.listener(move |this, _event, window, cx| {
+                                        this.start_ssh_tunnels(&ids, false, window, cx);
+                                        cx.stop_propagation();
+                                    }),
+                                ))
+                            },
                         )
                         .child(select_anchor_probe(
                             SelectAnchorId::SessionManagerBatchMove,

@@ -1,5 +1,7 @@
 {
   "ssh_tunnel": {
+    "start_selected": "Démarrer les tunnels sélectionnés",
+    "start_failed": "Impossible de démarrer le tunnel.",
     "description": "Redirigez des ports via un hôte SSH enregistré.",
     "title": "Tunnel SSH",
     "name": "Nom du tunnel",
