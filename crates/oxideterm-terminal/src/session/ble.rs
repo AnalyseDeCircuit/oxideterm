@@ -939,15 +939,24 @@ fn match_ble_device<'a>(
         .map(ToString::to_string)
         .unwrap_or_else(|| mac.or(name).unwrap_or("no identity clue").to_owned());
     let mut matches = devices.iter().filter(|device| {
-        if let Some(id) = selected {
-            return &device.id == id;
-        }
-        if let Some(mac) = mac {
-            return device
-                .persistent_address()
-                .is_some_and(|address| address.eq_ignore_ascii_case(mac));
-        }
-        name.is_some_and(|name| device.name.as_deref() == Some(name))
+        // BlueZ keeps device objects for previously connected peripherals even
+        // after they power off, and those cache entries still report the last
+        // known name, address, and advertised services. RSSI is only present
+        // while the device was actually seen advertising in this discovery
+        // window, so a missing RSSI marks a stale cache entry that must not
+        // match: otherwise the resolve passes matching and service
+        // verification without ever contacting the device and dies later with
+        // a connect timeout instead of failing here.
+        device.rssi.is_some()
+            && (if let Some(id) = selected {
+                &device.id == id
+            } else if let Some(mac) = mac {
+                device
+                    .persistent_address()
+                    .is_some_and(|address| address.eq_ignore_ascii_case(mac))
+            } else {
+                name.is_some_and(|name| device.name.as_deref() == Some(name))
+            })
     });
     let first = matches
         .next()
@@ -1235,7 +1244,7 @@ mod ble_tests {
                 id: uuid::Uuid::from_u128(id).into(),
                 name: Some("UART".into()),
                 address: "00:00:00:00:00:00".into(),
-                rssi: None,
+                rssi: Some(-60),
                 supports_nus: true,
                 advertised_services: vec![oxideterm_ble::NORDIC_UART_SERVICE_UUID],
                 address_type: None,
@@ -1273,6 +1282,39 @@ mod ble_tests {
             match_ble_device(&devices, None, Some("AB:CD:EF:01:23:45"), Some("UART")),
             Err(BleResolveError::NoDeviceMatched { .. })
         ));
+    }
+
+    /// A powered-off device leaves a BlueZ cache entry that still carries
+    /// identity and last-advertised services; without an RSSI from the current
+    /// discovery window it must fail matching instead of reaching the connect
+    /// timeout later. The same device advertising again must match. macOS
+    /// gates this like the sibling `match_ble_device` test: the RSSI filter
+    /// lives in platform-shared code, while Linux and Windows peripheral ids
+    /// are opaque handles that cannot be built without a real adapter.
+    #[test]
+    #[cfg(target_os = "macos")]
+    fn stale_cache_entries_without_rssi_do_not_match() {
+        use btleplug::api::AddressType;
+        let mut devices = vec![oxideterm_ble::BleDeviceInfo {
+            id: uuid::Uuid::from_u128(1).into(),
+            name: Some("UART".into()),
+            address: "12:34:56:78:9A:BC".into(),
+            rssi: None,
+            supports_nus: true,
+            advertised_services: vec![oxideterm_ble::NORDIC_UART_SERVICE_UUID],
+            address_type: Some(AddressType::Public),
+        }];
+        assert!(matches!(
+            match_ble_device(&devices, None, Some("12:34:56:78:9a:bc"), Some("UART")),
+            Err(BleResolveError::NoDeviceMatched { .. })
+        ));
+        devices[0].rssi = Some(-55);
+        assert_eq!(
+            match_ble_device(&devices, None, Some("12:34:56:78:9a:bc"), Some("UART"))
+                .unwrap()
+                .id,
+            devices[0].id
+        );
     }
 
     fn characteristic(
