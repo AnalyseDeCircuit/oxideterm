@@ -5,7 +5,7 @@ use oxideterm_connection_monitor::ResourceSampler;
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_topology::ConnectionTopologySnapshot;
 
-fn finish_host_query_audit(
+pub(super) fn finish_host_query_audit(
     audit: oxideterm_audit::AuditOperation,
     result: &Result<oxideterm_ssh::SshCommandOutput, ()>,
 ) {
@@ -109,7 +109,7 @@ pub(in crate::workspace) struct HostToolsEntity {
 }
 
 impl HostToolsEntity {
-    fn host_tool_audit(
+    pub(super) fn host_tool_audit(
         &self,
         connection_id: &str,
         action: &str,
@@ -768,7 +768,7 @@ impl HostToolsEntity {
 
     /// Resolves the execution target for one Host Tools connection. The local
     /// target runs the same generated command lines without an SSH node.
-    fn host_command_target(&self, connection_id: &str) -> Option<HostCommandTarget> {
+    pub(super) fn host_command_target(&self, connection_id: &str) -> Option<HostCommandTarget> {
         if connection_id == LOCAL_HOST_CONNECTION_ID {
             return Some(HostCommandTarget::Local);
         }
@@ -1705,6 +1705,9 @@ impl HostToolsEntity {
         focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
         cx: &mut Context<Self>,
     ) {
+        if self.selected_connection_id.as_deref() != Some(&connection_id) {
+            self.host_tmux.mux.clear_host();
+        }
         self.selected_connection_id = Some(connection_id);
         self.selector_open = false;
         self.selector_highlighted_index = None;
@@ -1794,6 +1797,10 @@ impl HostToolsEntity {
                 messages.log_unknown_error,
                 cx,
             ),
+            ContextSidebarTool::Tmux if self.host_tmux.mux.provider.is_some() => {
+                self.refresh_mux_sessions(connection_id, cx);
+                Vec::new()
+            }
             ContextSidebarTool::Tmux => self.request_tmux_snapshot(
                 connection_id,
                 feedback,
@@ -1872,6 +1879,7 @@ impl HostToolsEntity {
                     .any(|connection_id| connection_id == selected)
             });
         if !selected_is_live {
+            self.host_tmux.mux.clear_host();
             self.selected_connection_id = live_connection_ids.first().cloned();
             cx.notify();
         }

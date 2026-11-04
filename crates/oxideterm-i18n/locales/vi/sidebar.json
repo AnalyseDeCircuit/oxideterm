@@ -71,9 +71,9 @@
       "processes": "Tiến trình",
       "services": "Dịch vụ",
       "logs": "Nhật ký",
-      "tmux": "tmux",
+      "tmux": "Bộ ghép kênh terminal",
       "docker": "Docker",
-      "tmux_management": "Quản lý tmux",
+      "tmux_management": "Bộ ghép kênh terminal",
       "docker_management": "Quản lý Docker",
       "session_manager": "Quản lý phiên",
       "open_session_manager": "Mở quản lý phiên",
@@ -367,8 +367,20 @@
         "unknown_error": "Lỗi không rõ"
       }
     },
+    "multiplexer": {
+      "refresh": "Làm mới phiên",
+      "open": "Mở terminal",
+      "focus": "Chuyển tiêu điểm",
+      "new_workspace": "Không gian làm việc mới",
+      "new_tab": "Thẻ mới",
+      "split": "Chia ngăn",
+      "loading": "Đang tải…",
+      "empty": "Không có phiên phù hợp",
+      "unavailable": "Máy đã chọn chưa cài bộ ghép kênh này.",
+      "failed": "Lệnh thất bại. Hãy kiểm tra phiên bản đã cài và trạng thái phiên."
+    },
     "host_tmux": {
-      "search_placeholder": "Tìm tmux...",
+      "search_placeholder": "Tìm phiên…",
       "count_suffix": "phiên",
       "loading": "Đang tải phiên tmux...",
       "empty": "Không có phiên tmux phù hợp",

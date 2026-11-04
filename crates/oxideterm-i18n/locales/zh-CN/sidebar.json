@@ -71,9 +71,9 @@
       "processes": "进程",
       "services": "服务",
       "logs": "日志",
-      "tmux": "tmux",
+      "tmux": "终端复用器",
       "docker": "Docker",
-      "tmux_management": "tmux 管理",
+      "tmux_management": "终端复用器",
       "docker_management": "Docker 管理",
       "session_manager": "会话管理器",
       "open_session_manager": "打开会话管理器",
@@ -367,8 +367,20 @@
         "unknown_error": "未知错误"
       }
     },
+    "multiplexer": {
+      "refresh": "刷新会话",
+      "open": "打开终端",
+      "focus": "聚焦",
+      "new_workspace": "新建工作区",
+      "new_tab": "新建标签",
+      "split": "拆分窗格",
+      "loading": "加载中…",
+      "empty": "没有匹配的会话",
+      "unavailable": "所选主机未安装此复用器。",
+      "failed": "命令执行失败，请检查已安装的版本和会话状态。"
+    },
     "host_tmux": {
-      "search_placeholder": "搜索 tmux...",
+      "search_placeholder": "搜索会话…",
       "count_suffix": "个会话",
       "loading": "正在加载 tmux 会话...",
       "empty": "没有匹配的 tmux 会话",

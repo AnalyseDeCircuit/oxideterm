@@ -71,9 +71,9 @@
       "processes": "Procesos",
       "services": "Servicios",
       "logs": "Registros",
-      "tmux": "tmux",
+      "tmux": "Multiplexores de terminal",
       "docker": "Docker",
-      "tmux_management": "Gestión de tmux",
+      "tmux_management": "Multiplexores de terminal",
       "docker_management": "Gestión de Docker",
       "session_manager": "Gestor de sesiones",
       "open_session_manager": "Abrir gestor de sesiones",
@@ -367,8 +367,20 @@
         "unknown_error": "Error desconocido"
       }
     },
+    "multiplexer": {
+      "refresh": "Actualizar sesiones",
+      "open": "Abrir terminal",
+      "focus": "Enfocar",
+      "new_workspace": "Nuevo espacio de trabajo",
+      "new_tab": "Nueva pestaña",
+      "split": "Dividir panel",
+      "loading": "Cargando…",
+      "empty": "No hay sesiones coincidentes",
+      "unavailable": "Este multiplexor no está instalado en el equipo seleccionado.",
+      "failed": "Falló el comando. Comprueba la versión instalada y el estado de la sesión."
+    },
     "host_tmux": {
-      "search_placeholder": "Buscar tmux...",
+      "search_placeholder": "Buscar sesiones…",
       "count_suffix": "sesiones",
       "loading": "Cargando sesiones tmux...",
       "empty": "No hay sesiones tmux coincidentes",

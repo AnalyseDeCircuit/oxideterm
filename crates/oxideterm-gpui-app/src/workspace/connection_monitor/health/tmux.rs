@@ -311,6 +311,35 @@ impl HostToolsEntity {
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
+        let provider_tabs = self.render_mux_tabs(cx, tokens);
+        if self.host_tmux.mux.provider.is_some() {
+            return div()
+                .flex()
+                .flex_col()
+                .size_full()
+                .min_h_0()
+                .child(
+                    div()
+                        .px_3()
+                        .py_2()
+                        .flex()
+                        .flex_col()
+                        .gap_2()
+                        .child(self.render_connection_switcher(
+                            &connections,
+                            selected_id,
+                            true,
+                            tokens,
+                            mono_font_family,
+                            selectable_text,
+                            cx,
+                        ))
+                        .child(provider_tabs)
+                        .child(self.render_host_tmux_search(&search_ime, tokens, i18n, cx)),
+                )
+                .child(self.render_mux_sessions(selected_id, tokens, i18n, cx))
+                .into_any_element();
+        }
         let snapshot = self.tmux_snapshot_for(selected_id);
         let rows = snapshot
             .as_ref()
@@ -353,6 +382,7 @@ impl HostToolsEntity {
                         selectable_text,
                         cx,
                     ))
+                    .child(provider_tabs)
                     .child(self.render_host_tmux_search(&search_ime, tokens, i18n, cx))
                     .child(self.render_host_tmux_status_row(
                         rows.len(),

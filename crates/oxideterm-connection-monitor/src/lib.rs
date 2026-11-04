@@ -13,6 +13,7 @@ mod filesystem;
 mod gpu;
 mod log;
 mod metrics;
+pub mod multiplexer;
 mod package;
 mod port;
 mod process;

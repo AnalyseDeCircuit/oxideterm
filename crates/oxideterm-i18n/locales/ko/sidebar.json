@@ -71,9 +71,9 @@
       "processes": "프로세스",
       "services": "서비스",
       "logs": "로그",
-      "tmux": "tmux",
+      "tmux": "터미널 멀티플렉서",
       "docker": "Docker",
-      "tmux_management": "tmux 관리",
+      "tmux_management": "터미널 멀티플렉서",
       "docker_management": "Docker 관리",
       "session_manager": "세션 관리자",
       "open_session_manager": "세션 관리자 열기",
@@ -367,8 +367,20 @@
         "unknown_error": "알 수 없는 오류"
       }
     },
+    "multiplexer": {
+      "refresh": "세션 새로 고침",
+      "open": "터미널 열기",
+      "focus": "초점 이동",
+      "new_workspace": "새 작업 공간",
+      "new_tab": "새 탭",
+      "split": "창 분할",
+      "loading": "불러오는 중…",
+      "empty": "일치하는 세션 없음",
+      "unavailable": "선택한 호스트에 이 멀티플렉서가 설치되어 있지 않습니다.",
+      "failed": "명령이 실패했습니다. 설치된 버전과 세션 상태를 확인하세요."
+    },
     "host_tmux": {
-      "search_placeholder": "tmux 검색...",
+      "search_placeholder": "세션 검색…",
       "count_suffix": "개 세션",
       "loading": "tmux 세션을 불러오는 중...",
       "empty": "일치하는 tmux 세션이 없습니다",

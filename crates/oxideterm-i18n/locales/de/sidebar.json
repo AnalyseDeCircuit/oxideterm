@@ -71,9 +71,9 @@
       "processes": "Prozesse",
       "services": "Dienste",
       "logs": "Protokolle",
-      "tmux": "tmux",
+      "tmux": "Terminal-Multiplexer",
       "docker": "Docker",
-      "tmux_management": "tmux-Verwaltung",
+      "tmux_management": "Terminal-Multiplexer",
       "docker_management": "Docker-Verwaltung",
       "session_manager": "Sitzungsmanager",
       "open_session_manager": "Sitzungsmanager öffnen",
@@ -367,8 +367,20 @@
         "unknown_error": "Unbekannter Fehler"
       }
     },
+    "multiplexer": {
+      "refresh": "Sitzungen aktualisieren",
+      "open": "Terminal öffnen",
+      "focus": "Fokussieren",
+      "new_workspace": "Neuer Arbeitsbereich",
+      "new_tab": "Neuer Tab",
+      "split": "Bereich teilen",
+      "loading": "Wird geladen…",
+      "empty": "Keine passenden Sitzungen",
+      "unavailable": "Dieser Multiplexer ist auf dem gewählten Host nicht installiert.",
+      "failed": "Befehl fehlgeschlagen. Bitte Version und Sitzungsstatus prüfen."
+    },
     "host_tmux": {
-      "search_placeholder": "tmux suchen...",
+      "search_placeholder": "Sitzungen suchen…",
       "count_suffix": "Sitzungen",
       "loading": "tmux-Sitzungen werden geladen...",
       "empty": "Keine passenden tmux-Sitzungen",

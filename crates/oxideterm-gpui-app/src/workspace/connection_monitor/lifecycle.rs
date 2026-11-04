@@ -102,6 +102,12 @@ impl HostToolsEntity {
             // Re-showing Host Tools must restart the page profiler even when
             // the selected connection and cached pool snapshot stayed stable.
             self.sync_live_connections(connections, sampling_config, runtime, cx);
+            if selected_missing
+                && self.active_tool() == ContextSidebarTool::Tmux
+                && self.host_tmux.mux.provider.is_some()
+            {
+                self.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
+            }
         }
     }
 

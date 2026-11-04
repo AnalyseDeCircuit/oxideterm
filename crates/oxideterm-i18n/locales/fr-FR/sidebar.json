@@ -71,9 +71,9 @@
       "processes": "Processus",
       "services": "Services",
       "logs": "Journaux",
-      "tmux": "tmux",
+      "tmux": "Multiplexeurs de terminal",
       "docker": "Docker",
-      "tmux_management": "Gestion de tmux",
+      "tmux_management": "Multiplexeurs de terminal",
       "docker_management": "Gestion de Docker",
       "session_manager": "Gestionnaire de sessions",
       "open_session_manager": "Ouvrir le gestionnaire de sessions",
@@ -367,8 +367,20 @@
         "unknown_error": "Erreur inconnue"
       }
     },
+    "multiplexer": {
+      "refresh": "Actualiser les sessions",
+      "open": "Ouvrir le terminal",
+      "focus": "Activer",
+      "new_workspace": "Nouvel espace de travail",
+      "new_tab": "Nouvel onglet",
+      "split": "Scinder le volet",
+      "loading": "Chargement…",
+      "empty": "Aucune session correspondante",
+      "unavailable": "Ce multiplexeur n’est pas installé sur l’hôte sélectionné.",
+      "failed": "La commande a échoué. Vérifiez la version installée et l’état de la session."
+    },
     "host_tmux": {
-      "search_placeholder": "Rechercher tmux...",
+      "search_placeholder": "Rechercher des sessions…",
       "count_suffix": "sessions",
       "loading": "Chargement des sessions tmux...",
       "empty": "Aucune session tmux correspondante",

@@ -71,9 +71,9 @@
       "processes": "プロセス",
       "services": "サービス",
       "logs": "ログ",
-      "tmux": "tmux",
+      "tmux": "端末マルチプレクサ",
       "docker": "Docker",
-      "tmux_management": "tmux 管理",
+      "tmux_management": "端末マルチプレクサ",
       "docker_management": "Docker 管理",
       "session_manager": "セッションマネージャー",
       "open_session_manager": "セッションマネージャーを開く",
@@ -367,8 +367,20 @@
         "unknown_error": "不明なエラー"
       }
     },
+    "multiplexer": {
+      "refresh": "セッションを更新",
+      "open": "端末を開く",
+      "focus": "フォーカス",
+      "new_workspace": "ワークスペースを作成",
+      "new_tab": "タブを作成",
+      "split": "ペインを分割",
+      "loading": "読み込み中…",
+      "empty": "一致するセッションはありません",
+      "unavailable": "選択したホストにこのマルチプレクサはインストールされていません。",
+      "failed": "コマンドが失敗しました。バージョンとセッションの状態を確認してください。"
+    },
     "host_tmux": {
-      "search_placeholder": "tmux を検索...",
+      "search_placeholder": "セッションを検索…",
       "count_suffix": "件のセッション",
       "loading": "tmux セッションを読み込み中...",
       "empty": "一致する tmux セッションはありません",

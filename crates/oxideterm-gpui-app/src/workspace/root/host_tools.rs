@@ -24,6 +24,53 @@ impl WorkspaceApp {
             return;
         };
         match intent {
+            HostToolsWindowIntent::OpenLocalMultiplexer {
+                command,
+                title,
+                missing_notice,
+            } => {
+                // The inventory belongs to the native host, even if the preferred terminal starts WSL.
+                #[cfg(windows)]
+                let shell = {
+                    let root =
+                        std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+                    oxideterm_terminal::ShellInfo::new(
+                        "host-multiplexer",
+                        &title,
+                        std::path::PathBuf::from(root).join(r"System32\cmd.exe"),
+                    )
+                    .with_args(vec!["/D".into(), "/C".into(), command])
+                };
+                #[cfg(not(windows))]
+                let shell =
+                    oxideterm_terminal::ShellInfo::new("host-multiplexer", &title, "/bin/sh")
+                        .with_args(vec!["-c".into(), command]);
+                let config = LocalPtyConfig {
+                    shell: Some(shell),
+                    remove_env: HERDR_PANE_ENV_VARS
+                        .iter()
+                        .copied()
+                        .chain([
+                            "HERDR_SESSION",
+                            "ZELLIJ",
+                            "ZELLIJ_SESSION_NAME",
+                            "ZELLIJ_PANE_ID",
+                        ])
+                        .map(str::to_owned)
+                        .collect(),
+                    ..Default::default()
+                };
+                if self
+                    .create_local_terminal_tab_with_config(config, title, window, cx)
+                    .is_err()
+                {
+                    self.push_host_tools_window_notice(
+                        missing_notice,
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    );
+                }
+            }
             HostToolsWindowIntent::OpenExistingNodeTerminal {
                 connection_id,
                 command,

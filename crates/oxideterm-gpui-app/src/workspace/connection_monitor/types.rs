@@ -829,6 +829,7 @@ pub(in crate::workspace) enum HostToolsTextInput {
 }
 
 pub(super) struct HostTmuxState {
+    pub(super) mux: super::multiplexer::MuxPanel,
     pub(super) snapshot_connection_id: Option<String>,
     pub(super) snapshot: Option<ResourceTmuxSnapshot>,
     pub(super) snapshot_running: Option<HostTmuxSnapshotRequest>,
@@ -841,6 +842,7 @@ pub(super) struct HostTmuxState {
 impl HostTmuxState {
     pub(super) fn new() -> Self {
         Self {
+            mux: Default::default(),
             snapshot_connection_id: None,
             snapshot: None,
             snapshot_running: None,

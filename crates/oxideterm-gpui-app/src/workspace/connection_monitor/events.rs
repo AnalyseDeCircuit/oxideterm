@@ -44,6 +44,11 @@ impl PartialEq for HostToolsWindowRequest {
 
 /// Carries terminal data without exposing it through cloning or debug formatting.
 pub(in crate::workspace) enum HostToolsWindowIntent {
+    OpenLocalMultiplexer {
+        command: String,
+        title: String,
+        missing_notice: String,
+    },
     OpenExistingNodeTerminal {
         connection_id: String,
         command: String,

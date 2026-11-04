@@ -71,9 +71,9 @@
       "processes": "程序",
       "services": "服務",
       "logs": "日誌",
-      "tmux": "tmux",
+      "tmux": "終端多工器",
       "docker": "Docker",
-      "tmux_management": "tmux 管理",
+      "tmux_management": "終端多工器",
       "docker_management": "Docker 管理",
       "session_manager": "工作階段管理器",
       "open_session_manager": "開啟工作階段管理器",
@@ -367,8 +367,20 @@
         "unknown_error": "未知錯誤"
       }
     },
+    "multiplexer": {
+      "refresh": "重新整理工作階段",
+      "open": "開啟終端機",
+      "focus": "聚焦",
+      "new_workspace": "新增工作區",
+      "new_tab": "新增分頁",
+      "split": "分割窗格",
+      "loading": "載入中…",
+      "empty": "沒有符合的工作階段",
+      "unavailable": "所選主機未安裝此多工器。",
+      "failed": "命令執行失敗，請檢查已安裝的版本及工作階段狀態。"
+    },
     "host_tmux": {
-      "search_placeholder": "搜尋 tmux...",
+      "search_placeholder": "搜尋工作階段…",
       "count_suffix": "個會話",
       "loading": "正在載入 tmux 會話...",
       "empty": "沒有符合的 tmux 會話",

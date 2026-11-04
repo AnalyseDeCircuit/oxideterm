@@ -7,6 +7,7 @@ mod exec;
 mod health;
 mod helpers;
 mod lifecycle;
+mod multiplexer;
 mod runtime;
 #[cfg(test)]
 mod tests;
