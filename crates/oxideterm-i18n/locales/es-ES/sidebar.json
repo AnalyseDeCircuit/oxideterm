@@ -71,9 +71,9 @@
       "processes": "Procesos",
       "services": "Servicios",
       "logs": "Registros",
-      "tmux": "tmux",
+      "tmux": "Multiplexores de terminal",
       "docker": "Docker",
-      "tmux_management": "Gestión de tmux",
+      "tmux_management": "Multiplexores de terminal",
       "docker_management": "Gestión de Docker",
       "session_manager": "Gestor de sesiones",
       "open_session_manager": "Abrir gestor de sesiones",
@@ -105,6 +105,9 @@
     "active_session_count": "Sesiones activas: {{count}}",
     "no_sessions": "Sin sesiones",
     "add_new_connection": "Haz clic en + para añadir una nueva conexión",
+    "host_connection": {
+      "local_machine": "Este equipo"
+    },
     "host_gpu": {
       "count_suffix": "aceleradores",
       "refresh_interval": "Se actualiza cada 2 segundos",
@@ -364,8 +367,20 @@
         "unknown_error": "Error desconocido"
       }
     },
+    "multiplexer": {
+      "refresh": "Actualizar sesiones",
+      "open": "Abrir terminal",
+      "focus": "Enfocar",
+      "new_workspace": "Nuevo espacio de trabajo",
+      "new_tab": "Nueva pestaña",
+      "split": "Dividir panel",
+      "loading": "Cargando…",
+      "empty": "No hay sesiones coincidentes",
+      "unavailable": "Este multiplexor no está instalado en el equipo seleccionado.",
+      "failed": "Falló el comando. Comprueba la versión instalada y el estado de la sesión."
+    },
     "host_tmux": {
-      "search_placeholder": "Buscar tmux...",
+      "search_placeholder": "Buscar sesiones…",
       "count_suffix": "sesiones",
       "loading": "Cargando sesiones tmux...",
       "empty": "No hay sesiones tmux coincidentes",
@@ -584,6 +599,8 @@
       "actions": {
         "refresh": "Actualizar puertos",
         "diagnostic": "Abrir terminal de diagnóstico",
+        "kill_process": "Detener proceso",
+        "copy_kill_command": "Copiar comando de detención",
         "copy_endpoint": "Copiar dirección",
         "jump_process": "Buscar proceso"
       },
@@ -597,6 +614,7 @@
         "exec_terminal_missing": "No hay una ruta de terminal SSH activa para diagnósticos.",
         "diagnostic_opened": "Diagnóstico de puertos abierto.",
         "copied_endpoint": "{{endpoint}} copiado.",
+        "kill_command_copied": "Copiado: {{command}}",
         "partial_support": "La inspección de puertos es parcial en {{os}}.",
         "unknown_error": "Error desconocido de escaneo de puertos."
       }
@@ -707,7 +725,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "Paquete",
@@ -729,8 +748,16 @@
       },
       "actions": {
         "refresh": "Actualizar paquetes",
+        "uninstall": "Desinstalar paquete",
+        "upgrade": "Actualizar paquete",
         "inspect": "Abrir detalles del paquete",
+        "copy_id": "Copiar ID del paquete",
         "copy_name": "Copiar nombre del paquete"
+      },
+      "confirm": {
+        "uninstall_title": "Desinstalar paquete",
+        "uninstall_description": "¿Desinstalar {{name}}? winget lo quitará de este host.",
+        "uninstall": "Desinstalar"
       },
       "inspect_title": "Detalles del paquete",
       "toast": {
@@ -743,6 +770,11 @@
         "inspect_unsupported": "Los detalles de paquetes aún no son compatibles con {{manager}}.",
         "inspect_opened": "Detalles abiertos para {{name}}.",
         "copied_name": "{{name}} copiado.",
+        "copied_id": "{{id}} copiado.",
+        "uninstall_opened": "Desinstalando {{name}} en una terminal.",
+        "uninstall_unsupported": "La desinstalación mediante {{manager}} no es compatible.",
+        "upgrade_opened": "Actualizando {{name}}.",
+        "upgrade_unsupported": "Aún no se admite actualizar paquetes de {{manager}}.",
         "partial_support": "La inspección de paquetes en {{os}} es de solo lectura.",
         "unknown_error": "Error desconocido al analizar paquetes."
       }

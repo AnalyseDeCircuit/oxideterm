@@ -71,9 +71,9 @@
       "processes": "프로세스",
       "services": "서비스",
       "logs": "로그",
-      "tmux": "tmux",
+      "tmux": "터미널 멀티플렉서",
       "docker": "Docker",
-      "tmux_management": "tmux 관리",
+      "tmux_management": "터미널 멀티플렉서",
       "docker_management": "Docker 관리",
       "session_manager": "세션 관리자",
       "open_session_manager": "세션 관리자 열기",
@@ -105,6 +105,9 @@
     "active_session_count": "활성 세션: {{count}}",
     "no_sessions": "세션 없음",
     "add_new_connection": "+를 클릭하여 새 연결 추가",
+    "host_connection": {
+      "local_machine": "이 컴퓨터"
+    },
     "host_gpu": {
       "count_suffix": "가속기",
       "refresh_interval": "2초마다 업데이트",
@@ -364,8 +367,20 @@
         "unknown_error": "알 수 없는 오류"
       }
     },
+    "multiplexer": {
+      "refresh": "세션 새로 고침",
+      "open": "터미널 열기",
+      "focus": "초점 이동",
+      "new_workspace": "새 작업 공간",
+      "new_tab": "새 탭",
+      "split": "창 분할",
+      "loading": "불러오는 중…",
+      "empty": "일치하는 세션 없음",
+      "unavailable": "선택한 호스트에 이 멀티플렉서가 설치되어 있지 않습니다.",
+      "failed": "명령이 실패했습니다. 설치된 버전과 세션 상태를 확인하세요."
+    },
     "host_tmux": {
-      "search_placeholder": "tmux 검색...",
+      "search_placeholder": "세션 검색…",
       "count_suffix": "개 세션",
       "loading": "tmux 세션을 불러오는 중...",
       "empty": "일치하는 tmux 세션이 없습니다",
@@ -584,6 +599,8 @@
       "actions": {
         "refresh": "포트 새로고침",
         "diagnostic": "진단 터미널 열기",
+        "kill_process": "프로세스 중지",
+        "copy_kill_command": "중지 명령 복사",
         "copy_endpoint": "주소 복사",
         "jump_process": "프로세스 찾기"
       },
@@ -597,6 +614,7 @@
         "exec_terminal_missing": "진단에 사용할 수 있는 SSH 터미널 경로가 없습니다.",
         "diagnostic_opened": "포트 진단을 열었습니다.",
         "copied_endpoint": "{{endpoint}} 복사됨.",
+        "kill_command_copied": "복사됨: {{command}}",
         "partial_support": "{{os}}에서는 포트 검사가 부분 지원됩니다.",
         "unknown_error": "알 수 없는 포트 스캔 오류입니다."
       }
@@ -707,7 +725,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "패키지",
@@ -729,8 +748,16 @@
       },
       "actions": {
         "refresh": "패키지 새로고침",
+        "uninstall": "패키지 제거",
+        "upgrade": "패키지 업데이트",
         "inspect": "패키지 상세 열기",
+        "copy_id": "패키지 ID 복사",
         "copy_name": "패키지 이름 복사"
+      },
+      "confirm": {
+        "uninstall_title": "패키지 제거",
+        "uninstall_description": "{{name}}을(를) 제거할까요? winget이 이 호스트에서 제거합니다.",
+        "uninstall": "제거"
       },
       "inspect_title": "패키지 상세",
       "toast": {
@@ -743,6 +770,11 @@
         "inspect_unsupported": "{{manager}}의 패키지 상세 명령은 아직 지원되지 않습니다.",
         "inspect_opened": "{{name}} 상세를 열었습니다.",
         "copied_name": "{{name}}을(를) 복사했습니다.",
+        "copied_id": "{{id}}을(를) 복사했습니다.",
+        "uninstall_opened": "터미널에서 {{name}}을(를) 제거하는 중입니다.",
+        "uninstall_unsupported": "{{manager}}을(를) 통한 제거는 지원되지 않습니다.",
+        "upgrade_opened": "{{name}} 업데이트 중입니다.",
+        "upgrade_unsupported": "{{manager}} 패키지 업데이트는 아직 지원되지 않습니다.",
         "partial_support": "{{os}}의 패키지 검사는 읽기 전용으로 지원됩니다.",
         "unknown_error": "알 수 없는 패키지 스캔 오류입니다."
       }

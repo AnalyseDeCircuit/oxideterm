@@ -71,9 +71,9 @@
       "processes": "进程",
       "services": "服务",
       "logs": "日志",
-      "tmux": "tmux",
+      "tmux": "终端复用器",
       "docker": "Docker",
-      "tmux_management": "tmux 管理",
+      "tmux_management": "终端复用器",
       "docker_management": "Docker 管理",
       "session_manager": "会话管理器",
       "open_session_manager": "打开会话管理器",
@@ -105,6 +105,9 @@
     "active_session_count": "{{count}} 个活动会话",
     "no_sessions": "暂无会话",
     "add_new_connection": "点击 + 添加新连接",
+    "host_connection": {
+      "local_machine": "本机"
+    },
     "host_gpu": {
       "count_suffix": "个加速设备",
       "refresh_interval": "每 2 秒更新",
@@ -364,8 +367,20 @@
         "unknown_error": "未知错误"
       }
     },
+    "multiplexer": {
+      "refresh": "刷新会话",
+      "open": "打开终端",
+      "focus": "聚焦",
+      "new_workspace": "新建工作区",
+      "new_tab": "新建标签",
+      "split": "拆分窗格",
+      "loading": "加载中…",
+      "empty": "没有匹配的会话",
+      "unavailable": "所选主机未安装此复用器。",
+      "failed": "命令执行失败，请检查已安装的版本和会话状态。"
+    },
     "host_tmux": {
-      "search_placeholder": "搜索 tmux...",
+      "search_placeholder": "搜索会话…",
       "count_suffix": "个会话",
       "loading": "正在加载 tmux 会话...",
       "empty": "没有匹配的 tmux 会话",
@@ -584,6 +599,8 @@
       "actions": {
         "refresh": "刷新端口",
         "diagnostic": "打开诊断终端",
+        "kill_process": "关闭进程",
+        "copy_kill_command": "复制关闭进程命令",
         "copy_endpoint": "复制地址",
         "jump_process": "查找进程"
       },
@@ -597,6 +614,7 @@
         "exec_terminal_missing": "没有可用的 SSH 终端路由用于诊断。",
         "diagnostic_opened": "已打开端口诊断。",
         "copied_endpoint": "已复制 {{endpoint}}。",
+        "kill_command_copied": "已复制：{{command}}",
         "partial_support": "{{os}} 上的端口检查为部分支持。",
         "unknown_error": "未知端口扫描错误。"
       }
@@ -707,7 +725,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "软件包",
@@ -729,8 +748,16 @@
       },
       "actions": {
         "refresh": "刷新软件包",
+        "uninstall": "卸载应用",
+        "upgrade": "更新包",
         "inspect": "打开包详情",
+        "copy_id": "复制包 ID",
         "copy_name": "复制包名"
+      },
+      "confirm": {
+        "uninstall_title": "卸载应用",
+        "uninstall_description": "卸载 {{name}}？winget 会将其从此主机移除。",
+        "uninstall": "卸载"
       },
       "inspect_title": "包详情",
       "toast": {
@@ -743,6 +770,11 @@
         "inspect_unsupported": "暂不支持 {{manager}} 的包详情命令。",
         "inspect_opened": "已打开 {{name}} 的详情。",
         "copied_name": "已复制 {{name}}。",
+        "copied_id": "已复制 {{id}}。",
+        "uninstall_opened": "正在终端中卸载 {{name}}。",
+        "uninstall_unsupported": "不支持通过 {{manager}} 卸载。",
+        "upgrade_opened": "正在更新 {{name}}。",
+        "upgrade_unsupported": "暂不支持更新 {{manager}} 包。",
         "partial_support": "{{os}} 上的软件包检查为只读支持。",
         "unknown_error": "未知的软件包扫描错误。"
       }

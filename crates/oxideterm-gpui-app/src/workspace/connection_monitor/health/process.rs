@@ -1053,7 +1053,7 @@ impl HostToolsEntity {
             .clamp(-20, 19)
     }
 
-    fn request_host_process_action(
+    pub(in crate::workspace::connection_monitor) fn request_host_process_action(
         &mut self,
         connection_id: String,
         pid: String,

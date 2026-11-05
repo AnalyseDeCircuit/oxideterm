@@ -283,7 +283,7 @@ pub fn build_docker_logs_command(
 pub fn build_docker_exec_shell_command(container_id: &str) -> Result<String, String> {
     let container_id = validated_container_id(container_id)?;
     Ok(format!(
-        "docker exec -it {container_id} sh -lc 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'"
+        "docker exec -it {container_id} sh -lc \"if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi\""
     ))
 }
 

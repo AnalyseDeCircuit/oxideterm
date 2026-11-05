@@ -250,6 +250,17 @@ mod services;
 mod tmux;
 
 impl WorkspaceApp {
+    /// Host Tools attach actions need a terminal target: an SSH node consumer
+    /// or, for the local machine, a local terminal tab.
+    pub(super) fn host_tools_terminal_available(&self, connection_id: &str) -> bool {
+        if connection_id == LOCAL_HOST_CONNECTION_ID {
+            return true;
+        }
+        self.node_router
+            .node_id_for_connection(connection_id)
+            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id))
+    }
+
     fn host_tool_monitoring_enabled(&self, tool: ContextSidebarTool) -> bool {
         tool.monitoring_enabled(&self.settings_store.settings().host_tools)
     }

@@ -22,7 +22,7 @@ Primary areas:
 
 - Sessions: saved connections, active SSH nodes, and terminal sessions.
 - Connection pool: reusable connection/runtime state.
-- Connection monitor and Host Tools: health, reconnect status, processes, Docker, services, tmux, packages, logs, ports, filesystems, and metrics.
+- Connection monitor and Host Tools: health, reconnect status, processes, Docker, services, terminal multiplexers, packages, logs, ports, filesystems, and metrics.
 - Connection matrix: a broader connection overview.
 - File manager and SFTP: browse, preview, upload, download, and edit remote files.
 - Graphics/VNC: open a saved RDP/VNC profile, or open node-launched graphics when a connected SSH node provides it.
@@ -78,7 +78,7 @@ From the Sessions area, select a saved connection and open it. The app creates r
 
 If a host disconnects, use the connection pool or monitor to understand whether the runtime is reconnecting, stale, or unavailable. Reconnect from the app state instead of recreating the saved profile.
 
-Host Tools belong to the connected node. A graphics/VNC session may instead belong to a saved RDP/VNC profile; node-launched graphics use the SSH node as their runtime owner. Opening or closing these views should not rewrite saved profiles, and stale state should be refreshed through the owning profile or node.
+Host Tools belong to the connected node. The local machine is also a Host Tools target: tools run the same generated commands locally, and sampling views use one-shot local captures. A graphics/VNC session may instead belong to a saved RDP/VNC profile; node-launched graphics use the SSH node as their runtime owner. Opening or closing these views should not rewrite saved profiles, and stale state should be refreshed through the owning profile or node.
 
 ## SFTP and Remote Files
 
@@ -124,7 +124,9 @@ For forwarding without a terminal, use [Standalone SSH Tunnels](connections-and-
 
 ## Host Tools and Graphics
 
-Use Host Tools from the connected-node context when you need a read-oriented view of processes, containers, services, tmux, packages, logs, ports, filesystems, scheduled tasks, or host metrics. Actions that change host state should be reviewed in the app confirmation flow before execution.
+Use Host Tools from the connected-node context when you need a read-oriented view of processes, containers, services, terminal multiplexers, packages, logs, ports, filesystems, scheduled tasks, or host metrics. Actions that change host state should be reviewed in the app confirmation flow before execution.
+
+Under **Terminal multiplexers**, select the host and switch between tmux, Zellij, and Herdr. Expand a running Zellij session to see its tabs and panes, or a Herdr session to see its workspaces, tabs, and panes. Use the controls beside an object to focus, create, split, or close it where supported. Closing an object asks for confirmation. Attach opens a terminal on the selected host. Restore reopens an exited session.
 
 For remote desktops, first install and enable **RDP** or **VNC** in **Plugin Manager → Marketplace**, then open the connection from New Connection or Session Manager. OxideTerm owns the profiles, SSH gateway settings, and native viewer; the plugin supplies the protocol engine. See [Graphics and VNC](connections-and-forwards.md#graphics-and-vnc). Windows WSL Graphics uses a separate built-in viewer and does not require these remote-desktop plugins.
 

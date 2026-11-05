@@ -3,7 +3,8 @@
 use super::*;
 
 use oxideterm_connection_monitor::{
-    ScheduledTaskToggleAction, parse_scheduled_task_snapshot, scheduled_task_action_availability,
+    ScheduledTaskFilter, ScheduledTaskToggleAction, parse_scheduled_task_snapshot,
+    scheduled_task_action_availability, scheduled_task_filter_options,
 };
 
 const HOST_SCHEDULE_LOG_LINE_LIMIT: usize = 200;
@@ -387,16 +388,7 @@ impl HostToolsEntity {
             .items_center()
             .gap_1()
             .overflow_x_scroll();
-        for filter in [
-            ScheduledTaskFilter::All,
-            ScheduledTaskFilter::Enabled,
-            ScheduledTaskFilter::Disabled,
-            ScheduledTaskFilter::Systemd,
-            ScheduledTaskFilter::Cron,
-            ScheduledTaskFilter::Launchd,
-            ScheduledTaskFilter::Windows,
-            ScheduledTaskFilter::Failed,
-        ] {
+        for filter in self.schedule_filter_options() {
             row = row.child(self.render_host_schedule_filter_chip(filter, tokens, i18n, cx));
         }
         row.into_any_element()
@@ -1407,6 +1399,22 @@ impl HostToolsEntity {
         self.host_schedules.filter
     }
 
+    /// Source chips follow the host: a Windows snapshot offers no cron chip.
+    fn schedule_filter_options(&self) -> Vec<ScheduledTaskFilter> {
+        self.host_schedules
+            .snapshot
+            .as_ref()
+            .map(|snapshot| scheduled_task_filter_options(&snapshot.entries))
+            .unwrap_or_else(|| {
+                vec![
+                    ScheduledTaskFilter::All,
+                    ScheduledTaskFilter::Enabled,
+                    ScheduledTaskFilter::Disabled,
+                    ScheduledTaskFilter::Failed,
+                ]
+            })
+    }
+
     pub(super) fn schedule_list_state(&self) -> ListState {
         self.host_schedules.list_state.clone()
     }
@@ -1452,15 +1460,20 @@ impl HostToolsEntity {
     }
 
     fn sync_host_schedule_list_state(&self, rows: &[ResourceScheduledTask], selected_id: &str) {
+        let expanded = self.schedule_expanded_index();
         let signatures = rows
             .iter()
-            .map(scheduled_task_row_signature)
+            .enumerate()
+            .map(|(index, row)| {
+                expandable_row_signature(scheduled_task_row_signature(row), expanded == Some(index))
+            })
             .collect::<Vec<_>>();
+        // Expansion changes one row's height, so it stays out of the identity:
+        // a new identity resets the list and drops the user's scroll offset.
         let identity = format!(
-            "host-schedules:{selected_id}:{}:{}:{}",
+            "host-schedules:{selected_id}:{}:{}",
             self.ui.host_schedule_search_query,
-            self.schedule_filter() as u8,
-            self.schedule_expanded_index().unwrap_or(usize::MAX)
+            self.schedule_filter() as u8
         );
         self.sync_schedule_list_signatures(&identity, &signatures);
     }
@@ -1657,6 +1670,14 @@ impl HostToolsEntity {
                     ));
                 }
             }
+        }
+        // A filter the new snapshot does not offer would render an empty list.
+        if !self
+            .schedule_filter_options()
+            .contains(&self.host_schedules.filter)
+        {
+            self.host_schedules.filter = ScheduledTaskFilter::All;
+            self.host_schedules.expanded_index = None;
         }
         cx.notify();
     }
@@ -2083,10 +2104,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let dialog = self.host_tools.read(cx).schedule_logs_dialog()?;
-        let follow_terminal_available = self
-            .node_router
-            .node_id_for_connection(&dialog.request.connection_id)
-            .is_some_and(|node_id| self.ssh_nodes.contains_key(&node_id));
+        let follow_terminal_available =
+            self.host_tools_terminal_available(&dialog.request.connection_id);
         let tokens = self.tokens;
         let i18n = &self.i18n;
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());

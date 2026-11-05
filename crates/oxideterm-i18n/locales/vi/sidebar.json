@@ -71,9 +71,9 @@
       "processes": "Tiến trình",
       "services": "Dịch vụ",
       "logs": "Nhật ký",
-      "tmux": "tmux",
+      "tmux": "Bộ ghép kênh terminal",
       "docker": "Docker",
-      "tmux_management": "Quản lý tmux",
+      "tmux_management": "Bộ ghép kênh terminal",
       "docker_management": "Quản lý Docker",
       "session_manager": "Quản lý phiên",
       "open_session_manager": "Mở quản lý phiên",
@@ -105,6 +105,9 @@
     "active_session_count": "Phiên đang hoạt động: {{count}}",
     "no_sessions": "Không có phiên",
     "add_new_connection": "Nhấn + để thêm kết nối",
+    "host_connection": {
+      "local_machine": "Máy này"
+    },
     "host_gpu": {
       "count_suffix": "bộ tăng tốc",
       "refresh_interval": "Cập nhật mỗi 2 giây",
@@ -364,8 +367,20 @@
         "unknown_error": "Lỗi không rõ"
       }
     },
+    "multiplexer": {
+      "refresh": "Làm mới phiên",
+      "open": "Mở terminal",
+      "focus": "Chuyển tiêu điểm",
+      "new_workspace": "Không gian làm việc mới",
+      "new_tab": "Thẻ mới",
+      "split": "Chia ngăn",
+      "loading": "Đang tải…",
+      "empty": "Không có phiên phù hợp",
+      "unavailable": "Máy đã chọn chưa cài bộ ghép kênh này.",
+      "failed": "Lệnh thất bại. Hãy kiểm tra phiên bản đã cài và trạng thái phiên."
+    },
     "host_tmux": {
-      "search_placeholder": "Tìm tmux...",
+      "search_placeholder": "Tìm phiên…",
       "count_suffix": "phiên",
       "loading": "Đang tải phiên tmux...",
       "empty": "Không có phiên tmux phù hợp",
@@ -584,6 +599,8 @@
       "actions": {
         "refresh": "Làm mới cổng",
         "diagnostic": "Mở terminal chẩn đoán",
+        "kill_process": "Dừng tiến trình",
+        "copy_kill_command": "Sao chép lệnh dừng",
         "copy_endpoint": "Sao chép địa chỉ",
         "jump_process": "Tìm tiến trình"
       },
@@ -597,6 +614,7 @@
         "exec_terminal_missing": "Không có tuyến terminal SSH đang hoạt động để chẩn đoán.",
         "diagnostic_opened": "Đã mở chẩn đoán cổng.",
         "copied_endpoint": "Đã sao chép {{endpoint}}.",
+        "kill_command_copied": "Đã sao chép: {{command}}",
         "partial_support": "Kiểm tra cổng chỉ được hỗ trợ một phần trên {{os}}.",
         "unknown_error": "Lỗi quét cổng không xác định."
       }
@@ -707,7 +725,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "Gói",
@@ -729,8 +748,16 @@
       },
       "actions": {
         "refresh": "Làm mới gói",
+        "uninstall": "Gỡ cài đặt gói",
+        "upgrade": "Cập nhật gói",
         "inspect": "Mở chi tiết gói",
+        "copy_id": "Sao chép ID gói",
         "copy_name": "Sao chép tên gói"
+      },
+      "confirm": {
+        "uninstall_title": "Gỡ cài đặt gói",
+        "uninstall_description": "Gỡ cài đặt {{name}}? winget sẽ xóa gói này khỏi máy chủ.",
+        "uninstall": "Gỡ cài đặt"
       },
       "inspect_title": "Chi tiết gói",
       "toast": {
@@ -743,6 +770,11 @@
         "inspect_unsupported": "Chưa hỗ trợ chi tiết gói cho {{manager}}.",
         "inspect_opened": "Đã mở chi tiết cho {{name}}.",
         "copied_name": "Đã sao chép {{name}}.",
+        "copied_id": "Đã sao chép {{id}}.",
+        "uninstall_opened": "Đang gỡ cài đặt {{name}} trong terminal.",
+        "uninstall_unsupported": "Gỡ cài đặt qua {{manager}} không được hỗ trợ.",
+        "upgrade_opened": "Đang cập nhật {{name}}.",
+        "upgrade_unsupported": "Chưa hỗ trợ cập nhật gói {{manager}}.",
         "partial_support": "Kiểm tra gói trên {{os}} chỉ hỗ trợ đọc.",
         "unknown_error": "Lỗi quét gói không xác định."
       }

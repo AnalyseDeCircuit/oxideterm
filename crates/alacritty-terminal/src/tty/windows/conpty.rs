@@ -229,7 +229,7 @@ pub fn new(config: &Options, window_size: WindowSize) -> Result<Pty> {
     let cmdline = win32_string(&cmdline(config));
     let cwd = config.working_directory.as_ref().map(win32_string);
     let mut creation_flags = EXTENDED_STARTUPINFO_PRESENT;
-    let custom_env_block = convert_custom_env(&config.env);
+    let custom_env_block = convert_custom_env(&config.env, &config.env_remove);
     let custom_env_block_pointer = match &custom_env_block {
         Some(custom_env_block) => {
             creation_flags |= CREATE_UNICODE_ENVIRONMENT;
@@ -269,16 +269,28 @@ pub fn new(config: &Options, window_size: WindowSize) -> Result<Pty> {
 // deduplicating environment variables, so do that here while converting.
 //
 // https://learn.microsoft.com/en-us/previous-versions/troubleshoot/windows/win32/createprocess-cannot-eliminate-duplicate-variables#environment-variables
-fn convert_custom_env(custom_env: &HashMap<String, String>) -> Option<WindowsEnvironmentBlock> {
+fn convert_custom_env(
+    custom_env: &HashMap<String, String>,
+    env_remove: &[String],
+) -> Option<WindowsEnvironmentBlock> {
     // Windows inherits parent's env when no `lpEnvironment` parameter is specified.
-    if custom_env.is_empty() {
+    if custom_env.is_empty() && env_remove.is_empty() {
         return None;
     }
 
+    let removed_keys = env_remove
+        .iter()
+        .map(|key| OsStr::new(key).to_ascii_uppercase())
+        .collect::<HashSet<_>>();
     let mut environment = Vec::new();
     let mut all_env_keys = HashSet::new();
     for (custom_key, custom_value) in custom_env {
         let custom_key_os = OsStr::new(custom_key);
+        // A key the caller asked to strip must not survive through `env`; Unix
+        // `Command::env_remove` removes explicit values the same way.
+        if removed_keys.contains(&custom_key_os.to_ascii_uppercase()) {
+            continue;
+        }
         if all_env_keys.insert(custom_key_os.to_ascii_uppercase()) {
             environment.push((custom_key_os.to_os_string(), OsString::from(custom_value)));
         } else {
@@ -289,7 +301,11 @@ fn convert_custom_env(custom_env: &HashMap<String, String>) -> Option<WindowsEnv
 
     // Pull the current process environment after, to avoid overwriting the user provided one.
     for (inherited_key, inherited_value) in std::env::vars_os() {
-        if all_env_keys.insert(inherited_key.to_ascii_uppercase()) {
+        let inherited_key_upper = inherited_key.to_ascii_uppercase();
+        if removed_keys.contains(&inherited_key_upper) {
+            continue;
+        }
+        if all_env_keys.insert(inherited_key_upper) {
             environment.push((inherited_key, inherited_value));
         }
     }
@@ -299,6 +315,12 @@ fn convert_custom_env(custom_env: &HashMap<String, String>) -> Option<WindowsEnv
     let mut converted_block = Vec::new();
     for (key, value) in environment {
         add_windows_env_key_value_to_block(&mut converted_block, &key, &value);
+    }
+    // Each entry above already ends with NUL; the block terminator is one more.
+    // Removing every inherited variable leaves no entry to supply the first
+    // NUL, so the empty block still needs both.
+    if converted_block.is_empty() {
+        converted_block.push(0);
     }
     converted_block.push(0);
     Some(WindowsEnvironmentBlock(converted_block))
@@ -381,7 +403,7 @@ mod tests {
             ("AA_OXIDETERM_SORT_PROBE".to_string(), "first".to_string()),
             ("PaTh".to_string(), "oxideterm-path-probe".to_string()),
         ]);
-        let block = convert_custom_env(&custom_env).expect("custom environment block");
+        let block = convert_custom_env(&custom_env, &[]).expect("custom environment block");
         let entries = block
             .0
             .split(|unit| *unit == 0)
@@ -413,5 +435,26 @@ mod tests {
             })
             .collect::<Vec<_>>();
         assert_eq!(path_entries, ["PaTh=oxideterm-path-probe"]);
+    }
+
+    #[test]
+    fn removed_environment_keys_are_omitted_from_the_block() {
+        let key = "OXIDETERM_ENV_REMOVE_PROBE";
+        // SAFETY: the probe key is unique to this test and no other test reads it.
+        unsafe { std::env::set_var(key, "1") };
+        let block = convert_custom_env(&HashMap::new(), &[key.to_string()])
+            .expect("environment block for removals");
+        let present = block
+            .0
+            .split(|unit| *unit == 0)
+            .take_while(|entry| !entry.is_empty())
+            .any(|entry| {
+                String::from_utf16_lossy(entry)
+                    .split_once('=')
+                    .is_some_and(|(name, _)| name.eq_ignore_ascii_case(key))
+            });
+        // SAFETY: same key as the setup above.
+        unsafe { std::env::remove_var(key) };
+        assert!(!present, "removed key must not reach the child environment");
     }
 }

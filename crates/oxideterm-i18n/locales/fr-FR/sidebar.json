@@ -71,9 +71,9 @@
       "processes": "Processus",
       "services": "Services",
       "logs": "Journaux",
-      "tmux": "tmux",
+      "tmux": "Multiplexeurs de terminal",
       "docker": "Docker",
-      "tmux_management": "Gestion de tmux",
+      "tmux_management": "Multiplexeurs de terminal",
       "docker_management": "Gestion de Docker",
       "session_manager": "Gestionnaire de sessions",
       "open_session_manager": "Ouvrir le gestionnaire de sessions",
@@ -105,6 +105,9 @@
     "active_session_count": "Sessions actives : {{count}}",
     "no_sessions": "Aucune session",
     "add_new_connection": "Cliquez sur + pour ajouter une connexion",
+    "host_connection": {
+      "local_machine": "Cet ordinateur"
+    },
     "host_gpu": {
       "count_suffix": "accélérateurs",
       "refresh_interval": "Actualisation toutes les 2 secondes",
@@ -364,8 +367,20 @@
         "unknown_error": "Erreur inconnue"
       }
     },
+    "multiplexer": {
+      "refresh": "Actualiser les sessions",
+      "open": "Ouvrir le terminal",
+      "focus": "Activer",
+      "new_workspace": "Nouvel espace de travail",
+      "new_tab": "Nouvel onglet",
+      "split": "Scinder le volet",
+      "loading": "Chargement…",
+      "empty": "Aucune session correspondante",
+      "unavailable": "Ce multiplexeur n’est pas installé sur l’hôte sélectionné.",
+      "failed": "La commande a échoué. Vérifiez la version installée et l’état de la session."
+    },
     "host_tmux": {
-      "search_placeholder": "Rechercher tmux...",
+      "search_placeholder": "Rechercher des sessions…",
       "count_suffix": "sessions",
       "loading": "Chargement des sessions tmux...",
       "empty": "Aucune session tmux correspondante",
@@ -584,6 +599,8 @@
       "actions": {
         "refresh": "Actualiser les ports",
         "diagnostic": "Ouvrir le terminal de diagnostic",
+        "kill_process": "Arrêter le processus",
+        "copy_kill_command": "Copier la commande d’arrêt",
         "copy_endpoint": "Copier l’adresse",
         "jump_process": "Trouver le processus"
       },
@@ -597,6 +614,7 @@
         "exec_terminal_missing": "Aucune route de terminal SSH active pour le diagnostic.",
         "diagnostic_opened": "Diagnostic des ports ouvert.",
         "copied_endpoint": "{{endpoint}} copié.",
+        "kill_command_copied": "Copié : {{command}}",
         "partial_support": "L’inspection des ports est partielle sur {{os}}.",
         "unknown_error": "Erreur inconnue d’analyse des ports."
       }
@@ -707,7 +725,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "Paquet",
@@ -729,8 +748,16 @@
       },
       "actions": {
         "refresh": "Actualiser les paquets",
+        "uninstall": "Désinstaller le paquet",
+        "upgrade": "Mettre à jour le paquet",
         "inspect": "Ouvrir les détails du paquet",
+        "copy_id": "Copier l’ID du paquet",
         "copy_name": "Copier le nom du paquet"
+      },
+      "confirm": {
+        "uninstall_title": "Désinstaller le paquet",
+        "uninstall_description": "Désinstaller {{name}} ? winget le retire de cet hôte.",
+        "uninstall": "Désinstaller"
       },
       "inspect_title": "Détails du paquet",
       "toast": {
@@ -743,6 +770,11 @@
         "inspect_unsupported": "Les détails de paquet ne sont pas encore pris en charge pour {{manager}}.",
         "inspect_opened": "Détails ouverts pour {{name}}.",
         "copied_name": "{{name}} copié.",
+        "copied_id": "{{id}} copié.",
+        "uninstall_opened": "Désinstallation de {{name}} dans un terminal.",
+        "uninstall_unsupported": "La désinstallation via {{manager}} n’est pas prise en charge.",
+        "upgrade_opened": "Mise à jour de {{name}}.",
+        "upgrade_unsupported": "La mise à jour des paquets {{manager}} n’est pas encore prise en charge.",
         "partial_support": "L'inspection des paquets est en lecture seule sur {{os}}.",
         "unknown_error": "Erreur inconnue lors de l'analyse des paquets."
       }

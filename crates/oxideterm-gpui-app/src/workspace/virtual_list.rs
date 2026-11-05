@@ -267,13 +267,23 @@ pub(super) fn sync_tauri_virtual_list_state_by_signatures(
     )
 }
 
+/// Folds a height-changing row state into its signature.
+///
+/// Expansion belongs to one row, not to the data set: keeping it in the list
+/// identity resets the list and throws away the offset the user scrolled to, so
+/// callers encode it here and let the signature sync remeasure that row only.
+pub(crate) fn expandable_row_signature(signature: u64, expanded: bool) -> u64 {
+    signature ^ u64::from(expanded)
+}
+
+/// Returns whether the list was reset, which discards the user's scroll offset.
 pub(super) fn sync_tauri_variable_list_state_by_signatures(
     state: &ListState,
     cache: &mut VirtualListSignatureCache,
     identity: &str,
     signatures: &[u64],
     spec: TauriVirtualListSpec,
-) {
+) -> bool {
     // GPUI's variable-height list keeps its state by item index. Mirroring
     // React keys requires explicit splice/reset calls when filtered rows move
     // or change; keep that bookkeeping centralized for sidebar/dialog lists.
@@ -285,7 +295,7 @@ pub(super) fn sync_tauri_variable_list_state_by_signatures(
         state.reset(signatures.len());
         cache.identity = Some(identity.to_string());
         cache.signatures = signatures.to_vec();
-        return;
+        return true;
     }
 
     let old_len = cache.signatures.len();
@@ -303,12 +313,47 @@ pub(super) fn sync_tauri_variable_list_state_by_signatures(
         state.splice(new_len..old_len, 0);
     }
     cache.signatures = signatures.to_vec();
+    false
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use gpui::{ListAlignment, px};
+
+    #[test]
+    fn expanding_one_row_keeps_the_scroll_offset() {
+        let state = ListState::new(0, ListAlignment::Top, px(0.0));
+        let mut cache = VirtualListSignatureCache::default();
+        let spec = TauriVirtualListSpec::new(px(32.0), 8);
+        let rows = [11u64, 22, 33];
+        let collapsed = rows
+            .iter()
+            .map(|signature| expandable_row_signature(*signature, false))
+            .collect::<Vec<_>>();
+        let expanded = rows
+            .iter()
+            .enumerate()
+            .map(|(index, signature)| expandable_row_signature(*signature, index == 1))
+            .collect::<Vec<_>>();
+
+        assert!(sync_tauri_variable_list_state_by_signatures(
+            &state,
+            &mut cache,
+            "host-packages:conn-1:",
+            &collapsed,
+            spec,
+        ));
+        // Expansion must remeasure its row instead of resetting the list, which
+        // would throw away the offset the user scrolled to.
+        assert!(!sync_tauri_variable_list_state_by_signatures(
+            &state,
+            &mut cache,
+            "host-packages:conn-1:",
+            &expanded,
+            spec,
+        ));
+    }
 
     #[test]
     fn signature_sync_resets_for_new_identity_and_preserves_same_identity_follow_mode() {

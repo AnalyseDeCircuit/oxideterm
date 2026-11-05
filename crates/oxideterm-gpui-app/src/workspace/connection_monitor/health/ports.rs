@@ -662,12 +662,92 @@ impl HostToolsEntity {
         let diagnostic_opened_notice = i18n.t("sidebar.host_ports.toast.diagnostic_opened");
         let diagnostic_missing_notice = i18n.t("sidebar.host_ports.toast.exec_terminal_missing");
         let connection_id = connection_id.to_string();
+        // A port owner may need elevation, so the same action is also offered
+        // as a command the user can paste into an elevated terminal.
+        let kill_connection_id = connection_id.clone();
+        let kill_pid = entry.pid.clone();
+        let kill_display = Arc::new(zeroize::Zeroizing::new(host_port_process_label(entry)));
+        let process_action_supported = self.process_action_supported(
+            connection_id.as_str(),
+            kill_pid.as_str(),
+            ProcessActionKind::Kill,
+        );
+        let copy_kill_connection_id = connection_id.clone();
+        let copy_kill_pid = entry.pid.clone();
+        let has_process = !entry.pid.trim().is_empty() && process_action_supported;
         div()
             .flex_none()
             .flex()
             .items_center()
             .justify_end()
             .gap(px(4.0))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::Power,
+                12.0,
+                rgb(MONITOR_RED),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    disabled: !has_process,
+                    has_background: true,
+                    background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
+                    hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
+                    idle_opacity: if has_process { 1.0 } else { 0.45 },
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                i18n.t("sidebar.host_ports.actions.kill_process"),
+                "host-port-kill-process",
+                true,
+                cx.listener({
+                    let connection_id = kill_connection_id.clone();
+                    let pid = kill_pid.clone();
+                    let display_command = kill_display.clone();
+                    move |host_tools, _event, _window, cx| {
+                        if !pid.trim().is_empty() {
+                            host_tools.request_host_process_action(
+                                connection_id.clone(),
+                                pid.clone(),
+                                display_command.clone(),
+                                ProcessActionKind::Kill,
+                                cx,
+                            );
+                        }
+                        cx.stop_propagation();
+                    }
+                }),
+            ))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::Copy,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    disabled: !has_process,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: if has_process { 1.0 } else { 0.45 },
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                i18n.t("sidebar.host_ports.actions.copy_kill_command"),
+                "host-port-copy-kill-command",
+                true,
+                cx.listener({
+                    let connection_id = copy_kill_connection_id.clone();
+                    let pid = copy_kill_pid.clone();
+                    move |host_tools, _event, _window, cx| {
+                        if !pid.trim().is_empty() {
+                            host_tools.copy_host_port_kill_command(
+                                connection_id.clone(),
+                                pid.clone(),
+                                cx,
+                            );
+                        }
+                        cx.stop_propagation();
+                    }
+                }),
+            ))
             .child(host_tools_tooltip_icon_button(
                 tokens,
                 LucideIcon::Copy,
@@ -758,6 +838,34 @@ impl HostToolsEntity {
                 }),
             ))
             .into_any_element()
+    }
+
+    /// Copies the force-stop command for one port owner. Elevation cannot be
+    /// requested from the panel, so the user runs it in an elevated terminal.
+    fn copy_host_port_kill_command(
+        &mut self,
+        connection_id: String,
+        pid: String,
+        cx: &mut Context<Self>,
+    ) {
+        let os_type = self
+            .connection_os_type(&connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        match build_process_action_command(&os_type, &pid, ProcessActionKind::Kill) {
+            Ok(command) => {
+                cx.write_to_clipboard(ClipboardItem::new_string(command.command.clone()));
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::PortKillCommandCopied {
+                        command: command.command,
+                    },
+                ));
+            }
+            Err(_) => {
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::ProcessActionFailed,
+                ));
+            }
+        }
     }
 }
 
@@ -876,12 +984,20 @@ impl HostToolsEntity {
     }
 
     fn sync_port_render_rows(&self, rows: &[ResourcePortEntry], selected_id: &str) {
-        let signatures = rows.iter().map(port_row_signature).collect::<Vec<_>>();
+        let expanded = self.port_expanded_index();
+        let signatures = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                expandable_row_signature(port_row_signature(row), expanded == Some(index))
+            })
+            .collect::<Vec<_>>();
         let identity = format!(
-            "host-ports:{selected_id}:{}:{}:{}",
+            // Expansion changes one row's height, so it stays out of the identity:
+            // a new identity resets the list and drops the user's scroll offset.
+            "host-ports:{selected_id}:{}:{}",
             self.ui.host_port_search_query,
-            self.port_filter() as u8,
-            self.port_expanded_index().unwrap_or(usize::MAX)
+            self.port_filter() as u8
         );
         self.sync_port_list_signatures(&identity, &signatures);
     }

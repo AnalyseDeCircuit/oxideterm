@@ -79,7 +79,7 @@ impl HostToolsEntity {
                         cx,
                     ))
                     .child(self.render_host_package_search(&search_ime, tokens, i18n, cx))
-                    .child(self.render_host_package_filter_row(tokens, i18n, cx))
+                    .child(self.render_host_package_filter_row(snapshot, tokens, i18n, cx))
                     .child(self.render_host_package_status_row(
                         rows.len(),
                         selected_id.to_string(),
@@ -156,6 +156,7 @@ impl HostToolsEntity {
 
     fn render_host_package_filter_row(
         &self,
+        snapshot: Option<&ResourcePackageSnapshot>,
         tokens: &ThemeTokens,
         i18n: &I18n,
         cx: &mut Context<Self>,
@@ -166,17 +167,12 @@ impl HostToolsEntity {
             .items_center()
             .gap_1()
             .overflow_x_scroll();
-        for filter in [
-            PackageFilter::All,
-            PackageFilter::Upgradable,
-            PackageFilter::Installed,
-            PackageFilter::Services,
-            PackageFilter::Apt,
-            PackageFilter::Dnf,
-            PackageFilter::Yum,
-            PackageFilter::Pacman,
-            PackageFilter::Brew,
-        ] {
+        // Manager chips follow what the selected host reports, so the rail
+        // shows winget on Windows and apt/dnf/pacman/brew elsewhere.
+        let managers = snapshot
+            .map(|snapshot| snapshot.managers.as_slice())
+            .unwrap_or(&[]);
+        for filter in package_filter_options(managers) {
             row = row.child(self.render_host_package_filter_chip(filter, tokens, i18n, cx));
         }
         row.into_any_element()
@@ -477,7 +473,17 @@ impl HostToolsEntity {
         let expanded = self.package_expanded_index() == Some(index);
         let theme = tokens.ui;
         let status = host_package_status_display(i18n, &entry.status);
-        let installed = host_package_blank_dash(&entry.installed_version);
+        let installed = {
+            let installed = host_package_blank_dash(&entry.installed_version);
+            // The candidate column is hidden on a narrow sidebar, so an
+            // upgradable row carries its target version inline.
+            let candidate = entry.candidate_version.trim();
+            if entry.status == "upgradable" && !candidate.is_empty() {
+                format!("{installed} → {candidate}")
+            } else {
+                installed
+            }
+        };
         let candidate = host_package_blank_dash(&entry.candidate_version);
         let manager = host_package_blank_dash(&entry.manager);
         let service = host_package_service_label(&entry);
@@ -630,7 +636,14 @@ impl HostToolsEntity {
         let package_name = entry.name.clone();
         let inspect_connection_id = connection_id.to_string();
         let inspect_manager = entry.manager.clone();
-        let inspect_package_name = entry.name.clone();
+        // Winget stores the package identifier in the repository column; the
+        // display name alone may match several packages or none.
+        let inspect_package_name =
+            if entry.manager == "winget" && !entry.repository.trim().is_empty() {
+                entry.repository.clone()
+            } else {
+                entry.name.clone()
+            };
         let inspect_title = format!(
             "{}: {}",
             i18n.t("sidebar.host_packages.inspect_title"),
@@ -640,12 +653,63 @@ impl HostToolsEntity {
             .t("sidebar.host_packages.toast.inspect_opened")
             .replace("{{name}}", &entry.name);
         let inspect_missing_notice = i18n.t("sidebar.host_packages.toast.exec_terminal_missing");
+        // Winget keeps the identifier in the repository column; apt rows put the
+        // suite there (`jammy-updates`), so other managers are addressed by name.
+        let package_id = if entry.manager == "winget" && !entry.repository.trim().is_empty() {
+            entry.repository.clone()
+        } else {
+            entry.name.clone()
+        };
+        let copy_package_id = package_id.clone();
+        let upgrade_connection_id = connection_id.to_string();
+        let upgrade_manager = entry.manager.clone();
+        let upgrade_package_id = package_id.clone();
+        let upgrade_title = format!(
+            "{}: {}",
+            i18n.t("sidebar.host_packages.actions.upgrade"),
+            entry.name
+        );
+        let upgrade_opened_notice = i18n
+            .t("sidebar.host_packages.toast.upgrade_opened")
+            .replace("{{name}}", &entry.name);
+        let upgrade_missing_notice = i18n.t("sidebar.host_packages.toast.exec_terminal_missing");
+        // Only winget has an in-place upgrade verb; other managers keep the
+        // details action only.
+        let can_upgrade = entry.manager == "winget" && entry.status == "upgradable";
+        let uninstall_request = HostPackageUninstallRequest {
+            connection_id: connection_id.to_string(),
+            manager: entry.manager.clone(),
+            package_id,
+            package_name: entry.name.clone(),
+        };
+        let can_uninstall = entry.manager == "winget";
         div()
             .flex_none()
             .flex()
             .items_center()
             .justify_end()
             .gap(px(4.0))
+            .child(host_tools_tooltip_icon_button(
+                tokens,
+                LucideIcon::Hash,
+                12.0,
+                rgb(theme.text),
+                oxideterm_gpui_ui::button::IconButtonOptions {
+                    size: 22.0,
+                    has_background: true,
+                    background: Some(rgb(theme.bg_hover)),
+                    hover_background: Some(rgb(theme.bg_panel)),
+                    idle_opacity: 1.0,
+                    ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                },
+                i18n.t("sidebar.host_packages.actions.copy_id"),
+                "host-package-copy-id",
+                true,
+                cx.listener(move |host_tools, _event, _window, cx| {
+                    host_tools.copy_host_package_id(copy_package_id.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            ))
             .child(host_tools_tooltip_icon_button(
                 tokens,
                 LucideIcon::Copy,
@@ -667,6 +731,66 @@ impl HostToolsEntity {
                     cx.stop_propagation();
                 }),
             ))
+            .when(can_uninstall, |actions| {
+                actions.child(host_tools_tooltip_icon_button(
+                    tokens,
+                    LucideIcon::Trash2,
+                    12.0,
+                    rgb(MONITOR_RED),
+                    oxideterm_gpui_ui::button::IconButtonOptions {
+                        size: 22.0,
+                        has_background: true,
+                        background: Some(rgba((MONITOR_RED << 8) | MONITOR_TINT_ALPHA)),
+                        hover_background: Some(rgba((MONITOR_RED << 8) | 0x30)),
+                        idle_opacity: 1.0,
+                        ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                    },
+                    i18n.t("sidebar.host_packages.actions.uninstall"),
+                    "host-package-row-uninstall",
+                    true,
+                    cx.listener({
+                        let request = uninstall_request.clone();
+                        move |host_tools, _event, _window, cx| {
+                            host_tools.open_package_uninstall_confirm(request.clone(), cx);
+                            cx.stop_propagation();
+                        }
+                    }),
+                ))
+            })
+            .when(can_upgrade, |actions| {
+                actions.child(host_tools_tooltip_icon_button(
+                    tokens,
+                    LucideIcon::Download,
+                    12.0,
+                    rgb(theme.text),
+                    oxideterm_gpui_ui::button::IconButtonOptions {
+                        size: 22.0,
+                        has_background: true,
+                        background: Some(rgb(theme.bg_hover)),
+                        hover_background: Some(rgb(theme.bg_panel)),
+                        idle_opacity: 1.0,
+                        ..oxideterm_gpui_ui::button::IconButtonOptions::compact(22.0)
+                    },
+                    i18n.t("sidebar.host_packages.actions.upgrade"),
+                    "host-package-row-upgrade",
+                    true,
+                    cx.listener({
+                        move |host_tools, _event, window, cx| {
+                            host_tools.dispatch_host_package_upgrade_terminal(
+                                upgrade_connection_id.clone(),
+                                upgrade_manager.clone(),
+                                upgrade_package_id.clone(),
+                                upgrade_title.clone(),
+                                upgrade_opened_notice.clone(),
+                                upgrade_missing_notice.clone(),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }
+                    }),
+                ))
+            })
             .child(host_tools_tooltip_icon_button(
                 tokens,
                 LucideIcon::Terminal,
@@ -787,12 +911,20 @@ impl HostToolsEntity {
     }
 
     fn sync_host_package_list_state(&self, rows: &[ResourcePackageEntry], selected_id: &str) {
-        let signatures = rows.iter().map(package_row_signature).collect::<Vec<_>>();
+        let expanded = self.package_expanded_index();
+        let signatures = rows
+            .iter()
+            .enumerate()
+            .map(|(index, row)| {
+                expandable_row_signature(package_row_signature(row), expanded == Some(index))
+            })
+            .collect::<Vec<_>>();
+        // Expansion changes one row's height, so it stays out of the identity:
+        // a new identity resets the list and drops the user's scroll offset.
         let identity = format!(
-            "host-packages:{selected_id}:{}:{}:{}",
+            "host-packages:{selected_id}:{}:{}",
             self.ui.host_package_search_query,
-            self.package_filter() as u8,
-            self.package_expanded_index().unwrap_or(usize::MAX)
+            self.package_filter() as u8
         );
         self.sync_package_list_signatures(&identity, &signatures);
     }
@@ -820,11 +952,189 @@ impl HostToolsEntity {
         }
     }
 
+    fn open_package_uninstall_confirm(
+        &mut self,
+        request: HostPackageUninstallRequest,
+        cx: &mut Context<Self>,
+    ) {
+        HostToolConfirmState::open(&mut self.host_packages.pending_confirm, request);
+        cx.notify();
+    }
+
+    pub(in crate::workspace::connection_monitor) fn package_confirm_view(
+        &self,
+    ) -> Option<(
+        HostPackageUninstallRequest,
+        oxideterm_gpui_ui::motion::ExitPhase,
+    )> {
+        self.host_packages
+            .pending_confirm
+            .as_ref()
+            .map(|state| (state.request.clone(), state.presence.phase()))
+    }
+
+    pub(in crate::workspace) fn package_confirm_is_open(&self) -> bool {
+        self.host_packages.pending_confirm.is_some()
+    }
+
+    /// Keeps the request mounted until the current exit generation completes.
+    pub(super) fn begin_package_confirm_exit(
+        &mut self,
+        delay: Duration,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(generation) = self
+            .host_packages
+            .pending_confirm
+            .as_mut()
+            .and_then(|state| state.presence.begin_exit())
+        else {
+            return false;
+        };
+        if delay.is_zero() {
+            self.host_packages.pending_confirm = None;
+            cx.notify();
+            return true;
+        }
+        cx.spawn(async move |weak, cx| {
+            Timer::after(delay).await;
+            let _ = weak.update(cx, |entity, cx| {
+                if entity
+                    .host_packages
+                    .pending_confirm
+                    .as_ref()
+                    .is_some_and(|state| state.presence.finish_exit(generation))
+                {
+                    entity.host_packages.pending_confirm = None;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+        true
+    }
+
+    /// The confirmed request moves into the same one-shot terminal boundary the
+    /// update action uses, so the progress output stays visible to the user.
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_host_package_uninstall_terminal(
+        &mut self,
+        request: HostPackageUninstallRequest,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(os_type) = self.connection_os_type(&request.connection_id) else {
+            cx.emit(HostToolsEvent::ShowNotice(
+                HostToolsNotice::PackageUninstallUnsupported {
+                    manager: host_package_blank_dash(&request.manager),
+                },
+            ));
+            return;
+        };
+        let command = match build_package_uninstall_command(
+            &os_type,
+            &request.manager,
+            &request.package_id,
+        ) {
+            Ok(command) => command.command,
+            Err(_) => {
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::PackageUninstallUnsupported {
+                        manager: host_package_blank_dash(&request.manager),
+                    },
+                ));
+                return;
+            }
+        };
+        self.open_host_package_terminal(
+            request.connection_id,
+            command,
+            title,
+            opened_notice,
+            missing_notice,
+            window,
+            cx,
+        );
+    }
+
+    fn copy_host_package_id(&mut self, package_id: String, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(package_id.clone()));
+        cx.emit(HostToolsEvent::ShowNotice(
+            HostToolsNotice::PackageIdCopied { package_id },
+        ));
+    }
+
     fn copy_host_package_name(&mut self, package_name: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(ClipboardItem::new_string(package_name.clone()));
         cx.emit(HostToolsEvent::ShowNotice(
             HostToolsNotice::PackageNameCopied { package_name },
         ));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn dispatch_host_package_upgrade_terminal(
+        &mut self,
+        connection_id: String,
+        manager: String,
+        package_id: String,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let os_type = self
+            .connection_os_type(&connection_id)
+            .unwrap_or_else(|| "Unknown".to_string());
+        let command = match build_package_upgrade_command(&os_type, &manager, &package_id) {
+            Ok(command) => command.command,
+            Err(_) => {
+                cx.emit(HostToolsEvent::ShowNotice(
+                    HostToolsNotice::PackageUpgradeUnsupported { manager },
+                ));
+                return;
+            }
+        };
+        self.open_host_package_terminal(
+            connection_id,
+            command,
+            title,
+            opened_notice,
+            missing_notice,
+            window,
+            cx,
+        );
+    }
+
+    /// The fixed package command moves into the shared one-shot terminal
+    /// boundary, the same route the details action uses.
+    #[allow(clippy::too_many_arguments)]
+    fn open_host_package_terminal(
+        &mut self,
+        connection_id: String,
+        command: String,
+        title: String,
+        opened_notice: String,
+        missing_notice: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        window.dispatch_action(
+            Box::new(HostToolsWindowRequest::new(
+                HostToolsWindowIntent::OpenExistingNodeTerminal {
+                    connection_id,
+                    command,
+                    title,
+                    opened_notice,
+                    missing_notice,
+                },
+            )),
+            cx,
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -850,17 +1160,13 @@ impl HostToolsEntity {
                 return;
             }
         };
-        // The fixed inspect command moves into the shared one-shot terminal boundary.
-        window.dispatch_action(
-            Box::new(HostToolsWindowRequest::new(
-                HostToolsWindowIntent::OpenExistingNodeTerminal {
-                    connection_id,
-                    command,
-                    title,
-                    opened_notice,
-                    missing_notice,
-                },
-            )),
+        self.open_host_package_terminal(
+            connection_id,
+            command,
+            title,
+            opened_notice,
+            missing_notice,
+            window,
             cx,
         );
     }
@@ -1062,6 +1368,9 @@ impl HostToolsEntity {
         self.host_packages.running = None;
         match delivery.result {
             Ok(mut output) if output.exit_code.unwrap_or(0) == 0 => {
+                // The error-marker payload quotes raw host output, which can
+                // carry credentials; only the request's fallback copy may
+                // reach renderable state.
                 let mut snapshot = parse_package_snapshot(&output.stdout);
                 if matches!(&snapshot.status, ResourcePackageStatus::Error { .. }) {
                     snapshot.status = ResourcePackageStatus::Error {
@@ -1125,6 +1434,19 @@ impl HostToolsEntity {
                     ));
                 }
             }
+        }
+        // A manager filter only exists while the host reports that manager;
+        // otherwise the list would be empty with no chip to switch back.
+        let filter_manager = package_filter_manager(self.host_packages.filter);
+        let manager_present = filter_manager.is_some_and(|manager| {
+            self.host_packages
+                .snapshot
+                .as_ref()
+                .is_some_and(|snapshot| snapshot.managers.iter().any(|entry| entry.name == manager))
+        });
+        if filter_manager.is_some() && !manager_present {
+            self.host_packages.filter = PackageFilter::All;
+            self.host_packages.expanded_index = None;
         }
         cx.notify();
     }
@@ -1197,6 +1519,118 @@ fn host_package_meta_label(
         host_package_blank_dash(repo_or_arch),
         host_package_service_label(entry)
     )
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn handle_host_package_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.host_tools.read(cx).package_confirm_is_open() {
+            return false;
+        }
+        match self.handle_standard_confirm_key(event, cx) {
+            Some(ConfirmKeyboardAction::Cancel) => {
+                self.dismiss_host_package_confirm(cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Confirm) => {
+                self.confirm_host_package_uninstall(window, cx);
+                true
+            }
+            Some(ConfirmKeyboardAction::Handled) => true,
+            None => false,
+        }
+    }
+
+    pub(in crate::workspace) fn render_host_package_confirm_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let (request, phase) = self.host_tools.read(cx).package_confirm_view()?;
+        let tokens = self.tokens;
+        let i18n = &self.i18n;
+        let focused_action = self.standard_confirm_focus();
+        let description = i18n
+            .t("sidebar.host_packages.confirm.uninstall_description")
+            .replace("{{name}}", &request.package_name);
+        let view = ConfirmDialogView {
+            variant: ConfirmDialogVariant::Default,
+            title: div()
+                .child(i18n.t("sidebar.host_packages.confirm.uninstall_title"))
+                .into_any_element(),
+            description: Some(div().child(description).into_any_element()),
+            cancel_label: div().child(i18n.t("common.cancel")).into_any_element(),
+            confirm_label: div()
+                .child(i18n.t("sidebar.host_packages.confirm.uninstall"))
+                .into_any_element(),
+        };
+        Some(
+            oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
+                &tokens,
+                "host-package-confirm-motion",
+                phase,
+                view,
+                focused_action,
+                cx.listener(move |workspace, _event, _window, cx| {
+                    workspace.dismiss_host_package_confirm(cx);
+                }),
+                cx.listener(move |workspace, _event, window, cx| {
+                    workspace.confirm_host_package_uninstall(window, cx);
+                }),
+            )
+            .into_any_element(),
+        )
+    }
+
+    fn dismiss_host_package_confirm(&mut self, cx: &mut Context<Self>) {
+        self.clear_standard_confirm_focus();
+        let exit_delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.begin_package_confirm_exit(exit_delay, cx);
+        });
+    }
+
+    fn confirm_host_package_uninstall(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.clear_standard_confirm_focus();
+        let Some((request, _)) = self.host_tools.read(cx).package_confirm_view() else {
+            return;
+        };
+        let exit_delay = oxideterm_gpui_ui::motion::duration(
+            &self.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        );
+        let title = format!(
+            "{}: {}",
+            self.i18n.t("sidebar.host_packages.actions.uninstall"),
+            request.package_name
+        );
+        let opened_notice = self
+            .i18n
+            .t("sidebar.host_packages.toast.uninstall_opened")
+            .replace("{{name}}", &request.package_name);
+        let missing_notice = self
+            .i18n
+            .t("sidebar.host_packages.toast.exec_terminal_missing");
+        self.host_tools.update(cx, |host_tools, cx| {
+            if !host_tools.begin_package_confirm_exit(exit_delay, cx) {
+                return;
+            }
+            host_tools.dispatch_host_package_uninstall_terminal(
+                request,
+                title,
+                opened_notice,
+                missing_notice,
+                window,
+                cx,
+            );
+        });
+    }
 }
 
 #[cfg(test)]

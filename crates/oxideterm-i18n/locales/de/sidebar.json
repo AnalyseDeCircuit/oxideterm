@@ -71,9 +71,9 @@
       "processes": "Prozesse",
       "services": "Dienste",
       "logs": "Protokolle",
-      "tmux": "tmux",
+      "tmux": "Terminal-Multiplexer",
       "docker": "Docker",
-      "tmux_management": "tmux-Verwaltung",
+      "tmux_management": "Terminal-Multiplexer",
       "docker_management": "Docker-Verwaltung",
       "session_manager": "Sitzungsmanager",
       "open_session_manager": "Sitzungsmanager öffnen",
@@ -105,6 +105,9 @@
     "active_session_count": "Aktive Sitzungen: {{count}}",
     "no_sessions": "Keine Sitzungen",
     "add_new_connection": "Klicken Sie + um eine neue Verbindung hinzuzufügen",
+    "host_connection": {
+      "local_machine": "Dieser Rechner"
+    },
     "host_gpu": {
       "count_suffix": "Beschleuniger",
       "refresh_interval": "Aktualisierung alle 2 Sekunden",
@@ -364,8 +367,20 @@
         "unknown_error": "Unbekannter Fehler"
       }
     },
+    "multiplexer": {
+      "refresh": "Sitzungen aktualisieren",
+      "open": "Terminal öffnen",
+      "focus": "Fokussieren",
+      "new_workspace": "Neuer Arbeitsbereich",
+      "new_tab": "Neuer Tab",
+      "split": "Bereich teilen",
+      "loading": "Wird geladen…",
+      "empty": "Keine passenden Sitzungen",
+      "unavailable": "Dieser Multiplexer ist auf dem gewählten Host nicht installiert.",
+      "failed": "Befehl fehlgeschlagen. Bitte Version und Sitzungsstatus prüfen."
+    },
     "host_tmux": {
-      "search_placeholder": "tmux suchen...",
+      "search_placeholder": "Sitzungen suchen…",
       "count_suffix": "Sitzungen",
       "loading": "tmux-Sitzungen werden geladen...",
       "empty": "Keine passenden tmux-Sitzungen",
@@ -584,6 +599,8 @@
       "actions": {
         "refresh": "Ports aktualisieren",
         "diagnostic": "Diagnose-Terminal öffnen",
+        "kill_process": "Prozess beenden",
+        "copy_kill_command": "Beenden-Befehl kopieren",
         "copy_endpoint": "Adresse kopieren",
         "jump_process": "Prozess finden"
       },
@@ -597,6 +614,7 @@
         "exec_terminal_missing": "Keine aktive SSH-Terminalroute für Diagnosen verfügbar.",
         "diagnostic_opened": "Port-Diagnose geöffnet.",
         "copied_endpoint": "{{endpoint}} kopiert.",
+        "kill_command_copied": "Kopiert: {{command}}",
         "partial_support": "Port-Prüfung wird unter {{os}} nur teilweise unterstützt.",
         "unknown_error": "Unbekannter Port-Scan-Fehler."
       }
@@ -707,7 +725,8 @@
         "dnf": "dnf",
         "yum": "yum",
         "pacman": "pacman",
-        "brew": "Homebrew"
+        "brew": "Homebrew",
+        "winget": "winget"
       },
       "columns": {
         "package": "Paket",
@@ -729,8 +748,16 @@
       },
       "actions": {
         "refresh": "Pakete aktualisieren",
+        "uninstall": "Paket deinstallieren",
+        "upgrade": "Paket aktualisieren",
         "inspect": "Paketdetails öffnen",
+        "copy_id": "Paket-ID kopieren",
         "copy_name": "Paketnamen kopieren"
+      },
+      "confirm": {
+        "uninstall_title": "Paket deinstallieren",
+        "uninstall_description": "{{name}} deinstallieren? winget entfernt es von diesem Host.",
+        "uninstall": "Deinstallieren"
       },
       "inspect_title": "Paketdetails",
       "toast": {
@@ -743,6 +770,11 @@
         "inspect_unsupported": "Paketdetails werden für {{manager}} noch nicht unterstützt.",
         "inspect_opened": "Details für {{name}} geöffnet.",
         "copied_name": "{{name}} kopiert.",
+        "copied_id": "{{id}} kopiert.",
+        "uninstall_opened": "{{name}} wird in einem Terminal deinstalliert.",
+        "uninstall_unsupported": "Deinstallieren über {{manager}} wird nicht unterstützt.",
+        "upgrade_opened": "{{name}} wird aktualisiert.",
+        "upgrade_unsupported": "Das Aktualisieren von {{manager}}-Paketen wird noch nicht unterstützt.",
         "partial_support": "Paketprüfung ist auf {{os}} nur lesend unterstützt.",
         "unknown_error": "Unbekannter Paket-Scan-Fehler."
       }

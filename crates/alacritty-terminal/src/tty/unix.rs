@@ -225,6 +225,9 @@ pub fn from_fd(config: &Options, window_id: u64, master: OwnedFd, slave: OwnedFd
     // Prevent child processes from inheriting linux-specific startup notification env.
     builder.env_remove("XDG_ACTIVATION_TOKEN");
     builder.env_remove("DESKTOP_STARTUP_ID");
+    for key in &config.env_remove {
+        builder.env_remove(key);
+    }
 
     let working_directory = config
         .working_directory

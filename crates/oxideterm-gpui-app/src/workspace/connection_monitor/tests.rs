@@ -14,6 +14,7 @@ fn connection_options(count: usize) -> Vec<MonitorConnectionOption> {
             host: format!("host-{index}"),
             port: 22,
             username: "user".to_string(),
+            label: None,
         })
         .collect()
 }

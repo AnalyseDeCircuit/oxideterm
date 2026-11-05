@@ -17,6 +17,8 @@ use super::{
 };
 
 pub const GPU_SAMPLE_INTERVAL: Duration = Duration::from_secs(2);
+// A Windows sample runs the vendor query once (nvidia-smi is typically one to
+// two seconds); the timeout only bounds hung reads.
 pub const GPU_SAMPLE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const GPU_CHANNEL_OPEN_TIMEOUT: Duration = Duration::from_secs(10);
 // Multi-accelerator hosts can return sizeable per-process and per-tile data,
@@ -119,15 +121,22 @@ async fn sample_loop(
                 break;
             }
             _ = interval.tick() => {
-                match shell
-                    .sample_until(
+                // A provider read can take most of the sample timeout, so stop
+                // must close the shell without waiting for it.
+                let sampled = tokio::select! {
+                    biased;
+                    _ = &mut stop_rx => {
+                        let _ = shell.close().await;
+                        break;
+                    }
+                    sampled = shell.sample_until(
                         &command,
                         GPU_END_MARKER,
                         GPU_SAMPLE_TIMEOUT,
                         GPU_MAX_OUTPUT_SIZE,
-                    )
-                    .await
-                {
+                    ) => sampled,
+                };
+                match sampled {
                     Ok(output) => {
                         let snapshot = parse_gpu_snapshot(&output, now_ms());
                         let sampling_complete = matches!(

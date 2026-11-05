@@ -564,7 +564,11 @@ fn build_unix_tmux_snapshot_command() -> String {
             "oxide_tmux_sessions=$(tmux list-sessions -F {session_format} 2>&1); ",
             "oxide_tmux_status=$?; ",
             "if [ \"$oxide_tmux_status\" -ne 0 ]; then ",
-            "if printf '%s' \"$oxide_tmux_sessions\" | grep -qi 'no server running'; then :; ",
+            // Newer tmux reports a missing server as "error connecting to
+            // <socket> (No such file or directory)" instead of the older
+            // "no server running"; both mean no tmux server exists, the same
+            // state a missing binary reports.
+            "if printf '%s' \"$oxide_tmux_sessions\" | grep -Eqi 'no server running|error connecting to .*no such file or directory'; then echo '__OXIDE_TMUX_UNAVAILABLE__'; ",
             "else printf '__OXIDE_TMUX_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_tmux_sessions\" | head -n 1 | tr '\\t' ' ')\"; fi; ",
             "else ",
             "printf '%s\\n' \"$oxide_tmux_sessions\"; ",
@@ -599,7 +603,8 @@ fn build_windows_tmux_snapshot_command() -> String {
         "$sessions=& tmux list-sessions -F $sf 2>&1;",
         "if($LASTEXITCODE -ne 0){",
         "$msg=($sessions|Select-Object -First 1);",
-        "if(([string]$msg) -notmatch 'no server running'){Write-Output ('__OXIDE_TMUX_ERROR__'+[char]9+$msg)}",
+        // Same missing-server classification as the POSIX branch above.
+        "if(([string]$msg) -notmatch 'no server running|error connecting to .*no such file or directory'){Write-Output ('__OXIDE_TMUX_ERROR__'+[char]9+$msg)}else{Write-Output '__OXIDE_TMUX_UNAVAILABLE__'}",
         "}else{",
         "$sessions|ForEach-Object{Write-Output $_};",
         "$windows=& tmux list-windows -a -F $wf 2>&1;",
@@ -1121,6 +1126,68 @@ mod tests {
         assert!(rename.command.contains("'work''s'"));
         assert!(send.command.contains("tmux send-keys -t '%1' -l --"));
         assert!(send.command.contains("tmux send-keys -t '%1' Enter"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn missing_tmux_server_is_reported_as_unavailable() {
+        // The generated line runs `/bin/sh -c`, so a shell-function fixture
+        // would not be visible inside it; a stub on PATH reaches both shells.
+        let stub_dir = std::env::temp_dir().join(format!("oxide-tmux-stub-{}", std::process::id()));
+        std::fs::create_dir_all(&stub_dir).unwrap();
+        let stub = stub_dir.join("tmux");
+        std::fs::write(
+            &stub,
+            "#!/bin/sh\n\
+             if [ \"$1\" = -V ]; then echo 'tmux 3.2a'; exit 0; fi\n\
+             if [ \"$TMUX_STUB\" = permission ]; then \
+             echo 'error connecting to /tmp/tmux-9001/default (Permission denied)' >&2; exit 1; fi\n\
+             if [ \"$TMUX_STUB\" = socket ]; then \
+             echo 'error connecting to /tmp/tmux-9001/default (No such file or directory)' >&2; exit 1; fi\n\
+             echo 'no server running on /tmp/tmux-9001/default' >&2\n\
+             exit 1\n",
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let command = build_tmux_snapshot_command("Linux");
+        let run = |mode: &str| {
+            let output = std::process::Command::new("sh")
+                .args(["-c", &command.command])
+                .env("TMUX_STUB", mode)
+                .env(
+                    "PATH",
+                    format!(
+                        "{}:{}",
+                        stub_dir.display(),
+                        std::env::var_os("PATH")
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                    ),
+                )
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{mode}: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            parse_tmux_snapshot(&String::from_utf8(output.stdout).unwrap())
+        };
+
+        for mode in ["socket", "noserver"] {
+            assert!(
+                matches!(run(mode).status, ResourceTmuxStatus::Unavailable),
+                "{mode}"
+            );
+        }
+        assert!(matches!(
+            run("permission").status,
+            ResourceTmuxStatus::Error { .. }
+        ));
+
+        let _ = std::fs::remove_dir_all(&stub_dir);
     }
 
     #[test]

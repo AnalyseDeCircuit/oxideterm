@@ -100,7 +100,7 @@ pub fn build_port_snapshot_command(os_type: &str) -> PortCaptureCommand {
 pub fn build_port_diagnostic_command(os_type: &str) -> String {
     match port_os(os_type) {
         PortOs::Windows => concat!(
-            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;",
             "Get-NetTCPConnection | Sort-Object LocalPort | Format-Table -AutoSize; ",
             "Get-NetUDPEndpoint | Sort-Object LocalPort | Format-Table -AutoSize",
             "\""
@@ -322,16 +322,19 @@ fn build_bsd_port_snapshot_command() -> String {
 
 fn build_windows_port_snapshot_command() -> String {
     concat!(
-        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"",
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command \"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8;$OutputEncoding=[System.Text.Encoding]::UTF8;",
         "Write-Output '===PORTS===';",
         "Write-Output ('__OXIDE_PORT_CAPABILITY__'+[char]9+'partial'+[char]9+'windows_powershell');",
         "try{",
+        // A process lookup per socket costs a Get-Process call per row and
+        // dominates the scan; one table answers every row.
+        "$names=@{};Get-Process -ErrorAction SilentlyContinue|ForEach-Object{$names[[string]$_.Id]=[string]$_.ProcessName};",
         "Get-NetTCPConnection|ForEach-Object{",
-        "$p='';$n='';try{if($_.OwningProcess){$pr=Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue;$p=[string]$_.OwningProcess;$n=[string]$pr.ProcessName}}catch{};",
+        "$p=if($_.OwningProcess){[string]$_.OwningProcess}else{''};$n=if($p){[string]$names[$p]}else{''};",
         "Write-Output ('WIN'+[char]9+'tcp'+[char]9+$_.LocalAddress+[char]9+$_.LocalPort+[char]9+$_.RemoteAddress+[char]9+$_.RemotePort+[char]9+$_.State+[char]9+$p+[char]9+$n)",
         "};",
         "Get-NetUDPEndpoint|ForEach-Object{",
-        "$p='';$n='';try{if($_.OwningProcess){$pr=Get-Process -Id $_.OwningProcess -ErrorAction SilentlyContinue;$p=[string]$_.OwningProcess;$n=[string]$pr.ProcessName}}catch{};",
+        "$p=if($_.OwningProcess){[string]$_.OwningProcess}else{''};$n=if($p){[string]$names[$p]}else{''};",
         "Write-Output ('WIN'+[char]9+'udp'+[char]9+$_.LocalAddress+[char]9+$_.LocalPort+[char]9+''+[char]9+''+[char]9+'Open'+[char]9+$p+[char]9+$n)",
         "}",
         "}catch{Write-Output ('__OXIDE_PORT_ERROR__'+[char]9+$_.Exception.Message)};",
