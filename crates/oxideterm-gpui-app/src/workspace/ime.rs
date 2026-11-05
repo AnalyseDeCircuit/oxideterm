@@ -148,6 +148,7 @@ pub(super) enum WorkspaceImeTarget {
     HostLogSearch,
     HostTmuxSearch,
     HostTmuxDialogInput,
+    HostMuxDialog,
     HostPortSearch,
     HostScheduleSearch,
     HostFilesystemSearch,
@@ -383,7 +384,7 @@ impl HostToolsPlainTextImeFrame {
         marked_text: Option<String>,
         anchor_store: TextInputAnchorStore,
     ) -> Option<Self> {
-        // Tmux dialog commands may contain secrets and must stay on their
+        // Dialog commands may contain secrets and must stay on their
         // zeroizing workspace-owned input path.
         let target = workspace_ime_target_for_plain_host_tools_input(input)?;
         Some(Self {
@@ -433,6 +434,9 @@ pub(super) fn workspace_ime_target_for_plain_host_tools_input(
         HostToolsTextInput::LogSearch => Some(WorkspaceImeTarget::HostLogSearch),
         HostToolsTextInput::TmuxSearch => Some(WorkspaceImeTarget::HostTmuxSearch),
         HostToolsTextInput::TmuxDialog => None,
+        // The shared multiplexer search reuses the tmux frame; the mux dialog
+        // carries user-authored text and never crosses the plain-text boundary.
+        HostToolsTextInput::MuxDialog => None,
         HostToolsTextInput::PortSearch => Some(WorkspaceImeTarget::HostPortSearch),
         HostToolsTextInput::ScheduleSearch => Some(WorkspaceImeTarget::HostScheduleSearch),
         HostToolsTextInput::FilesystemSearch => Some(WorkspaceImeTarget::HostFilesystemSearch),
@@ -545,6 +549,7 @@ impl WorkspaceImeTarget {
             Self::HostLogSearch => 10,
             Self::HostTmuxSearch => 11,
             Self::HostTmuxDialogInput => 12,
+            Self::HostMuxDialog => 28,
             Self::HostPortSearch => 13,
             Self::HostScheduleSearch => 14,
             Self::HostFilesystemSearch => 15,
@@ -913,20 +918,28 @@ impl InputHandler for WorkspaceInputHandler {
                     .rendered_viewport(target.anchor_id()),
             };
             if let Some(viewport) = viewport {
-                let visible_text = view.ime_text_with_marked_text_for_target(target, cx)?;
-                let secret = ime_target_is_secret(target);
-                let visual_offset = text_input_visual_range(
-                    &visible_text,
-                    secret,
-                    range_utf16.end..range_utf16.end,
-                )
-                .end;
-                let display = if secret {
-                    text_input_secret_mask(&visible_text)
-                } else {
-                    visible_text
+                let byte_index = match view.ime_rendered_geometry_text(target, cx) {
+                    // The rectangle must be measured on the bytes this
+                    // viewport painted, and these dialog inputs paint their
+                    // plaintext draft.
+                    Some(draft) => byte_index_for_utf16(draft.as_str(), range_utf16.end),
+                    None => {
+                        let visible_text = view.ime_text_with_marked_text_for_target(target, cx)?;
+                        let secret = ime_geometry_uses_secret_mask(target);
+                        let visual_offset = text_input_visual_range(
+                            &visible_text,
+                            secret,
+                            range_utf16.end..range_utf16.end,
+                        )
+                        .end;
+                        let display = if secret {
+                            text_input_secret_mask(&visible_text)
+                        } else {
+                            visible_text
+                        };
+                        byte_index_for_utf16(&display, visual_offset)
+                    }
                 };
-                let byte_index = byte_index_for_utf16(&display, visual_offset);
                 if let Some(caret_bounds) = viewport.caret_bounds_for_byte_index(
                     byte_index,
                     px(view.tokens.metrics.form_caret_width),
@@ -1287,6 +1300,7 @@ impl WorkspaceApp {
                 HostToolsTextInput::LogSearch => WorkspaceImeTarget::HostLogSearch,
                 HostToolsTextInput::TmuxSearch => WorkspaceImeTarget::HostTmuxSearch,
                 HostToolsTextInput::TmuxDialog => WorkspaceImeTarget::HostTmuxDialogInput,
+                HostToolsTextInput::MuxDialog => WorkspaceImeTarget::HostMuxDialog,
                 HostToolsTextInput::PortSearch => WorkspaceImeTarget::HostPortSearch,
                 HostToolsTextInput::ScheduleSearch => WorkspaceImeTarget::HostScheduleSearch,
                 HostToolsTextInput::FilesystemSearch => WorkspaceImeTarget::HostFilesystemSearch,
@@ -1852,10 +1866,20 @@ impl WorkspaceApp {
         };
         if let Some(viewport) = viewport {
             if let Some(byte_index) = viewport.byte_index_for_position(position) {
+                // The viewport answered in the bytes it painted, so a
+                // plaintext-rendered dialog input maps the click through its
+                // draft; an owner that paints the mask measures its
+                // projection instead.
+                if let Some(draft) = self.ime_rendered_geometry_text(target, cx) {
+                    return Some(utf16_offset_for_byte_index(
+                        draft.as_str(),
+                        byte_index.min(draft.len()),
+                    ));
+                }
                 let visible_text = self
                     .ime_text_with_marked_text_for_target(target, cx)
                     .unwrap_or_else(|| text.clone());
-                if ime_target_is_secret(target) {
+                if ime_geometry_uses_secret_mask(target) {
                     let display = text_input_secret_mask(&visible_text);
                     let count = display
                         [..floor_char_boundary(&display, byte_index.min(display.len()))]
@@ -2080,6 +2104,32 @@ impl WorkspaceApp {
         // placement follows the visible value.
         let centered_text_left = content_left + (content_width - text_width).max(px(0.0)) * 0.5;
         position_x - centered_text_left
+    }
+
+    /// The bytes the target's input painted into its viewport, in the same
+    /// UTF-16 coordinates the platform uses. A dialog input borrows its draft
+    /// from its zeroizing owner only to measure caret and candidate geometry:
+    /// nothing here is handed to the platform, whose frame keeps receiving the
+    /// projected mask.
+    fn ime_rendered_geometry_text(
+        &self,
+        target: WorkspaceImeTarget,
+        cx: &App,
+    ) -> Option<Zeroizing<String>> {
+        let input = host_tools_dialog_input(target)?;
+        let value = {
+            let host_tools = self.host_tools.read(cx);
+            host_tools.ui.input_value(input)?.to_owned()
+        };
+        let mut text = Zeroizing::new(value);
+        if let Some(marked) = self.marked_text_state_for_target(target, cx) {
+            replace_utf16(
+                &mut text,
+                Some(marked.replacement_range.clone()),
+                marked.text.as_str(),
+            );
+        }
+        Some(text)
     }
 
     /// Builds the virtual text buffer seen by the platform while an IME
@@ -2344,6 +2394,12 @@ impl WorkspaceApp {
                 .read(cx)
                 .ui
                 .input_value(HostToolsTextInput::TmuxDialog)
+                .map(|value| ime_text_snapshot(target, value)),
+            WorkspaceImeTarget::HostMuxDialog => self
+                .host_tools
+                .read(cx)
+                .ui
+                .input_value(HostToolsTextInput::MuxDialog)
                 .map(|value| ime_text_snapshot(target, value)),
             WorkspaceImeTarget::HostPortSearch => self
                 .host_tools
@@ -3359,6 +3415,14 @@ impl WorkspaceApp {
                     cx,
                 );
             }
+            WorkspaceImeTarget::HostMuxDialog => {
+                self.replace_host_tools_text_input(
+                    HostToolsTextInput::MuxDialog,
+                    replacement_range,
+                    text,
+                    cx,
+                );
+            }
             WorkspaceImeTarget::HostPortSearch => {
                 self.replace_host_tools_text_input(
                     HostToolsTextInput::PortSearch,
@@ -3945,12 +4009,32 @@ fn ime_target_is_secret(target: WorkspaceImeTarget) -> bool {
                 | NewConnectionField::JumpPassphrase
         ) | WorkspaceImeTarget::KeyboardInteractive(_)
             | WorkspaceImeTarget::HostTmuxDialogInput
+            | WorkspaceImeTarget::HostMuxDialog
     ) || matches!(target, WorkspaceImeTarget::Settings(input) if input.is_secret())
         || matches!(target, WorkspaceImeTarget::SessionManager(input) if input.is_secret())
         || matches!(
             target,
             WorkspaceImeTarget::PluginControl { secret: true, .. }
         )
+}
+
+/// The Host Tools dialog inputs hold user-authored command text, so they stay
+/// secret-classified and never cross the plain-text IME frame. Their renderers
+/// still paint the draft itself, which is why geometry may not use the mask.
+fn host_tools_dialog_input(target: WorkspaceImeTarget) -> Option<HostToolsTextInput> {
+    match target {
+        WorkspaceImeTarget::HostTmuxDialogInput => Some(HostToolsTextInput::TmuxDialog),
+        WorkspaceImeTarget::HostMuxDialog => Some(HostToolsTextInput::MuxDialog),
+        _ => None,
+    }
+}
+
+/// Whether a target's caret geometry is measured against a mask instead of the
+/// text itself. Credential owners paint the mask, so the two bases coincide
+/// there; only the dialog inputs above paint plaintext from a secret-classified
+/// draft and therefore leave the masked basis.
+fn ime_geometry_uses_secret_mask(target: WorkspaceImeTarget) -> bool {
+    ime_target_is_secret(target) && host_tools_dialog_input(target).is_none()
 }
 
 fn ime_target_should_blink_caret(target: WorkspaceImeTarget) -> bool {
@@ -4234,11 +4318,12 @@ mod tests {
         TextInputAnchorStore, WorkspaceCaretState, WorkspaceCaretVisibility,
         WorkspaceImeMarkedText, WorkspaceImeTarget, active_ime_should_defer_input_key,
         copy_shortcut_owner_for_target, effective_platform_text_replacement_range,
-        ime_target_is_secret, ime_text_snapshot, keystroke_platform_text,
-        keystroke_uses_text_edit_modifier, multiline_ime_line_ranges,
-        normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
-        platform_text_commit_is_duplicate, secret_ime_proxy, soft_wrapped_line_ranges_utf16,
-        utf16_offset_for_char_index, workspace_ime_target_for_plain_host_tools_input,
+        host_tools_dialog_input, ime_geometry_uses_secret_mask, ime_target_is_secret,
+        ime_text_snapshot, keystroke_platform_text, keystroke_uses_text_edit_modifier,
+        multiline_ime_line_ranges, normalize_clipboard_text_for_ime_target,
+        path_completion_owns_vertical_navigation, platform_text_commit_is_duplicate,
+        secret_ime_proxy, soft_wrapped_line_ranges_utf16, utf16_offset_for_char_index,
+        workspace_ime_target_for_plain_host_tools_input,
     };
 
     #[test]
@@ -4469,26 +4554,28 @@ mod tests {
     }
 
     #[test]
-    fn plain_host_tools_ime_frame_rejects_secret_tmux_dialog_input() {
+    fn plain_host_tools_ime_frame_rejects_secret_dialog_inputs() {
         assert_eq!(
             workspace_ime_target_for_plain_host_tools_input(HostToolsTextInput::ProcessRenice),
             Some(WorkspaceImeTarget::HostProcessRenice)
         );
-        assert_eq!(
-            workspace_ime_target_for_plain_host_tools_input(HostToolsTextInput::TmuxDialog),
-            None
-        );
-        assert!(
-            HostToolsPlainTextImeFrame::new(
-                HostToolsTextInput::TmuxDialog,
-                true,
-                None,
-                None,
-                None,
-                TextInputAnchorStore::default(),
-            )
-            .is_none()
-        );
+        for input in [
+            HostToolsTextInput::TmuxDialog,
+            HostToolsTextInput::MuxDialog,
+        ] {
+            assert_eq!(workspace_ime_target_for_plain_host_tools_input(input), None);
+            assert!(
+                HostToolsPlainTextImeFrame::new(
+                    input,
+                    true,
+                    None,
+                    None,
+                    None,
+                    TextInputAnchorStore::default(),
+                )
+                .is_none()
+            );
+        }
     }
 
     #[test]
@@ -4629,6 +4716,38 @@ mod tests {
             ime_text_snapshot(WorkspaceImeTarget::TerminalCwdSearch, secret),
             secret
         );
+    }
+
+    #[test]
+    fn plaintext_dialog_inputs_stay_secret_but_measure_the_rendered_draft() {
+        // The dialog drafts keep the secret classification that keeps them out
+        // of plain-text frames, yet they paint plaintext, so only their
+        // platform projection — never their geometry — is masked.
+        for (target, input) in [
+            (
+                WorkspaceImeTarget::HostTmuxDialogInput,
+                HostToolsTextInput::TmuxDialog,
+            ),
+            (
+                WorkspaceImeTarget::HostMuxDialog,
+                HostToolsTextInput::MuxDialog,
+            ),
+        ] {
+            assert_eq!(host_tools_dialog_input(target), Some(input));
+            assert!(ime_target_is_secret(target));
+            assert!(!ime_geometry_uses_secret_mask(target));
+        }
+        for target in [
+            WorkspaceImeTarget::NewConnection(NewConnectionField::Password),
+            WorkspaceImeTarget::KeyboardInteractive(0),
+            WorkspaceImeTarget::Settings(SettingsInput::AiProviderApiKey(0)),
+            WorkspaceImeTarget::HostTmuxSearch,
+        ] {
+            assert_eq!(
+                ime_geometry_uses_secret_mask(target),
+                ime_target_is_secret(target)
+            );
+        }
     }
 
     #[test]

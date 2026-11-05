@@ -116,11 +116,33 @@
       "unsupported": "La supervisión de GPU / NPU no es compatible con este sistema operativo.",
       "no_devices": "No se encontraron dispositivos GPU / NPU compatibles.",
       "error": "Falló la consulta de GPU / NPU: {{error}}",
-      "actions": { "refresh": "Actualizar datos de GPU / NPU" },
-      "summary": { "utilization": "Uso promedio", "memory": "Memoria del dispositivo", "temperature": "Temperatura máxima", "power": "Potencia total" },
-      "columns": { "device": "Dispositivo", "utilization": "Uso", "memory": "Memoria" },
-      "details": { "uuid": "UUID", "driver": "Controlador", "performance_state": "Rendimiento", "health": "Estado", "temperature": "Temperatura", "power": "Potencia", "fan": "Ventilador" },
-      "processes": { "title": "Procesos de cálculo", "empty": "Ningún proceso de cálculo está usando este dispositivo." }
+      "actions": {
+        "refresh": "Actualizar datos de GPU / NPU"
+      },
+      "summary": {
+        "utilization": "Uso promedio",
+        "memory": "Memoria del dispositivo",
+        "temperature": "Temperatura máxima",
+        "power": "Potencia total"
+      },
+      "columns": {
+        "device": "Dispositivo",
+        "utilization": "Uso",
+        "memory": "Memoria"
+      },
+      "details": {
+        "uuid": "UUID",
+        "driver": "Controlador",
+        "performance_state": "Rendimiento",
+        "health": "Estado",
+        "temperature": "Temperatura",
+        "power": "Potencia",
+        "fan": "Ventilador"
+      },
+      "processes": {
+        "title": "Procesos de cálculo",
+        "empty": "Ningún proceso de cálculo está usando este dispositivo."
+      }
     },
     "host_processes": {
       "search_placeholder": "Buscar procesos...",
@@ -377,7 +399,86 @@
       "loading": "Cargando…",
       "empty": "No hay sesiones coincidentes",
       "unavailable": "Este multiplexor no está instalado en el equipo seleccionado.",
-      "failed": "Falló el comando. Comprueba la versión instalada y el estado de la sesión."
+      "failed": "Falló el comando. Comprueba la versión instalada y el estado de la sesión.",
+      "server_not_running": "El servidor del multiplexor no está en ejecución. Usa el botón de adjuntar para iniciarlo.",
+      "sampling": "Cargando sesiones del multiplexor…",
+      "error": "El comando del multiplexor falló: {{error}}",
+      "sessions_title": "Sesiones",
+      "search_empty": "Sin coincidencias",
+      "search_child_empty": "No hay objetos coincidentes en esta sesión",
+      "workspace_empty": "No hay espacios de trabajo en esta sesión",
+      "last_refreshed": "Actualizado",
+      "attach_title": "Multiplexor",
+      "focused": "enfoque",
+      "restore_error": "error de restauración",
+      "orphan_agent": "agente sin vincular",
+      "row_space": "espacio de trabajo",
+      "row_tab": "pestaña",
+      "row_pane": "panel",
+      "tabs_suffix": "pestañas",
+      "tabs_suffix_one": "pestaña",
+      "panes_suffix": "paneles",
+      "panes_suffix_one": "panel",
+      "status": {
+        "working": "trabajando",
+        "blocked": "bloqueado",
+        "idle": "inactivo",
+        "done": "hecho",
+        "unknown": "desconocido"
+      },
+      "actions": {
+        "refresh": "Actualizar",
+        "agent_attach": "Adjuntar al agente",
+        "session_attach": "Adjuntar a la sesión",
+        "session_stop": "Detener la sesión",
+        "session_delete": "Eliminar la sesión",
+        "new_session": "Nueva sesión",
+        "new_workspace": "Nuevo espacio de trabajo",
+        "rename": "Renombrar",
+        "close": "Cerrar",
+        "send": "Ejecutar comando",
+        "read": "Leer salida"
+      },
+      "confirm": {
+        "title": "Confirmar acción del multiplexor",
+        "cancel": "Cancelar",
+        "run": "Confirmar",
+        "close_workspace": "¿Cerrar el espacio de trabajo {{name}} ({{target}}) de la sesión {{session}}? Se detendrán todas las pestañas y los paneles que contiene.",
+        "close_tab": "¿Cerrar la pestaña {{name}} ({{target}}) de la sesión {{session}}? Se detendrán todos los paneles que contiene.",
+        "close_pane": "¿Cerrar el panel {{name}} ({{target}}) de la sesión {{session}}? Se detendrá el trabajo que contiene.",
+        "stop_session": "¿Detener la sesión {{name}}? Se detendrán todos los espacios de trabajo y agentes de la sesión.",
+        "delete_session": "¿Eliminar la sesión detenida {{name}}? Se borra su estado guardado."
+      },
+      "inputs": {
+        "new_session": "Nueva sesión",
+        "new_session_hint": "Nombre de la sesión",
+        "new_workspace": "Nuevo espacio de trabajo",
+        "new_workspace_hint": "nombre [/ruta/remota]",
+        "rename_workspace": "Renombrar espacio de trabajo",
+        "rename_tab": "Renombrar pestaña",
+        "rename_pane": "Renombrar panel",
+        "rename_hint": "Nuevo nombre",
+        "run_pane": "Ejecutar comando en el panel",
+        "run_pane_hint": "Comando que se escribirá en el panel",
+        "error_required": "Introduce un valor primero.",
+        "error_rejected": "El multiplexor rechazó este valor."
+      },
+      "read": {
+        "title": "Salida: {{pane}}",
+        "loading": "Cargando salida…",
+        "empty": "Sin salida.",
+        "close": "Cerrar"
+      },
+      "toast": {
+        "snapshot_already_running": "Ya se está cargando una instantánea del multiplexor.",
+        "connection_missing": "La conexión seleccionada ya no está disponible.",
+        "action_already_running": "Ya hay una acción del multiplexor en ejecución.",
+        "action_failed": "La acción del multiplexor falló.",
+        "action_succeeded": "Acción del multiplexor completada para {{target}}.",
+        "read_already_running": "La salida del panel ya se está cargando.",
+        "read_failed": "No se pudo leer la salida del panel.",
+        "attach_opened": "Multiplexor abierto en una ventana de terminal."
+      }
     },
     "host_tmux": {
       "search_placeholder": "Buscar sesiones…",

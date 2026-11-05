@@ -121,14 +121,17 @@ impl WorkspaceApp {
             self.collapse_context_sidebar(cx);
             return;
         }
-        self.host_tools.update(cx, |host_tools, cx| {
-            host_tools.select_sidebar_tool(tool, cx)
-        });
+        // Mount the panel before selecting the tool: the first page snapshot is
+        // requested by selection and that request is gated on the sidebar being
+        // visible, so selecting first would leave the panel loading forever.
         if !self.context_sidebar_visible()
             || self.active_context_sidebar_panel != ContextSidebarPanel::HostTools
         {
             self.open_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
         }
+        self.host_tools.update(cx, |host_tools, cx| {
+            host_tools.select_sidebar_tool(tool, cx)
+        });
         cx.notify();
     }
 

@@ -1376,6 +1376,15 @@ impl WorkspaceApp {
             .when_some(self.render_host_tmux_input_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
+            .when_some(self.render_host_mux_confirm_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(self.render_host_mux_input_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
+            .when_some(self.render_host_mux_read_dialog(cx), |root, dialog| {
+                root.child(dialog)
+            })
             .when_some(
                 self.render_host_schedule_confirm_dialog(cx),
                 |root, dialog| root.child(dialog),

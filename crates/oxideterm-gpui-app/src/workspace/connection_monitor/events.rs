@@ -47,6 +47,7 @@ pub(in crate::workspace) enum HostToolsWindowIntent {
     OpenLocalMultiplexer {
         command: String,
         title: String,
+        opened_notice: String,
         missing_notice: String,
     },
     OpenExistingNodeTerminal {
@@ -64,6 +65,12 @@ pub(in crate::workspace) enum HostToolsWindowIntent {
     PrepareTmuxInputDialog,
     /// Resets the shared confirmation focus before showing an Entity-owned tmux action.
     PrepareTmuxConfirm,
+    /// Gives the workspace focus to a secret-capable multiplexer input without
+    /// moving its value.
+    PrepareMuxInputDialog,
+    /// Resets the shared confirmation focus before showing an Entity-owned
+    /// multiplexer action, so a stale keyboard focus cannot confirm it.
+    PrepareMuxConfirm,
     /// Persists a Host Tools monitoring toggle while the Entity owns its UI.
     SetMonitoringEnabled {
         tool: ContextSidebarTool,
@@ -126,6 +133,15 @@ pub(in crate::workspace) enum HostToolsNotice {
         target_label: String,
         succeeded: bool,
     },
+    MuxSnapshotAlreadyRunning,
+    MuxConnectionMissing,
+    MuxActionAlreadyRunning,
+    MuxActionFailed,
+    MuxActionSucceeded {
+        target_label: String,
+    },
+    MuxReadAlreadyRunning,
+    MuxReadFailed,
     LogSnapshotAlreadyRunning,
     LogConnectionMissing,
     LogPartialSupport {

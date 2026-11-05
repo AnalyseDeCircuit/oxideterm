@@ -2,6 +2,7 @@ use super::*;
 
 use gpui::Task;
 use oxideterm_connection_monitor::ResourceSampler;
+use oxideterm_connection_monitor::multiplexer::Multiplexer;
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_topology::ConnectionTopologySnapshot;
 
@@ -532,6 +533,14 @@ impl HostToolsEntity {
             Some(HostToolsWindowModalSnapshot::ScheduleConfirm(
                 confirm.presence.phase(),
             ))
+        } else if self.host_tmux.mux.read.is_some() {
+            Some(HostToolsWindowModalSnapshot::MuxRead)
+        } else if self.ui.host_mux_input_dialog.is_some() {
+            Some(HostToolsWindowModalSnapshot::MuxInput)
+        } else if let Some(confirm) = self.host_tmux.mux.confirm.as_ref() {
+            Some(HostToolsWindowModalSnapshot::MuxConfirm(
+                confirm.presence.phase(),
+            ))
         } else if self.ui.host_tmux_input_dialog.is_some() {
             Some(HostToolsWindowModalSnapshot::TmuxInput)
         } else if let Some(confirm) = self.host_tmux.pending_confirm.as_ref() {
@@ -683,11 +692,15 @@ impl HostToolsEntity {
                 self.ui.host_tmux_expanded_session_id = None;
                 self.ui.host_tmux_expanded_window_id = None;
             }
+            // The multiplexer tree reveals search matches without mutating the
+            // click-managed expansion set, so an edit needs no reset here.
             HostToolsTextInput::PortSearch => self.host_ports.expanded_index = None,
             HostToolsTextInput::ScheduleSearch => self.host_schedules.expanded_index = None,
             HostToolsTextInput::FilesystemSearch => self.host_filesystems.expanded_index = None,
             HostToolsTextInput::PackageSearch => self.host_packages.expanded_index = None,
-            HostToolsTextInput::ProcessRenice | HostToolsTextInput::TmuxDialog => {}
+            HostToolsTextInput::ProcessRenice
+            | HostToolsTextInput::TmuxDialog
+            | HostToolsTextInput::MuxDialog => {}
         }
         true
     }
@@ -1385,6 +1398,194 @@ impl HostToolsEntity {
         true
     }
 
+    /// Starts one bounded session-list capture and returns its handle, which
+    /// the panel aborts when the request is superseded or its host changes.
+    /// Output stays inside this delivery boundary and is matched against the
+    /// request identity before anything is rendered.
+    pub(super) fn spawn_mux_snapshot_capture(
+        &self,
+        command: String,
+        request: MuxSnapshotRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let provider = request.provider.name();
+        let audit = request.feedback.should_toast().then(|| {
+            self.host_tool_audit(&request.connection_id, "query_multiplexer", Some(provider))
+        });
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            if let Some(audit) = audit {
+                audit.finish(
+                    oxideterm_audit::AuditOutcome::Failed,
+                    oxideterm_audit::AuditEvidence::Request,
+                    None,
+                    None,
+                );
+            }
+            return None;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        Some(runtime.spawn(async move {
+            let result = target
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            if let Some(audit) = audit {
+                finish_host_query_audit(audit, &result);
+            }
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxSnapshot(
+                MuxSnapshotDelivery { request, result },
+            ));
+        }))
+    }
+
+    pub(super) fn spawn_mux_detail_capture(
+        &self,
+        command: String,
+        request: MuxDetailRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let audit = self.host_tool_audit(
+            &request.connection_id,
+            "query_multiplexer",
+            Some(&format!(
+                "provider={} session={}",
+                request.provider.name(),
+                request.session
+            )),
+        );
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Request,
+                None,
+                None,
+            );
+            return None;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // One session's subtree travels the same bounded channel as its list.
+        Some(runtime.spawn(async move {
+            let result = target
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            finish_host_query_audit(audit, &result);
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxDetail(
+                MuxDetailDelivery { request, result },
+            ));
+        }))
+    }
+
+    /// Audits the provider and the target label only; user-authored labels and
+    /// run commands never enter the audit record.
+    pub(super) fn spawn_mux_action(
+        &self,
+        provider: Multiplexer,
+        command: zeroize::Zeroizing<String>,
+        request: MuxActionRun,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let audit = self.host_tool_audit(
+            &request.connection_id,
+            "manage_multiplexer",
+            Some(provider.name()),
+        );
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Request,
+                None,
+                None,
+            );
+            return None;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        Some(runtime.spawn(async move {
+            let mut audit_exit_code = None;
+            let result = target
+                .run_command_capture(command.as_str(), timeout, max_output_size)
+                .await
+                .map(|mut output| {
+                    audit_exit_code = output.exit_code;
+                    // A provider may report failure inside its envelope while
+                    // still exiting zero, so the envelope decides; a truncated
+                    // capture holds only part of it and decides nothing.
+                    let succeeded = provider.action_succeeded(
+                        &output.stdout,
+                        output.exit_code,
+                        output.truncated,
+                    );
+                    zeroize::Zeroize::zeroize(&mut output.stdout);
+                    zeroize::Zeroize::zeroize(&mut output.stderr);
+                    succeeded
+                })
+                .map_err(|_| ());
+            let audit_outcome = match &result {
+                Ok(true) => oxideterm_audit::AuditOutcome::Succeeded,
+                Ok(false) | Err(_) => oxideterm_audit::AuditOutcome::Failed,
+            };
+            audit.finish(
+                audit_outcome,
+                if audit_exit_code.is_some() {
+                    oxideterm_audit::AuditEvidence::ExitCode
+                } else {
+                    oxideterm_audit::AuditEvidence::Protocol
+                },
+                audit_exit_code,
+                None,
+            );
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxAction(
+                MuxActionDelivery { request, result },
+            ));
+        }))
+    }
+
+    pub(super) fn spawn_mux_read(
+        &self,
+        command: String,
+        request: MuxReadRequest,
+        timeout: Duration,
+        max_output_size: usize,
+        runtime: tokio::runtime::Handle,
+    ) -> Option<tokio::task::JoinHandle<()>> {
+        let audit = self.host_tool_audit(
+            &request.connection_id,
+            "query_multiplexer",
+            Some(&format!(
+                "provider={} target={}",
+                request.provider.name(),
+                request.target_id
+            )),
+        );
+        let Some(target) = self.host_command_target(&request.connection_id) else {
+            audit.finish(
+                oxideterm_audit::AuditOutcome::Failed,
+                oxideterm_audit::AuditEvidence::Request,
+                None,
+                None,
+            );
+            return None;
+        };
+        let delivery_tx = self.reliable_delivery_tx.clone();
+        // Raw pane output remains inside the Entity delivery and dialog state.
+        Some(runtime.spawn(async move {
+            let result = target
+                .run_command_capture(&command, timeout, max_output_size)
+                .await
+                .map_err(|_| ());
+            finish_host_query_audit(audit, &result);
+            let _ = delivery_tx.send(super::delivery::HostToolsReliableDelivery::MuxRead(
+                MuxReadDelivery { request, result },
+            ));
+        }))
+    }
+
     pub(super) fn spawn_tmux_snapshot_capture(
         &self,
         command: String,
@@ -1570,6 +1771,9 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) -> bool {
         if !self.select_tool(tool, cx) {
+            // Re-clicking the active tool retries a page snapshot that never
+            // started, for example while the connection was still coming up.
+            self.request_active_tool_snapshot(HostSnapshotFeedback::Silent, cx);
             return false;
         }
         self.ui.retain_input_focus_for_tool(tool);
@@ -1586,6 +1790,9 @@ impl HostToolsEntity {
         if tool != ContextSidebarTool::Tmux {
             self.dismiss_tmux_confirm(cx);
             self.dismiss_tmux_input_dialog(cx);
+            self.dismiss_mux_confirm(cx);
+            self.dismiss_mux_input_dialog(cx);
+            self.dismiss_mux_read_dialog(cx);
         }
         if tool != ContextSidebarTool::Schedules {
             self.dismiss_schedule_confirm(cx);
@@ -1727,6 +1934,9 @@ impl HostToolsEntity {
         self.dismiss_service_confirm(cx);
         self.dismiss_tmux_input_dialog(cx);
         self.dismiss_tmux_confirm(cx);
+        self.dismiss_mux_confirm(cx);
+        self.dismiss_mux_input_dialog(cx);
+        self.dismiss_mux_read_dialog(cx);
         self.dismiss_schedule_confirm(cx);
 
         let Some(runtime) = self.lifecycle_runtime.clone() else {
@@ -1755,14 +1965,25 @@ impl HostToolsEntity {
         {
             return;
         }
-        let Some(connection_id) = self.selected_connection_id_owned() else {
-            return;
-        };
         let Some(runtime) = self.lifecycle_runtime.clone() else {
             return;
         };
         let Some(messages) = self.messages.clone() else {
             return;
+        };
+        let connection_id = match self.selected_connection_id_owned() {
+            Some(connection_id) => connection_id,
+            None => {
+                // The panel falls back to the first monitor connection; the
+                // request must target that same connection or its delivery is
+                // filtered out as belonging to another node.
+                let Some(connection) = self.monitor_connections().into_iter().next() else {
+                    return;
+                };
+                self.selected_connection_id = Some(connection.connection_id.clone());
+                cx.notify();
+                connection.connection_id
+            }
         };
         #[cfg(test)]
         if let Some(dispatches) = self.test_snapshot_dispatches.as_mut()
@@ -1798,7 +2019,7 @@ impl HostToolsEntity {
                 cx,
             ),
             ContextSidebarTool::Tmux if self.host_tmux.mux.provider.is_some() => {
-                self.refresh_mux_sessions(connection_id, cx);
+                self.refresh_mux_sessions(connection_id, feedback, cx);
                 Vec::new()
             }
             ContextSidebarTool::Tmux => self.request_tmux_snapshot(
@@ -1880,6 +2101,10 @@ impl HostToolsEntity {
             });
         if !selected_is_live {
             self.host_tmux.mux.clear_host();
+            // The dialog carries typed text bound to the host that just went
+            // away; keeping it open would let that value be submitted against
+            // the fallback connection.
+            self.dismiss_mux_input_dialog(cx);
             self.selected_connection_id = live_connection_ids.first().cloned();
             cx.notify();
         }
@@ -2183,6 +2408,13 @@ impl WorkspaceApp {
             HostToolsWindowModalSnapshot::TmuxInput => {
                 self.handle_host_tmux_input_dialog_key(event, cx)
             }
+            HostToolsWindowModalSnapshot::MuxConfirm(_) => {
+                self.handle_host_mux_confirm_key(event, cx)
+            }
+            HostToolsWindowModalSnapshot::MuxInput => {
+                self.handle_host_mux_input_dialog_key(event, window, cx)
+            }
+            HostToolsWindowModalSnapshot::MuxRead => self.handle_host_mux_read_key(event, cx),
             HostToolsWindowModalSnapshot::ScheduleConfirm(_) => {
                 self.handle_host_schedule_confirm_key(event, cx)
             }
@@ -2208,6 +2440,7 @@ impl WorkspaceApp {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+    use oxideterm_connection_monitor::multiplexer::{MuxKind, MuxNode, MuxStatus};
     use oxideterm_connection_monitor::{
         GPU_END_MARKER, ProfilerState, ResourceSampleShell, ResourceSamplerFuture,
     };
@@ -2929,6 +3162,361 @@ mod tests {
                 succeeded: false,
             })
         );
+        assert!(events.try_recv().is_err());
+    }
+
+    #[gpui::test]
+    fn mux_capture_failures_are_redacted_and_stale_deliveries_are_ignored(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let secret_marker = "Authorization: should-not-reach-mux-state";
+        let current = MuxSnapshotRequest {
+            provider: Multiplexer::Herdr,
+            connection_id: "connection-1".to_string(),
+            feedback: HostSnapshotFeedback::Silent,
+            generation: 3,
+        };
+        let sender = entity.update(cx, |entity, _cx| {
+            entity.host_tmux.mux.provider = Some(Multiplexer::Herdr);
+            entity.host_tmux.mux.host = "connection-1".to_string();
+            entity.host_tmux.mux.snapshot_running = Some(current.clone());
+            entity.reliable_delivery_tx.clone()
+        });
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::MuxSnapshot(
+                MuxSnapshotDelivery {
+                    request: current.clone(),
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(1),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_tmux.mux.snapshot_running.is_none());
+            // A capture that contradicts the probe is reported with the panel's
+            // own failure text, so nothing from the remote stream rides along.
+            assert_eq!(
+                entity.host_tmux.mux.snapshot.as_ref().unwrap().status,
+                MuxStatus::Error(None)
+            );
+        });
+        assert!(events.try_recv().is_err());
+
+        // A capture that started before the panel moved on answers for a list
+        // nobody waits for: same provider, same connection, same feedback, only
+        // an older generation. Applying it would clear the in-flight marker of
+        // the current capture and leave the replaced inventory on screen.
+        let superseded = MuxSnapshotRequest {
+            generation: 1,
+            ..current.clone()
+        };
+        entity.update(cx, |entity, _cx| {
+            entity.host_tmux.mux.snapshot_running = Some(current.clone());
+        });
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::MuxSnapshot(
+                MuxSnapshotDelivery {
+                    request: superseded,
+                    result: Ok(SshCommandOutput {
+                        stdout: "dev".to_string(),
+                        stderr: String::new(),
+                        exit_code: Some(0),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+        entity.read_with(cx, |entity, _cx| {
+            assert!(
+                entity.host_tmux.mux.snapshot_running.is_some(),
+                "a superseded answer must not end the current capture"
+            );
+            assert_eq!(
+                entity
+                    .host_tmux
+                    .mux
+                    .snapshot_running
+                    .as_ref()
+                    .map(|request| request.generation),
+                Some(current.generation),
+                "the current request keeps its slot"
+            );
+        });
+        assert!(events.try_recv().is_err());
+
+        // A session subtree follows the same contract: a truncated capture is
+        // a failure, never an empty tree, and it keeps no remote text.
+        let detail_request = MuxDetailRequest {
+            provider: Multiplexer::Herdr,
+            connection_id: "connection-1".to_string(),
+            session: "default".to_string(),
+            generation: 2,
+        };
+        entity.update(cx, |entity, _cx| {
+            entity.host_tmux.mux.detail_running = Some(detail_request.clone());
+        });
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::MuxDetail(
+                MuxDetailDelivery {
+                    request: detail_request.clone(),
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: secret_marker.to_string(),
+                        exit_code: Some(0),
+                        truncated: true,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.host_tmux.mux.detail_running.is_none());
+            assert!(!entity.host_tmux.mux.details.contains_key("default"));
+            assert!(
+                entity.host_tmux.mux.detail_failed.contains("default"),
+                "a truncated subtree is a failure, not an empty session"
+            );
+        });
+        assert!(events.try_recv().is_err());
+
+        // A delivery from a superseded action must not clear the running slot
+        // or report completion for the action the user is waiting on. The two
+        // runs share connection, provider, session and label: only the
+        // generation tells them apart.
+        let active = MuxActionRun {
+            provider: Multiplexer::Herdr,
+            connection_id: "connection-1".to_string(),
+            session: "default".to_string(),
+            target_label: "wA:pC".to_string(),
+            generation: 9,
+        };
+        let stale = MuxActionRun {
+            generation: 4,
+            ..active.clone()
+        };
+        entity.update(cx, |entity, _cx| {
+            entity.host_tmux.mux.action_running = Some(active.clone());
+        });
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::MuxAction(
+                MuxActionDelivery {
+                    request: stale,
+                    result: Ok(true),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            assert_eq!(
+                entity
+                    .host_tmux
+                    .mux
+                    .action_running
+                    .as_ref()
+                    .map(|run| run.generation),
+                Some(active.generation),
+                "the older run's completion is not the current action's result"
+            );
+        });
+        assert!(events.try_recv().is_err());
+    }
+
+    /// The dialog is the user's typed text: an answer the model will not
+    /// accept must come back with the text and the reason still in place, and
+    /// a host that moved under the dialog must not receive the command.
+    #[gpui::test]
+    fn mux_input_dialog_answers_its_own_submission(cx: &mut TestAppContext) {
+        let runtime = tokio::runtime::Runtime::new().expect("create test runtime");
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let target = MuxNode {
+            kind: MuxKind::Pane,
+            id: "wA:tB:p1".to_string(),
+            label: "omp".to_string(),
+            children: Vec::new(),
+            focused: false,
+            status: None,
+            agent: None,
+            title: None,
+            cwd: None,
+            orphan_agent: false,
+            restore_failed: false,
+            tab_count: 0,
+            pane_count: 0,
+        };
+        let dialog = |value: &str, connection_id: &str| MuxInputDialog {
+            kind: MuxInputDialogKind::RenamePane {
+                target: target.clone(),
+            },
+            session: "default".to_string(),
+            provider: Multiplexer::Herdr,
+            connection_id: connection_id.to_string(),
+            value: zeroize::Zeroizing::new(value.to_string()),
+            error: None,
+        };
+        entity.update(cx, |entity, _cx| {
+            entity.lifecycle_runtime = Some(runtime.handle().clone());
+            entity.host_tmux.mux.provider = Some(Multiplexer::Herdr);
+            entity.host_tmux.mux.host = "connection-1".to_string();
+        });
+
+        // Blank: the dialog stays with its reason.
+        entity.update(cx, |entity, cx| {
+            entity.ui.host_mux_input_dialog = Some(dialog("   ", "connection-1"));
+            entity.submit_mux_input_from_view(cx);
+        });
+        entity.read_with(cx, |entity, _cx| {
+            let stored = entity
+                .ui
+                .host_mux_input_dialog
+                .as_ref()
+                .expect("dialog stays");
+            assert_eq!(
+                stored.error,
+                Some("sidebar.multiplexer.inputs.error_required")
+            );
+            assert!(entity.host_tmux.mux.action_running.is_none());
+        });
+        assert!(events.try_recv().is_err());
+
+        // Refused by the model's payload grammar: the typed text is kept.
+        entity.update(cx, |entity, cx| {
+            entity.ui.host_mux_input_dialog = Some(dialog("two\nlines", "connection-1"));
+            entity.submit_mux_input_from_view(cx);
+        });
+        entity.read_with(cx, |entity, _cx| {
+            let stored = entity
+                .ui
+                .host_mux_input_dialog
+                .as_ref()
+                .expect("dialog stays");
+            assert_eq!(stored.value.as_str(), "two\nlines");
+            assert_eq!(
+                stored.error,
+                Some("sidebar.multiplexer.inputs.error_rejected")
+            );
+            assert!(
+                entity.host_tmux.mux.action_running.is_none(),
+                "a refused payload never reserves the mutating slot"
+            );
+        });
+        assert!(events.try_recv().is_err());
+
+        // The panel moved to another connection while the dialog was open.
+        entity.update(cx, |entity, _cx| {
+            entity.host_tmux.mux.host = "connection-2".to_string();
+        });
+        entity.update(cx, |entity, cx| {
+            entity.ui.host_mux_input_dialog = Some(dialog("web", "connection-1"));
+            entity.submit_mux_input_from_view(cx);
+        });
+        entity.read_with(cx, |entity, _cx| {
+            assert!(
+                entity.ui.host_mux_input_dialog.is_none(),
+                "text bound to the old host is dropped, not run here"
+            );
+            assert!(entity.host_tmux.mux.action_running.is_none());
+        });
+        assert!(matches!(
+            events.try_recv(),
+            Ok(HostToolsEvent::ShowNotice(
+                HostToolsNotice::MuxConnectionMissing
+            ))
+        ));
+    }
+
+    /// A pane read belongs to the viewer that asked for it: closing the viewer
+    /// stops the fetch, and an answer for a replaced capture cannot overwrite
+    /// the buffer the user is reading.
+    #[gpui::test]
+    fn mux_read_delivery_requires_its_own_capture(cx: &mut TestAppContext) {
+        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
+        let entity = cx.new(|cx| {
+            HostToolsEntity::new(
+                profiler_update_tx,
+                profiler_update_rx,
+                SshConnectionRegistry::default(),
+                cx,
+            )
+        });
+        let mut events = cx.events(&entity);
+        let current = MuxReadRequest {
+            provider: Multiplexer::Herdr,
+            connection_id: "connection-1".to_string(),
+            session: "default".to_string(),
+            target_id: "wA:tB:p1".to_string(),
+            target_label: "omp".to_string(),
+            generation: 7,
+        };
+        let sender = entity.update(cx, |entity, _cx| {
+            entity.host_tmux.mux.read = Some(MuxReadDialog {
+                request: current.clone(),
+                output: None,
+                failed: false,
+                loading: true,
+            });
+            entity.reliable_delivery_tx.clone()
+        });
+        let secret_marker = "password: should-not-reach-replaced-read";
+
+        sender
+            .send(super::delivery::HostToolsReliableDelivery::MuxRead(
+                MuxReadDelivery {
+                    request: MuxReadRequest {
+                        generation: 6,
+                        ..current.clone()
+                    },
+                    result: Ok(SshCommandOutput {
+                        stdout: secret_marker.to_string(),
+                        stderr: String::new(),
+                        exit_code: Some(0),
+                        truncated: false,
+                    }),
+                },
+            ))
+            .unwrap();
+        cx.run_until_parked();
+
+        entity.read_with(cx, |entity, _cx| {
+            let dialog = entity
+                .host_tmux
+                .mux
+                .read
+                .as_ref()
+                .expect("viewer stays open");
+            assert!(
+                dialog.loading,
+                "the replaced capture is still the one the viewer waits for"
+            );
+            assert!(dialog.output.is_none());
+            assert!(!dialog.failed);
+        });
         assert!(events.try_recv().is_err());
     }
 

@@ -16,6 +16,10 @@ pub(super) enum HostToolsReliableDelivery {
     ServiceLogs(HostServiceLogsDelivery),
     TmuxSnapshot(HostTmuxSnapshotDelivery),
     TmuxAction(HostTmuxActionDelivery),
+    MuxSnapshot(MuxSnapshotDelivery),
+    MuxDetail(MuxDetailDelivery),
+    MuxAction(MuxActionDelivery),
+    MuxRead(MuxReadDelivery),
     LogSnapshot(HostLogSnapshotDelivery),
     PortSnapshot(HostPortSnapshotDelivery),
     FilesystemSnapshot(HostFilesystemSnapshotDelivery),
@@ -202,6 +206,18 @@ impl HostToolsEntity {
                 }
                 HostToolsReliableDelivery::TmuxAction(delivery) => {
                     self.finish_host_tmux_action(delivery, cx);
+                }
+                HostToolsReliableDelivery::MuxSnapshot(delivery) => {
+                    self.finish_host_mux_snapshot(delivery, cx);
+                }
+                HostToolsReliableDelivery::MuxDetail(delivery) => {
+                    self.finish_host_mux_detail(delivery, cx);
+                }
+                HostToolsReliableDelivery::MuxAction(delivery) => {
+                    self.finish_host_mux_action(delivery, cx);
+                }
+                HostToolsReliableDelivery::MuxRead(delivery) => {
+                    self.finish_host_mux_read(delivery, cx);
                 }
                 HostToolsReliableDelivery::LogSnapshot(delivery) => {
                     self.finish_host_logs_snapshot(delivery, cx);

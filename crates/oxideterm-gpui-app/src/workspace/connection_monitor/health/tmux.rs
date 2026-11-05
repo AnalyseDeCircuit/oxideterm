@@ -16,10 +16,18 @@ impl WorkspaceApp {
             .host_tools_plain_text_ime_frame(HostToolsTextInput::TmuxSearch, cx)
             .expect("tmux search is a non-secret Host Tools input");
         let sidebar_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
+        // Attach buttons need a terminal target; the Entity cannot see the
+        // workspace-owned node router, so the view resolves it once here.
+        let terminal_available = self
+            .host_tools
+            .read(cx)
+            .selected_connection_id_owned()
+            .is_some_and(|connection_id| self.host_tools_terminal_available(&connection_id));
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.render_host_tmux_panel(
                 search_ime,
                 sidebar_width,
+                terminal_available,
                 &tokens,
                 i18n,
                 mono_font_family,
@@ -290,6 +298,7 @@ impl HostToolsEntity {
         &self,
         search_ime: HostToolsPlainTextImeFrame,
         sidebar_width: f32,
+        terminal_available: bool,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
@@ -311,35 +320,22 @@ impl HostToolsEntity {
         let selected_id = selected_connection_id
             .as_deref()
             .unwrap_or(connections[0].connection_id.as_str());
-        let provider_tabs = self.render_mux_tabs(cx, tokens);
         if self.host_tmux.mux.provider.is_some() {
-            return div()
-                .flex()
-                .flex_col()
-                .size_full()
-                .min_h_0()
-                .child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .flex_col()
-                        .gap_2()
-                        .child(self.render_connection_switcher(
-                            &connections,
-                            selected_id,
-                            true,
-                            tokens,
-                            mono_font_family,
-                            selectable_text,
-                            cx,
-                        ))
-                        .child(provider_tabs)
-                        .child(self.render_host_tmux_search(&search_ime, tokens, i18n, cx)),
-                )
-                .child(self.render_mux_sessions(selected_id, tokens, i18n, cx))
-                .into_any_element();
+            // Every non-tmux provider shares this tool's header and search box;
+            // the panel below owns its own status row and tree.
+            return self.render_mux_panel(
+                &connections,
+                selected_id,
+                &search_ime,
+                terminal_available,
+                tokens,
+                i18n,
+                mono_font_family,
+                selectable_text,
+                cx,
+            );
         }
+        let provider_tabs = self.render_mux_tabs(cx, tokens);
         let snapshot = self.tmux_snapshot_for(selected_id);
         let rows = snapshot
             .as_ref()
@@ -409,7 +405,7 @@ impl HostToolsEntity {
             .into_any_element()
     }
 
-    fn render_host_tmux_search(
+    pub(in crate::workspace::connection_monitor) fn render_host_tmux_search(
         &self,
         ime: &HostToolsPlainTextImeFrame,
         tokens: &ThemeTokens,

@@ -116,11 +116,33 @@
       "unsupported": "このオペレーティングシステムでは GPU / NPU の監視をサポートしていません。",
       "no_devices": "対応する GPU / NPU デバイスが見つかりません。",
       "error": "GPU / NPU の照会に失敗しました：{{error}}",
-      "actions": { "refresh": "GPU / NPU データを更新" },
-      "summary": { "utilization": "平均使用率", "memory": "デバイスメモリ", "temperature": "最高温度", "power": "合計消費電力" },
-      "columns": { "device": "デバイス", "utilization": "使用率", "memory": "メモリ" },
-      "details": { "uuid": "UUID", "driver": "ドライバー", "performance_state": "性能状態", "health": "健康状態", "temperature": "温度", "power": "消費電力", "fan": "ファン" },
-      "processes": { "title": "計算プロセス", "empty": "このデバイスを使用している計算プロセスはありません。" }
+      "actions": {
+        "refresh": "GPU / NPU データを更新"
+      },
+      "summary": {
+        "utilization": "平均使用率",
+        "memory": "デバイスメモリ",
+        "temperature": "最高温度",
+        "power": "合計消費電力"
+      },
+      "columns": {
+        "device": "デバイス",
+        "utilization": "使用率",
+        "memory": "メモリ"
+      },
+      "details": {
+        "uuid": "UUID",
+        "driver": "ドライバー",
+        "performance_state": "性能状態",
+        "health": "健康状態",
+        "temperature": "温度",
+        "power": "消費電力",
+        "fan": "ファン"
+      },
+      "processes": {
+        "title": "計算プロセス",
+        "empty": "このデバイスを使用している計算プロセスはありません。"
+      }
     },
     "host_processes": {
       "search_placeholder": "プロセスを検索...",
@@ -377,7 +399,86 @@
       "loading": "読み込み中…",
       "empty": "一致するセッションはありません",
       "unavailable": "選択したホストにこのマルチプレクサはインストールされていません。",
-      "failed": "コマンドが失敗しました。バージョンとセッションの状態を確認してください。"
+      "failed": "コマンドが失敗しました。バージョンとセッションの状態を確認してください。",
+      "server_not_running": "マルチプレクサのサーバーが実行されていません。アタッチボタンで起動してください。",
+      "sampling": "マルチプレクサのセッションを取得中…",
+      "error": "マルチプレクサのコマンドが失敗しました: {{error}}",
+      "sessions_title": "セッション",
+      "search_empty": "一致する項目はありません",
+      "search_child_empty": "このセッションに一致する項目はありません",
+      "workspace_empty": "このセッションにワークスペースはありません",
+      "last_refreshed": "更新",
+      "attach_title": "マルチプレクサ",
+      "focused": "フォーカス",
+      "restore_error": "復元エラー",
+      "orphan_agent": "未リンクのエージェント",
+      "row_space": "ワークスペース",
+      "row_tab": "タブ",
+      "row_pane": "ペイン",
+      "tabs_suffix": "タブ",
+      "tabs_suffix_one": "タブ",
+      "panes_suffix": "ペイン",
+      "panes_suffix_one": "ペイン",
+      "status": {
+        "working": "実行中",
+        "blocked": "ブロック中",
+        "idle": "待機",
+        "done": "完了",
+        "unknown": "不明"
+      },
+      "actions": {
+        "refresh": "更新",
+        "agent_attach": "エージェントにアタッチ",
+        "session_attach": "セッションにアタッチ",
+        "session_stop": "セッションを停止",
+        "session_delete": "セッションを削除",
+        "new_session": "新規セッション",
+        "new_workspace": "新しいワークスペース",
+        "rename": "名前変更",
+        "close": "閉じる",
+        "send": "コマンドを実行",
+        "read": "出力を読む"
+      },
+      "confirm": {
+        "title": "マルチプレクサの操作の確認",
+        "cancel": "キャンセル",
+        "run": "確認",
+        "close_workspace": "セッション {{session}} 内のワークスペース {{name}}（{{target}}）を閉じますか？内部のすべてのタブとペインが停止します。",
+        "close_tab": "セッション {{session}} 内のタブ {{name}}（{{target}}）を閉じますか？その中のすべてのペインが停止します。",
+        "close_pane": "セッション {{session}} 内のペイン {{name}}（{{target}}）を閉じますか？内部の作業が停止します。",
+        "stop_session": "セッション {{name}} を停止しますか？セッション内のすべてのワークスペースとエージェントが停止します。",
+        "delete_session": "停止中のセッション {{name}} を削除しますか？保存された状態が削除されます。"
+      },
+      "inputs": {
+        "new_session": "新規セッション",
+        "new_session_hint": "セッション名",
+        "new_workspace": "新しいワークスペース",
+        "new_workspace_hint": "名前 [/リモートパス]",
+        "rename_workspace": "ワークスペース名を変更",
+        "rename_tab": "タブ名を変更",
+        "rename_pane": "ペイン名を変更",
+        "rename_hint": "新しい名前",
+        "run_pane": "ペインでコマンドを実行",
+        "run_pane_hint": "ペインに入力するコマンド",
+        "error_required": "先に値を入力してください。",
+        "error_rejected": "マルチプレクサがこの値を拒否しました。"
+      },
+      "read": {
+        "title": "出力: {{pane}}",
+        "loading": "出力を読み込み中…",
+        "empty": "出力はありません。",
+        "close": "閉じる"
+      },
+      "toast": {
+        "snapshot_already_running": "マルチプレクサのスナップショットはすでに読み込み中です。",
+        "connection_missing": "選択した接続は利用できなくなりました。",
+        "action_already_running": "マルチプレクサの操作が既に実行中です。",
+        "action_failed": "マルチプレクサの操作に失敗しました。",
+        "action_succeeded": "マルチプレクサの操作が完了しました: {{target}}。",
+        "read_already_running": "ペイン出力はすでに読み込み中です。",
+        "read_failed": "ペイン出力の読み込みに失敗しました。",
+        "attach_opened": "ターミナルでマルチプレクサを開きました。"
+      }
     },
     "host_tmux": {
       "search_placeholder": "セッションを検索…",
