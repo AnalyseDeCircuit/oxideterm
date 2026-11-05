@@ -944,7 +944,7 @@ mod tests {
     #[test]
     fn rpm_check_update_failures_are_reported_instead_of_zero_rows() {
         let command = build_package_snapshot_command("Linux");
-        let fixture = "dnf() { \
+        let fixture = "rpm() { return 0; }; dnf() { \
             if [ \"$DNF_MODE\" = updates ]; then \
             printf '%s\\n' 'Last metadata expiration check: 0:00:01 ago' \
             'kernel.x86_64 5.14.0-427.el9 rhel9-baseos'; return 100; fi; \

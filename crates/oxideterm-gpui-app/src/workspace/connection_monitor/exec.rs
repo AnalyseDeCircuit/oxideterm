@@ -12,6 +12,9 @@ use oxideterm_connection_monitor::{
 use oxideterm_ssh::{SshCommandOutput, SshConnectionHandle};
 use tokio::io::AsyncReadExt;
 
+#[cfg(windows)]
+mod windows;
+
 /// Synthetic Host Tools connection id for the local machine.
 pub(in crate::workspace) const LOCAL_HOST_CONNECTION_ID: &str = "oxide-local-host";
 
@@ -71,21 +74,22 @@ async fn run_local_command_capture(
     // Dropping the capture future is a cancellation, not a timeout: `kill_on_drop`
     // only ends the shell, so the guard ends the tree the same way the timeout
     // path does.
-    let mut child = LocalCaptureChild::new(child);
+    let mut child = LocalCaptureChild::new(child)?;
     let stdout = child.child.stdout.take().ok_or(())?;
     let stderr = child.child.stderr.take().ok_or(())?;
     // Both streams share one budget, matching the SSH capture limit.
     let budget = Arc::new(AtomicUsize::new(max_output_size));
-    // The child stays owned here: both streams closing is what ends a normal
-    // capture, and a hung command leaves them open forever.
+    // EOF is not process completion: commands may redirect both streams and keep running.
     let reads = tokio::time::timeout(timeout, async {
-        tokio::join!(
+        let output = tokio::join!(
             read_capped(stdout, budget.clone()),
             read_capped(stderr, budget.clone()),
-        )
+        );
+        let status = child.child.wait().await;
+        (output, status)
     })
     .await;
-    let (stdout, stderr) = match reads {
+    let ((stdout, stderr), status) = match reads {
         Ok(read) => read,
         Err(_) => {
             // A Windows capture is `cmd /C powershell …`; killing only the
@@ -94,7 +98,7 @@ async fn run_local_command_capture(
             return Err(());
         }
     };
-    let status = child.child.wait().await.map_err(|_| ())?;
+    let status = status.map_err(|_| ())?;
     child.disarm();
     let (stdout, stdout_truncated) = stdout;
     let (stderr, stderr_truncated) = stderr;
@@ -254,9 +258,10 @@ fn local_shell_command(line: &str) -> tokio::process::Command {
         // (`-Command "..."`). `arg` would escape those quotes for the C
         // runtime and cmd would hand PowerShell a literal quoted string, so the
         // line is appended verbatim instead.
-        process.arg("/C");
+        process.arg("/D").arg("/C");
         process.raw_arg(line);
-        process.creation_flags(LOCAL_HOST_COMMAND_CREATE_NO_WINDOW);
+        // Attach to the job before the shell can create any descendants.
+        process.creation_flags(LOCAL_HOST_COMMAND_CREATE_NO_WINDOW | 0x00000004);
         process
     }
     #[cfg(not(windows))]
@@ -271,21 +276,27 @@ fn local_shell_command(line: &str) -> tokio::process::Command {
 
 /// Owns one capture's process and ends its tree on cancellation.
 ///
-/// The shell is the only process this runner knows, so the tree has to be
-/// addressed through the platform: a job object on Windows would need the child
-/// spawned suspended, and the process group is enough on Unix. `kill_on_drop`
-/// alone leaves a `powershell` CIM call running after `cmd.exe` dies, so this
-/// guard repeats the timeout path when the future is dropped.
+/// Windows children join a kill-on-close job while suspended. Unix captures
+/// own a process group. Neither cleanup path relies on a surviving parent shell.
 struct LocalCaptureChild {
     child: tokio::process::Child,
+    #[cfg(windows)]
+    job: windows::CaptureJob,
     /// Cleared once the capture ends normally, so a finished child is not
     /// killed again on drop.
     armed: bool,
 }
 
 impl LocalCaptureChild {
-    fn new(child: tokio::process::Child) -> Self {
-        Self { child, armed: true }
+    fn new(child: tokio::process::Child) -> Result<Self, ()> {
+        #[cfg(windows)]
+        let job = windows::CaptureJob::attach_and_resume(child.id().ok_or(())?).map_err(|_| ())?;
+        Ok(Self {
+            child,
+            armed: true,
+            #[cfg(windows)]
+            job,
+        })
     }
 
     fn disarm(&mut self) {
@@ -293,29 +304,14 @@ impl LocalCaptureChild {
     }
 
     async fn kill_tree(&mut self) {
+        self.terminate_tree();
+        let _ = self.child.wait().await;
         self.armed = false;
-        kill_local_command_tree(&mut self.child).await;
     }
-}
 
-impl Drop for LocalCaptureChild {
-    fn drop(&mut self) {
-        if !self.armed {
-            return;
-        }
-        // Drop cannot await, so the platform kill is issued without waiting.
+    fn terminate_tree(&mut self) {
         #[cfg(windows)]
-        if let Some(pid) = self.child.id() {
-            use std::os::windows::process::CommandExt;
-            let mut command = std::process::Command::new("taskkill");
-            command
-                .args(["/F", "/T", "/PID", &pid.to_string()])
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .creation_flags(LOCAL_HOST_COMMAND_CREATE_NO_WINDOW);
-            let _ = command.spawn();
-        }
+        self.job.terminate();
         #[cfg(not(windows))]
         if let Some(pid) = self.child.id() {
             let _ = unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
@@ -324,29 +320,12 @@ impl Drop for LocalCaptureChild {
     }
 }
 
-/// Ends the capture and everything it started.
-#[cfg(windows)]
-async fn kill_local_command_tree(child: &mut tokio::process::Child) {
-    if let Some(pid) = child.id() {
-        let mut command = tokio::process::Command::new("taskkill");
-        command
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .creation_flags(LOCAL_HOST_COMMAND_CREATE_NO_WINDOW);
-        let _ = command.status().await;
+impl Drop for LocalCaptureChild {
+    fn drop(&mut self) {
+        if self.armed {
+            self.terminate_tree();
+        }
     }
-    let _ = child.start_kill();
-}
-
-#[cfg(not(windows))]
-async fn kill_local_command_tree(child: &mut tokio::process::Child) {
-    if let Some(pid) = child.id() {
-        // `local_shell_command` made the shell a process-group leader.
-        let _ = unsafe { libc::kill(-(pid as i32), libc::SIGKILL) };
-    }
-    let _ = child.start_kill();
 }
 
 /// Drains a stream to EOF while retaining at most the shared budget, so a
@@ -413,6 +392,78 @@ mod tests {
         assert_eq!(output.stdout.trim(), "oxide-local");
         assert_eq!(output.exit_code, Some(0));
         assert!(!output.truncated);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn local_capture_deadline_includes_waiting_after_output_closes() {
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            run_local_command_capture(
+                "exec >/dev/null 2>&1; sleep 30",
+                Duration::from_millis(100),
+                1024,
+            ),
+        )
+        .await
+        .expect("capture must enforce its deadline after EOF");
+        assert!(
+            result.is_err(),
+            "a timed out command must not report success"
+        );
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn cancelling_local_capture_terminates_powershell_descendants() {
+        use ::windows::Win32::{
+            Foundation::{CloseHandle, WAIT_OBJECT_0},
+            System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("child.pid");
+        let script = format!(
+            "$p=Start-Process powershell -ArgumentList '-NoProfile -Command Start-Sleep 60' -PassThru -WindowStyle Hidden; [IO.File]::WriteAllText('{}',[string]$p.Id); Start-Sleep 60",
+            pid_file.to_string_lossy().replace('\'', "''")
+        );
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(
+            script
+                .encode_utf16()
+                .flat_map(u16::to_le_bytes)
+                .collect::<Vec<_>>(),
+        );
+        let worker = tokio::spawn(async move {
+            run_local_command_capture(
+                &format!("powershell -NoProfile -EncodedCommand {encoded}"),
+                Duration::from_secs(30),
+                1024,
+            )
+            .await
+        });
+        let pid: u32 = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(pid) = std::fs::read_to_string(&pid_file)
+                    && let Ok(pid) = pid.trim().parse()
+                {
+                    break pid;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("descendant must start");
+        let process = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid).unwrap() };
+        worker.abort();
+        assert!(worker.await.unwrap_err().is_cancelled());
+        let stopped = unsafe { WaitForSingleObject(process, 5000) };
+        unsafe {
+            let _ = CloseHandle(process);
+        }
+        assert_eq!(
+            stopped, WAIT_OBJECT_0,
+            "capture cancellation must end its descendant"
+        );
     }
 
     #[tokio::test]

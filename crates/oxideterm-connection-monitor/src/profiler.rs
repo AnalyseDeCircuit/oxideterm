@@ -713,12 +713,16 @@ fn build_windows_sample_command(
         script.push_str(concat!(
             "Write-Output '===GPUS===';",
             "$gpuControllers=@(Get-CimInstance Win32_VideoController -Property Name,AdapterRAM);",
-            "$gpuMem=@{};",
-            // Engine utilization would need the formatted GPUEngine class,
-            // whose ~480 per-process engine instances cost around two seconds
-            // to enumerate on every sample; the raw class is equally slow. The
-            // summary reports 0% utilization until a cheaper source lands.
-            // AdapterMemory stays: it enumerates only a handful of instances.
+            "$gpuMem=@{};$gpuUtil=@{};",
+            // Missing or unsupported counters stay absent, rather than reporting an idle GPU.
+            "try{",
+            "$samples=(Get-Counter '\\GPU Engine(*)\\Utilization Percentage' -ErrorAction Stop).CounterSamples;",
+            "foreach($sample in $samples){",
+            "$phys=0;",
+            "if($sample.InstanceName -match 'phys_([0-9]+)'){$phys=[int]$matches[1]};",
+            "$gpuUtil[$phys]=[double]($gpuUtil[$phys])+[double]$sample.CookedValue",
+            "}",
+            "}catch{};",
             "try{",
             "$memories=@(Get-CimInstance Win32_PerfFormattedData_GPUPerformanceCounters_GPUAdapterMemory -Property Name,DedicatedUsage);",
             "foreach($sample in $memories){",
@@ -732,7 +736,8 @@ fn build_windows_sample_command(
             "$name=($gpu.Name -replace ',', ' ');",
             "$total=if($gpu.AdapterRAM){[Math]::Round(([double]$gpu.AdapterRAM)/1MB)}else{''};",
             "$used=if($gpuMem.ContainsKey($i)){[Math]::Round(([double]$gpuMem[$i])/1MB)}else{''};",
-            "Write-Output (''+$i+','+$name+',0,'+$used+','+$total)",
+            "$util=if($gpuUtil.ContainsKey($i)){[Math]::Min(100.0,[Math]::Round([double]$gpuUtil[$i],1))}else{''};",
+            "Write-Output (''+$i+','+$name+','+$util+','+$used+','+$total)",
             "};"
         ));
     }
@@ -1254,6 +1259,74 @@ mod tests {
             cpu_direct < topprocs,
             "CPU_DIRECT must precede TOPPROCS in the generated script"
         );
+    }
+
+    #[test]
+    #[cfg_attr(
+        not(windows),
+        ignore = "Requires pwsh; run explicitly on non-Windows hosts"
+    )]
+    fn windows_gpu_probe_distinguishes_measured_and_unavailable_utilization() {
+        use base64::Engine as _;
+        let command = build_sample_command_for(
+            "Windows",
+            ResourceSamplingConfig {
+                system: false,
+                gpu: true,
+                processes: false,
+                docker: false,
+            },
+        );
+        let encoded = command
+            .split_once("FromBase64String('")
+            .unwrap()
+            .1
+            .split_once('\'')
+            .unwrap()
+            .0;
+        let script = String::from_utf8(
+            base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .unwrap(),
+        )
+        .unwrap();
+        for (counter, expected) in [
+            (
+                "[pscustomobject]@{CounterSamples=@([pscustomobject]@{InstanceName='pid_42_phys_0_eng_0';CookedValue=42.5})}",
+                Some(42.5),
+            ),
+            ("throw 'Counter unavailable'", None),
+        ] {
+            let fixture = format!(
+                r#"
+function Get-CimInstance {{
+    param($ClassName, $Property)
+    if ($ClassName -eq 'Win32_VideoController') {{
+        [pscustomobject]@{{Name='Fixture GPU';AdapterRAM=1073741824}}
+    }} else {{
+        [pscustomobject]@{{Name='phys_0';DedicatedUsage=268435456}}
+    }}
+}}
+function Get-Counter {{ {counter} }}
+{script}
+"#
+            );
+            let output =
+                std::process::Command::new(if cfg!(windows) { "powershell" } else { "pwsh" })
+                    .args(["-NoProfile", "-NonInteractive", "-Command", &fixture])
+                    .output()
+                    .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let gpus = crate::metrics::parse_gpus(&String::from_utf8(output.stdout).unwrap());
+            assert_eq!(gpus.len(), 1);
+            assert_eq!(gpus[0].name, "Fixture GPU");
+            assert_eq!(gpus[0].utilization_percent, expected);
+            assert_eq!(gpus[0].memory_used, Some(268435456));
+        }
     }
 
     #[cfg(unix)]

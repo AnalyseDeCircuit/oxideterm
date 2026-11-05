@@ -12,6 +12,70 @@ const HERDR_PANE_ENV_VARS: [&str; 5] = [
     "HERDR_SOCKET_PATH",
 ];
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_tool_terminal_runs_native_command_without_loading_preferred_shell() {
+        let line = if cfg!(windows) {
+            "echo oxide-host-tool&exit 7"
+        } else {
+            "printf oxide-host-tool; exit 7"
+        };
+        let config = local_host_tool_terminal_config(line, "Host tool");
+        let shell = config.shell.unwrap();
+        let args = shell.args.clone();
+        let mut process = std::process::Command::new(&shell.path);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            assert!(shell.path.ends_with(r"System32\cmd.exe"));
+            // ConPTY passes the shell's command tail without CRT escaping.
+            for arg in args {
+                process.raw_arg(arg);
+            }
+        }
+        #[cfg(unix)]
+        {
+            assert_eq!(shell.path, std::path::Path::new("/bin/sh"));
+            process.args(args);
+        }
+        let output = process.output().unwrap();
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().trim(),
+            "oxide-host-tool"
+        );
+        assert_eq!(output.status.code(), Some(7));
+    }
+}
+
+fn local_host_tool_terminal_config(command: &str, title: &str) -> LocalPtyConfig {
+    // Match the native host used by captures, not the user's preferred WSL or custom shell.
+    #[cfg(windows)]
+    let shell = {
+        let root = std::env::var_os("SystemRoot").unwrap_or_else(|| r"C:\Windows".into());
+        oxideterm_terminal::ShellInfo::new(
+            "host-tool",
+            title,
+            std::path::PathBuf::from(root).join(r"System32\cmd.exe"),
+        )
+        .with_args(vec!["/D".into(), "/K".into(), command.into()])
+    };
+    #[cfg(not(windows))]
+    let shell = oxideterm_terminal::ShellInfo::new("host-tool", title, "/bin/sh")
+        .with_args(vec!["-c".into(), format!("{command}\nexec /bin/sh -i")]);
+    LocalPtyConfig {
+        shell: Some(shell),
+        load_profile: false,
+        remove_env: HERDR_PANE_ENV_VARS
+            .iter()
+            .map(|name| (*name).to_owned())
+            .collect(),
+        ..Default::default()
+    }
+}
+
 impl WorkspaceApp {
     /// Handles the one-shot window work that must remain with workspace-owned nodes and tabs.
     pub(in crate::workspace) fn handle_host_tools_window_request(
@@ -159,9 +223,7 @@ impl WorkspaceApp {
         }
     }
 
-    /// Runs a Host Tools attach line in a fresh local terminal tab. The PTY is
-    /// spawned with the tab, so the line queues immediately and executes once
-    /// the shell starts.
+    /// Diagnostic output stays in a native-host shell after the command finishes.
     fn open_local_host_tool_terminal(
         &mut self,
         command: &str,
@@ -171,35 +233,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut config = self.local_terminal_config();
-        // Herdr exports its pane identity into every process of a managed
-        // pane. A terminal created here is not that pane, and carrying the
-        // outer identity makes herdr reject the attach as a nested launch.
-        config.remove_env = HERDR_PANE_ENV_VARS
-            .iter()
-            .map(|name| (*name).to_string())
-            .collect();
-        let opened =
-            match self.create_local_terminal_tab_with_owned_session(config, title, window, cx) {
-                Ok((_session_id, session)) => {
-                    let mut line = command
-                        .trim_end_matches(['\r', '\n'])
-                        .replace("\r\n", "\r")
-                        .replace('\n', "\r");
-                    line.push('\r');
-                    if session.lock().write_text(&line).is_ok() {
-                        true
-                    } else {
-                        // Creation selects the new tab, so this is the one that
-                        // would otherwise stay behind as an empty shell.
-                        if let Some(tab_id) = self.active_tab_id(cx) {
-                            self.close_tab_by_id(tab_id, window, cx);
-                        }
-                        false
-                    }
-                }
-                Err(_) => false,
-            };
+        let config = local_host_tool_terminal_config(command, &title);
+        let opened = self
+            .create_local_terminal_tab_with_config(config, title, window, cx)
+            .is_ok();
         if opened {
             self.push_host_tools_window_notice(opened_notice, TerminalNoticeVariant::Success, cx);
         } else {
