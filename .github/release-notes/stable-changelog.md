@@ -3,6 +3,74 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.3.1
+
+### 中文
+
+OxideTerm 2.3.1 把主机工具带到了本机：查端口、看进程或管理容器，不必先建立 SSH 连接。已有终端可以直接平铺在一起；经常同时使用多条隧道的用户，也可以留在会话管理器里一次启动所选隧道。
+
+#### 🖥️ 本机与远程主机工具
+
+- 在主机选择器中选择本机或 SSH 连接，查看进程、端口、服务、日志、文件系统、容器和软件包，并执行当前平台支持的管理操作。Windows 支持按 winget 包 ID 查看、升级和卸载；即使默认终端是 WSL，Windows 本机操作也留在宿主系统。取消或超时的本机采集会清理其子进程。（PR [#750](https://github.com/AnalyseDeCircuit/oxideterm/pull/750)）
+- 终端复用器面板现在可以切换 tmux、Zellij 和 Herdr。展开会话即可查看标签和窗格；Herdr 还显示工作区。可以在所选主机上附加到会话，并按工具支持的范围聚焦、新建、拆分或关闭窗格。（PR [#750](https://github.com/AnalyseDeCircuit/oxideterm/pull/750)）
+- 主机监控减少了 Docker、系统、日志及部分 AMD、Intel GPU 采样中的无用字段。过大的 Docker 输出会报告采样不完整，不再显示为空列表；旧于 20.10 的 Docker CLI 也能读取容器状态。
+
+#### ⚡ 终端绘制与会话布局
+
+- 持续输出和滚动时，终端会复用未改变的字形与排版结果。在 Windows x64 的绘制基准复测中，纯文本持续输出耗时从 1,108 降至 773 微秒，混合 Unicode 从 1,133 降至 824 微秒。这里测的是绘制工作负载，不含 SSH 网络传输。[基准条件与完整结果](https://github.com/AnalyseDeCircuit/oxideterm/blob/v2.3.1/docs/development/performance-and-benchmarking.md#incremental-terminal-drawing-2026-11-03)
+- 标题和超链接等 OSC 序列的载荷改为批量扫描。修复了 UTF-8 编码的 C1 控制字符跨输入块时可能被当作文字显示的问题，以及自定义背景上的透明 Powerline 分隔符。
+- 可将 2 到 16 个已打开的终端平铺到一个标签页，无需重新连接。双击窗格标题可单独放大，再还原原布局；也可以将窗格移出为独立标签页。
+- 浏览 Shell 历史后可恢复命令建议。替换或执行前会重新核对当前输入，迟到的终端回显不会覆盖新输入；上一个和下一个候选的快捷键可在设置中修改，默认按键不变。
+
+#### 🔗 SSH、隧道与文件传输
+
+- SSH 终端工具栏可显示当前连接的请求往返延迟。同一连接共享采样，默认每 10 秒探测一次；可调整间隔或关闭显示，超时状态与有效读数分开呈现。
+- 在会话管理器里启动隧道不再切换标签页。多选启动时，同一已保存主机共用一次认证并逐条启动；失败提示给出隧道名，转发表也显示自定义名称。
+- 命令面板可以搜索并打开各类已保存连接。SFTP 列表和按钮随界面字号缩放；悬停在修改日期上可查看精确到秒的本地时间。
+- Linux 重新连接已保存的 BLE 设备时，不再把 BlueZ 缓存中的离线设备误判为当前可连接设备。（PR [#749](https://github.com/AnalyseDeCircuit/oxideterm/pull/749)）
+
+#### 🎛️ 外观与快捷键
+
+- 外观设置可在普通圆角与连续曲线之间切换。macOS 的隐藏应用和最小化窗口快捷键也可在快捷键设置中修改。
+
+#### 👥 贡献者
+
+- @idxdy：将主机工具扩展到本机，加入 winget 操作并改进 Windows 采样。（PR [#750](https://github.com/AnalyseDeCircuit/oxideterm/pull/750)）
+- @allegrox：修复 Linux BLE 重连时对离线设备的误匹配。（PR [#749](https://github.com/AnalyseDeCircuit/oxideterm/pull/749)）
+
+### English
+
+OxideTerm 2.3.1 brought Host Tools to the local machine: inspect ports, processes and containers without opening an SSH connection. You can also tile terminals that are already running and start several saved tunnels without leaving Session Manager.
+
+#### 🖥️ Local and remote Host Tools
+
+- Select the local machine or an SSH connection to inspect processes, ports, services, logs, filesystems, containers and packages, and run the actions available on that platform. Windows gained winget inspection, upgrade and uninstall by package ID. Windows host actions stay on Windows even when the preferred terminal is WSL. Cancelled or timed-out local captures clean up their process trees. (PR [#750](https://github.com/AnalyseDeCircuit/oxideterm/pull/750))
+- The terminal multiplexer panel now supports tmux, Zellij and Herdr. Expand a session to inspect tabs and panes, plus workspaces in Herdr. Attach on the selected host, or focus, create, split and close panes where the multiplexer supports it. (PR [#750](https://github.com/AnalyseDeCircuit/oxideterm/pull/750))
+- Monitoring requests fewer unused Docker, system, log and AMD/Intel GPU fields. Oversized Docker samples are reported as incomplete rather than shown as empty lists. Container state is also available with Docker CLI versions before 20.10.
+
+#### ⚡ Terminal rendering and layout
+
+- Streaming output and scrolling reuse unchanged glyphs and text layouts. In a Windows x64 drawing benchmark rerun, plain streaming text fell from 1,108 to 773 microseconds and mixed Unicode from 1,133 to 824 microseconds. These timings cover the drawing workload, excluding SSH transport. [Benchmark setup and results](https://github.com/AnalyseDeCircuit/oxideterm/blob/v2.3.1/docs/development/performance-and-benchmarking.md#incremental-terminal-drawing-2026-11-03)
+- OSC payloads such as titles and hyperlinks are scanned in batches. UTF-8-encoded C1 controls now work across input chunk boundaries, and transparent Powerline separators render correctly over custom backgrounds.
+- Tile 2 to 16 open terminals in one tab without reconnecting. Double-click a pane header to enlarge it and restore the original layout, or extract a pane into its own tab.
+- Command suggestions recover after shell history navigation. Replacement and execution recheck the current input, so delayed echo cannot overwrite a newer command. Previous and next suggestion shortcuts are configurable and retain their existing defaults.
+
+#### 🔗 SSH, tunnels and file transfers
+
+- The SSH terminal toolbar can show request round-trip time for the active connection. Tabs sharing a connection share its probe. The default interval is 10 seconds; you can change it or disable the display. Timeouts are shown separately from valid readings.
+- Starting a tunnel no longer takes you out of Session Manager. Batch starts authenticate once per saved host and start its rules in sequence. Errors identify affected tunnels by name, and the forwarding table shows their saved names.
+- The command palette can find and open all saved connection types. SFTP rows and buttons follow the UI font size; hover over a modification date to see local time down to the second.
+- Reconnecting a saved BLE device on Linux no longer matches offline devices from the BlueZ cache. (PR [#749](https://github.com/AnalyseDeCircuit/oxideterm/pull/749))
+
+#### 🎛️ Appearance and shortcuts
+
+- Choose standard rounded corners or continuous curves in Appearance. On macOS, you can also rebind the shortcuts for hiding the app and minimizing the window.
+
+#### 👥 Contributors
+
+- @idxdy brought Host Tools to the local machine, added winget actions and improved Windows sampling. (PR [#750](https://github.com/AnalyseDeCircuit/oxideterm/pull/750))
+- @allegrox fixed offline device matching during Linux BLE reconnects. (PR [#749](https://github.com/AnalyseDeCircuit/oxideterm/pull/749))
+
 ## 2.3.0
 
 ### 中文
