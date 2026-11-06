@@ -17,7 +17,8 @@ SSH · Mosh · Telnet · 시리얼 · RDP/VNC · SFTP · 포트 포워딩 · 내
 [**다운로드**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) ·
 [**문서**](https://oxideterm.app) ·
 [**변경 이력**](../../.github/release-notes/stable-changelog.md) ·
-[**문제 보고**](https://github.com/AnalyseDeCircuit/oxideterm/issues)
+[**문제 보고**](https://github.com/AnalyseDeCircuit/oxideterm/issues) ·
+[**위챗 사용자 모임**](https://github.com/AnalyseDeCircuit/oxideterm/issues/752)
 
 [English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md)
 

@@ -17,7 +17,8 @@ SSH · Mosh · Telnet · シリアル · RDP/VNC · SFTP · ポート転送 · �
 [**ダウンロード**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) ·
 [**ドキュメント**](https://oxideterm.app) ·
 [**変更履歴**](../../.github/release-notes/stable-changelog.md) ·
-[**問題を報告**](https://github.com/AnalyseDeCircuit/oxideterm/issues)
+[**問題を報告**](https://github.com/AnalyseDeCircuit/oxideterm/issues) ·
+[**WeChat 交流グループ**](https://github.com/AnalyseDeCircuit/oxideterm/issues/752)
 
 [English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md)
 

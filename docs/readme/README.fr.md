@@ -17,7 +17,8 @@ Sans compte. Sans abonnement. Sans télémétrie. Sans Electron.
 [**Télécharger**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest) ·
 [**Documentation**](https://oxideterm.app) ·
 [**Journal des modifications**](../../.github/release-notes/stable-changelog.md) ·
-[**Signaler un problème**](https://github.com/AnalyseDeCircuit/oxideterm/issues)
+[**Signaler un problème**](https://github.com/AnalyseDeCircuit/oxideterm/issues) ·
+[**Groupe WeChat**](https://github.com/AnalyseDeCircuit/oxideterm/issues/752)
 
 [English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md)
 
