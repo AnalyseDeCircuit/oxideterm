@@ -24,11 +24,20 @@ pub fn join_local_path(base: &str, component: &str) -> String {
     path.to_string_lossy().to_string()
 }
 
+/// Keep undecodable remote bytes distinct on local filesystems with Unicode paths.
+pub fn local_download_name(name: &str) -> String {
+    name.replace('\0', "%")
+}
+
 pub(crate) fn validate_remote_entry_name(name: &str) -> Result<(), SftpError> {
+    let raw =
+        russh_sftp::path::to_bytes(name).map_err(|error| SftpError::InvalidPath(error.into()))?;
     if name.is_empty()
         || name == "."
         || name == ".."
-        || name.contains(['/', '\\', '\n', '\r', '\0'])
+        || raw
+            .iter()
+            .any(|byte| matches!(byte, b'/' | b'\\' | b'\n' | b'\r' | 0))
     {
         return Err(SftpError::ProtocolError(
             "SFTP directory entry is not a safe path component".to_string(),

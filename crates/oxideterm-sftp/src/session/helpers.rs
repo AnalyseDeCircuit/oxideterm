@@ -60,16 +60,6 @@ fn sort_entries(entries: &mut [FileInfo], order: SortOrder) {
     });
 }
 
-fn swap_path(canonical_path: &str) -> String {
-    if let Some(slash_pos) = canonical_path.rfind('/') {
-        let dir = &canonical_path[..=slash_pos];
-        let name = &canonical_path[slash_pos + 1..];
-        format!("{dir}.{name}.oxswp")
-    } else {
-        format!(".{canonical_path}.oxswp")
-    }
-}
-
 async fn throttle_transfer(
     transferred: u64,
     started: Instant,

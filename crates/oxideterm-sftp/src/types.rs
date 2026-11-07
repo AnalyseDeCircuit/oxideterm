@@ -21,7 +21,9 @@ pub mod constants {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FileInfo {
+    /// Display label only; operations must use path, which preserves remote bytes.
     pub name: String,
+    /// Lossless operation path, never reconstructed from a rendered label.
     pub path: String,
     pub file_type: FileType,
     pub size: u64,

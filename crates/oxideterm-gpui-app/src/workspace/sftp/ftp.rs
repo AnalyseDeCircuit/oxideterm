@@ -68,6 +68,7 @@ impl FtpRuntime {
                 oxideterm_preview::detect_and_decode(&bytes);
             return Ok(PreviewContent::Text {
                 data,
+                version: None,
                 mime_type: Some("text/plain".into()),
                 language: oxideterm_preview::extension_to_language(&extension),
                 encoding,
@@ -101,6 +102,7 @@ impl FtpRuntime {
         }
         result.map_err(|error| error.to_string())?;
         Ok(SftpPreviewSaveResult {
+            version: None,
             mtime: None,
             size: Some(bytes.len() as u64),
             encoding_used: encoding.to_owned(),

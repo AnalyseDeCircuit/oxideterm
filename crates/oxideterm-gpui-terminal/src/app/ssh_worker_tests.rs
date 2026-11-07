@@ -654,7 +654,7 @@ fn tmux_selection_replays_the_first_click_and_release_on_the_new_pane(cx: &mut T
     let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(10)).unwrap();
     let layout = "80x24,0,0{40x24,0,0,1,39x24,41,0,2}";
     peer.runtime
-        .block_on(sender.data(channel, b"\x1bP1000p".to_vec()))
+        .block_on(sender.data(channel, b"\x1bP1000p%begin 0 0 0\n%end 0 0 0\n".to_vec()))
         .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     let panes = format!("%1 @1 1 40 24 0 0 {layout}\n%2 @1 0 39 24 0 0 {layout}\n");

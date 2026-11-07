@@ -37,6 +37,8 @@ pub enum SftpError {
     WriteError(String),
     #[error("Storage error: {0}")]
     StorageError(String),
+    #[error("Remote file changed since it was opened: {0}")]
+    Conflict(String),
 }
 
 impl SftpError {
@@ -73,6 +75,7 @@ impl SftpError {
             | Self::TransferError(_)
             | Self::WriteError(_)
             | Self::StorageError(_) => false,
+            Self::Conflict(_) => false,
         }
     }
 }

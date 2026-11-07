@@ -572,6 +572,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn spawn_remote_sftp_preview_save(
         &self,
+        expected_version: Option<String>,
         path: String,
         content: Arc<str>,
         encoding: Arc<str>,
@@ -587,6 +588,10 @@ impl WorkspaceApp {
             return false;
         };
         let network_error_message = self.i18n.t("sftp.preview.network_error");
+        let conflict_message = self
+            .i18n
+            .t("ide.conflict_desc")
+            .replace("{{fileName}}", &oxideterm_sftp::display_remote_path(&path));
         let runtime = self.forwarding_runtime.clone();
         let audit_request = oxideterm_audit::AuditContext::current_request().or_else(|| {
             oxideterm_audit::AuditContext::current().map(|mut context| {
@@ -598,6 +603,7 @@ impl WorkspaceApp {
             let task = save_remote_sftp_preview(
                 backend,
                 &path,
+                expected_version.as_deref(),
                 content.as_ref(),
                 encoding.as_ref(),
                 line_ending,
@@ -606,7 +612,11 @@ impl WorkspaceApp {
                 context.scope(task).await
             } else {
                 task.await
-            };
+            }
+            .map_err(|error| match error {
+                oxideterm_sftp::SftpError::Conflict(_) => conflict_message,
+                error => error.to_string(),
+            });
             let _ = tx.send(SftpWorkerResult::PreviewSaved {
                 generation,
                 path,
@@ -658,6 +668,10 @@ impl SftpWorkspaceEntity {
         self.preview_editor_network_error = false;
         self.preview_generation = self.preview_generation.wrapping_add(1);
         cx.emit(SftpWorkspaceEvent::PreviewSaveRequested {
+            expected_version: match self.preview_content.as_deref() {
+                Some(PreviewContent::Text { version, .. }) => version.clone(),
+                _ => None,
+            },
             path,
             content,
             encoding: Arc::<str>::from(self.preview_editor_encoding.as_str()),
@@ -704,6 +718,7 @@ mod tests {
         entity.update(cx, |sftp, _| {
             sftp.preview_editor = Some(editor);
             sftp.preview_content = Some(Arc::new(PreviewContent::Text {
+                version: None,
                 data: "# title".into(),
                 mime_type: Some("text/markdown".into()),
                 language: Some("markdown".into()),
@@ -739,13 +754,29 @@ mod tests {
             sftp.preview_editor_initial_content = original.clone();
             sftp.preview_editor_observed_content = original.clone();
             sftp.preview_path = Some("/tmp/shared.txt".into());
+            sftp.preview_content = Some(Arc::new(PreviewContent::Text {
+                data: original.to_string(),
+                version: Some("sftp-sha256:opened".into()),
+                mime_type: None,
+                language: None,
+                encoding: "UTF-8".into(),
+                confidence: 1.0,
+                has_bom: false,
+            }));
         });
         let captured = Arc::new(std::sync::Mutex::new(None));
         let observed = captured.clone();
         let _subscription = entity.update(cx, |_, cx| {
             cx.subscribe(&entity, move |_, _, event: &SftpWorkspaceEvent, _| {
-                if let SftpWorkspaceEvent::PreviewSaveRequested { path, content, .. } = event {
+                if let SftpWorkspaceEvent::PreviewSaveRequested {
+                    path,
+                    content,
+                    expected_version,
+                    ..
+                } = event
+                {
                     assert_eq!(path, "/tmp/shared.txt");
+                    assert_eq!(expected_version.as_deref(), Some("sftp-sha256:opened"));
                     *observed.lock().unwrap() = Some(content.clone());
                 }
             })

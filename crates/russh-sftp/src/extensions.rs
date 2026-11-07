@@ -28,7 +28,9 @@ pub struct LimitsExtension {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HardlinkExtension {
+    #[serde(with = "crate::path")]
     pub oldpath: String,
+    #[serde(with = "crate::path")]
     pub newpath: String,
 }
 
@@ -43,6 +45,7 @@ impl_try_into_bytes!(FsyncExtension);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct StatvfsExtension {
+    #[serde(with = "crate::path")]
     pub path: String,
 }
 
@@ -50,6 +53,7 @@ impl_try_into_bytes!(StatvfsExtension);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExpandPathExtension {
+    #[serde(with = "crate::path")]
     pub path: String,
 }
 

@@ -29,6 +29,7 @@ pub use conflict::{
     source_not_newer_than_target,
 };
 pub use error::SftpError;
+pub use path_utils::local_download_name;
 pub use path_utils::{
     join_remote_path, normalize_remote_path, remote_directory_prefixes, remote_parent_path,
     unique_conflict_name,
@@ -43,11 +44,12 @@ pub use retry::{
     error_is_not_found, error_is_permission_denied, error_should_retry_initialization,
     is_retryable_error,
 };
+pub use russh_sftp::path::display as display_remote_path;
 pub use scp::{
     ScpCapabilities, ScpTransferResult, probe_scp_capabilities, probe_scp_support,
     scp_download_directory, scp_download_file, scp_upload_directory, scp_upload_file,
 };
-pub use session::{SftpChannelOpener, SftpSession, WriteContentResult};
+pub use session::{SftpChannelOpener, SftpSession, WriteContentResult, content_version};
 pub use tar_transfer::{
     SftpExecChannelOpener, TarCapabilities, TarCompression, TarDirectoryProfile,
     TarTransferOptions, TarTransferResult, probe_tar_capabilities, probe_tar_compression,

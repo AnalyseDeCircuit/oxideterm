@@ -15,6 +15,7 @@ use crate::{
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Features {
+    pub posix_rename: bool,
     pub hardlink: bool,
     pub fsync: bool,
     pub statvfs: bool,
@@ -81,6 +82,7 @@ impl SftpSession {
         let has_extension = |name, ver| version.extensions.get(name).is_some_and(|v| v == ver);
 
         let mut features = Features {
+            posix_rename: has_extension("posix-rename@openssh.com", "1"),
             hardlink: has_extension(extensions::HARDLINK, "1"),
             fsync: has_extension(extensions::FSYNC, "1"),
             statvfs: has_extension(extensions::STATVFS, "2"),
@@ -279,6 +281,30 @@ impl SftpSession {
         self.session.rename(oldpath, newpath).await.map(|_| ())
     }
 
+    /// Returns false only when the server does not support atomic replacement.
+    pub async fn posix_rename(&self, oldpath: &str, newpath: &str) -> SftpResult<bool> {
+        if !self.features.posix_rename {
+            return Ok(false);
+        }
+        let data = extensions::HardlinkExtension {
+            oldpath: oldpath.to_owned(),
+            newpath: newpath.to_owned(),
+        }
+        .try_into()?;
+        match self
+            .session
+            .extended("posix-rename@openssh.com", data)
+            .await?
+        {
+            crate::protocol::Packet::Status(status) => match status.status_code {
+                StatusCode::Ok => Ok(true),
+                StatusCode::OpUnsupported => Ok(false),
+                _ => Err(Error::Status(status)),
+            },
+            _ => Err(Error::UnexpectedPacket),
+        }
+    }
+
     /// Creates a symlink of the specified target.
     pub async fn symlink<P, T>(&self, path: P, target: T) -> SftpResult<()>
     where
@@ -446,6 +472,7 @@ mod tests {
             Self {
                 session: Arc::new(RawSftpSession::new(stream)),
                 features: Features {
+                    posix_rename: false,
                     hardlink: false,
                     fsync: false,
                     statvfs: false,

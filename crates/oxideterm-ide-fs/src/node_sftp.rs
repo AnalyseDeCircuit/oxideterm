@@ -289,7 +289,7 @@ impl NodeSftpIdeFileSystem {
                 "File already exists",
             ));
         }
-        if let Some(expected) = expected_version
+        if let Some(expected) = expected_version.filter(|version| version.etag.is_none())
             && let Ok(current_info) = sftp.stat(path).await
         {
             let current = version_from_remote(&current_info);
@@ -301,21 +301,25 @@ impl NodeSftpIdeFileSystem {
             }
         }
 
-        // Mirrors Tauri SFTP save fallback: write_content first attempts an
-        // atomic swap+rename and internally falls back to direct overwrite when
-        // the server rejects the swap path.
-        sftp.write_content(path, bytes)
+        let written = sftp
+            .write_content_checked(
+                path,
+                bytes,
+                expected_version.and_then(|version| version.etag.as_deref()),
+            )
             .await
             .map_err(map_sftp_error)?;
         let info = sftp.stat(path).await.map_err(map_sftp_error)?;
-        Ok(version_from_remote(&info))
+        let mut version = version_from_remote(&info);
+        version.etag = Some(written.version);
+        Ok(version)
     }
 }
 
 impl AsyncIdeFileSystem for NodeSftpIdeFileSystem {
     fn capabilities(&self) -> FileSystemCapabilities {
         FileSystemCapabilities {
-            atomic_write: true,
+            atomic_write: false,
             directory_listing: true,
             conflict_detection: true,
         }
@@ -347,7 +351,9 @@ impl AsyncIdeFileSystem for NodeSftpIdeFileSystem {
                         .await
                         .map_err(map_sftp_error)?;
                     check_size(size)?;
-                    decode_file(&bytes, encoding.as_deref(), version_from_remote(&info))
+                    let mut version = version_from_remote(&info);
+                    version.etag = Some(oxideterm_sftp::content_version(&bytes));
+                    decode_file(&bytes, encoding.as_deref(), version)
                 })
             })
             .await
@@ -464,7 +470,10 @@ async fn copy_sftp_item_recursive(
                     .await
                     .map_err(map_sftp_error)?;
                 for entry in entries.into_iter().rev() {
-                    let child_target = join_remote_path_for_ide(&target_path, &entry.name);
+                    let child_target = join_remote_path_for_ide(
+                        &target_path,
+                        entry.path.rsplit('/').next().unwrap_or(&entry.name),
+                    );
                     pending.push((entry.path, child_target));
                 }
             }
@@ -602,6 +611,7 @@ fn map_sftp_error(error: SftpError) -> IdeFileError {
     let recoverable = error.is_channel_recoverable();
     let message = error.to_string();
     let kind = match &error {
+        SftpError::Conflict(_) => IdeFileErrorKind::Conflict,
         SftpError::PermissionDenied(_) => IdeFileErrorKind::PermissionDenied,
         SftpError::FileNotFound(_) | SftpError::DirectoryNotFound(_) => IdeFileErrorKind::NotFound,
         SftpError::IoError(io_error) => ide_kind_from_backend_class(

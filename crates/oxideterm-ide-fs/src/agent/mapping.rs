@@ -56,7 +56,10 @@ fn ide_error_from_agent_error(error: AgentError) -> IdeFileError {
         AgentError::Rpc { code, message } if is_agent_conflict_parts(code, &message) => {
             IdeFileError::new(IdeFileErrorKind::Conflict, message)
         }
-        AgentError::Rpc { code: -32601, message } => IdeFileError::new(IdeFileErrorKind::Unsupported, message),
+        AgentError::Rpc {
+            code: -32601,
+            message,
+        } => IdeFileError::new(IdeFileErrorKind::Unsupported, message),
         AgentError::Rpc { message, .. } => ide_error_from_agent_message(message),
         AgentError::Timeout(timeout) => IdeFileError::new(
             IdeFileErrorKind::Timeout,
@@ -105,7 +108,10 @@ fn agent_error_log_label(error: &AgentError) -> &'static str {
 
 fn ide_error_from_agent_message(message: impl Into<String>) -> IdeFileError {
     let message = message.into();
-    IdeFileError::new(ide_kind_from_backend_class(classify_message(&message)), message)
+    IdeFileError::new(
+        ide_kind_from_backend_class(classify_message(&message)),
+        message,
+    )
 }
 
 fn ide_kind_from_backend_class(classification: BackendErrorClass) -> IdeFileErrorKind {
@@ -119,15 +125,19 @@ fn ide_kind_from_backend_class(classification: BackendErrorClass) -> IdeFileErro
             IdeFileErrorKind::PermissionDenied
         }
         BackendErrorClass::Timeout => IdeFileErrorKind::Timeout,
-        BackendErrorClass::Unsupported | BackendErrorClass::HostKey => IdeFileErrorKind::Unsupported,
+        BackendErrorClass::Unsupported | BackendErrorClass::HostKey => {
+            IdeFileErrorKind::Unsupported
+        }
         BackendErrorClass::PortInUse | BackendErrorClass::Other => IdeFileErrorKind::Other,
     }
 }
 
 fn should_write_via_agent(expected_version: Option<&SavedFileVersion>) -> bool {
     // Tauri only uses the agent optimistic-lock path when the tab was opened
-    // with an agent hash. Buffers opened through SFTP carry only mtime/size and
-    // must keep SFTP's stat-before-write conflict check even if an agent later
-    // becomes available. `None` is the explicit conflict-overwrite path.
-    expected_version.is_none() || expected_version.and_then(|version| version.etag.as_ref()).is_some()
+    // with an agent hash. SFTP fingerprints belong to the SFTP save path even
+    // if an agent becomes available after opening. None explicitly overwrites.
+    expected_version.is_none()
+        || expected_version
+            .and_then(|version| version.etag.as_ref())
+            .is_some_and(|etag| !etag.starts_with("sftp-sha256:"))
 }

@@ -2234,7 +2234,7 @@ mod tests {
         );
         let mut ordinary = Vec::new();
 
-        let entered = controller
+        let candidate = controller
             .advance(
                 b"prompt\x1bP1000p",
                 |bytes| ordinary.extend_from_slice(bytes),
@@ -2243,6 +2243,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(ordinary, b"prompt");
+        assert!(!candidate.entered);
+        assert!(
+            candidate.commands.is_empty(),
+            "ordinary output must not send tmux commands"
+        );
+        assert!(!display.is_active());
+        let entered = controller
+            .advance(b"%begin 0 0 0\n%end 0 0 0\n", |_| {}, false, |_| {})
+            .unwrap();
         assert!(entered.entered);
         assert_eq!(entered.commands.len(), 5);
         for reply in entered.replies {
@@ -2339,7 +2348,7 @@ mod tests {
                 }
                 outcome.commands
             };
-            advance(b"\x1bP1000p");
+            advance(b"\x1bP1000p%begin 0 0 0\n%end 0 0 0\n");
             advance(b"%begin 1 1 1\n%end 1 1 1\n");
             advance(format!("%begin 1 2 1\n{version}\n%end 1 2 1\n").as_bytes());
             advance(b"%begin 1 3 1\n$1 demo\n%end 1 3 1\n");
@@ -2411,7 +2420,12 @@ mod tests {
             GraphicsOptions::default(),
         );
         controller
-            .advance(b"\x1bP1000p", |_| {}, false, |_| {})
+            .advance(
+                b"\x1bP1000p%begin 0 0 0\n%end 0 0 0\n",
+                |_| {},
+                false,
+                |_| {},
+            )
             .unwrap();
         controller.pending_queries.clear();
         display.written_replies.lock().unwrap().clear();
@@ -2502,7 +2516,12 @@ mod tests {
             GraphicsOptions::default(),
         );
         controller
-            .advance(b"\x1bP1000p", |_| {}, false, |_| {})
+            .advance(
+                b"\x1bP1000p%begin 0 0 0\n%end 0 0 0\n",
+                |_| {},
+                false,
+                |_| {},
+            )
             .unwrap();
         {
             let mut state = display.state.write().unwrap();

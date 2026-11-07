@@ -344,6 +344,7 @@ async fn load_local_text(
     Ok(LoadedPreview {
         content: PreviewContent::Text {
             data,
+            version: None,
             mime_type: Some(mime_type),
             language: path
                 .extension()

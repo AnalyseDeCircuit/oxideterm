@@ -4,7 +4,9 @@ use super::{impl_packet_for, impl_request_id, Packet, RequestId};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Symlink {
     pub id: u32,
+    #[serde(with = "crate::path")]
     pub linkpath: String,
+    #[serde(with = "crate::path")]
     pub targetpath: String,
 }
 

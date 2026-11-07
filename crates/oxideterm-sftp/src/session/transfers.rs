@@ -609,7 +609,7 @@ impl SftpSession {
             };
             let (local_dir, current_depth, entries) = scan?;
             for entry in entries {
-                let local_entry = join_local_path(&local_dir, &entry.name);
+                let local_entry = join_local_path(&local_dir, &crate::local_download_name(&entry.name));
                 match entry.file_type {
                     FileType::Directory if !entry.is_symlink => {
                         pending.push_back((

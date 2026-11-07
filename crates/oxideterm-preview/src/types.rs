@@ -34,6 +34,8 @@ pub enum PreviewKind {
 pub enum PreviewContent {
     Text {
         data: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        version: Option<String>,
         mime_type: Option<String>,
         language: Option<String>,
         encoding: String,

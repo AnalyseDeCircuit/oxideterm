@@ -2233,11 +2233,13 @@ impl SftpWorkspaceEntity {
                 if let Some(preview_content) = self.preview_content.as_mut()
                     && let PreviewContent::Text {
                         data,
+                        version,
                         encoding: current_encoding,
                         ..
                     } = Arc::make_mut(preview_content)
                 {
                     *data = restore_text_line_endings(content.as_ref(), line_ending);
+                    *version = saved.version.clone();
                     *current_encoding = saved.encoding_used.clone();
                 }
                 if let Some(file) = self.remote_files.iter_mut().find(|file| file.path == path) {
@@ -2415,6 +2417,7 @@ mod tests {
                 name: "readme.md".into(),
             });
             let owner = Arc::new(PreviewContent::Text {
+                version: None,
                 data: "# Remote".into(),
                 mime_type: Some("text/markdown".into()),
                 language: Some("markdown".into()),

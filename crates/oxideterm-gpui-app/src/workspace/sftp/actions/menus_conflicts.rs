@@ -200,7 +200,13 @@ impl SftpWorkspaceEntity {
                     .find(|file| file.name == name)
                     .cloned()
                     .map(|source| SftpPendingTransfer {
-                        name,
+                        name: if direction == SftpTransferDirection::Download
+                            && self.pair_primary_remote_id.is_none()
+                        {
+                            oxideterm_sftp::local_download_name(&name)
+                        } else {
+                            name
+                        },
                         direction,
                         source,
                         protocol_override: None,
@@ -577,7 +583,11 @@ impl WorkspaceApp {
             return;
         };
         let pending_transfers = vec![SftpPendingTransfer {
-            name: file.name.clone(),
+            name: if self.sftp_pair_primary_remote_id(cx).is_some() {
+                file.name.clone()
+            } else {
+                oxideterm_sftp::local_download_name(&file.name)
+            },
             direction: SftpTransferDirection::Download,
             source: file,
             protocol_override: None,

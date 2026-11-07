@@ -8280,6 +8280,7 @@ name = "oxideterm-tmux"
 version = "2.3.1"
 dependencies = [
  "memchr",
+ "zeroize",
 ]
 
 [[package]]

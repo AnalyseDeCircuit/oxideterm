@@ -5,6 +5,7 @@ use super::FileAttributes;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct File {
+    #[serde(with = "crate::path")]
     pub filename: String,
     pub longname: String,
     pub attrs: FileAttributes,

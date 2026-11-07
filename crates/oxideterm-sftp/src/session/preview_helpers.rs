@@ -13,10 +13,18 @@ impl SftpSession {
                 recommend_download: true,
             });
         }
-        let content = self.read_file_limited(path, file_size as usize).await?;
+        let content = Zeroizing::new(self.read_file_limited(path, constants::MAX_TEXT_PREVIEW_SIZE as usize + 1).await?);
+        if content.len() as u64 > constants::MAX_TEXT_PREVIEW_SIZE {
+            return Ok(PreviewContent::TooLarge {
+                size: content.len() as u64,
+                max_size: constants::MAX_TEXT_PREVIEW_SIZE,
+                recommend_download: true,
+            });
+        }
         let (data, encoding, confidence, has_bom) = detect_and_decode(&content);
         Ok(PreviewContent::Text {
             data,
+            version: Some(content_version(&content)),
             mime_type: Some(mime_type.to_string()),
             language: extension_to_language(extension),
             encoding,
@@ -204,9 +212,8 @@ impl SftpSession {
         Ok(canonical)
     }
 
-    async fn write_to_swap_and_rename(
+    async fn write_swap(
         &self,
-        canonical_path: &str,
         swap_path: &str,
         content: &[u8],
     ) -> Result<(), SftpError> {
@@ -214,7 +221,7 @@ impl SftpSession {
             .sftp
             .open_with_flags(
                 swap_path,
-                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+                OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
             )
             .await
             .map_err(|error| self.map_sftp_error(error, swap_path))?;
@@ -224,38 +231,7 @@ impl SftpSession {
         file.flush().await.map_err(|error| {
             SftpError::WriteError(format!("Failed to flush swap file: {error}"))
         })?;
-        drop(file);
-        if let Err(error) = self.sftp.remove_file(canonical_path).await
-            && !is_missing_file_error_message(&error.to_string())
-        {
-            warn!("Failed to remove existing target before SFTP rename: {error}");
-        }
-        match self.sftp.rename(swap_path, canonical_path).await {
-            Ok(()) => Ok(()),
-            Err(error) => {
-                let _ = self.sftp.remove_file(swap_path).await;
-                Err(SftpError::WriteError(format!(
-                    "Atomic rename failed: {error}"
-                )))
-            }
-        }
-    }
-
-    async fn write_direct(&self, canonical_path: &str, content: &[u8]) -> Result<(), SftpError> {
-        let mut file = self
-            .sftp
-            .open_with_flags(
-                canonical_path,
-                OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
-            )
-            .await
-            .map_err(|error| self.map_sftp_error(error, canonical_path))?;
-        file.write_all(content)
-            .await
-            .map_err(|error| SftpError::WriteError(format!("Failed to write content: {error}")))?;
-        file.flush()
-            .await
-            .map_err(|error| SftpError::WriteError(format!("Failed to flush file: {error}")))?;
+        file.shutdown().await.map_err(SftpError::IoError)?;
         Ok(())
     }
 

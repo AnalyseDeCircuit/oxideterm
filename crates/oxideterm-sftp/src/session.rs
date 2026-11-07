@@ -67,6 +67,13 @@ type SftpChannelFactory = Arc<dyn Fn() -> BoxedSftpChannelFuture + Send + Sync>;
 
 pub struct WriteContentResult {
     pub atomic_write: bool,
+    pub backup_path: Option<String>,
+    pub version: String,
+}
+
+/// Fingerprint of the bytes read by an editor, before decoding or newline conversion.
+pub fn content_version(bytes: &[u8]) -> String {
+    format!("sftp-sha256:{:x}", Sha256::digest(bytes))
 }
 
 pub struct SftpSession {
@@ -132,3 +139,7 @@ include!("session/transfers.rs");
 include!("session/relay.rs");
 include!("session/preview_helpers.rs");
 include!("session/helpers.rs");
+
+#[cfg(test)]
+#[path = "session/save_tests.rs"]
+mod save_tests;

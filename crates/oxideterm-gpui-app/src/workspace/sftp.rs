@@ -227,6 +227,7 @@ enum SftpButtonVariant {
 
 #[derive(Clone, Debug)]
 pub(super) struct SftpFileEntry {
+    // Remote components retain their byte identity; decode only for rendering.
     name: String,
     path: String,
     file_type: SftpFileType,
@@ -692,6 +693,7 @@ pub(super) enum SftpWorkspaceEvent {
         delivery: delivery::ActiveDeliverySender<SftpWorkerResult>,
     },
     PreviewSaveRequested {
+        expected_version: Option<String>,
         path: String,
         content: Arc<str>,
         encoding: Arc<str>,
@@ -709,6 +711,7 @@ pub(super) struct RemoteSftpListing {
 
 #[derive(Clone, Debug)]
 pub(super) struct SftpPreviewSaveResult {
+    version: Option<String>,
     mtime: Option<u64>,
     size: Option<u64>,
     encoding_used: String,

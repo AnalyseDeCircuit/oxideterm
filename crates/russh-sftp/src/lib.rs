@@ -27,6 +27,7 @@ pub mod client;
 pub mod de;
 mod error;
 pub mod extensions;
+pub mod path;
 /// Protocol implementation
 pub mod protocol;
 pub mod ser;

@@ -12,7 +12,11 @@ pub(in crate::workspace::sftp) fn sftp_sorted_filtered_indices(
         .iter()
         .enumerate()
         .filter_map(|(index, file)| {
-            (filter.is_empty() || file.name.to_lowercase().contains(&filter)).then_some(index)
+            (filter.is_empty()
+                || oxideterm_sftp::display_remote_path(&file.name)
+                    .to_lowercase()
+                    .contains(&filter))
+            .then_some(index)
         })
         .collect::<Vec<_>>();
     // Sort lightweight indices so the virtual list never owns a duplicate
@@ -621,9 +625,13 @@ impl WorkspaceApp {
                         let row_file = file.clone();
                         let context_file = file.clone();
                         let display_name = if let Some(target) = file.symlink_target.as_ref() {
-                            format!("{} -> {target}", file.name)
+                            format!(
+                                "{} -> {}",
+                                oxideterm_sftp::display_remote_path(&file.name),
+                                oxideterm_sftp::display_remote_path(target)
+                            )
                         } else {
-                            file.name.clone()
+                            oxideterm_sftp::display_remote_path(&file.name).into_owned()
                         };
                         let _metadata_fields_consumed =
                             (&file.permissions, &file.owner, &file.group);
@@ -848,9 +856,13 @@ impl WorkspaceApp {
                             sftp.tree_selected.as_deref() == Some(file.path.as_str())
                         };
                         let display_name = if let Some(target) = file.symlink_target.as_ref() {
-                            format!("{} -> {target}", file.name)
+                            format!(
+                                "{} -> {}",
+                                oxideterm_sftp::display_remote_path(&file.name),
+                                oxideterm_sftp::display_remote_path(target)
+                            )
                         } else {
-                            file.name.clone()
+                            oxideterm_sftp::display_remote_path(&file.name).into_owned()
                         };
                         let chevron = if is_directory {
                             let path = file.path.clone();

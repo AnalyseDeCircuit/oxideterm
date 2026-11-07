@@ -1674,6 +1674,7 @@ mod tests {
             Arc::new(session),
             "file".into(),
             Features {
+                posix_rename: false,
                 hardlink: false,
                 fsync: false,
                 statvfs: false,

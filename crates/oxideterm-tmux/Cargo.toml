@@ -9,3 +9,4 @@ version.workspace = true
 
 [dependencies]
 memchr.workspace = true
+zeroize.workspace = true

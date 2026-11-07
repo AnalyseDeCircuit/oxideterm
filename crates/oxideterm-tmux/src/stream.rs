@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{borrow::Cow, error::Error, fmt};
+use zeroize::Zeroizing;
 
-use crate::{ControlEvent, ControlParser, Notification};
+use crate::{CommandGuard, ControlEvent, ControlParser, Notification};
 
 pub const CONTROL_MODE_ENTER: &[u8] = b"\x1bP1000p";
 pub const CONTROL_MODE_EXIT: &[u8] = b"\x1b\\";
@@ -50,6 +51,9 @@ impl Error for ControlStreamError {}
 pub struct ControlStream {
     mode: ControlStreamMode,
     enter_match_bytes: usize,
+    entry_probe: Option<Zeroizing<Vec<u8>>>,
+    entry_guard: Option<CommandGuard>,
+    entry_line_start: usize,
     pending_line: Vec<u8>,
     pending_control_escape: bool,
     exit_announced: bool,
@@ -72,6 +76,9 @@ impl ControlStream {
         Self {
             mode: ControlStreamMode::Terminal,
             enter_match_bytes: 0,
+            entry_probe: None,
+            entry_guard: None,
+            entry_line_start: 0,
             pending_line: Vec::new(),
             pending_control_escape: false,
             exit_announced: false,
@@ -94,7 +101,7 @@ impl ControlStream {
         while cursor < input.len() {
             match self.mode {
                 ControlStreamMode::Terminal => {
-                    self.advance_terminal(input, &mut cursor, &mut emit);
+                    self.advance_terminal(input, &mut cursor, &mut emit)?;
                 }
                 ControlStreamMode::Control => {
                     self.advance_control(input, &mut cursor, &mut emit)?;
@@ -110,8 +117,12 @@ impl ControlStream {
         input: &[u8],
         cursor: &mut usize,
         emit: &mut impl FnMut(StreamEvent<'_>),
-    ) {
+    ) -> Result<(), ControlStreamError> {
         while *cursor < input.len() && self.mode == ControlStreamMode::Terminal {
+            if self.entry_probe.is_some() {
+                self.advance_entry_probe(input, cursor, emit)?;
+                continue;
+            }
             if self.enter_match_bytes != 0 {
                 let candidate_start = self.enter_match_bytes;
                 let available = input.len() - *cursor;
@@ -129,10 +140,12 @@ impl ControlStream {
 
                 if self.enter_match_bytes == CONTROL_MODE_ENTER.len() {
                     self.enter_match_bytes = 0;
-                    self.mode = ControlStreamMode::Control;
+                    self.entry_probe = Some(Zeroizing::new(Vec::with_capacity(
+                        self.maximum_line_bytes.min(64 * 1024) + 1,
+                    )));
+                    self.entry_guard = None;
+                    self.entry_line_start = 0;
                     self.parser.reset();
-                    self.exit_announced = false;
-                    emit(StreamEvent::ControlModeEntered);
                 } else if matched < compare_len {
                     // The marker is static and no prefix allocation is needed
                     // when an ANSI escape merely resembles the tmux marker.
@@ -152,10 +165,12 @@ impl ControlStream {
                     )));
                 }
                 *cursor += marker_offset + CONTROL_MODE_ENTER.len();
-                self.mode = ControlStreamMode::Control;
+                self.entry_probe = Some(Zeroizing::new(Vec::with_capacity(
+                    self.maximum_line_bytes.min(64 * 1024) + 1,
+                )));
+                self.entry_guard = None;
+                self.entry_line_start = 0;
                 self.parser.reset();
-                self.exit_announced = false;
-                emit(StreamEvent::ControlModeEntered);
                 continue;
             }
 
@@ -169,6 +184,67 @@ impl ControlStream {
             self.enter_match_bytes = partial_len;
             *cursor = input.len();
         }
+        Ok(())
+    }
+
+    fn advance_entry_probe(
+        &mut self,
+        input: &[u8],
+        cursor: &mut usize,
+        emit: &mut impl FnMut(StreamEvent<'_>),
+    ) -> Result<(), ControlStreamError> {
+        let probe = self.entry_probe.as_mut().expect("entry probe is active");
+        let byte = input[*cursor];
+        *cursor += 1;
+        probe.push(byte);
+        let overflow = probe.len() > self.maximum_line_bytes.min(64 * 1024);
+        let prefix_mismatch = self.entry_guard.is_none()
+            && !b"%begin ".starts_with(&probe[..probe.len().min(b"%begin ".len())]);
+        if byte != b'\n' && !overflow && !prefix_mismatch {
+            return Ok(());
+        }
+        let line = trim_carriage_return(
+            &probe[self.entry_line_start..probe.len() - usize::from(byte == b'\n')],
+        );
+        self.entry_line_start = probe.len();
+        let event = self.parser.parse_line(line);
+        let confirmed =
+            matches!(event, ControlEvent::End(guard) if Some(guard) == self.entry_guard);
+        let invalid_end =
+            (line.starts_with(b"%end ") && !confirmed) || line.starts_with(b"%error ");
+        let rejected = overflow
+            || prefix_mismatch
+            || invalid_end
+            || match event {
+                ControlEvent::Begin(guard) if self.entry_guard.is_none() => {
+                    self.entry_guard = Some(guard);
+                    false
+                }
+                ControlEvent::CommandOutput(_) if self.entry_guard.is_some() => false,
+                ControlEvent::End(_) if confirmed => false,
+                _ => true,
+            };
+        if confirmed || rejected {
+            let probe = self.entry_probe.take().expect("entry probe is active");
+            self.entry_guard = None;
+            self.entry_line_start = 0;
+            self.parser.reset();
+            if confirmed && !overflow {
+                // A DCS marker is ordinary program output until a complete,
+                // matching tmux startup reply arrives. No bootstrap commands
+                // may be written while the probe is pending.
+                self.mode = ControlStreamMode::Control;
+                self.exit_announced = false;
+                emit(StreamEvent::ControlModeEntered);
+                self.advance_control(&probe, &mut 0, emit)?;
+            } else {
+                emit(StreamEvent::TerminalOutput(Cow::Borrowed(
+                    CONTROL_MODE_ENTER,
+                )));
+                emit(StreamEvent::TerminalOutput(Cow::Borrowed(&probe)));
+            }
+        }
+        Ok(())
     }
 
     fn advance_control(
@@ -328,9 +404,10 @@ mod tests {
             .advance(b"prompt\x1bP10", |event| observe(event, &mut events))
             .unwrap();
         stream
-            .advance(b"00p%begin 1 9 1\n%output %2 hi\\015\n", |event| {
-                observe(event, &mut events)
-            })
+            .advance(
+                b"00p%begin 1 9 0\n%end 1 9 0\n%output %2 hi\\015\n",
+                |event| observe(event, &mut events),
+            )
             .unwrap();
 
         assert_eq!(
@@ -339,6 +416,7 @@ mod tests {
                 Observed::Terminal(b"prompt".to_vec()),
                 Observed::Entered,
                 Observed::Begin(9),
+                Observed::Output(PaneId(2), b"hi\r".to_vec()),
             ]
         );
         assert_eq!(stream.mode(), ControlStreamMode::Control);
@@ -366,13 +444,48 @@ mod tests {
     }
 
     #[test]
+    fn marker_alone_does_not_authorize_control_mode() {
+        for suffix in [
+            b"".as_slice(),
+            b"ordinary shell output\n",
+            b"%begin 1 9 0\n%end 1 10 0\n",
+        ] {
+            let mut stream = ControlStream::new();
+            let mut events = Vec::new();
+            for chunk in [CONTROL_MODE_ENTER, suffix] {
+                stream
+                    .advance(chunk, |event| observe(event, &mut events))
+                    .unwrap();
+            }
+            assert_eq!(stream.mode(), ControlStreamMode::Terminal);
+            assert!(
+                !events
+                    .iter()
+                    .any(|event| matches!(event, Observed::Entered | Observed::Begin(_)))
+            );
+            if !suffix.is_empty() {
+                let restored = events
+                    .into_iter()
+                    .filter_map(|event| match event {
+                        Observed::Terminal(bytes) => Some(bytes),
+                        _ => None,
+                    })
+                    .flatten()
+                    .collect::<Vec<_>>();
+                assert_eq!(restored, [CONTROL_MODE_ENTER, suffix].concat());
+            }
+        }
+    }
+
+    #[test]
     fn lines_and_exit_marker_can_span_reads() {
         let mut stream = ControlStream::new();
         let mut events = Vec::new();
         stream
-            .advance(b"\x1bP1000p%output %5 hel", |event| {
-                observe(event, &mut events)
-            })
+            .advance(
+                b"\x1bP1000p%begin 1 0 0\n%end 1 0 0\n%output %5 hel",
+                |event| observe(event, &mut events),
+            )
             .unwrap();
         stream
             .advance(
@@ -388,6 +501,7 @@ mod tests {
             events,
             vec![
                 Observed::Entered,
+                Observed::Begin(0),
                 Observed::Output(PaneId(5), b"hello\x1b".to_vec()),
                 Observed::Other(b"future".to_vec(), b"arg".to_vec()),
                 Observed::Exited,

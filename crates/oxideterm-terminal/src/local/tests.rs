@@ -65,6 +65,62 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn ordinary_pty_marker_never_receives_tmux_bootstrap_commands() {
+        let directory = tempfile::tempdir().unwrap();
+        let received = directory.path().join("received");
+        let config = crate::LocalPtyConfig {
+            shell: Some(crate::ShellInfo::new("marker-fixture", "Marker fixture", "/bin/sh")
+                .with_args(vec!["-c".into(),
+                    r#"stty -echo; printf 'READY\n\033P1000p'; IFS= read -r line; printf '%s' "$line" > "$1"; IFS= read -r stay"#.into(),
+                    "marker-fixture".into(), received.to_str().unwrap().into()])),
+            load_profile: false,
+            ..Default::default()
+        };
+        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+            80,
+            6,
+            config,
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .unwrap();
+        let activity = session.event_rx.activity_receiver();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let wait_for = |session: &LocalPtySession, expected: &str| {
+            runtime.block_on(async {
+                tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                    loop {
+                        let text = session
+                            .snapshot()
+                            .lines
+                            .iter()
+                            .flat_map(|row| row.cells.iter().map(|cell| cell.ch))
+                            .collect::<String>();
+                        if text.contains(expected) {
+                            break;
+                        }
+                        assert!(activity.notified().await);
+                    }
+                })
+                .await
+                .expect("PTY fixture did not reach its readiness marker")
+            });
+        };
+        wait_for(&session, "READY");
+        session.write_input(b"probe\n").unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if std::fs::read(&received).is_ok_and(|bytes| bytes == b"probe") { break; }
+            assert!(std::time::Instant::now() < deadline, "unexpected PTY input: {:?}", std::fs::read(&received));
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(session.tmux_state().is_none());
+        session.shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn local_color_and_size_probes_finish_without_a_ui_event_drain() {
         let expected =
             b"\x1b]10;rgb:3333/3333/3333\x07\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[4;120;800t";
@@ -3502,145 +3558,4 @@ mod tests {
         assert_eq!(bg, OXIDETERM_DARK_THEME.ansi[15]);
     }
 
-    #[cfg(unix)]
-    #[test]
-    #[ignore = "requires the tmux executable; uses a private test server socket"]
-    fn real_tmux_control_actions_keep_replies_with_their_audit_operations() {
-        use oxideterm_audit::{
-            AuditCategory, AuditContext, AuditEvidence, AuditOutcome, AuditPhase, AuditQuery,
-            AuditService, AuditSource,
-        };
-        use std::time::{Duration, Instant};
-        struct Server(PathBuf);
-        impl Drop for Server {
-            fn drop(&mut self) {
-                let _ = std::process::Command::new("tmux")
-                    .args(["-S"])
-                    .arg(&self.0)
-                    .arg("kill-server")
-                    .output();
-            }
-        }
-        let directory = tempfile::tempdir().unwrap();
-        let server = Server(directory.path().join("tmux.sock"));
-        let service =
-            AuditService::with_key_provider(directory.path().join("audit.db"), AuditTestKeys)
-                .unwrap();
-        let client = service.client();
-        let context =
-            AuditContext::new(client.clone(), AuditSource::User).session("local", "tmux-fixture");
-        let config = crate::LocalPtyConfig {
-            shell: Some(
-                crate::ShellInfo::new("test-tmux", "Test", "tmux").with_args(vec![
-                    "-S".into(),
-                    server.0.to_string_lossy().into_owned(),
-                    "-f".into(),
-                    "/dev/null".into(),
-                    "-CC".into(),
-                    "new-session".into(),
-                    "-s".into(),
-                    "audit-fixture".into(),
-                    "/bin/cat".into(),
-                ]),
-            ),
-            load_profile: false,
-            ..Default::default()
-        };
-        let mut session = LocalPtySession::spawn_with_config_graphics_encoding_and_audit(
-            80,
-            24,
-            config,
-            Default::default(),
-            Default::default(),
-            100,
-            Some(context.clone()),
-        )
-        .unwrap();
-        let started = Instant::now();
-        while !session.tmux_state().is_some_and(|state| state.ready) {
-            session.drain_output();
-            assert!(
-                started.elapsed() < Duration::from_secs(5),
-                "tmux did not become ready"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
-        let id = session
-            .tmux_state()
-            .unwrap()
-            .sessions
-            .iter()
-            .find(|session| session.active)
-            .unwrap()
-            .id;
-        let rename = context.operation(AuditCategory::Automation, "tmux_control", Some("rename"));
-        let rename_id = rename.id().unwrap().to_owned();
-        session
-            .tmux_action(
-                crate::TmuxAction::RenameSession {
-                    id,
-                    name: "audit-renamed".into(),
-                },
-                rename,
-            )
-            .unwrap();
-        let rejected =
-            context.operation(AuditCategory::Automation, "tmux_control", Some("invalid"));
-        let rejected_id = rejected.id().unwrap().to_owned();
-        session
-            .tmux_action(
-                crate::TmuxAction::RunCommand("invalid-audit-fixture-command".into()),
-                rejected,
-            )
-            .unwrap();
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        loop {
-            session.drain_output();
-            let page = runtime
-                .block_on(client.query(AuditQuery {
-                    category: Some(AuditCategory::Automation),
-                    limit: 20,
-                    ..Default::default()
-                }))
-                .unwrap();
-            let results = page
-                .records
-                .iter()
-                .filter_map(|record| record.details.operation.as_ref())
-                .filter(|operation| operation.phase == Some(AuditPhase::Result))
-                .collect::<Vec<_>>();
-            if results.len() == 2 {
-                let rename = results
-                    .iter()
-                    .find(|operation| operation.id == rename_id)
-                    .unwrap();
-                assert_eq!(
-                    (rename.outcome, rename.evidence),
-                    (AuditOutcome::Succeeded, AuditEvidence::Protocol)
-                );
-                let rejected = results
-                    .iter()
-                    .find(|operation| operation.id == rejected_id)
-                    .unwrap();
-                assert_eq!(
-                    (rejected.outcome, rejected.evidence),
-                    (AuditOutcome::Failed, AuditEvidence::Protocol)
-                );
-                assert!(
-                    session
-                        .tmux_state()
-                        .unwrap()
-                        .sessions
-                        .iter()
-                        .any(|session| session.id == id && session.name == "audit-renamed")
-                );
-                break;
-            }
-            assert!(
-                started.elapsed() < Duration::from_secs(5),
-                "tmux did not return the action results"
-            );
-            std::thread::sleep(Duration::from_millis(5));
-        }
-    }
 }

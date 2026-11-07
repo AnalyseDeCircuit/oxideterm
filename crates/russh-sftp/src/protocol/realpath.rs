@@ -4,6 +4,7 @@ use super::{impl_packet_for, impl_request_id, Packet, RequestId};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct RealPath {
     pub id: u32,
+    #[serde(with = "crate::path")]
     pub path: String,
 }
 

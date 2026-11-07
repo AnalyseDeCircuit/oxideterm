@@ -54,6 +54,7 @@ impl From<OpenFlags> for fs::OpenOptions {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Open {
     pub id: u32,
+    #[serde(with = "crate::path")]
     pub filename: String,
     pub pflags: OpenFlags,
     pub attrs: FileAttributes,

@@ -91,6 +91,11 @@ mod tests {
         };
 
         assert!(!should_write_via_agent(Some(&sftp_version)));
+        let fingerprinted_sftp = SavedFileVersion {
+            etag: Some("sftp-sha256:fixture".into()),
+            ..sftp_version
+        };
+        assert!(!should_write_via_agent(Some(&fingerprinted_sftp)));
         assert!(should_write_via_agent(Some(&agent_version)));
         assert!(should_write_via_agent(None));
     }

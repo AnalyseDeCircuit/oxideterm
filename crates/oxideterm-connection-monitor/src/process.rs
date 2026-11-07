@@ -185,12 +185,17 @@ pub fn process_matches_query(process: &ResourceTopProcess, query: &str) -> bool 
 /// Orders process rows using monitor-owned semantics instead of app-local table helpers.
 pub fn sort_process_rows(rows: &mut [ResourceTopProcess], sort: ProcessSort, descending: bool) {
     rows.sort_by(|left, right| {
+        // Missing or non-finite samples stay last in either direction.
+        let sample = match sort {
+            ProcessSort::Cpu => Some((left.cpu_percent, right.cpu_percent)),
+            ProcessSort::Memory => Some((Some(left.memory_percent), Some(right.memory_percent))),
+            _ => None,
+        };
+        if let Some((left, right)) = sample {
+            return compare_process_samples(left, right, descending);
+        }
         let ordering = match sort {
-            ProcessSort::Cpu => compare_optional_f64(left.cpu_percent, right.cpu_percent),
-            ProcessSort::Memory => left
-                .memory_percent
-                .partial_cmp(&right.memory_percent)
-                .unwrap_or(std::cmp::Ordering::Equal),
+            ProcessSort::Cpu | ProcessSort::Memory => unreachable!(),
             ProcessSort::Pid => {
                 process_pid_sort_value(&left.pid).cmp(&process_pid_sort_value(&right.pid))
             }
@@ -316,10 +321,22 @@ fn build_windows_process_action_command(
     })
 }
 
-fn compare_optional_f64(left: Option<f64>, right: Option<f64>) -> std::cmp::Ordering {
-    left.unwrap_or(f64::NEG_INFINITY)
-        .partial_cmp(&right.unwrap_or(f64::NEG_INFINITY))
-        .unwrap_or(std::cmp::Ordering::Equal)
+fn compare_process_samples(
+    left: Option<f64>,
+    right: Option<f64>,
+    descending: bool,
+) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    match (
+        left.filter(|value| value.is_finite()),
+        right.filter(|value| value.is_finite()),
+    ) {
+        (Some(left), Some(right)) if descending => right.total_cmp(&left),
+        (Some(left), Some(right)) => left.total_cmp(&right),
+        (Some(_), None) => Ordering::Less,
+        (None, Some(_)) => Ordering::Greater,
+        (None, None) => Ordering::Equal,
+    }
 }
 
 fn process_pid_sort_value(pid: &str) -> u64 {
@@ -345,6 +362,40 @@ fn process_usable_command(value: Option<&str>) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_samples_stay_last_without_disturbing_numeric_order() {
+        for sort in [ProcessSort::Cpu, ProcessSort::Memory] {
+            for descending in [false, true] {
+                let mut rows = Vec::new();
+                for (pid, sample) in [
+                    ("80", Some(80.0)),
+                    ("nan", Some(f64::NAN)),
+                    ("2", Some(2.0)),
+                    ("inf", Some(f64::INFINITY)),
+                    ("none", None),
+                ] {
+                    let mut row: ResourceTopProcess = serde_json::from_value(serde_json::json!({
+                        "pid": pid, "command": pid, "memoryPercent": 0.0
+                    }))
+                    .unwrap();
+                    row.cpu_percent = sample;
+                    row.memory_percent = sample.unwrap_or(f64::NEG_INFINITY);
+                    rows.push(row);
+                }
+                sort_process_rows(&mut rows, sort, descending);
+                let expected = if descending {
+                    vec!["80", "2", "nan", "inf", "none"]
+                } else {
+                    vec!["2", "80", "nan", "inf", "none"]
+                };
+                assert_eq!(
+                    rows.iter().map(|row| row.pid.as_str()).collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
+    }
 
     #[test]
     fn process_commands_preserve_platform_capabilities_and_validate_actions() {
