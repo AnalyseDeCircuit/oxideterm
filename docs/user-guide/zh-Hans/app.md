@@ -251,3 +251,25 @@ CLI 伴侣工具适合无界面、可重复或诊断类工作：
 - CI 中检查导出的配置。
 
 日常使用先从桌面应用开始。CLI 应辅助桌面工作流，而不是替代桌面应用。
+
+### 从其他工具打开本地终端
+
+在设置中安装命令行工具后，可以在项目目录中新建标签：
+
+```sh
+oxideterm terminal --cwd ~/project
+oxideterm terminal --cwd ~/project -- claude --resume SESSION_ID
+oxideterm terminal --cwd ~/project -- codex resume SESSION_ID
+```
+
+OxideTerm 未运行时会启动应用；已经运行时交给现有实例新建标签。此命令使用桌面应用当前的数据目录，不接受命令行工具用于隔离配置的 `--config-dir` 和 `--profile` 选项。
+
+不指定程序时使用已配置的默认 Shell。指定程序时，按照调用方的 `PATH` 查找，并逐个原样传递参数。带空格的路径需要加引号。相对工作目录以调用方当前目录为准，相对可执行文件路径以指定的工作目录为准。Windows 批处理文件需要显式使用 `cmd.exe /c` 调用。
+
+需要管道、变量展开等 Shell 语法时，显式指定 Shell：
+
+```sh
+oxideterm terminal --cwd ~/project -- /bin/zsh -lc 'echo hello; exec zsh'
+```
+
+启动参数通过一次性管道及经过身份验证的本机通信传递，不写入临时文件。请求上限为 60 KiB。返回零表示启动请求已发送，不代表目标程序运行成功。分屏使用已配置的 Shell，不会重放这次启动命令。

@@ -105,9 +105,10 @@ impl LocalPtySession {
         };
 
         let shell = local_config.shell.clone().unwrap_or_else(default_shell);
+        let direct_command = local_config.command.is_some();
         // Some PTY backends report a successful fork even when chdir or exec fails in the child.
         // Reject known-invalid launch targets before a session can be registered by the caller.
-        if !shell.id.starts_with("wsl")
+        if (direct_command || !shell.id.starts_with("wsl"))
             && local_config
                 .cwd
                 .as_ref()
@@ -115,19 +116,37 @@ impl LocalPtySession {
         {
             anyhow::bail!("local terminal startup directory is unavailable");
         }
-        if shell.path.is_absolute() && !crate::is_shell_executable(&shell.path) {
+        if !direct_command
+            && shell.path.is_absolute()
+            && !crate::is_shell_executable(&shell.path)
+        {
             anyhow::bail!("local terminal shell executable is unavailable");
         }
 
-        let shell_program = shell.path.display().to_string();
         let terminal_env = oxideterm_terminal_env(&local_config, &shell);
-        #[cfg(target_os = "windows")]
-        let base_shell_args = powershell_init_args(&local_config, &shell)
-            .unwrap_or_else(|| shell_args_for_profile(&shell, local_config.load_profile));
-        #[cfg(not(target_os = "windows"))]
-        let base_shell_args = shell_args_for_profile(&shell, local_config.load_profile);
-        let launch =
-            prepare_local_shell_launch(&local_config, &shell, terminal_env, base_shell_args);
+        let (shell_program, launch) = if let Some(command) = local_config.command.as_ref() {
+            if !command.program.is_absolute() || !crate::is_shell_executable(&command.program) {
+                anyhow::bail!("local terminal program is unavailable");
+            }
+            (
+                command.program.to_string_lossy().into_owned(),
+                crate::local_shell_integration::LocalShellLaunch {
+                    args: command.args.to_vec(),
+                    env: terminal_env,
+                    integration: None,
+                    integration_state: crate::TerminalCwdIntegrationLaunchState::NotRequested,
+                },
+            )
+        } else {
+            #[cfg(target_os = "windows")]
+            let base_shell_args = powershell_init_args(&local_config, &shell)
+                .unwrap_or_else(|| shell_args_for_profile(&shell, local_config.load_profile));
+            #[cfg(not(target_os = "windows"))]
+            let base_shell_args = shell_args_for_profile(&shell, local_config.load_profile);
+            let launch =
+                prepare_local_shell_launch(&local_config, &shell, terminal_env, base_shell_args);
+            (shell.path.display().to_string(), launch)
+        };
         let shell_args = launch.args;
 
         let (mut listener, event_rx) = local_event_channel();
@@ -156,7 +175,9 @@ impl LocalPtySession {
             .or_else(|| env::current_dir().ok());
         #[cfg(target_os = "windows")]
         let working_directory =
-            if shell.id.starts_with("wsl") || matches!(shell.id.as_str(), "powershell" | "pwsh") {
+            if !direct_command
+                && (shell.id.starts_with("wsl") || matches!(shell.id.as_str(), "powershell" | "pwsh"))
+            {
                 None
             } else {
                 cwd.clone()
@@ -171,12 +192,18 @@ impl LocalPtySession {
                 env: launch.env,
                 env_remove: local_config.remove_env.clone(),
                 #[cfg(target_os = "windows")]
-                escape_args: shell.id.starts_with("wsl"),
+                escape_args: direct_command || shell.id.starts_with("wsl"),
             },
             window_size(size),
             0,
         )
-        .context("failed to spawn local shell PTY")?;
+        .map_err(|error| {
+            if direct_command {
+                anyhow::anyhow!("failed to spawn local terminal program: {}", error.kind())
+            } else {
+                anyhow::Error::new(error).context("failed to spawn local shell PTY")
+            }
+        })?;
         #[cfg(target_os = "windows")]
         let shell_pid = windows_shell_pid(&pty);
         #[cfg(not(target_os = "windows"))]

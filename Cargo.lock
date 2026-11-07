@@ -275,6 +275,7 @@ dependencies = [
  "unicode-width",
  "vte",
  "windows-sys 0.59.0",
+ "zeroize",
 ]
 
 [[package]]

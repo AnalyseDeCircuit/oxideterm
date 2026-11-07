@@ -11,6 +11,37 @@ use oxideterm_terminal::{
 };
 
 #[test]
+fn direct_command_preserves_arguments_cwd_and_exit_without_shell_initialization() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("result");
+    let command = oxideterm_terminal::LocalCommand {
+        program: "/bin/sh".into(),
+        args: zeroize::Zeroizing::new(vec![
+            "-c".into(), "{ printf '<%s>\\n' \"$PWD\" \"$@\"; } > result; exit 7".into(),
+            "test".into(), "argument with spaces".into(), "$(touch should-not-exist)".into(), "".into(),
+        ]),
+    };
+    let config = LocalPtyConfig {
+        command: Some(command),
+        shell: Some(ShellInfo::new("zsh", "Unrelated shell", "/nonexistent/default-shell")),
+        cwd: Some(directory.path().canonicalize().unwrap()),
+        load_profile: true,
+        current_directory_shell_integration: true,
+        oh_my_posh_enabled: true,
+        ..Default::default()
+    };
+    let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(80, 24, config,
+        GraphicsOptions::default(), TerminalEncoding::Utf8, 100).unwrap();
+    assert_eventually(Duration::from_secs(3), || {
+        session.drain_output(); session.take_events(); !session.lifecycle().is_running()
+    }, "direct command should exit");
+    assert_eq!(std::fs::read_to_string(output).unwrap(), format!("<{}>\n<argument with spaces>\n<$(touch should-not-exist)>\n<>\n", directory.path().canonicalize().unwrap().display()));
+    assert!(!directory.path().join("should-not-exist").exists());
+    assert_eq!(session.shell_integration_launch_state(), TerminalCwdIntegrationLaunchState::NotRequested);
+    session.shutdown();
+}
+
+#[test]
 fn local_pty_shutdown_cleans_background_child_processes() {
     let marker_path = std::env::temp_dir().join(format!(
         "oxideterm-pty-child-{}-{}",

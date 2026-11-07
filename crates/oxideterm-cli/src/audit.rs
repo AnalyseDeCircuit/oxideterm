@@ -100,6 +100,7 @@ pub(crate) fn command_name(command: &Command) -> Option<&'static str> {
             BatchAction::Apply(..) => "batch apply",
         }),
         Command::Ssh(_) => Some("ssh dispatch"),
+        Command::Terminal(_) => Some("terminal dispatch"),
         Command::Open(_) => Some("open dispatch"),
         Command::Report(_) => Some("report"),
         Command::Mcp(_) => Some("mcp"),

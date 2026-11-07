@@ -251,3 +251,25 @@ Use the CLI companion when the work is headless, repeatable, or diagnostic:
 - CI checks for exported configuration.
 
 For normal daily work, start in the desktop app. The CLI should support the desktop workflow, not replace it.
+
+### Open a local terminal from another tool
+
+Install the CLI companion from Settings, then open a new tab in a project directory:
+
+```sh
+oxideterm terminal --cwd ~/project
+oxideterm terminal --cwd ~/project -- claude --resume SESSION_ID
+oxideterm terminal --cwd ~/project -- codex resume SESSION_ID
+```
+
+OxideTerm starts if necessary; otherwise the existing instance opens a new tab. This command targets the application's active data directory, so it does not accept the CLI's isolated `--config-dir` or `--profile` options.
+
+Without a program, the tab uses your configured shell. With a program, OxideTerm resolves it using the caller's `PATH` and passes each argument literally. Quote paths with spaces. Relative working directories are resolved from the caller's directory; relative executable paths are resolved inside the selected working directory. On Windows, invoke batch files through an explicit `cmd.exe /c` command.
+
+Shell expressions require an explicit shell:
+
+```sh
+oxideterm terminal --cwd ~/project -- /bin/zsh -lc 'echo hello; exec zsh'
+```
+
+Launch arguments travel through a one-shot pipe and authenticated local IPC, not a temporary file. The request limit is 60 KiB. Exit status zero means the launch was dispatched, not that the child program finished successfully. Split panes use the configured shell rather than replaying the launch command.

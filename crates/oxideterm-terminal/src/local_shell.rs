@@ -4,6 +4,20 @@ use std::{
     path::{Path, PathBuf},
     process::Command,
 };
+use zeroize::Zeroizing;
+
+/// A one-shot executable launch, distinct from the shell identity used by splits.
+#[derive(Clone)]
+pub struct LocalCommand {
+    pub program: PathBuf,
+    pub args: Zeroizing<Vec<String>>,
+}
+
+impl std::fmt::Debug for LocalCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalCommand").field("argument_count", &self.args.len()).finish_non_exhaustive()
+    }
+}
 
 #[cfg(unix)]
 use std::{collections::HashSet, fs};
@@ -40,6 +54,7 @@ impl ShellInfo {
 
 #[derive(Clone, Debug)]
 pub struct LocalPtyConfig {
+    pub command: Option<LocalCommand>,
     pub shell: Option<ShellInfo>,
     pub cwd: Option<PathBuf>,
     pub env: HashMap<String, String>,
@@ -56,6 +71,7 @@ pub struct LocalPtyConfig {
 impl Default for LocalPtyConfig {
     fn default() -> Self {
         Self {
+            command: None,
             shell: None,
             cwd: None,
             env: HashMap::new(),

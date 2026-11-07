@@ -63,6 +63,9 @@ version = "2.4.1"
 [dependencies.home]
 version = "0.5.5"
 
+[dependencies.zeroize]
+version = "1"
+
 [dependencies.libc]
 version = "0.2"
 

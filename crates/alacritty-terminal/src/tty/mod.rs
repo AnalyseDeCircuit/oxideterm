@@ -47,12 +47,27 @@ pub struct Options {
 }
 
 /// Shell options.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct Shell {
     /// Path to a shell program to run on startup.
     pub(crate) program: String,
     /// Arguments passed to shell.
     pub(crate) args: Vec<String>,
+}
+
+impl std::fmt::Debug for Shell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shell").field("argument_count", &self.args.len()).finish_non_exhaustive()
+    }
+}
+
+impl Drop for Shell {
+    fn drop(&mut self) {
+        use zeroize::Zeroize;
+        // Program arguments can contain credentials; retain them only through spawn.
+        self.program.zeroize();
+        self.args.zeroize();
+    }
 }
 
 impl Shell {

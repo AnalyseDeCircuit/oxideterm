@@ -196,7 +196,7 @@ fn launch_native_gui(request_path: &Path) -> CliResult<()> {
     }
 }
 
-fn sibling_native_binary() -> Option<PathBuf> {
+pub(crate) fn sibling_native_binary() -> Option<PathBuf> {
     let exe = env::current_exe().ok()?;
     let dir = exe.parent()?;
     let binary = dir.join(native_binary_name());
@@ -215,7 +215,7 @@ fn spawn_native_binary(binary: &Path, request_path: &Path) -> io::Result<()> {
         .map(|_| ())
 }
 
-fn native_binary_name() -> &'static str {
+pub(crate) fn native_binary_name() -> &'static str {
     if cfg!(windows) {
         "oxideterm-native.exe"
     } else {

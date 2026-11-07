@@ -372,6 +372,7 @@ impl WorkspaceApp {
             .collect();
 
         LocalPtyConfig {
+            command: None,
             shell,
             cwd,
             env,

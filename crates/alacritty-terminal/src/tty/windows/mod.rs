@@ -160,7 +160,11 @@ fn cmdline(config: &Options) -> String {
     let shell = config.shell.as_ref().unwrap_or(&default_shell);
 
     let mut cmd = String::new();
-    cmd.push_str(&shell.program);
+    if config.escape_args {
+        push_escaped_arg(&mut cmd, &shell.program);
+    } else {
+        cmd.push_str(&shell.program);
+    }
 
     for arg in &shell.args {
         cmd.push(' ');
@@ -236,5 +240,7 @@ mod test {
 
         options.escape_args = true;
         assert_eq!(cmdline(&options), "echo \"hello world\"");
+        options.shell = Some(Shell::new("C:\\Program Files\\Tool\\tool.exe".into(), vec!["".into(), "a\\\"b".into()]));
+        assert_eq!(cmdline(&options), r#""C:\Program Files\Tool\tool.exe" "" "a\\\"b""#);
     }
 }

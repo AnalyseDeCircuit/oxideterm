@@ -13,6 +13,9 @@ use serde::{Deserialize, Serialize};
 use url::Host;
 use zeroize::Zeroizing;
 
+mod local;
+pub use local::{LocalTerminalLaunch, MAX_LOCAL_LAUNCH_BYTES};
+
 /// Default port used by temporary SSH launch targets.
 pub const DEFAULT_SSH_PORT: u16 = 22;
 pub const DEFAULT_TELNET_PORT: u16 = 23;
@@ -27,6 +30,7 @@ pub const SUPPORTED_CONNECTION_URI_SCHEMES: [&str; 5] = ["ssh", "telnet", "mosh"
 #[derive(Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum NativeConnectionLaunch {
+    Local(LocalTerminalLaunch),
     SavedConnection(SavedConnectionLaunch),
     Ssh(TemporarySshLaunch),
     Telnet(TemporaryTelnetLaunch),

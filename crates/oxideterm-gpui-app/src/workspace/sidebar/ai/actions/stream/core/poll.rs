@@ -502,6 +502,7 @@ impl WorkspaceApp {
                                         )
                                         .with_args(args);
                                         let config = LocalPtyConfig {
+                                            command: None,
                                             shell: Some(shell),
                                             cwd: Some(resolved_cwd),
                                             env,

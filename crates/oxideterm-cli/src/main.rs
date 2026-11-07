@@ -30,6 +30,7 @@ mod report;
 mod secrets;
 mod settings;
 mod ssh;
+mod terminal;
 mod uri;
 mod write_guard;
 
@@ -91,11 +92,12 @@ fn run(cli: Cli) -> CliResult<i32> {
             .and_then(|operation| operation.id().map(str::to_string));
     }
     let registration = context.map(oxideterm_audit::AuditContext::install);
-    let dispatched = matches!(cli.command, Command::Ssh(_) | Command::Open(_));
+    let dispatched = matches!(cli.command, Command::Ssh(_) | Command::Open(_) | Command::Terminal(_));
     let result = (|| match cli.command {
         Command::Settings(command) => settings::run(command),
         Command::Connections(command) => connections::run(command),
         Command::Ssh(args) => ssh::run(args),
+        Command::Terminal(args) => terminal::run(args),
         Command::Open(args) => uri::run(args),
         Command::Forwards(command) => forwards::run(command),
         Command::QuickCommands(command) => quick_commands::run(command),

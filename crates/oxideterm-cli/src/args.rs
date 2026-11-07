@@ -234,6 +234,8 @@ pub enum Command {
     Connections(ConnectionsCommand),
     #[command(about = "Open a temporary SSH terminal in the native GUI")]
     Ssh(SshLaunchArgs),
+    #[command(about = "Open a new local terminal tab in the native GUI")]
+    Terminal(crate::terminal::TerminalArgs),
     #[command(
         about = "Open an ssh://, telnet://, mosh://, rdp://, or vnc:// URI in the native GUI"
     )]

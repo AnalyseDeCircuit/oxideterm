@@ -154,7 +154,9 @@ fn main() {
         .as_ref()
         .map(|store| store.settings().clone())
         .unwrap_or_default();
-    if startup_launch.is_some()
+    if startup_launch.as_ref().is_some_and(|launch| {
+        !matches!(launch, oxideterm_ssh_launch::NativeConnectionLaunch::Local(_))
+    })
         && handoff_launch.is_none()
         && !startup_settings.general.external_connection_uris_enabled
     {
@@ -162,11 +164,11 @@ fn main() {
         return;
     }
     let native_connection_launch = handoff_launch.or_else(|| {
-        startup_settings
-            .general
-            .external_connection_uris_enabled
-            .then_some(startup_launch)
-            .flatten()
+        startup_launch
+            .filter(|launch| {
+                matches!(launch, oxideterm_ssh_launch::NativeConnectionLaunch::Local(_))
+                    || startup_settings.general.external_connection_uris_enabled
+            })
             .map(Into::into)
     });
     let _log_guard = match logging::init_file_logging(
@@ -426,6 +428,16 @@ fn native_launch_args() -> Result<NativeLaunchArgs, String> {
     let mut connection_launch = None;
     let default_username = whoami::username();
     while let Some(arg) = args.next() {
+        if arg == "--local-launch-stdin" {
+            if handoff_path.is_some() || connection_launch.is_some() {
+                return Err("only one native launch may be supplied".into());
+            }
+            connection_launch = Some(oxideterm_ssh_launch::NativeConnectionLaunch::Local(
+                oxideterm_ssh_launch::LocalTerminalLaunch::read_from(std::io::stdin().lock())
+                    .map_err(str::to_owned)?,
+            ));
+            continue;
+        }
         if arg == "--ssh-launch-file" || arg == "--connection-launch-file" {
             if handoff_path.is_some() || connection_launch.is_some() {
                 return Err("only one native connection launch may be supplied".to_string());

@@ -47,7 +47,7 @@ fn oxideterm_terminal_env(config: &LocalPtyConfig, _shell: &ShellInfo) -> HashMa
     {
         terminal_env.insert("PYTHONIOENCODING".to_string(), "utf-8".to_string());
         terminal_env.insert("TERM_PROGRAM".to_string(), "OxideTerm".to_string());
-        if _shell.id.starts_with("wsl") {
+        if config.command.is_none() && _shell.id.starts_with("wsl") {
             terminal_env.insert("WSL_UTF8".to_string(), "1".to_string());
             let mut wslenv_vars = vec!["TERM", "COLORTERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION"];
             if config.oh_my_posh_enabled {
