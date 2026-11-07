@@ -1264,6 +1264,7 @@
       "provider_template_anthropic": "Anthropic",
       "provider_template_gemini": "Google Gemini",
       "provider_template_ollama": "Ollama / 本機",
+      "provider_template_openllm": "OpenLLM",
       "embedding_title": "嵌入配置",
       "embedding_description": "為知識庫配置專用的嵌入模型。此設定獨立於聊天模型。",
       "embedding_provider": "嵌入供應商",

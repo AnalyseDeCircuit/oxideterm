@@ -150,6 +150,56 @@ async fn tool_images_do_not_disappear_when_a_text_only_model_returns_them() {
 }
 
 #[test]
+fn openllm_preset_targets_local_daemon_keyless_and_lists_chat_models_only() {
+    let template = providers::provider_template_by_type("openllm");
+    assert_eq!(template.provider_type, "openllm");
+    assert_eq!(template.base_url, "http://127.0.0.1:8787/v1");
+    assert_eq!(template.initial_models, &["ultra", "plus", "lite"]);
+    assert!(!provider_chat_requires_key("openllm"));
+    assert_eq!(
+        provider_refresh_key_policy("openllm"),
+        AiProviderRefreshKeyPolicy::OptionalStoredKey
+    );
+
+    let provider = |base_url: &str| AiProviderView {
+        id: "custom-openllm-1".into(),
+        provider_type: "openllm".into(),
+        name: "OpenLLM".into(),
+        base_url: base_url.into(),
+        models: Vec::new(),
+        enabled: true,
+        custom: true,
+        api_protocol: Default::default(),
+    };
+    assert_eq!(
+        resolve_model_selector_provider_probe(&provider(template.base_url)),
+        ModelSelectorProviderProbe::ImplicitKey {
+            endpoint: Some("/models")
+        }
+    );
+    assert_eq!(
+        resolve_model_selector_provider_probe(&provider("https://www.openllm.sh/v1")),
+        ModelSelectorProviderProbe::StoredKey
+    );
+
+    let payload = serde_json::json!({"data": [
+        {"id": "plus", "capabilities": ["chat", "tools", "streaming"], "context_window": 400000},
+        {"id": "openai/gpt-image-1", "capabilities": ["image_generation"]},
+        {"id": "claude_code/claude-sonnet-4-6", "capabilities": ["chat", "vision"]},
+        {"id": "openai/text-embedding-3-small", "capabilities": ["embedding"]},
+        {"id": "lite"}
+    ]});
+    assert_eq!(
+        parse_provider_models("openllm", &payload),
+        ["claude_code/claude-sonnet-4-6", "lite", "plus"]
+    );
+    assert_eq!(
+        parse_provider_context_windows("openllm", &payload).get("plus"),
+        Some(&400_000)
+    );
+}
+
+#[test]
 fn mimo_preset_discovers_chat_models_and_budgets_images() {
     let template = providers::provider_template_by_type("mimo");
     assert_eq!(template.base_url, "https://api.xiaomimimo.com/v1");

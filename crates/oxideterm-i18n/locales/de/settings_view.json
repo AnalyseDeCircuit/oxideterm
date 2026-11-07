@@ -1264,6 +1264,7 @@
       "provider_template_anthropic": "Anthropic",
       "provider_template_gemini": "Google Gemini",
       "provider_template_ollama": "Ollama / Local",
+      "provider_template_openllm": "OpenLLM",
       "embedding_title": "Embedding-Konfiguration",
       "embedding_description": "Konfigurieren Sie ein dediziertes Embedding-Modell für die Wissensdatenbank. Diese Einstellung ist unabhängig vom Chat-Modell.",
       "embedding_provider": "Embedding-Anbieter",

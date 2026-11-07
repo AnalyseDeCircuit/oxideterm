@@ -38,8 +38,9 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
                     .map(str::to_string)
             })
             .collect::<Vec<_>>(),
-        "openai_compatible" | "deepseek" | "kimi" | "glm" | "xai" | "mimo" => {
+        "openai_compatible" | "deepseek" | "kimi" | "glm" | "xai" | "mimo" | "openllm" => {
             openai_compatible_model_values(payload)
+                .filter(|model| provider_type != "openllm" || is_openllm_chat_model(model))
                 .filter_map(|model| {
                     model
                         .get("id")
@@ -96,6 +97,19 @@ pub(crate) fn parse_provider_models(provider_type: &str, payload: &Value) -> Vec
     }
     models.sort();
     models
+}
+
+/// OpenLLM lists image, audio, video and embedding models next to chat models and
+/// tags each card with `capabilities`. Cards without that field are kept.
+fn is_openllm_chat_model(model: &Value) -> bool {
+    model
+        .get("capabilities")
+        .and_then(Value::as_array)
+        .is_none_or(|capabilities| {
+            capabilities
+                .iter()
+                .any(|value| value.as_str() == Some("chat"))
+        })
 }
 
 fn openai_compatible_model_values(payload: &Value) -> impl Iterator<Item = &Value> {

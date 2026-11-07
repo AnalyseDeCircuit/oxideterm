@@ -49,7 +49,11 @@ pub fn resolve_model_selector_provider_probe(
             endpoint: Some("/api/tags"),
         };
     }
-    if provider.provider_type == "openai_compatible" && is_local_provider_url(&provider.base_url) {
+    if matches!(
+        provider.provider_type.as_str(),
+        "openai_compatible" | "openllm"
+    ) && is_local_provider_url(&provider.base_url)
+    {
         return ModelSelectorProviderProbe::ImplicitKey {
             endpoint: Some("/models"),
         };

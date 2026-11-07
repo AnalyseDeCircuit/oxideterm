@@ -73,6 +73,12 @@ pub const AI_PROVIDER_TEMPLATES: &[AiProviderTemplate] = &[
         base_url: "http://localhost:11434",
         initial_models: &[],
     },
+    AiProviderTemplate {
+        provider_type: "openllm",
+        label_key: "settings_view.ai.provider_template_openllm",
+        base_url: "http://127.0.0.1:8787/v1",
+        initial_models: &["ultra", "plus", "lite"],
+    },
 ];
 
 pub fn provider_template_by_type(provider_type: &str) -> AiProviderTemplate {

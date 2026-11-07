@@ -1264,6 +1264,7 @@
       "provider_template_anthropic": "Anthropic",
       "provider_template_gemini": "Google Gemini",
       "provider_template_ollama": "Ollama / Local",
+      "provider_template_openllm": "OpenLLM",
       "embedding_title": "임베딩 설정",
       "embedding_description": "지식 베이스 전용 임베딩 모델을 구성합니다. 이 설정은 채팅 모델과 별도입니다.",
       "embedding_provider": "임베딩 공급자",

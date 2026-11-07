@@ -1264,6 +1264,7 @@
       "provider_template_anthropic": "Anthropic",
       "provider_template_gemini": "Google Gemini",
       "provider_template_ollama": "Ollama / Local",
+      "provider_template_openllm": "OpenLLM",
       "embedding_title": "Configuração de embedding",
       "embedding_description": "Configure um modelo de embedding dedicado para a base de conhecimento. Esta configuração é independente do modelo de chat.",
       "embedding_provider": "Provedor de embedding",

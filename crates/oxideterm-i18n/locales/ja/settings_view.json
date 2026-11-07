@@ -1264,6 +1264,7 @@
       "provider_template_anthropic": "Anthropic",
       "provider_template_gemini": "Google Gemini",
       "provider_template_ollama": "Ollama / Local",
+      "provider_template_openllm": "OpenLLM",
       "embedding_title": "エンベディング設定",
       "embedding_description": "ナレッジベース用の専用エンベディングモデルを設定します。チャットモデルとは独立した設定です。",
       "embedding_provider": "エンベディングプロバイダー",

@@ -31,7 +31,7 @@ impl AiProviderKeyDisplayState {
 pub fn provider_chat_requires_key(provider_type: &str) -> bool {
     // Tauri chat execution allows OpenAI-compatible endpoints to be keyless
     // so local LM Studio / gateway providers can work without credentials.
-    !matches!(provider_type, "ollama" | "openai_compatible")
+    !matches!(provider_type, "ollama" | "openai_compatible" | "openllm")
 }
 
 pub fn provider_key_display_state(
@@ -61,7 +61,9 @@ pub fn provider_refresh_key_policy(provider_type: &str) -> AiProviderRefreshKeyP
         "ollama" => AiProviderRefreshKeyPolicy::NoKey,
         // Match Tauri: OpenAI-compatible providers may be local or gateway
         // endpoints, so refreshing models may proceed without a stored key.
-        "openai_compatible" => AiProviderRefreshKeyPolicy::OptionalStoredKey,
+        // OpenLLM defaults to a local daemon that signs in on its own, and
+        // accepts an optional key when pointed at the cloud origin.
+        "openai_compatible" | "openllm" => AiProviderRefreshKeyPolicy::OptionalStoredKey,
         _ => AiProviderRefreshKeyPolicy::RequiredStoredKey,
     }
 }
