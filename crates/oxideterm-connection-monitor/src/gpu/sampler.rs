@@ -11,6 +11,7 @@ use tokio::{
 
 use crate::{ResourceSampleShell, ResourceSampler, shell_init_command};
 
+use super::provider::gpu_os_supported;
 use super::{
     GPU_END_MARKER, GpuSnapshot, GpuSnapshotStatus, GpuUpdate, build_gpu_sample_command,
     parse_gpu_snapshot,
@@ -177,13 +178,6 @@ async fn open_gpu_shell(
     sampler
         .open_shell(shell_init_command(os_type), GPU_CHANNEL_OPEN_TIMEOUT)
         .await
-}
-
-fn gpu_os_supported(os_type: &str) -> bool {
-    matches!(
-        os_type,
-        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin"
-    )
 }
 
 fn emit_error(update_tx: &mpsc::UnboundedSender<GpuUpdate>, connection_id: &str, error: &str) {

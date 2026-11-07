@@ -12,6 +12,8 @@
       "source": "Nguồn"
     },
     "panel": {
+      "disk_read": "Đọc đĩa",
+      "disk_write": "Ghi đĩa",
       "session_failed": "Không thể mở phiên giám sát. Hãy kiểm tra kết nối; chế độ một kênh cũng cần xác thực cho kết nối riêng.",
       "sample_read_failed": "Không đọc được kết quả lấy mẫu đầy đủ. Hãy thử dò lại.",
       "sample_unrecognized": "Đã nhận kết quả lấy mẫu nhưng không nhận diện được chỉ số máy chủ. Hãy kiểm tra tính tương thích của hệ thống từ xa và các lệnh lấy mẫu.",

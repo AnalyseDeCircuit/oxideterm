@@ -122,6 +122,7 @@
       "summary": {
         "utilization": "Durchschnittliche Auslastung",
         "memory": "Gerätespeicher",
+        "shared_memory": "Belegter gemeinsamer Speicher",
         "temperature": "Höchsttemperatur",
         "power": "Gesamtleistung"
       },
@@ -140,6 +141,7 @@
         "fan": "Lüfter"
       },
       "processes": {
+        "unavailable": "Für dieses Gerät sind keine Prozessdaten verfügbar.",
         "title": "Rechenprozesse",
         "empty": "Keine Rechenprozesse verwenden dieses Gerät."
       }

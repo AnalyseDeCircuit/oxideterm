@@ -229,6 +229,18 @@ impl ResourceSampleShell for LocalResourceSampleShell {
                     "Local sample ended without its completion marker.".into(),
                 ));
             }
+            #[cfg(target_os = "macos")]
+            let mut output = output;
+            #[cfg(target_os = "macos")]
+            if command.contains("===CPU_DIRECT===") {
+                let counters = oxideterm_connection_monitor::macos_cpu_counters()
+                    .map_err(ResourceSampleError::Failed)?;
+                if output.stdout.len() + counters.len() > max_output_size {
+                    return Err(ResourceSampleError::OutputLimit { channel_reusable: true });
+                }
+                let end = output.stdout.rfind(end_marker).expect("completion marker checked");
+                output.stdout.insert_str(end, &counters);
+            }
             Ok(output.stdout)
         })
     }

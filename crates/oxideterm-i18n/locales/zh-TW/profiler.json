@@ -12,6 +12,8 @@
       "source": "資料來源"
     },
     "panel": {
+      "disk_read": "磁碟讀取",
+      "disk_write": "磁碟寫入",
       "session_failed": "無法建立監控工作階段。請檢查連線狀態；單通道模式還需要為獨立連線完成驗證。",
       "sample_read_failed": "無法讀取完整的採樣結果，請重新偵測。",
       "sample_unrecognized": "已收到採樣結果，但無法辨識主機指標。請檢查遠端系統與採樣命令的相容性。",

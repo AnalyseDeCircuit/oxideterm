@@ -177,6 +177,8 @@ impl HostToolsEntity {
                 format_bytes(summary.memory_used),
                 format_bytes(summary.memory_total)
             )
+        } else if snapshot.devices.iter().any(|device| device.memory_used.is_some()) {
+            format_bytes(summary.memory_used)
         } else {
             "—".to_string()
         };
@@ -202,7 +204,13 @@ impl HostToolsEntity {
                 i18n,
             ))
             .child(Self::render_host_gpu_summary_item(
-                "sidebar.host_gpu.summary.memory",
+                if !snapshot.devices.is_empty()
+                    && snapshot.devices.iter().all(|device| device.provider == GpuProvider::Apple)
+                {
+                    "sidebar.host_gpu.summary.shared_memory"
+                } else {
+                    "sidebar.host_gpu.summary.memory"
+                },
                 memory,
                 tokens,
                 i18n,
@@ -404,7 +412,8 @@ impl HostToolsEntity {
         let device_uuid = device.uuid.clone();
         let device_kind = match device.provider {
             GpuProvider::Ascend | GpuProvider::Cambricon => "NPU",
-            GpuProvider::Nvidia
+            GpuProvider::Apple
+            | GpuProvider::Nvidia
             | GpuProvider::Amd
             | GpuProvider::Hygon
             | GpuProvider::Intel
@@ -415,6 +424,7 @@ impl HostToolsEntity {
             (Some(used), Some(total)) => {
                 format!("{} / {}", format_bytes(used), format_bytes(total))
             }
+            (Some(used), None) => format_bytes(used),
             _ => percent_text(device.memory_utilization_percent),
         };
         let process_rows = snapshot.processes_for(&device).cloned().collect::<Vec<_>>();
@@ -575,7 +585,9 @@ impl HostToolsEntity {
                     .text_color(rgb(theme.text))
                     .child(i18n.t("sidebar.host_gpu.processes.title")),
             );
-        if processes.is_empty() {
+        if device.provider == GpuProvider::Apple {
+            details = details.child(i18n.t("sidebar.host_gpu.processes.unavailable"));
+        } else if processes.is_empty() {
             details = details.child(i18n.t("sidebar.host_gpu.processes.empty"));
         } else {
             for process in processes {

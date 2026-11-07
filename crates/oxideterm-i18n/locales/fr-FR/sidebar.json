@@ -122,6 +122,7 @@
       "summary": {
         "utilization": "Utilisation moyenne",
         "memory": "Mémoire du périphérique",
+        "shared_memory": "Mémoire partagée utilisée",
         "temperature": "Température maximale",
         "power": "Puissance totale"
       },
@@ -140,6 +141,7 @@
         "fan": "Ventilateur"
       },
       "processes": {
+        "unavailable": "Les données des processus ne sont pas disponibles pour ce périphérique.",
         "title": "Processus de calcul",
         "empty": "Aucun processus de calcul n’utilise ce périphérique."
       }

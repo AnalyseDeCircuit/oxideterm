@@ -973,7 +973,7 @@ fn monitor_metric_icon(kind: MonitorMetricKind) -> LucideIcon {
         MonitorMetricKind::Memory | MonitorMetricKind::Swap | MonitorMetricKind::GpuMemory => {
             LucideIcon::MemoryStick
         }
-        MonitorMetricKind::Disk => LucideIcon::HardDrive,
+        MonitorMetricKind::Disk | MonitorMetricKind::DiskRead | MonitorMetricKind::DiskWrite => LucideIcon::HardDrive,
         MonitorMetricKind::LoadAverage => LucideIcon::Gauge,
         MonitorMetricKind::Rtt => LucideIcon::Activity,
         MonitorMetricKind::Source => LucideIcon::Info,
@@ -991,6 +991,8 @@ fn monitor_metric_label_key(kind: MonitorMetricKind) -> &'static str {
         MonitorMetricKind::Memory => "profiler.panel.memory",
         MonitorMetricKind::Swap => "profiler.panel.swap",
         MonitorMetricKind::Disk => "profiler.panel.disk",
+        MonitorMetricKind::DiskRead => "profiler.panel.disk_read",
+        MonitorMetricKind::DiskWrite => "profiler.panel.disk_write",
         MonitorMetricKind::Gpu => "profiler.panel.gpu",
         MonitorMetricKind::GpuMemory => "profiler.panel.gpu_memory",
         MonitorMetricKind::LoadAverage => "profiler.panel.load_avg",
@@ -1001,6 +1003,7 @@ fn monitor_metric_label_key(kind: MonitorMetricKind) -> &'static str {
 
 fn monitor_section_icon(kind: MonitorSectionKind) -> LucideIcon {
     match kind {
+        MonitorSectionKind::CpuCores => LucideIcon::Cpu,
         MonitorSectionKind::Mounts => LucideIcon::HardDrive,
         MonitorSectionKind::Gpus => LucideIcon::Cpu,
         MonitorSectionKind::Interfaces => LucideIcon::Wifi,
@@ -1010,6 +1013,7 @@ fn monitor_section_icon(kind: MonitorSectionKind) -> LucideIcon {
 
 fn monitor_section_label_key(kind: MonitorSectionKind) -> &'static str {
     match kind {
+        MonitorSectionKind::CpuCores => "profiler.detail.cpu_cores",
         MonitorSectionKind::Mounts => "profiler.panel.mounts",
         MonitorSectionKind::Gpus => "profiler.panel.gpus",
         MonitorSectionKind::Interfaces => "profiler.panel.interfaces",

@@ -12,8 +12,13 @@ mod docker;
 mod filesystem;
 mod gpu;
 mod herdr;
+mod launchd;
 mod log;
 mod metrics;
+#[cfg(target_os = "macos")]
+mod native_macos;
+#[cfg(target_os = "macos")]
+pub use native_macos::macos_cpu_counters;
 pub mod multiplexer;
 mod package;
 mod port;

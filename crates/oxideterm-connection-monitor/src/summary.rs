@@ -16,6 +16,8 @@ pub enum MonitorMetricKind {
     Memory,
     Swap,
     Disk,
+    DiskRead,
+    DiskWrite,
     Gpu,
     GpuMemory,
     LoadAverage,
@@ -25,6 +27,7 @@ pub enum MonitorMetricKind {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum MonitorSectionKind {
+    CpuCores,
     Mounts,
     Gpus,
     Interfaces,
@@ -375,6 +378,18 @@ fn push_compact_metric_rows(metrics: &ResourceMetrics, rows: &mut Vec<CompactMon
             level: percent_level(metrics.disk_percent),
         });
     }
+    for (kind, rate) in [
+        (MonitorMetricKind::DiskRead, metrics.disk_read_bytes_per_sec),
+        (MonitorMetricKind::DiskWrite, metrics.disk_write_bytes_per_sec),
+    ] {
+        if let Some(rate) = rate {
+            rows.push(CompactMonitorRow::Metric {
+                kind,
+                value: format_rate(rate),
+                level: MonitorValueLevel::Normal,
+            });
+        }
+    }
     if let Some(gpu_utilization) = gpu_utilization_percent(metrics) {
         rows.push(CompactMonitorRow::Metric {
             kind: MonitorMetricKind::Gpu,
@@ -446,6 +461,15 @@ fn push_compact_system_rows(metrics: &ResourceMetrics, rows: &mut Vec<CompactMon
 }
 
 fn push_compact_detail_rows(metrics: &ResourceMetrics, rows: &mut Vec<CompactMonitorRow>) {
+    push_section_rows(
+        rows,
+        MonitorSectionKind::CpuCores,
+        metrics.cpu_per_core.iter().map(|core| MonitorListRow {
+            name: format!("CPU {}", core.index),
+            value: core.percent.map(|percent| format!("{percent:.1}%")).unwrap_or_else(dash),
+            level: percent_level(core.percent),
+        }).collect(),
+    );
     push_section_rows(rows, MonitorSectionKind::Mounts, disk_list_rows(metrics, 8));
     push_section_rows(rows, MonitorSectionKind::Gpus, gpu_list_rows(metrics, 4));
     push_compact_interface_rows(metrics, rows);

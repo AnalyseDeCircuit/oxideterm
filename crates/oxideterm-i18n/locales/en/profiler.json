@@ -12,6 +12,8 @@
       "source": "Source"
     },
     "panel": {
+      "disk_read": "Disk read",
+      "disk_write": "Disk write",
       "session_failed": "Could not open a monitoring session. Check the connection; single-channel mode also requires authentication for a separate connection.",
       "sample_read_failed": "Could not read a complete sample. Retry detection.",
       "sample_unrecognized": "A sample was received, but no host metrics could be recognized. Check remote system and sampling command compatibility.",

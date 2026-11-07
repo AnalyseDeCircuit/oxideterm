@@ -131,6 +131,10 @@ pub struct ResourceMetrics {
     pub disk_used: Option<u64>,
     pub disk_total: Option<u64>,
     pub disk_percent: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_read_bytes_per_sec: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disk_write_bytes_per_sec: Option<u64>,
     pub load_avg_1: Option<f64>,
     pub load_avg_5: Option<f64>,
     pub load_avg_15: Option<f64>,
@@ -168,6 +172,8 @@ impl ResourceMetrics {
             disk_used: None,
             disk_total: None,
             disk_percent: None,
+            disk_read_bytes_per_sec: None,
+            disk_write_bytes_per_sec: None,
             load_avg_1: None,
             load_avg_5: None,
             load_avg_15: None,
@@ -233,11 +239,19 @@ pub struct NetInterfaceSnapshot {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PreviousResourceSample {
-    pub cpu: CpuSnapshot,
+    pub cpu: Option<CpuSnapshot>,
     pub cpu_per_core: Vec<CpuSnapshot>,
-    pub net: NetSnapshot,
+    pub net: Option<NetSnapshot>,
     pub net_interfaces: Vec<NetInterfaceSnapshot>,
     pub timestamp_ms: u64,
+    pub disk_io: Vec<DiskIoSnapshot>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiskIoSnapshot {
+    pub id: String,
+    pub read_bytes: u64,
+    pub written_bytes: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -281,8 +295,8 @@ pub fn parse_resource_metrics(
         || !top_processes.is_empty()
         || !matches!(docker.status, crate::ResourceDockerStatus::Unknown);
 
-    let cpu_percent = match (&cpu_snap, previous) {
-        (Some(current), Some(previous)) => cpu_usage_percent(current, &previous.cpu),
+    let cpu_percent = match (&cpu_snap, previous.and_then(|previous| previous.cpu.as_ref())) {
+        (Some(current), Some(previous)) => cpu_usage_percent(current, previous),
         _ => cpu_direct,
     };
 
@@ -300,18 +314,21 @@ pub fn parse_resource_metrics(
         })
         .collect::<Vec<_>>();
 
-    let (net_rx_rate, net_tx_rate) = match (&net_snap, previous) {
-        (Some(current), Some(previous)) => {
+    let (disk_read_bytes_per_sec, disk_write_bytes_per_sec) = disk_io_rates(
+        &parse_disk_io_snapshot(output), previous, timestamp_ms,
+    );
+    let (net_rx_rate, net_tx_rate) = match (&net_snap, previous.and_then(|sample| sample.net.as_ref().map(|net| (sample, net)))) {
+        (Some(current), Some((previous, previous_net))) => {
             let elapsed_ms = timestamp_ms.saturating_sub(previous.timestamp_ms);
             if elapsed_ms > 0 {
                 let elapsed_secs = elapsed_ms as f64 / 1000.0;
                 (
                     Some(
-                        (current.rx_bytes.saturating_sub(previous.net.rx_bytes) as f64
+                        (current.rx_bytes.saturating_sub(previous_net.rx_bytes) as f64
                             / elapsed_secs) as u64,
                     ),
                     Some(
-                        (current.tx_bytes.saturating_sub(previous.net.tx_bytes) as f64
+                        (current.tx_bytes.saturating_sub(previous_net.tx_bytes) as f64
                             / elapsed_secs) as u64,
                     ),
                 )
@@ -414,6 +431,8 @@ pub fn parse_resource_metrics(
         disk_used,
         disk_total,
         disk_percent,
+        disk_read_bytes_per_sec,
+        disk_write_bytes_per_sec,
         load_avg_1: load.map(|(one, _, _)| one),
         load_avg_5: load.map(|(_, five, _)| five),
         load_avg_15: load.map(|(_, _, fifteen)| fifteen),
@@ -469,13 +488,44 @@ pub fn previous_sample_from_metrics(
     metrics: &ResourceMetrics,
     output: &str,
 ) -> Option<PreviousResourceSample> {
+    let cpu = parse_cpu_snapshot(output);
+    let cpu_per_core = parse_cpu_core_snapshots(output);
+    let net = parse_net_snapshot(output);
+    let disk_io = parse_disk_io_snapshot(output);
+    if cpu.is_none() && cpu_per_core.is_empty() && net.is_none() && disk_io.is_empty() {
+        return None;
+    }
     Some(PreviousResourceSample {
-        cpu: parse_cpu_snapshot(output)?,
-        cpu_per_core: parse_cpu_core_snapshots(output),
-        net: parse_net_snapshot(output).unwrap_or_default(),
+        cpu,
+        cpu_per_core,
+        net,
         net_interfaces: parse_net_interface_snapshots(output),
         timestamp_ms: metrics.timestamp_ms,
+        disk_io,
     })
+}
+
+fn parse_disk_io_snapshot(output: &str) -> Vec<DiskIoSnapshot> {
+    extract_section(output, "DISK_IO").into_iter().flat_map(str::lines).filter_map(|line| {
+        let mut fields = line.split_whitespace();
+        Some(DiskIoSnapshot {
+            id: fields.next()?.into(), read_bytes: fields.next()?.parse().ok()?,
+            written_bytes: fields.next()?.parse().ok()?,
+        })
+    }).collect()
+}
+
+fn disk_io_rates(current: &[DiskIoSnapshot], previous: Option<&PreviousResourceSample>, timestamp: u64) -> (Option<u64>, Option<u64>) {
+    let Some(previous) = previous else { return (None, None) };
+    let elapsed = timestamp.saturating_sub(previous.timestamp_ms);
+    if elapsed == 0 { return (None, None); }
+    let mut deltas = current.iter().filter_map(|disk| {
+        let old = previous.disk_io.iter().find(|old| old.id == disk.id)?;
+        Some((disk.read_bytes.checked_sub(old.read_bytes)?, disk.written_bytes.checked_sub(old.written_bytes)?))
+    });
+    let Some(mut total) = deltas.next() else { return (None, None) };
+    for (read, written) in deltas { total.0 = total.0.saturating_add(read); total.1 = total.1.saturating_add(written); }
+    (Some((total.0 as f64 * 1000.0 / elapsed as f64) as u64), Some((total.1 as f64 * 1000.0 / elapsed as f64) as u64))
 }
 
 pub fn push_history(history: &mut Vec<ResourceMetrics>, metrics: ResourceMetrics) {
@@ -986,6 +1036,26 @@ fn percent(used: u64, total: u64) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_direct_cpu_samples_keep_network_and_disk_rate_baselines() {
+        assert!(previous_sample_from_metrics(&ResourceMetrics::empty(1, MetricsSource::RttOnly), "===END===").is_none());
+        let first = "===CPU_DIRECT===\n20\n===NETDEV===\nen0: 1000 0 0 0 0 0 0 0 2000\n===DISK_IO===\na 10000 20000\nb 5000 6000\n===END===";
+        let initial = parse_resource_metrics(first, None, 1000);
+        assert_eq!(initial.disk_read_bytes_per_sec, None);
+        let previous = previous_sample_from_metrics(&initial, first).unwrap();
+        let second = "===CPU_DIRECT===\n30\n===NETDEV===\nen0: 3000 0 0 0 0 0 0 0 6000\n===DISK_IO===\na 14000 26000\nb 7000 10000\nnew 99999999 99999999\n===END===";
+        let metrics = parse_resource_metrics(second, Some(&previous), 3000);
+        assert_eq!((metrics.disk_read_bytes_per_sec, metrics.disk_write_bytes_per_sec), (Some(3000), Some(5000)));
+        assert_eq!((metrics.net_rx_bytes_per_sec, metrics.net_tx_bytes_per_sec), (Some(1000), Some(2000)));
+        let reset = "===DISK_IO===\na 1 2\n===END===";
+        assert_eq!(parse_resource_metrics(reset, Some(&previous), 3000).disk_read_bytes_per_sec, None);
+        assert_eq!(parse_resource_metrics(second, Some(&previous), 1000).disk_write_bytes_per_sec, None);
+        let rows = crate::compact_monitor_rows(&metrics, None);
+        assert!(rows.contains(&crate::CompactMonitorRow::Metric {
+            kind: crate::MonitorMetricKind::DiskRead, value: "2.9 KB/s".into(), level: crate::MonitorValueLevel::Normal,
+        }));
+    }
 
     const SAMPLE_OUTPUT: &str = r#"===STAT===
 cpu  10000100 290000 3000050 46000200 16000 0 25000 0 0 0

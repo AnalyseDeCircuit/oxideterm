@@ -122,13 +122,14 @@
       "summary": {
         "utilization": "平均使用率",
         "memory": "裝置記憶體",
+        "shared_memory": "已用統一記憶體",
         "temperature": "最高溫度",
         "power": "總功耗"
       },
       "columns": {
         "device": "裝置",
         "utilization": "使用率",
-        "memory": "顯示記憶體"
+        "memory": "記憶體"
       },
       "details": {
         "uuid": "UUID",
@@ -140,6 +141,7 @@
         "fan": "風扇"
       },
       "processes": {
+        "unavailable": "此裝置暫不提供程序使用量資料。",
         "title": "運算程序",
         "empty": "目前沒有運算程序使用此裝置。"
       }

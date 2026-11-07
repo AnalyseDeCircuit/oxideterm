@@ -122,6 +122,7 @@
       "summary": {
         "utilization": "Mức sử dụng trung bình",
         "memory": "Bộ nhớ thiết bị",
+        "shared_memory": "Bộ nhớ dùng chung đang sử dụng",
         "temperature": "Nhiệt độ cao nhất",
         "power": "Tổng công suất"
       },
@@ -140,6 +141,7 @@
         "fan": "Quạt"
       },
       "processes": {
+        "unavailable": "Không có dữ liệu tiến trình cho thiết bị này.",
         "title": "Tiến trình tính toán",
         "empty": "Không có tiến trình tính toán nào đang dùng thiết bị này."
       }

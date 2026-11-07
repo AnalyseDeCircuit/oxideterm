@@ -12,6 +12,8 @@
       "source": "Fonte"
     },
     "panel": {
+      "disk_read": "Leitura de disco",
+      "disk_write": "Gravação em disco",
       "session_failed": "Não foi possível abrir uma sessão de monitoramento. Verifique a conexão; o modo de canal único também exige autenticação de uma conexão separada.",
       "sample_read_failed": "Não foi possível ler uma amostra completa. Tente detectar novamente.",
       "sample_unrecognized": "Uma amostra foi recebida, mas nenhuma métrica do host foi reconhecida. Verifique a compatibilidade do sistema remoto e dos comandos de amostragem.",

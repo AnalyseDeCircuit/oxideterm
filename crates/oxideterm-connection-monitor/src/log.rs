@@ -3,7 +3,7 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::shell::{shell_quote, windows_encoded_command};
+use crate::shell::{posix_shell_command, shell_quote, windows_encoded_command};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -154,6 +154,15 @@ pub fn parse_log_snapshot(output: &str) -> ResourceLogSnapshot {
                 entries: Vec::new(),
             };
         }
+        if let Some(status) = line.strip_prefix("MACOS_LOG_EXIT\t") {
+            if status != "0" {
+                return ResourceLogSnapshot {
+                    status: ResourceLogStatus::Error { message: "macOS log query failed.".into() },
+                    entries: Vec::new(),
+                };
+            }
+            continue;
+        }
         if let Some(message) = line.strip_prefix(LOG_ERROR_MARKER) {
             return ResourceLogSnapshot {
                 status: ResourceLogStatus::Error {
@@ -167,7 +176,8 @@ pub fn parse_log_snapshot(output: &str) -> ResourceLogSnapshot {
             platform = next_platform;
             continue;
         }
-        if let Some(entry) = parse_log_json_line(line).or_else(|| parse_log_row_line(line)) {
+        if let Some(entry) = parse_macos_log_line(line)
+            .or_else(|| parse_log_json_line(line)).or_else(|| parse_log_row_line(line)) {
             entries.push(entry);
         }
     }
@@ -280,21 +290,21 @@ fn build_linux_log_follow_command(preset: LogPreset) -> String {
 
 fn build_macos_log_snapshot_command(preset: LogPreset, limit: usize) -> String {
     let predicate = macos_log_predicate(preset);
-    format!(
+    posix_shell_command(&format!(
         concat!(
             "echo '===HOST_LOGS==='; ",
-            "if command -v log >/dev/null 2>&1; then ",
+            "if [ -x /usr/bin/log ]; then ",
             "echo '__OXIDE_LOG_CAPABILITY__\tpartial\tmacos_log'; ",
-            "oxide_logs=$(log show --last 1h --style compact {predicate} 2>&1 | tail -n {limit}); ",
-            "oxide_status=$?; ",
-            "if [ \"$oxide_status\" -eq 0 ]; then printf '%s\\n' \"$oxide_logs\" | awk '{{ gsub(/\\t/, \" \"); printf \"ROW\\t\\tinfo\\tmacos_log\\t\\t%s\\n\", $0 }}'; ",
-            "else printf '__OXIDE_LOG_ERROR__\\t%s\\n' \"$(printf '%s' \"$oxide_logs\" | head -n 1 | tr '\\t' ' ')\"; fi; ",
+            // Carry the producer's exit status through tail instead of reporting
+            // tail's success when log denied access or rejected the query.
+            "{{ /usr/bin/log show --last 1h --style ndjson {predicate} 2>/dev/null; ",
+            "printf 'MACOS_LOG_EXIT\\t%s\\n' \"$?\"; }} | tail -n {lines}; ",
             "else echo '__OXIDE_LOG_UNAVAILABLE__'; fi; ",
             "echo '===HOST_LOGS_END==='"
         ),
         predicate = predicate,
-        limit = limit,
-    )
+        lines = limit + 1,
+    ))
 }
 
 fn build_macos_log_follow_command(preset: LogPreset) -> String {
@@ -462,6 +472,29 @@ fn parse_log_json_line(line: &str) -> Option<ResourceLogEntry> {
     })
 }
 
+fn parse_macos_log_line(line: &str) -> Option<ResourceLogEntry> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let message = value.get("eventMessage")?.as_str()?.to_string();
+    let process = value.get("processImagePath").and_then(|v| v.as_str())
+        .and_then(|path| path.rsplit('/').next()).unwrap_or_default();
+    let source = match value.get("processID").and_then(|v| v.as_u64()) {
+        Some(pid) => format!("{process}[{pid}]"),
+        None => process.to_string(),
+    };
+    let level = match value.get("messageType").and_then(|v| v.as_str()).unwrap_or_default() {
+        "Error" | "Fault" => "error",
+        "Info" | "Default" => "info",
+        "Debug" => "debug",
+        _ => "unknown",
+    };
+    Some(ResourceLogEntry {
+        timestamp: value.get("timestamp").and_then(|v| v.as_str()).unwrap_or_default().into(),
+        level: level.into(), source,
+        unit: value.get("subsystem").and_then(|v| v.as_str()).unwrap_or_default().into(),
+        message,
+    })
+}
+
 fn journal_priority_value(value: &serde_json::Value) -> Option<String> {
     value
         .as_str()
@@ -620,7 +653,7 @@ fn linux_log_grep_filter(preset: LogPreset) -> &'static str {
 fn macos_log_predicate(preset: LogPreset) -> String {
     match preset {
         LogPreset::All | LogPreset::System => String::new(),
-        LogPreset::Errors => "--predicate 'eventType == logEvent AND messageType == error'".to_string(),
+        LogPreset::Errors => "--predicate 'eventType == logEvent AND (messageType == error OR messageType == fault)'".to_string(),
         LogPreset::Auth => "--predicate 'process == \"sshd\" OR eventMessage CONTAINS \"auth\" OR eventMessage CONTAINS \"login\"'".to_string(),
         LogPreset::Kernel => "--predicate 'sender CONTAINS \"kernel\" OR process == \"kernel\"'".to_string(),
     }
@@ -689,6 +722,20 @@ enum LogOs {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_structured_logs_preserve_event_fields_and_producer_failure() {
+        let raw = concat!("===HOST_LOGS===\n__OXIDE_LOG_CAPABILITY__\tpartial\tmacos_log\n",
+            "{\"timestamp\":\"2026-11-07 12:00:00+0800\",\"messageType\":\"Fault\",\"processImagePath\":\"/usr/sbin/example\",\"processID\":42,\"subsystem\":\"com.example.io\",\"eventMessage\":\"failure\\nwith\\ttabs\"}\n",
+            "MACOS_LOG_EXIT\t0\n===HOST_LOGS_END===");
+        let snapshot = parse_log_snapshot(raw);
+        assert_eq!(snapshot.entries, vec![ResourceLogEntry {
+            timestamp: "2026-11-07 12:00:00+0800".into(), level: "error".into(), source: "example[42]".into(),
+            unit: "com.example.io".into(), message: "failure\nwith\ttabs".into(),
+        }]);
+        assert_eq!(parse_log_snapshot(&raw.replace("MACOS_LOG_EXIT\t0", "MACOS_LOG_EXIT\t1")).status,
+            ResourceLogStatus::Error { message: "macOS log query failed.".into() });
+    }
 
     #[test]
     fn parses_platform_logs_and_selects_matching_records() {

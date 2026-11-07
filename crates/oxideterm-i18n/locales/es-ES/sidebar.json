@@ -122,6 +122,7 @@
       "summary": {
         "utilization": "Uso promedio",
         "memory": "Memoria del dispositivo",
+        "shared_memory": "Memoria compartida en uso",
         "temperature": "Temperatura máxima",
         "power": "Potencia total"
       },
@@ -140,6 +141,7 @@
         "fan": "Ventilador"
       },
       "processes": {
+        "unavailable": "No hay datos de procesos disponibles para este dispositivo.",
         "title": "Procesos de cálculo",
         "empty": "Ningún proceso de cálculo está usando este dispositivo."
       }

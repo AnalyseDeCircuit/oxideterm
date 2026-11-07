@@ -115,6 +115,12 @@ const METRICS_COMMAND_LINUX_GPU: &str = concat!(
     "timeout 3 intel_gpu_top -J -s 1000 -n 2 -o - 2>/dev/null || true; ",
     "fi"
 );
+const METRICS_COMMAND_MACOS_DISK_IO: &str = concat!(
+    "echo '===DISK_IO==='; ",
+    "ioreg -r -c IOBlockStorageDriver -d 1 -l -w 0 2>/dev/null | awk '",
+    "/^\\+-o/ {id=$0; sub(/^.* id /,\"\",id); sub(/,.*/,\"\",id)} ",
+    "/\"Statistics\" = / {read=\"\"; written=\"\"; n=split($0,fields,\",\"); for(i=1;i<=n;i++) {v=fields[i]; sub(/^.*=/,\"\",v); gsub(/[^0-9]/,\"\",v); if(fields[i] ~ /\"Bytes \\(Read\\)\"=/)read=v; if(fields[i] ~ /\"Bytes \\(Write\\)\"=/)written=v} if(id!=\"\" && read!=\"\" && written!=\"\")printf \"%s\\t%s\\t%s\\n\",id,read,written}'"
+);
 const METRICS_COMMAND_MACOS_SYSTEM: &str = "echo '===CPU_DIRECT==='; cpuline=$(top -l 1 -s 0 -n 0 2>/dev/null | grep 'CPU usage:' | head -1); echo \"$cpuline\" | awk '{for(i=1;i<=NF;i++){if($(i+1)~/^idle/){v=$i;gsub(/%/,\"\",v);printf \"%.1f\\n\",100-v}}}'; echo '===MEMINFO==='; pagesize=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096); memtotal=$(sysctl -n hw.memsize 2>/dev/null | awk '{printf \"%d\",$1/1024}'); vm_stat 2>/dev/null | awk -v ps=\"$pagesize\" -v total=\"$memtotal\" 'BEGIN{free=0;spec=0;inactive=0;purgeable=0} /^Pages free:/{gsub(/[^0-9]/,\"\",$NF);free=$NF} /^Pages speculative:/{gsub(/[^0-9]/,\"\",$NF);spec=$NF} /^Pages inactive:/{gsub(/[^0-9]/,\"\",$NF);inactive=$NF} /^Pages purgeable:/{gsub(/[^0-9]/,\"\",$NF);purgeable=$NF} END{avail=int((free+spec+inactive+purgeable)*ps/1024); printf \"MemTotal: %d kB\\nMemAvailable: %d kB\\n\",total,avail}'; sysctl vm.swapusage 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i==\"total\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);total=v*m} if($i==\"used\"&&$(i+1)==\"=\"){v=$(i+2);m=1024;if(v~/G/)m=1048576;gsub(/[MmGg]/,\"\",v);used=v*m}} printf \"SwapTotal: %.0f kB\\nSwapFree: %.0f kB\\n\",total,total-used}'; echo '===LOADAVG==='; sysctl -n vm.loadavg 2>/dev/null | tr -d '{}'; echo '===NETDEV==='; netstat -ib 2>/dev/null | awk '/^[a-z]/&&$3~/Link/&&$1!~/^lo/{if($4~/:/){rx=$7;tx=$10}else{rx=$6;tx=$9};if((rx+0)>0){gsub(/[\\*]/,\"\",$1);printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",$1,rx,tx}}'; echo '===NPROC==='; sysctl -n hw.logicalcpu 2>/dev/null; echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ && ($6==\"/\" || $6 ~ /^\\/Volumes\\//) {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'";
 const METRICS_COMMAND_MACOS_PROCESSES: &str = "echo '===TOPPROCS==='; ps axww -o pid=,ppid=,user=,stat=,pcpu=,pmem=,rss=,vsz=,etime=,comm=,command= 2>/dev/null | sort -k6 -rn | awk 'NR<=200 {pid=$1;ppid=$2;user=$3;stat=$4;cpu=$5;mem=$6;rss=$7;vsz=$8;etime=$9;comm=$10;$1=$2=$3=$4=$5=$6=$7=$8=$9=$10=\"\";sub(/^ +/,\"\");gsub(/\\t/,\" \");printf \"%s\\t%s\\t%s\\t%s\\t%.1f\\t%.1f\\t%s\\t%s\\t%s\\t%s\\t%s\\n\",pid,ppid,user,stat,cpu,mem,rss,vsz,etime,comm,$0}'";
 const METRICS_COMMAND_UNSUPPORTED: &str =
@@ -591,6 +597,9 @@ fn build_sample_command_with_system_info(
             _ => METRICS_COMMAND_UNSUPPORTED,
         };
         commands.push(metrics.to_string());
+        if matches!(os_type, "macOS" | "macos" | "Darwin") {
+            commands.push(METRICS_COMMAND_MACOS_DISK_IO.to_string());
+        }
     }
     if config.gpu
         && matches!(
@@ -1097,6 +1106,22 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 mod tests {
     use super::*;
     use crate::MetricsSource;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn native_disk_probe_reads_cumulative_byte_counters() {
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", METRICS_COMMAND_MACOS_DISK_IO]).output().unwrap();
+        assert!(output.status.success());
+        let output = String::from_utf8(output.stdout).unwrap();
+        let metrics = parse_resource_metrics(&output, None, 1);
+        let baseline = previous_sample_from_metrics(&metrics, &output).unwrap();
+        assert!(baseline.disk_io.iter().any(|disk| disk.read_bytes > 0));
+        assert!(baseline.disk_io.iter().all(|disk| disk.id.starts_with("0x")));
+        // Reusing the same counters at a later timestamp represents an idle disk.
+        let idle = parse_resource_metrics(&output, Some(&baseline), 1001);
+        assert_eq!((idle.disk_read_bytes_per_sec, idle.disk_write_bytes_per_sec), (Some(0), Some(0)));
+    }
 
     #[test]
     fn profiler_registry_records_registered_samples_and_resets_degraded_history() {

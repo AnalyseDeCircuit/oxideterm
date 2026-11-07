@@ -12,6 +12,8 @@
       "source": "Fuente"
     },
     "panel": {
+      "disk_read": "Lectura de disco",
+      "disk_write": "Escritura de disco",
       "session_failed": "No se pudo abrir una sesión de monitorización. Comprueba la conexión; el modo de canal único también requiere autenticar una conexión independiente.",
       "sample_read_failed": "No se pudo leer una muestra completa. Reintenta la detección.",
       "sample_unrecognized": "Se recibió una muestra, pero no se reconocieron métricas del equipo. Comprueba la compatibilidad del sistema remoto y de los comandos de muestreo.",

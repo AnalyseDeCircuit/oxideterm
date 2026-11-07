@@ -122,6 +122,7 @@
       "summary": {
         "utilization": "平均使用率",
         "memory": "デバイスメモリ",
+        "shared_memory": "使用中の共有メモリ",
         "temperature": "最高温度",
         "power": "合計消費電力"
       },
@@ -140,6 +141,7 @@
         "fan": "ファン"
       },
       "processes": {
+        "unavailable": "このデバイスではプロセス別の使用状況を取得できません。",
         "title": "計算プロセス",
         "empty": "このデバイスを使用している計算プロセスはありません。"
       }

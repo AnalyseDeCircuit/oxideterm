@@ -12,6 +12,8 @@
       "source": "Quelle"
     },
     "panel": {
+      "disk_read": "Datenträger lesen",
+      "disk_write": "Datenträger schreiben",
       "session_failed": "Die Überwachungssitzung konnte nicht geöffnet werden. Prüfen Sie die Verbindung; im Einzelkanalmodus muss auch die separate Verbindung authentifiziert werden.",
       "sample_read_failed": "Die Messung konnte nicht vollständig gelesen werden. Starten Sie die Erkennung erneut.",
       "sample_unrecognized": "Eine Messung wurde empfangen, aber keine Host-Metriken erkannt. Prüfen Sie die Kompatibilität des entfernten Systems und der Messbefehle.",

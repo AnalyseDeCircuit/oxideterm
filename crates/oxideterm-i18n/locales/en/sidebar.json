@@ -122,6 +122,7 @@
       "summary": {
         "utilization": "Average utilization",
         "memory": "Device memory",
+        "shared_memory": "Shared memory in use",
         "temperature": "Maximum temperature",
         "power": "Total power"
       },
@@ -140,6 +141,7 @@
         "fan": "Fan"
       },
       "processes": {
+        "unavailable": "Process metrics are unavailable for this device.",
         "title": "Compute processes",
         "empty": "No compute processes are using this device."
       }

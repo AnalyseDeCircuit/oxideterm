@@ -4,6 +4,7 @@
 //! Vendor-specific GPU sampling commands and parsers.
 
 mod amd;
+mod apple;
 mod ascend;
 mod cambricon;
 mod hygon;
@@ -36,6 +37,9 @@ pub fn build_gpu_sample_command(os_type: &str) -> String {
         return format!("echo '===GPU_NPU_STATUS==='; echo unsupported; echo '{GPU_END_MARKER}'\n");
     }
 
+    if matches!(os_type, "macOS" | "macos" | "Darwin") {
+        return format!("{}echo '{GPU_END_MARKER}'\n", apple::sample_command());
+    }
     let mut command = nvidia::sample_command();
     if matches!(os_type, "Linux" | "linux") {
         command.push_str(&amd::sample_command());
@@ -61,6 +65,7 @@ pub fn parse_gpu_snapshot(output: &str, timestamp_ms: u64) -> GpuSnapshot {
     }
 
     let provider_snapshots = [
+        apple::parse(output),
         nvidia::parse(output),
         amd::parse(output),
         hygon::parse(output),
@@ -165,10 +170,15 @@ pub(super) fn sanitized_error(output: &str, marker: &str, fallback: &str) -> Str
         .collect()
 }
 
-fn gpu_os_supported(os_type: &str) -> bool {
+pub(super) fn gpu_os_supported(os_type: &str) -> bool {
     matches!(
         os_type,
-        "Linux" | "linux" | "Windows_MinGW" | "Windows_MSYS" | "Windows_Cygwin"
+        "Linux"
+            | "linux"
+            | "Windows_MinGW"
+            | "Windows_MSYS"
+            | "Windows_Cygwin"
+            | "macOS" | "macos" | "Darwin"
     )
 }
 
@@ -418,6 +428,8 @@ esac
                 [true, false, false, false, false, false, false, false],
             ),
             ("macOS", [false; 8]),
+            ("Darwin", [false; 8]),
+            ("FreeBSD", [false; 8]),
         ] {
             let command = build_gpu_sample_command(os);
             for (provider, enabled) in providers.into_iter().zip(expected) {
@@ -436,6 +448,8 @@ esac
                 }
             } else if os == "Windows_MSYS" {
                 assert!(command.contains("nvidia-smi --query-gpu="));
+            } else if matches!(os, "macOS" | "Darwin") {
+                assert!(command.contains("ioreg -r -c IOAccelerator"));
             } else {
                 assert!(command.contains("echo unsupported"));
             }

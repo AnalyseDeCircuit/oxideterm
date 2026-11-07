@@ -12,6 +12,8 @@
       "source": "数据来源"
     },
     "panel": {
+      "disk_read": "磁盘读取",
+      "disk_write": "磁盘写入",
       "session_failed": "无法建立监控会话。请检查连接状态；单通道模式还需要为独立连接完成认证。",
       "sample_read_failed": "未能读取完整的采样结果，请重新探测。",
       "sample_unrecognized": "已收到采样结果，但无法识别主机指标。请检查远端系统和采样命令的兼容性。",

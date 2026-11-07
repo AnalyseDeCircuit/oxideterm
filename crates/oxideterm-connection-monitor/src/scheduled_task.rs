@@ -6,6 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::capture::capture_failure_message;
 use crate::shell::{posix_shell_command, powershell_quote, shell_quote};
 
+mod macos;
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResourceScheduledTask {
@@ -98,8 +100,15 @@ pub fn scheduled_task_action_availability(
         "enabled" | "true" | "yes" | "static"
     );
     ScheduledTaskActionAvailability {
-        can_run_now: task.unit.ends_with(".service") || task.source == "windows",
-        can_toggle_enabled: matches!(task.source.as_str(), "systemd" | "windows"),
+        can_run_now: if task.source == "launchd" {
+            macos::valid_target(&task.id) && task.unit == task.id && is_enabled
+        } else {
+            task.unit.ends_with(".service") || task.source == "windows"
+        },
+        can_toggle_enabled: matches!(task.source.as_str(), "systemd" | "windows")
+            || (task.source == "launchd"
+                && macos::valid_target(&task.id)
+                && (is_enabled || is_disabled_state(&task.enabled))),
         is_enabled,
         next_toggle: if is_enabled {
             ScheduledTaskToggleAction::Disable
@@ -235,6 +244,7 @@ pub fn build_scheduled_task_action_command(
     action: ScheduledTaskActionKind,
 ) -> Result<ScheduledTaskActionCommand, String> {
     match (scheduled_task_os(os_type), action) {
+        (ScheduledTaskOs::MacOs, action) => macos::action_command(action),
         (
             ScheduledTaskOs::Linux | ScheduledTaskOs::Unknown,
             ScheduledTaskActionKind::RunNow { id, unit },
@@ -358,7 +368,8 @@ pub fn parse_scheduled_task_snapshot(output: &str) -> ResourceScheduledTaskSnaps
                 entries: Vec::new(),
             };
         }
-        if let Some(message) = line.strip_prefix(SCHEDULED_TASK_ERROR_MARKER) {
+        if let Some(message) = line.strip_prefix(SCHEDULED_TASK_ERROR_MARKER)
+            .or_else(|| line.strip_prefix("LAUNCHD_ERROR\t")) {
             return ResourceScheduledTaskSnapshot {
                 status: ResourceScheduledTaskStatus::Error {
                     message: clean_marker_message(message, "Scheduled task command failed."),
@@ -378,7 +389,6 @@ pub fn parse_scheduled_task_snapshot(output: &str) -> ResourceScheduledTaskSnaps
         if let Some(entry) = parse_task_row_line(line)
             .or_else(|| parse_systemd_timer_line(line))
             .or_else(|| parse_cron_line(line))
-            .or_else(|| parse_launchd_line(line))
             .or_else(|| parse_windows_line(line))
             .or_else(|| parse_at_line(line))
         {
@@ -417,6 +427,7 @@ pub fn parse_scheduled_task_snapshot(output: &str) -> ResourceScheduledTaskSnaps
         }
     }
 
+    entries.extend(macos::parse_snapshot(section));
     dedupe_and_sort_tasks(&mut entries);
     ResourceScheduledTaskSnapshot {
         status: ResourceScheduledTaskStatus::Available {
@@ -573,16 +584,10 @@ fn build_linux_scheduled_task_snapshot_command() -> String {
 }
 
 fn build_macos_scheduled_task_snapshot_command() -> String {
-    concat!(
-        "echo '===SCHEDULED_TASKS==='; ",
-        "if command -v launchctl >/dev/null 2>&1; then ",
-        "echo '__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tmacos_launchd'; ",
-        "launchctl list 2>/dev/null | awk 'NR > 1 && NF >= 3 { pid=$1; status=$2; label=$3; active=(pid ~ /^[0-9]+$/ ? \"active\" : \"inactive\"); printf \"LAUNCHD\\t%s\\t%s\\t%s\\t\\t\\t\\t%s\\n\", label, active, status, label }'; ",
-        "find ~/Library/LaunchAgents /Library/LaunchAgents /Library/LaunchDaemons -maxdepth 1 -name '*.plist' -print 2>/dev/null | while IFS= read -r plist; do label=$(basename \"$plist\" .plist); printf 'LAUNCHD\\t%s\\tinactive\\tunknown\\t\\t\\t%s\\t%s\\n' \"$label\" \"$plist\" \"$label\"; done; ",
-        "else echo '__OXIDE_SCHEDULE_UNAVAILABLE__'; fi; ",
-        "echo '===SCHEDULED_TASKS_END==='"
+    format!(
+        "echo '===SCHEDULED_TASKS==='; if command -v launchctl >/dev/null 2>&1 && command -v plutil >/dev/null 2>&1; then\nprintf '__OXIDE_SCHEDULE_CAPABILITY__\\tpartial\\tmacos_launchd\\n'\n{}\n{}\nelse echo '__OXIDE_SCHEDULE_UNAVAILABLE__'; fi\necho '===SCHEDULED_TASKS_END==='",
+        include_str!("launchd_inventory.sh"), include_str!("scheduled_task/macos_snapshot.sh")
     )
-    .to_string()
 }
 
 fn build_bsd_scheduled_task_snapshot_command() -> String {
@@ -754,30 +759,6 @@ fn parse_cron_line(line: &str) -> Option<ResourceScheduledTask> {
         last_result: String::new(),
         description: source_path,
         unit: String::new(),
-    })
-}
-
-fn parse_launchd_line(line: &str) -> Option<ResourceScheduledTask> {
-    let payload = line.strip_prefix("LAUNCHD\t")?;
-    let parts = payload.splitn(7, '\t').collect::<Vec<_>>();
-    if parts.len() != 7 {
-        return None;
-    }
-    let id = clean(parts[0]);
-    Some(ResourceScheduledTask {
-        name: id.clone(),
-        id,
-        source: "launchd".to_string(),
-        schedule: clean(parts[3]),
-        command: clean(parts[5]),
-        user: String::new(),
-        enabled: "unknown".to_string(),
-        active: clean(parts[1]),
-        last_run: String::new(),
-        next_run: String::new(),
-        last_result: clean(parts[2]),
-        description: clean(parts[6]),
-        unit: clean(parts[4]),
     })
 }
 
@@ -1087,7 +1068,7 @@ mod tests {
                 concat!(
                     "===SCHEDULED_TASKS===\n",
                     "__OXIDE_SCHEDULE_CAPABILITY__\tpartial\tmixed\n",
-                    "LAUNCHD\tcom.example.sync\tactive\t0\tStartInterval=300\t/Library/LaunchDaemons/com.example.sync.plist\t/usr/local/bin/sync\tExample sync\n",
+                    "ROW\tsystem/com.example.sync\tcom.example.sync\tlaunchd\tStartInterval=300\t/usr/local/bin/sync\t\tunknown\tactive\t\t\t0\tExample sync\t/Library/LaunchDaemons/com.example.sync.plist\n",
                     "WIN\t\\Microsoft\\Windows\\Defrag\\ScheduledDefrag\tScheduledDefrag\tReady\tWeekly\tdefrag.exe C:\tSYSTEM\t2026-06-15 10:00:00\t2026-06-22 10:00:00\t0\tDisk defrag\n",
                     "===SCHEDULED_TASKS_END===\n",
                 ),
@@ -1199,7 +1180,7 @@ mod tests {
         assert!(linux.command.contains("next_at=$1"));
         assert!(!linux.command.contains(" next=$1"));
         assert_eq!(linux.capability, ScheduledTaskCapability::Full);
-        assert!(mac.command.contains("launchctl list"));
+        assert!(mac.command.contains("launchctl print"));
         assert_eq!(mac.capability, ScheduledTaskCapability::Partial);
         assert!(bsd.command.contains("crontab -l"));
         assert!(windows.command.contains("Get-ScheduledTask"));

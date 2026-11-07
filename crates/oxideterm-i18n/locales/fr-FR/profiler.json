@@ -12,6 +12,8 @@
       "source": "Source"
     },
     "panel": {
+      "disk_read": "Lecture disque",
+      "disk_write": "Écriture disque",
       "session_failed": "Impossible d’ouvrir une session de surveillance. Vérifiez la connexion ; le mode à canal unique nécessite aussi l’authentification d’une connexion distincte.",
       "sample_read_failed": "Impossible de lire un échantillon complet. Relancez la détection.",
       "sample_unrecognized": "Un échantillon a été reçu, mais aucune mesure de l’hôte n’a été reconnue. Vérifiez la compatibilité du système distant et des commandes de collecte.",

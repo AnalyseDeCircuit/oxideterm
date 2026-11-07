@@ -297,6 +297,12 @@ impl HostToolsEntity {
         selectable_text: &SelectableTextRenderState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let partial_error = match &status {
+            ResourcePackageStatus::Error { message } if !rows.is_empty() => {
+                Some(i18n.t("sidebar.host_packages.error").replace("{{error}}", message))
+            }
+            _ => None,
+        };
         if loading && rows.is_empty() {
             return host_tools_center_state(
                 LucideIcon::Archive,
@@ -316,7 +322,7 @@ impl HostToolsEntity {
                     cx,
                 );
             }
-            ResourcePackageStatus::Error { message } => {
+            ResourcePackageStatus::Error { message } if rows.is_empty() => {
                 return host_tools_center_state(
                     LucideIcon::AlertTriangle,
                     MONITOR_RED,
@@ -326,7 +332,9 @@ impl HostToolsEntity {
                     cx,
                 );
             }
-            ResourcePackageStatus::Unknown | ResourcePackageStatus::Available { .. } => {}
+            ResourcePackageStatus::Unknown
+            | ResourcePackageStatus::Available { .. }
+            | ResourcePackageStatus::Error { .. } => {}
         }
         if rows.is_empty() {
             return host_tools_center_state(
@@ -355,6 +363,17 @@ impl HostToolsEntity {
             .flex()
             .flex_col()
             .overflow_hidden()
+            .when_some(partial_error, |panel, message| {
+                panel.child(
+                    div()
+                        .flex_none()
+                        .px_3()
+                        .py_2()
+                        .text_size(px(11.0))
+                        .text_color(rgb(MONITOR_RED))
+                        .child(message),
+                )
+            })
             .child(Self::render_host_package_table_header(
                 show_context_columns,
                 tokens,
@@ -641,6 +660,8 @@ impl HostToolsEntity {
         let inspect_package_name =
             if entry.manager == "winget" && !entry.repository.trim().is_empty() {
                 entry.repository.clone()
+            } else if entry.manager == "brew" {
+                entry.id.clone()
             } else {
                 entry.name.clone()
             };
@@ -657,6 +678,8 @@ impl HostToolsEntity {
         // suite there (`jammy-updates`), so other managers are addressed by name.
         let package_id = if entry.manager == "winget" && !entry.repository.trim().is_empty() {
             entry.repository.clone()
+        } else if entry.manager == "brew" {
+            entry.id.clone()
         } else {
             entry.name.clone()
         };
@@ -673,16 +696,15 @@ impl HostToolsEntity {
             .t("sidebar.host_packages.toast.upgrade_opened")
             .replace("{{name}}", &entry.name);
         let upgrade_missing_notice = i18n.t("sidebar.host_packages.toast.exec_terminal_missing");
-        // Only winget has an in-place upgrade verb; other managers keep the
-        // details action only.
-        let can_upgrade = entry.manager == "winget" && entry.status == "upgradable";
+        let can_upgrade = matches!(entry.manager.as_str(), "winget" | "brew")
+            && entry.status == "upgradable";
         let uninstall_request = HostPackageUninstallRequest {
             connection_id: connection_id.to_string(),
             manager: entry.manager.clone(),
             package_id,
             package_name: entry.name.clone(),
         };
-        let can_uninstall = entry.manager == "winget";
+        let can_uninstall = matches!(entry.manager.as_str(), "winget" | "brew");
         div()
             .flex_none()
             .flex()

@@ -3,7 +3,9 @@ use std::hash::{Hash, Hasher};
 
 use serde::{Deserialize, Serialize};
 
-use crate::shell::shell_quote;
+use crate::shell::{posix_shell_command, shell_quote};
+
+mod homebrew;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -150,6 +152,10 @@ pub fn build_package_upgrade_command(
         return Err("Package id is empty.".to_string());
     }
     let (command, capability) = match (package_os(os_type), manager.trim()) {
+        (PackageOs::MacOs, "brew") => (
+            homebrew::action_command("upgrade", package_id)?,
+            PackageCommandCapability::Partial,
+        ),
         (PackageOs::Windows, "winget") => (
             format!(
                 "winget upgrade --id {} --accept-source-agreements --accept-package-agreements --disable-interactivity",
@@ -176,6 +182,10 @@ pub fn build_package_uninstall_command(
         return Err("Package id is empty.".to_string());
     }
     let (command, capability) = match (package_os(os_type), manager.trim()) {
+        (PackageOs::MacOs, "brew") => (
+            homebrew::action_command("uninstall", package_id)?,
+            PackageCommandCapability::Partial,
+        ),
         (PackageOs::Windows, "winget") => (
             format!(
                 "winget uninstall --id {} --accept-source-agreements --disable-interactivity",
@@ -203,7 +213,11 @@ pub fn build_package_inspect_command(
     let quoted = shell_quote(package_name);
     let (command, capability) = match (package_os(os_type), manager.trim()) {
         (PackageOs::MacOs, "brew") => (
-            format!("HOMEBREW_NO_AUTO_UPDATE=1 brew info {quoted}"),
+            if package_name.starts_with("brew:") {
+                homebrew::action_command("info", package_name)?
+            } else {
+                format!("HOMEBREW_NO_AUTO_UPDATE=1 brew info -- {quoted}")
+            },
             PackageCommandCapability::Partial,
         ),
         (PackageOs::Linux | PackageOs::Unknown, "apt") => (
@@ -262,6 +276,7 @@ pub fn parse_package_snapshot(output: &str) -> ResourcePackageSnapshot {
     let mut entries = Vec::new();
     let mut managers = Vec::new();
     let mut owners = Vec::new();
+    let mut warnings = Vec::new();
     let mut capability = PackageCommandCapability::Unknown;
     let mut platform = "unknown".to_string();
 
@@ -286,6 +301,10 @@ pub fn parse_package_snapshot(output: &str) -> ResourcePackageSnapshot {
                 entries: Vec::new(),
             };
         }
+        if let Some(message) = line.strip_prefix("__OXIDE_PACKAGE_WARNING__\t") {
+            warnings.push(clean_marker_message(message, "Package query was incomplete."));
+            continue;
+        }
         if let Some((next_capability, next_platform)) = parse_package_capability_line(line) {
             capability = next_capability;
             platform = next_platform;
@@ -304,15 +323,17 @@ pub fn parse_package_snapshot(output: &str) -> ResourcePackageSnapshot {
         }
     }
 
+    entries.extend(homebrew::parse_inventory(section));
     merge_package_entries(&mut entries);
     attach_package_owners(&mut entries, &owners);
     dedupe_and_sort_package_managers(&mut managers);
     dedupe_and_sort_package_entries(&mut entries);
 
     ResourcePackageSnapshot {
-        status: ResourcePackageStatus::Available {
-            capability,
-            platform,
+        status: if warnings.is_empty() {
+            ResourcePackageStatus::Available { capability, platform }
+        } else {
+            ResourcePackageStatus::Error { message: warnings.join("\n") }
         },
         managers,
         entries,
@@ -445,18 +466,7 @@ fn build_linux_package_snapshot_command() -> String {
 }
 
 fn build_macos_package_snapshot_command() -> String {
-    // Homebrew can be slow on large installations. Avoid automatic full
-    // inventory and services scans; users can inspect a selected formula.
-    concat!(
-        "echo '===PACKAGES==='; ",
-        "if command -v brew >/dev/null 2>&1; then ",
-        "echo '__OXIDE_PACKAGE_CAPABILITY__\tpartial\tmacos_brew'; ",
-        "echo 'MANAGER\tbrew\ttrue\tbrew'; ",
-        "HOMEBREW_NO_AUTO_UPDATE=1 brew outdated --verbose 2>/dev/null | awk '{ name=$1; installed=\"\"; candidate=\"\"; if (match($0, /\\([^)]*\\)/)) installed=substr($0,RSTART+1,RLENGTH-2); if (index($0,\" < \")>0) candidate=$NF; printf \"ROW\\t%s\\tbrew\\t%s\\t%s\\t\\t\\toutdated\\t\\t\\t\\tbrew\\n\", name, installed, candidate }'; ",
-        "else echo '__OXIDE_PACKAGE_UNAVAILABLE__'; fi; ",
-        "echo '===PACKAGES_END==='"
-    )
-    .to_string()
+    posix_shell_command(include_str!("package/homebrew_snapshot.sh"))
 }
 
 fn build_bsd_package_snapshot_command() -> String {
