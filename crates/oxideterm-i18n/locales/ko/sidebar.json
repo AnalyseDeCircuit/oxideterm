@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker가 실행 중이 아니거나 연결할 수 없습니다. Docker 서비스 상태를 확인한 후 다시 시도하세요.",
       "search_placeholder": "컨테이너 검색...",
       "count_suffix": "개 컨테이너",
       "sampling": "Docker 컨테이너를 수집 중...",

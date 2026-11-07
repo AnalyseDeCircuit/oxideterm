@@ -403,6 +403,15 @@ impl HostToolsEntity {
                     cx,
                 );
             }
+            ResourceDockerStatus::DaemonUnavailable { .. } => {
+                return host_tools_center_state(
+                    LucideIcon::AlertTriangle,
+                    MONITOR_RED,
+                    i18n.t("sidebar.host_docker.daemon_unavailable"),
+                    selectable_text,
+                    cx,
+                );
+            }
             ResourceDockerStatus::Error { message } => {
                 return host_tools_center_state(
                     LucideIcon::AlertTriangle,

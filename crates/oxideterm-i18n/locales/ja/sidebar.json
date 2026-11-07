@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker が起動していないか、接続できません。Docker サービスの状態を確認してから再試行してください。",
       "search_placeholder": "コンテナを検索...",
       "count_suffix": "コンテナ",
       "sampling": "Docker コンテナを取得中...",

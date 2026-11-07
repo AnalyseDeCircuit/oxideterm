@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker no está en ejecución o no se puede conectar. Comprueba que el servicio de Docker esté en ejecución y vuelve a intentarlo.",
       "search_placeholder": "Buscar contenedores...",
       "count_suffix": "contenedores",
       "sampling": "Muestreando contenedores Docker...",

@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker n’est pas démarré ou est inaccessible. Vérifiez que le service Docker est démarré, puis réessayez.",
       "search_placeholder": "Rechercher des conteneurs...",
       "count_suffix": "conteneurs",
       "sampling": "Échantillonnage des conteneurs Docker...",

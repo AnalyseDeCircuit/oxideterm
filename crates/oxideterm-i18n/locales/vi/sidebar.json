@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker chưa chạy hoặc không thể kết nối. Hãy kiểm tra trạng thái dịch vụ Docker rồi thử lại.",
       "search_placeholder": "Tìm container...",
       "count_suffix": "container",
       "sampling": "Đang lấy mẫu container Docker...",

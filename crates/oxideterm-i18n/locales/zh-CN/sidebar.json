@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker 服务未启动或无法连接，请检查服务状态后重试。",
       "search_placeholder": "搜索容器...",
       "count_suffix": "个容器",
       "sampling": "正在采样 Docker 容器...",

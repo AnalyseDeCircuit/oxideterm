@@ -23,6 +23,9 @@ pub enum ResourceDockerStatus {
     Unavailable,
     Incomplete,
     OutputLimit,
+    DaemonUnavailable {
+        message: String,
+    },
     Error {
         message: String,
     },
@@ -98,38 +101,39 @@ macro_rules! docker_inspect_format {
     };
 }
 
+// Keep the user's Docker context and original failure unless a permission retry succeeds.
+macro_rules! docker_unix_runner {
+    () => {
+        concat!(
+            "oxide_docker() { ",
+            "oxide_docker_output=$(docker \"$@\" 2>&1); oxide_docker_result=$?; ",
+            "if [ \"$oxide_docker_result\" -ne 0 ]; then ",
+            "case \"$oxide_docker_output\" in *'permission denied'*|*'Permission denied'*) ",
+            "oxide_docker_sudo_output=$(sudo -n docker \"$@\" 2>&1); ",
+            "if [ $? -eq 0 ]; then oxide_docker_output=$oxide_docker_sudo_output; oxide_docker_result=0; fi; ",
+            ";; esac; fi; ",
+            "printf '%s\\n' \"$oxide_docker_output\"; return \"$oxide_docker_result\"; }; "
+        )
+    };
+}
+
 const DOCKER_SAMPLE_COMMAND_UNIX: &str = concat!(
+    docker_unix_runner!(),
     "echo '===DOCKER==='; ",
     "if command -v docker >/dev/null 2>&1; then ",
-    "oxide_docker_ps=$(docker ps -a --no-trunc --format '",
+    "oxide_docker_ps=$(oxide_docker ps -a --no-trunc --format '",
     docker_ps_format!(),
     "' 2>&1); ",
     "oxide_docker_status=$?; ",
-    "if [ \"$oxide_docker_status\" -ne 0 ]; then ",
-    "oxide_docker_ps=$(sudo -n docker ps -a --no-trunc --format '",
-    docker_ps_format!(),
-    "' 2>&1); ",
-    "oxide_docker_status=$?; ",
-    "fi; ",
     "if [ \"$oxide_docker_status\" -eq 0 ]; then ",
     "printf '%s\\n' \"$oxide_docker_ps\" | sed 's/^/PS\\t/'; ",
-    "oxide_docker_ids=$(docker ps -aq --no-trunc 2>/dev/null); ",
+    "oxide_docker_ids=$(oxide_docker ps -aq --no-trunc 2>/dev/null); ",
     "oxide_docker_ids_status=$?; ",
-    "if [ \"$oxide_docker_ids_status\" -ne 0 ]; then ",
-    "oxide_docker_ids=$(sudo -n docker ps -aq --no-trunc 2>/dev/null); ",
-    "oxide_docker_ids_status=$?; ",
-    "fi; ",
     "if [ \"$oxide_docker_ids_status\" -eq 0 ] && [ -n \"$oxide_docker_ids\" ]; then ",
-    "oxide_docker_inspect=$(docker inspect --format '",
+    "oxide_docker_inspect=$(oxide_docker inspect --format '",
     docker_inspect_format!(),
     "' $oxide_docker_ids 2>/dev/null); ",
     "oxide_docker_inspect_status=$?; ",
-    "if [ \"$oxide_docker_inspect_status\" -ne 0 ]; then ",
-    "oxide_docker_inspect=$(sudo -n docker inspect --format '",
-    docker_inspect_format!(),
-    "' $oxide_docker_ids 2>/dev/null); ",
-    "oxide_docker_inspect_status=$?; ",
-    "fi; ",
     "if [ \"$oxide_docker_inspect_status\" -eq 0 ]; then ",
     "printf '%s\\n' \"$oxide_docker_inspect\" | sed 's/^/INSPECT\\t/'; ",
     "fi; ",
@@ -198,9 +202,22 @@ pub fn parse_docker_snapshot(output: &str) -> ResourceDockerSnapshot {
             };
         }
         if let Some(message) = line.strip_prefix(DOCKER_ERROR_MARKER) {
+            let lower = message.to_ascii_lowercase();
+            let message = clean_error_marker_message(message);
+            let daemon_unavailable = !lower.contains("permission denied")
+                && (lower.contains("cannot connect to the docker daemon")
+                    || lower.contains("is the docker daemon running")
+                    || (lower.contains("failed to connect")
+                        && lower.contains("docker")
+                        && (lower.contains("connection refused")
+                            || lower.contains("no such file or directory")))
+                    || (lower.contains("open //./pipe/")
+                        && lower.contains("the system cannot find the file specified")));
             return ResourceDockerSnapshot {
-                status: ResourceDockerStatus::Error {
-                    message: clean_error_marker_message(message),
+                status: if daemon_unavailable {
+                    ResourceDockerStatus::DaemonUnavailable { message }
+                } else {
+                    ResourceDockerStatus::Error { message }
                 },
                 containers: Vec::new(),
             };
@@ -300,7 +317,8 @@ fn build_docker_cli_command(os_type: &str, operation: &str, container_id: &str) 
             "powershell -NoProfile -ExecutionPolicy Bypass -Command \"docker {operation} {container_id}\""
         ),
         _ => format!(
-            "docker {operation} {container_id} 2>&1 || sudo -n docker {operation} {container_id}"
+            "{}oxide_docker {operation} {container_id}",
+            docker_unix_runner!()
         ),
     };
     command
@@ -534,6 +552,91 @@ fn extract_section<'a>(output: &'a str, name: &str) -> Option<&'a str> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    #[test]
+    fn docker_commands_preserve_original_failure_when_sudo_cannot_help() {
+        for error in [
+            "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+            "permission denied while trying to connect to the Docker daemon socket",
+        ] {
+            let fixture = format!(
+                "docker() {{ printf '%s\\n' '{error}' >&2; return 17; }}; sudo() {{ printf '%s\\n' 'sudo: a password is required' >&2; return 1; }};"
+            );
+            for (kind, command) in [
+                ("sample", docker_sample_command("Linux").to_string()),
+                (
+                    "action",
+                    build_docker_action_command("Linux", "abc123def456", DockerActionKind::Restart)
+                        .unwrap()
+                        .command,
+                ),
+                (
+                    "logs",
+                    build_docker_logs_command("Linux", "abc123def456")
+                        .unwrap()
+                        .command,
+                ),
+            ] {
+                let output = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("{fixture}\n{command}"))
+                    .output()
+                    .unwrap();
+                let stdout = String::from_utf8(output.stdout).unwrap();
+                let stderr = String::from_utf8(output.stderr).unwrap();
+                assert!(stdout.contains(error), "{kind}: {stdout}");
+                assert!(!stdout.contains("sudo:"), "{kind}: {stdout}");
+                assert_eq!(stderr, "", "{kind}");
+                assert_eq!(
+                    output.status.code(),
+                    Some(if kind == "sample" { 0 } else { 17 }),
+                    "{kind}"
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn docker_commands_retry_only_permission_errors() {
+        for (error, expected_sudo) in [
+            (
+                "Cannot connect to the Docker daemon. Is the docker daemon running?",
+                false,
+            ),
+            ("Error response from daemon: container is restarting", false),
+            (
+                "permission denied while trying to connect to the Docker daemon socket",
+                true,
+            ),
+        ] {
+            let fixture = format!(
+                "docker() {{ printf '%s\\n' '{error}' >&2; return 17; }}; sudo() {{ printf '%s\\n' 'sudo succeeded'; }};"
+            );
+            for command in [
+                docker_sample_command("Linux").to_string(),
+                build_docker_action_command("Linux", "abc123def456", DockerActionKind::Restart)
+                    .unwrap()
+                    .command,
+                build_docker_logs_command("Linux", "abc123def456")
+                    .unwrap()
+                    .command,
+            ] {
+                let output = std::process::Command::new("sh")
+                    .args(["-c", &format!("{fixture}\n{command}")])
+                    .output()
+                    .unwrap();
+                let stdout = String::from_utf8(output.stdout).unwrap();
+                assert_eq!(
+                    stdout.contains("sudo succeeded"),
+                    expected_sudo,
+                    "{error}: {stdout}"
+                );
+                assert_eq!(stdout.contains(error), !expected_sudo, "{error}: {stdout}");
+            }
+        }
+    }
+
     #[test]
     fn docker_parser_preserves_container_fields_and_applies_inspect_overrides() {
         for (case, output, expected) in [
@@ -752,6 +855,52 @@ mod tests {
                 message: "permission denied".to_string()
             }
         );
+        for (error, unavailable) in [
+            (
+                "Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?",
+                true,
+            ),
+            (
+                "failed to connect to the docker API at unix:///var/run/docker.sock; check if the path is correct and if the daemon is running: dial unix /var/run/docker.sock: connect: no such file or directory",
+                true,
+            ),
+            (
+                "failed to connect to the docker API at unix:///run/docker.sock: dial unix /run/docker.sock: connect: connection refused",
+                true,
+            ),
+            (
+                "error during connect: Get http://example: open //./pipe/dockerDesktopLinuxEngine: The system cannot find the file specified.",
+                true,
+            ),
+            (
+                "permission denied while trying to connect to the Docker daemon socket",
+                false,
+            ),
+            (
+                "Cannot connect to the Docker daemon: permission denied",
+                false,
+            ),
+            (
+                "Error response from daemon: client version is too old",
+                false,
+            ),
+        ] {
+            let output = format!("===DOCKER===\n__OXIDE_DOCKER_ERROR__\t{error}\n===DOCKER_END===");
+            let expected_message = error.chars().take(180).collect();
+            assert_eq!(
+                parse_docker_snapshot(&output).status,
+                if unavailable {
+                    ResourceDockerStatus::DaemonUnavailable {
+                        message: expected_message,
+                    }
+                } else {
+                    ResourceDockerStatus::Error {
+                        message: expected_message,
+                    }
+                },
+                "{error}"
+            );
+        }
     }
 
     #[test]
@@ -774,10 +923,6 @@ mod tests {
         assert!(
             logs.command
                 .contains("docker logs --tail 200 --timestamps abc123def456")
-        );
-        assert!(
-            logs.command
-                .contains("sudo -n docker logs --tail 200 --timestamps abc123def456")
         );
 
         let exec = build_docker_exec_shell_command("abc123def456").unwrap();

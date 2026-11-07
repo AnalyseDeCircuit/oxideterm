@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker läuft nicht oder ist nicht erreichbar. Prüfen Sie, ob der Docker-Dienst läuft, und versuchen Sie es erneut.",
       "search_placeholder": "Container suchen...",
       "count_suffix": "Container",
       "sampling": "Docker-Container werden erfasst...",

@@ -204,6 +204,7 @@
       }
     },
     "host_docker": {
+      "daemon_unavailable": "Docker is not running or cannot be reached. Check that the Docker service is running, then retry.",
       "search_placeholder": "Search containers...",
       "count_suffix": "containers",
       "sampling": "Sampling Docker containers...",
