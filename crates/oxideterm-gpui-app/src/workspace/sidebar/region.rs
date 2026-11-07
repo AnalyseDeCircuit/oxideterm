@@ -184,15 +184,9 @@ impl WorkspaceApp {
                                         self.render_host_tools_context_panel(cx)
                                     }
                                 };
-                                oxideterm_gpui_ui::motion::slide_fade_in_x(
-                                    &self.tokens,
-                                    gpui::ElementId::Name(
-                                        format!("context-panel-{title_key}").into(),
-                                    ),
-                                    div().size_full().child(content),
-                                    6.0,
-                                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
-                                )
+                                // Content refreshes and virtual-list remounts are not panel
+                                // entrances. The frame owns explicit open/close motion.
+                                div().size_full().child(content)
                             }),
                     ),
             )
