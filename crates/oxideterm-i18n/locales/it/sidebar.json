@@ -116,11 +116,33 @@
       "unsupported": "Il monitoraggio GPU / NPU non è supportato su questo sistema operativo.",
       "no_devices": "Nessun dispositivo GPU / NPU supportato trovato.",
       "error": "Query GPU / NPU non riuscita: {{error}}",
-      "actions": { "refresh": "Aggiorna dati GPU / NPU" },
-      "summary": { "utilization": "Utilizzo medio", "memory": "Memoria del dispositivo", "temperature": "Temperatura massima", "power": "Potenza totale" },
-      "columns": { "device": "Dispositivo", "utilization": "Utilizzo", "memory": "Memoria" },
-      "details": { "uuid": "UUID", "driver": "Driver", "performance_state": "Prestazioni", "health": "Stato", "temperature": "Temperatura", "power": "Potenza", "fan": "Ventola" },
-      "processes": { "title": "Processi di calcolo", "empty": "Nessun processo di calcolo usa questo dispositivo." }
+      "actions": {
+        "refresh": "Aggiorna dati GPU / NPU"
+      },
+      "summary": {
+        "utilization": "Utilizzo medio",
+        "memory": "Memoria del dispositivo",
+        "temperature": "Temperatura massima",
+        "power": "Potenza totale"
+      },
+      "columns": {
+        "device": "Dispositivo",
+        "utilization": "Utilizzo",
+        "memory": "Memoria"
+      },
+      "details": {
+        "uuid": "UUID",
+        "driver": "Driver",
+        "performance_state": "Prestazioni",
+        "health": "Stato",
+        "temperature": "Temperatura",
+        "power": "Potenza",
+        "fan": "Ventola"
+      },
+      "processes": {
+        "title": "Processi di calcolo",
+        "empty": "Nessun processo di calcolo usa questo dispositivo."
+      }
     },
     "host_processes": {
       "search_placeholder": "Cerca processi...",
@@ -377,7 +399,86 @@
       "loading": "Caricamento…",
       "empty": "Nessuna sessione corrispondente",
       "unavailable": "Questo multiplexer non è installato sul computer selezionato.",
-      "failed": "Comando non riuscito. Controlla la versione installata e lo stato della sessione."
+      "failed": "Comando non riuscito. Controlla la versione installata e lo stato della sessione.",
+      "server_not_running": "Il server del multiplexer non è in esecuzione. Avvialo con il pulsante di collegamento.",
+      "sampling": "Caricamento delle sessioni del multiplexer…",
+      "error": "Il comando del multiplexer non è riuscito: {{error}}",
+      "sessions_title": "Sessioni",
+      "search_empty": "Nessuna corrispondenza",
+      "search_child_empty": "Nessun oggetto corrispondente in questa sessione",
+      "workspace_empty": "Nessuna area di lavoro in questa sessione",
+      "last_refreshed": "Aggiornato",
+      "attach_title": "Multiplexer",
+      "focused": "attivo",
+      "restore_error": "errore di ripristino",
+      "orphan_agent": "agente non collegato",
+      "row_space": "area di lavoro",
+      "row_tab": "scheda",
+      "row_pane": "riquadro",
+      "tabs_suffix": "schede",
+      "tabs_suffix_one": "scheda",
+      "panes_suffix": "riquadri",
+      "panes_suffix_one": "riquadro",
+      "status": {
+        "working": "in lavoro",
+        "blocked": "bloccato",
+        "idle": "inattivo",
+        "done": "completato",
+        "unknown": "sconosciuto"
+      },
+      "actions": {
+        "refresh": "Aggiorna",
+        "agent_attach": "Collegati all'agente",
+        "session_attach": "Collegati alla sessione",
+        "session_stop": "Fermare la sessione",
+        "session_delete": "Elimina la sessione",
+        "new_session": "Nuova sessione",
+        "new_workspace": "Nuova area di lavoro",
+        "rename": "Rinomina",
+        "close": "Chiudi",
+        "send": "Esegui comando",
+        "read": "Leggi output"
+      },
+      "confirm": {
+        "title": "Conferma azione del multiplexer",
+        "cancel": "Annulla",
+        "run": "Conferma",
+        "close_workspace": "Chiudere l’area di lavoro {{name}} ({{target}}) nella sessione {{session}}? Tutte le schede e i riquadri al suo interno verranno arrestati.",
+        "close_tab": "Chiudere la scheda {{name}} ({{target}}) nella sessione {{session}}? Tutti i riquadri al suo interno verranno arrestati.",
+        "close_pane": "Chiudere il riquadro {{name}} ({{target}}) nella sessione {{session}}? Il lavoro al suo interno verrà arrestato.",
+        "stop_session": "Arrestare la sessione {{name}}? Tutte le aree di lavoro e gli agenti della sessione verranno arrestati.",
+        "delete_session": "Eliminare la sessione ferma {{name}}? Il suo stato salvato viene rimosso."
+      },
+      "inputs": {
+        "new_session": "Nuova sessione",
+        "new_session_hint": "Nome della sessione",
+        "new_workspace": "Nuova area di lavoro",
+        "new_workspace_hint": "nome [/percorso/remoto]",
+        "rename_workspace": "Rinomina area di lavoro",
+        "rename_tab": "Rinomina scheda",
+        "rename_pane": "Rinomina riquadro",
+        "rename_hint": "Nuovo nome",
+        "run_pane": "Esegui comando nel riquadro",
+        "run_pane_hint": "Comando da digitare nel riquadro",
+        "error_required": "Inserisci prima un valore.",
+        "error_rejected": "Il multiplexer ha rifiutato questo valore."
+      },
+      "read": {
+        "title": "Output di {{pane}}",
+        "loading": "Caricamento output…",
+        "empty": "Nessun output.",
+        "close": "Chiudi"
+      },
+      "toast": {
+        "snapshot_already_running": "Uno snapshot del multiplexer è già in caricamento.",
+        "connection_missing": "La connessione selezionata non è più disponibile.",
+        "action_already_running": "Un'azione del multiplexer è già in corso.",
+        "action_failed": "Azione del multiplexer non riuscita.",
+        "action_succeeded": "Azione del multiplexer completata per {{target}}.",
+        "read_already_running": "L’output del riquadro è già in caricamento.",
+        "read_failed": "Impossibile leggere l'output del riquadro.",
+        "attach_opened": "Multiplexer aperto in una finestra di terminale."
+      }
     },
     "host_tmux": {
       "search_placeholder": "Cerca sessioni…",

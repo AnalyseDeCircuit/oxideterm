@@ -91,6 +91,7 @@ impl WorkspaceApp {
             HostToolsWindowIntent::OpenLocalMultiplexer {
                 command,
                 title,
+                opened_notice,
                 missing_notice,
             } => {
                 // The inventory belongs to the native host, even if the preferred terminal starts WSL.
@@ -124,16 +125,25 @@ impl WorkspaceApp {
                         .collect(),
                     ..Default::default()
                 };
-                if self
+                let opened = self
                     .create_local_terminal_tab_with_config(config, title, window, cx)
-                    .is_err()
-                {
-                    self.push_host_tools_window_notice(
-                        missing_notice,
-                        TerminalNoticeVariant::Error,
-                        cx,
-                    );
-                }
+                    .is_ok();
+                // The copy is earned by the tab, not by the click: reporting
+                // the open before the terminal exists would cover a failed
+                // launch with a success notice the user cannot act on.
+                self.push_host_tools_window_notice(
+                    if opened {
+                        opened_notice
+                    } else {
+                        missing_notice
+                    },
+                    if opened {
+                        TerminalNoticeVariant::Success
+                    } else {
+                        TerminalNoticeVariant::Error
+                    },
+                    cx,
+                );
             }
             HostToolsWindowIntent::OpenExistingNodeTerminal {
                 connection_id,
@@ -196,8 +206,8 @@ impl WorkspaceApp {
             }
             HostToolsWindowIntent::BeginPlainTextImeSelection { input, event } => {
                 let Some(target) = workspace_ime_target_for_plain_host_tools_input(input) else {
-                    // Secret-bearing tmux dialog input never crosses this
-                    // plain-text frame boundary.
+                    // Secret-bearing dialog input never crosses this plain-text
+                    // frame boundary.
                     return;
                 };
                 self.ime_marked_text = None;
@@ -214,6 +224,18 @@ impl WorkspaceApp {
                 cx.notify();
             }
             HostToolsWindowIntent::PrepareTmuxConfirm => {
+                self.reset_standard_confirm_focus();
+                cx.notify();
+            }
+            HostToolsWindowIntent::PrepareMuxInputDialog => {
+                // Only focus state crosses this boundary; the zeroizing input stays in the Entity.
+                self.ime_marked_text = None;
+                self.clear_ime_selection();
+                self.show_active_input_caret(cx);
+                window.focus(&self.focus_handle, cx);
+                cx.notify();
+            }
+            HostToolsWindowIntent::PrepareMuxConfirm => {
                 self.reset_standard_confirm_focus();
                 cx.notify();
             }
@@ -457,6 +479,40 @@ impl WorkspaceApp {
                     )
                 }
             }
+            HostToolsNotice::MuxSnapshotAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.multiplexer.toast.snapshot_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::MuxConnectionMissing => (
+                self.i18n.t("sidebar.multiplexer.toast.connection_missing"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::MuxActionAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.multiplexer.toast.action_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::MuxActionFailed => (
+                self.i18n.t("sidebar.multiplexer.toast.action_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::MuxReadAlreadyRunning => (
+                self.i18n
+                    .t("sidebar.multiplexer.toast.read_already_running"),
+                TerminalNoticeVariant::Warning,
+            ),
+            HostToolsNotice::MuxReadFailed => (
+                self.i18n.t("sidebar.multiplexer.toast.read_failed"),
+                TerminalNoticeVariant::Error,
+            ),
+            HostToolsNotice::MuxActionSucceeded { target_label } => (
+                self.i18n_replace(
+                    "sidebar.multiplexer.toast.action_succeeded",
+                    &[("target", target_label)],
+                ),
+                TerminalNoticeVariant::Success,
+            ),
             HostToolsNotice::LogSnapshotAlreadyRunning => (
                 self.i18n
                     .t("sidebar.host_logs.toast.snapshot_already_running"),

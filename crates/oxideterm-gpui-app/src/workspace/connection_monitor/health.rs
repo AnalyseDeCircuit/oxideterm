@@ -57,7 +57,7 @@ impl ContextSidebarTool {
 }
 
 impl HostToolsEntity {
-    fn render_connection_switcher(
+    pub(in crate::workspace::connection_monitor) fn render_connection_switcher(
         &self,
         connections: &[MonitorConnectionOption],
         selected_id: &str,

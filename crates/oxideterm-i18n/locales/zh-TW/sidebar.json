@@ -116,11 +116,33 @@
       "unsupported": "此作業系統暫不支援 GPU / NPU 監控。",
       "no_devices": "未發現受支援的 GPU / NPU 裝置。",
       "error": "GPU / NPU 查詢失敗：{{error}}",
-      "actions": { "refresh": "重新整理 GPU / NPU 資料" },
-      "summary": { "utilization": "平均使用率", "memory": "裝置記憶體", "temperature": "最高溫度", "power": "總功耗" },
-      "columns": { "device": "裝置", "utilization": "使用率", "memory": "顯示記憶體" },
-      "details": { "uuid": "UUID", "driver": "驅動程式", "performance_state": "效能狀態", "health": "健康狀態", "temperature": "溫度", "power": "功耗", "fan": "風扇" },
-      "processes": { "title": "運算程序", "empty": "目前沒有運算程序使用此裝置。" }
+      "actions": {
+        "refresh": "重新整理 GPU / NPU 資料"
+      },
+      "summary": {
+        "utilization": "平均使用率",
+        "memory": "裝置記憶體",
+        "temperature": "最高溫度",
+        "power": "總功耗"
+      },
+      "columns": {
+        "device": "裝置",
+        "utilization": "使用率",
+        "memory": "顯示記憶體"
+      },
+      "details": {
+        "uuid": "UUID",
+        "driver": "驅動程式",
+        "performance_state": "效能狀態",
+        "health": "健康狀態",
+        "temperature": "溫度",
+        "power": "功耗",
+        "fan": "風扇"
+      },
+      "processes": {
+        "title": "運算程序",
+        "empty": "目前沒有運算程序使用此裝置。"
+      }
     },
     "host_processes": {
       "search_placeholder": "搜尋程序...",
@@ -377,7 +399,86 @@
       "loading": "載入中…",
       "empty": "沒有符合的工作階段",
       "unavailable": "所選主機未安裝此多工器。",
-      "failed": "命令執行失敗，請檢查已安裝的版本及工作階段狀態。"
+      "failed": "命令執行失敗，請檢查已安裝的版本及工作階段狀態。",
+      "server_not_running": "多工器伺服器未執行。點擊附加按鈕啟動它。",
+      "sampling": "正在擷取多工器工作階段…",
+      "error": "多工器指令失敗：{{error}}",
+      "sessions_title": "工作階段",
+      "search_empty": "無符合項目",
+      "search_child_empty": "該工作階段中沒有符合的物件",
+      "workspace_empty": "該工作階段中沒有工作區",
+      "last_refreshed": "更新於",
+      "attach_title": "多工器",
+      "focused": "焦點",
+      "restore_error": "還原錯誤",
+      "orphan_agent": "未關聯代理",
+      "row_space": "工作區",
+      "row_tab": "分頁",
+      "row_pane": "窗格",
+      "tabs_suffix": "個分頁",
+      "tabs_suffix_one": "個分頁",
+      "panes_suffix": "個窗格",
+      "panes_suffix_one": "個窗格",
+      "status": {
+        "working": "執行中",
+        "blocked": "已封鎖",
+        "idle": "閒置",
+        "done": "已完成",
+        "unknown": "未知"
+      },
+      "actions": {
+        "refresh": "重新整理",
+        "agent_attach": "附加到代理",
+        "session_attach": "附加到工作階段",
+        "session_stop": "停止工作階段",
+        "session_delete": "刪除工作階段",
+        "new_session": "新增工作階段",
+        "new_workspace": "新增工作區",
+        "rename": "重新命名",
+        "close": "關閉",
+        "send": "執行指令",
+        "read": "讀取輸出"
+      },
+      "confirm": {
+        "title": "確認多工器操作",
+        "cancel": "取消",
+        "run": "確認",
+        "close_workspace": "關閉工作階段 {{session}} 中的工作區 {{name}}（{{target}}）？其中的所有分頁與窗格都會停止。",
+        "close_tab": "關閉工作階段 {{session}} 中的分頁 {{name}}（{{target}}）？其中的所有窗格都會停止。",
+        "close_pane": "關閉工作階段 {{session}} 中的窗格 {{name}}（{{target}}）？其中的工作會停止。",
+        "stop_session": "停止工作階段 {{name}}？該工作階段中的所有工作區與代理都會停止。",
+        "delete_session": "刪除已停止的工作階段 {{name}}？該工作階段的已儲存狀態會被移除。"
+      },
+      "inputs": {
+        "new_session": "新增工作階段",
+        "new_session_hint": "工作階段名稱",
+        "new_workspace": "新增工作區",
+        "new_workspace_hint": "名稱 [/遠端路徑]",
+        "rename_workspace": "重新命名工作區",
+        "rename_tab": "重新命名分頁",
+        "rename_pane": "重新命名窗格",
+        "rename_hint": "新名稱",
+        "run_pane": "在窗格中執行指令",
+        "run_pane_hint": "要輸入窗格的指令",
+        "error_required": "請先輸入值。",
+        "error_rejected": "多工器拒絕了此值。"
+      },
+      "read": {
+        "title": "輸出：{{pane}}",
+        "loading": "正在載入輸出…",
+        "empty": "目前沒有輸出。",
+        "close": "關閉"
+      },
+      "toast": {
+        "snapshot_already_running": "已有多工器快照正在載入。",
+        "connection_missing": "所選連線已無法使用。",
+        "action_already_running": "已有多工器操作正在執行。",
+        "action_failed": "多工器操作失敗。",
+        "action_succeeded": "多工器操作已完成：{{target}}。",
+        "read_already_running": "已有窗格輸出正在載入。",
+        "read_failed": "讀取窗格輸出失敗。",
+        "attach_opened": "已在終端機視窗開啟多工器。"
+      }
     },
     "host_tmux": {
       "search_placeholder": "搜尋工作階段…",

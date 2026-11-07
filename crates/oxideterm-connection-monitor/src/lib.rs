@@ -11,6 +11,7 @@ mod capture;
 mod docker;
 mod filesystem;
 mod gpu;
+mod herdr;
 mod log;
 mod metrics;
 pub mod multiplexer;

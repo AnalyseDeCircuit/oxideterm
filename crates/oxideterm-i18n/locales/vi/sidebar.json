@@ -116,11 +116,33 @@
       "unsupported": "Hệ điều hành này chưa hỗ trợ giám sát GPU / NPU.",
       "no_devices": "Không tìm thấy thiết bị GPU / NPU được hỗ trợ.",
       "error": "Truy vấn GPU / NPU thất bại: {{error}}",
-      "actions": { "refresh": "Làm mới dữ liệu GPU / NPU" },
-      "summary": { "utilization": "Mức sử dụng trung bình", "memory": "Bộ nhớ thiết bị", "temperature": "Nhiệt độ cao nhất", "power": "Tổng công suất" },
-      "columns": { "device": "Thiết bị", "utilization": "Mức dùng", "memory": "Bộ nhớ" },
-      "details": { "uuid": "UUID", "driver": "Trình điều khiển", "performance_state": "Hiệu năng", "health": "Tình trạng", "temperature": "Nhiệt độ", "power": "Công suất", "fan": "Quạt" },
-      "processes": { "title": "Tiến trình tính toán", "empty": "Không có tiến trình tính toán nào đang dùng thiết bị này." }
+      "actions": {
+        "refresh": "Làm mới dữ liệu GPU / NPU"
+      },
+      "summary": {
+        "utilization": "Mức sử dụng trung bình",
+        "memory": "Bộ nhớ thiết bị",
+        "temperature": "Nhiệt độ cao nhất",
+        "power": "Tổng công suất"
+      },
+      "columns": {
+        "device": "Thiết bị",
+        "utilization": "Mức dùng",
+        "memory": "Bộ nhớ"
+      },
+      "details": {
+        "uuid": "UUID",
+        "driver": "Trình điều khiển",
+        "performance_state": "Hiệu năng",
+        "health": "Tình trạng",
+        "temperature": "Nhiệt độ",
+        "power": "Công suất",
+        "fan": "Quạt"
+      },
+      "processes": {
+        "title": "Tiến trình tính toán",
+        "empty": "Không có tiến trình tính toán nào đang dùng thiết bị này."
+      }
     },
     "host_processes": {
       "search_placeholder": "Tìm tiến trình...",
@@ -377,7 +399,86 @@
       "loading": "Đang tải…",
       "empty": "Không có phiên phù hợp",
       "unavailable": "Máy đã chọn chưa cài bộ ghép kênh này.",
-      "failed": "Lệnh thất bại. Hãy kiểm tra phiên bản đã cài và trạng thái phiên."
+      "failed": "Lệnh thất bại. Hãy kiểm tra phiên bản đã cài và trạng thái phiên.",
+      "server_not_running": "Máy chủ của bộ ghép kênh chưa chạy. Dùng nút kết nối để khởi động.",
+      "sampling": "Đang tải các phiên của bộ ghép kênh…",
+      "error": "Lệnh của bộ ghép kênh thất bại: {{error}}",
+      "sessions_title": "Phiên",
+      "search_empty": "Không có kết quả",
+      "search_child_empty": "Không có đối tượng phù hợp nào trong phiên này",
+      "workspace_empty": "Không có không gian làm việc nào trong phiên này",
+      "last_refreshed": "Cập nhật",
+      "attach_title": "Bộ ghép kênh",
+      "focused": "đang chọn",
+      "restore_error": "lỗi khôi phục",
+      "orphan_agent": "tác tử chưa liên kết",
+      "row_space": "không gian làm việc",
+      "row_tab": "thẻ",
+      "row_pane": "ngăn",
+      "tabs_suffix": "thẻ",
+      "tabs_suffix_one": "thẻ",
+      "panes_suffix": "ngăn",
+      "panes_suffix_one": "ngăn",
+      "status": {
+        "working": "đang chạy",
+        "blocked": "bị chặn",
+        "idle": "rảnh",
+        "done": "xong",
+        "unknown": "không rõ"
+      },
+      "actions": {
+        "refresh": "Làm mới",
+        "agent_attach": "Kết nối tới tác tử",
+        "session_attach": "Kết nối tới phiên",
+        "session_stop": "Dừng phiên",
+        "session_delete": "Xóa phiên",
+        "new_session": "Phiên mới",
+        "new_workspace": "Không gian làm việc mới",
+        "rename": "Đổi tên",
+        "close": "Đóng",
+        "send": "Chạy lệnh",
+        "read": "Đọc đầu ra"
+      },
+      "confirm": {
+        "title": "Xác nhận hành động của bộ ghép kênh",
+        "cancel": "Hủy",
+        "run": "Xác nhận",
+        "close_workspace": "Đóng không gian làm việc {{name}} ({{target}}) trong phiên {{session}}? Mọi thẻ và ngăn bên trong sẽ dừng.",
+        "close_tab": "Đóng thẻ {{name}} ({{target}}) trong phiên {{session}}? Mọi ngăn bên trong sẽ dừng.",
+        "close_pane": "Đóng ngăn {{name}} ({{target}}) trong phiên {{session}}? Công việc bên trong sẽ dừng.",
+        "stop_session": "Dừng phiên {{name}}? Mọi không gian làm việc và tác tử trong phiên sẽ dừng.",
+        "delete_session": "Xóa phiên đã dừng {{name}}? Trạng thái đã lưu sẽ bị xóa."
+      },
+      "inputs": {
+        "new_session": "Phiên mới",
+        "new_session_hint": "Tên phiên",
+        "new_workspace": "Không gian làm việc mới",
+        "new_workspace_hint": "tên [/đường/dẫn/xa]",
+        "rename_workspace": "Đổi tên không gian làm việc",
+        "rename_tab": "Đổi tên thẻ",
+        "rename_pane": "Đổi tên ngăn",
+        "rename_hint": "Tên mới",
+        "run_pane": "Chạy lệnh trong ngăn",
+        "run_pane_hint": "Lệnh sẽ nhập vào ngăn",
+        "error_required": "Hãy nhập giá trị trước.",
+        "error_rejected": "Bộ ghép kênh đã từ chối giá trị này."
+      },
+      "read": {
+        "title": "Đầu ra: {{pane}}",
+        "loading": "Đang tải đầu ra…",
+        "empty": "Không có đầu ra.",
+        "close": "Đóng"
+      },
+      "toast": {
+        "snapshot_already_running": "Một ảnh chụp của bộ ghép kênh đang được tải.",
+        "connection_missing": "Kết nối đã chọn không còn khả dụng.",
+        "action_already_running": "Một hành động của bộ ghép kênh đang chạy.",
+        "action_failed": "Hành động của bộ ghép kênh thất bại.",
+        "action_succeeded": "Hành động của bộ ghép kênh hoàn tất cho {{target}}.",
+        "read_already_running": "Đầu ra của ngăn đang được tải.",
+        "read_failed": "Không thể đọc đầu ra của ngăn.",
+        "attach_opened": "Đã mở bộ ghép kênh trong cửa sổ terminal."
+      }
     },
     "host_tmux": {
       "search_placeholder": "Tìm phiên…",

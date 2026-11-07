@@ -116,11 +116,33 @@
       "unsupported": "Die GPU-/NPU-Überwachung wird auf diesem Betriebssystem nicht unterstützt.",
       "no_devices": "Keine unterstützten GPU-/NPU-Geräte gefunden.",
       "error": "GPU-/NPU-Abfrage fehlgeschlagen: {{error}}",
-      "actions": { "refresh": "GPU-/NPU-Daten aktualisieren" },
-      "summary": { "utilization": "Durchschnittliche Auslastung", "memory": "Gerätespeicher", "temperature": "Höchsttemperatur", "power": "Gesamtleistung" },
-      "columns": { "device": "Gerät", "utilization": "Auslastung", "memory": "Speicher" },
-      "details": { "uuid": "UUID", "driver": "Treiber", "performance_state": "Leistungszustand", "health": "Zustand", "temperature": "Temperatur", "power": "Leistung", "fan": "Lüfter" },
-      "processes": { "title": "Rechenprozesse", "empty": "Keine Rechenprozesse verwenden dieses Gerät." }
+      "actions": {
+        "refresh": "GPU-/NPU-Daten aktualisieren"
+      },
+      "summary": {
+        "utilization": "Durchschnittliche Auslastung",
+        "memory": "Gerätespeicher",
+        "temperature": "Höchsttemperatur",
+        "power": "Gesamtleistung"
+      },
+      "columns": {
+        "device": "Gerät",
+        "utilization": "Auslastung",
+        "memory": "Speicher"
+      },
+      "details": {
+        "uuid": "UUID",
+        "driver": "Treiber",
+        "performance_state": "Leistungszustand",
+        "health": "Zustand",
+        "temperature": "Temperatur",
+        "power": "Leistung",
+        "fan": "Lüfter"
+      },
+      "processes": {
+        "title": "Rechenprozesse",
+        "empty": "Keine Rechenprozesse verwenden dieses Gerät."
+      }
     },
     "host_processes": {
       "search_placeholder": "Prozesse suchen...",
@@ -373,11 +395,90 @@
       "focus": "Fokussieren",
       "new_workspace": "Neuer Arbeitsbereich",
       "new_tab": "Neuer Tab",
-      "split": "Bereich teilen",
+      "split": "Pane teilen",
       "loading": "Wird geladen…",
       "empty": "Keine passenden Sitzungen",
       "unavailable": "Dieser Multiplexer ist auf dem gewählten Host nicht installiert.",
-      "failed": "Befehl fehlgeschlagen. Bitte Version und Sitzungsstatus prüfen."
+      "failed": "Befehl fehlgeschlagen. Bitte Version und Sitzungsstatus prüfen.",
+      "server_not_running": "Der Multiplexer-Server läuft nicht. Über die Schaltfläche starten.",
+      "sampling": "Multiplexer-Sitzungen werden geladen…",
+      "error": "Multiplexer-Befehl fehlgeschlagen: {{error}}",
+      "sessions_title": "Sitzungen",
+      "search_empty": "Keine Treffer",
+      "search_child_empty": "Keine passenden Objekte in dieser Sitzung",
+      "workspace_empty": "Keine Arbeitsbereiche in dieser Sitzung",
+      "last_refreshed": "Aktualisiert",
+      "attach_title": "Multiplexer",
+      "focused": "Fokus",
+      "restore_error": "Wiederherstellungsfehler",
+      "orphan_agent": "Unverknüpfter Agent",
+      "row_space": "Arbeitsbereich",
+      "row_tab": "Tab",
+      "row_pane": "Pane",
+      "tabs_suffix": "Tabs",
+      "tabs_suffix_one": "Tab",
+      "panes_suffix": "Panes",
+      "panes_suffix_one": "Pane",
+      "status": {
+        "working": "arbeitet",
+        "blocked": "blockiert",
+        "idle": "bereit",
+        "done": "fertig",
+        "unknown": "unbekannt"
+      },
+      "actions": {
+        "refresh": "Aktualisieren",
+        "agent_attach": "An Agent anhängen",
+        "session_attach": "An Sitzung anhängen",
+        "session_stop": "Sitzung stoppen",
+        "session_delete": "Sitzung löschen",
+        "new_session": "Neue Sitzung",
+        "new_workspace": "Neuer Arbeitsbereich",
+        "rename": "Umbenennen",
+        "close": "Schließen",
+        "send": "Befehl ausführen",
+        "read": "Ausgabe lesen"
+      },
+      "confirm": {
+        "title": "Multiplexer-Aktion bestätigen",
+        "cancel": "Abbrechen",
+        "run": "Bestätigen",
+        "close_workspace": "Arbeitsbereich {{name}} ({{target}}) in Sitzung {{session}} schließen? Alle Tabs und Panes darin werden beendet.",
+        "close_tab": "Tab {{name}} ({{target}}) in Sitzung {{session}} schließen? Alle Panes darin werden beendet.",
+        "close_pane": "Pane {{name}} ({{target}}) in Sitzung {{session}} schließen? Die Arbeit darin wird beendet.",
+        "stop_session": "Sitzung {{name}} stoppen? Alle Arbeitsbereiche und Agenten in der Sitzung werden gestoppt.",
+        "delete_session": "Gestoppte Sitzung {{name}} löschen? Der gespeicherte Zustand wird entfernt."
+      },
+      "inputs": {
+        "new_session": "Neue Sitzung",
+        "new_session_hint": "Sitzungsname",
+        "new_workspace": "Neuer Arbeitsbereich",
+        "new_workspace_hint": "Name [/Remote-Pfad]",
+        "rename_workspace": "Arbeitsbereich umbenennen",
+        "rename_tab": "Tab umbenennen",
+        "rename_pane": "Pane umbenennen",
+        "rename_hint": "Neuer Name",
+        "run_pane": "Befehl in Pane ausführen",
+        "run_pane_hint": "Befehl für das Pane",
+        "error_required": "Gib zuerst einen Wert ein.",
+        "error_rejected": "Der Multiplexer hat diesen Wert abgelehnt."
+      },
+      "read": {
+        "title": "Ausgabe: {{pane}}",
+        "loading": "Ausgabe wird geladen…",
+        "empty": "Keine Ausgabe.",
+        "close": "Schließen"
+      },
+      "toast": {
+        "snapshot_already_running": "Ein Multiplexer-Snapshot wird bereits geladen.",
+        "connection_missing": "Die ausgewählte Verbindung ist nicht mehr verfügbar.",
+        "action_already_running": "Eine Multiplexer-Aktion läuft bereits.",
+        "action_failed": "Multiplexer-Aktion fehlgeschlagen.",
+        "action_succeeded": "Multiplexer-Aktion abgeschlossen für {{target}}.",
+        "read_already_running": "Pane-Ausgabe wird bereits geladen.",
+        "read_failed": "Pane-Ausgabe konnte nicht gelesen werden.",
+        "attach_opened": "Multiplexer in einem Terminal geöffnet."
+      }
     },
     "host_tmux": {
       "search_placeholder": "Sitzungen suchen…",

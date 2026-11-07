@@ -1413,6 +1413,9 @@ impl WorkspaceApp {
         if self.handle_host_tmux_input_dialog_key(event, cx) {
             return;
         }
+        if self.handle_host_mux_input_dialog_key(event, window, cx) {
+            return;
+        }
 
         if self.active_surface == ActiveSurface::Settings && self.open_settings_select.is_some() {
             if self

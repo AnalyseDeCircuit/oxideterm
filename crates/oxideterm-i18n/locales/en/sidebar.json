@@ -116,11 +116,33 @@
       "unsupported": "GPU / NPU monitoring is not supported on this operating system.",
       "no_devices": "No supported GPU / NPU devices were found.",
       "error": "GPU / NPU query failed: {{error}}",
-      "actions": { "refresh": "Refresh GPU / NPU data" },
-      "summary": { "utilization": "Average utilization", "memory": "Device memory", "temperature": "Maximum temperature", "power": "Total power" },
-      "columns": { "device": "Device", "utilization": "Usage", "memory": "Memory" },
-      "details": { "uuid": "UUID", "driver": "Driver", "performance_state": "Performance", "health": "Health", "temperature": "Temperature", "power": "Power", "fan": "Fan" },
-      "processes": { "title": "Compute processes", "empty": "No compute processes are using this device." }
+      "actions": {
+        "refresh": "Refresh GPU / NPU data"
+      },
+      "summary": {
+        "utilization": "Average utilization",
+        "memory": "Device memory",
+        "temperature": "Maximum temperature",
+        "power": "Total power"
+      },
+      "columns": {
+        "device": "Device",
+        "utilization": "Usage",
+        "memory": "Memory"
+      },
+      "details": {
+        "uuid": "UUID",
+        "driver": "Driver",
+        "performance_state": "Performance",
+        "health": "Health",
+        "temperature": "Temperature",
+        "power": "Power",
+        "fan": "Fan"
+      },
+      "processes": {
+        "title": "Compute processes",
+        "empty": "No compute processes are using this device."
+      }
     },
     "host_processes": {
       "search_placeholder": "Search processes...",
@@ -377,7 +399,86 @@
       "loading": "Loading…",
       "empty": "No matching sessions",
       "unavailable": "This multiplexer is not installed on the selected host.",
-      "failed": "The command failed. Check the installed version and session state."
+      "failed": "The command failed. Check the installed version and session state.",
+      "server_not_running": "The multiplexer server is not running. Use the attach button to launch it.",
+      "sampling": "Sampling multiplexer sessions…",
+      "error": "The multiplexer command failed: {{error}}",
+      "sessions_title": "Sessions",
+      "search_empty": "No matches",
+      "search_child_empty": "No matching objects in this session",
+      "workspace_empty": "No workspaces in this session",
+      "last_refreshed": "Updated",
+      "attach_title": "Multiplexer",
+      "focused": "focused",
+      "restore_error": "restore error",
+      "orphan_agent": "unlinked agent",
+      "row_space": "workspace",
+      "row_tab": "tab",
+      "row_pane": "pane",
+      "tabs_suffix": "tabs",
+      "tabs_suffix_one": "tab",
+      "panes_suffix": "panes",
+      "panes_suffix_one": "pane",
+      "status": {
+        "working": "working",
+        "blocked": "blocked",
+        "idle": "idle",
+        "done": "done",
+        "unknown": "unknown"
+      },
+      "actions": {
+        "refresh": "Refresh",
+        "agent_attach": "Attach to agent",
+        "session_attach": "Attach to session",
+        "session_stop": "Stop session",
+        "session_delete": "Delete session",
+        "new_session": "New session",
+        "new_workspace": "New workspace",
+        "rename": "Rename",
+        "close": "Close",
+        "send": "Run command",
+        "read": "Read output"
+      },
+      "confirm": {
+        "title": "Confirm multiplexer action",
+        "cancel": "Cancel",
+        "run": "Confirm",
+        "close_workspace": "Close workspace {{name}} ({{target}}) in session {{session}}? Every tab and pane inside stops.",
+        "close_tab": "Close tab {{name}} ({{target}}) in session {{session}}? Every pane in it stops.",
+        "close_pane": "Close pane {{name}} ({{target}}) in session {{session}}? Work inside it stops.",
+        "stop_session": "Stop session {{name}}? Every workspace and agent in the session stops.",
+        "delete_session": "Delete stopped session {{name}}? Its saved state is removed."
+      },
+      "inputs": {
+        "new_session": "New session",
+        "new_session_hint": "Session name",
+        "new_workspace": "New workspace",
+        "new_workspace_hint": "name [/remote/path]",
+        "rename_workspace": "Rename workspace",
+        "rename_tab": "Rename tab",
+        "rename_pane": "Rename pane",
+        "rename_hint": "New name",
+        "run_pane": "Run command in pane",
+        "run_pane_hint": "Command to type into the pane",
+        "error_required": "Enter a value first.",
+        "error_rejected": "The multiplexer rejected this value."
+      },
+      "read": {
+        "title": "Output: {{pane}}",
+        "loading": "Loading output…",
+        "empty": "No output.",
+        "close": "Close"
+      },
+      "toast": {
+        "snapshot_already_running": "A multiplexer snapshot is already loading.",
+        "connection_missing": "The selected connection is no longer available.",
+        "action_already_running": "A multiplexer action is already running.",
+        "action_failed": "Multiplexer action failed.",
+        "action_succeeded": "Multiplexer action completed for {{target}}.",
+        "read_already_running": "Pane output is already loading.",
+        "read_failed": "Failed to read pane output.",
+        "attach_opened": "Opened the multiplexer in a terminal window."
+      }
     },
     "host_tmux": {
       "search_placeholder": "Search sessions…",

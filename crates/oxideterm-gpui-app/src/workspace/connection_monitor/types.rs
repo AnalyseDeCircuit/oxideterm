@@ -7,6 +7,7 @@ use oxideterm_topology::TopologyViewStatus;
 use zeroize::Zeroize;
 
 use super::*;
+use oxideterm_connection_monitor::multiplexer::{Multiplexer, MuxNode, MuxVerb};
 
 pub(super) const HOST_PROCESS_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
 pub(super) const HOST_GPU_LIST_ESTIMATED_ROW_HEIGHT: f32 = 72.0;
@@ -75,6 +76,14 @@ pub(super) const HOST_TMUX_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 128 * 1024;
 pub(super) const HOST_TMUX_ACTION_TIMEOUT: Duration = Duration::from_secs(8);
 pub(super) const HOST_TMUX_ACTION_MAX_OUTPUT_SIZE: usize = 4096;
 pub(super) const HOST_TMUX_INPUT_DIALOG_WIDTH: f32 = 460.0;
+pub(super) const HOST_MUX_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(12);
+pub(super) const HOST_MUX_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 512 * 1024;
+pub(super) const HOST_MUX_DETAIL_TIMEOUT: Duration = Duration::from_secs(12);
+pub(super) const HOST_MUX_DETAIL_MAX_OUTPUT_SIZE: usize = 512 * 1024;
+pub(super) const HOST_MUX_ACTION_TIMEOUT: Duration = Duration::from_secs(15);
+pub(super) const HOST_MUX_ACTION_MAX_OUTPUT_SIZE: usize = 64 * 1024;
+pub(super) const HOST_MUX_READ_TIMEOUT: Duration = Duration::from_secs(10);
+pub(super) const HOST_MUX_READ_MAX_OUTPUT_SIZE: usize = 256 * 1024;
 pub(super) const HOST_PORT_LIST_ESTIMATED_ROW_HEIGHT: f32 = 64.0;
 pub(super) const HOST_PORT_TABLE_HEADER_HEIGHT: f32 = 28.0;
 pub(super) const HOST_PORT_TABLE_MAIN_ROW_HEIGHT: f32 = 36.0;
@@ -439,6 +448,9 @@ pub(in crate::workspace) enum HostToolsWindowModalSnapshot {
     ServiceLogs,
     TmuxConfirm(oxideterm_gpui_ui::motion::ExitPhase),
     TmuxInput,
+    MuxConfirm(oxideterm_gpui_ui::motion::ExitPhase),
+    MuxInput,
+    MuxRead,
     ScheduleConfirm(oxideterm_gpui_ui::motion::ExitPhase),
     ScheduleLogs,
     PackageConfirm(oxideterm_gpui_ui::motion::ExitPhase),
@@ -822,6 +834,7 @@ pub(in crate::workspace) enum HostToolsTextInput {
     LogSearch,
     TmuxSearch,
     TmuxDialog,
+    MuxDialog,
     PortSearch,
     ScheduleSearch,
     FilesystemSearch,
@@ -852,6 +865,147 @@ impl HostTmuxState {
             action_running: None,
         }
     }
+}
+
+/// One capture of the session list. `generation` distinguishes successive
+/// captures of the same target: a response is applied only while the request
+/// that started it is still current, so switching hosts or providers and back
+/// cannot accept an older remote answer as the newest one.
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct MuxSnapshotRequest {
+    pub(super) provider: Multiplexer,
+    pub(super) connection_id: String,
+    pub(super) feedback: HostSnapshotFeedback,
+    pub(super) generation: u64,
+}
+
+impl MuxSnapshotRequest {
+    /// The identity repeat clicks and automatic refreshes coalesce on,
+    /// deliberately ignoring the generation that makes each capture unique.
+    pub(super) fn same_target(&self, other: &Self) -> bool {
+        self.provider == other.provider
+            && self.connection_id == other.connection_id
+            && self.feedback == other.feedback
+    }
+}
+
+pub(super) struct MuxSnapshotDelivery {
+    pub(super) request: MuxSnapshotRequest,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+/// One capture of the subtree beneath one session; same generation rule as
+/// [`MuxSnapshotRequest`].
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct MuxDetailRequest {
+    pub(super) provider: Multiplexer,
+    pub(super) connection_id: String,
+    pub(super) session: String,
+    pub(super) generation: u64,
+}
+
+impl MuxDetailRequest {
+    pub(super) fn same_target(&self, other: &Self) -> bool {
+        self.provider == other.provider
+            && self.connection_id == other.connection_id
+            && self.session == other.session
+    }
+}
+
+pub(super) struct MuxDetailDelivery {
+    pub(super) request: MuxDetailRequest,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+/// The verb the user confirmed against one row. `node` is `None` for a
+/// session-level verb; the frozen model builds every object command from the
+/// node itself, so the request carries it rather than an id it could not
+/// turn back into a row.
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct MuxActionRequest {
+    pub(super) provider: Multiplexer,
+    pub(super) connection_id: String,
+    /// Session that owns the workspace, tab or pane being mutated.
+    pub(super) session: String,
+    pub(super) target_label: String,
+    pub(super) node: Option<MuxNode>,
+    pub(super) verb: MuxVerb,
+}
+
+/// The one mutating slot a confirmed action reserves. It carries the whole
+/// request identity because a target label alone is not unique: after a
+/// provider switch an older action can finish with the same label as a newer
+/// one and would otherwise clear that action's slot and report its result.
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct MuxActionRun {
+    pub(super) provider: Multiplexer,
+    pub(super) connection_id: String,
+    pub(super) session: String,
+    pub(super) target_label: String,
+    pub(super) generation: u64,
+}
+
+pub(super) struct MuxActionDelivery {
+    pub(super) request: MuxActionRun,
+    // Action output is reduced to a success bit before it crosses delivery.
+    pub(super) result: Result<bool, ()>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(in crate::workspace) enum MuxInputDialogKind {
+    NewSession,
+    NewWorkspace,
+    RenameWorkspace { target: MuxNode },
+    RenameTab { target: MuxNode },
+    RenamePane { target: MuxNode },
+    RunPane { target: MuxNode },
+}
+
+/// The dialog is bound to the host and session it was opened for. A lifecycle
+/// fallback can select another connection while the dialog stays open, and
+/// submitting against that host would mutate a machine the user never chose,
+/// so submission re-checks both before the verb is built.
+pub(in crate::workspace) struct MuxInputDialog {
+    pub(in crate::workspace) kind: MuxInputDialogKind,
+    /// Session the dialog's action targets; providers address workspaces, tabs
+    /// and panes through their session.
+    pub(in crate::workspace) session: String,
+    pub(in crate::workspace) provider: Multiplexer,
+    pub(in crate::workspace) connection_id: String,
+    // User commands may contain secrets; the dialog clears the only retained
+    // input buffer when it closes or hands the value to command construction.
+    pub(in crate::workspace) value: zeroize::Zeroizing<String>,
+    /// Localized reason the previous submission was refused. The typed value
+    /// stays so the user corrects it instead of typing it again.
+    pub(in crate::workspace) error: Option<&'static str>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct MuxReadRequest {
+    pub(super) provider: Multiplexer,
+    pub(super) connection_id: String,
+    pub(super) session: String,
+    pub(super) target_id: String,
+    pub(super) target_label: String,
+    /// Reopening the same pane starts a new capture, so an older answer cannot
+    /// overwrite the buffer the user is now reading.
+    pub(super) generation: u64,
+}
+
+pub(super) struct MuxReadDelivery {
+    pub(super) request: MuxReadRequest,
+    pub(super) result: Result<SshCommandOutput, ()>,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub(super) struct MuxReadDialog {
+    pub(super) request: MuxReadRequest,
+    // The Entity and render tree share one zeroizing capture buffer.
+    pub(super) output: Option<Arc<zeroize::Zeroizing<String>>>,
+    /// A failed capture renders the localized fallback; remote output never
+    /// becomes the error text.
+    pub(super) failed: bool,
+    pub(super) loading: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1034,6 +1188,7 @@ pub(in crate::workspace) struct HostToolsUiState {
     pub(in crate::workspace) host_tmux_expanded_session_id: Option<String>,
     pub(in crate::workspace) host_tmux_expanded_window_id: Option<String>,
     pub(in crate::workspace) host_tmux_input_dialog: Option<HostTmuxInputDialog>,
+    pub(in crate::workspace) host_mux_input_dialog: Option<MuxInputDialog>,
     pub(super) host_tmux_list_state: ListState,
     pub(super) host_tmux_list_cache: RefCell<VirtualListSignatureCache>,
     pub(in crate::workspace) host_port_search_query: String,
@@ -1079,6 +1234,7 @@ impl HostToolsUiState {
             host_tmux_expanded_session_id: None,
             host_tmux_expanded_window_id: None,
             host_tmux_input_dialog: None,
+            host_mux_input_dialog: None,
             host_tmux_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -1116,7 +1272,11 @@ impl HostToolsUiState {
                 Some(HostToolsTextInput::LogSearch),
                 ContextSidebarTool::Logs
             ) | (
-                Some(HostToolsTextInput::TmuxSearch | HostToolsTextInput::TmuxDialog),
+                Some(
+                    HostToolsTextInput::TmuxSearch
+                        | HostToolsTextInput::TmuxDialog
+                        | HostToolsTextInput::MuxDialog,
+                ),
                 ContextSidebarTool::Tmux
             ) | (
                 Some(HostToolsTextInput::PortSearch),
@@ -1156,6 +1316,10 @@ impl HostToolsUiState {
                 .host_tmux_input_dialog
                 .as_ref()
                 .map(|dialog| dialog.value.as_str()),
+            HostToolsTextInput::MuxDialog => self
+                .host_mux_input_dialog
+                .as_ref()
+                .map(|dialog| dialog.value.as_str()),
             HostToolsTextInput::PortSearch => Some(&self.host_port_search_query),
             HostToolsTextInput::ScheduleSearch => Some(&self.host_schedule_search_query),
             HostToolsTextInput::FilesystemSearch => Some(&self.host_filesystem_search_query),
@@ -1179,6 +1343,10 @@ impl HostToolsUiState {
             HostToolsTextInput::TmuxSearch => Some(&mut self.host_tmux_search_query),
             HostToolsTextInput::TmuxDialog => self
                 .host_tmux_input_dialog
+                .as_mut()
+                .map(|dialog| &mut *dialog.value),
+            HostToolsTextInput::MuxDialog => self
+                .host_mux_input_dialog
                 .as_mut()
                 .map(|dialog| &mut *dialog.value),
             HostToolsTextInput::PortSearch => Some(&mut self.host_port_search_query),
