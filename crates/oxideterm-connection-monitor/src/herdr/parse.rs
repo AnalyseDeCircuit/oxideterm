@@ -77,7 +77,7 @@ struct FramedCapture<'a> {
     missing_binary: bool,
     /// The capture holds text but no framing line anywhere the probe prints
     /// one, so nothing here can be attributed to herdr.
-    unframed: bool,
+    complete: bool,
     /// The probe printed nothing at all.
     silent: bool,
 }
@@ -86,51 +86,38 @@ fn frame_capture<'a>(output: &'a str, expected: &[&str]) -> FramedCapture<'a> {
     let mut framed = FramedCapture {
         sections: expected.iter().map(|_| Vec::new()).collect(),
         missing_binary: false,
-        unframed: false,
+        complete: false,
         // The probe's first word is its header, so a capture that is blank
         // after trimming was never answered.
         silent: output.trim().is_empty(),
     };
-    let mut framing = false;
-    let mut open: Option<usize> = None;
+    let mut started = false;
     let mut next = 0usize;
     for line in output.lines().map(str::trim) {
         if line.is_empty() {
             continue;
         }
-        if line == HERDR_PROBE_HEADER && open.is_none() && next == 0 {
-            framing = true;
+        if !started {
+            started = line == HERDR_PROBE_HEADER;
             continue;
         }
         if line == HERDR_UNAVAILABLE_MARKER && next == 0 {
-            framing = true;
             framed.missing_binary = true;
             break;
         }
-        if let Some(index) = expected.iter().position(|marker| *marker == line) {
-            // Inside a section only the marker the probe prints next frames
-            // anything. Before the first section a later marker means the head
-            // of the capture was lost and the probe resumed where it survived.
-            let opens = match open {
-                Some(section) => index == section + 1,
-                None => index >= next,
-            };
-            if opens {
-                framing = true;
-                open = Some(index);
-                next = index + 1;
-                continue;
-            }
+        // Only the next expected marker can open a section.
+        if expected.get(next).is_some_and(|marker| *marker == line) {
+            next += 1;
+            continue;
         }
-        if line == HERDR_SNAPSHOT_END && (open.is_none() || next == expected.len()) {
-            framing = true;
+        if line == HERDR_SNAPSHOT_END && next == expected.len() {
+            framed.complete = true;
             break;
         }
-        if let Some(section) = open {
-            framed.sections[section].push(line);
+        if next != 0 {
+            framed.sections[next - 1].push(line);
         }
     }
-    framed.unframed = !framing && !output.trim().is_empty();
     framed
 }
 
@@ -372,6 +359,7 @@ fn parse_herdr_section<T>(
 ) -> (Vec<T>, Option<HerdrStatus>) {
     let mut items = Vec::new();
     let mut status = None;
+    let mut answered = false;
     for line in lines {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
             // Non-JSON noise (a shell banner between markers) is not an answer.
@@ -387,6 +375,7 @@ fn parse_herdr_section<T>(
         }
         match carrier(&value, carrier_path) {
             Carrier::List(entries) => {
+                answered = true;
                 for entry in entries {
                     if let Some(item) = extract(entry) {
                         items.push(item);
@@ -395,6 +384,7 @@ fn parse_herdr_section<T>(
             }
             Carrier::Absent => {
                 if let Some(item) = extract(&value) {
+                    answered = true;
                     items.push(item);
                 }
             }
@@ -403,7 +393,7 @@ fn parse_herdr_section<T>(
             }
         }
     }
-    (items, status)
+    (items, status.or_else(|| (!answered).then_some(MALFORMED)))
 }
 
 /// Folds the per-section verdicts into the status of the whole capture.
@@ -428,23 +418,18 @@ impl StatusFold {
         if framed.missing_binary {
             return HerdrStatus::Unavailable;
         }
+        if framed.silent {
+            return HerdrStatus::Unknown;
+        }
         if self.server_down {
             return HerdrStatus::ServerNotRunning;
         }
         if let Some(error) = self.error {
             return error;
         }
-        if framed.unframed {
+        if !framed.complete {
             return HerdrStatus::Malformed;
         }
-        if framed.silent {
-            // Nothing was printed, so the answer carries no verdict: the
-            // session probe still has its exit code, and a subtree fetch has
-            // only the panel's own gate to fall back on.
-            return HerdrStatus::Unknown;
-        }
-        // Framing the probe could have printed, no error envelope and nothing
-        // malformed: the server answered, even if it had no rows.
         HerdrStatus::Available
     }
 }
@@ -709,10 +694,10 @@ mod tests {
             HerdrStatus::Unavailable
         );
 
-        // A banner between the header and the first section is not a row, and
-        // a section the server answered with nothing is legitimately empty.
+        // A banner is not a row; an explicit empty list is a valid answer.
+        let empty_agents = r#"{"result":{"agents":[]}}"#;
         let noisy = format!(
-            "{HERDR_PROBE_HEADER}\nPowerShell banner noise\n{HERDR_WORKSPACES_SECTION}\n{WORKSPACE_ENVELOPE}\n{HERDR_TABS_SECTION}\n{TAB_ENVELOPE}\n{HERDR_PANES_SECTION}\n{PANE_ENVELOPE}\n{HERDR_AGENTS_SECTION}\n{HERDR_SNAPSHOT_END}"
+            "{HERDR_PROBE_HEADER}\nPowerShell banner noise\n{HERDR_WORKSPACES_SECTION}\n{WORKSPACE_ENVELOPE}\n{HERDR_TABS_SECTION}\n{TAB_ENVELOPE}\n{HERDR_PANES_SECTION}\n{PANE_ENVELOPE}\n{HERDR_AGENTS_SECTION}\n{empty_agents}\n{HERDR_SNAPSHOT_END}"
         );
         let detail = parse_herdr_session_detail(&noisy);
         assert_eq!(detail.status, HerdrStatus::Available);
@@ -721,9 +706,37 @@ mod tests {
     }
 
     #[test]
+    fn herdr_requires_complete_list_replies_not_just_probe_markers() {
+        for body in ["", "{", r#"{"id":"cli:session:list"}"#] {
+            let capture = format!(
+                "{HERDR_PROBE_HEADER}\n{HERDR_SESSIONS_SECTION}\n{body}\n{HERDR_SNAPSHOT_END}"
+            );
+            assert_eq!(
+                parse_herdr_snapshot(&capture).status,
+                HerdrStatus::Malformed,
+                "{body:?}"
+            );
+        }
+        let empty = format!("{HERDR_PROBE_HEADER}\n{HERDR_SESSIONS_SECTION}\n{{\"sessions\":[]}}");
+        assert_eq!(parse_herdr_snapshot(&empty).status, HerdrStatus::Malformed);
+        let snapshot = parse_herdr_snapshot(&format!("{empty}\n{HERDR_SNAPSHOT_END}"));
+        assert_eq!(snapshot.status, HerdrStatus::Available);
+        assert!(snapshot.sessions.is_empty());
+
+        for marker in DETAIL_SECTIONS {
+            let capture = detail_output_with(marker, "");
+            assert_eq!(
+                parse_herdr_session_detail(&capture).status,
+                HerdrStatus::Malformed,
+                "{marker} printed no reply"
+            );
+        }
+    }
+
+    #[test]
     fn herdr_parser_ignores_marker_text_inside_server_strings() {
         let envelope = r#"{"result":{"workspaces":[{"workspace_id":"wA","label":"===HERDR_PANES=== __OXIDE_HERDR_UNAVAILABLE__","number":1}]}}"#;
-        let output = framed_detail(&[(HERDR_WORKSPACES_SECTION, envelope)]);
+        let output = detail_output_with(HERDR_WORKSPACES_SECTION, envelope);
         let detail = parse_herdr_session_detail(&output);
         assert_eq!(detail.status, HerdrStatus::Available);
         assert_eq!(detail.workspaces.len(), 1);
@@ -763,8 +776,8 @@ mod tests {
         );
         assert_eq!(
             detail.status,
-            HerdrStatus::Available,
-            "a payload line cannot declare the binary missing"
+            HerdrStatus::Malformed,
+            "a payload line cannot stand in for missing sections"
         );
 
         // Once the last section is open the sentinel is terminal, so anything
@@ -783,10 +796,8 @@ mod tests {
         let envelope = format!(
             r#"{{"id":"cli:workspace:list","error":{{"code":"invalid_params","message":"{long}\nsecond line\u001besc"}}}}"#
         );
-        let detail = parse_herdr_session_detail(&framed_detail(&[(
-            HERDR_WORKSPACES_SECTION,
-            envelope.as_str(),
-        )]));
+        let detail =
+            parse_herdr_session_detail(&detail_output_with(HERDR_WORKSPACES_SECTION, &envelope));
         match detail.status {
             HerdrStatus::Error { message } => {
                 assert_eq!(
@@ -812,7 +823,7 @@ mod tests {
     fn herdr_parser_treats_null_error_member_as_success() {
         let envelope = r#"{"id":"cli:workspace:list","error":null,"result":{"workspaces":[{"workspace_id":"wA","label":"one","number":1}]}}"#;
         let detail =
-            parse_herdr_session_detail(&framed_detail(&[(HERDR_WORKSPACES_SECTION, envelope)]));
+            parse_herdr_session_detail(&detail_output_with(HERDR_WORKSPACES_SECTION, envelope));
         assert_eq!(detail.status, HerdrStatus::Available);
         assert_eq!(detail.workspaces.len(), 1);
     }
@@ -831,8 +842,9 @@ mod tests {
         );
 
         // A wrapper that is a string instead of an object.
-        let wrapped = format!(
-            "{HERDR_PROBE_HEADER}\n{HERDR_WORKSPACES_SECTION}\n{{\"result\":\"no workspaces yet\"}}\n{HERDR_SNAPSHOT_END}"
+        let wrapped = detail_output_with(
+            HERDR_WORKSPACES_SECTION,
+            r#"{"result":"no workspaces yet"}"#,
         );
         assert!(
             matches!(
@@ -883,6 +895,8 @@ mod tests {
     #[test]
     fn herdr_parser_sanitizes_control_characters_in_remote_display_text() {
         let output = framed_detail(&[
+            (HERDR_WORKSPACES_SECTION, WORKSPACE_ENVELOPE),
+            (HERDR_TABS_SECTION, TAB_ENVELOPE),
             (HERDR_PANES_SECTION, HOSTILE_LABEL_ENVELOPE),
             (HERDR_AGENTS_SECTION, HOSTILE_AGENT_ENVELOPE),
         ]);
@@ -912,7 +926,7 @@ mod tests {
         // pane falls back to its next preference instead of rendering a blank.
         let blank =
             r#"{"result":{"panes":[{"pane_id":"wA:pB","workspace_id":"wA","label":"\n\r\t"}]}}"#;
-        let detail = parse_herdr_session_detail(&framed_detail(&[(HERDR_PANES_SECTION, blank)]));
+        let detail = parse_herdr_session_detail(&detail_output_with(HERDR_PANES_SECTION, blank));
         assert_eq!(detail.panes[0].label, None);
 
         // The length caps still bound sanitized values.
@@ -921,7 +935,7 @@ mod tests {
             r#"{{"result":{{"panes":[{{"pane_id":"wA:pC","workspace_id":"wA","cwd":"{long}"}}]}}}}"#
         );
         let detail =
-            parse_herdr_session_detail(&framed_detail(&[(HERDR_PANES_SECTION, envelope.as_str())]));
+            parse_herdr_session_detail(&detail_output_with(HERDR_PANES_SECTION, &envelope));
         assert_eq!(detail.panes[0].cwd.as_deref().unwrap().chars().count(), 256);
     }
 

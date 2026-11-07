@@ -3,17 +3,16 @@
 
 //! Command builders. Every value that reaches a command line is either a
 //! literal written here or a dynamic value that travels as data: base64 decoded
-//! into a PowerShell variable on Windows, one single-quoted POSIX argument
-//! elsewhere. Dynamic text is never concatenated into a Windows script or into
-//! a line typed into a terminal, because that terminal may be `cmd.exe`,
-//! PowerShell, or a login shell, and each of them rewrites quotes first.
+//! into a PowerShell variable on Windows, one single-quoted argument parsed by
+//! /bin/sh on Unix. The account shell never parses the dynamic values directly.
 
 use super::HERDR_READ_LINES;
 use super::ids::{validated_id, validated_name};
 use crate::shell::{
-    PowerShellData, posix_shell_command, powershell_bind, powershell_script, script_arg,
-    windows_encoded_command,
+    PowerShellData, encoded_posix_shell_command, posix_shell_command, powershell_bind,
+    powershell_script, push_shell_quoted, script_arg, shell_quoted_len, windows_encoded_command,
 };
+use std::fmt;
 use zeroize::Zeroizing;
 
 #[derive(Clone, Eq, PartialEq)]
@@ -31,8 +30,8 @@ impl std::fmt::Debug for HerdrCaptureCommand {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum HerdrActionKind {
+#[derive(Debug)]
+pub enum HerdrActionKind<'a> {
     NewWorkspace {
         label: String,
         cwd: String,
@@ -78,13 +77,21 @@ pub enum HerdrActionKind {
     },
     RunPane {
         pane_id: String,
-        command: Zeroizing<String>,
+        command: PaneCommand<'a>,
     },
 }
 
-#[derive(Clone, Eq, PartialEq)]
+/// A borrowed command that must not inherit its owner's Debug implementation.
+pub struct PaneCommand<'a>(pub &'a str);
+
+impl fmt::Debug for PaneCommand<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("[REDACTED]")
+    }
+}
+
 pub struct HerdrActionCommand {
-    pub command: String,
+    pub command: Zeroizing<String>,
 }
 
 impl std::fmt::Debug for HerdrActionCommand {
@@ -233,7 +240,7 @@ pub fn build_herdr_session_detail_command(
             ),
             socket = socket
         );
-        posix_shell_command(&body)
+        encoded_posix_shell_command(&body)
     };
     Ok(HerdrCaptureCommand { command })
 }
@@ -255,7 +262,7 @@ pub fn build_herdr_read_command(
         command: if windows {
             windows_encoded_command(&powershell_script(&data, &read))
         } else {
-            read
+            encoded_posix_shell_command(&read)
         },
     })
 }
@@ -270,8 +277,8 @@ pub fn build_herdr_attach_command(
     // remote-authored name spelled into that line either fails the attach or
     // runs a second command. Windows therefore gets the encoded invocation form,
     // the one the Zellij attach already used, and only literals reach a parser.
-    // POSIX keeps the bare line on purpose: herdr is on PATH, with the user's
-    // environment, only in their own interactive shell.
+    // The Unix wrapper inherits the terminal's PATH without asking its shell
+    // to interpret the name.
     let windows = is_windows_os(os_type);
     let mut data = Vec::new();
     let invocation = match target {
@@ -297,8 +304,10 @@ pub fn build_herdr_attach_command(
             "[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); & {invocation}; exit $LASTEXITCODE"
         );
         windows_encoded_command(&powershell_script(&data, &script))
-    } else {
+    } else if matches!(target, HerdrAttachTarget::Default) {
         invocation
+    } else {
+        encoded_posix_shell_command(&invocation)
     })
 }
 
@@ -308,7 +317,7 @@ pub fn build_herdr_attach_command(
 pub fn build_herdr_action_command(
     os_type: &str,
     session: &str,
-    action: &HerdrActionKind,
+    action: &HerdrActionKind<'_>,
 ) -> Result<HerdrActionCommand, String> {
     // Herdr takes one argv per value, and every value here was authored by the
     // server or typed into a text field. Only the verbs are literals: a value is
@@ -397,10 +406,7 @@ pub fn build_herdr_action_command(
         HerdrActionKind::RunPane { pane_id, command } => {
             let prefix = session_prefix(windows, &mut data, session)?;
             let id = object_arg(windows, &mut data, pane_id)?;
-            // The typed command is `Zeroizing<String>` because the user may
-            // have put a credential on this one line: only its base64 form
-            // leaves this function, and the value is wiped with the action.
-            let command = command.trim();
+            let command = command.0.trim();
             if command.is_empty() {
                 return Err("A command is required.".to_string());
             }
@@ -408,16 +414,31 @@ pub fn build_herdr_action_command(
             // the pane, and it does not consume a `--` separator: passing one
             // makes the pane run `-- <command>`. The command is the only
             // argument after the pane id.
-            let command = script_arg(windows, &mut data, command);
-            format!("{prefix} pane run {id} {command}")
+            if windows {
+                let command = powershell_bind(&mut data, command);
+                format!("{prefix} pane run {id} {command}")
+            } else {
+                const REDIRECT: &str = " 2>&1";
+                let head = format!("{prefix} pane run {id} ");
+                // Reserve once: resizing could leave an unwiped copy of the command.
+                let mut payload = Zeroizing::new(String::with_capacity(
+                    head.len() + shell_quoted_len(command) + REDIRECT.len(),
+                ));
+                payload.push_str(&head);
+                push_shell_quoted(&mut payload, command);
+                payload.push_str(REDIRECT);
+                return Ok(HerdrActionCommand {
+                    command: Zeroizing::new(encoded_posix_shell_command(&payload)),
+                });
+            }
         }
     };
     Ok(HerdrActionCommand {
-        command: if windows {
+        command: Zeroizing::new(if windows {
             windows_encoded_command(&powershell_script(&data, &payload))
         } else {
-            format!("{payload} 2>&1")
-        },
+            encoded_posix_shell_command(&format!("{payload} 2>&1"))
+        }),
     })
 }
 
@@ -425,24 +446,14 @@ pub fn build_herdr_action_command(
 mod tests {
     use super::*;
     use crate::shell::{
-        HOSTILE_VALUE, assert_inert_windows_line as assert_inert_line, decoded_powershell_data,
+        HOSTILE_VALUE, assert_inert_windows_line as assert_inert_line,
+        decoded_posix_script as posix_script, decoded_powershell_data,
         decoded_windows_script as windows_script,
     };
 
-    fn action(session: &str, kind: HerdrActionKind) -> String {
-        build_herdr_action_command("Linux", session, &kind)
-            .unwrap()
-            .command
-    }
-
-    /// POSIX lines wrap the script as one `/bin/sh -c` argument, so assertions
-    /// read that argument instead of the wrapping quotes.
-    fn posix_script(line: &str) -> String {
-        let quoted = line
-            .strip_prefix("/bin/sh -c '")
-            .and_then(|body| body.strip_suffix('\''))
-            .expect("posix wrapper");
-        quoted.replace("'\"'\"'", "'")
+    fn action(session: &str, kind: HerdrActionKind<'_>) -> String {
+        let line = build_herdr_action_command("Linux", session, &kind).unwrap();
+        posix_script(&line.command)
     }
 
     /// The script a line actually runs, whichever shell it was built for.
@@ -473,7 +484,7 @@ mod tests {
             "default",
             HerdrActionKind::RunPane {
                 pane_id: "wA:pC".to_string(),
-                command: Zeroizing::new("ls".to_string()),
+                command: PaneCommand("ls"),
             },
         );
         assert_eq!(run, "herdr --session 'default' pane run wA:pC 'ls' 2>&1");
@@ -482,7 +493,7 @@ mod tests {
             "default",
             HerdrActionKind::RunPane {
                 pane_id: "wA:pC".to_string(),
-                command: Zeroizing::new("echo hi; rm -rf /".to_string()),
+                command: PaneCommand("echo hi; rm -rf /"),
             },
         );
         assert_eq!(
@@ -521,7 +532,7 @@ mod tests {
                 "default",
                 &HerdrActionKind::RunPane {
                     pane_id: "wA:pC".to_string(),
-                    command: Zeroizing::new("   ".to_string())
+                    command: PaneCommand("   ")
                 }
             )
             .is_err()
@@ -546,7 +557,10 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(attach, "herdr --session 'default' agent attach wA:pC");
+        assert_eq!(
+            posix_script(&attach),
+            "herdr --session 'default' agent attach wA:pC"
+        );
         assert!(
             build_herdr_attach_command(
                 "Linux",
@@ -558,8 +572,7 @@ mod tests {
             .is_err()
         );
 
-        // Session names are remote-authored and typed into a terminal. The
-        // POSIX line stays bare, quoted for the user's own shell.
+        // Session names are typed into a terminal but parsed by /bin/sh.
         let session = build_herdr_attach_command(
             "Linux",
             &HerdrAttachTarget::Session {
@@ -567,7 +580,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(session, "herdr session attach 'work space'");
+        assert_eq!(posix_script(&session), "herdr session attach 'work space'");
         let created = build_herdr_attach_command(
             "Linux",
             &HerdrAttachTarget::NewSession {
@@ -575,7 +588,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(created, "herdr --session 'my work'");
+        assert_eq!(posix_script(&created), "herdr --session 'my work'");
         assert_eq!(
             build_herdr_attach_command("Linux", &HerdrAttachTarget::Default).unwrap(),
             "herdr"
@@ -668,7 +681,7 @@ mod tests {
 
         let read = build_herdr_read_command("Linux", "default", "wA:pC").unwrap();
         assert_eq!(
-            read.command,
+            posix_script(&read.command),
             concat!(
                 "herdr --session 'default' pane read wA:pC --lines 500 ",
                 "--source recent --format text 2>&1"
@@ -786,7 +799,7 @@ mod tests {
             "dev",
             &HerdrActionKind::RunPane {
                 pane_id: "wA:pC".to_string(),
-                command: Zeroizing::new(HOSTILE_VALUE.to_string()),
+                command: PaneCommand(HOSTILE_VALUE),
             },
         )
         .unwrap();

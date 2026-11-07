@@ -23,8 +23,9 @@ mod parse;
 // provider-neutral model reads; the shapes the protocol builds for itself stay
 // inside the module.
 pub use command::{
-    HerdrActionKind, HerdrAttachTarget, build_herdr_action_command, build_herdr_attach_command,
-    build_herdr_read_command, build_herdr_session_detail_command, build_herdr_snapshot_command,
+    HerdrActionKind, HerdrAttachTarget, PaneCommand, build_herdr_action_command,
+    build_herdr_attach_command, build_herdr_read_command, build_herdr_session_detail_command,
+    build_herdr_snapshot_command,
 };
 pub use model::{HerdrSessionDetail, HerdrStatus};
 pub use parse::{herdr_action_outcome, parse_herdr_session_detail, parse_herdr_snapshot};

@@ -244,7 +244,8 @@ impl HostToolsEntity {
         self.host_tmux.mux.snapshot_task = None;
         let snapshot = match delivery.result {
             Ok(mut output) if !output.truncated => {
-                let snapshot = provider.parse_sessions(&output.stdout, output.exit_code);
+                let snapshot =
+                    provider.parse_sessions(&output.stdout, &output.stderr, output.exit_code);
                 output.stdout.zeroize();
                 output.stderr.zeroize();
                 snapshot
@@ -524,21 +525,35 @@ impl HostToolsEntity {
         if self.host_tmux.mux.action_running.is_some() {
             return vec![HostToolsNotice::MuxActionAlreadyRunning];
         }
+        if self.connection_os_type(&request.connection_id).is_none() {
+            return vec![HostToolsNotice::MuxConnectionMissing];
+        }
+        let windows = self.mux_windows(&request.connection_id);
+        let Some(command) = request.provider.verb_command(
+            windows,
+            &request.session,
+            request.node.as_ref(),
+            &request.verb,
+        ) else {
+            return vec![HostToolsNotice::MuxActionFailed];
+        };
+        self.start_mux_action(request, command, runtime, cx)
+    }
+
+    fn start_mux_action(
+        &mut self,
+        request: MuxActionRequest,
+        command: zeroize::Zeroizing<String>,
+        runtime: tokio::runtime::Handle,
+        cx: &mut Context<Self>,
+    ) -> Vec<HostToolsNotice> {
         let MuxActionRequest {
             provider,
             connection_id,
             session,
             target_label,
-            node,
-            verb,
+            ..
         } = request;
-        if self.connection_os_type(&connection_id).is_none() {
-            return vec![HostToolsNotice::MuxConnectionMissing];
-        }
-        let windows = self.mux_windows(&connection_id);
-        let Some(command) = provider.verb_command(windows, &session, node.as_ref(), &verb) else {
-            return vec![HostToolsNotice::MuxActionFailed];
-        };
         // A target label is not an identity: two rows can share one, and a
         // provider switch keeps the label while changing what it names. The
         // slot records the whole request plus a fresh generation, so only this
@@ -2352,7 +2367,7 @@ impl HostToolsEntity {
         let Some(provider) = self.mux_provider() else {
             return;
         };
-        if self.host_tmux.mux.host.is_empty() {
+        if self.connection_os_type(&self.host_tmux.mux.host).is_none() {
             cx.emit(HostToolsEvent::ShowNotice(
                 HostToolsNotice::MuxConnectionMissing,
             ));
@@ -2376,7 +2391,7 @@ impl HostToolsEntity {
         }
         dialog.error = None;
         self.ui.clear_input_focus();
-        let value = dialog.value.trim().to_string();
+        let value = dialog.value.trim();
         let windows = self.mux_windows(&connection_id);
         let (verb, target_label, node) = match &dialog.kind {
             MuxInputDialogKind::NewWorkspace => {
@@ -2397,14 +2412,14 @@ impl HostToolsEntity {
             | MuxInputDialogKind::RenameTab { target }
             | MuxInputDialogKind::RenamePane { target } => (
                 MuxVerb::Rename {
-                    label: value.clone(),
+                    label: value.to_owned(),
                 },
-                value,
+                value.to_owned(),
                 Some(target.clone()),
             ),
             MuxInputDialogKind::RunPane { target } => (
                 MuxVerb::Run {
-                    command: zeroize::Zeroizing::new(value),
+                    command: zeroize::Zeroizing::new(value.to_owned()),
                 },
                 target.label.clone(),
                 Some(target.clone()),
@@ -2415,16 +2430,14 @@ impl HostToolsEntity {
         // The model owns the payload grammar, so it decides whether this value
         // can become a command at all; a refusal reopens the dialog with the
         // text and names the reason where it was typed.
-        if provider
-            .verb_command(windows, &dialog.session, node.as_ref(), &verb)
-            .is_none()
-        {
+        let Some(command) = provider.verb_command(windows, &dialog.session, node.as_ref(), &verb)
+        else {
             dialog.error = Some("sidebar.multiplexer.inputs.error_rejected");
             self.ui.host_mux_input_dialog = Some(dialog);
             cx.notify();
             return;
-        }
-        for notice in self.run_mux_action(
+        };
+        for notice in self.start_mux_action(
             MuxActionRequest {
                 provider,
                 connection_id,
@@ -2433,6 +2446,7 @@ impl HostToolsEntity {
                 node,
                 verb,
             },
+            command,
             runtime,
             cx,
         ) {

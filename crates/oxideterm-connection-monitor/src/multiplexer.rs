@@ -10,9 +10,10 @@
 //! plus screen-scraped text.
 
 use serde::Deserialize;
+use std::fmt;
 
 use crate::herdr::{
-    HerdrActionKind, HerdrAttachTarget, HerdrSessionDetail, HerdrStatus,
+    HerdrActionKind, HerdrAttachTarget, HerdrSessionDetail, HerdrStatus, PaneCommand,
     build_herdr_action_command, build_herdr_attach_command, build_herdr_read_command,
     build_herdr_session_detail_command, build_herdr_snapshot_command, herdr_action_outcome,
     parse_herdr_session_detail, parse_herdr_snapshot,
@@ -128,9 +129,8 @@ pub enum MuxVerbKind {
 }
 
 /// A verb with the payload the user supplied. The typed pane command is
-/// zeroized because it is one line the user may have filled with a credential;
-/// the derived `Debug` renders it as `[REDACTED]`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// zeroized because it can contain credentials.
+#[derive(Clone, Eq, PartialEq)]
 pub enum MuxVerb {
     Focus,
     CreateChild,
@@ -141,6 +141,13 @@ pub enum MuxVerb {
     Close,
     Stop,
     Delete,
+}
+
+impl fmt::Debug for MuxVerb {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Report the verb, never the user-authored argument.
+        fmt::Debug::fmt(&verb_kind(self), formatter)
+    }
 }
 
 impl Multiplexer {
@@ -172,10 +179,10 @@ impl Multiplexer {
         }
     }
 
-    pub fn parse_sessions(self, output: &str, exit_code: Option<i32>) -> MuxSnapshot {
+    pub fn parse_sessions(self, stdout: &str, stderr: &str, exit_code: Option<i32>) -> MuxSnapshot {
         match self {
             Self::Herdr => {
-                let snapshot = parse_herdr_snapshot(output);
+                let snapshot = parse_herdr_snapshot(stdout);
                 MuxSnapshot {
                     status: herdr_status(snapshot.status, exit_code),
                     sessions: snapshot
@@ -188,7 +195,7 @@ impl Multiplexer {
                         .collect(),
                 }
             }
-            Self::Zellij => zellij_sessions(output, exit_code),
+            Self::Zellij => zellij_sessions(stdout, stderr, exit_code),
         }
     }
 
@@ -427,7 +434,7 @@ fn herdr_verb_command(
         },
         MuxVerb::Run { command } => HerdrActionKind::RunPane {
             pane_id: id,
-            command: command.clone(),
+            command: PaneCommand(command.as_str()),
         },
         MuxVerb::Stop => HerdrActionKind::StopSession {
             name: session.to_string(),
@@ -443,7 +450,7 @@ fn herdr_verb_command(
     };
     build_herdr_action_command(os_type(windows), session, &action)
         .ok()
-        .map(|command| Zeroizing::new(command.command))
+        .map(|command| command.command)
 }
 
 /// `zellij attach <session name>`: the name is positional, so it keeps the
@@ -540,14 +547,18 @@ fn zellij_line(
     })
 }
 
-fn zellij_sessions(output: &str, exit_code: Option<i32>) -> MuxSnapshot {
+fn zellij_sessions(stdout: &str, stderr: &str, exit_code: Option<i32>) -> MuxSnapshot {
     if exit_code == Some(127) {
         return MuxSnapshot {
             status: MuxStatus::Unavailable,
             sessions: Vec::new(),
         };
     }
-    if exit_code == Some(1) && output.contains("No active zellij sessions found.") {
+    if exit_code == Some(1)
+        && stderr
+            .lines()
+            .any(|line| line.trim() == "No active zellij sessions found.")
+    {
         return MuxSnapshot {
             status: MuxStatus::Available,
             sessions: Vec::new(),
@@ -558,7 +569,7 @@ fn zellij_sessions(output: &str, exit_code: Option<i32>) -> MuxSnapshot {
         sessions: Vec::new(),
     };
     let mut sessions = Vec::new();
-    for line in output
+    for line in stdout
         .lines()
         .map(str::trim)
         .filter(|line| !line.is_empty())
@@ -899,18 +910,24 @@ mod tests {
 
     #[test]
     fn herdr_probe_status_comes_from_the_envelope_not_the_exit_code() {
-        let missing = Multiplexer::Herdr.parse_sessions("__OXIDE_HERDR_UNAVAILABLE__", Some(0));
+        let missing = Multiplexer::Herdr.parse_sessions(
+            "===HERDR===\n__OXIDE_HERDR_UNAVAILABLE__\n===HERDR_END===",
+            "",
+            Some(0),
+        );
         assert_eq!(missing.status, MuxStatus::Unavailable);
 
         let down = Multiplexer::Herdr.parse_sessions(
-            "===HERDR_SESSIONS===\n{\"error\":{\"code\":\"server_not_running\",\"message\":\"no herdr server is running\"}}\n===HERDR_END===",
+            "===HERDR===\n===HERDR_SESSIONS===\n{\"error\":{\"code\":\"server_not_running\",\"message\":\"no herdr server is running\"}}\n===HERDR_END===",
+            "",
             Some(0),
         );
         assert_eq!(down.status, MuxStatus::ServerNotRunning);
         assert!(down.sessions.is_empty());
 
         let listed = Multiplexer::Herdr.parse_sessions(
-            "===HERDR_SESSIONS===\n{\"sessions\":[{\"name\":\"default\",\"running\":true},{\"name\":\"work space\",\"running\":false}]}\n===HERDR_END===",
+            "===HERDR===\n===HERDR_SESSIONS===\n{\"sessions\":[{\"name\":\"default\",\"running\":true},{\"name\":\"work space\",\"running\":false}]}\n===HERDR_END===",
+            "",
             Some(0),
         );
         assert_eq!(listed.status, MuxStatus::Available);
@@ -929,7 +946,8 @@ mod tests {
         );
 
         let failed = Multiplexer::Herdr.parse_sessions(
-            "===HERDR_SESSIONS===\n{\"error\":{\"code\":\"invalid_params\",\"message\":\"bad socket\"}}\n===HERDR_END===",
+            "===HERDR===\n===HERDR_SESSIONS===\n{\"error\":{\"code\":\"invalid_params\",\"message\":\"bad socket\"}}\n===HERDR_END===",
+            "",
             Some(0),
         );
         assert_eq!(
@@ -939,7 +957,7 @@ mod tests {
 
         // Silence with a failed exit code must not look like an empty list.
         assert_eq!(
-            Multiplexer::Herdr.parse_sessions("", Some(1)).status,
+            Multiplexer::Herdr.parse_sessions("", "", Some(1)).status,
             MuxStatus::Error(None)
         );
     }
@@ -948,6 +966,7 @@ mod tests {
     fn zellij_sessions_distinguish_resurrection_from_running() {
         let snapshot = Multiplexer::Zellij.parse_sessions(
             "dev [Created 2 hours ago] (current)\nwork space [Created 3 days ago] (EXITED - attach to resurrect)\n",
+            "",
             Some(0),
         );
         assert_eq!(snapshot.status, MuxStatus::Available);
@@ -967,18 +986,45 @@ mod tests {
         );
 
         assert_eq!(
-            Multiplexer::Zellij.parse_sessions("", Some(127)).status,
+            Multiplexer::Zellij.parse_sessions("", "", Some(127)).status,
             MuxStatus::Unavailable
         );
-        let empty = Multiplexer::Zellij.parse_sessions("No active zellij sessions found.", Some(1));
-        assert_eq!(empty.status, MuxStatus::Available);
-        assert!(empty.sessions.is_empty());
+        assert_eq!(
+            Multiplexer::Zellij.parse_sessions("", "No active zellij sessions found.\n", Some(1)),
+            MuxSnapshot {
+                status: MuxStatus::Available,
+                sessions: vec![]
+            }
+        );
+        assert_eq!(
+            Multiplexer::Zellij
+                .parse_sessions("", "Permission denied\n", Some(1))
+                .status,
+            MuxStatus::Error(None)
+        );
         // An unrecognized state string is not a session.
         assert_eq!(
             Multiplexer::Zellij
-                .parse_sessions("weird [Created 1 minute ago] (unknown)", Some(0))
+                .parse_sessions("weird [Created 1 minute ago] (unknown)", "", Some(0))
                 .status,
             MuxStatus::Error(None)
+        );
+    }
+
+    #[test]
+    fn pane_command_debug_omits_the_input_at_each_boundary() {
+        let secret = "synthetic-secret-6041";
+        let verb = MuxVerb::Run {
+            command: Zeroizing::new(secret.to_owned()),
+        };
+        let action = HerdrActionKind::RunPane {
+            pane_id: "wA:pC".to_owned(),
+            command: PaneCommand(secret),
+        };
+        assert_eq!(format!("{verb:?}"), "Run");
+        assert_eq!(
+            format!("{action:?}"),
+            "RunPane { pane_id: \"wA:pC\", command: [REDACTED] }"
         );
     }
 
@@ -1090,86 +1136,68 @@ mod tests {
 
     #[test]
     fn herdr_verbs_reach_the_cli_through_the_protocol_layer() {
+        use crate::shell::decoded_posix_script;
+
         let workspace = MuxNode::new(MuxKind::Workspace, "wA".to_string(), "helphub".to_string());
         let tab = MuxNode::new(MuxKind::Tab, "wA:tB".to_string(), "backend".to_string());
         let pane = MuxNode::new(MuxKind::Pane, "wA:tB:p1".to_string(), "omp".to_string());
+        let script = |session: &str, node, verb: &MuxVerb| {
+            decoded_posix_script(
+                &Multiplexer::Herdr
+                    .verb_command(false, session, node, verb)
+                    .unwrap(),
+            )
+        };
 
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(
-                    false,
-                    "work space",
-                    None,
-                    &MuxVerb::CreateWorkspace {
-                        label: "web".to_string(),
-                        cwd: Some("/srv/web".to_string()),
-                    },
-                )
-                .unwrap()
-                .as_str(),
+            script(
+                "work space",
+                None,
+                &MuxVerb::CreateWorkspace {
+                    label: "web".to_string(),
+                    cwd: Some("/srv/web".to_string()),
+                },
+            ),
             "herdr --session 'work space' workspace create --label 'web' --cwd '/srv/web' 2>&1"
         );
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(false, "dev", Some(&workspace), &MuxVerb::Focus)
-                .unwrap()
-                .as_str(),
+            script("dev", Some(&workspace), &MuxVerb::Focus),
             "herdr --session 'dev' workspace focus wA 2>&1"
         );
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(false, "dev", Some(&workspace), &MuxVerb::CreateChild)
-                .unwrap()
-                .as_str(),
+            script("dev", Some(&workspace), &MuxVerb::CreateChild),
             "herdr --session 'dev' tab create --workspace wA 2>&1"
         );
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(
-                    false,
-                    "dev",
-                    Some(&tab),
-                    &MuxVerb::Rename {
-                        label: "it's mine".to_string()
-                    },
-                )
-                .unwrap()
-                .as_str(),
+            script(
+                "dev",
+                Some(&tab),
+                &MuxVerb::Rename {
+                    label: "it's mine".to_string()
+                },
+            ),
             "herdr --session 'dev' tab rename wA:tB 'it'\"'\"'s mine' 2>&1"
         );
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(
-                    false,
-                    "dev",
-                    Some(&pane),
-                    &MuxVerb::Run {
-                        command: Zeroizing::new("ls -la".to_string())
-                    },
-                )
-                .unwrap()
-                .as_str(),
+            script(
+                "dev",
+                Some(&pane),
+                &MuxVerb::Run {
+                    command: Zeroizing::new("ls -la".to_string())
+                },
+            ),
             "herdr --session 'dev' pane run wA:tB:p1 'ls -la' 2>&1"
         );
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(false, "dev", Some(&pane), &MuxVerb::CreateChild)
-                .unwrap()
-                .as_str(),
+            script("dev", Some(&pane), &MuxVerb::CreateChild),
             "herdr --session 'dev' pane split wA:tB:p1 --direction right 2>&1"
         );
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(false, "work space", None, &MuxVerb::Stop)
-                .unwrap()
-                .as_str(),
+            script("work space", None, &MuxVerb::Stop),
             "herdr session stop 'work space' 2>&1"
         );
         assert_eq!(
-            Multiplexer::Herdr
-                .verb_command(false, "dev", Some(&pane), &MuxVerb::Read)
-                .unwrap()
-                .as_str(),
+            script("dev", Some(&pane), &MuxVerb::Read),
             "herdr --session 'dev' pane read wA:tB:p1 --lines 500 --source recent --format text 2>&1"
         );
 
