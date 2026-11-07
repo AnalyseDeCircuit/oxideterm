@@ -525,9 +525,6 @@ impl HostToolsEntity {
         if self.host_tmux.mux.action_running.is_some() {
             return vec![HostToolsNotice::MuxActionAlreadyRunning];
         }
-        if self.connection_os_type(&request.connection_id).is_none() {
-            return vec![HostToolsNotice::MuxConnectionMissing];
-        }
         let windows = self.mux_windows(&request.connection_id);
         let Some(command) = request.provider.verb_command(
             windows,
@@ -547,6 +544,9 @@ impl HostToolsEntity {
         runtime: tokio::runtime::Handle,
         cx: &mut Context<Self>,
     ) -> Vec<HostToolsNotice> {
+        if self.connection_os_type(&request.connection_id).is_none() {
+            return vec![HostToolsNotice::MuxConnectionMissing];
+        }
         let MuxActionRequest {
             provider,
             connection_id,
@@ -2367,7 +2367,7 @@ impl HostToolsEntity {
         let Some(provider) = self.mux_provider() else {
             return;
         };
-        if self.connection_os_type(&self.host_tmux.mux.host).is_none() {
+        if self.host_tmux.mux.host.is_empty() {
             cx.emit(HostToolsEvent::ShowNotice(
                 HostToolsNotice::MuxConnectionMissing,
             ));

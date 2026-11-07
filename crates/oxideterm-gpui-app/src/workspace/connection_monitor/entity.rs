@@ -3449,6 +3449,22 @@ mod tests {
                 HostToolsNotice::MuxConnectionMissing
             ))
         ));
+
+        // A valid payload still cannot start a mutation without its connection.
+        entity.update(cx, |entity, cx| {
+            entity.ui.host_mux_input_dialog = Some(dialog("web", "connection-2"));
+            entity.submit_mux_input_from_view(cx);
+        });
+        entity.read_with(cx, |entity, _cx| {
+            assert!(entity.ui.host_mux_input_dialog.is_none());
+            assert!(entity.host_tmux.mux.action_running.is_none());
+        });
+        assert!(matches!(
+            events.try_recv(),
+            Ok(HostToolsEvent::ShowNotice(
+                HostToolsNotice::MuxConnectionMissing
+            ))
+        ));
     }
 
     /// A pane read belongs to the viewer that asked for it: closing the viewer
