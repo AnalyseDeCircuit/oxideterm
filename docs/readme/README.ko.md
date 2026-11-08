@@ -4,9 +4,10 @@
 
 # ⚡ OxideTerm
 
-**자신의 API 키로 사용하는 AI 도우미를 갖춘 무료 네이티브 SSH 클라이언트이자 원격 운영 작업 공간입니다.**
+**원격 서버 작업을 위한 무료 네이티브 SSH 클라이언트.**
 
-SSH · Mosh · Telnet · 시리얼 · RDP/VNC · SFTP · 포트 포워딩 · 내장 편집기를 하나의 GPU 렌더링 앱에서 사용하세요.
+SSH · Mosh · Telnet · 시리얼 · RDP/VNC · SFTP · 포트 포워딩 · 코드 편집기
+
 계정도, 구독도 필요 없습니다. 텔레메트리와 Electron을 사용하지 않습니다.
 
 [![최신 릴리스](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
@@ -26,71 +27,59 @@ SSH · Mosh · Telnet · 시리얼 · RDP/VNC · SFTP · 포트 포워딩 · 내
 
 ---
 
-## 빠른 시작
+## OxideTerm 소개
 
-1. **OxideTerm을 설치하세요.** [최신 릴리스](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)에서 패키지를 다운로드하세요. 운영체제별 안내는 아래 [설치](#install)에서 확인할 수 있습니다.
-2. **서버를 추가하세요.** 세션 관리자에서 SSH 연결을 만들거나 `~/.ssh/config`에서 호스트를 가져오세요.
-3. **연결하세요.** 터미널을 여세요. 호스트 키는 `~/.ssh/known_hosts`와 대조하여 확인합니다.
-4. **다른 기능도 활용하세요.** 같은 노드에서 SFTP, 포트 포워딩, 내장 편집기를 여세요. 기본적으로 하나의 SSH 연결을 공유합니다.
-5. **필요하면 AI를 켜세요.** 설정에서 자신의 OpenAI, Anthropic, Gemini, Ollama 또는 OpenAI 호환 엔드포인트를 추가하면 OxideSens를 사용할 수 있습니다.
-
-자세한 사용 안내는 [문서](https://oxideterm.app)를 참고하세요.
-
----
-
-## 제공 기능
-
-| | |
-|---|---|
-| **터미널과 프로토콜** | 로컬 셸, SSH, Mosh, Telnet, 시리얼, 분할 창, 다중 홉 경로, SSH 에이전트와 에이전트 포워딩, 2FA와 TOTP 인증 정보, X11 포워딩, 셸 통합, 명령 표시, 세션 로그 설정, 녹화, Sixel 및 Kitty 그래픽, trzsz 전송 |
-| **tmux와 동시 입력** | 창 배치와 드래그 가능한 구분선을 지원하는 네이티브 `tmux -CC` 제어 모드, 이름을 지정하는 동시 입력 그룹, 예약 및 반복 입력을 위한 고급 다중 대상 명령 전송 |
-| **연결 안정성** | Grace Period 재연결로 짧은 네트워크 중단에도 TUI 앱을 유지하고, 이후 포트 포워딩, 파일 전송, 열려 있던 편집 파일을 복원 |
-| **파일과 편집** | SFTP 양쪽 창 파일 관리자, 속도 제한과 예상 완료 시간을 지원하는 전송 대기열, 북마크, 안전한 저장·충돌 처리·작업 공간 복원을 지원하는 내장 원격 편집기 |
-| **네트워크** | 로컬·원격·동적 SOCKS5 포트 포워딩, 규칙 저장, 원격 포트 감지, 연결 토폴로지, 필요할 때 바로 수행하는 소켓 디버깅 |
-| **원격 데스크톱** | 마켓플레이스에서 RDP 또는 VNC 플러그인을 설치하여 네이티브 뷰어, 클립보드, 키보드·마우스 입력 사용 |
-| **호스트 운영** | 프로세스, 서비스, 로그, 포트, 작업, 디스크, 패키지, 컨테이너, tmux 모니터링 |
-| **AI와 자동화** | 자신의 API 키로 사용하는 OxideSens, MCP, 로컬 RAG, Agent Skills, 승인된 작업 공간 작업, 독립 실행형 CLI |
-| **확인과 감사** | 선택적으로 사용하는 알림 및 감사 작업 공간과 암호화된 세션 녹화(둘 다 기본적으로 꺼져 있음) |
-| **동기화와 이동** | 암호화된 클라우드 동기화, 이동 가능한 `.oxide` 번들 |
-| **개인 설정** | 테마, 배경 이미지, 단축키 설정, 빠른 명령, 11개 언어 인터페이스 |
-
----
+OxideTerm은 macOS, Windows, Linux용 SSH 클라이언트입니다. 서버마다 작업 공간을 두고 터미널, 파일 관리자, 포트 포워딩, 코드 편집기, 호스트 모니터링, 선택 사항인 AI 도우미를 한 창에서 사용합니다. GPL-3.0으로 공개된 무료 오픈 소스 소프트웨어입니다.
 
 ## OxideTerm을 선택하는 이유
 
-- **무료로, 로컬 데이터를 중심으로.** 계정, 구독, 텔레메트리가 없습니다. 연결 정보와 운영 데이터는 사용자가 관리합니다.
-- **서버마다 하나의 작업 공간.** 터미널, SFTP, 포트 포워딩, RDP/VNC, 편집기, 모니터링, AI가 같은 노드에 연결되어 함께 작동합니다.
-- **브라우저에 의존하지 않는 네이티브 앱.** [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)가 GPU에서 인터페이스를 직접 그립니다. Electron이나 번들 WebView를 사용하지 않습니다.
-- **AI 사용 방식은 사용자가 결정.** OxideSens는 사용자의 공급자와 키를 사용하며 승인한 작업만 실행합니다.
-- **끊김에 강한 연결.** Grace Period 재연결은 기존 연결을 30초 동안 확인한 후 교체하므로 짧은 네트워크 중단에도 TUI 앱을 유지할 수 있습니다.
-- **순수 Rust SSH.** SSH 스택은 `russh`와 `ring`을 사용하며 OpenSSL이나 libssh2에 의존하지 않습니다.
+- **한 번 연결하면 여러 도구를 함께 사용.** 같은 서버의 터미널, SFTP, 포워딩, 편집기는 기본적으로 SSH 연결 하나를 공유하므로 도구마다 다시 로그인할 필요가 없습니다.
+- **짧은 네트워크 단절에 대응.** 응답이 없는 연결을 교체하기 전에 30초간 계속 확인하여 vim, htop 같은 전체 화면 프로그램이 이전 상태에서 이어갈 수 있게 합니다.
+- **낮은 메모리 사용량.** Zed의 UI 프레임워크인 [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)로 GPU에 직접 그립니다. 유휴 시 macOS에서 약 81 MB, Windows에서 약 24 MB를 사용합니다.
+- **원하는 AI 사용.** OxideSens는 직접 선택한 제공업체와 API 키를 사용합니다. 별도로 구매할 OxideTerm 크레딧은 없습니다.
+- **순수 Rust SSH.** russh와 ring 기반으로, OpenSSL이나 libssh2에 의존하지 않습니다.
 
----
+<details>
+<summary><b>OxideTerm 1.x와 메모리 비교</b></summary>
 
-## 메모리 사용량
+Tauri(1.x)에서 네이티브 GPUI(2.0)로 전환하기 전후의 유휴 메모리입니다. 1.x 수치는 WebView 프로세스를 포함합니다.
 
-**네이티브 재작성으로 유휴 상태 메모리 사용량이 macOS에서는 이전 버전의 약 4분의 1, Windows에서는 약 8분의 1로 줄었습니다.** 아래는 Tauri 1.x에서 네이티브 GPUI 2.0으로 전환할 때 관리자가 기록한 관찰 결과입니다.
-
-| 플랫폼 | Tauri 1.x(유휴 상태) | 네이티브 2.0(유휴 상태) | 감소율 |
+| 플랫폼 | 1.x(Tauri) | 2.0(네이티브) | 감소율 |
 |---|---:|---:|---:|
-| macOS | 318.7 MB | 81.3 MB | 약 74% |
-| Windows | 182.4 MB | 23.5 MB | 약 87% |
+| macOS | 318.7 MB | 81.3 MB | 74% |
+| Windows | 182.4 MB | 23.5 MB | 87% |
 
-이전 버전의 합계에는 OxideTerm과 관련 WebView 프로세스가 포함됩니다. 네이티브 버전에서는 이러한 브라우저 프로세스가 필요하지 않습니다.
+![시스템 프로세스 모니터에서 비교한 OxideTerm 1.x와 2.0의 유휴 메모리](../../docs/screenshots/oxideterm-memory-comparison.png)
 
-![시스템 프로세스 화면으로 비교한 유휴 상태 메모리: Tauri 1.x와 네이티브 2.0](../../docs/screenshots/oxideterm-memory-comparison.png)
+</details>
 
 ---
 
 ## 스크린샷
 
-| OxideSens를 갖춘 SSH 터미널 | SFTP 파일 관리자 |
-|---|---|
-| ![OxideSens AI를 갖춘 SSH 터미널](../../docs/screenshots/terminal/SSHTERMINAL.png) | ![전송 대기열을 갖춘 SFTP 양쪽 창 파일 관리자](../../docs/screenshots/sftp/sftp.png) |
+### 터미널
 
-| 내장 IDE | 스마트 포트 포워딩 |
-|---|---|
-| ![내장 IDE 모드](../../docs/screenshots/miniIDE/miniide.png) | ![자동 감지를 지원하는 스마트 포트 포워딩](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png) |
+SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, SFTP, IDE, 포트 포워딩을 열 수 있습니다.
+
+![사이드바에 서버 도구가 표시된 SSH 터미널](../../docs/screenshots/terminal/SSHTERMINAL.png)
+
+### 파일
+
+로컬 및 원격 폴더를 나란히 표시하고 아래에 전송 대기열을 둡니다.
+
+![전송 대기열이 있는 2분할 SFTP 파일 관리자](../../docs/screenshots/sftp/sftp.png)
+
+### IDE
+
+원격 프로젝트를 열고 탭에서 파일을 편집합니다.
+
+![내장 IDE에서 열린 원격 프로젝트](../../docs/screenshots/miniIDE/miniide.png)
+
+### 포트 포워딩
+
+서버에서 수신 중인 포트를 찾아 클릭 한 번으로 포워딩합니다. Jupyter 같은 도구에는 빠른 포워딩도 사용할 수 있습니다.
+
+![서버에서 감지한 포트가 표시된 포워딩 화면](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
 
 <details>
 <summary><b>자연어 요청으로 OxideSens가 터미널을 여는 모습 보기</b></summary>
@@ -103,176 +92,181 @@ SSH · Mosh · Telnet · 시리얼 · RDP/VNC · SFTP · 포트 포워딩 · 내
 
 ---
 
-## OxideSens AI
+## 기능
 
-OxideSens는 선택적으로 사용하는 도우미입니다. 실행 중인 세션을 확인하고 **사용자가 승인한 후에만** 작업 공간 작업을 수행할 수 있습니다.
+*(플러그인)* 표시가 있는 기능은 앱의 플러그인 마켓에서 설치합니다.
 
-- **자신의 키 사용.** OpenAI, Anthropic(Claude), Google Gemini, Ollama 및 모든 OpenAI 호환 엔드포인트를 지원하며 공급자별 추론 설정을 제공합니다. 플랫폼에서 제공하는 사용 크레딧은 없습니다.
-- **MCP와 Agent Skills.** MCP 서버(stdio 및 SSE)를 연결하고 범위가 제한된 Agent Skills를 불러올 수 있습니다.
-- **로컬 지식 기반(RAG).** BM25 전문 검색과 벡터 인덱스를 함께 사용합니다.
-- **컨텍스트는 사용자가 관리.** 승인할 작업 공간 정보와 작업을 사용자가 선택하며 명령 정책 규칙도 적용됩니다.
-- **인증 정보 마스킹.** 공급자에게 보내는 메시지에는 인증 정보 패턴에 따른 마스킹을 적용합니다.
-- **키는 OS 키체인에 보관**하며 구조화된 로그에는 기록하지 않습니다.
+### 작업 공간
 
----
+- 저장된 연결 검색, 정렬, 그룹화, 가져오기/내보내기와 중첩 그룹, 태그, 색상, 아이콘, 메모를 제공하는 세션 관리자
+- `Match` 블록, `ProxyJump` 체인, `RemoteCommand`를 포함한 `~/.ssh/config` 가져오기 및 가져온 호스트 정보 갱신
+- SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell에서 저장 전 미리보기를 거쳐 가져오기
+- 전체 탭, 전역 페이지, 로컬 터미널 또는 서버별 필터; 숨겨진 세션도 계속 실행
+- 탭당 최대 16개 창에 터미널, SFTP, IDE, 포워딩, 메모, 설정, 원격 데스크톱 혼합 배치
+- 세션을 끊지 않고 탭을 별도 창으로 이동하거나 다시 합치기
+- 열린 터미널 2–16개를 재연결 없이 격자로 배치
+- 작업 및 저장 연결용 명령 팔레트와 한 페이지에 집중하는 Zen 모드
+- 셸, 시작 디렉터리, 아이콘을 지정하는 로컬 터미널 프로필
+- 시작 시 작업 공간, 창 크기, 전체 화면 상태 및 모니터 위치 복원
 
-<a id="plugins"></a>
+### 터미널
 
-## 플러그인
+- Unix 셸, 명령 프롬프트, Windows PowerShell, PowerShell Core, Git Bash, Nushell 자동 감지
+- 드래그 가능한 구분선으로 분할; 새 로컬 창은 작업 디렉터리 상속
+- 정규식, 대소문자 구분, 여러 줄 검색과 창별 독립 검색 상태
+- Bash, Zsh, Fish, Nushell, PowerShell 통합: 디렉터리, 종료 코드, 명령 표시 추적 및 앱에서 원격 설치
+- 완료된 명령 출력을 접고 종료 상태 유지
+- 여러 줄 입력, 기록, 경로 제안, 자동 완성 및 빠른 명령을 갖춘 명령 모음
+- 유사 일치 기록 제안과 선택적인 연결별 영구 기록
+- 마우스로 현재 명령을 편집하는 자유 입력 모드
+- 여러 줄 붙여넣기를 보내기 전 편집, 실행 취소 및 코드 블록 구분자 제거
+- 텍스트나 정규식 출력 트리거로 입력 전송, 빠른 명령 실행, 프로그램 시작, 결과를 클릭 가능한 작업으로 전환
+- 오류, Git 상태, 권한, 주소, 날짜 등 색 없는 출력에 의미별 색상 적용; 키워드 및 정규식 강조
+- 클릭 가능한 URL/파일 경로, 밀리초 단위 줄별 타임스탬프, 탭의 읽지 않은 출력 표시
+- Sixel/Kitty 그래픽 및 Kitty 애니메이션
+- 창 배치와 드래그 가능한 구분선을 갖춘 네이티브 `tmux -CC` 제어 모드
+- 여러 터미널에 입력을 보내는 동기화 그룹과 속도, 간격, 반복을 지정하는 텍스트/16진 명령 전송기
+- 빠른 명령의 그룹, 고정, 텍스트/선택/비밀 매개변수 및 호스트별 표시 규칙
+- 파일명 템플릿, 크기/보관 기간 제한, 선택적 ANSI가 있는 세션 로그; `.cast` 녹화 및 내장 재생기
+- 로컬 및 지원되는 SSH 세션에서 Vim, Neovim, Emacs 선택 영역 복사, 잘라내기, 붙여넣기
+- 연결별 Backspace/Delete 시퀀스와 텍스트 인코딩
 
-OxideTerm은 다음 세 가지 플러그인 방식을 지원합니다.
+### 연결
 
-| 유형 | 실행 방식 | 실행 범위와 제약 |
+- 비밀번호, 개인 키, OpenSSH 인증서, 관리 키, SSH 에이전트, 키보드 대화형 인증, Kerberos 로그인
+- SSH 에이전트 감지 또는 사용자 지정 엔드포인트(macOS/Linux의 `SSH_AUTH_SOCK`, Windows의 `\\.\pipe\openssh-ssh-agent`) 및 에이전트 포워딩
+- Ed25519/RSA/ECDSA 키, ChaCha20-Poly1305/AES-GCM, 알고리즘 순서 조정 및 구형 서버 호환 옵션
+- 서버나 각 점프 호스트에서 일치하는 인증 요청에 TOTP 생성 및 자동 입력
+- PIN 및 터치 요청을 사용하는 FIDO 보안 키(`ed25519-sk`, `ecdsa-sk`) *(플러그인)*
+- 홉별 독립 인증을 사용하는 점프 호스트 체인, HTTP CONNECT/SOCKS5 프록시, ProxyCommand
+- 유예 기간 재연결로 새 연결에서 포워딩 복원, 전송 재개, 편집기 파일 다시 열기
+- 서버별 공유 연결 또는 새 터미널마다 개별 인증
+- 신뢰/비신뢰 X11 포워딩
+- 저장 없는 임시 연결 및 앱을 여는 `ssh://`, `telnet://`, `mosh://`, `rdp://`, `vnc://` 링크
+- 적응형 로컬 에코 예측을 사용하는 Mosh *(플러그인)*
+- 옵션 협상, 프록시 라우팅, 줄 끝 설정을 지원하는 Telnet
+- 시리얼 전송 속도, 데이터 비트, 패리티, 정지 비트, 흐름 제어, 16진 입출력, Break/DTR/RTS
+- Nordic UART Service 또는 사용자 지정 GATT 특성 기반 Bluetooth LE 터미널
+
+### 파일 및 전송
+
+- 즐겨찾기, 경로 완성, 목록/트리 보기가 있는 로컬/원격 2분할 파일 관리자
+- 연결별로 짝지어 저장하는 로컬/원격 경로 북마크
+- 병렬 전송, 속도 제한, 남은 시간, 일시 중지, 재개 및 재시도; 중단된 SFTP 전송은 재시작 후 일시 중지 상태로 복원
+- 충돌 시 덮어쓰기, 건너뛰기, 이름 변경을 파일 하나 또는 전체에 적용
+- SFTP 하위 시스템이 없는 호스트에서 SCP로 자동 전환
+- 독립 SFTP 연결 및 앱을 통한 서버 간 중계 전송
+- FTP 및 명시적 FTPS
+- SSH 터미널에 파일을 끌어 놓아 현재 디렉터리에 업로드
+- 원격 셸의 `trz`/`tsz`(trzsz), `rz`/`sz`(ZMODEM)와 시리얼의 XMODEM/YMODEM/ZMODEM
+- 텍스트, 코드, Markdown, 이미지, 오디오, 비디오, 16진 데이터, 글꼴 미리보기
+- PDF, SQLite, 인증서 및 바이너리 뷰어 *(플러그인)*
+- 터미널에서 같은 SFTP 디렉터리로 이동하거나 SFTP 경로를 터미널로 보내기
+
+### 편집기 및 IDE
+
+- SFTP, 일반 셸 명령 또는 심볼 인덱스, 완성, 파일 감시를 추가하는 원격 에이전트 기반 IDE
+- 유휴 터미널을 같은 사용자, 컨테이너, 디렉터리의 IDE로 변환
+- 탭, 다중 선택 프로젝트 트리, 프로젝트 검색, 정규식/캡처 그룹 찾기 및 바꾸기
+- 최대 100 MiB 파일, 인코딩/BOM/줄 끝 보존
+- 충돌 처리와 탭 전환 시 선택적 자동 저장을 제공하는 안전한 저장
+- 재시작 후 열린 파일과 저장하지 않은 변경 복원
+- Git 브랜치, worktree, 스테이징, 기록, 앞선/뒤처진 커밋 수, 병합/리베이스 상태 보기
+- 프로젝트 작업 감지 및 실행
+- 내장 15개 언어와 추가 20개 이상 언어 플러그인의 구문 강조 *(플러그인)*
+- 표, 수식, 각주가 있는 Markdown 미리보기
+
+### 포트 포워딩 및 네트워크
+
+- 로컬/원격/동적 SOCKS5 포워딩과 연결 시 시작할 수 있는 저장 규칙
+- 수신 중인 서버 포트 감지 및 원클릭 포워딩
+- 터미널 없는 독립 SSH 터널, 선택적으로 앱 시작 시 실행
+- 재연결 후 포워딩 복원; 수동 중지 규칙은 중지 유지
+- 앱 전체 프록시와 기업 CA를 포함한 시스템 신뢰 인증서를 사용하는 네트워크 요청
+- 연결 토폴로지 및 임시 소켓 디버깅
+
+### 원격 데스크톱
+
+- 키보드, 마우스, 클립보드, 배율, 재연결을 지원하는 RDP/VNC *(플러그인)*
+- 다중 모니터와 네트워크 품질 프로필을 갖춘 RDP *(플러그인)*
+- VeNCrypt TLS 기반 VNC *(플러그인)*
+- SSH 점프 호스트를 통한 RDP/VNC *(플러그인)*
+- 내장 뷰어에서 WSLg 앱 실행(Windows)
+
+### 호스트 도구
+
+- 로컬 컴퓨터 및 모든 SSH 서버 지원
+- CPU, 메모리, 스왑, 디스크, 네트워크, 부하, 지연 시간과 추세 그래프
+- 프로세스(신호, 중지/계속, nice), 서비스(systemd, launchd, BSD, Windows), 예약 작업, 패키지; Windows winget 업그레이드 및 제거
+- 프리셋/추적 모드 로그, 외부 노출 표시가 있는 수신 포트, 공간 부족 경고가 있는 파일 시스템
+- Docker 컨테이너의 상태, 포트, 시작, 중지, 재시작, 로그
+- NVIDIA, AMD ROCm, Hygon DCU, Huawei Ascend, Intel XPU, Moore Threads MUSA, Cambricon GPU/NPU 모니터링
+- tmux, Zellij, Herdr 세션 연결, 생성, 분할, 이름 변경
+- 연결 풀/연결 매트릭스 대시보드 및 터미널 모음의 SSH 지연 시간
+
+### OxideSens AI
+
+- OpenAI(Responses API 포함), Anthropic, Gemini, DeepSeek, xAI Grok, Xiaomi MiMo, Ollama 및 OpenAI 호환 엔드포인트, 추론 강도 조절
+- 선택한 터미널, 파일, 설정의 문맥과 명령 실행, 대화형 프로그램 조작, 파일 편집 및 전송 도구
+- 읽기 전용/기본/승인 불필요 모드, 도구 분류별 권한, 명령 정책 및 파괴적이거나 인증 정보와 관련된 명령 추가 검토
+- 이미지 첨부, 대화 분기, 메시지 편집, 후속 질문 대기열
+- 병렬 하위 에이전트, 백그라운드 작업, 중단 후 작업 재개
+- ACP를 통한 Codex/Claude Code 및 OpenCode, Antigravity, Cursor, Grok Build, GitHub Copilot CLI, Qwen Code, Kimi CLI 실행기 *(플러그인)*
+- stdio, Streamable HTTP 또는 기존 SSE로 MCP 서버 연결
+- 외부 MCP 제어: 편집기와 다른 AI 도구가 저장 연결을 사용하며, 도구 그룹별 권한 부여 및 철회 가능
+- [Agent Skills](../../docs/agent-skills.md)(`SKILL.md`)와 `/skill-name` 자동 완성
+- BM25/HNSW 벡터 검색, CJK 토큰화, Mermaid 미리보기를 갖춘 Markdown 노트 지식 기반
+
+### 보안
+
+- 연결을 유지하면서 Touch ID(macOS) 또는 Windows Hello(Windows)로 앱 잠금
+- sudo/su 요청에 저장 비밀번호 제안, 로컬/연결/호스트 패턴으로 범위 제한, 2단계 요청용 TOTP 옵션
+- 필터, 보관 기간, JSON/CSV 내보내기가 있는 작업 감사
+- 암호화된 세션 녹화, 탐색 및 속도 조절 재생
+- 플러그인 활성화 전 권한 검토
+
+### 동기화 및 백업
+
+- WebDAV, S3 호환 저장소(Alibaba Cloud OSS 포함), Git 저장소, GitHub Gist, Dropbox, OneDrive, Google Drive, HTTP JSON
+- 동기화 대상 선택, 여러 기기 변경 병합, 충돌별 해결
+- 롤백 백업 및 중단된 동기화 복구
+- 연결, 포워딩, 설정, 빠른 명령, 키를 암호화 `.oxide`로 이동; 가져올 때 건너뛰기, 이름 변경, 대체, 병합
+- 전용 암호화 키 저장소를 포함한 폴더에서 포터블 실행
+- 안정/베타 채널을 통한 앱 내 업데이트
+
+### 개인 설정
+
+- 밝음/어두움/시스템 외관, 앱/터미널별 테마 및 테마 편집기
+- 이미지/애니메이션/비디오 배경, 안개/입자/유성/수면 빛무늬 생성 효과와 추가 미디어 팩 *(플러그인)*
+- 창 불투명도와 모서리 스타일
+- 독립 CJK 글꼴, 합자, 굵기를 지원하는 글꼴 스택과 편집기별 글자 설정
+- UI 배율, 커서, 여백, 동작 설정
+- 사용자 지정 단축키와 검색 및 재배열 가능한 설정
+- 11개 UI 언어, IME 입력, 양방향 텍스트
+
+### 플러그인
+
+| 종류 | 실행 방식 | 접근 범위 |
 |---|---|---|
-| **매니페스트 전용** | 코드를 사용하지 않는 선언형 확장 | 실행 가능한 코드 없음 |
-| **WASM** | Wasmtime/WASI 또는 사이드카 | 호스트 호출을 제어하고 허용된 기능 범위로 제한 |
-| **프로세스** | 일반 로컬 프로세스 | 신뢰하는 로컬 코드로 실행되며 OS 샌드박스로 **격리되지 않음** |
+| **매니페스트** | 선언적 확장 | 없음; 코드 실행 없음 |
+| **WASM** | Wasmtime/WASI 또는 보조 프로세스 | 허가된 호스트 기능만 |
+| **프로세스** | 일반 로컬 프로세스 | 로컬 프로그램과 동일; OS 샌드박스 없음 |
 
-이전 Tauri(1.x)용 ESM 플러그인이 목록에 표시될 수는 있지만 네이티브 2.x 앱에서는 실행되지 않습니다. 프로세스 플러그인은 신뢰하는 출처에서만 설치하세요.
+프로세스 플러그인은 신뢰할 수 있는 출처에서만 설치하세요. 1.x 플러그인은 목록에 남아 있어도 2.x에서 실행하지 않습니다.
 
----
+### 명령줄 도구
 
-## 보안과 개인정보 보호
-
-| 항목 | 동작 방식 |
-|---|---|
-| **인증 정보 저장** | OS 키체인(macOS Keychain, Windows Credential Manager, libsecret) |
-| **메모리의 비밀 정보** | 비밀 정보를 담은 타입과 임시 버퍼는 지원되는 소유권 경계에서 `zeroize`로 지움 |
-| **호스트 키** | `~/.ssh/known_hosts`를 사용하는 최초 사용 시 신뢰 방식. 예기치 않은 변경은 거부 |
-| **이동용 내보내기** | `.oxide` 번들은 ChaCha20-Poly1305와 Argon2id(메모리 256 MB, 반복 4회)를 사용 |
-| **AI 컨텍스트** | 공급자에게 보내기 전에 인증 정보 패턴을 마스킹. 컨텍스트와 작업은 사용자가 승인 |
-| **세션 녹화** | 기본적으로 꺼져 있음. 기기에 암호화하여 저장하고 클라우드 동기화에서 제외. 키보드 입력은 기록하지 않음 |
-| **감사** | 기본적으로 꺼져 있음. 데이터는 기기에 저장하며 민감한 정보는 암호화 |
-| **CLI 변경** | 상태를 변경하는 명령에 실행 전 계획 확인, `--yes` 확인 절차, 복원용 백업 제공 |
-| **플러그인** | [플러그인](#plugins) 참고 |
-| **텔레메트리** | 없음 |
-
-**적법한 사용.** OxideTerm은 추가 제한 없이 GPL-3.0-only 라이선스로 제공됩니다. 자신이 소유하거나 명시적으로 접근 권한을 받은 시스템, 네트워크, 기기에만 접근하고 관련 법률을 준수하세요. 무단 접근, 서비스 방해, 접근 제어 우회에 OxideTerm을 사용하지 마세요.
-
----
-
-## 현재의 제한 사항
-
-설치하기 전에 다음 사항을 확인하세요.
-
-- 데스크톱 전용입니다(macOS, Windows, Linux). 모바일 앱은 없습니다.
-- 개발이 빠르게 진행되며 릴리스가 자주 이루어집니다. [변경 이력](../../.github/release-notes/stable-changelog.md)과 [미해결 이슈](https://github.com/AnalyseDeCircuit/oxideterm/issues)를 참고하세요.
-- 감사와 세션 녹화는 사용자가 선택하여 켜는 기능이며 OxideTerm이 직접 관찰할 수 있는 내용만 기록합니다.
-- 프로세스 플러그인은 OS 샌드박스로 격리되지 않습니다.
-- 기기에서 렌더링이 제대로 동작하지 않으면 호환성 프로필을 사용해 보세요: `OXIDETERM_RENDER_PROFILE=compatibility`.
-
----
-
-<a id="for-developers"></a>
-
-## 개발자 안내
-
-<details>
-<summary><b>소스에서 실행</b></summary>
-
-**필요 환경:** Rust 도구 체인(edition 2024)과 GPUI를 실행할 수 있는 데스크톱 환경.
+**설정 → 일반 → CLI Companion**에서 `oxideterm`을 설치합니다. 앱 설정을 공유하므로 창 없이 확인, 스크립트, 백업을 수행하거나 셸에서 새 탭을 열 수 있습니다. 변경 명령은 `--dry-run`으로 계획을 보여 주고 `--yes`로만 적용하며 롤백 백업을 남깁니다.
 
 ```bash
-# Run the app
-cargo run
-
-# If the renderer fails on your machine
-OXIDETERM_RENDER_PROFILE=compatibility cargo run
-
-# Build the headless CLI companion
-./scripts/build/build-cli.sh
-
-# Build the optional Linux remote agent
-./scripts/build/build-agent.sh
+oxideterm terminal --cwd ~/project
+oxideterm doctor --strict
+oxideterm connections search prod
+oxideterm forwards list --format json
+oxideterm oxide export ./profile.oxide --connection prod --password-stdin
 ```
 
-Nix 사용 시: `nix build .#oxideterm`, `nix run .#oxideterm` 또는 `nix develop`.
-
-CLI 빌드 결과물은 `crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm`에 생성됩니다.
-
-</details>
-
-<details>
-<summary><b>명령줄 인터페이스</b></summary>
-
-화면 없이 동작하는 `oxideterm` CLI는 앱을 실행하지 않고 사용할 수 있어 자동화, CI, 진단에 유용합니다. 설정, 연결, 포트 포워딩, 플러그인, 빠른 명령, 비밀 정보, 이동용 번들, 진단, 보고서, 일괄 실행 계획, 백업, 클라우드 동기화를 지원합니다.
-
-```bash
-cargo run -p oxideterm-cli -- doctor --strict
-cargo run -p oxideterm-cli -- settings validate --strict --json
-cargo run -p oxideterm-cli -- connections search prod
-cargo run -p oxideterm-cli -- forwards list --format json
-cargo run -p oxideterm-cli -- cloud-sync push --dry-run --json
-cargo run -p oxideterm-cli -- oxide export ./profile.oxide --connection prod --password-stdin
-cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
-cargo run -p oxideterm-cli -- completion install zsh --force
-
-# Path and profile isolation for CI or fixtures
-cargo run -p oxideterm-cli -- --config-dir ./fixture-config doctor --strict
-```
-
-</details>
-
-<details>
-<summary><b>아키텍처</b></summary>
-
-UI와 터미널·SSH 백엔드는 하나의 Rust 프로세스를 공유하며 선택적인 원격 에이전트와 플랫폼 도우미는 그 밖에서 동작합니다. 터미널 바이트는 `TerminalState`를 직접 변경하고 GPUI는 이 상태를 렌더링합니다. JSON, WebSocket, Base64, xterm.js 파싱 단계를 거치지 않습니다.
-
-```
-┌─────────────────────────────────────────────────┐
-│               GPUI Render Loop                  │
-│   WorkspaceApp  ·  Tab surfaces  ·  GPUI views  │
-└──────────────────────┬──────────────────────────┘
-                       │  in-process Arc<> / async
-┌──────────────────────▼──────────────────────────┐
-│             Domain Crates (Rust async)          │
-│  NodeRouter → SshConnectionRegistry             │
-│  TerminalState ← SSH PTY channel (russh)        │
-│  SftpSession · ForwardingRuntime · IdeWorkspace │
-│  Ai/ACP Entities · CloudSync · Plugin Runtimes  │
-└─────────────────────────────────────────────────┘
-```
-
-| 항목 | 브라우저를 포함하는 방식 | OxideTerm |
-|---|---|---|
-| 렌더링 | 브라우저 엔진과 웹 레이아웃 | GPU 화면에서 GPUI 렌더링 |
-| 터미널 데이터 흐름 | WebSocket → JS 이벤트 루프 → xterm.js | Rust 입력 → `TerminalState` → GPUI 렌더링 |
-| 연결 수명 주기 | 프런트엔드와 백엔드에 분산 | 프로세스 내부의 단일 연결 및 재연결 흐름 |
-| AI 컨텍스트 | 앱의 연결 계층을 거쳐 복사 | 사용자 승인에 따라 활성 작업 공간에서 구성 |
-| CLI | 데스크톱 앱 실행 필요 | 독립 실행 파일로 크레이트를 직접 연결 |
-
-**연결 풀.** `SshConnectionRegistry`는 `DashMap`을 기반으로 하며 `NodeRouter`를 통해 사용합니다. 터미널 창, SFTP, 포트 포워딩, 편집기는 노드마다 하나의 물리 SSH 연결을 공유할 수 있고, 터미널 정책에서 전용 연결을 선택할 수도 있습니다. 각 연결은 `connecting → active → idle → link_down → reconnecting` 상태를 거칩니다. 점프 호스트에 장애가 발생하면 하위 노드는 `link_down` 상태가 됩니다. AI와 플러그인은 연결 소비자로 등록하는 대신 허용된 기능의 핸들과 호스트 스냅샷을 사용합니다.
-
-**Grace Period 재연결.**
-
-1. 연결 유지 확인의 시간 초과를 감지합니다.
-2. 터미널 창, SFTP 전송, 포트 포워딩, 편집 파일의 스냅샷을 저장합니다.
-3. 기존 연결을 30초 동안 확인하여 짧은 네트워크 중단에도 TUI 앱을 유지합니다.
-4. 새 연결을 열고 포트 포워딩을 복원하며 전송을 재개하고 편집 파일을 다시 엽니다.
-
-SFTP 세션에는 연결 세대 정보가 포함됩니다. 재연결 후에는 조건을 충족하는 세션을 다시 확보하지만 이전 세대의 작업을 새 연결로 조용히 옮기지는 않습니다.
-
-**포트 포워딩.** 전용 크레이트가 로컬, 원격, 동적 SOCKS5 포워딩을 제공합니다. 각 규칙은 자체 리스너와 연결 작업을 가지며 공유 SSH 연결 레지스트리를 통해 관리됩니다.
-
-**순수 Rust SSH.** `russh`와 `ring`으로 전체 SSH2, ChaCha20-Poly1305와 AES-GCM, Ed25519/RSA/ECDSA 키, Unix(`SSH_AUTH_SOCK`)와 Windows(`\\.\pipe\openssh-ssh-agent`)의 SSH 에이전트, 홉마다 독립적으로 인증하는 다중 홉 연결을 지원합니다.
-
-**기술 구성**
-
-| 계층 | 기술 |
-|---|---|
-| UI | GPUI(Zed의 GPU 기반 UI 프레임워크) |
-| 런타임 | Tokio, DashMap |
-| SSH | `russh`와 `ring`(OpenSSL과 libssh2 미사용) |
-| 로컬 PTY | `portable-pty`(Windows에서는 ConPTY) |
-| 터미널 에뮬레이션 | `alacritty_terminal`(VT100–VT500, Sixel, Kitty 그래픽) |
-| 편집기 | tree-sitter 구문 강조, 자체 버퍼 |
-| 암호화 | ChaCha20-Poly1305, Argon2id |
-| 플러그인 | Wasmtime/WASI, 사이드카 WASM, 프로세스 방식 |
-| AI 스트리밍 | SSE(OpenAI, Anthropic, Gemini), 프로세스 내부 처리 |
-| RAG | 순위 융합을 적용한 BM25 + HNSW 벡터 인덱스, CJK 바이그램 토크나이저 |
-| 다국어 지원 | `oxideterm-i18n`(11개 언어) |
-
-</details>
+Bash, Zsh, Fish, PowerShell, Elvish 완성을 지원합니다. 전체 명령은 [CLI 안내서(영어)](../../docs/user-guide/en/cli.md)를 참조하세요.
 
 ---
 
@@ -280,7 +274,7 @@ SFTP 세션에는 연결 세대 정보가 포함됩니다. 재연결 후에는 �
 
 ## 설치
 
-[**최신 릴리스 다운로드**](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[최신 릴리스](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)에서 OxideTerm을 다운로드하세요.
 
 | OS | x64 | ARM64 |
 |---|---|---|
@@ -288,7 +282,7 @@ SFTP 세션에는 연결 세대 정보가 포함됩니다. 재연결 후에는 �
 | **Windows** | 설치 프로그램(`.exe`) | 설치 프로그램(`.exe`) |
 | **Linux** | AppImage · `.deb` · `.rpm` | AppImage · `.deb` · `.rpm` |
 
-릴리스 페이지의 `sha256sums.txt` 파일로 다운로드한 파일을 검증하세요. 이동용 압축 파일과 서명도 같은 페이지에 있습니다.
+릴리스 페이지에는 포터블 압축 파일, 서명, 검증용 `sha256sums.txt`도 있습니다.
 
 ### macOS
 
@@ -318,21 +312,88 @@ sudo dnf install ./OxideTerm_*_linux_*.rpm
 nix run github:AnalyseDeCircuit/oxideterm
 ```
 
-직접 빌드하려면 [개발자 안내](#for-developers)의 **소스에서 실행**을 참고하세요.
+### 창이 그려지지 않는 경우
+
+환경에 `OXIDETERM_RENDER_PROFILE=compatibility`를 설정하고 OxideTerm을 다시 시작하세요.
+
+### 시작하기
+
+1. **세션 관리자**에서 서버를 추가하거나 `~/.ssh/config`에서 가져옵니다.
+2. 연결하여 터미널을 엽니다.
+3. 같은 서버에서 SFTP, 포트 포워딩 또는 IDE를 엽니다.
+4. OxideSens는 **설정**에서 AI 제공업체를 추가하면 사용할 수 있습니다.
+
+기타 기능은 [문서](https://oxideterm.app)를 참조하세요. 직접 빌드하려면 [소스에서 빌드](#build-from-source)를 확인하세요.
+
+---
+
+## 개인정보 보호 및 보안
+
+- 비밀번호와 키는 시스템 키 저장소(macOS Keychain, Windows 자격 증명 관리자, Linux libsecret)에 저장합니다. AI 키는 앱 로그에서 제외합니다.
+- 메모리의 비밀 정보는 해제 시 zeroize로 지웁니다.
+- 호스트 키는 최초 신뢰 후 `~/.ssh/known_hosts`와 비교하며, 변경되면 거부합니다.
+- AI 제공업체에 보내는 텍스트는 먼저 인증 정보를 가립니다.
+- 세션 녹화는 기본으로 꺼져 있습니다. 기기에 암호화 저장하고 동기화에서 제외하며 키 입력을 수집하지 않습니다.
+- 알림 및 감사도 기본으로 꺼져 있습니다. 켜면 데이터는 기기에 남고 민감한 세부 사항은 암호화되며 OxideTerm 내부 작업만 다룹니다.
+- `.oxide`는 ChaCha20-Poly1305 및 Argon2id 파생 키(메모리 256 MB, 4회)로 암호화합니다.
+
+---
+
+<a id="build-from-source"></a>
+
+## 소스에서 빌드
+
+Rust(rustup이 `rust-toolchain.toml`에 고정된 도구 체인을 설치)와 GPUI를 실행할 수 있는 데스크톱 환경이 필요합니다.
+
+```bash
+# Run the app
+cargo run
+
+# Build the oxideterm CLI
+./scripts/build/build-cli.sh
+
+# Build the optional Linux remote agent
+./scripts/build/build-agent.sh
+```
+
+Nix: `nix build .#oxideterm`, `nix run .#oxideterm` 또는 `nix develop`. CLI 결과물은 `crates/oxideterm-gpui-app/resources/cli-bin/<target-triple>/oxideterm`에 놓입니다.
+
+### 전체 구조
+
+UI, 터미널, SSH는 하나의 Rust 프로세스에서 실행합니다. 선택적인 원격 에이전트와 플랫폼 보조 도구는 별도 프로세스입니다. SSH/로컬 PTY 출력은 `TerminalState`로 직접 들어가 GPUI가 WebView, JSON 브리지, xterm.js 없이 그립니다.
+
+`NodeRouter`는 DashMap 기반 풀 `SshConnectionRegistry`에서 연결을 제공합니다. 자체 연결로 설정된 터미널을 제외하고 터미널, SFTP, 포워딩, 편집기는 서버별 연결 하나를 공유합니다. 상태는 `connecting → active → idle → link_down → reconnecting`입니다. 점프 호스트가 실패하면 하위 서버는 `link_down`이 됩니다. 포워딩 규칙마다 리스너가 있으며, 재연결 후 SFTP 세션은 새로 취득하고 이전 연결의 작업을 몰래 옮기지 않습니다.
+
+```text
+crates/
+├── oxideterm-gpui-app/        # Desktop app: windows, workspace, settings
+├── oxideterm-gpui-terminal/   # Terminal panes: input, selection, overlays
+├── oxideterm-terminal/        # Terminal model and escape-sequence parsing
+├── oxideterm-ssh/             # SSH connections, NodeRouter, jump hosts
+├── oxideterm-sftp/            # SFTP sessions and transfers
+├── oxideterm-forwarding/      # Port forwarding runtime
+├── oxideterm-gpui-ide/        # Remote IDE
+├── oxideterm-ai/              # OxideSens: providers, MCP, RAG
+├── oxideterm-cli/             # The oxideterm command
+├── oxideterm-i18n/            # Locale catalogs for the 11 interface languages
+└── gpui-ce/                   # Patched copy of GPUI
+```
+
+관련 자료(영어): [개발 안내서](../../docs/development/README.md), [crate 지도](../../docs/development/crate-map.md), [아키텍처](../../docs/user-guide/en/architecture.md).
 
 ---
 
 ## 기여하기
 
-Rust 코드, 문서, 번역, 플러그인, 테스트, 문제 재현 등 다양한 기여를 환영합니다. 큰 변경은 먼저 이슈를 열어 논의해 주세요.
+코드, 문서, 번역, 플러그인, 테스트, 버그 재현을 환영합니다. 큰 변경은 먼저 issue로 논의하세요. [CONTRIBUTING.md](../../docs/CONTRIBUTING.md)에 PR 준비 방법이 있습니다.
 
-버그를 보고할 때 민감한 정보를 마스킹한 진단 번들을 첨부하면 도움이 됩니다.
+민감 정보를 가린 진단 패키지를 첨부하면 버그 수정에 도움이 됩니다:
 
 ```bash
-cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip
+oxideterm report --bundle ./oxideterm-report.zip
 ```
 
-재현 가능한 버그와 회귀 문제를 우선적으로 처리합니다. 기능 요청은 범위, 안전성, OxideTerm의 원격 서버 작업 공간이라는 방향과의 적합성을 검토합니다. OxideTerm이 작업에 도움이 된다면 GitHub 스타, 재현 가능한 버그 보고, 번역 수정, 플러그인 제공으로 개발을 지원할 수 있습니다.
+소스에서 실행할 때는 `cargo run -p oxideterm-cli -- report --bundle ./oxideterm-report.zip`을 사용하세요.
 
 ### 기여자
 
@@ -346,11 +407,25 @@ OxideTerm을 더 나은 앱으로 만드는 데 함께해 주시는 모든 분�
 
 ---
 
+## 감사의 말
+
+OxideTerm은 다음 오픈 소스 프로젝트를 기반으로 합니다:
+
+- [russh](https://github.com/warp-tech/russh)와 [ring](https://github.com/briansmith/ring): SSH 및 암호화
+- [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui): Zed의 GPU UI 프레임워크
+- [alacritty_terminal](https://github.com/alacritty/alacritty): 터미널 에뮬레이션(VT100–VT500)
+- [portable-pty](https://github.com/wez/wezterm/tree/main/pty): 로컬 셸, Windows에서는 ConPTY
+- [Tokio](https://tokio.rs): 비동기 런타임
+- [Wasmtime](https://wasmtime.dev/): WASM 플러그인 실행
+- [tree-sitter](https://tree-sitter.github.io/): 편집기 구문 강조
+
+---
+
 ## 라이선스
 
-**GPL-3.0-only.** 의존 라이브러리의 저작권 표기는 [`THIRD_PARTY_NOTICES.md`](../../THIRD_PARTY_NOTICES.md)에, 추가 고지는 [`NOTICE`](../../NOTICE)에 있습니다.
+OxideTerm은 추가 제한 없이 [GPL-3.0-only](../../LICENSE)로 배포됩니다. 의존성 고지는 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md)와 [NOTICE](../../NOTICE)를 참조하세요.
 
-**사용 기술:** [russh](https://github.com/warp-tech/russh) · [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) · [alacritty_terminal](https://github.com/alacritty/alacritty) · [portable-pty](https://github.com/wez/wezterm/tree/main/pty) · [wasmtime](https://wasmtime.dev/) · [tree-sitter](https://tree-sitter.github.io/)
+소유하거나 접근을 허가받은 시스템에서만 사용하세요. 전체 법적 고지는 [LEGAL.md](../../LEGAL.md)에 있습니다.
 
 ## Star History
 
