@@ -152,6 +152,7 @@ core-video = { version = "0.5.2", features = ["metal"] }
 criterion = { version = "0.5", features = ["html_reports"] }
 ctor = "1.0.6"
 dashmap = "6.1"
+dbus = "0.9"
 derive_more = { version = "2.1.1", features = ["add", "add_assign", "deref", "deref_mut", "display", "from_str", "mul", "mul_assign", "not"] }
 dirs = "5"
 dunce = "1.0"

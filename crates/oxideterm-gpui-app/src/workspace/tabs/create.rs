@@ -744,6 +744,7 @@ impl WorkspaceApp {
         &mut self,
         config: BleSessionConfig,
         adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+        resolved_link: Option<oxideterm_terminal::BleResolvedLink>,
         terminal_options: ConnectionTerminalOptions,
         title: String,
         window: &mut Window,
@@ -771,6 +772,7 @@ impl WorkspaceApp {
             TerminalPane::new_ble_with_preferences(
                 config.clone(),
                 adapter_guard,
+                resolved_link,
                 preferences,
                 window,
                 cx,

@@ -84,6 +84,7 @@
               "connect_failed": "BLEデバイスへの接続に失敗しました：{error}",
               "service_discovery_failed": "サービス探索に失敗しました：{error}",
               "service_mismatch": "デバイスは一致しましたが、対象サービス {uuid} をアドバタイズしていません",
+              "direct_connect_failed": "{identity} への直接接続に失敗しました：{reason}。再試行するか、新規接続からデバイスをスキャンしてください。",
               "invalid_service_uuid": "サービスUUIDが無効です：{uuid}"
         }
       },
@@ -142,6 +143,7 @@
       },
       "stage": {
         "ble_opening_adapter": "Bluetooth アダプターを開いています",
+        "ble_direct_connect": "スキャンをスキップして直接接続",
         "ble_scanning": "Bluetooth デバイスをスキャン中",
         "ble_matching": "デバイスを照合中",
         "ble_verifying_service": "サービスを確認中",

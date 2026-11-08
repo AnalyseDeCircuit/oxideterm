@@ -30,6 +30,9 @@ pub(super) struct BleConnectionClues {
     pub adapter_mac: Option<String>,
     pub device_mac: Option<String>,
     pub device_name: Option<String>,
+    /// Platform-local identity for the cache-based direct connect; sync and
+    /// restarts carry it as host-local metadata.
+    pub platform_identifier: Option<String>,
     pub service_uuid: String,
 }
 
@@ -277,6 +280,7 @@ impl WorkspaceApp {
                         adapter_mac: clues.adapter_mac,
                         device_mac: clues.device_mac,
                         device_name: clues.device_name,
+                        platform_identifier: clues.platform_identifier,
                         service_uuid: clues.service_uuid,
                         title: format!("BLE {title}"),
                         terminal_options,
@@ -522,6 +526,7 @@ impl WorkspaceApp {
                             adapter_mac: profile.adapter_mac.clone(),
                             device_mac: profile.device_mac.clone(),
                             device_name: profile.device_name.clone(),
+                            platform_identifier: profile.platform_identifier.clone(),
                             service_uuid: profile.service_uuid.clone(),
                         },
                     ),
@@ -625,6 +630,80 @@ mod tests {
         let rebound = registry.record(&connection_id).expect("record must remain");
         assert_eq!(rebound.surface, Some(next_surface));
         assert_ne!(rebound.surface, Some(first_surface));
+    }
+
+    fn saved_ble_launch(profile_id: &str) -> StandaloneConnectionLaunch {
+        StandaloneConnectionLaunch::SavedBle {
+            profile_id: profile_id.to_string(),
+            clues: BleConnectionClues {
+                adapter_mac: None,
+                device_mac: Some("AA:BB:CC:DD:EE:FF".to_string()),
+                device_name: Some("test-nus".to_string()),
+                platform_identifier: None,
+                service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+            },
+            terminal_options: ConnectionTerminalOptions::default(),
+        }
+    }
+
+    #[test]
+    fn released_saved_ble_record_revives_latest_released_row() {
+        let mut registry = StandaloneConnectionRegistry::default();
+        let released_surface = StandaloneConnectionSurface::Terminal(TerminalSessionId(11));
+        let released_id = registry.insert(
+            StandaloneConnectionKind::Ble,
+            "BLE released".to_string(),
+            saved_ble_launch("profile-1"),
+            released_surface,
+        );
+        registry.release_surface(released_surface);
+        assert_eq!(
+            registry.released_saved_ble_record("profile-1").as_deref(),
+            Some(released_id.as_str())
+        );
+
+        // A newer open row for the same profile must not shadow the released
+        // row: a surface-bound row is a live session, not a revival target.
+        let open_surface = StandaloneConnectionSurface::Terminal(TerminalSessionId(12));
+        registry.insert(
+            StandaloneConnectionKind::Ble,
+            "BLE open".to_string(),
+            saved_ble_launch("profile-1"),
+            open_surface,
+        );
+        assert_eq!(
+            registry.released_saved_ble_record("profile-1").as_deref(),
+            Some(released_id.as_str())
+        );
+
+        // An in-flight reconnect is not a candidate until it settles.
+        let attempt_id = registry.begin_reconnect(&released_id).unwrap();
+        assert_eq!(registry.released_saved_ble_record("profile-1"), None);
+
+        // A failed attempt leaves an Error row the next open revives.
+        registry.mark_attempt_error(&attempt_id);
+        assert_eq!(
+            registry.released_saved_ble_record("profile-1").as_deref(),
+            Some(released_id.as_str())
+        );
+
+        // With two released rows for the profile the most recently inserted
+        // one wins, so reopening never stacks onto the stale first row.
+        let second_surface = StandaloneConnectionSurface::Terminal(TerminalSessionId(13));
+        let second_id = registry.insert(
+            StandaloneConnectionKind::Ble,
+            "BLE released second".to_string(),
+            saved_ble_launch("profile-1"),
+            second_surface,
+        );
+        registry.release_surface(second_surface);
+        assert_eq!(
+            registry.released_saved_ble_record("profile-1").as_deref(),
+            Some(second_id.as_str())
+        );
+
+        // Profiles without a released row never revive another profile's row.
+        assert_eq!(registry.released_saved_ble_record("profile-2"), None);
     }
 
     #[test]
@@ -866,6 +945,30 @@ impl StandaloneConnectionRegistry {
         record.surface = None;
         record.readiness = ActiveSessionReadiness::Connecting;
         Some(attempt_id)
+    }
+
+    /// Record id of a saved BLE profile whose terminal surface is gone
+    /// (Disconnected/Error) and whose resolver is not running. A session
+    /// manager open of that profile revives this row instead of stacking a
+    /// second row for the same device.
+    pub(super) fn released_saved_ble_record(&self, profile_id: &str) -> Option<String> {
+        self.records.iter().rev().find_map(|record| {
+            let matches_profile = matches!(
+                &record.launch,
+                StandaloneConnectionLaunch::SavedBle { profile_id: id, .. } if id == profile_id
+            );
+            if matches_profile
+                && record.surface.is_none()
+                && matches!(
+                    record.readiness,
+                    ActiveSessionReadiness::Disconnected | ActiveSessionReadiness::Error
+                )
+            {
+                Some(record.id.clone())
+            } else {
+                None
+            }
+        })
     }
 
     pub(super) fn remove_attempt(&mut self, attempt_id: &str) {

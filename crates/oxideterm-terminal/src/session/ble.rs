@@ -1,4 +1,13 @@
 const BLE_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
+/// Settle time before the worker's one bounded reconnect after a failed
+/// subscribe: gives the previous session's in-flight `Device1.Disconnect` a
+/// moment to land at bluetoothd before [`heal_dying_link`] forces any stale
+/// link down and reconnects.
+const BLE_SUBSCRIBE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
+/// Budget for a `disconnect()` call. bluetoothd completes the teardown well
+/// inside this window; a longer wait means the link is stuck and neither
+/// session cleanup nor the self-heal may block on it.
+const BLE_DISCONNECT_BUDGET: std::time::Duration = std::time::Duration::from_secs(2);
 /// Discovery window for saved-profile opens, which start from a cold adapter.
 const BLE_SAVED_PROFILE_SCAN_WINDOW: std::time::Duration = std::time::Duration::from_secs(5);
 /// A dropped link does not always end the notification stream (the stream can
@@ -104,6 +113,7 @@ impl BleSession {
     pub fn new(
         config: BleSessionConfig,
         adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+        resolved_link: Option<BleResolvedLink>,
         audit: Option<oxideterm_audit::AuditContext>,
         cols: usize,
         rows: usize,
@@ -154,6 +164,7 @@ impl BleSession {
             worker = Some(runtime.spawn(run_ble_worker(
                 worker_config,
                 adapter_guard,
+                resolved_link,
                 command_rx,
                 worker_tx,
                 close_token.clone(),
@@ -674,6 +685,9 @@ async fn write_with_mtu(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BleResolveStage {
     OpeningAdapter,
+    /// Connecting from platform caches without a discovery window; the scan
+    /// stages below only run when this fast path misses.
+    DirectConnect,
     Scanning,
     Matching,
     VerifyingService,
@@ -705,6 +719,14 @@ pub enum BleResolveError {
     /// The matched device does not advertise the profile's target service.
     ServiceMismatch {
         service_uuid: String,
+    },
+    /// The cache-based direct connect could not be completed: the cached
+    /// lookup, its recovery window, or the link retry after recovery failed
+    /// at the radio level. A device that never appears in the recovery
+    /// window is reported as `NoDeviceMatched` instead.
+    DirectConnectUnavailable {
+        identity: String,
+        reason: String,
     },
     /// The profile's service UUID does not parse, so the resolve never starts.
     InvalidServiceUuid {
@@ -738,6 +760,9 @@ impl std::fmt::Display for BleResolveError {
                 f,
                 "device matched but does not advertise the target service {service_uuid}"
             ),
+            Self::DirectConnectUnavailable { identity, reason } => {
+                write!(f, "direct connect to {identity} failed: {reason}")
+            }
             Self::InvalidServiceUuid { service_uuid } => {
                 write!(f, "invalid service UUID: {service_uuid}")
             }
@@ -745,32 +770,179 @@ impl std::fmt::Display for BleResolveError {
     }
 }
 
-/// Closes a link opened by this flow for service inspection or a terminal
-/// start that failed. A link that predated the call belongs to another
-/// consumer and must survive, otherwise a later session would tear it down.
-async fn disconnect_temporary_link(
-    peripheral: &btleplug::platform::Peripheral,
-    was_connected: bool,
-) {
+/// Closes a link this flow created or opened for service inspection or a
+/// terminal start that failed. A link that predated the flow belongs to
+/// another consumer and must survive, otherwise a later session would tear
+/// it down.
+async fn disconnect_temporary_link(peripheral: &btleplug::platform::Peripheral, owned: bool) {
     use btleplug::api::Peripheral as _;
-    if !was_connected {
-        let _ = tokio::time::timeout(Duration::from_secs(2), peripheral.disconnect()).await;
+    if owned {
+        let _ = tokio::time::timeout(BLE_DISCONNECT_BUDGET, peripheral.disconnect()).await;
+    }
+}
+
+/// One bounded self-heal after a GATT call fails on a link bluetoothd still
+/// reports connected. The previous session's `Device1.Disconnect` stays in
+/// flight for seconds ("Device is disconnecting"), during which every GATT
+/// call is rejected — adopting the reported link again would fail
+/// identically. Settle, force any stale link down (the D-Bus reply arrives
+/// only once the link is actually gone), then connect afresh. Returns true
+/// when a fresh link is up; a persistent failure (device offline, radio off)
+/// or a cancelled session returns false and the caller reports the original
+/// error.
+async fn heal_dying_link(
+    peripheral: &btleplug::platform::Peripheral,
+    close_token: &tokio_util::sync::CancellationToken,
+) -> bool {
+    use btleplug::api::Peripheral as _;
+    tokio::time::sleep(BLE_SUBSCRIBE_RETRY_DELAY).await;
+    let stale = tokio::select! {
+        biased;
+        _ = close_token.cancelled() => return false,
+        check = peripheral.is_connected() => check.unwrap_or(false),
+    };
+    if stale {
+        let _ = tokio::time::timeout(BLE_DISCONNECT_BUDGET, peripheral.disconnect()).await;
+    }
+    tokio::select! {
+        biased;
+        _ = close_token.cancelled() => false,
+        result = tokio::time::timeout(BLE_CONNECT_TIMEOUT, peripheral.connect()) => {
+            matches!(result, Ok(Ok(())))
+        }
+    }
+}
+
+/// A verified, still-open link produced by the resolver's service check. The
+/// session worker adopts it instead of reconnecting, so the terminal never
+/// crosses the disconnect-reconnect window where peripherals and stacks
+/// reject an immediate second connect. `owned` marks links this flow opened
+/// itself, which must be closed through [`Self::close`] when never adopted,
+/// and torn down when the session ends; a link that predated the resolve
+/// stays with its original owner.
+pub struct BleResolvedLink {
+    peripheral: btleplug::platform::Peripheral,
+    owned: bool,
+}
+
+impl BleResolvedLink {
+    /// Closes a handed-over link that was never adopted by a session.
+    pub async fn close(self) {
+        disconnect_temporary_link(&self.peripheral, self.owned).await;
+    }
+}
+
+/// Links to `device_id` and reports whether its GATT table contains
+/// `target_service`. The check always opens a link and reads the real GATT
+/// table: cached advertisement properties would otherwise let an offline
+/// device match, because BlueZ keeps the last-seen service list after
+/// disconnect. On a verified device the link is NOT closed: the caller hands
+/// it to the session worker as a [`BleResolvedLink`] instead of tearing it
+/// down and reconnecting across the window where an immediate second connect
+/// is rejected. A mismatch or a failed discovery closes the link here.
+async fn verify_target_service(
+    guard: &oxideterm_ble::BleAdapterGuard,
+    device_id: &oxideterm_ble::BlePeripheralId,
+    cancelled: &tokio_util::sync::CancellationToken,
+    target_service: uuid::Uuid,
+) -> Result<(bool, Option<BleResolvedLink>), BleResolveError> {
+    use btleplug::api::Peripheral as _;
+    let (peripheral, was_connected) = match oxideterm_ble::ble_connect_discovered_device(
+        guard.adapter(),
+        device_id,
+        BLE_CONNECT_TIMEOUT,
+        cancelled,
+    )
+    .await
+    {
+        Ok(pair) => pair,
+        Err(oxideterm_ble::BleError::Cancelled) => return Err(BleResolveError::Cancelled),
+        Err(error) => return Err(BleResolveError::Connect(error.to_string())),
+    };
+    // A link this flow opened is torn down on failure; one that predated the
+    // call belongs to another consumer and must survive.
+    let owned = !was_connected;
+    let discovered = tokio::select! {
+        biased;
+        _ = cancelled.cancelled() => Err(BleResolveError::Cancelled),
+        result = peripheral.discover_services() => result
+            .map_err(|error| BleResolveError::ServiceDiscovery(error.to_string())),
+    };
+    let has_target = match discovered {
+        Ok(()) => peripheral
+            .services()
+            .iter()
+            .any(|service| service.uuid == target_service),
+        Err(error) => {
+            disconnect_temporary_link(&peripheral, owned).await;
+            return Err(error);
+        }
+    };
+    if !has_target {
+        disconnect_temporary_link(&peripheral, owned).await;
+        return Ok((false, None));
+    }
+    Ok((true, Some(BleResolvedLink { peripheral, owned })))
+}
+
+/// Builds the session config for a connect that skipped the discovery flow.
+/// Properties may be missing on a platform that never saw the device
+/// advertise; the profile clues then fill the session label.
+async fn ble_direct_session_config(
+    peripheral: &btleplug::platform::Peripheral,
+    adapter_index: usize,
+    identity_label: &str,
+    device_name: Option<&str>,
+    target_service: uuid::Uuid,
+    runtime_options: SerialRuntimeOptions,
+    mtu: Option<u16>,
+    write_without_response: bool,
+) -> BleSessionConfig {
+    use btleplug::api::Peripheral as _;
+    let info = oxideterm_ble::ble_peripheral_info(peripheral).await;
+    let name = info
+        .as_ref()
+        .and_then(|device| device.name.clone())
+        .or_else(|| device_name.map(str::to_owned));
+    let address = info
+        .as_ref()
+        .map(|device| device.address.clone())
+        .unwrap_or_else(|| identity_label.to_owned());
+    BleSessionConfig {
+        adapter_index,
+        device_id: peripheral.id(),
+        service_uuid: target_service,
+        device_label: name.unwrap_or_else(|| address.clone()),
+        runtime_options,
+        mtu,
+        write_without_response,
     }
 }
 
 /// Resolves a persisted BLE profile (adapter preference + device identity +
-/// service UUID) into a runtime [`BleSessionConfig`] by scanning the radio and
-/// matching. Reuses a pre-existing [`oxideterm_ble::BleAdapterGuard`] when
-/// supplied so the scan results it produced stay addressable on all three
-/// platforms.
+/// service UUID) into a runtime [`BleSessionConfig`]. Reuses a pre-existing
+/// [`oxideterm_ble::BleAdapterGuard`] when supplied so the scan results it
+/// produced stay addressable on all three platforms.
 ///
-/// A live scan selection takes precedence. Saved profiles match a public MAC
-/// when available, otherwise a unique advertisement name. An unmatched MAC
-/// or ambiguous name must not silently connect to a different peripheral.
-/// The target service is checked against advertisements or the GATT table.
+/// A live scan selection takes precedence. Saved profiles with a
+/// platform-usable identity (public MAC, or the macOS CoreBluetooth
+/// identifier) take the direct path: the device is resolved from the
+/// platform's own state and connected without a discovery window. A cache
+/// miss or a failed link gets exactly one recovery window in which the
+/// platform re-learns the device: on Linux a directed discovery filtered to
+/// the exact target MAC (re)creates the bluetoothd device object, and on
+/// Windows/macOS a targeted scan (exact match, stops on first hit) makes the
+/// advertising device reappear in the adapter's list. A final miss (device
+/// offline) is reported instead of falling back to the full scan flow: the
+/// recovery window already scanned the same radio. Profiles without such an
+/// identity (typically cross-platform synced, matched by name) go through the
+/// scan window, whose service check always reads the real GATT table instead
+/// of cached advertisement data. An unmatched MAC or ambiguous name must not
+/// silently connect to a different peripheral.
 ///
-/// Returns the runtime config plus the guard so the caller (typically
-/// [`run_ble_worker`]) can stop the scan window once the terminal link is up.
+/// Returns the runtime config, the guard, and the verified link when the
+/// service check opened one; the caller hands all three to the session
+/// worker so it adopts the live link instead of reconnecting.
 pub async fn ble_resolve_profile_to_session(
     guard: Option<oxideterm_ble::BleAdapterGuard>,
     selected_device: Option<&oxideterm_ble::BlePeripheralId>,
@@ -778,12 +950,20 @@ pub async fn ble_resolve_profile_to_session(
     adapter_mac: Option<&str>,
     device_mac: Option<&str>,
     device_name: Option<&str>,
+    platform_identifier: Option<&str>,
     service_uuid: &str,
     runtime_options: SerialRuntimeOptions,
     mtu: Option<u16>,
     write_without_response: bool,
     mut on_stage: impl FnMut(BleResolveStage),
-) -> Result<(BleSessionConfig, oxideterm_ble::BleAdapterGuard), BleResolveError> {
+) -> Result<
+    (
+        BleSessionConfig,
+        oxideterm_ble::BleAdapterGuard,
+        Option<BleResolvedLink>,
+    ),
+    BleResolveError,
+> {
     use btleplug::api::Peripheral as _;
     use uuid::Uuid;
 
@@ -809,6 +989,230 @@ pub async fn ble_resolve_profile_to_session(
             None => open_adapter_for_profile(adapter_mac).await?,
         }) } => result?,
     };
+
+    // Fast path — connect from platform caches without a discovery window
+    // when the clues carry an identity this platform can address. Only a
+    // freshly opened adapter takes this path: a supplied guard means the
+    // caller selected the device from a live scan, whose cached peripheral
+    // stays addressable through the scan flow below. A cache miss or a
+    // failed link gets exactly one recovery window in which the platform
+    // re-learns the device — the D-Bus directed discovery on Linux, a
+    // targeted scan (exact match, stops on first hit) on Windows/macOS.
+    // A final miss is reported instead of falling back to the full scan
+    // flow: the recovery window already scanned the same radio, so the
+    // device is simply out of range or off.
+    if !guard_supplied {
+        if let Some(identity) =
+            oxideterm_ble::BleKnownIdentity::from_clues(device_mac, platform_identifier)
+        {
+            on_stage(BleResolveStage::DirectConnect);
+            #[cfg(target_os = "linux")]
+            let mut directed_discovery: Option<oxideterm_ble::BluezDirectedDiscovery> = None;
+            let peripheral =
+                match oxideterm_ble::ble_resolve_known_device(guard.adapter(), &identity).await {
+                    Some(peripheral) => peripheral,
+                    None => {
+                        // The OS does not currently know the device — the
+                        // usual state after the peripheral powered off and
+                        // back on (bluetoothd reaped its device object on
+                        // Linux, the WinRT/CoreBluetooth caches are cold on
+                        // the other platforms). Each platform gets one
+                        // recovery window that re-learns the device; the
+                        // branch comments explain the mechanism.
+                        #[cfg(target_os = "linux")]
+                        {
+                            let adapter_mac = guard.adapter_mac().ok_or_else(|| {
+                                BleResolveError::DirectConnectUnavailable {
+                                    identity: identity.clue_label().to_owned(),
+                                    reason: "the selected adapter does not report its address"
+                                        .to_owned(),
+                                }
+                            })?;
+                            let discovery = oxideterm_ble::ble_start_directed_discovery(
+                                adapter_mac,
+                                identity.clue_label(),
+                                BLE_CONNECT_TIMEOUT,
+                            )
+                            .await
+                            .map_err(|error| {
+                                BleResolveError::DirectConnectUnavailable {
+                                    identity: identity.clue_label().to_owned(),
+                                    reason: error.to_string(),
+                                }
+                            })?;
+                            // Keep the window open across the re-resolve and
+                            // the verify below: bluetoothd reaps unpaired
+                            // temporary devices around discovery stop, and
+                            // the object must survive until the link is up.
+                            // An early return drops the handle, which still
+                            // ends the session via the bus disconnect.
+                            directed_discovery = Some(discovery);
+                            // The device object exists again; re-resolve it
+                            // so the connect runs through the same btleplug
+                            // handle as every other path.
+                            oxideterm_ble::ble_resolve_known_device(guard.adapter(), &identity)
+                                .await
+                                .ok_or_else(|| BleResolveError::DirectConnectUnavailable {
+                                    identity: identity.clue_label().to_owned(),
+                                    reason:
+                                        "the device did not appear after the directed discovery"
+                                            .to_owned(),
+                                })?
+                        }
+                        #[cfg(not(target_os = "linux"))]
+                        {
+                            // The OS stack does not currently know the
+                            // device — cold after a reboot, an adapter
+                            // restart, or a power cycle. One targeted
+                            // discovery window makes the advertising device
+                            // reappear in the adapter's peripheral list;
+                            // the match stays exact, so other peers are
+                            // ignored.
+                            on_stage(BleResolveStage::Scanning);
+                            let found = tokio::select! {
+                                biased;
+                                _ = cancelled.cancelled() => {
+                                    return Err(BleResolveError::Cancelled);
+                                }
+                                result = guard.scan_for_known_device(
+                                    &identity,
+                                    device_name,
+                                    BLE_SAVED_PROFILE_SCAN_WINDOW,
+                                ) => result,
+                            }
+                            .map_err(|error| {
+                                BleResolveError::DirectConnectUnavailable {
+                                    identity: identity.clue_label().to_owned(),
+                                    reason: error.to_string(),
+                                }
+                            })?;
+                            found.ok_or_else(|| BleResolveError::NoDeviceMatched {
+                                identity: identity.clue_label().to_owned(),
+                            })?
+                        }
+                    }
+                };
+            on_stage(BleResolveStage::VerifyingService);
+            let verified =
+                verify_target_service(&guard, &peripheral.id(), cancelled, target_service).await;
+            // The link is established (or the attempt failed): close the
+            // directed discovery window now that the object no longer needs
+            // it — a connected device is not temporary.
+            #[cfg(target_os = "linux")]
+            if let Some(discovery) = directed_discovery.take() {
+                discovery.stop().await;
+            }
+            // A targeted recovery window that ran above (and survived) is no
+            // longer needed once the link attempt has settled; calling this
+            // when no scan is active is a no-op.
+            #[cfg(not(target_os = "linux"))]
+            guard.stop_scan().await;
+            match verified {
+                Ok((true, link)) => {
+                    let config = ble_direct_session_config(
+                        &peripheral,
+                        adapter_index,
+                        identity.clue_label(),
+                        device_name,
+                        target_service,
+                        runtime_options,
+                        mtu,
+                        write_without_response,
+                    )
+                    .await;
+                    on_stage(BleResolveStage::Ready);
+                    return Ok((config, guard, link));
+                }
+                // The device answered with a GATT table lacking the target
+                // service: a real profile mismatch, not a reachability issue.
+                Ok((false, _)) => {
+                    return Err(BleResolveError::ServiceMismatch {
+                        service_uuid: service_uuid.to_string(),
+                    });
+                }
+                Err(BleResolveError::Cancelled) => return Err(BleResolveError::Cancelled),
+                Err(error) => {
+                    #[cfg(target_os = "linux")]
+                    return Err(BleResolveError::DirectConnectUnavailable {
+                        identity: identity.clue_label().to_owned(),
+                        reason: error.to_string(),
+                    });
+                    #[cfg(not(target_os = "linux"))]
+                    {
+                        // The cached handle resolved but the link failed:
+                        // the platform's entry is stale (the device
+                        // power-cycled since the stack cached it). One
+                        // targeted discovery window re-learns the device,
+                        // then the link is retried through the fresh
+                        // handle.
+                        on_stage(BleResolveStage::Scanning);
+                        let recovered = tokio::select! {
+                            biased;
+                            _ = cancelled.cancelled() => {
+                                return Err(BleResolveError::Cancelled);
+                            }
+                            result = guard.scan_for_known_device(
+                                &identity,
+                                device_name,
+                                BLE_SAVED_PROFILE_SCAN_WINDOW,
+                            ) => result,
+                        }
+                        .map_err(|scan_error| {
+                            BleResolveError::DirectConnectUnavailable {
+                                identity: identity.clue_label().to_owned(),
+                                reason: format!("{error}; targeted scan failed: {scan_error}"),
+                            }
+                        })?;
+                        let Some(peripheral) = recovered else {
+                            return Err(BleResolveError::NoDeviceMatched {
+                                identity: identity.clue_label().to_owned(),
+                            });
+                        };
+                        on_stage(BleResolveStage::VerifyingService);
+                        match verify_target_service(
+                            &guard,
+                            &peripheral.id(),
+                            cancelled,
+                            target_service,
+                        )
+                        .await
+                        {
+                            Ok((true, link)) => {
+                                guard.stop_scan().await;
+                                let config = ble_direct_session_config(
+                                    &peripheral,
+                                    adapter_index,
+                                    identity.clue_label(),
+                                    device_name,
+                                    target_service,
+                                    runtime_options,
+                                    mtu,
+                                    write_without_response,
+                                )
+                                .await;
+                                on_stage(BleResolveStage::Ready);
+                                return Ok((config, guard, link));
+                            }
+                            Ok((false, _)) => {
+                                return Err(BleResolveError::ServiceMismatch {
+                                    service_uuid: service_uuid.to_string(),
+                                });
+                            }
+                            Err(BleResolveError::Cancelled) => {
+                                return Err(BleResolveError::Cancelled);
+                            }
+                            Err(retry_error) => {
+                                return Err(BleResolveError::DirectConnectUnavailable {
+                                    identity: identity.clue_label().to_owned(),
+                                    reason: retry_error.to_string(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Step 1 — collect discovered peripherals. A supplied guard already has
     // its discovery window open (the form's scan kept it alive so the selected
@@ -854,52 +1258,18 @@ pub async fn ble_resolve_profile_to_session(
         }
     };
 
-    // Step 3 — service UUID verification. Fast path uses the advertised
-    // service list (no round-trip); slow path connects and discovers the
-    // full GATT table when the advertisement hint is missing or incomplete.
+    // Step 3 — service UUID verification. The check always opens a link and
+    // reads the real GATT table: a cached device that is no longer reachable
+    // must fail here instead of matching through stale advertisement data.
     on_stage(BleResolveStage::VerifyingService);
-    let uuid_match = if device.advertised_services.contains(&target_service) {
-        true
-    } else {
-        let (peripheral, was_connected) = match oxideterm_ble::ble_connect_discovered_device(
-            guard.adapter(),
-            &device.id,
-            BLE_CONNECT_TIMEOUT,
-            cancelled,
-        )
-        .await
-        {
-            Ok(pair) => pair,
+    let (uuid_match, link) =
+        match verify_target_service(&guard, &device.id, cancelled, target_service).await {
+            Ok(result) => result,
             Err(error) => {
-                guard.stop_scan().await;
-                if matches!(error, oxideterm_ble::BleError::Cancelled) {
-                    return Err(BleResolveError::Cancelled);
-                }
-                return Err(BleResolveError::Connect(error.to_string()));
-            }
-        };
-        let discovered = tokio::select! {
-            biased;
-            _ = cancelled.cancelled() => Err(BleResolveError::Cancelled),
-            result = peripheral.discover_services() => result.map_err(|error| BleResolveError::ServiceDiscovery(error.to_string())),
-        };
-        let has_target = match discovered {
-            Ok(()) => peripheral
-                .services()
-                .iter()
-                .any(|service| service.uuid == target_service),
-            Err(error) => {
-                disconnect_temporary_link(&peripheral, was_connected).await;
                 guard.stop_scan().await;
                 return Err(error);
             }
         };
-        // The verification link is temporary; a link that predated this check
-        // belongs to another consumer and must survive, otherwise the worker
-        // that follows would have to reconnect a link it does not own.
-        disconnect_temporary_link(&peripheral, was_connected).await;
-        has_target
-    };
 
     if !uuid_match {
         let _ = guard.stop_scan().await;
@@ -921,7 +1291,7 @@ pub async fn ble_resolve_profile_to_session(
         write_without_response,
     };
     on_stage(BleResolveStage::Ready);
-    Ok((config, guard))
+    Ok((config, guard, link))
 }
 
 fn match_ble_device<'a>(
@@ -939,24 +1309,15 @@ fn match_ble_device<'a>(
         .map(ToString::to_string)
         .unwrap_or_else(|| mac.or(name).unwrap_or("no identity clue").to_owned());
     let mut matches = devices.iter().filter(|device| {
-        // BlueZ keeps device objects for previously connected peripherals even
-        // after they power off, and those cache entries still report the last
-        // known name, address, and advertised services. RSSI is only present
-        // while the device was actually seen advertising in this discovery
-        // window, so a missing RSSI marks a stale cache entry that must not
-        // match: otherwise the resolve passes matching and service
-        // verification without ever contacting the device and dies later with
-        // a connect timeout instead of failing here.
-        device.rssi.is_some()
-            && (if let Some(id) = selected {
-                &device.id == id
-            } else if let Some(mac) = mac {
-                device
-                    .persistent_address()
-                    .is_some_and(|address| address.eq_ignore_ascii_case(mac))
-            } else {
-                name.is_some_and(|name| device.name.as_deref() == Some(name))
-            })
+        if let Some(id) = selected {
+            &device.id == id
+        } else if let Some(mac) = mac {
+            device
+                .persistent_address()
+                .is_some_and(|address| address.eq_ignore_ascii_case(mac))
+        } else {
+            name.is_some_and(|name| device.name.as_deref() == Some(name))
+        }
     });
     let first = matches
         .next()
@@ -1005,6 +1366,7 @@ async fn open_adapter_for_profile(
 async fn run_ble_worker(
     config: BleSessionConfig,
     mut adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+    resolved_link: Option<BleResolvedLink>,
     mut command_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
     worker_tx: crate::backpressure::ByteBoundedSender<BleWorkerEvent>,
     close_token: tokio_util::sync::CancellationToken,
@@ -1044,28 +1406,35 @@ async fn run_ble_worker(
             }
         }
     };
-    // The scan's discovery window stays open through connect: on Linux it keeps
-    // the BlueZ object alive, and on macOS/Windows the cache was populated by
-    // the scan. Once the link is up the device is no longer temporary, so the
-    // guard can be dropped to release the radio.
-    let (peripheral, was_connected) = match oxideterm_ble::ble_connect_discovered_device(
-        &adapter,
-        &config.device_id,
-        BLE_CONNECT_TIMEOUT,
-        &close_token,
-    )
-    .await
-    {
-        Ok(pair) => pair,
-        Err(error) => {
-            // Connect failed before the link was up; release the discovery
-            // window so the radio does not stay active for a dead session.
-            if let Some(guard) = adapter_guard.take() {
-                guard.stop_scan().await;
+    // Adopt the link the resolver's service check opened whenever it is
+    // available: tearing that link down and reconnecting immediately is a
+    // window in which the peripheral or the stack rejects the second connect.
+    // Otherwise connect afresh. The scan's discovery window stays open
+    // through connect: on Linux it keeps the BlueZ object alive, and on
+    // macOS/Windows the cache was populated by the scan. Once the link is up
+    // the device is no longer temporary, so the guard can be dropped to
+    // release the radio.
+    let (peripheral, mut owned) = match resolved_link {
+        Some(BleResolvedLink { peripheral, owned }) => (peripheral, owned),
+        None => match oxideterm_ble::ble_connect_discovered_device(
+            &adapter,
+            &config.device_id,
+            BLE_CONNECT_TIMEOUT,
+            &close_token,
+        )
+        .await
+        {
+            Ok(pair) => pair,
+            Err(error) => {
+                // Connect failed before the link was up; release the discovery
+                // window so the radio does not stay active for a dead session.
+                if let Some(guard) = adapter_guard.take() {
+                    guard.stop_scan().await;
+                }
+                let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
+                return;
             }
-            let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
-            return;
-        }
+        },
     };
     let mut subscribed = None;
     let connected_worker = async {
@@ -1102,8 +1471,20 @@ async fn run_ble_worker(
         let notify_uuid = notify_char.uuid;
         subscribed = Some(notify_char.clone());
         if let Err(error) = peripheral.subscribe(notify_char).await {
-            let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
-            return;
+            // One bounded self-heal, not a blind retry loop: see
+            // [`heal_dying_link`] for the disconnect-in-flight failure mode.
+            if !heal_dying_link(&peripheral, &close_token).await {
+                let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
+                return;
+            }
+            // The recovery opened a fresh link, so the session owns it and
+            // must close it on exit even when the adopted link had belonged
+            // to another consumer.
+            owned = true;
+            if let Err(retry_error) = peripheral.subscribe(notify_char).await {
+                let _ = worker_tx.send_control(BleWorkerEvent::Failed(retry_error.to_string()));
+                return;
+            }
         }
         let _ = worker_tx.send_control(BleWorkerEvent::Connected);
 
@@ -1209,7 +1590,7 @@ async fn run_ble_worker(
         )
         .await;
     }
-    disconnect_temporary_link(&peripheral, was_connected).await;
+    disconnect_temporary_link(&peripheral, owned).await;
     if let Some(guard) = adapter_guard.take() {
         guard.stop_scan().await;
     }
@@ -1282,39 +1663,6 @@ mod ble_tests {
             match_ble_device(&devices, None, Some("AB:CD:EF:01:23:45"), Some("UART")),
             Err(BleResolveError::NoDeviceMatched { .. })
         ));
-    }
-
-    /// A powered-off device leaves a BlueZ cache entry that still carries
-    /// identity and last-advertised services; without an RSSI from the current
-    /// discovery window it must fail matching instead of reaching the connect
-    /// timeout later. The same device advertising again must match. macOS
-    /// gates this like the sibling `match_ble_device` test: the RSSI filter
-    /// lives in platform-shared code, while Linux and Windows peripheral ids
-    /// are opaque handles that cannot be built without a real adapter.
-    #[test]
-    #[cfg(target_os = "macos")]
-    fn stale_cache_entries_without_rssi_do_not_match() {
-        use btleplug::api::AddressType;
-        let mut devices = vec![oxideterm_ble::BleDeviceInfo {
-            id: uuid::Uuid::from_u128(1).into(),
-            name: Some("UART".into()),
-            address: "12:34:56:78:9A:BC".into(),
-            rssi: None,
-            supports_nus: true,
-            advertised_services: vec![oxideterm_ble::NORDIC_UART_SERVICE_UUID],
-            address_type: Some(AddressType::Public),
-        }];
-        assert!(matches!(
-            match_ble_device(&devices, None, Some("12:34:56:78:9a:bc"), Some("UART")),
-            Err(BleResolveError::NoDeviceMatched { .. })
-        ));
-        devices[0].rssi = Some(-55);
-        assert_eq!(
-            match_ble_device(&devices, None, Some("12:34:56:78:9a:bc"), Some("UART"))
-                .unwrap()
-                .id,
-            devices[0].id
-        );
     }
 
     fn characteristic(

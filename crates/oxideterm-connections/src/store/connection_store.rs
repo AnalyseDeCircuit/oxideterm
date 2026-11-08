@@ -1382,6 +1382,7 @@ impl ConnectionStore {
             profile.adapter_mac = normalize_optional_text(request.adapter_mac);
             profile.device_mac = normalize_optional_text(request.device_mac);
             profile.device_name = normalize_optional_text(request.device_name);
+            profile.platform_identifier = normalize_optional_text(request.platform_identifier);
             profile.service_uuid = request.service_uuid.trim().to_string();
             profile.terminal = request.terminal;
             if let Some(value) = request.input_line_ending {

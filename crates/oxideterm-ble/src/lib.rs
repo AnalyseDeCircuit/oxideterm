@@ -16,8 +16,18 @@ use uuid::Uuid;
 /// Re-exported so UI layers can store device identity without depending on btleplug.
 pub type BlePeripheralId = PeripheralId;
 
+#[cfg(target_os = "linux")]
+mod bluez;
+#[cfg(target_os = "linux")]
+pub use bluez::{BluezDirectedDiscovery, ble_start_directed_discovery};
+
 /// Fixed discovery window; BLE scanning is inherently time-boxed.
 pub const BLE_SCAN_DURATION: Duration = Duration::from_secs(5);
+
+/// Poll interval inside [`BleAdapterGuard::scan_for_known_device`]; LE
+/// devices commonly advertise every 100 ms to 1 s, so a hit is observed
+/// within about one advertising interval.
+const TARGETED_SCAN_POLL_INTERVAL: Duration = Duration::from_millis(300);
 
 /// Nordic UART Service (NUS) advertisement UUID; the de facto serial-over-BLE
 /// protocol with one writable and one notifiable characteristic.
@@ -33,6 +43,8 @@ pub enum BleError {
     ConnectTimedOut,
     #[error("device is no longer available")]
     DeviceUnavailable,
+    #[error("directed discovery failed: {0}")]
+    DirectedDiscovery(String),
     #[error("bluetooth operation cancelled")]
     Cancelled,
     #[error(transparent)]
@@ -230,6 +242,10 @@ pub struct BleAdapterGuard {
     /// True between a successful `start_scan` and the matching stop, so `Drop`
     /// only pays the cleanup cost when a discovery window is actually open.
     scan_active: AtomicBool,
+    /// Controller address as reported by the OS, when available. Linux needs
+    /// it to name the adapter on the D-Bus for address-based connects; macOS
+    /// does not expose a controller address at all.
+    adapter_mac: Option<String>,
 }
 
 impl BleAdapterGuard {
@@ -245,16 +261,30 @@ impl BleAdapterGuard {
             .ok_or(BleError::AdapterOutOfRange {
                 index: adapter_index,
             })?;
+        // Treated as best-effort: a missing address only disables the
+        // address-based direct connect, never the adapter itself.
+        let adapter_mac = adapter
+            .adapter_address()
+            .await
+            .ok()
+            .flatten()
+            .map(|address| address.to_string());
         Ok(Self {
             adapter,
             runtime: tokio::runtime::Handle::current(),
             scan_active: AtomicBool::new(false),
+            adapter_mac,
         })
     }
 
     /// The adapter the guard owns, shared with inspect and connect callers.
     pub fn adapter(&self) -> &btleplug::platform::Adapter {
         &self.adapter
+    }
+
+    /// Controller address reported by the OS, when it exposes one.
+    pub fn adapter_mac(&self) -> Option<&str> {
+        self.adapter_mac.as_deref()
     }
 
     /// Runs a discovery window and leaves it running so discovered peripherals
@@ -290,6 +320,49 @@ impl BleAdapterGuard {
         let mut devices = collect_discovered_devices(peripherals).await;
         devices.sort_by(device_sort_order);
         Ok(devices)
+    }
+
+    /// Runs a discovery window narrowed to one known identity and returns the
+    /// peripheral as soon as it appears. Windows and macOS can only address
+    /// devices their stacks currently know (WinRT resolves a stored MAC,
+    /// CoreBluetooth retrieves a stored identifier) and that knowledge is
+    /// cold after a reboot or an adapter restart; this window makes the
+    /// advertising device reappear in the adapter's peripheral list. Neither
+    /// platform exposes an address filter at the API level, so the radio
+    /// scans broadly while the match stays exact and the window ends on the
+    /// first hit. Like [`BleAdapterGuard::scan`] the window is left open for
+    /// the caller's connect; a miss or an enumeration error stops it here.
+    pub async fn scan_for_known_device(
+        &self,
+        identity: &BleKnownIdentity,
+        device_name: Option<&str>,
+        timeout: Duration,
+    ) -> Result<Option<btleplug::platform::Peripheral>, BleError> {
+        self.adapter.start_scan(ScanFilter::default()).await?;
+        self.scan_active
+            .store(true, std::sync::atomic::Ordering::Release);
+        let deadline = Instant::now() + timeout;
+        loop {
+            let peripherals = match self.adapter.peripherals().await {
+                Ok(peripherals) => peripherals,
+                Err(error) => {
+                    self.stop_scan().await;
+                    return Err(error.into());
+                }
+            };
+            for peripheral in peripherals {
+                if peripheral_matches_identity(&peripheral, identity, device_name).await {
+                    // The window stays open: the caller connects through this
+                    // handle and closes it once the link has settled.
+                    return Ok(Some(peripheral));
+                }
+            }
+            if Instant::now() >= deadline {
+                self.stop_scan().await;
+                return Ok(None);
+            }
+            sleep(TARGETED_SCAN_POLL_INTERVAL).await;
+        }
     }
 
     /// Stops the discovery window the guard started. Safe to call when no
@@ -344,20 +417,180 @@ async fn collect_discovered_devices(
         // the scan because it is no longer addressable anyway.
         // Anonymous peripherals still carry an address, so they stay listed
         // with a name fallback instead of being dropped.
-        let Ok(Some(properties)) = peripheral.properties().await else {
-            continue;
-        };
-        devices.push(BleDeviceInfo {
-            id: peripheral.id(),
-            name: properties.local_name,
-            address: properties.address.to_string(),
-            rssi: properties.rssi,
-            supports_nus: advertises_nus(&properties.services),
-            advertised_services: properties.services.clone(),
-            address_type: properties.address_type,
-        });
+        if let Some(info) = ble_peripheral_info(&peripheral).await {
+            devices.push(info);
+        }
     }
     devices
+}
+
+/// Reads one peripheral's cached properties into a device info without
+/// requiring a discovery window. Returns `None` when the platform cannot
+/// report properties for the handle (e.g. a BlueZ device object that vanished
+/// mid-enumeration).
+pub async fn ble_peripheral_info(
+    peripheral: &btleplug::platform::Peripheral,
+) -> Option<BleDeviceInfo> {
+    let properties = peripheral.properties().await.ok()??;
+    Some(BleDeviceInfo {
+        id: peripheral.id(),
+        name: properties.local_name,
+        address: properties.address.to_string(),
+        rssi: properties.rssi,
+        supports_nus: advertises_nus(&properties.services),
+        advertised_services: properties.services.clone(),
+        address_type: properties.address_type,
+    })
+}
+
+/// Identity a platform can address without a discovery window, built from
+/// profile clues.
+///
+/// The macOS CoreBluetooth identifier is platform-local: a profile synced
+/// from macOS carries an identifier no other platform can resolve, so
+/// non-Apple builds only consider the public MAC (and vice versa — CoreBluetooth
+/// cannot connect by MAC at all).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum BleKnownIdentity {
+    /// Public/static MAC. Linux matches the BlueZ device list; Windows opens
+    /// an address-based peripheral handle.
+    Mac(String),
+    /// macOS CoreBluetooth peripheral identifier (a platform UUID string).
+    #[cfg(target_vendor = "apple")]
+    MacosIdentifier(String),
+}
+
+impl BleKnownIdentity {
+    /// Picks the best direct-connect identity from saved profile clues.
+    /// Returns `None` when no clue is usable on this platform, so the caller
+    /// falls back to the scan flow (typically a cross-platform synced profile
+    /// matched by name): CoreBluetooth cannot address a peripheral by MAC, so
+    /// Apple builds only accept the platform identifier, while other
+    /// platforms cannot resolve a foreign macOS identifier and only accept
+    /// the public MAC.
+    pub fn from_clues(device_mac: Option<&str>, platform_identifier: Option<&str>) -> Option<Self> {
+        #[cfg(target_vendor = "apple")]
+        {
+            // CoreBluetooth cannot address a peripheral by MAC, so the
+            // stored address never drives a direct connect here.
+            let _ = device_mac;
+            let identifier = platform_identifier?.trim();
+            identifier.parse::<Uuid>().ok()?;
+            Some(Self::MacosIdentifier(identifier.to_string()))
+        }
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            let _ = platform_identifier;
+            // Re-validate like the persisted-clue contract: only a parseable
+            // non-placeholder address may drive a direct connect.
+            let mac = device_mac?.trim().to_owned();
+            let address = mac.parse::<btleplug::api::BDAddr>().ok()?;
+            (address != btleplug::api::BDAddr::default()).then_some(Self::Mac(mac))
+        }
+    }
+
+    /// Address or identifier string used as the last-resort device label and
+    /// address when the platform cannot report properties for the handle.
+    pub fn clue_label(&self) -> &str {
+        match self {
+            Self::Mac(mac) => mac,
+            #[cfg(target_vendor = "apple")]
+            Self::MacosIdentifier(identifier) => identifier,
+        }
+    }
+}
+
+/// Exact match for [`BleAdapterGuard::scan_for_known_device`]: the stored
+/// MAC where the platform reports addresses, and on macOS the stored
+/// CoreBluetooth identifier with the profile name as fallback (a wiped
+/// known-peripherals store can hand the device a fresh identifier, while
+/// the advertised name is what the profile was matched by originally).
+async fn peripheral_matches_identity(
+    peripheral: &btleplug::platform::Peripheral,
+    identity: &BleKnownIdentity,
+    device_name: Option<&str>,
+) -> bool {
+    #[cfg(not(target_vendor = "apple"))]
+    let _ = device_name;
+    match identity {
+        BleKnownIdentity::Mac(mac) => ble_peripheral_info(peripheral)
+            .await
+            .is_some_and(|info| info.address.eq_ignore_ascii_case(mac)),
+        #[cfg(target_vendor = "apple")]
+        BleKnownIdentity::MacosIdentifier(identifier) => {
+            if peripheral.id().to_string().eq_ignore_ascii_case(identifier) {
+                return true;
+            }
+            match device_name.filter(|name| !name.is_empty()) {
+                Some(profile_name) => ble_peripheral_info(peripheral)
+                    .await
+                    .and_then(|info| info.name)
+                    .is_some_and(|name| name == profile_name),
+                None => false,
+            }
+        }
+    }
+}
+
+/// Resolves `identity` against platform caches without starting a discovery
+/// window: BlueZ keeps known devices across sessions, Windows can open a
+/// peripheral straight from a Bluetooth address, and CoreBluetooth retrieves
+/// known peripherals by identifier. Returns `None` when the platform cannot
+/// currently address the device; callers fall back to a scan window and any
+/// real platform error surfaces there.
+pub async fn ble_resolve_known_device(
+    adapter: &btleplug::platform::Adapter,
+    identity: &BleKnownIdentity,
+) -> Option<btleplug::platform::Peripheral> {
+    #[cfg(target_os = "linux")]
+    {
+        let BleKnownIdentity::Mac(mac) = identity;
+        let peripherals = adapter.peripherals().await.ok()?;
+        for peripheral in peripherals {
+            if let Some(info) = ble_peripheral_info(&peripheral).await {
+                if info.address.eq_ignore_ascii_case(mac) {
+                    return Some(peripheral);
+                }
+            }
+        }
+        None
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let BleKnownIdentity::Mac(mac) = identity;
+        // Creates a peripheral straight from the address so bonded or
+        // OS-cached devices are reachable without waiting for an
+        // advertisement; a device Windows does not know fails later at
+        // connect time.
+        let address = mac.parse::<btleplug::api::BDAddr>().ok()?;
+        adapter
+            .add_peripheral(&btleplug::platform::PeripheralId::from(address))
+            .await
+            .ok()
+    }
+    #[cfg(target_vendor = "apple")]
+    {
+        // Apple builds still carry the Mac variant (the enum is shared), but
+        // CoreBluetooth cannot address by MAC and from_clues never produces
+        // one here, so anything else is a caller bug: resolve to None.
+        let BleKnownIdentity::MacosIdentifier(identifier) = identity else {
+            return None;
+        };
+        let id = btleplug::platform::PeripheralId::from(identifier.parse::<Uuid>().ok()?);
+        let mut retrieved = adapter
+            .retrieve_peripherals(btleplug::api::RetrievePeripheralsOptions {
+                identifiers: Some(vec![id]),
+                services: None,
+            })
+            .await
+            .ok()?;
+        retrieved.pop()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "windows", target_vendor = "apple")))]
+    {
+        let _ = (adapter, identity);
+        None
+    }
 }
 
 /// Orders NUS-capable devices first, then named devices, then by address so
@@ -438,26 +671,25 @@ pub async fn ble_connect_discovered_device(
         }
         Err(_) => {
             adapter.start_scan(ScanFilter::default()).await?;
-            let recreated = tokio::select! {
+            // The discovery window only needs to stay open until the device
+            // object is recreated and the link is up; every exit path below
+            // must close it again, otherwise a discovery session leaks for
+            // the whole connection lifetime (and blocks other consumers'
+            // filters on this adapter).
+            let result = tokio::select! {
                 biased;
-                _ = cancelled.cancelled() => {
-                    let _ = adapter.stop_scan().await;
-                    return Err(BleError::Cancelled);
-                }
-                result = wait_for_recreated_peripheral(adapter, id) => result,
-            };
-            match recreated {
-                Some(peripheral) => {
-                    if let Err(error) =
-                        connect_if_needed(&peripheral, false, connect_timeout, cancelled).await
-                    {
-                        let _ = adapter.stop_scan().await;
-                        return Err(error);
+                _ = cancelled.cancelled() => Err(BleError::Cancelled),
+                result = wait_for_recreated_peripheral(adapter, id) => match result {
+                    Some(peripheral) => {
+                        connect_if_needed(&peripheral, false, connect_timeout, cancelled)
+                            .await
+                            .map(|()| (peripheral, false))
                     }
-                    Ok((peripheral, false))
-                }
-                None => Err(BleError::DeviceUnavailable),
-            }
+                    None => Err(BleError::DeviceUnavailable),
+                },
+            };
+            let _ = adapter.stop_scan().await;
+            result
         }
     }
 }
@@ -722,11 +954,81 @@ fn extract_16bit_uuid(uuid: &Uuid) -> Option<u16> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BleAdapterInfo, NORDIC_UART_SERVICE_UUID, adapter_display_name, adapter_vendor_label,
-        advertises_nus, characteristic_property_names,
+        BleAdapterInfo, BleKnownIdentity, NORDIC_UART_SERVICE_UUID, adapter_display_name,
+        adapter_vendor_label, advertises_nus, characteristic_property_names,
     };
     use btleplug::api::CharPropFlags;
     use uuid::Uuid;
+
+    #[test]
+    fn known_identity_from_clues_prefers_a_valid_public_mac() {
+        let mac = Some("AA:BB:CC:DD:EE:FF");
+        assert_eq!(
+            BleKnownIdentity::from_clues(mac, None),
+            Some(BleKnownIdentity::Mac("AA:BB:CC:DD:EE:FF".to_string()))
+        );
+        // Lowercase input stays verbatim so matching keeps its own
+        // case-insensitive comparison downstream.
+        assert_eq!(
+            BleKnownIdentity::from_clues(Some("aa:bb:cc:dd:ee:ff"), None),
+            Some(BleKnownIdentity::Mac("aa:bb:cc:dd:ee:ff".to_string()))
+        );
+    }
+
+    #[test]
+    fn known_identity_from_clues_rejects_unusable_addresses_and_empty_clues() {
+        // The all-zero placeholder is what CoreBluetooth reports when no real
+        // MAC exists; it must never drive a direct connect.
+        assert_eq!(
+            BleKnownIdentity::from_clues(Some("00:00:00:00:00:00"), None),
+            None
+        );
+        assert_eq!(
+            BleKnownIdentity::from_clues(Some("not-an-address"), None),
+            None
+        );
+        assert_eq!(BleKnownIdentity::from_clues(None, None), None);
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn known_identity_from_clues_prefers_the_platform_identifier_on_apple() {
+        let identifier = "1b4d2f6e-1234-4c5d-9e8f-aabbccddeeff";
+        assert_eq!(
+            BleKnownIdentity::from_clues(Some("AA:BB:CC:DD:EE:FF"), Some(identifier)),
+            Some(BleKnownIdentity::MacosIdentifier(identifier.to_string()))
+        );
+        // CoreBluetooth cannot address a peripheral by MAC, so MAC-only
+        // clues (e.g. a Linux-saved profile synced over) must fall back to
+        // the scan flow instead of attempting a direct connect.
+        assert_eq!(
+            BleKnownIdentity::from_clues(Some("AA:BB:CC:DD:EE:FF"), None),
+            None
+        );
+        assert_eq!(
+            BleKnownIdentity::from_clues(Some("AA:BB:CC:DD:EE:FF"), Some("nope")),
+            None
+        );
+        assert_eq!(BleKnownIdentity::from_clues(None, Some(identifier)), None);
+    }
+
+    #[cfg(not(target_vendor = "apple"))]
+    #[test]
+    fn known_identity_from_clues_ignores_foreign_identifiers_off_apple() {
+        // A macOS CoreBluetooth identifier synced into a profile cannot be
+        // resolved on this platform; only the MAC may drive a direct connect.
+        assert_eq!(
+            BleKnownIdentity::from_clues(
+                Some("AA:BB:CC:DD:EE:FF"),
+                Some("1b4d2f6e-1234-4c5d-9e8f-aabbccddeeff")
+            ),
+            Some(BleKnownIdentity::Mac("AA:BB:CC:DD:EE:FF".to_string()))
+        );
+        assert_eq!(
+            BleKnownIdentity::from_clues(None, Some("1b4d2f6e-1234-4c5d-9e8f-aabbccddeeff")),
+            None
+        );
+    }
 
     #[test]
     fn adapter_display_name_strips_modalias_but_keeps_other_parentheticals() {

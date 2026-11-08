@@ -84,6 +84,7 @@
               "connect_failed": "BLE connect failed: {error}",
               "service_discovery_failed": "service discovery failed: {error}",
               "service_mismatch": "device matched but does not advertise the target service {uuid}",
+              "direct_connect_failed": "Direct connect to {identity} failed: {reason}. Retry, or scan for the device via a new connection.",
               "invalid_service_uuid": "invalid service UUID: {uuid}"
         }
       }

@@ -3092,6 +3092,7 @@ fn connection_trace_progress(stage: ConnectionTraceStage) -> f32 {
         // BLE resolution reports its own milestones; SSH progress never reads
         // these, but the shared enum keeps the match exhaustive.
         ConnectionTraceStage::BleOpeningAdapter => 10.0,
+        ConnectionTraceStage::BleDirectConnect => 45.0,
         ConnectionTraceStage::BleScanning => 35.0,
         ConnectionTraceStage::BleMatching => 55.0,
         ConnectionTraceStage::BleVerifyingService => 80.0,

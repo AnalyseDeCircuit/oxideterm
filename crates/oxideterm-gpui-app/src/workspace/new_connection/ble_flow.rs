@@ -67,6 +67,9 @@ pub(in crate::workspace) struct BleOpenRequest {
     pub adapter_mac: Option<String>,
     pub device_mac: Option<String>,
     pub device_name: Option<String>,
+    /// Platform-local identity for the cache-based direct connect; `None`
+    /// falls back to the scan window.
+    pub platform_identifier: Option<String>,
     pub service_uuid: String,
     pub title: String,
     pub terminal_options: ConnectionTerminalOptions,
@@ -92,6 +95,7 @@ impl BleOpenRequest {
             adapter_mac: self.adapter_mac.clone(),
             device_mac: self.device_mac.clone(),
             device_name: self.device_name.clone(),
+            platform_identifier: self.platform_identifier.clone(),
             service_uuid: self.service_uuid.clone(),
         }
     }
@@ -110,6 +114,9 @@ pub(in crate::workspace) enum BleConnectionWorkerResult {
     ScanComplete {
         config: BleSessionConfig,
         adapter_guard: BleAdapterGuard,
+        /// Verified link opened by the resolver's service check; the session
+        /// worker adopts it instead of reconnecting.
+        resolved_link: Option<oxideterm_terminal::BleResolvedLink>,
         terminal_options: ConnectionTerminalOptions,
         title: String,
         attempt_id: String,
@@ -138,6 +145,7 @@ struct PendingBleOpen {
     adapter_mac: Option<String>,
     device_mac: Option<String>,
     device_name: Option<String>,
+    platform_identifier: Option<String>,
     service_uuid: String,
     label: String,
     title: String,
@@ -231,6 +239,16 @@ impl WorkspaceApp {
                     name.to_string()
                 }
             };
+            // The macOS CoreBluetooth identifier is the only platform-local
+            // identity worth persisting: a live selection refreshes it, an
+            // edit without re-selection keeps the stored value.
+            let platform_identifier = if let Some(device_id) = &device_id {
+                cfg!(target_vendor = "apple").then(|| device_id.to_string())
+            } else {
+                existing
+                    .as_ref()
+                    .and_then(|profile| profile.platform_identifier.clone())
+            };
             // MTU is a text input in the form; an empty draft means "platform
             // default" and anything else must parse inside the BLE spec range.
             let mtu_text = form.ble.mtu.trim();
@@ -264,6 +282,7 @@ impl WorkspaceApp {
                 adapter_mac: adapter_mac.clone(),
                 device_mac: device_mac.clone(),
                 device_name: device_name.clone(),
+                platform_identifier: platform_identifier.clone(),
                 service_uuid: service_uuid_text.clone(),
                 terminal: form.terminal.clone(),
                 input_line_ending: Some(form.ble.input_line_ending),
@@ -285,6 +304,7 @@ impl WorkspaceApp {
                 adapter_mac,
                 device_mac,
                 device_name,
+                platform_identifier,
                 service_uuid: service_uuid_text,
                 title: format!("BLE {}", profile_name),
                 label: profile_name,
@@ -373,6 +393,7 @@ impl WorkspaceApp {
                 adapter_mac: open.adapter_mac,
                 device_mac: open.device_mac,
                 device_name: open.device_name,
+                platform_identifier: open.platform_identifier,
                 service_uuid: open.service_uuid,
                 title: open.title,
                 terminal_options: open.terminal_options,

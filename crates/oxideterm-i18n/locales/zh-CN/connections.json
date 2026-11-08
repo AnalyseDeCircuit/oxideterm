@@ -84,6 +84,7 @@
               "connect_failed": "连接 BLE 设备失败：{error}",
               "service_discovery_failed": "服务发现失败：{error}",
               "service_mismatch": "设备已匹配，但不广播目标服务 {uuid}",
+              "direct_connect_failed": "直连 {identity} 失败：{reason}。可重试直连，或通过新建连接扫描设备。",
               "invalid_service_uuid": "服务 UUID 无效：{uuid}"
         }
       }

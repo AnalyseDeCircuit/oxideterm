@@ -84,6 +84,7 @@
               "connect_failed": "連線 BLE 裝置失敗：{error}",
               "service_discovery_failed": "服務探索失敗：{error}",
               "service_mismatch": "裝置已符合，但不廣播目標服務 {uuid}",
+              "direct_connect_failed": "直連 {identity} 失敗：{reason}。可重試直連，或透過新增連線掃描裝置。",
               "invalid_service_uuid": "服務 UUID 無效：{uuid}"
         }
       }

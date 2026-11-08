@@ -349,6 +349,7 @@
         "shell_ready": "Starting shell",
         "ready": "Ready",
         "ble_opening_adapter": "Opening Bluetooth adapter",
+        "ble_direct_connect": "Connecting directly (scan skipped)",
         "ble_scanning": "Scanning Bluetooth devices",
         "ble_matching": "Matching device",
         "ble_verifying_service": "Verifying service",

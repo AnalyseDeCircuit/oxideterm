@@ -84,6 +84,7 @@
               "connect_failed": "BLE-Verbindung fehlgeschlagen: {error}",
               "service_discovery_failed": "Diensterkennung fehlgeschlagen: {error}",
               "service_mismatch": "Gerät gefunden, bewirbt aber nicht den Zieldienst {uuid}",
+              "direct_connect_failed": "Direktverbindung zu {identity} fehlgeschlagen: {reason}. Erneut versuchen oder das Gerät über eine neue Verbindung scannen.",
               "invalid_service_uuid": "Ungültige Dienst-UUID: {uuid}"
         }
       },
@@ -142,6 +143,7 @@
       },
       "stage": {
         "ble_opening_adapter": "Bluetooth-Adapter wird geöffnet",
+        "ble_direct_connect": "Direkte Verbindung (Scan übersprungen)",
         "ble_scanning": "Bluetooth-Geräte werden gesucht",
         "ble_matching": "Gerät wird zugeordnet",
         "ble_verifying_service": "Dienst wird geprüft",
