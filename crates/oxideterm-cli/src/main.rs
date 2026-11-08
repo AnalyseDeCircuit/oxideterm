@@ -92,7 +92,10 @@ fn run(cli: Cli) -> CliResult<i32> {
             .and_then(|operation| operation.id().map(str::to_string));
     }
     let registration = context.map(oxideterm_audit::AuditContext::install);
-    let dispatched = matches!(cli.command, Command::Ssh(_) | Command::Open(_) | Command::Terminal(_));
+    let dispatched = matches!(
+        cli.command,
+        Command::Ssh(_) | Command::Open(_) | Command::Terminal(_)
+    );
     let result = (|| match cli.command {
         Command::Settings(command) => settings::run(command),
         Command::Connections(command) => connections::run(command),

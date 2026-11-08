@@ -328,7 +328,9 @@ impl WorkspaceApp {
     ) -> Result<()> {
         match launch {
             NativeConnectionLaunch::Local(launch) => {
-                launch.validate().map_err(|message| anyhow::anyhow!(message))?;
+                launch
+                    .validate()
+                    .map_err(|message| anyhow::anyhow!(message))?;
                 let mut config = self.local_terminal_config();
                 config.cwd = Some(launch.cwd);
                 if let Some(program) = launch.program {

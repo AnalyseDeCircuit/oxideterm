@@ -86,7 +86,9 @@ pub fn service_action_availability(service: &ResourceService) -> ServiceActionAv
         can_reload: active && !crate::launchd::valid_target(&service.id),
         can_enable: if crate::launchd::valid_target(&service.id) {
             service.enabled_state == "disabled"
-        } else { !enabled },
+        } else {
+            !enabled
+        },
         can_disable: enabled,
     }
 }
@@ -138,7 +140,9 @@ const SERVICE_SAMPLE_COMMAND_MACOS_LAUNCHCTL: &str = concat!(
     "echo '===SERVICES==='; ",
     "if command -v launchctl >/dev/null 2>&1; then ",
     "echo '__OXIDE_SERVICE_CAPABILITY__\tpartial\tmacos_launchctl'; ",
-    "\n", include_str!("launchd_inventory.sh"), "\n",
+    "\n",
+    include_str!("launchd_inventory.sh"),
+    "\n",
     "else echo '__OXIDE_SERVICE_UNAVAILABLE__'; fi; ",
     "echo '===SERVICES_END==='"
 );
@@ -253,8 +257,10 @@ pub fn parse_service_snapshot(output: &str) -> ResourceServiceSnapshot {
                 services: Vec::new(),
             };
         }
-        if let Some(message) = line.strip_prefix(SERVICE_ERROR_MARKER)
-            .or_else(|| line.strip_prefix("LAUNCHD_ERROR\t")) {
+        if let Some(message) = line
+            .strip_prefix(SERVICE_ERROR_MARKER)
+            .or_else(|| line.strip_prefix("LAUNCHD_ERROR\t"))
+        {
             return ResourceServiceSnapshot {
                 status: ResourceServiceStatus::Error {
                     message: clean_marker_message(message, "Service command failed."),
@@ -378,9 +384,12 @@ pub fn build_service_logs_command(
 ) -> Result<ServiceCaptureCommand, String> {
     let service_id = validated_service_id(service_id)?;
     let service_id = if matches!(normalized_service_os(os_type), ServiceOs::MacLaunchctl)
-        && crate::launchd::valid_target(service_id) {
+        && crate::launchd::valid_target(service_id)
+    {
         service_id.rsplit_once('/').unwrap().1
-    } else { service_id };
+    } else {
+        service_id
+    };
     let (command, capability) = match normalized_service_os(os_type) {
         ServiceOs::LinuxSystemd => (
             format!(
@@ -428,9 +437,12 @@ pub fn build_service_follow_logs_command(
 ) -> Result<ServiceCaptureCommand, String> {
     let service_id = validated_service_id(service_id)?;
     let service_id = if matches!(normalized_service_os(os_type), ServiceOs::MacLaunchctl)
-        && crate::launchd::valid_target(service_id) {
+        && crate::launchd::valid_target(service_id)
+    {
         service_id.rsplit_once('/').unwrap().1
-    } else { service_id };
+    } else {
+        service_id
+    };
     let (command, capability) = match normalized_service_os(os_type) {
         ServiceOs::LinuxSystemd => (
             format!("journalctl -fu {} --no-pager", shell_quote(service_id)),
@@ -645,7 +657,10 @@ fn build_systemd_service_action_command(service_id: &str, action: &ServiceAction
     )
 }
 
-fn build_launchctl_service_action_command(service_id: &str, action: &ServiceActionKind) -> Result<String, String> {
+fn build_launchctl_service_action_command(
+    service_id: &str,
+    action: &ServiceActionKind,
+) -> Result<String, String> {
     if !crate::launchd::valid_target(service_id) {
         return Err("Refresh services to obtain a scoped launchd service target.".into());
     }
@@ -655,9 +670,16 @@ fn build_launchctl_service_action_command(service_id: &str, action: &ServiceActi
         ServiceActionKind::Stop => "kill TERM",
         ServiceActionKind::Enable => "enable",
         ServiceActionKind::Disable => "disable",
-        ServiceActionKind::Reload => return Err("launchd has no generic reload operation; choose Restart explicitly.".into()),
+        ServiceActionKind::Reload => {
+            return Err(
+                "launchd has no generic reload operation; choose Restart explicitly.".into(),
+            );
+        }
     };
-    Ok(posix_shell_command(&format!("launchctl {verb} {}", shell_quote(service_id))))
+    Ok(posix_shell_command(&format!(
+        "launchctl {verb} {}",
+        shell_quote(service_id)
+    )))
 }
 
 fn build_bsd_service_action_command(service_id: &str, action: &ServiceActionKind) -> String {
@@ -977,14 +999,30 @@ mod tests {
         assert_eq!(linux.capability, ServiceCommandCapability::Full);
         assert!(linux.command.contains("systemctl restart 'sshd.service'"));
 
-        let mac =
-            build_service_action_command("macOS", "gui/501/com.example.agent", ServiceActionKind::Disable)
-                .unwrap();
+        let mac = build_service_action_command(
+            "macOS",
+            "gui/501/com.example.agent",
+            ServiceActionKind::Disable,
+        )
+        .unwrap();
         assert_eq!(mac.capability, ServiceCommandCapability::Partial);
         assert!(mac.command.contains("launchctl disable"));
-        assert_eq!(crate::shell::decoded_posix_script(&mac.command), "launchctl disable 'gui/501/com.example.agent'");
-        assert!(build_service_action_command("Darwin", "system/com.example.agent", ServiceActionKind::Reload).is_err());
-        assert!(build_service_action_command("Darwin", "com.example.agent", ServiceActionKind::Stop).is_err());
+        assert_eq!(
+            crate::shell::decoded_posix_script(&mac.command),
+            "launchctl disable 'gui/501/com.example.agent'"
+        );
+        assert!(
+            build_service_action_command(
+                "Darwin",
+                "system/com.example.agent",
+                ServiceActionKind::Reload
+            )
+            .is_err()
+        );
+        assert!(
+            build_service_action_command("Darwin", "com.example.agent", ServiceActionKind::Stop)
+                .is_err()
+        );
 
         let windows =
             build_service_action_command("Windows", "Spooler", ServiceActionKind::Enable).unwrap();

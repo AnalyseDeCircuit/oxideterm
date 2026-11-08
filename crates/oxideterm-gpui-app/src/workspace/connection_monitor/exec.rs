@@ -236,9 +236,14 @@ impl ResourceSampleShell for LocalResourceSampleShell {
                 let counters = oxideterm_connection_monitor::macos_cpu_counters()
                     .map_err(ResourceSampleError::Failed)?;
                 if output.stdout.len() + counters.len() > max_output_size {
-                    return Err(ResourceSampleError::OutputLimit { channel_reusable: true });
+                    return Err(ResourceSampleError::OutputLimit {
+                        channel_reusable: true,
+                    });
                 }
-                let end = output.stdout.rfind(end_marker).expect("completion marker checked");
+                let end = output
+                    .stdout
+                    .rfind(end_marker)
+                    .expect("completion marker checked");
                 output.stdout.insert_str(end, &counters);
             }
             Ok(output.stdout)

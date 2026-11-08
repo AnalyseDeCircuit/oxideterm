@@ -56,21 +56,44 @@ pub async fn ble_start_directed_discovery(
     adapter_mac: &str,
     device_mac: &str,
     timeout: Duration,
+    cancelled: &tokio_util::sync::CancellationToken,
 ) -> Result<BluezDirectedDiscovery, BleError> {
+    if cancelled.is_cancelled() {
+        return Err(BleError::Cancelled);
+    }
     let adapter_mac = adapter_mac.to_owned();
     let device_mac = device_mac.to_owned();
+    let shutdown = cancelled.child_token();
+    // Dropping this future must also stop the blocking worker, which Tokio
+    // cannot abort once it has started running.
+    let _cancel_on_drop = shutdown.clone().drop_guard();
+    let worker_shutdown = shutdown.clone();
     // The blocking D-Bus round trips and poll loop park their thread until
     // bluetoothd answers, so they must not run on the async runtime's
     // worker threads.
-    let task = tokio::task::spawn_blocking(move || {
-        start_directed_discovery_blocking(&adapter_mac, &device_mac, timeout)
+    let mut task = tokio::task::spawn_blocking(move || {
+        start_directed_discovery_blocking(&adapter_mac, &device_mac, timeout, &worker_shutdown)
     });
-    match tokio::time::timeout(timeout, task).await {
-        Ok(Ok(Ok(discovery))) => Ok(discovery),
-        Ok(Ok(Err(reason))) => Err(BleError::DirectedDiscovery(reason)),
-        // The runtime is shutting down; the discovery window dies with it.
-        Ok(Err(join_error)) => Err(BleError::DirectedDiscovery(join_error.to_string())),
-        Err(_elapsed) => Err(BleError::ConnectTimedOut),
+    tokio::select! {
+        biased;
+        _ = cancelled.cancelled() => {
+            shutdown.cancel();
+            // Join before returning so a retry cannot overlap our discovery.
+            // A pending D-Bus call is bounded by BLUEZ_METHOD_TIMEOUT.
+            let _ = task.await;
+            Err(BleError::Cancelled)
+        }
+        _ = tokio::time::sleep(timeout) => {
+            shutdown.cancel();
+            let _ = task.await;
+            Err(BleError::ConnectTimedOut)
+        }
+        result = &mut task => match result {
+            Ok(Ok(discovery)) => Ok(discovery),
+            Ok(Err(_)) if cancelled.is_cancelled() => Err(BleError::Cancelled),
+            Ok(Err(reason)) => Err(BleError::DirectedDiscovery(reason)),
+            Err(error) => Err(BleError::DirectedDiscovery(error.to_string())),
+        },
     }
 }
 
@@ -118,9 +141,13 @@ fn start_directed_discovery_blocking(
     adapter_mac: &str,
     device_mac: &str,
     timeout: Duration,
+    cancelled: &tokio_util::sync::CancellationToken,
 ) -> Result<BluezDirectedDiscovery, String> {
+    check_cancelled(cancelled)?;
     let connection = SyncConnection::new_system().map_err(|error| error.to_string())?;
+    check_cancelled(cancelled)?;
     let adapter_path = find_adapter_path(&connection, adapter_mac)?;
+    check_cancelled(cancelled)?;
 
     // "Pattern" is the only documented filter that narrows discovery to one
     // peer: bluetoothd prefix-matches it against the advertised Name or
@@ -143,6 +170,7 @@ fn start_directed_discovery_blocking(
     ) {
         let _ = connection.send_with_reply_and_block(message.append1(filter), BLUEZ_METHOD_TIMEOUT);
     }
+    check_cancelled(cancelled)?;
 
     let message = Message::new_method_call(
         "org.bluez",
@@ -165,6 +193,9 @@ fn start_directed_discovery_blocking(
     let poll_deadline = Instant::now() + timeout.saturating_sub(DISCOVERY_STOP_MARGIN);
     let mut last_lookup_error: Option<String> = None;
     let result = loop {
+        if let Err(error) = check_cancelled(cancelled) {
+            break Err(error);
+        }
         match find_device_path(&connection, device_mac) {
             Ok(Some(_)) => break Ok(()),
             Ok(None) => {}
@@ -197,11 +228,21 @@ fn start_directed_discovery_blocking(
         // The attempt failed: close our window before returning so the
         // radio is released even if nobody consumes the error.
         Err(reason) => {
-            if owns_discovery {
+            // Disconnecting this private D-Bus sender releases its session
+            // on cancellation without another blocking StopDiscovery call.
+            if owns_discovery && !cancelled.is_cancelled() {
                 stop_discovery(&connection, &adapter_path);
             }
             Err(reason)
         }
+    }
+}
+
+fn check_cancelled(cancelled: &tokio_util::sync::CancellationToken) -> Result<(), String> {
+    if cancelled.is_cancelled() {
+        Err("Bluetooth discovery cancelled".to_owned())
+    } else {
+        Ok(())
     }
 }
 

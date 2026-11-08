@@ -1,8 +1,8 @@
 const BLE_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 /// Settle time before the worker's one bounded reconnect after a failed
 /// subscribe: gives the previous session's in-flight `Device1.Disconnect` a
-/// moment to land at bluetoothd before [`heal_dying_link`] forces any stale
-/// link down and reconnects.
+/// moment to land at bluetoothd before [`heal_dying_link`] checks whether
+/// the link can safely be reopened.
 const BLE_SUBSCRIBE_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(1);
 /// Budget for a `disconnect()` call. bluetoothd completes the teardown well
 /// inside this window; a longer wait means the link is stuck and neither
@@ -785,13 +785,14 @@ async fn disconnect_temporary_link(peripheral: &btleplug::platform::Peripheral, 
 /// reports connected. The previous session's `Device1.Disconnect` stays in
 /// flight for seconds ("Device is disconnecting"), during which every GATT
 /// call is rejected — adopting the reported link again would fail
-/// identically. Settle, force any stale link down (the D-Bus reply arrives
-/// only once the link is actually gone), then connect afresh. Returns true
+/// identically. Settle, tear down our own link or wait for a borrowed link's
+/// existing teardown to finish, then connect afresh. Returns true
 /// when a fresh link is up; a persistent failure (device offline, radio off)
 /// or a cancelled session returns false and the caller reports the original
 /// error.
 async fn heal_dying_link(
     peripheral: &btleplug::platform::Peripheral,
+    owned: bool,
     close_token: &tokio_util::sync::CancellationToken,
 ) -> bool {
     use btleplug::api::Peripheral as _;
@@ -802,7 +803,26 @@ async fn heal_dying_link(
         check = peripheral.is_connected() => check.unwrap_or(false),
     };
     if stale {
-        let _ = tokio::time::timeout(BLE_DISCONNECT_BUDGET, peripheral.disconnect()).await;
+        let teardown = async {
+            if owned {
+                peripheral.disconnect().await
+            } else {
+                // A borrowed link may still serve another consumer. Only
+                // reconnect once its owner has actually finished closing it.
+                while peripheral.is_connected().await? {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Ok(())
+            }
+        };
+        let released = tokio::select! {
+            biased;
+            _ = close_token.cancelled() => return false,
+            result = tokio::time::timeout(BLE_DISCONNECT_BUDGET, teardown) => result,
+        };
+        if !matches!(released, Ok(Ok(()))) {
+            return false;
+        }
     }
     tokio::select! {
         biased;
@@ -1032,9 +1052,13 @@ pub async fn ble_resolve_profile_to_session(
                                 adapter_mac,
                                 identity.clue_label(),
                                 BLE_CONNECT_TIMEOUT,
+                                cancelled,
                             )
                             .await
                             .map_err(|error| {
+                                if matches!(error, oxideterm_ble::BleError::Cancelled) {
+                                    return BleResolveError::Cancelled;
+                                }
                                 BleResolveError::DirectConnectUnavailable {
                                     identity: identity.clue_label().to_owned(),
                                     reason: error.to_string(),
@@ -1076,7 +1100,6 @@ pub async fn ble_resolve_profile_to_session(
                                 }
                                 result = guard.scan_for_known_device(
                                     &identity,
-                                    device_name,
                                     BLE_SAVED_PROFILE_SCAN_WINDOW,
                                 ) => result,
                             }
@@ -1153,7 +1176,6 @@ pub async fn ble_resolve_profile_to_session(
                             }
                             result = guard.scan_for_known_device(
                                 &identity,
-                                device_name,
                                 BLE_SAVED_PROFILE_SCAN_WINDOW,
                             ) => result,
                         }
@@ -1424,7 +1446,7 @@ async fn run_ble_worker(
         )
         .await
         {
-            Ok(pair) => pair,
+            Ok((peripheral, was_connected)) => (peripheral, !was_connected),
             Err(error) => {
                 // Connect failed before the link was up; release the discovery
                 // window so the radio does not stay active for a dead session.
@@ -1473,13 +1495,11 @@ async fn run_ble_worker(
         if let Err(error) = peripheral.subscribe(notify_char).await {
             // One bounded self-heal, not a blind retry loop: see
             // [`heal_dying_link`] for the disconnect-in-flight failure mode.
-            if !heal_dying_link(&peripheral, &close_token).await {
+            if !heal_dying_link(&peripheral, owned, &close_token).await {
                 let _ = worker_tx.send_control(BleWorkerEvent::Failed(error.to_string()));
                 return;
             }
-            // The recovery opened a fresh link, so the session owns it and
-            // must close it on exit even when the adopted link had belonged
-            // to another consumer.
+            // Recovery has opened a fresh link, which this session owns.
             owned = true;
             if let Err(retry_error) = peripheral.subscribe(notify_char).await {
                 let _ = worker_tx.send_control(BleWorkerEvent::Failed(retry_error.to_string()));

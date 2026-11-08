@@ -335,7 +335,6 @@ impl BleAdapterGuard {
     pub async fn scan_for_known_device(
         &self,
         identity: &BleKnownIdentity,
-        device_name: Option<&str>,
         timeout: Duration,
     ) -> Result<Option<btleplug::platform::Peripheral>, BleError> {
         self.adapter.start_scan(ScanFilter::default()).await?;
@@ -351,7 +350,7 @@ impl BleAdapterGuard {
                 }
             };
             for peripheral in peripherals {
-                if peripheral_matches_identity(&peripheral, identity, device_name).await {
+                if peripheral_matches_identity(&peripheral, identity).await {
                     // The window stays open: the caller connects through this
                     // handle and closes it once the link has settled.
                     return Ok(Some(peripheral));
@@ -502,32 +501,18 @@ impl BleKnownIdentity {
 
 /// Exact match for [`BleAdapterGuard::scan_for_known_device`]: the stored
 /// MAC where the platform reports addresses, and on macOS the stored
-/// CoreBluetooth identifier with the profile name as fallback (a wiped
-/// known-peripherals store can hand the device a fresh identifier, while
-/// the advertised name is what the profile was matched by originally).
+/// CoreBluetooth identifier. Names are not unique device identities.
 async fn peripheral_matches_identity(
     peripheral: &btleplug::platform::Peripheral,
     identity: &BleKnownIdentity,
-    device_name: Option<&str>,
 ) -> bool {
-    #[cfg(not(target_vendor = "apple"))]
-    let _ = device_name;
     match identity {
         BleKnownIdentity::Mac(mac) => ble_peripheral_info(peripheral)
             .await
             .is_some_and(|info| info.address.eq_ignore_ascii_case(mac)),
         #[cfg(target_vendor = "apple")]
         BleKnownIdentity::MacosIdentifier(identifier) => {
-            if peripheral.id().to_string().eq_ignore_ascii_case(identifier) {
-                return true;
-            }
-            match device_name.filter(|name| !name.is_empty()) {
-                Some(profile_name) => ble_peripheral_info(peripheral)
-                    .await
-                    .and_then(|info| info.name)
-                    .is_some_and(|name| name == profile_name),
-                None => false,
-            }
+            peripheral.id().to_string().eq_ignore_ascii_case(identifier)
         }
     }
 }
@@ -960,6 +945,7 @@ mod tests {
     use btleplug::api::CharPropFlags;
     use uuid::Uuid;
 
+    #[cfg(not(target_vendor = "apple"))]
     #[test]
     fn known_identity_from_clues_prefers_a_valid_public_mac() {
         let mac = Some("AA:BB:CC:DD:EE:FF");
@@ -1009,7 +995,10 @@ mod tests {
             BleKnownIdentity::from_clues(Some("AA:BB:CC:DD:EE:FF"), Some("nope")),
             None
         );
-        assert_eq!(BleKnownIdentity::from_clues(None, Some(identifier)), None);
+        assert_eq!(
+            BleKnownIdentity::from_clues(None, Some(identifier)),
+            Some(BleKnownIdentity::MacosIdentifier(identifier.to_string()))
+        );
     }
 
     #[cfg(not(target_vendor = "apple"))]

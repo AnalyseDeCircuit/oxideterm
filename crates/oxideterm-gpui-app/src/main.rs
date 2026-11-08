@@ -155,9 +155,11 @@ fn main() {
         .map(|store| store.settings().clone())
         .unwrap_or_default();
     if startup_launch.as_ref().is_some_and(|launch| {
-        !matches!(launch, oxideterm_ssh_launch::NativeConnectionLaunch::Local(_))
-    })
-        && handoff_launch.is_none()
+        !matches!(
+            launch,
+            oxideterm_ssh_launch::NativeConnectionLaunch::Local(_)
+        )
+    }) && handoff_launch.is_none()
         && !startup_settings.general.external_connection_uris_enabled
     {
         // A disabled external URI must not open an unrelated workspace window.
@@ -166,8 +168,10 @@ fn main() {
     let native_connection_launch = handoff_launch.or_else(|| {
         startup_launch
             .filter(|launch| {
-                matches!(launch, oxideterm_ssh_launch::NativeConnectionLaunch::Local(_))
-                    || startup_settings.general.external_connection_uris_enabled
+                matches!(
+                    launch,
+                    oxideterm_ssh_launch::NativeConnectionLaunch::Local(_)
+                ) || startup_settings.general.external_connection_uris_enabled
             })
             .map(Into::into)
     });

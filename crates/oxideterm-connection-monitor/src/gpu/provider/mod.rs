@@ -178,7 +178,9 @@ pub(super) fn gpu_os_supported(os_type: &str) -> bool {
             | "Windows_MinGW"
             | "Windows_MSYS"
             | "Windows_Cygwin"
-            | "macOS" | "macos" | "Darwin"
+            | "macOS"
+            | "macos"
+            | "Darwin"
     )
 }
 
