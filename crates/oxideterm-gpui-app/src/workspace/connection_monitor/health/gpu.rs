@@ -177,7 +177,11 @@ impl HostToolsEntity {
                 format_bytes(summary.memory_used),
                 format_bytes(summary.memory_total)
             )
-        } else if snapshot.devices.iter().any(|device| device.memory_used.is_some()) {
+        } else if snapshot
+            .devices
+            .iter()
+            .any(|device| device.memory_used.is_some())
+        {
             format_bytes(summary.memory_used)
         } else {
             "—".to_string()
@@ -205,7 +209,10 @@ impl HostToolsEntity {
             ))
             .child(Self::render_host_gpu_summary_item(
                 if !snapshot.devices.is_empty()
-                    && snapshot.devices.iter().all(|device| device.provider == GpuProvider::Apple)
+                    && snapshot
+                        .devices
+                        .iter()
+                        .all(|device| device.provider == GpuProvider::Apple)
                 {
                     "sidebar.host_gpu.summary.shared_memory"
                 } else {

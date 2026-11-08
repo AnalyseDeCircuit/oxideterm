@@ -368,8 +368,10 @@ pub fn parse_scheduled_task_snapshot(output: &str) -> ResourceScheduledTaskSnaps
                 entries: Vec::new(),
             };
         }
-        if let Some(message) = line.strip_prefix(SCHEDULED_TASK_ERROR_MARKER)
-            .or_else(|| line.strip_prefix("LAUNCHD_ERROR\t")) {
+        if let Some(message) = line
+            .strip_prefix(SCHEDULED_TASK_ERROR_MARKER)
+            .or_else(|| line.strip_prefix("LAUNCHD_ERROR\t"))
+        {
             return ResourceScheduledTaskSnapshot {
                 status: ResourceScheduledTaskStatus::Error {
                     message: clean_marker_message(message, "Scheduled task command failed."),
@@ -586,7 +588,8 @@ fn build_linux_scheduled_task_snapshot_command() -> String {
 fn build_macos_scheduled_task_snapshot_command() -> String {
     format!(
         "echo '===SCHEDULED_TASKS==='; if command -v launchctl >/dev/null 2>&1 && command -v plutil >/dev/null 2>&1; then\nprintf '__OXIDE_SCHEDULE_CAPABILITY__\\tpartial\\tmacos_launchd\\n'\n{}\n{}\nelse echo '__OXIDE_SCHEDULE_UNAVAILABLE__'; fi\necho '===SCHEDULED_TASKS_END==='",
-        include_str!("launchd_inventory.sh"), include_str!("scheduled_task/macos_snapshot.sh")
+        include_str!("launchd_inventory.sh"),
+        include_str!("scheduled_task/macos_snapshot.sh")
     )
 }
 

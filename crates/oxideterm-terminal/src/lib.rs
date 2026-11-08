@@ -63,7 +63,9 @@ pub use editor_integration::{
     TerminalEditorClipboardEvent, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEditorMode, TerminalEditorSelection, VIM_FREE_TYPE_INTEGRATION_SOURCE,
 };
-pub use local_shell::{LocalCommand, LocalPtyConfig, ShellInfo, default_shell, is_shell_executable, scan_shells};
+pub use local_shell::{
+    LocalCommand, LocalPtyConfig, ShellInfo, default_shell, is_shell_executable, scan_shells,
+};
 pub use local_shell_integration::TerminalCwdIntegrationLaunchState;
 pub use oxideterm_modem_transfer::{
     DetectedModemProtocol, ModemTransferDirection,
@@ -92,11 +94,11 @@ pub use selection::TerminalSelectionRange;
 // oxideterm-ble directly alongside oxideterm-terminal.
 pub use oxideterm_ble::BleAdapterGuard;
 pub use session::{
-    BleConnectionStatus, BleResolveError, BleResolveStage, BleSessionConfig, MoshConnectionStatus,
-    MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine, SerialControlState,
-    SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl, SerialLineEnding,
-    SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode, SerialSessionConfig,
-    SshPtySession, SshSessionConfig, TelnetControlCommand, TelnetLineEndings,
+    BleConnectionStatus, BleResolveError, BleResolveStage, BleResolvedLink, BleSessionConfig,
+    MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine,
+    SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,
+    SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode,
+    SerialSessionConfig, SshPtySession, SshSessionConfig, TelnetControlCommand, TelnetLineEndings,
     TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport,
     TerminalMagicKind, TerminalOutputProcessor, TerminalResize, TerminalSession,
     TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,

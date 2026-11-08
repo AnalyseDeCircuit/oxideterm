@@ -157,7 +157,9 @@ pub fn parse_log_snapshot(output: &str) -> ResourceLogSnapshot {
         if let Some(status) = line.strip_prefix("MACOS_LOG_EXIT\t") {
             if status != "0" {
                 return ResourceLogSnapshot {
-                    status: ResourceLogStatus::Error { message: "macOS log query failed.".into() },
+                    status: ResourceLogStatus::Error {
+                        message: "macOS log query failed.".into(),
+                    },
                     entries: Vec::new(),
                 };
             }
@@ -177,7 +179,9 @@ pub fn parse_log_snapshot(output: &str) -> ResourceLogSnapshot {
             continue;
         }
         if let Some(entry) = parse_macos_log_line(line)
-            .or_else(|| parse_log_json_line(line)).or_else(|| parse_log_row_line(line)) {
+            .or_else(|| parse_log_json_line(line))
+            .or_else(|| parse_log_row_line(line))
+        {
             entries.push(entry);
         }
     }
@@ -475,22 +479,38 @@ fn parse_log_json_line(line: &str) -> Option<ResourceLogEntry> {
 fn parse_macos_log_line(line: &str) -> Option<ResourceLogEntry> {
     let value: serde_json::Value = serde_json::from_str(line).ok()?;
     let message = value.get("eventMessage")?.as_str()?.to_string();
-    let process = value.get("processImagePath").and_then(|v| v.as_str())
-        .and_then(|path| path.rsplit('/').next()).unwrap_or_default();
+    let process = value
+        .get("processImagePath")
+        .and_then(|v| v.as_str())
+        .and_then(|path| path.rsplit('/').next())
+        .unwrap_or_default();
     let source = match value.get("processID").and_then(|v| v.as_u64()) {
         Some(pid) => format!("{process}[{pid}]"),
         None => process.to_string(),
     };
-    let level = match value.get("messageType").and_then(|v| v.as_str()).unwrap_or_default() {
+    let level = match value
+        .get("messageType")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+    {
         "Error" | "Fault" => "error",
         "Info" | "Default" => "info",
         "Debug" => "debug",
         _ => "unknown",
     };
     Some(ResourceLogEntry {
-        timestamp: value.get("timestamp").and_then(|v| v.as_str()).unwrap_or_default().into(),
-        level: level.into(), source,
-        unit: value.get("subsystem").and_then(|v| v.as_str()).unwrap_or_default().into(),
+        timestamp: value
+            .get("timestamp")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .into(),
+        level: level.into(),
+        source,
+        unit: value
+            .get("subsystem")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .into(),
         message,
     })
 }
@@ -725,16 +745,28 @@ mod tests {
 
     #[test]
     fn macos_structured_logs_preserve_event_fields_and_producer_failure() {
-        let raw = concat!("===HOST_LOGS===\n__OXIDE_LOG_CAPABILITY__\tpartial\tmacos_log\n",
+        let raw = concat!(
+            "===HOST_LOGS===\n__OXIDE_LOG_CAPABILITY__\tpartial\tmacos_log\n",
             "{\"timestamp\":\"2026-11-07 12:00:00+0800\",\"messageType\":\"Fault\",\"processImagePath\":\"/usr/sbin/example\",\"processID\":42,\"subsystem\":\"com.example.io\",\"eventMessage\":\"failure\\nwith\\ttabs\"}\n",
-            "MACOS_LOG_EXIT\t0\n===HOST_LOGS_END===");
+            "MACOS_LOG_EXIT\t0\n===HOST_LOGS_END==="
+        );
         let snapshot = parse_log_snapshot(raw);
-        assert_eq!(snapshot.entries, vec![ResourceLogEntry {
-            timestamp: "2026-11-07 12:00:00+0800".into(), level: "error".into(), source: "example[42]".into(),
-            unit: "com.example.io".into(), message: "failure\nwith\ttabs".into(),
-        }]);
-        assert_eq!(parse_log_snapshot(&raw.replace("MACOS_LOG_EXIT\t0", "MACOS_LOG_EXIT\t1")).status,
-            ResourceLogStatus::Error { message: "macOS log query failed.".into() });
+        assert_eq!(
+            snapshot.entries,
+            vec![ResourceLogEntry {
+                timestamp: "2026-11-07 12:00:00+0800".into(),
+                level: "error".into(),
+                source: "example[42]".into(),
+                unit: "com.example.io".into(),
+                message: "failure\nwith\ttabs".into(),
+            }]
+        );
+        assert_eq!(
+            parse_log_snapshot(&raw.replace("MACOS_LOG_EXIT\t0", "MACOS_LOG_EXIT\t1")).status,
+            ResourceLogStatus::Error {
+                message: "macOS log query failed.".into()
+            }
+        );
     }
 
     #[test]

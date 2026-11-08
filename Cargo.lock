@@ -7152,6 +7152,7 @@ name = "oxideterm-ble"
 version = "2.3.1"
 dependencies = [
  "btleplug",
+ "dbus",
  "thiserror 2.0.20",
  "tokio",
  "tokio-util",

@@ -84,6 +84,7 @@
               "connect_failed": "Error al conectar el dispositivo BLE: {error}",
               "service_discovery_failed": "Error al descubrir servicios: {error}",
               "service_mismatch": "El dispositivo coincide pero no anuncia el servicio de destino {uuid}",
+              "direct_connect_failed": "Conexión directa a {identity} fallida: {reason}. Reintente o busque el dispositivo mediante una nueva conexión.",
               "invalid_service_uuid": "UUID de servicio no válido: {uuid}"
         }
       },
@@ -142,6 +143,7 @@
       },
       "stage": {
         "ble_opening_adapter": "Abriendo adaptador Bluetooth",
+        "ble_direct_connect": "Conexión directa (escaneo omitido)",
         "ble_scanning": "Buscando dispositivos Bluetooth",
         "ble_matching": "Identificando dispositivo",
         "ble_verifying_service": "Verificando servicio",

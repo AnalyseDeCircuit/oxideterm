@@ -4713,6 +4713,71 @@ mod tests {
             .unwrap();
         assert!(store_b.ble_profiles().iter().any(|p| p.id == reborn.id));
     }
+
+    #[test]
+    fn upsert_ble_profile_keeps_platform_identifier_through_reload() {
+        let mut store = load_empty_store("ble-platform-identifier");
+        let identifier = "1b4d2f6e-1234-4c5d-9e8f-aabbccddeeff";
+        store
+            .upsert_ble_profile(SaveBleProfileRequest {
+                id: Some("ble-direct".to_string()),
+                name: "BLE direct".to_string(),
+                device_mac: Some("AA:BB:CC:DD:EE:FF".to_string()),
+                device_name: Some("NUC Console".to_string()),
+                platform_identifier: Some(identifier.to_string()),
+                service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                ..SaveBleProfileRequest::default()
+            })
+            .unwrap();
+
+        // The identifier survives a save/reload round trip.
+        let path = store.path.clone();
+        let reloaded = ConnectionStore::load(path.clone()).unwrap();
+        let profile = reloaded
+            .ble_profiles()
+            .iter()
+            .find(|p| p.id == "ble-direct")
+            .unwrap();
+        assert_eq!(profile.platform_identifier.as_deref(), Some(identifier));
+
+        // A profile written before this field existed must still load; the
+        // missing key deserializes as `None`.
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let mut value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        value["ble_profiles"][0]["platform_identifier"] = serde_json::Value::Null;
+        std::fs::write(&path, serde_json::to_string(&value).unwrap()).unwrap();
+
+        let mut reloaded = ConnectionStore::load(path).unwrap();
+        assert_eq!(
+            reloaded
+                .ble_profiles()
+                .iter()
+                .find(|p| p.id == "ble-direct")
+                .unwrap()
+                .platform_identifier,
+            None
+        );
+
+        // A save without an identifier clears it instead of keeping a stale
+        // platform-local value pointing at a device the OS may no longer know.
+        reloaded
+            .upsert_ble_profile(SaveBleProfileRequest {
+                id: Some("ble-direct".to_string()),
+                name: "BLE direct".to_string(),
+                service_uuid: "6e400001-b5a3-f393-e0a9-e50e24dcca9e".to_string(),
+                ..SaveBleProfileRequest::default()
+            })
+            .unwrap();
+        assert_eq!(
+            reloaded
+                .ble_profiles()
+                .iter()
+                .find(|p| p.id == "ble-direct")
+                .unwrap()
+                .platform_identifier,
+            None
+        );
+    }
     #[test]
     fn local_profiles_persist_sync_and_delete_without_syncing_usage() {
         let mut source = load_empty_store("local-profile-source");

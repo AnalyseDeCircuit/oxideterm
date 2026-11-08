@@ -78,6 +78,17 @@ impl WorkspaceApp {
         else {
             return;
         };
+        // Revive the profile's released row when one exists: reopening an
+        // already-known device from the session manager should reuse its row
+        // instead of stacking a second one in the active list.
+        let standalone = self
+            .standalone_connections
+            .released_saved_ble_record(&profile.id)
+            .and_then(|record_id| {
+                self.standalone_connections
+                    .begin_reconnect(&record_id)
+                    .map(|attempt_id| BleStandaloneTarget::Reconnect { attempt_id })
+            });
         self.start_ble_open_flow(
             BleOpenRequest {
                 target: BleTraceTarget {
@@ -93,6 +104,7 @@ impl WorkspaceApp {
                 adapter_mac: profile.adapter_mac.clone(),
                 device_mac: profile.device_mac.clone(),
                 device_name: profile.device_name.clone(),
+                platform_identifier: profile.platform_identifier.clone(),
                 service_uuid: profile.service_uuid.clone(),
                 title: format!("BLE {}", profile.name),
                 terminal_options: profile.terminal.clone(),
@@ -104,7 +116,7 @@ impl WorkspaceApp {
                 write_without_response: profile.write_without_response,
                 profile_id: Some(profile.id),
                 form_id: None,
-                standalone: BleStandaloneTarget::New,
+                standalone: standalone.unwrap_or(BleStandaloneTarget::New),
             },
             cx,
         );
@@ -161,6 +173,7 @@ impl WorkspaceApp {
             adapter_mac,
             device_mac,
             device_name,
+            platform_identifier,
             service_uuid,
             title,
             terminal_options,
@@ -203,6 +216,7 @@ impl WorkspaceApp {
                 adapter_mac.as_deref(),
                 device_mac.as_deref(),
                 device_name.as_deref(),
+                platform_identifier.as_deref(),
                 &service_uuid,
                 runtime_options,
                 mtu,
@@ -218,10 +232,11 @@ impl WorkspaceApp {
             )
             .await;
             match result {
-                Ok((config, guard)) => {
+                Ok((config, guard, resolved_link)) => {
                     let _ = tx.send(BleConnectionWorkerResult::ScanComplete {
                         config,
                         adapter_guard: guard,
+                        resolved_link,
                         terminal_options,
                         title,
                         attempt_id,
@@ -251,6 +266,19 @@ impl WorkspaceApp {
         );
     }
 
+    /// Closes a resolver link that no session will adopt, on the shared
+    /// runtime: the link is still open on the radio and has no other owner.
+    fn abandon_ble_resolved_link(
+        &self,
+        resolved_link: Option<oxideterm_terminal::BleResolvedLink>,
+    ) {
+        if let Some(link) = resolved_link {
+            self.forwarding_runtime.clone().spawn(async move {
+                link.close().await;
+            });
+        }
+    }
+
     pub(in crate::workspace) fn handle_ble_worker_result(
         &mut self,
         result: BleConnectionWorkerResult,
@@ -263,6 +291,11 @@ impl WorkspaceApp {
             | BleConnectionWorkerResult::ScanFailed { attempt_id, .. } => attempt_id,
         };
         if !self.standalone_connections.is_connecting_attempt(attempt) {
+            // The attempt is already gone; a verified link would otherwise be
+            // dropped while still open on the radio.
+            if let BleConnectionWorkerResult::ScanComplete { resolved_link, .. } = result {
+                self.abandon_ble_resolved_link(resolved_link);
+            }
             return;
         }
         match result {
@@ -283,6 +316,7 @@ impl WorkspaceApp {
             BleConnectionWorkerResult::ScanComplete {
                 config,
                 adapter_guard,
+                resolved_link,
                 terminal_options,
                 title,
                 attempt_id,
@@ -291,12 +325,14 @@ impl WorkspaceApp {
                 form_id,
             } => {
                 if form_id.is_some() && !self.ble_form_is_current(form_id, cx) {
+                    self.abandon_ble_resolved_link(resolved_link);
                     self.standalone_connections.cancel_attempt(&attempt_id);
                     return;
                 }
                 let created = self.create_ble_terminal_tab(
                     config,
                     Some(adapter_guard),
+                    resolved_link,
                     terminal_options,
                     title,
                     window,
@@ -435,6 +471,10 @@ impl WorkspaceApp {
                 "connections.ble.resolve.service_mismatch",
                 &[("uuid", service_uuid)],
             ),
+            BleResolveError::DirectConnectUnavailable { identity, reason } => self.i18n.t_with(
+                "connections.ble.resolve.direct_connect_failed",
+                &[("identity", identity), ("reason", reason)],
+            ),
             BleResolveError::InvalidServiceUuid { service_uuid } => self.i18n.t_with(
                 "connections.ble.resolve.invalid_service_uuid",
                 &[("uuid", service_uuid)],
@@ -476,6 +516,9 @@ impl WorkspaceApp {
         let stage = match stage {
             oxideterm_terminal::BleResolveStage::OpeningAdapter => {
                 ConnectionTraceStage::BleOpeningAdapter
+            }
+            oxideterm_terminal::BleResolveStage::DirectConnect => {
+                ConnectionTraceStage::BleDirectConnect
             }
             oxideterm_terminal::BleResolveStage::Scanning => ConnectionTraceStage::BleScanning,
             oxideterm_terminal::BleResolveStage::Matching => ConnectionTraceStage::BleMatching,

@@ -1052,6 +1052,7 @@ impl TerminalPane {
     pub fn new_ble_with_preferences(
         config: BleSessionConfig,
         adapter_guard: Option<oxideterm_terminal::BleAdapterGuard>,
+        resolved_link: Option<oxideterm_terminal::BleResolvedLink>,
         preferences: TerminalUiPreferences,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1061,6 +1062,7 @@ impl TerminalPane {
         let terminal = Arc::new(Mutex::new(TerminalSession::ble_with_graphics_and_encoding(
             config,
             adapter_guard,
+            resolved_link,
             DEFAULT_COLS,
             DEFAULT_ROWS,
             graphics_options_from_preferences(&preferences),

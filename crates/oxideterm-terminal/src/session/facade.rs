@@ -359,6 +359,7 @@ impl TerminalSession {
     pub fn ble_with_graphics_and_encoding(
         config: BleSessionConfig,
         adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+        resolved_link: Option<BleResolvedLink>,
         cols: usize,
         rows: usize,
         graphics_options: GraphicsOptions,
@@ -372,6 +373,7 @@ impl TerminalSession {
             backend: Box::new(BleSession::new(
                 config,
                 adapter_guard,
+                resolved_link,
                 audit,
                 cols,
                 rows,

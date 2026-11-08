@@ -319,6 +319,7 @@ impl LaunchSnapshot {
                             adapter_mac: profile.adapter_mac.clone(),
                             device_mac: profile.device_mac.clone(),
                             device_name: profile.device_name.clone(),
+                            platform_identifier: profile.platform_identifier.clone(),
                             service_uuid: profile.service_uuid.clone(),
                         },
                         terminal_options: profile.terminal.clone(),

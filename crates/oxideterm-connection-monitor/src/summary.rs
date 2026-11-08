@@ -380,7 +380,10 @@ fn push_compact_metric_rows(metrics: &ResourceMetrics, rows: &mut Vec<CompactMon
     }
     for (kind, rate) in [
         (MonitorMetricKind::DiskRead, metrics.disk_read_bytes_per_sec),
-        (MonitorMetricKind::DiskWrite, metrics.disk_write_bytes_per_sec),
+        (
+            MonitorMetricKind::DiskWrite,
+            metrics.disk_write_bytes_per_sec,
+        ),
     ] {
         if let Some(rate) = rate {
             rows.push(CompactMonitorRow::Metric {
@@ -464,11 +467,18 @@ fn push_compact_detail_rows(metrics: &ResourceMetrics, rows: &mut Vec<CompactMon
     push_section_rows(
         rows,
         MonitorSectionKind::CpuCores,
-        metrics.cpu_per_core.iter().map(|core| MonitorListRow {
-            name: format!("CPU {}", core.index),
-            value: core.percent.map(|percent| format!("{percent:.1}%")).unwrap_or_else(dash),
-            level: percent_level(core.percent),
-        }).collect(),
+        metrics
+            .cpu_per_core
+            .iter()
+            .map(|core| MonitorListRow {
+                name: format!("CPU {}", core.index),
+                value: core
+                    .percent
+                    .map(|percent| format!("{percent:.1}%"))
+                    .unwrap_or_else(dash),
+                level: percent_level(core.percent),
+            })
+            .collect(),
     );
     push_section_rows(rows, MonitorSectionKind::Mounts, disk_list_rows(metrics, 8));
     push_section_rows(rows, MonitorSectionKind::Gpus, gpu_list_rows(metrics, 4));

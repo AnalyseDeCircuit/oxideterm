@@ -21,6 +21,9 @@ pub enum ConnectionTraceStage {
     // BLE profiles resolve through scan/match/verify stages instead of an SSH
     // handshake; the UI reuses the same progress card vocabulary.
     BleOpeningAdapter,
+    /// Cache-based connect without a discovery window; scan stages only run
+    /// when this fast path misses.
+    BleDirectConnect,
     BleScanning,
     BleMatching,
     BleVerifyingService,

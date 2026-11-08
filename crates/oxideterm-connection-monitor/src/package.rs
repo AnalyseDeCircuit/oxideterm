@@ -302,7 +302,10 @@ pub fn parse_package_snapshot(output: &str) -> ResourcePackageSnapshot {
             };
         }
         if let Some(message) = line.strip_prefix("__OXIDE_PACKAGE_WARNING__\t") {
-            warnings.push(clean_marker_message(message, "Package query was incomplete."));
+            warnings.push(clean_marker_message(
+                message,
+                "Package query was incomplete.",
+            ));
             continue;
         }
         if let Some((next_capability, next_platform)) = parse_package_capability_line(line) {
@@ -331,9 +334,14 @@ pub fn parse_package_snapshot(output: &str) -> ResourcePackageSnapshot {
 
     ResourcePackageSnapshot {
         status: if warnings.is_empty() {
-            ResourcePackageStatus::Available { capability, platform }
+            ResourcePackageStatus::Available {
+                capability,
+                platform,
+            }
         } else {
-            ResourcePackageStatus::Error { message: warnings.join("\n") }
+            ResourcePackageStatus::Error {
+                message: warnings.join("\n"),
+            }
         },
         managers,
         entries,

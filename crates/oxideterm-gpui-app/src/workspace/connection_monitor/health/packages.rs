@@ -298,9 +298,10 @@ impl HostToolsEntity {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let partial_error = match &status {
-            ResourcePackageStatus::Error { message } if !rows.is_empty() => {
-                Some(i18n.t("sidebar.host_packages.error").replace("{{error}}", message))
-            }
+            ResourcePackageStatus::Error { message } if !rows.is_empty() => Some(
+                i18n.t("sidebar.host_packages.error")
+                    .replace("{{error}}", message),
+            ),
             _ => None,
         };
         if loading && rows.is_empty() {
@@ -696,8 +697,8 @@ impl HostToolsEntity {
             .t("sidebar.host_packages.toast.upgrade_opened")
             .replace("{{name}}", &entry.name);
         let upgrade_missing_notice = i18n.t("sidebar.host_packages.toast.exec_terminal_missing");
-        let can_upgrade = matches!(entry.manager.as_str(), "winget" | "brew")
-            && entry.status == "upgradable";
+        let can_upgrade =
+            matches!(entry.manager.as_str(), "winget" | "brew") && entry.status == "upgradable";
         let uninstall_request = HostPackageUninstallRequest {
             connection_id: connection_id.to_string(),
             manager: entry.manager.clone(),

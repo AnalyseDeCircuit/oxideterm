@@ -328,7 +328,9 @@ impl WorkspaceApp {
     ) -> Result<()> {
         match launch {
             NativeConnectionLaunch::Local(launch) => {
-                launch.validate().map_err(|message| anyhow::anyhow!(message))?;
+                launch
+                    .validate()
+                    .map_err(|message| anyhow::anyhow!(message))?;
                 let mut config = self.local_terminal_config();
                 config.cwd = Some(launch.cwd);
                 if let Some(program) = launch.program {
@@ -744,6 +746,7 @@ impl WorkspaceApp {
         &mut self,
         config: BleSessionConfig,
         adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
+        resolved_link: Option<oxideterm_terminal::BleResolvedLink>,
         terminal_options: ConnectionTerminalOptions,
         title: String,
         window: &mut Window,
@@ -771,6 +774,7 @@ impl WorkspaceApp {
             TerminalPane::new_ble_with_preferences(
                 config.clone(),
                 adapter_guard,
+                resolved_link,
                 preferences,
                 window,
                 cx,

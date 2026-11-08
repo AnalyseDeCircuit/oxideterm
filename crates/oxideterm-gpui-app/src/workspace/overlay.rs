@@ -1514,7 +1514,7 @@ fn render_connection_card(
     })
     .child(header)
     .child(render_connection_stage_path(
-        tokens, i18n, attempt_id, event,
+        tokens, i18n, attempt_id, event, history,
     ));
 
     if let Some(error_log) = render_connection_error_log(tokens, event) {
@@ -1531,11 +1531,77 @@ fn render_connection_card(
     )
 }
 
+// Attempts that skipped the scan window render a shorter path so no dead
+// node lingers for the scan stages they never entered.
+const BLE_DIRECT_STAGES: [(ConnectionTraceStage, &str); 3] = [
+    (
+        ConnectionTraceStage::BleOpeningAdapter,
+        "connections.trace.stage.ble_opening_adapter",
+    ),
+    (
+        ConnectionTraceStage::BleDirectConnect,
+        "connections.trace.stage.ble_direct_connect",
+    ),
+    (
+        ConnectionTraceStage::BleVerifyingService,
+        "connections.trace.stage.ble_verifying_service",
+    ),
+];
+
+const BLE_SCAN_STAGES: [(ConnectionTraceStage, &str); 4] = [
+    (
+        ConnectionTraceStage::BleOpeningAdapter,
+        "connections.trace.stage.ble_opening_adapter",
+    ),
+    (
+        ConnectionTraceStage::BleScanning,
+        "connections.trace.stage.ble_scanning",
+    ),
+    (
+        ConnectionTraceStage::BleMatching,
+        "connections.trace.stage.ble_matching",
+    ),
+    (
+        ConnectionTraceStage::BleVerifyingService,
+        "connections.trace.stage.ble_verifying_service",
+    ),
+];
+
+/// BLE stage vocabulary and current-node index for an attempt. Split from the
+/// renderer so the direct/scan fallback rules are testable without gpui.
+fn ble_stage_path(
+    event_stage: ConnectionTraceStage,
+    history: &VecDeque<ConnectionTraceEvent>,
+) -> (&'static [(ConnectionTraceStage, &'static str)], usize) {
+    // Once the attempt leaves the direct stage for a scan stage, the path
+    // falls back to the scan vocabulary.
+    let direct_path = event_stage == ConnectionTraceStage::BleDirectConnect
+        || (history
+            .iter()
+            .any(|entry| entry.stage == ConnectionTraceStage::BleDirectConnect)
+            && !matches!(
+                event_stage,
+                ConnectionTraceStage::BleScanning | ConnectionTraceStage::BleMatching
+            ));
+    let stages: &'static [(ConnectionTraceStage, &'static str)] = if direct_path {
+        &BLE_DIRECT_STAGES
+    } else {
+        &BLE_SCAN_STAGES
+    };
+    // Ready is past the last node so every node renders completed.
+    let current = stages
+        .iter()
+        .position(|(stage, _)| *stage == event_stage)
+        .unwrap_or(stages.len());
+    (stages, current)
+}
+
 fn render_connection_stage_path(
     tokens: &ThemeTokens,
     i18n: &I18n,
     attempt_id: &str,
     event: &ConnectionTraceEvent,
+    history: &VecDeque<ConnectionTraceEvent>,
 ) -> AnyElement {
     const SSH_STAGES: [(ConnectionTraceStage, &str); 4] = [
         (
@@ -1552,27 +1618,9 @@ fn render_connection_stage_path(
         ),
         (ConnectionTraceStage::Ready, "connections.trace.stage.ready"),
     ];
-    const BLE_STAGES: [(ConnectionTraceStage, &str); 4] = [
-        (
-            ConnectionTraceStage::BleOpeningAdapter,
-            "connections.trace.stage.ble_opening_adapter",
-        ),
-        (
-            ConnectionTraceStage::BleScanning,
-            "connections.trace.stage.ble_scanning",
-        ),
-        (
-            ConnectionTraceStage::BleMatching,
-            "connections.trace.stage.ble_matching",
-        ),
-        (
-            ConnectionTraceStage::BleVerifyingService,
-            "connections.trace.stage.ble_verifying_service",
-        ),
-    ];
     let (stages, current): (&[(ConnectionTraceStage, &str)], usize) =
         match connection_trace_transport(event.stage) {
-            TraceTransport::Ble => (&BLE_STAGES, ble_trace_path_index(event.stage)),
+            TraceTransport::Ble => ble_stage_path(event.stage, history),
             TraceTransport::Ssh => (&SSH_STAGES, connection_trace_path_index(event.stage)),
         };
     let failed = event.status == ConnectionTraceStatus::Failed;
@@ -1808,6 +1856,7 @@ fn connection_trace_path_index(stage: ConnectionTraceStage) -> usize {
         // BLE stages are rendered through their own path; this SSH mapping is
         // only reached if a BLE stage ever arrives on a non-BLE card.
         ConnectionTraceStage::BleOpeningAdapter
+        | ConnectionTraceStage::BleDirectConnect
         | ConnectionTraceStage::BleScanning
         | ConnectionTraceStage::BleMatching
         | ConnectionTraceStage::BleVerifyingService => 0,
@@ -1826,23 +1875,12 @@ enum TraceTransport {
 fn connection_trace_transport(stage: ConnectionTraceStage) -> TraceTransport {
     match stage {
         ConnectionTraceStage::BleOpeningAdapter
+        | ConnectionTraceStage::BleDirectConnect
         | ConnectionTraceStage::BleScanning
         | ConnectionTraceStage::BleMatching
         | ConnectionTraceStage::BleVerifyingService
         | ConnectionTraceStage::BleReady => TraceTransport::Ble,
         _ => TraceTransport::Ssh,
-    }
-}
-
-fn ble_trace_path_index(stage: ConnectionTraceStage) -> usize {
-    match stage {
-        ConnectionTraceStage::BleOpeningAdapter => 0,
-        ConnectionTraceStage::BleScanning => 1,
-        ConnectionTraceStage::BleMatching => 2,
-        ConnectionTraceStage::BleVerifyingService => 3,
-        // Past the last visible stage so every node renders as completed.
-        ConnectionTraceStage::BleReady => 4,
-        _ => 0,
     }
 }
 
@@ -2124,6 +2162,7 @@ pub(in crate::workspace) fn connection_trace_stage_key(
         ConnectionTraceStage::ShellReady => "connections.trace.stage.shell_ready",
         ConnectionTraceStage::Ready => "connections.trace.stage.ready",
         ConnectionTraceStage::BleOpeningAdapter => "connections.trace.stage.ble_opening_adapter",
+        ConnectionTraceStage::BleDirectConnect => "connections.trace.stage.ble_direct_connect",
         ConnectionTraceStage::BleScanning => "connections.trace.stage.ble_scanning",
         ConnectionTraceStage::BleMatching => "connections.trace.stage.ble_matching",
         ConnectionTraceStage::BleVerifyingService => {
@@ -2162,6 +2201,41 @@ mod tests {
             total_steps: None,
             mode: ConnectionTraceMode::Connect,
         }
+    }
+
+    #[test]
+    fn ble_stage_path_selects_direct_vocabulary_and_falls_back_to_scan() {
+        let mut history = VecDeque::new();
+
+        // No direct stage recorded: the scan vocabulary is used.
+        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleScanning, &history);
+        assert_eq!(stages.len(), 4);
+        assert_eq!(stages[1].0, ConnectionTraceStage::BleScanning);
+        assert_eq!(current, 1);
+
+        history.push_back(ble_trace_event(ConnectionTraceStage::BleDirectConnect));
+
+        // On the direct stage itself: 3 nodes, the direct node is current.
+        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleDirectConnect, &history);
+        assert_eq!(stages.len(), 3);
+        assert_eq!(stages[1].1, "connections.trace.stage.ble_direct_connect");
+        assert_eq!(current, 1);
+
+        // Verifying after a direct connect stays on the direct vocabulary.
+        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleVerifyingService, &history);
+        assert_eq!(stages.len(), 3);
+        assert_eq!(current, 2);
+
+        // Ready falls past the last node so every node renders completed.
+        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleReady, &history);
+        assert_eq!(stages.len(), 3);
+        assert_eq!(current, 3);
+
+        // A scan stage after a direct entry falls back to the scan vocabulary
+        // so the scan nodes the attempt did enter are shown.
+        let (stages, current) = ble_stage_path(ConnectionTraceStage::BleMatching, &history);
+        assert_eq!(stages.len(), 4);
+        assert_eq!(current, 2);
     }
 
     #[gpui::test]

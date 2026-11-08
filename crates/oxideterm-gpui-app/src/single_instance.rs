@@ -442,29 +442,62 @@ mod tests {
     #[test]
     fn local_terminal_launch_uses_the_primary_instance_and_native_event_path() {
         for already_running in [false, true] {
-            let data_dir = std::env::temp_dir().join(format!("oxideterm-local-launch-{}", Uuid::new_v4()));
+            let data_dir =
+                std::env::temp_dir().join(format!("oxideterm-local-launch-{}", Uuid::new_v4()));
             fs::create_dir_all(&data_dir).unwrap();
             let paths = InstancePaths::for_data_dir(&data_dir, "test");
             let launch = NativeConnectionLaunch::Local(oxideterm_ssh_launch::LocalTerminalLaunch {
-                cwd: data_dir.clone(), program: Some(std::env::current_exe().unwrap()),
-                args: Zeroizing::new(vec!["argument with spaces".into(), "token=synthetic-secret".into()]), path: None,
+                cwd: data_dir.clone(),
+                program: Some(std::env::current_exe().unwrap()),
+                args: Zeroizing::new(vec![
+                    "argument with spaces".into(),
+                    "token=synthetic-secret".into(),
+                ]),
+                path: None,
             });
             let (guard, delivered) = if already_running {
-                let SingleInstanceOutcome::Primary { _guard: guard, receiver, .. } =
-                    acquire_or_forward_with_paths(paths.clone(), None, None).unwrap() else { panic!("primary") };
-                assert!(matches!(acquire_or_forward_with_paths(paths, None, Some(launch)).unwrap(), SingleInstanceOutcome::Forwarded));
+                let SingleInstanceOutcome::Primary {
+                    _guard: guard,
+                    receiver,
+                    ..
+                } = acquire_or_forward_with_paths(paths.clone(), None, None).unwrap()
+                else {
+                    panic!("primary")
+                };
+                assert!(matches!(
+                    acquire_or_forward_with_paths(paths, None, Some(launch)).unwrap(),
+                    SingleInstanceOutcome::Forwarded
+                ));
                 let receiver = receiver.lock().unwrap();
-                assert!(matches!(receiver.recv_timeout(Duration::from_secs(1)).unwrap(), SingleInstanceEvent::ShowMainWindow));
-                let SingleInstanceEvent::OpenNativeConnection(handoff) = receiver.recv_timeout(Duration::from_secs(1)).unwrap() else { panic!("local request must not use the external URI handler") };
+                assert!(matches!(
+                    receiver.recv_timeout(Duration::from_secs(1)).unwrap(),
+                    SingleInstanceEvent::ShowMainWindow
+                ));
+                let SingleInstanceEvent::OpenNativeConnection(handoff) =
+                    receiver.recv_timeout(Duration::from_secs(1)).unwrap()
+                else {
+                    panic!("local request must not use the external URI handler")
+                };
                 (guard, handoff.launch)
             } else {
-                let SingleInstanceOutcome::Primary { _guard: guard, startup_launch: Some(launch), .. } =
-                    acquire_or_forward_with_paths(paths, None, Some(launch)).unwrap() else { panic!("startup launch") };
+                let SingleInstanceOutcome::Primary {
+                    _guard: guard,
+                    startup_launch: Some(launch),
+                    ..
+                } = acquire_or_forward_with_paths(paths, None, Some(launch)).unwrap()
+                else {
+                    panic!("startup launch")
+                };
                 (guard, launch)
             };
-            let NativeConnectionLaunch::Local(launch) = delivered else { panic!("local launch") };
+            let NativeConnectionLaunch::Local(launch) = delivered else {
+                panic!("local launch")
+            };
             assert_eq!(launch.cwd, data_dir);
-            assert_eq!(launch.args.as_slice(), ["argument with spaces", "token=synthetic-secret"]);
+            assert_eq!(
+                launch.args.as_slice(),
+                ["argument with spaces", "token=synthetic-secret"]
+            );
             assert!(!format!("{launch:?}").contains("synthetic-secret"));
             drop(guard);
             fs::remove_dir_all(data_dir).unwrap();

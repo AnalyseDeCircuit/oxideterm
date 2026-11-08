@@ -84,6 +84,7 @@
               "connect_failed": "BLE 장치 연결 실패: {error}",
               "service_discovery_failed": "서비스 검색 실패: {error}",
               "service_mismatch": "장치가 일치하지만 대상 서비스 {uuid}를 광고하지 않습니다",
+              "direct_connect_failed": "{identity} 직접 연결 실패: {reason}. 재시도하거나 새 연결에서 장치를 스캔하세요.",
               "invalid_service_uuid": "잘못된 서비스 UUID: {uuid}"
         }
       },
@@ -142,6 +143,7 @@
       },
       "stage": {
         "ble_opening_adapter": "Bluetooth 어댑터 여는 중",
+        "ble_direct_connect": "스캔을 건너뛰고 직접 연결",
         "ble_scanning": "Bluetooth 장치 검색 중",
         "ble_matching": "장치 매칭 중",
         "ble_verifying_service": "서비스 확인 중",

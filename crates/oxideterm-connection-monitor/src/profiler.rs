@@ -1111,16 +1111,26 @@ mod tests {
     #[test]
     fn native_disk_probe_reads_cumulative_byte_counters() {
         let output = std::process::Command::new("/bin/sh")
-            .args(["-c", METRICS_COMMAND_MACOS_DISK_IO]).output().unwrap();
+            .args(["-c", METRICS_COMMAND_MACOS_DISK_IO])
+            .output()
+            .unwrap();
         assert!(output.status.success());
         let output = String::from_utf8(output.stdout).unwrap();
         let metrics = parse_resource_metrics(&output, None, 1);
         let baseline = previous_sample_from_metrics(&metrics, &output).unwrap();
         assert!(baseline.disk_io.iter().any(|disk| disk.read_bytes > 0));
-        assert!(baseline.disk_io.iter().all(|disk| disk.id.starts_with("0x")));
+        assert!(
+            baseline
+                .disk_io
+                .iter()
+                .all(|disk| disk.id.starts_with("0x"))
+        );
         // Reusing the same counters at a later timestamp represents an idle disk.
         let idle = parse_resource_metrics(&output, Some(&baseline), 1001);
-        assert_eq!((idle.disk_read_bytes_per_sec, idle.disk_write_bytes_per_sec), (Some(0), Some(0)));
+        assert_eq!(
+            (idle.disk_read_bytes_per_sec, idle.disk_write_bytes_per_sec),
+            (Some(0), Some(0))
+        );
     }
 
     #[test]

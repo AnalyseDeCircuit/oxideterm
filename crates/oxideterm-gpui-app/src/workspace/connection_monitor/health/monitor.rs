@@ -973,7 +973,9 @@ fn monitor_metric_icon(kind: MonitorMetricKind) -> LucideIcon {
         MonitorMetricKind::Memory | MonitorMetricKind::Swap | MonitorMetricKind::GpuMemory => {
             LucideIcon::MemoryStick
         }
-        MonitorMetricKind::Disk | MonitorMetricKind::DiskRead | MonitorMetricKind::DiskWrite => LucideIcon::HardDrive,
+        MonitorMetricKind::Disk | MonitorMetricKind::DiskRead | MonitorMetricKind::DiskWrite => {
+            LucideIcon::HardDrive
+        }
         MonitorMetricKind::LoadAverage => LucideIcon::Gauge,
         MonitorMetricKind::Rtt => LucideIcon::Activity,
         MonitorMetricKind::Source => LucideIcon::Info,

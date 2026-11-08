@@ -1195,6 +1195,14 @@ pub struct BleProfile {
     /// fails on the current scan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device_name: Option<String>,
+    /// Platform-local peripheral identifier that allows connecting without a
+    /// discovery window. On macOS this is the CoreBluetooth identifier UUID
+    /// (the only stable identity CoreBluetooth exposes); other platforms
+    /// resolve from `device_mac` and leave this as `None`. The value is not
+    /// portable across platforms, so sync consumers must treat it as
+    /// host-local metadata.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform_identifier: Option<String>,
     /// GATT service UUID the terminal protocol (e.g. Nordic UART Service)
     /// runs over. Must be present as a canonical 8-4-4-4-12 hex UUID string.
     pub service_uuid: String,
@@ -1247,6 +1255,9 @@ pub struct SaveBleProfileRequest {
     pub adapter_mac: Option<String>,
     pub device_mac: Option<String>,
     pub device_name: Option<String>,
+    /// Platform-local peripheral identifier written on macOS; `None` on
+    /// platforms that resolve from `device_mac` instead.
+    pub platform_identifier: Option<String>,
     pub service_uuid: String,
     pub terminal: ConnectionTerminalOptions,
     pub input_line_ending: Option<SerialLineEnding>,
@@ -1860,6 +1871,7 @@ impl BleProfile {
             adapter_mac: None,
             device_mac: None,
             device_name: None,
+            platform_identifier: None,
             service_uuid: service_uuid.into(),
             terminal: ConnectionTerminalOptions::default(),
             input_line_ending: SerialLineEnding::default(),
