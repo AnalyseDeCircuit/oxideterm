@@ -98,6 +98,18 @@ struct LegacyRsaPeer;
 impl server::Handler for LegacyRsaPeer {
     type Error = russh::Error;
 
+    async fn lookup_dh_gex_group(
+        &mut self,
+        parameters: &russh::client::GexParams,
+    ) -> Result<Option<russh::kex::dh::groups::DhGroup>, Self::Error> {
+        // Model a legacy appliance with only a 2048-bit GEX group, rather
+        // than accepting the modern client's request for an 8192-bit group.
+        let group = &russh::kex::dh::groups::DH_GROUP14;
+        Ok((parameters.min_group_size() <= group.bit_size()
+            && parameters.max_group_size() >= group.bit_size())
+        .then(|| group.clone()))
+    }
+
     async fn auth_password(
         &mut self,
         user: &str,
@@ -174,9 +186,14 @@ async fn explicit_legacy_rsa_policy_reaches_a_node_owned_password_shell() {
             ..Default::default()
         });
         let server = tokio::spawn(async move {
-            let (stream, _) = listener.accept().await.unwrap();
-            if let Ok(session) = server::run_stream(server_config, stream, LegacyRsaPeer).await {
-                let _ = session.await;
+            // Preflight and the authenticated node use separate transports.
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                if let Ok(session) =
+                    server::run_stream(server_config.clone(), stream, LegacyRsaPeer).await
+                {
+                    let _ = session.await;
+                }
             }
         });
         let mut config = SshConfig::password("127.0.0.1", port, "fixture-user", "fixture-password");
@@ -188,6 +205,24 @@ async fn explicit_legacy_rsa_policy_reaches_a_node_owned_password_shell() {
         config.ssh_algorithms.mac = vec!["hmac-sha2-256".into()];
         let registry = SshConnectionRegistry::default();
         let outcome = tokio::time::timeout(Duration::from_secs(20), async {
+            let status = check_host_key_with_route(
+                &config.host,
+                port,
+                5,
+                None,
+                None,
+                config.legacy_ssh_compatibility,
+                &config.ssh_algorithms,
+            )
+            .await;
+            let captured = match status {
+                HostKeyStatus::Unknown { fingerprint, .. } => fingerprint,
+                HostKeyStatus::Changed {
+                    actual_fingerprint, ..
+                } => actual_fingerprint,
+                other => panic!("legacy RSA preflight did not reach the host key: {other:?}"),
+            };
+            assert_eq!(captured, fingerprint);
             let node = SshTransportClient::new(config)
                 .connect_node_with_registry(
                     registry.clone(),

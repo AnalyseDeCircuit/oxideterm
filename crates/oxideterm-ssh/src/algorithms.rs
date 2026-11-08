@@ -115,6 +115,25 @@ pub fn preferred_algorithms(
     Ok(preferred)
 }
 
+pub(crate) fn preferred_gex(
+    legacy_compatibility: bool,
+    preferences: &SshAlgorithmPreferences,
+) -> russh::client::GexParams {
+    if legacy_compatibility
+        || preferences
+            .kex
+            .iter()
+            .any(|name| name == "diffie-hellman-group-exchange-sha1")
+    {
+        // Legacy appliances may only have a 2048-bit group. The normal
+        // russh minimum is 3072 bits, even when SHA-1 KEX is opted into.
+        russh::client::GexParams::new(2048, 2048, 8192)
+            .expect("fixed legacy GEX bounds satisfy the client configuration contract")
+    } else {
+        russh::client::GexParams::default()
+    }
+}
+
 pub fn visible_algorithm_names(
     preferred: &russh::Preferred,
     category: SshAlgorithmCategory,

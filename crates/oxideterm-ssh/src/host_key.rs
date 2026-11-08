@@ -599,6 +599,7 @@ fn preflight_client_config(
     Ok(client::Config {
         inactivity_timeout: Some(Duration::from_secs(timeout_secs)),
         preferred: crate::preferred_algorithms(legacy_compatibility, algorithms)?,
+        gex: crate::algorithms::preferred_gex(legacy_compatibility, algorithms),
         ..client::Config::default()
     })
 }

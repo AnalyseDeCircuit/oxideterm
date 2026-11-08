@@ -292,5 +292,19 @@ mod tests {
 
         assert!(!modern.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
         assert!(legacy.preferred.kex.contains(&russh::kex::DH_G14_SHA1));
+        assert_eq!(modern.gex.min_group_size(), 3072);
+        assert_eq!(modern.gex.preferred_group_size(), 8192);
+        assert_eq!(legacy.gex.min_group_size(), 2048);
+        assert_eq!(legacy.gex.preferred_group_size(), 2048);
+        let explicit = ssh_client_config(
+            false,
+            &oxideterm_connections::SshAlgorithmPreferences {
+                kex: vec!["diffie-hellman-group-exchange-sha1".into()],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(explicit.gex.min_group_size(), 2048);
+        assert_eq!(explicit.gex.max_group_size(), 8192);
     }
 }

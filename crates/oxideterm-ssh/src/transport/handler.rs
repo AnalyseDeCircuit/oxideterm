@@ -8,6 +8,7 @@ fn ssh_client_config(
         keepalive_max: 3,
         window_size: 32 * 1024 * 1024,
         maximum_packet_size: 256 * 1024,
+        gex: crate::algorithms::preferred_gex(legacy_ssh_compatibility, ssh_algorithms),
         ..client::Config::default()
     };
     // The persisted policy is compiled once per physical connection. Invalid
