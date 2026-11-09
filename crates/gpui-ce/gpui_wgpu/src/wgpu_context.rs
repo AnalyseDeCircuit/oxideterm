@@ -565,7 +565,7 @@ impl WgpuContext {
 
         wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends,
-            flags: wgpu::InstanceFlags::default(),
+            flags: wgpu::InstanceFlags::from_env_or_default(),
             backend_options: wgpu::BackendOptions::default(),
             memory_budget_thresholds: wgpu::MemoryBudgetThresholds::default(),
             display,
