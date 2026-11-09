@@ -283,6 +283,15 @@ fn reusable_direct_root_node_for_saved_config(
     })
 }
 
+fn ssh_terminal_tab_title(host: &str, fallback_title: &str) -> String {
+    let host = host.trim();
+    if host.is_empty() {
+        fallback_title.to_string()
+    } else {
+        host.to_string()
+    }
+}
+
 impl WorkspaceApp {
     pub(crate) fn open_native_connection_handoff(
         &mut self,
@@ -1680,6 +1689,7 @@ impl WorkspaceApp {
             post_connect_command,
             title,
             true,
+            false,
             window,
             cx,
         )
@@ -1699,6 +1709,7 @@ impl WorkspaceApp {
             post_connect_command,
             title,
             false,
+            true,
             window,
             cx,
         )?;
@@ -1743,11 +1754,20 @@ impl WorkspaceApp {
         &mut self,
         node_id: &NodeId,
         post_connect_command: Option<String>,
-        title: String,
+        fallback_title: String,
         allow_dedicated_connection: bool,
+        use_hostname_title: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<TerminalSessionId> {
+        let title = if use_hostname_title {
+            self.ssh_nodes
+                .get(node_id)
+                .map(|node| ssh_terminal_tab_title(&node.endpoint.host, &fallback_title))
+                .unwrap_or(fallback_title)
+        } else {
+            fallback_title
+        };
         let tab_id = self.alloc_tab_id(cx);
         let (pane_id, session_id) = self.create_ssh_terminal_pane_for_existing_node(
             node_id,
@@ -2135,6 +2155,22 @@ fn ssh_config_from_proxy_hop(hop: ProxyHopConfig, connect_timeout_seconds: u64) 
 #[cfg(test)]
 mod create_tests {
     use super::*;
+
+    #[test]
+    fn ssh_terminal_tab_title_uses_remote_hostname() {
+        assert_eq!(
+            ssh_terminal_tab_title("  server.example.com  ", "Saved connection"),
+            "server.example.com"
+        );
+    }
+
+    #[test]
+    fn ssh_terminal_tab_title_falls_back_when_hostname_is_empty() {
+        assert_eq!(
+            ssh_terminal_tab_title("  ", "Saved connection"),
+            "Saved connection"
+        );
+    }
 
     #[test]
     fn ssh_root_node_allocator_skips_restored_node_ids() {
