@@ -230,6 +230,7 @@ pub enum EditorSaveStatus {
 struct MarkedText {
     text: String,
     range: TextRange,
+    selection: std::ops::Range<usize>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

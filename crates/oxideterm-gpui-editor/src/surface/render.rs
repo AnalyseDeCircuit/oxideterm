@@ -657,7 +657,18 @@ impl TextEditorView {
             .into_iter()
             .filter_map(|column| column.checked_sub(origin.column))
             .collect::<Vec<_>>();
+        let marked = self.marked_text.as_ref().filter(|marked| {
+            marked.range.start.0 >= segment_range.start && marked.range.start.0 <= segment_range.end
+        });
+        let marked_text = marked.map(|marked| marked.text.as_str());
+        let marked_caret_prefix = marked.map(|marked| {
+            let utf16_len = marked.text.encode_utf16().count();
+            let selection_end = marked.selection.end.min(utf16_len);
+            let byte = super::input::utf16_index_to_byte(&marked.text, selection_end);
+            &marked.text[..byte]
+        });
         let needs_shaped_coordinates = cursor_byte_column.is_some()
+            || marked_text.is_some()
             || !selection_ranges.is_empty()
             || !find_ranges.is_empty()
             || !bracket_ranges.is_empty()
@@ -666,14 +677,38 @@ impl TextEditorView {
         // overlay. Fixed cell widths diverge under font fallback.
         let coordinate_line = needs_shaped_coordinates
             .then(|| self.shape_coordinate_line(segment_text, window.text_system()));
-        let cursor_x = cursor_byte_column.map(|byte_column| {
-            f32::from(
+        let cursor_x = if let Some(marked) = marked {
+            let start = marked
+                .range
+                .start
+                .0
+                .saturating_sub(segment_range.start)
+                .min(segment_text.len());
+            let start = super::coords::floor_char_boundary(segment_text, start);
+            let start_x = f32::from(
                 coordinate_line
                     .as_ref()
-                    .expect("cursor requires shaped coordinates")
-                    .x_for_index(byte_column),
-            )
-        });
+                    .expect("marked text requires shaped coordinates")
+                    .x_for_index(start),
+            );
+            let prefix_width = f32::from(
+                self.shape_coordinate_line(
+                    marked_caret_prefix.unwrap_or_default(),
+                    window.text_system(),
+                )
+                .width(),
+            );
+            Some(start_x + prefix_width)
+        } else {
+            cursor_byte_column.map(|byte_column| {
+                f32::from(
+                    coordinate_line
+                        .as_ref()
+                        .expect("cursor requires shaped coordinates")
+                        .x_for_index(byte_column),
+                )
+            })
+        };
         let shaped_rects = |ranges: Vec<Range<usize>>, empty_range_width: f32| {
             if ranges.is_empty() {
                 return Vec::new();
@@ -703,12 +738,6 @@ impl TextEditorView {
             .then(|| self.foldable_range_starting_at(line))
             .flatten();
         let folded = display_row.is_folded_header;
-        let marked_text = self.marked_text.as_ref().and_then(|marked| {
-            (marked.range.start.0 >= segment_range.start
-                && marked.range.start.0 <= segment_range.end)
-                .then_some(marked.text.as_str())
-        });
-
         let row = div()
             .relative()
             .h(px(line_height))

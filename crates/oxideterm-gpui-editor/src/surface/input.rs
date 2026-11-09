@@ -63,11 +63,10 @@ impl EntityInputHandler for TextEditorView {
     ) -> Option<UTF16Selection> {
         let selection = self.cursor.selection();
         if let Some(marked) = self.marked_text.as_ref() {
-            let range = selection.range();
+            let start = self.buffer.utf16_offset(marked.range.start.0);
             return Some(UTF16Selection {
-                range: self.marked_text_utf16_offset(marked, range.start.0)
-                    ..self.marked_text_utf16_offset(marked, range.end.0),
-                reversed: selection.anchor > selection.head,
+                range: start + marked.selection.start..start + marked.selection.end,
+                reversed: false,
             });
         }
         let range = selection.range();
@@ -132,16 +131,18 @@ impl EntityInputHandler for TextEditorView {
         // Keep the original replacement range separate from the committed
         // buffer so IME updates can replace the same composing segment without
         // corrupting the underlying text before commit.
+        let text_len = new_text.encode_utf16().count();
+        let selection = new_selected_range.unwrap_or(text_len..text_len);
+        let selection_start = selection.start.min(text_len);
+        let selection_end = selection.end.min(text_len).max(selection_start);
         self.marked_text = (!new_text.is_empty()).then(|| MarkedText {
             text: new_text.to_string(),
             range,
+            selection: selection_start..selection_end,
         });
-        let marked_caret = new_selected_range
-            .as_ref()
-            .map(|selection| utf16_index_to_byte(new_text, selection.end))
-            .unwrap_or(new_text.len());
-        self.cursor
-            .set_selection(Selection::caret(BufferOffset(range.start.0 + marked_caret)));
+        // The buffer cursor must stay on a real buffer boundary while the IME
+        // owns a virtual selection inside the preedit text.
+        self.cursor.set_selection(Selection::caret(range.start));
         self.secondary_selections.clear();
         cx.notify();
     }
@@ -188,14 +189,6 @@ impl EntityInputHandler for TextEditorView {
 }
 
 impl TextEditorView {
-    fn marked_text_utf16_offset(&self, marked: &MarkedText, byte: usize) -> usize {
-        let start = self.buffer.utf16_offset(marked.range.start.0);
-        let relative = byte
-            .saturating_sub(marked.range.start.0)
-            .min(marked.text.len());
-        start + marked.text[..relative].encode_utf16().count()
-    }
-
     pub(super) fn ime_replacement_range(
         &self,
         range_utf16: Option<Range<usize>>,
@@ -228,7 +221,7 @@ pub(super) fn keystroke_commits_platform_text(keystroke: &gpui::Keystroke) -> bo
         .is_some_and(|text| !text.is_empty() && !text.chars().any(char::is_control))
 }
 
-fn utf16_index_to_byte(text: &str, utf16_index: usize) -> usize {
+pub(super) fn utf16_index_to_byte(text: &str, utf16_index: usize) -> usize {
     if utf16_index == 0 {
         return 0;
     }
@@ -328,17 +321,76 @@ mod tests {
                     .cursor
                     .set_selection(oxideterm_editor_core::Selection::caret(BufferOffset(1)));
                 editor.replace_and_mark_text_in_range(Some(1..1), "zhong", Some(5..5), window, cx);
-                assert_eq!(editor.cursor.selection().head, BufferOffset(6));
+                assert_eq!(editor.cursor.selection().head, BufferOffset(1));
+                assert!(
+                    editor
+                        .buffer
+                        .offset_to_line_col(editor.cursor.selection().head)
+                        .is_ok()
+                );
+                let expected_range = 1 + "zhong".encode_utf16().count();
                 assert_eq!(
                     editor
                         .selected_text_range(false, window, cx)
                         .expect("marked text keeps a selected range")
                         .range,
-                    6..6
+                    expected_range..expected_range
                 );
 
                 editor.unmark_text(window, cx);
                 assert_eq!(editor.cursor.selection().head, BufferOffset(1));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn marked_text_caret_maps_multibyte_selection_without_invalidating_cursor(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("a", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                editor
+                    .cursor
+                    .set_selection(oxideterm_editor_core::Selection::caret(BufferOffset(1)));
+                let selection_end = "中文".encode_utf16().count();
+                editor.replace_and_mark_text_in_range(
+                    Some(1..1),
+                    "中文🙂",
+                    Some(selection_end..selection_end),
+                    window,
+                    cx,
+                );
+
+                assert_eq!(editor.cursor.selection().head, BufferOffset(1));
+                assert!(
+                    editor
+                        .buffer
+                        .offset_to_line_col(editor.cursor.selection().head)
+                        .is_ok()
+                );
+                let expected_caret = 1 + selection_end;
+                assert_eq!(
+                    editor
+                        .selected_text_range(false, window, cx)
+                        .expect("marked text keeps a selected range")
+                        .range,
+                    expected_caret..expected_caret
+                );
+
+                let element_bounds = gpui::Bounds::new(
+                    gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                    gpui::size(gpui::px(400.0), gpui::px(100.0)),
+                );
+                let start = editor
+                    .bounds_for_range(1..1, element_bounds, window, cx)
+                    .expect("composition start has bounds");
+                let caret = editor
+                    .bounds_for_range(expected_caret..expected_caret, element_bounds, window, cx)
+                    .expect("composition caret has bounds");
+                assert!(caret.origin.x > start.origin.x);
             });
         });
     }
