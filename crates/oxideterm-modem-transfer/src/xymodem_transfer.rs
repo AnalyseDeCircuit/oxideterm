@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::io::{Read, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::error::ModemTransferError;
 use crate::io::ModemIo;
@@ -233,35 +233,24 @@ fn send_xymodem_block<I: ModemIo>(
     payload: &[u8],
     use_crc: bool,
 ) -> Result<(), ModemTransferError> {
-    if !use_crc {
-        let block = XyBlock::new(number, block_size, payload)?;
-        for _ in 0..XYMODEM_RETRIES {
-            io.write_all(&block.encode_checksum())?;
-            match io.read_byte(XYMODEM_TIMEOUT)? {
-                ACK => return Ok(()),
-                NAK | WANT_CRC => continue,
-                CAN => {
-                    if io.read_byte(XYMODEM_TIMEOUT)? == CAN {
-                        return Err(ModemTransferError::Cancelled);
-                    }
-                }
-                byte => return Err(ModemTransferError::UnexpectedByte(byte)),
-            }
-        }
-        return Err(ModemTransferError::Timeout);
-    }
     let block = XyBlock::new(number, block_size, payload)?;
+    let encoded = if use_crc {
+        block.encode_crc()
+    } else {
+        block.encode_checksum()
+    };
     for _ in 0..XYMODEM_RETRIES {
-        io.write_all(&block.encode_crc())?;
-        match io.read_byte(XYMODEM_TIMEOUT)? {
-            ACK => return Ok(()),
-            NAK | WANT_CRC => continue,
-            CAN => {
+        io.write_all(&encoded)?;
+        match io.read_byte(XYMODEM_TIMEOUT) {
+            Ok(ACK) => return Ok(()),
+            Ok(NAK | WANT_CRC) | Err(ModemTransferError::Timeout) => continue,
+            Ok(CAN) => {
                 if io.read_byte(XYMODEM_TIMEOUT)? == CAN {
                     return Err(ModemTransferError::Cancelled);
                 }
             }
-            byte => return Err(ModemTransferError::UnexpectedByte(byte)),
+            Ok(byte) => return Err(ModemTransferError::UnexpectedByte(byte)),
+            Err(error) => return Err(error),
         }
     }
     Err(ModemTransferError::Timeout)
@@ -324,33 +313,39 @@ fn read_xymodem_packet<I: ModemIo>(
 }
 
 fn wait_for_xymodem_start<I: ModemIo>(io: &mut I) -> Result<bool, ModemTransferError> {
-    for _ in 0..XYMODEM_RETRIES {
-        match io.read_byte(XYMODEM_TIMEOUT)? {
+    // Bootloaders may print status text before negotiation; it must not consume retries
+    // or extend the time allowed for the receiver to start.
+    let deadline = Instant::now() + XYMODEM_TIMEOUT;
+    loop {
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or(ModemTransferError::Timeout)?;
+        match io.read_byte(remaining)? {
             WANT_CRC => return Ok(true),
             NAK => return Ok(false),
             CAN => {
-                if io.read_byte(XYMODEM_TIMEOUT)? == CAN {
+                if io.read_byte(deadline.saturating_duration_since(Instant::now()))? == CAN {
                     return Err(ModemTransferError::Cancelled);
                 }
             }
             _ => {}
         }
     }
-    Err(ModemTransferError::Timeout)
 }
 
 fn finish_xymodem_send<I: ModemIo>(io: &mut I) -> Result<(), ModemTransferError> {
     for _ in 0..XYMODEM_RETRIES {
         io.write_all(&[EOT])?;
-        match io.read_byte(XYMODEM_TIMEOUT)? {
-            ACK => return Ok(()),
-            NAK => continue,
-            CAN => {
+        match io.read_byte(XYMODEM_TIMEOUT) {
+            Ok(ACK) => return Ok(()),
+            Ok(NAK) | Err(ModemTransferError::Timeout) => continue,
+            Ok(CAN) => {
                 if io.read_byte(XYMODEM_TIMEOUT)? == CAN {
                     return Err(ModemTransferError::Cancelled);
                 }
             }
-            byte => return Err(ModemTransferError::UnexpectedByte(byte)),
+            Ok(byte) => return Err(ModemTransferError::UnexpectedByte(byte)),
+            Err(error) => return Err(error),
         }
     }
     Err(ModemTransferError::Timeout)
@@ -386,10 +381,29 @@ fn read_padded<R: Read>(reader: &mut R, buffer: &mut [u8]) -> Result<usize, Mode
 mod tests {
     use super::*;
     use crate::io::MemoryModemIo;
+    use std::collections::VecDeque;
+
+    struct ScriptedModemIo {
+        input: VecDeque<Result<u8, ModemTransferError>>,
+        writes: Vec<Vec<u8>>,
+    }
+
+    impl ModemIo for ScriptedModemIo {
+        fn read_byte(&mut self, _timeout: Duration) -> Result<u8, ModemTransferError> {
+            self.input
+                .pop_front()
+                .unwrap_or(Err(ModemTransferError::Timeout))
+        }
+
+        fn write_all(&mut self, bytes: &[u8]) -> Result<(), ModemTransferError> {
+            self.writes.push(bytes.to_vec());
+            Ok(())
+        }
+    }
 
     #[test]
     fn xmodem_send_emits_crc_blocks_and_eot() {
-        let mut input = Vec::new();
+        let mut input = b"Bootloader waiting for firmware upload\r\n".to_vec();
         input.push(WANT_CRC);
         input.extend([ACK, ACK]);
         let mut io = MemoryModemIo::with_input(input);
@@ -417,6 +431,94 @@ mod tests {
         assert_eq!(block.number, 1);
         assert_eq!(&block.payload[..5], b"hello");
         assert_eq!(output[block_len], EOT);
+    }
+
+    #[test]
+    fn xmodem_send_retries_timed_out_blocks_and_eot() {
+        for (start, check) in [(WANT_CRC, &[0x74, 0x90][..]), (NAK, &[0x92][..])] {
+            let mut io = ScriptedModemIo {
+                input: [
+                    Ok(start),
+                    Err(ModemTransferError::Timeout),
+                    Ok(ACK),
+                    Err(ModemTransferError::Timeout),
+                    Ok(ACK),
+                ]
+                .into(),
+                writes: Vec::new(),
+            };
+
+            let sent = send_xmodem(&mut io, &mut b"hello".as_slice(), XmodemBlockMode::Bytes128)
+                .expect("recovered acknowledgements should finish the upload");
+
+            let mut expected_block = b"\x01\x01\xfehello".to_vec();
+            expected_block.resize(131, 0x1a);
+            expected_block.extend_from_slice(check);
+            assert_eq!(sent, 5);
+            assert_eq!(
+                io.writes,
+                [expected_block.clone(), expected_block, vec![EOT], vec![EOT]]
+            );
+        }
+    }
+
+    #[test]
+    fn xmodem_send_bounds_block_and_eot_timeout_retries() {
+        for eot in [false, true] {
+            let mut io = ScriptedModemIo {
+                input: VecDeque::from([Ok(WANT_CRC)]),
+                writes: Vec::new(),
+            };
+            if eot {
+                io.input.push_back(Ok(ACK));
+            }
+
+            let result = send_xmodem(&mut io, &mut b"hello".as_slice(), XmodemBlockMode::Bytes128);
+
+            assert!(matches!(result, Err(ModemTransferError::Timeout)));
+            let mut expected_block = b"\x01\x01\xfehello".to_vec();
+            expected_block.resize(131, 0x1a);
+            expected_block.extend_from_slice(&[0x74, 0x90]);
+            let expected = if eot {
+                let mut writes = vec![expected_block];
+                writes.extend(vec![vec![EOT]; XYMODEM_RETRIES]);
+                writes
+            } else {
+                vec![expected_block; XYMODEM_RETRIES]
+            };
+            assert_eq!(io.writes, expected);
+        }
+    }
+
+    #[test]
+    fn xmodem_send_stops_on_cancellation_and_transport_errors() {
+        for eot in [false, true] {
+            for cancelled in [false, true] {
+                let mut io = ScriptedModemIo {
+                    input: VecDeque::from([Ok(WANT_CRC)]),
+                    writes: Vec::new(),
+                };
+                if eot {
+                    io.input.push_back(Ok(ACK));
+                }
+                io.input.push_back(Err(if cancelled {
+                    ModemTransferError::Cancelled
+                } else {
+                    std::io::Error::from(std::io::ErrorKind::BrokenPipe).into()
+                }));
+
+                let result =
+                    send_xmodem(&mut io, &mut b"hello".as_slice(), XmodemBlockMode::Bytes128);
+
+                if cancelled {
+                    assert!(matches!(result, Err(ModemTransferError::Cancelled)));
+                } else {
+                    assert!(matches!(result, Err(ModemTransferError::Io(error))
+                        if error.kind() == std::io::ErrorKind::BrokenPipe));
+                }
+                assert_eq!(io.writes.len(), if eot { 2 } else { 1 });
+            }
+        }
     }
 
     #[test]
