@@ -200,7 +200,9 @@ impl TextEditorView {
         &self,
         range_utf16: Option<Range<usize>>,
     ) -> Option<TextRange> {
-        let range_utf16 = range_utf16?;
+        let Some(range_utf16) = range_utf16 else {
+            return self.marked_text.as_ref().map(|marked| marked.range);
+        };
         if let Some(marked) = self.marked_text.as_ref() {
             let marked_start = self.buffer.utf16_offset(marked.range.start.0);
             let marked_end = marked_start + marked.text.encode_utf16().count();
@@ -337,6 +339,20 @@ mod tests {
 
                 editor.unmark_text(window, cx);
                 assert_eq!(editor.cursor.selection().head, BufferOffset(1));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn committed_marked_text_without_range_replaces_composition(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                editor.replace_and_mark_text_in_range(Some(0..0), "zhong", Some(5..5), window, cx);
+                editor.replace_text_in_range(None, "中", window, cx);
+                assert_eq!(editor.buffer.text(), "中");
             });
         });
     }
