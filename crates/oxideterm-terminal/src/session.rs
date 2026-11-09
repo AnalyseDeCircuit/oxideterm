@@ -9,7 +9,7 @@ use std::{
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener},
     grid::{Dimensions, Row, Scroll},
-    index::{Column, Line},
+    index::{Column, Line, Point},
     sync::FairMutex,
     term::{Config, Term},
     vte::ansi::{self, Handler, Processor},
@@ -166,7 +166,7 @@ fn kept_cursor_line<T: EventListener>(term: &Term<T>) -> Option<KeptCursorLine> 
             .contains(Flags::WRAPLINE)
     };
     let mut start = cursor.line.0;
-    while start > 0 && wraps(start - 1) {
+    while start > grid.topmost_line().0 && wraps(start - 1) {
         start -= 1;
     }
     let mut end = cursor.line.0;
@@ -194,15 +194,28 @@ pub(crate) fn clear_terminal_buffer<T: EventListener>(term: &mut Term<T>) {
     let kept = kept_cursor_line(term);
     Handler::clear_screen(term, ansi::ClearMode::All);
     Handler::clear_screen(term, ansi::ClearMode::Saved);
+    let grid = term.grid_mut();
+    // Host-side placement uses absolute coordinates even when the process enabled DECOM.
+    grid.cursor.point = Point::default();
+    grid.cursor.input_needs_wrap = false;
     let Some(kept) = kept else {
-        Handler::goto(term, 0, 0);
         return;
     };
-    for (line, row) in kept.rows.into_iter().enumerate() {
-        term.grid_mut()[Line(line as i32)] = row;
+
+    // Only the retained input may occupy history when it cannot fit in the viewport.
+    let screen_lines = grid.screen_lines();
+    let history_rows = kept.rows.len().saturating_sub(screen_lines);
+    if history_rows > 0 {
+        grid.scroll_up(&(Line(0)..Line(screen_lines as i32)), history_rows);
     }
-    Handler::goto(term, kept.cursor_row, kept.cursor_column);
-    term.grid_mut().cursor.input_needs_wrap = kept.input_needs_wrap;
+    for (line, row) in kept.rows.into_iter().enumerate() {
+        grid[Line(line as i32 - history_rows as i32)] = row;
+    }
+    grid.cursor.point = Point::new(
+        Line(kept.cursor_row - history_rows as i32),
+        Column(kept.cursor_column),
+    );
+    grid.cursor.input_needs_wrap = kept.input_needs_wrap;
 }
 
 fn apply_terminal_output_processor<'a>(
@@ -390,21 +403,20 @@ mod tests {
 
     #[test]
     fn clear_terminal_buffer_homes_cursor_for_followup_output() {
-        let size = TerminalSize {
-            cols: 12,
-            rows: 4,
-            cell_width: 8,
-            cell_height: 17,
-        };
-        let mut term = Term::new(Config::default(), &size, VoidListener);
-        let mut parser = Processor::<StdSyncHandler>::new();
-        parser.advance(&mut term, b"\x1b[3;5Hbefore\x1b[4;1H");
+        for setup in [
+            &b"\x1b[3;5Hbefore\x1b[4;1H"[..],
+            &b"\x1b[2;4r\x1b[?6h\x1b[2;5Hbefore\x1b[3;1H"[..],
+        ] {
+            let mut term = clear_fixture_term();
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, setup);
 
-        clear_terminal_buffer(&mut term);
+            clear_terminal_buffer(&mut term);
 
-        assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(0)));
-        parser.advance(&mut term, b"next");
-        assert_eq!(term.grid()[Line(0)].cell(Column(0)).c, 'n');
+            assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(0)));
+            parser.advance(&mut term, b"next");
+            assert_eq!(screen_lines(&term), ["next", "", "", ""]);
+        }
     }
 
     fn clear_fixture_term() -> Term<VoidListener> {
@@ -430,16 +442,24 @@ mod tests {
 
     #[test]
     fn clear_terminal_buffer_keeps_the_prompt_line_and_its_cursor() {
-        let mut term = clear_fixture_term();
-        let mut parser = Processor::<StdSyncHandler>::new();
-        parser.advance(&mut term, b"a\r\nb\r\nc\r\nd\r\ne\r\n$ ls");
+        for origin_mode in [&b""[..], &b"\x1b[2;4r\x1b[?6h"[..]] {
+            let mut term = clear_fixture_term();
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, b"a\r\nb\r\nc\r\nd\r\ne\r\n");
+            parser.advance(&mut term, origin_mode);
+            parser.advance(&mut term, b"$ ls");
 
-        clear_terminal_buffer(&mut term);
+            clear_terminal_buffer(&mut term);
 
-        assert_eq!(screen_lines(&term), ["$ ls", "", "", ""]);
-        assert_eq!(term.grid().history_size(), 0);
-        parser.advance(&mut term, b"x");
-        assert_eq!(screen_lines(&term), ["$ lsx", "", "", ""]);
+            assert_eq!(screen_lines(&term), ["$ ls", "", "", ""]);
+            assert_eq!(term.grid().history_size(), 0);
+            assert_eq!(
+                term.mode().contains(TermMode::ORIGIN),
+                !origin_mode.is_empty()
+            );
+            parser.advance(&mut term, b"x");
+            assert_eq!(screen_lines(&term), ["$ lsx", "", "", ""]);
+        }
     }
 
     #[test]
@@ -456,6 +476,40 @@ mod tests {
             clear_terminal_buffer(&mut term);
 
             assert_eq!(screen_lines(&term), ["0123456789ab", "XY", "", ""]);
+            assert_eq!(term.grid().cursor.point, expected_cursor);
+        }
+    }
+
+    #[test]
+    fn clear_terminal_buffer_keeps_wrapped_input_from_history() {
+        let expected_rows = [
+            "$ 0123456789",
+            "abcdefghijkl",
+            "ABCDEFGHIJKL",
+            "mnopqrstuvwx",
+            "MNOPQRSTUVWX",
+            "yz0123456789",
+            "YZ0123456789",
+            "row-seven---",
+            "row-eight---",
+            "tail",
+        ];
+        for (cursor_keys, expected_cursor) in [
+            (&b""[..], Point::new(Line(3), Column(4))),
+            (&b"\x1b[3A"[..], Point::new(Line(0), Column(4))),
+        ] {
+            let mut term = clear_fixture_term();
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, b"old output\r\n");
+            parser.advance(&mut term, expected_rows.join("").as_bytes());
+            parser.advance(&mut term, cursor_keys);
+
+            clear_terminal_buffer(&mut term);
+
+            assert_eq!(
+                terminal_buffer_text_from_term(&term, term.columns()),
+                expected_rows.join("\n")
+            );
             assert_eq!(term.grid().cursor.point, expected_cursor);
         }
     }
