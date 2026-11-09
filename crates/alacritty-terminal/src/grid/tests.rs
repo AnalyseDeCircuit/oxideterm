@@ -218,6 +218,53 @@ fn shrink_reflow_twice() {
 }
 
 #[test]
+fn shrink_reflow_preserves_history_until_widened() {
+    let mut grid = Grid::<Cell>::new(1, 4, 2);
+    grid.increase_scroll_limit(2);
+
+    for (line, text) in [(Line(-2), "abcd"), (Line(-1), "efgh")] {
+        for (column, c) in text.chars().enumerate() {
+            *grid[line].cell_mut(Column(column)) = cell(c);
+        }
+    }
+
+    // Both history rows need two rows at half the width. Truncating to the row limit here
+    // would permanently drop the oldest row, so widening could not restore it.
+    grid.resize(true, 1, 2);
+
+    grid.resize(true, 1, 4);
+    assert_eq!(grid.total_lines(), 3);
+    assert_eq!(grid[Line(-2)].cell(Column(0)), cell('a'));
+    assert_eq!(grid[Line(-2)].cell(Column(3)), cell('d'));
+    assert_eq!(grid[Line(-1)].cell(Column(0)), cell('e'));
+    assert_eq!(grid[Line(-1)].cell(Column(3)), cell('h'));
+    assert_eq!(grid[Line(0)].cell(Column(0)), Cell::default());
+}
+
+#[test]
+fn scrolling_after_reflow_shrink_evicts_oldest_history() {
+    let mut grid = Grid::<Cell>::new(1, 4, 2);
+    grid.increase_scroll_limit(2);
+
+    for (line, text) in [(Line(-2), "abcd"), (Line(-1), "efgh")] {
+        for (column, c) in text.chars().enumerate() {
+            *grid[line].cell_mut(Column(column)) = cell(c);
+        }
+    }
+
+    // Reflow leaves history above the configured row limit until scrolling resumes.
+    grid.resize(true, 1, 2);
+    grid.scroll_up(&(Line(0)..Line(1)), 1);
+
+    assert_eq!(grid.total_lines(), 5);
+    assert_eq!(grid[Line(-4)].cell(Column(0)), cell('c'));
+    assert_eq!(grid[Line(-4)].cell(Column(1)), cell('d'));
+    assert_eq!(grid[Line(-3)].cell(Column(0)), cell('e'));
+    assert_eq!(grid[Line(-3)].cell(Column(1)), wrap_cell('f'));
+    assert_eq!(grid[Line(0)].cell(Column(0)), Cell::default());
+}
+
+#[test]
 fn shrink_reflow_empty_cell_inside_line() {
     let mut grid = Grid::<Cell>::new(1, 5, 3);
     *grid[Line(0)].cell_mut(Column(0)) = cell('1');

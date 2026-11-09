@@ -183,7 +183,7 @@ impl<T: GridCell + Default> Grid<T> {
     }
 
     fn increase_scroll_limit(&mut self, count: usize) {
-        let count = min(count, self.max_scroll_limit - self.history_size());
+        let count = min(count, self.max_scroll_limit.saturating_sub(self.history_size()));
         if count != 0 {
             self.raw.initialize(count, self.columns);
         }
@@ -273,9 +273,11 @@ impl<T: GridCell + Default> Grid<T> {
             return;
         }
 
-        // Update display offset when not pinned to active area.
+        // Update display offset when not pinned to active area. Reflow can leave history above
+        // the configured limit, so never clamp the viewport below the lines that exist.
         if self.display_offset != 0 {
-            self.display_offset = min(self.display_offset + positions, self.max_scroll_limit);
+            let limit = max(self.max_scroll_limit, self.history_size());
+            self.display_offset = min(self.display_offset + positions, limit);
         }
 
         // Only rotate the entire history if the active region starts at the top.
@@ -286,7 +288,7 @@ impl<T: GridCell + Default> Grid<T> {
                 drop(self.raw[Line(-1)].compact());
             }
             // Create scrollback for the new lines.
-            let history_available = self.max_scroll_limit - self.history_size();
+            let history_available = self.max_scroll_limit.saturating_sub(self.history_size());
             self.scrolled_out_lines = self
                 .scrolled_out_lines
                 .wrapping_add(positions.saturating_sub(history_available));
@@ -429,7 +431,7 @@ impl<T: GridCell> Grid<T> {
         self.truncate();
 
         // Initialize everything with empty new lines.
-        self.raw.initialize(self.max_scroll_limit - self.history_size(), self.columns);
+        self.raw.initialize(self.max_scroll_limit.saturating_sub(self.history_size()), self.columns);
     }
 
     /// This is used only for truncating before saving ref-tests.

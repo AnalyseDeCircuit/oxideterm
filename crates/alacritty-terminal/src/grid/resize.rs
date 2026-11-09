@@ -380,8 +380,11 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         }
 
         // Reverse iterator and use it as the new grid storage.
-        let mut reversed: Vec<Row<T>> = new_raw.drain(..).rev().collect();
-        reversed.truncate(self.max_scroll_limit + self.lines);
+        let reversed: Vec<Row<T>> = new_raw.drain(..).rev().collect();
+        // Reflow can turn one history row into several when narrowing. Truncating to the
+        // row-based limit here would permanently discard content that widening would merge
+        // back, so retain every reflowed row. History above `max_scroll_limit` is naturally
+        // evicted by later scrolling; see `Grid::increase_scroll_limit`.
         self.raw.replace_inner(reversed);
 
         // Clamp display offset in case some lines went off.
