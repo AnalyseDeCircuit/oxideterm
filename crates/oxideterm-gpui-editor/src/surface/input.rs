@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use gpui::{Bounds, Context, EntityInputHandler, Pixels, UTF16Selection, Window};
-use oxideterm_editor_core::{BufferOffset, TextRange};
+use oxideterm_editor_core::{BufferOffset, Selection, TextRange};
 
 use super::{MarkedText, TextEditorView};
 
@@ -62,6 +62,14 @@ impl EntityInputHandler for TextEditorView {
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         let selection = self.cursor.selection();
+        if let Some(marked) = self.marked_text.as_ref() {
+            let range = selection.range();
+            return Some(UTF16Selection {
+                range: self.marked_text_utf16_offset(marked, range.start.0)
+                    ..self.marked_text_utf16_offset(marked, range.end.0),
+                reversed: selection.anchor > selection.head,
+            });
+        }
         let range = selection.range();
         Some(UTF16Selection {
             range: self.buffer.utf16_offset(range.start.0)..self.buffer.utf16_offset(range.end.0),
@@ -81,7 +89,10 @@ impl EntityInputHandler for TextEditorView {
     }
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.marked_text.take().is_some() {
+        if let Some(marked) = self.marked_text.take() {
+            self.cursor
+                .set_selection(Selection::caret(marked.range.start));
+            self.secondary_selections.clear();
             cx.notify();
         }
     }
@@ -107,7 +118,7 @@ impl EntityInputHandler for TextEditorView {
         &mut self,
         range_utf16: Option<Range<usize>>,
         new_text: &str,
-        _new_selected_range: Option<Range<usize>>,
+        new_selected_range: Option<Range<usize>>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -125,6 +136,13 @@ impl EntityInputHandler for TextEditorView {
             text: new_text.to_string(),
             range,
         });
+        let marked_caret = new_selected_range
+            .as_ref()
+            .map(|selection| utf16_index_to_byte(new_text, selection.end))
+            .unwrap_or(new_text.len());
+        self.cursor
+            .set_selection(Selection::caret(BufferOffset(range.start.0 + marked_caret)));
+        self.secondary_selections.clear();
         cx.notify();
     }
 
@@ -136,6 +154,24 @@ impl EntityInputHandler for TextEditorView {
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let index = range_utf16.start;
+        if let Some(marked) = self.marked_text.as_ref() {
+            let marked_start = self.buffer.utf16_offset(marked.range.start.0);
+            let marked_end = marked_start + marked.text.encode_utf16().count();
+            if (marked_start..=marked_end).contains(&index) {
+                let relative = index - marked_start;
+                let byte = utf16_index_to_byte(&marked.text, relative);
+                let mut bounds = self.bounds_for_byte_offset(
+                    BufferOffset(marked.range.start.0),
+                    element_bounds,
+                    window,
+                );
+                let prefix = &marked.text[..byte];
+                bounds.origin.x += self
+                    .shape_coordinate_line(prefix, window.text_system())
+                    .width();
+                return Some(bounds);
+            }
+        }
         let byte = self.buffer.byte_offset_for_utf16(index);
         Some(self.bounds_for_byte_offset(BufferOffset(byte), element_bounds, window))
     }
@@ -152,6 +188,14 @@ impl EntityInputHandler for TextEditorView {
 }
 
 impl TextEditorView {
+    fn marked_text_utf16_offset(&self, marked: &MarkedText, byte: usize) -> usize {
+        let start = self.buffer.utf16_offset(marked.range.start.0);
+        let relative = byte
+            .saturating_sub(marked.range.start.0)
+            .min(marked.text.len());
+        start + marked.text[..relative].encode_utf16().count()
+    }
+
     pub(super) fn ime_replacement_range(
         &self,
         range_utf16: Option<Range<usize>>,
@@ -267,6 +311,32 @@ mod tests {
                 assert_eq!(editor.buffer.text(), "a文\nlast");
                 editor.undo(cx);
                 assert_eq!(editor.buffer.text(), "a🚀界\nlast");
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn marked_text_advances_caret_and_unmark_restores_origin(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("abc", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                editor
+                    .cursor
+                    .set_selection(oxideterm_editor_core::Selection::caret(BufferOffset(1)));
+                editor.replace_and_mark_text_in_range(Some(1..1), "zhong", Some(5..5), window, cx);
+                assert_eq!(editor.cursor.selection().head, BufferOffset(6));
+                assert_eq!(
+                    editor
+                        .selected_text_range(false, window, cx)
+                        .expect("marked text keeps a selected range")
+                        .range,
+                    6..6
+                );
+
+                editor.unmark_text(window, cx);
+                assert_eq!(editor.cursor.selection().head, BufferOffset(1));
             });
         });
     }
