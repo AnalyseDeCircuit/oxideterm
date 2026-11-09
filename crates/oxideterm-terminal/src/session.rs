@@ -8,8 +8,8 @@ use std::{
 
 use alacritty_terminal::{
     event::{Event as AlacEvent, EventListener},
-    grid::{Dimensions, Scroll},
-    index::Line,
+    grid::{Dimensions, Row, Scroll},
+    index::{Column, Line, Point},
     sync::FairMutex,
     term::{Config, Term},
     vte::ansi::{self, Handler, Processor},
@@ -143,12 +143,79 @@ fn command_output_text_from_term<T: EventListener>(
     text
 }
 
+struct KeptCursorLine {
+    rows: Vec<Row<alacritty_terminal::term::cell::Cell>>,
+    cursor_row: i32,
+    cursor_column: usize,
+    input_needs_wrap: bool,
+}
+
+/// Copy the logical line under the cursor, which is the shell prompt when the shell is idle.
+/// Full-screen programs repaint their own screen, so nothing is kept on the alternate screen.
+fn kept_cursor_line<T: EventListener>(term: &Term<T>) -> Option<KeptCursorLine> {
+    if term.mode().contains(TermMode::ALT_SCREEN) {
+        return None;
+    }
+    let grid = term.grid();
+    let cursor = grid.cursor.point;
+    let last_column = Column(grid.columns() - 1);
+    let wraps = |line: i32| {
+        grid[Line(line)]
+            .cell(last_column)
+            .flags
+            .contains(Flags::WRAPLINE)
+    };
+    let mut start = cursor.line.0;
+    while start > grid.topmost_line().0 && wraps(start - 1) {
+        start -= 1;
+    }
+    let mut end = cursor.line.0;
+    while end + 1 < grid.screen_lines() as i32 && wraps(end) {
+        end += 1;
+    }
+    let rows: Vec<_> = (start..=end).map(|line| grid[Line(line)].clone()).collect();
+    if rows
+        .iter()
+        .all(|row| row.into_iter().all(|cell| cell.c == ' '))
+    {
+        return None;
+    }
+    Some(KeptCursorLine {
+        rows,
+        cursor_row: cursor.line.0 - start,
+        cursor_column: cursor.column.0,
+        input_needs_wrap: grid.cursor.input_needs_wrap,
+    })
+}
+
 pub(crate) fn clear_terminal_buffer<T: EventListener>(term: &mut Term<T>) {
     // Clear host-owned emulator state without sending control bytes to the process or device.
-    // New output must start at the cleared origin after viewport and scrollback removal.
+    // New output must continue from the kept prompt, or from the cleared origin without one.
+    let kept = kept_cursor_line(term);
     Handler::clear_screen(term, ansi::ClearMode::All);
     Handler::clear_screen(term, ansi::ClearMode::Saved);
-    Handler::goto(term, 0, 0);
+    let grid = term.grid_mut();
+    // Host-side placement uses absolute coordinates even when the process enabled DECOM.
+    grid.cursor.point = Point::default();
+    grid.cursor.input_needs_wrap = false;
+    let Some(kept) = kept else {
+        return;
+    };
+
+    // Only the retained input may occupy history when it cannot fit in the viewport.
+    let screen_lines = grid.screen_lines();
+    let history_rows = kept.rows.len().saturating_sub(screen_lines);
+    if history_rows > 0 {
+        grid.scroll_up(&(Line(0)..Line(screen_lines as i32)), history_rows);
+    }
+    for (line, row) in kept.rows.into_iter().enumerate() {
+        grid[Line(line as i32 - history_rows as i32)] = row;
+    }
+    grid.cursor.point = Point::new(
+        Line(kept.cursor_row - history_rows as i32),
+        Column(kept.cursor_column),
+    );
+    grid.cursor.input_needs_wrap = kept.input_needs_wrap;
 }
 
 fn apply_terminal_output_processor<'a>(
@@ -336,21 +403,139 @@ mod tests {
 
     #[test]
     fn clear_terminal_buffer_homes_cursor_for_followup_output() {
+        for setup in [
+            &b"\x1b[3;5Hbefore\x1b[4;1H"[..],
+            &b"\x1b[2;4r\x1b[?6h\x1b[2;5Hbefore\x1b[3;1H"[..],
+        ] {
+            let mut term = clear_fixture_term();
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, setup);
+
+            clear_terminal_buffer(&mut term);
+
+            assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(0)));
+            parser.advance(&mut term, b"next");
+            assert_eq!(screen_lines(&term), ["next", "", "", ""]);
+        }
+    }
+
+    fn clear_fixture_term() -> Term<VoidListener> {
         let size = TerminalSize {
             cols: 12,
             rows: 4,
             cell_width: 8,
             cell_height: 17,
         };
-        let mut term = Term::new(Config::default(), &size, VoidListener);
+        Term::new(Config::default(), &size, VoidListener)
+    }
+
+    fn screen_lines(term: &Term<VoidListener>) -> Vec<String> {
+        (0..term.screen_lines() as i32)
+            .map(|line| {
+                let text: String = (0..term.columns())
+                    .map(|column| term.grid()[Line(line)].cell(Column(column)).c)
+                    .collect();
+                text.trim_end().to_string()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn clear_terminal_buffer_keeps_the_prompt_line_and_its_cursor() {
+        for origin_mode in [&b""[..], &b"\x1b[2;4r\x1b[?6h"[..]] {
+            let mut term = clear_fixture_term();
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, b"a\r\nb\r\nc\r\nd\r\ne\r\n");
+            parser.advance(&mut term, origin_mode);
+            parser.advance(&mut term, b"$ ls");
+
+            clear_terminal_buffer(&mut term);
+
+            assert_eq!(screen_lines(&term), ["$ ls", "", "", ""]);
+            assert_eq!(term.grid().history_size(), 0);
+            assert_eq!(
+                term.mode().contains(TermMode::ORIGIN),
+                !origin_mode.is_empty()
+            );
+            parser.advance(&mut term, b"x");
+            assert_eq!(screen_lines(&term), ["$ lsx", "", "", ""]);
+        }
+    }
+
+    #[test]
+    fn clear_terminal_buffer_keeps_every_row_of_a_wrapped_prompt() {
+        for (cursor_keys, expected_cursor) in [
+            (&b""[..], Point::new(Line(1), Column(2))),
+            (&b"\x1b[A"[..], Point::new(Line(0), Column(2))),
+        ] {
+            let mut term = clear_fixture_term();
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, b"old\r\n0123456789abXY");
+            parser.advance(&mut term, cursor_keys);
+
+            clear_terminal_buffer(&mut term);
+
+            assert_eq!(screen_lines(&term), ["0123456789ab", "XY", "", ""]);
+            assert_eq!(term.grid().cursor.point, expected_cursor);
+        }
+    }
+
+    #[test]
+    fn clear_terminal_buffer_keeps_wrapped_input_from_history() {
+        let expected_rows = [
+            "$ 0123456789",
+            "abcdefghijkl",
+            "ABCDEFGHIJKL",
+            "mnopqrstuvwx",
+            "MNOPQRSTUVWX",
+            "yz0123456789",
+            "YZ0123456789",
+            "row-seven---",
+            "row-eight---",
+            "tail",
+        ];
+        for (cursor_keys, expected_cursor) in [
+            (&b""[..], Point::new(Line(3), Column(4))),
+            (&b"\x1b[3A"[..], Point::new(Line(0), Column(4))),
+        ] {
+            let mut term = clear_fixture_term();
+            let mut parser = Processor::<StdSyncHandler>::new();
+            parser.advance(&mut term, b"old output\r\n");
+            parser.advance(&mut term, expected_rows.join("").as_bytes());
+            parser.advance(&mut term, cursor_keys);
+
+            clear_terminal_buffer(&mut term);
+
+            assert_eq!(
+                terminal_buffer_text_from_term(&term, term.columns()),
+                expected_rows.join("\n")
+            );
+            assert_eq!(term.grid().cursor.point, expected_cursor);
+        }
+    }
+
+    #[test]
+    fn clear_terminal_buffer_keeps_a_pending_wrap_at_the_last_column() {
+        let mut term = clear_fixture_term();
         let mut parser = Processor::<StdSyncHandler>::new();
-        parser.advance(&mut term, b"\x1b[3;5Hbefore");
+        parser.advance(&mut term, b"old\r\n0123456789ab");
+
+        clear_terminal_buffer(&mut term);
+        parser.advance(&mut term, b"Z");
+
+        assert_eq!(screen_lines(&term), ["0123456789ab", "Z", "", ""]);
+    }
+
+    #[test]
+    fn clear_terminal_buffer_empties_the_alternate_screen() {
+        let mut term = clear_fixture_term();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"\x1b[?1049h\x1b[2;1Heditor");
 
         clear_terminal_buffer(&mut term);
 
+        assert_eq!(screen_lines(&term), ["", "", "", ""]);
         assert_eq!(term.grid().cursor.point, Point::new(Line(0), Column(0)));
-        parser.advance(&mut term, b"next");
-        assert_eq!(term.grid()[Line(0)].cell(Column(0)).c, 'n');
     }
 
     #[test]
