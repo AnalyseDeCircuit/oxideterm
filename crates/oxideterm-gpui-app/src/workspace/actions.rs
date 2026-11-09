@@ -411,6 +411,116 @@ mod terminal_search_tests {
     }
 }
 
+#[cfg(all(test, unix))]
+mod knowledge_dialog_key_tests {
+    use super::*;
+
+    #[gpui::test]
+    fn knowledge_document_title_enter_creates_document(cx: &mut gpui::TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_KNOWLEDGE_DIALOG_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // WorkspaceApp owns background tasks and process-wide settings. Run the
+            // UI interaction in a portable child so this test cannot poison the
+            // shared test process during teardown.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .arg(cx.test_function_name().unwrap())
+                .arg("--nocapture")
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        assert!(default_settings_path().starts_with(std::path::PathBuf::from(fixture_dir)));
+        let mut settings = SettingsStore::load_from_path(default_settings_path()).unwrap();
+        settings.settings_mut().onboarding_completed = true;
+        settings.save().unwrap();
+
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            crate::workspace::window_shell::WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        let collection_id = workspace.read_with(cx, |workspace, cx| {
+            let store = workspace.ai_entity.read(cx).rag_store();
+            oxideterm_ai::rag_create_collection(
+                &store,
+                oxideterm_ai::RagCreateCollectionRequest {
+                    name: "Notes".into(),
+                    scope: oxideterm_ai::RagDocScopeRequest::Global,
+                },
+            )
+            .unwrap()
+            .id
+        });
+
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_knowledge_workspace_tab(window, cx);
+                workspace.open_knowledge_document_dialog(collection_id.clone(), true, window, cx);
+                workspace.ai_entity.update(cx, |ai, cx| {
+                    assert!(ai.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
+                    assert!(ai.replace_settings_input(
+                        SettingsInput::KnowledgeDocumentTitle,
+                        None,
+                        "Runbook",
+                        cx,
+                    ));
+                });
+            });
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |workspace, cx| {
+            assert!(
+                !workspace
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_document_dialog_open()
+            );
+            let store = workspace.ai_entity.read(cx).rag_store();
+            let documents =
+                oxideterm_ai::rag_list_documents(&store, &collection_id, None, None).unwrap();
+            assert_eq!(documents.documents.len(), 1);
+            assert_eq!(documents.documents[0].title, "Runbook");
+        });
+
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.open_knowledge_document_dialog(collection_id, true, window, cx);
+                workspace.ai_entity.update(cx, |ai, cx| {
+                    assert!(ai.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
+                });
+            });
+            window.draw(cx).clear(cx);
+        });
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, cx| {
+            assert!(
+                workspace
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_document_dialog_open()
+            );
+        });
+    }
+}
+
 fn terminal_tab_capture_blocked_by_workspace_ui(
     active_ime_target: bool,
     quick_commands_focused: bool,
@@ -1780,14 +1890,46 @@ impl WorkspaceApp {
         if !self.ai_entity.read(cx).knowledge_create_dialog_open() {
             return false;
         }
-        match self.handle_standard_confirm_key(event, cx) {
-            Some(ConfirmKeyboardAction::Cancel) => {
+        let Some(action) = self.knowledge_dialog_input_key_action(
+            event,
+            SettingsInput::KnowledgeCollectionName,
+            cx,
+        ) else {
+            return false;
+        };
+        match action {
+            browser_behavior::ModalFooterInputKeyAction::Cancel => {
                 self.ai_entity.update(cx, |entity, cx| {
                     entity.close_knowledge_create_dialog(Duration::ZERO, cx);
                 });
                 true
             }
-            Some(ConfirmKeyboardAction::Confirm) => {
+            browser_behavior::ModalFooterInputKeyAction::FocusInput => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.focus_settings_input(SettingsInput::KnowledgeCollectionName, cx);
+                });
+                self.clear_standard_confirm_focus();
+                self.show_active_input_caret(cx);
+                cx.notify();
+                true
+            }
+            browser_behavior::ModalFooterInputKeyAction::FocusFooter(action) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.blur_settings_input(cx);
+                });
+                self.set_standard_confirm_focus(action);
+                self.show_active_input_caret(cx);
+                cx.notify();
+                true
+            }
+            browser_behavior::ModalFooterInputKeyAction::Activate(action) => {
+                self.clear_standard_confirm_focus();
+                if action == ConfirmDialogAction::Cancel {
+                    self.ai_entity.update(cx, |entity, cx| {
+                        entity.close_knowledge_create_dialog(Duration::ZERO, cx);
+                    });
+                    return true;
+                }
                 if self
                     .ai_entity
                     .read(cx)
@@ -1806,8 +1948,6 @@ impl WorkspaceApp {
                 }
                 true
             }
-            Some(ConfirmKeyboardAction::Handled) => true,
-            None => false,
         }
     }
 
@@ -1819,14 +1959,46 @@ impl WorkspaceApp {
         if !self.ai_entity.read(cx).knowledge_document_dialog_open() {
             return false;
         }
-        match self.handle_standard_confirm_key(event, cx) {
-            Some(ConfirmKeyboardAction::Cancel) => {
+        let Some(action) = self.knowledge_dialog_input_key_action(
+            event,
+            SettingsInput::KnowledgeDocumentTitle,
+            cx,
+        ) else {
+            return false;
+        };
+        match action {
+            browser_behavior::ModalFooterInputKeyAction::Cancel => {
                 self.ai_entity.update(cx, |entity, cx| {
                     entity.close_knowledge_document_dialog(Duration::ZERO, cx);
                 });
                 true
             }
-            Some(ConfirmKeyboardAction::Confirm) => {
+            browser_behavior::ModalFooterInputKeyAction::FocusInput => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx);
+                });
+                self.clear_standard_confirm_focus();
+                self.show_active_input_caret(cx);
+                cx.notify();
+                true
+            }
+            browser_behavior::ModalFooterInputKeyAction::FocusFooter(action) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.blur_settings_input(cx);
+                });
+                self.set_standard_confirm_focus(action);
+                self.show_active_input_caret(cx);
+                cx.notify();
+                true
+            }
+            browser_behavior::ModalFooterInputKeyAction::Activate(action) => {
+                self.clear_standard_confirm_focus();
+                if action == ConfirmDialogAction::Cancel {
+                    self.ai_entity.update(cx, |entity, cx| {
+                        entity.close_knowledge_document_dialog(Duration::ZERO, cx);
+                    });
+                    return true;
+                }
                 if self
                     .ai_entity
                     .read(cx)
@@ -1846,9 +2018,26 @@ impl WorkspaceApp {
                 }
                 true
             }
-            Some(ConfirmKeyboardAction::Handled) => true,
-            None => false,
         }
+    }
+
+    fn knowledge_dialog_input_key_action(
+        &self,
+        event: &KeyDownEvent,
+        input: SettingsInput,
+        cx: &App,
+    ) -> Option<browser_behavior::ModalFooterInputKeyAction<ConfirmDialogAction>> {
+        let input_focused = self.ai_entity.read(cx).focused_settings_input() == Some(input);
+        browser_behavior::modal_footer_input_key_action(
+            event.keystroke.key.as_str(),
+            event.keystroke.modifiers.shift,
+            &CONFIRM_DIALOG_FOOTER_ACTIONS,
+            true,
+            input_focused,
+            self.standard_confirm_focus_owner(),
+            ConfirmDialogAction::Cancel,
+            Some(ConfirmDialogAction::Confirm),
+        )
     }
 
     pub(super) fn handle_knowledge_delete_confirm_key(
