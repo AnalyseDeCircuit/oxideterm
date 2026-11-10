@@ -219,3 +219,224 @@ fn snapshot_changes_describe_incoming_records() {
         ]
     );
 }
+
+#[test]
+fn batch_create_args_parse_with_files_and_policy() {
+    use clap::Parser;
+    let cli = crate::args::Cli::parse_from([
+        "oxideterm",
+        "connections",
+        "batch-create",
+        "--template-file",
+        "template.conf",
+        "--data-file",
+        "hosts.txt",
+        "--duplicate",
+        "rename",
+    ]);
+    let crate::args::Command::Connections(ConnectionsCommand {
+        action: ConnectionsAction::BatchCreate(args),
+    }) = cli.command
+    else {
+        panic!("expected batch-create");
+    };
+    assert_eq!(args.template_path.as_deref(), Some("template.conf"));
+    assert_eq!(args.data_path.as_deref(), Some("hosts.txt"));
+    assert!(matches!(
+        args.duplicate,
+        crate::args::ConnectionBatchDuplicateArg::Rename
+    ));
+    assert!(!args.write.yes, "writes require an explicit confirmation");
+}
+
+#[test]
+fn batch_default_auth_follows_the_template_identity_source() {
+    use oxideterm_connections::{BatchTemplate, SecretString, parse_batch_template};
+
+    let with_identity: BatchTemplate =
+        parse_batch_template("Host --\n  User u\n  IdentityFile ~/.ssh/kn\n").unwrap();
+    let conflict = batch::BatchAuthInput {
+        password: Some(SecretString::from("unused-secret")),
+        key_path: None,
+    };
+    let error = batch::resolve_batch_default_auth(&with_identity, &conflict, true).unwrap_err();
+    assert_eq!(error.code, "connection_batch_auth_conflict");
+    assert!(
+        batch::resolve_batch_default_auth(
+            &with_identity,
+            &batch::BatchAuthInput {
+                password: None,
+                key_path: None,
+            },
+            true,
+        )
+        .unwrap()
+        .is_none(),
+        "an identity template needs no dialog authentication"
+    );
+
+    let without_identity: BatchTemplate = parse_batch_template("Host --\n  User u\n").unwrap();
+    let auth = batch::resolve_batch_default_auth(
+        &without_identity,
+        &batch::BatchAuthInput {
+            password: Some(SecretString::from("pw")),
+            key_path: None,
+        },
+        true,
+    )
+    .unwrap()
+    .expect("password becomes the shared connection authentication");
+    match auth {
+        oxideterm_connections::SavedAuth::Password {
+            plaintext_password, ..
+        } => assert_eq!(
+            plaintext_password
+                .expect("the set account keeps its secret")
+                .expose_secret(),
+            "pw",
+            "the supplied secret must reach the saved authentication unchanged"
+        ),
+        other => panic!("expected the shared password, got {other:?}"),
+    }
+    let auth = batch::resolve_batch_default_auth(
+        &without_identity,
+        &batch::BatchAuthInput {
+            password: None,
+            key_path: Some("~/.ssh/kn".into()),
+        },
+        true,
+    )
+    .unwrap()
+    .expect("key path becomes the shared connection authentication");
+    assert!(matches!(auth, oxideterm_connections::SavedAuth::Key { .. }));
+    let error = batch::resolve_batch_default_auth(
+        &without_identity,
+        &batch::BatchAuthInput {
+            password: Some(SecretString::from("pw")),
+            key_path: Some("both".into()),
+        },
+        true,
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "connection_batch_auth_conflict");
+}
+
+#[test]
+fn batch_changes_describe_rows_and_invalid_lines() {
+    use oxideterm_connections::{
+        BatchDuplicateNamePolicy, BatchExistingConnection, parse_batch_data, parse_batch_template,
+        resolve_batch_rows,
+    };
+
+    let template = parse_batch_template("Host --\n  User u\n  IdentityFile ~/.ssh/kn\n").unwrap();
+    let data = parse_batch_data("hktkosl1100\nhktkosl1100\nbad host\n").unwrap();
+    let preview = resolve_batch_rows(&template, &data, None, &[], BatchDuplicateNamePolicy::Skip);
+    let changes = batch::batch_changes(&preview);
+    assert_eq!(
+        changes
+            .iter()
+            .map(|change| change.action)
+            .collect::<Vec<&str>>(),
+        vec!["batchCreate", "batchSkipDuplicateTarget", "batchInvalid"]
+    );
+    assert_eq!(changes[0].target, "hktkosl1100");
+    assert_eq!(changes[0].after.as_deref(), Some("u@hktkosl1100:22"));
+    assert_eq!(changes[2].target, "line 3");
+
+    // A stored connection with the same target is rewritten, not duplicated.
+    // The stored connection carries the same expanded credential the batch
+    // resolves, which is what `BatchExistingConnection::from_saved` reports.
+    let key_path = resolve_batch_rows(
+        &template,
+        &parse_batch_data("hktkosl1100\n").unwrap(),
+        None,
+        &[],
+        BatchDuplicateNamePolicy::Skip,
+    )
+    .addable_rows()[0]
+        .auth
+        .key_path()
+        .map(str::to_owned);
+    let existing = [BatchExistingConnection {
+        id: "saved-id".to_owned(),
+        name: "hktkosl1100".to_owned(),
+        host: "hktkosl1100".to_owned(),
+        port: 22,
+        username: "u".to_owned(),
+        group: None,
+        tags: Vec::new(),
+        auth_type: oxideterm_connections::AuthType::Key,
+        key_path,
+        cert_path: None,
+        managed_key_id: None,
+        has_proxy_command: false,
+        connect_timeout_seconds: None,
+        agent_forwarding: false,
+    }];
+    let data = parse_batch_data("hktkosl1100?group=helphub\n").unwrap();
+    let preview = resolve_batch_rows(
+        &template,
+        &data,
+        None,
+        &existing,
+        BatchDuplicateNamePolicy::Rename,
+    );
+    let changes = batch::batch_changes(&preview);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].action, "batchUpdate");
+    assert_eq!(changes[0].target, "hktkosl1100");
+
+    // Repeating stored data reports the row as already there.
+    let data = parse_batch_data("hktkosl1100\n").unwrap();
+    let preview = resolve_batch_rows(
+        &template,
+        &data,
+        None,
+        &existing,
+        BatchDuplicateNamePolicy::Skip,
+    );
+    let changes = batch::batch_changes(&preview);
+    assert_eq!(changes.len(), 1);
+    assert_eq!(changes[0].action, "batchUnchanged");
+
+    // Rendered reports must not carry credential values.
+    let cred_template = parse_batch_template("Host --\n  HostName {host}\n  User u\n").unwrap();
+    let cred_preview = resolve_batch_rows(
+        &cred_template,
+        &parse_batch_data("ops:example-pw@db1?name=db1-row\n").unwrap(),
+        None,
+        &[],
+        BatchDuplicateNamePolicy::Skip,
+    );
+    let rendered = format!(
+        "{cred_preview:?} {}",
+        serde_json::to_string(&batch::batch_changes(&cred_preview)).unwrap()
+    );
+    assert!(
+        !rendered.contains("example-pw"),
+        "batch reports must not render secrets: {rendered}"
+    );
+}
+
+#[test]
+fn batch_write_is_refused_while_any_row_is_invalid() {
+    use oxideterm_connections::{
+        BatchDuplicateNamePolicy, parse_batch_data, parse_batch_template, resolve_batch_rows,
+    };
+
+    let template = parse_batch_template("Host --\n  User u\n  IdentityFile ~/.ssh/kn\n").unwrap();
+    let data = parse_batch_data("hktkosl1100\nbad host\n").unwrap();
+    let preview = resolve_batch_rows(&template, &data, None, &[], BatchDuplicateNamePolicy::Skip);
+    assert_eq!(preview.addable_count(), 1, "one row alone would be written");
+
+    let error = batch::ensure_rows_valid(&preview, false, true).unwrap_err();
+    assert_eq!(error.code, "connection_batch_rows_invalid");
+    assert!(
+        error.message.contains("2 ("),
+        "the message names the offending line: {}",
+        error.message
+    );
+
+    batch::ensure_rows_valid(&preview, true, true)
+        .expect("a dry run reports invalid rows instead of failing");
+}

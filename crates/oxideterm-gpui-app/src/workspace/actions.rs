@@ -1269,6 +1269,7 @@ impl WorkspaceApp {
         if self.search_editor_focused(window, cx)
             || self.terminal_command_sender_editor_focused(window, cx)
             || self.quick_command_text_editor_focused(window, cx)
+            || self.batch_add_text_editor_focused(window, cx)
         {
             // Child editor handlers own the bubble path while focused.
             return;

@@ -641,6 +641,23 @@ impl WorkspaceApp {
                 && self.session_manager.read(cx).sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerBatchMove
                 && self.session_manager.read(cx).show_batch_move)
+            || (anchor.id == SelectAnchorId::SessionManagerBatchTemplate
+                && self
+                    .session_manager
+                    .read(cx)
+                    .batch_add
+                    .as_ref()
+                    .is_some_and(|dialog| dialog.template_menu_open))
+            || (anchor.id == SelectAnchorId::SessionManagerBatchKeyAuth && {
+                // The key menu only owns a trigger while it is open; a
+                // closed menu must not claim the anchor.
+                let session_manager = self.session_manager.read(cx);
+                session_manager.batch_add_uses_key_auth()
+                    && session_manager
+                        .batch_add
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.key_menu_open)
+            })
             || (matches!(anchor.id, SelectAnchorId::RemoteDesktopResizeMenu(_))
                 && self.remote_desktop_resize_menu_tab_id.is_some())
             || self

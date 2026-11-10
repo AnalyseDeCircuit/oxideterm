@@ -453,7 +453,7 @@ fn required_direct_value(value: Option<&String>, field: &str, json: bool) -> Cli
         })
 }
 
-fn read_direct_secret(
+pub(super) fn read_direct_secret(
     stdin: bool,
     env_var: Option<&str>,
     field: &str,

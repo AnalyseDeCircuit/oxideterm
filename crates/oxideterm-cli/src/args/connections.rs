@@ -37,6 +37,8 @@ pub enum ConnectionsAction {
     Validate(ConnectionsValidateArgs),
     #[command(about = "Create a connection from a JSON spec or direct parameters")]
     Create(ConnectionCreateArgs),
+    #[command(about = "Create many connections from an SSH config template and a host list")]
+    BatchCreate(ConnectionBatchCreateArgs),
     #[command(about = "Edit a connection from a JSON spec or direct parameters")]
     Edit(ConnectionEditArgs),
     #[command(about = "Delete a saved connection")]
@@ -186,6 +188,75 @@ pub enum ConnectionAuthArg {
     Password,
     Key,
     Certificate,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+pub enum ConnectionBatchDuplicateArg {
+    /// Leave the existing connection untouched.
+    Skip,
+    /// Append a numeric suffix until the display name is free.
+    Rename,
+}
+
+impl ConnectionBatchDuplicateArg {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "skip" => Some(Self::Skip),
+            "rename" => Some(Self::Rename),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+#[command(
+    long_about = "Create saved connections from an OpenSSH-style template plus one data line per host.\n\
+Data lines look like [user@]host[:port][?name=…&group=…&profile=…&tags=a,b]; the template owns shared user, port, identity and ProxyCommand settings."
+)]
+pub struct ConnectionBatchCreateArgs {
+    #[arg(long = "spec", value_name = "PATH", help = "Path to a batch JSON spec")]
+    pub spec_path: Option<String>,
+    #[arg(
+        long = "template-file",
+        value_name = "PATH",
+        conflicts_with = "spec_path",
+        help = "Path to the SSH config template text"
+    )]
+    pub template_path: Option<String>,
+    #[arg(
+        long = "data-file",
+        value_name = "PATH",
+        conflicts_with = "spec_path",
+        help = "Path to the per-host data list"
+    )]
+    pub data_path: Option<String>,
+    #[arg(
+        long,
+        value_enum,
+        default_value = "skip",
+        help = "Behavior when a generated display name already exists"
+    )]
+    pub duplicate: ConnectionBatchDuplicateArg,
+    #[arg(
+        long,
+        conflicts_with = "password_env",
+        help = "Read password from stdin when the template has no IdentityFile/CertificateFile"
+    )]
+    pub password_stdin: bool,
+    #[arg(
+        long = "password-env",
+        value_name = "VAR",
+        help = "Read password from an environment variable when the template has no IdentityFile/CertificateFile"
+    )]
+    pub password_env: Option<String>,
+    #[arg(
+        long,
+        help = "Private key path used when the template has no IdentityFile/CertificateFile"
+    )]
+    pub key_path: Option<String>,
+    #[command(flatten)]
+    pub write: WriteArgs,
 }
 
 #[derive(Debug, Args)]

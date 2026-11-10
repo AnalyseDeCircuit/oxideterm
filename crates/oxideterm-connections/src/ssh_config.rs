@@ -603,7 +603,7 @@ fn resolve_x11_forwarding(options: &SshHostOptions) -> Result<ConnectionX11Forwa
     })
 }
 
-fn parse_yes_no(value: &str) -> Result<bool> {
+pub(crate) fn parse_yes_no(value: &str) -> Result<bool> {
     if value.eq_ignore_ascii_case("yes") {
         Ok(true)
     } else if value.eq_ignore_ascii_case("no") {
@@ -613,7 +613,7 @@ fn parse_yes_no(value: &str) -> Result<bool> {
     }
 }
 
-fn parse_ssh_time_seconds(value: &str) -> Result<u32> {
+pub(crate) fn parse_ssh_time_seconds(value: &str) -> Result<u32> {
     let value = value.trim();
     if value.is_empty() {
         bail!("empty SSH time value");
@@ -1143,7 +1143,7 @@ fn remote_command_value(line: &str) -> Option<&str> {
     (!value.is_empty()).then_some(value)
 }
 
-fn strip_comment(line: &str) -> &str {
+pub(crate) fn strip_comment(line: &str) -> &str {
     let mut in_quotes = false;
     for (index, ch) in line.char_indices() {
         match ch {
@@ -1155,7 +1155,7 @@ fn strip_comment(line: &str) -> &str {
     line
 }
 
-fn split_ssh_words(line: &str) -> Vec<String> {
+pub(crate) fn split_ssh_words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
     let mut in_quotes = false;

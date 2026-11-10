@@ -96,6 +96,7 @@ fn normalize_command_output_format(command: &mut Command) {
                 normalize_json_args(args)
             }
             ConnectionsAction::Create(args) => normalize_write_args(&mut args.write),
+            ConnectionsAction::BatchCreate(args) => normalize_write_args(&mut args.write),
             ConnectionsAction::Edit(args) => normalize_write_args(&mut args.write),
             ConnectionsAction::Delete(args) => normalize_write_args(&mut args.write),
             ConnectionsAction::Rename(args) => normalize_write_args(&mut args.write),

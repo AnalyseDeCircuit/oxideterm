@@ -993,6 +993,23 @@ impl WorkspaceApp {
         }) {
             changed = true;
         }
+        if self.session_manager.update(cx, |session_manager, cx| {
+            let Some(dialog) = session_manager.batch_add.as_mut() else {
+                return false;
+            };
+            if !dialog.template_menu_open && !dialog.key_menu_open {
+                return false;
+            }
+            dialog.template_menu_open = false;
+            dialog.key_menu_open = false;
+            dialog.renaming_id = None;
+            dialog.new_template_naming = false;
+            dialog.rename_draft.clear();
+            cx.notify();
+            true
+        }) {
+            changed = true;
+        }
         if self.dismiss_workspace_context_menus(cx) {
             changed = true;
         }

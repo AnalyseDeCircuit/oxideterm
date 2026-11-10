@@ -1,3 +1,4 @@
+mod batch;
 mod connection_import;
 mod connection_transport;
 mod draft;
@@ -10,6 +11,12 @@ mod ssh_keys;
 mod ssh_paths;
 mod store;
 pub mod totp;
+pub use batch::{
+    BatchAddResult, BatchDataParse, BatchDataRow, BatchDuplicateNamePolicy,
+    BatchExistingConnection, BatchIssue, BatchIssueKind, BatchPreview, BatchPreviewRow,
+    BatchRowAuth, BatchRowStatus, BatchTemplate, MAX_BATCH_ROWS, ResolvedBatchRow, apply_batch,
+    normalize_batch_tags, parse_batch_data, parse_batch_template, resolve_batch_rows,
+};
 pub use connection_import::{
     ConnectionImportApplyRequest, ConnectionImportApplyResult, ConnectionImportDuplicateStrategy,
     ConnectionImportErrorInfo, ConnectionImportPreview, ConnectionImportSource,
