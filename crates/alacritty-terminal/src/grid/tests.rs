@@ -218,6 +218,87 @@ fn shrink_reflow_twice() {
 }
 
 #[test]
+fn shrink_reflow_preserves_history_until_widened() {
+    let mut grid = Grid::<Cell>::new(1, 4, 2);
+    grid.increase_scroll_limit(2);
+
+    for (line, text) in [(Line(-2), "abcd"), (Line(-1), "efgh")] {
+        for (column, c) in text.chars().enumerate() {
+            *grid[line].cell_mut(Column(column)) = cell(c);
+        }
+    }
+
+    // Both history rows need two rows at half the width. Truncating to the row limit here
+    // would permanently drop the oldest row, so widening could not restore it.
+    grid.resize(true, 1, 2);
+    grid.scroll_up(&(Line(0)..Line(1)), 0);
+
+    grid.resize(true, 1, 4);
+    assert_eq!(grid.total_lines(), 3);
+    assert_eq!(grid[Line(-2)].cell(Column(0)), cell('a'));
+    assert_eq!(grid[Line(-2)].cell(Column(3)), cell('d'));
+    assert_eq!(grid[Line(-1)].cell(Column(0)), cell('e'));
+    assert_eq!(grid[Line(-1)].cell(Column(3)), cell('h'));
+    assert_eq!(grid[Line(0)].cell(Column(0)), Cell::default());
+}
+
+#[test]
+fn scrolling_after_reflow_shrink_restores_history_limit() {
+    let mut grid = Grid::<Cell>::new(1, 4, 2);
+    grid.increase_scroll_limit(2);
+
+    for (line, text) in [(Line(-2), "abcd"), (Line(-1), "efgh")] {
+        for (column, c) in text.chars().enumerate() {
+            *grid[line].cell_mut(Column(column)) = cell(c);
+        }
+    }
+
+    // Reflow leaves history above the configured row limit until scrolling resumes.
+    grid.resize(true, 1, 2);
+    grid.scroll_display(Scroll::Top);
+    for (output, oldest, newest, evicted) in [("ij", "gh", "ij", 3), ("kl", "ij", "kl", 4)] {
+        for (column, c) in output.chars().enumerate() {
+            *grid[Line(0)].cell_mut(Column(column)) = cell(c);
+        }
+        grid.scroll_up(&(Line(0)..Line(1)), 1);
+
+        assert_eq!(grid.history_size(), 2);
+        assert_eq!(grid.display_offset(), 2);
+        assert_eq!(grid.scrolled_out_lines(), evicted);
+        for (line, text) in [(Line(-2), oldest), (Line(-1), newest)] {
+            for (column, c) in text.chars().enumerate() {
+                assert_eq!(grid[line].cell(Column(column)), cell(c));
+            }
+        }
+        for column in 0..2 {
+            assert_eq!(grid[Line(0)].cell(Column(column)), Cell::default());
+        }
+    }
+}
+
+#[test]
+fn height_resize_does_not_reclaim_reflowed_history() {
+    let mut grid = Grid::<Cell>::new(2, 4, 2);
+    grid.increase_scroll_limit(2);
+    for (line, text) in
+        [(Line(-2), "abcd"), (Line(-1), "efgh"), (Line(0), "ijkl"), (Line(1), "mnop")]
+    {
+        for (column, c) in text.chars().enumerate() {
+            *grid[line].cell_mut(Column(column)) = cell(c);
+        }
+    }
+    grid.cursor.point = Point::new(Line(1), Column(3));
+
+    grid.resize(true, 2, 2);
+    grid.resize(true, 1, 2);
+
+    let rows: Vec<String> = (grid.topmost_line().0..1)
+        .map(|line| (0..2).map(|column| grid[Line(line)].cell(Column(column)).c).collect())
+        .collect();
+    assert_eq!(rows, ["cd", "ef", "gh", "ij", "kl", "mn", "op"]);
+}
+
+#[test]
 fn shrink_reflow_empty_cell_inside_line() {
     let mut grid = Grid::<Cell>::new(1, 5, 3);
     *grid[Line(0)].cell_mut(Column(0)) = cell('1');

@@ -67,7 +67,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Move existing lines up for every line that couldn't be pulled from history.
         if from_history != lines_added {
             let delta = lines_added - from_history;
-            self.scroll_up(&(Line(0)..Line(target as i32)), delta);
+            self.scroll_up_region(&(Line(0)..Line(target as i32)), delta);
         }
 
         // Move cursor down for every line pulled from history.
@@ -93,7 +93,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Scroll up to keep content inside the window.
         let required_scrolling = (self.cursor.point.line.0 as usize + 1).saturating_sub(target);
         if required_scrolling > 0 {
-            self.scroll_up(&(Line(0)..Line(self.lines as i32)), required_scrolling);
+            self.scroll_up_region(&(Line(0)..Line(self.lines as i32)), required_scrolling);
 
             // Clamp cursors to the new viewport size.
             self.cursor.point.line = min(self.cursor.point.line, Line(target as i32 - 1));
@@ -380,8 +380,11 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         }
 
         // Reverse iterator and use it as the new grid storage.
-        let mut reversed: Vec<Row<T>> = new_raw.drain(..).rev().collect();
-        reversed.truncate(self.max_scroll_limit + self.lines);
+        let reversed: Vec<Row<T>> = new_raw.drain(..).rev().collect();
+        // Reflow can turn one history row into several when narrowing. Truncating to the
+        // row-based limit here would permanently discard content that widening would merge
+        // back, so retain every reflowed row. The next history-producing scroll restores
+        // `max_scroll_limit`; see `Grid::scroll_up`.
         self.raw.replace_inner(reversed);
 
         // Clamp display offset in case some lines went off.
