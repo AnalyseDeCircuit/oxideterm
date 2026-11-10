@@ -13,7 +13,9 @@ use std::os::unix::fs::PermissionsExt;
 use uuid::Uuid;
 use zeroize::{Zeroize, Zeroizing};
 
-use crate::store::{ImportedManagedSshKey, ManagedSshKey, ManagedSshKeyOrigin};
+use crate::store::{
+    ImportedManagedSshKey, ManagedSshKey, ManagedSshKeyOrigin, canonical_group_name,
+};
 use crate::{
     AuthType, BleProfilesSyncSnapshot, CONFIG_VERSION, ConnectionOptions, ConnectionStore,
     MoshProfilesSyncSnapshot, RemoteDesktopProfilesSyncSnapshot, SavedAuth, SavedConnection,

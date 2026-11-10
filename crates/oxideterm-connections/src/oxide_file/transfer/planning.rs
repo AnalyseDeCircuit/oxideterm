@@ -4,12 +4,12 @@ fn find_import_conflict<'a>(
     store: &'a ConnectionStore,
     conn: &EncryptedConnection,
 ) -> Option<&'a SavedConnection> {
-    let group = normalized_group(conn.group.as_deref());
+    let group = canonical_group_name(conn.group.as_deref());
     store
         .connections()
         .iter()
         .find(|existing| {
-            existing.name == conn.name && normalized_group(existing.group.as_deref()) == group
+            existing.name == conn.name && canonical_group_name(existing.group.as_deref()) == group
         })
         .or_else(|| {
             conn.source_connection_id
@@ -19,17 +19,13 @@ fn find_import_conflict<'a>(
         })
 }
 
-fn normalized_group(group: Option<&str>) -> Option<&str> {
-    group.map(str::trim).filter(|group| !group.is_empty())
-}
-
 fn plan_rename<'a>(
     conn: &'a EncryptedConnection,
     reserved_names: &mut HashSet<String>,
     planned_identities: &mut HashSet<(String, Option<&'a str>)>,
 ) -> PlannedImportAction {
     let name = unique_copy_name(&conn.name, reserved_names);
-    planned_identities.insert((name.clone(), normalized_group(conn.group.as_deref())));
+    planned_identities.insert((name.clone(), canonical_group_name(conn.group.as_deref())));
     PlannedImportAction::Rename(name)
 }
 
@@ -49,9 +45,9 @@ fn plan_import(
     connections
         .iter()
         .map(|conn| {
-            let group = normalized_group(conn.group.as_deref());
+            let identity = (conn.name.clone(), canonical_group_name(conn.group.as_deref()));
             let Some(existing_id) = find_import_conflict(store, conn).map(|c| c.id.clone()) else {
-                if !planned_identities.insert((conn.name.clone(), group)) {
+                if !planned_identities.insert(identity) {
                     return plan_rename(conn, &mut reserved_names, &mut planned_identities);
                 }
                 reserved_names.insert(conn.name.clone());
@@ -63,14 +59,20 @@ fn plan_import(
                     plan_rename(conn, &mut reserved_names, &mut planned_identities)
                 }
                 ImportConflictStrategy::Skip => PlannedImportAction::Skip,
-                ImportConflictStrategy::Replace if replaced_ids.insert(existing_id.clone()) => {
-                    PlannedImportAction::Replace(existing_id)
-                }
-                ImportConflictStrategy::Merge if replaced_ids.insert(existing_id.clone()) => {
-                    PlannedImportAction::Merge(existing_id)
-                }
                 ImportConflictStrategy::Replace | ImportConflictStrategy::Merge => {
-                    plan_rename(conn, &mut reserved_names, &mut planned_identities)
+                    if planned_identities.contains(&identity)
+                        || !replaced_ids.insert(existing_id.clone())
+                    {
+                        return plan_rename(conn, &mut reserved_names, &mut planned_identities);
+                    }
+                    // A moved connection occupies its destination before later archive entries
+                    // are planned, even though the store is not updated until import commits.
+                    planned_identities.insert(identity);
+                    if strategy == ImportConflictStrategy::Replace {
+                        PlannedImportAction::Replace(existing_id)
+                    } else {
+                        PlannedImportAction::Merge(existing_id)
+                    }
                 }
             }
         })

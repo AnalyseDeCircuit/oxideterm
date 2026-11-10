@@ -1771,7 +1771,7 @@ mod tests {
     }
 
     #[test]
-    fn import_planning_keeps_same_group_conflicts_and_blank_group_equivalence() {
+    fn import_planning_keeps_same_group_conflicts_and_ungrouped_equivalence() {
         let mut store = temp_store("same-name-same-group");
         store
             .upsert_imported_connection(grouped_saved_connection(
@@ -1783,20 +1783,22 @@ mod tests {
         store
             .upsert_imported_connection(grouped_saved_connection("plain", "edge", None))
             .unwrap();
-        let payload = [
-            grouped_payload_connection("master", Some("Spark"), None),
-            grouped_payload_connection("edge", Some("  "), None),
-        ];
+        for group in [None, Some("  "), Some("Ungrouped"), Some("未分组")] {
+            let payload = [
+                grouped_payload_connection("master", Some("Spark"), None),
+                grouped_payload_connection("edge", group, None),
+            ];
+            let plans = plan_import(&store, &payload, ImportConflictStrategy::Merge);
 
-        let plans = plan_import(&store, &payload, ImportConflictStrategy::Merge);
-
-        assert!(matches!(
-            plans.as_slice(),
-            [
-                PlannedImportAction::Merge(first),
-                PlannedImportAction::Merge(second),
-            ] if first == "spark" && second == "plain"
-        ));
+            assert!(
+                matches!(
+                    plans.as_slice(),
+                    [PlannedImportAction::Merge(first), PlannedImportAction::Merge(second)]
+                        if first == "spark" && second == "plain"
+                ),
+                "group={group:?}: {plans:?}"
+            );
+        }
     }
 
     #[test]
@@ -1827,6 +1829,35 @@ mod tests {
             ),
             "the source id alone must not retarget a differently named connection"
         );
+
+        for strategy in [ImportConflictStrategy::Merge, ImportConflictStrategy::Replace] {
+            let mut payload = [
+                grouped_payload_connection("master", Some("New"), Some("conn-1")),
+                grouped_payload_connection("master", Some("New"), Some("other")),
+            ];
+            let plans = plan_import(&store, &payload, strategy);
+            let updates_existing = match strategy {
+                ImportConflictStrategy::Merge => {
+                    matches!(plans.first(), Some(PlannedImportAction::Merge(id)) if id == "conn-1")
+                }
+                ImportConflictStrategy::Replace => {
+                    matches!(plans.first(), Some(PlannedImportAction::Replace(id)) if id == "conn-1")
+                }
+                _ => unreachable!(),
+            };
+            assert!(updates_existing, "{strategy:?}: {plans:?}");
+            assert!(
+                matches!(plans.get(1), Some(PlannedImportAction::Rename(name)) if name == "master (Copy)"),
+                "{strategy:?}: {plans:?}"
+            );
+
+            payload.swap(0, 1);
+            let plans = plan_import(&store, &payload, strategy);
+            assert!(
+                matches!(plans.as_slice(), [PlannedImportAction::Import, PlannedImportAction::Rename(name)] if name == "master (Copy)"),
+                "{strategy:?}, reversed archive: {plans:?}"
+            );
+        }
     }
 
     #[test]
