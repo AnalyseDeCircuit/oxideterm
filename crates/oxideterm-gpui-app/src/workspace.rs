@@ -688,6 +688,7 @@ struct TabDragState {
     current_x: f32,
     current_y: f32,
     tab_widths: Vec<f32>,
+    last_edge_scroll_frame: Option<Instant>,
     active: bool,
     mode: TabDragMode,
     drop_target_index: usize,

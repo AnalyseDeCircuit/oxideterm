@@ -3,6 +3,15 @@ use gpui::{Div, StatefulInteractiveElement, point};
 use oxideterm_remote_desktop::RemoteDesktopSessionStatus;
 use oxideterm_settings::SessionSortOrder;
 use oxideterm_terminal::BleConnectionStatus;
+use oxideterm_theme::AppUiColors;
+
+fn session_item_surface(theme: AppUiColors, selected: bool, accent_alpha: u32) -> Div {
+    if selected {
+        div().bg(rgba((theme.accent << 8) | accent_alpha))
+    } else {
+        div().hover(move |style| style.bg(rgb(theme.bg_hover)))
+    }
+}
 
 fn active_connection_count(rows: &[ActiveSessionSidebarRow]) -> usize {
     // Count connection owners, including SSH nodes with only SFTP/forwarding consumers.
@@ -1901,12 +1910,6 @@ impl WorkspaceApp {
         } else {
             rgba((theme.border << 8) | SESSION_FOCUS_CARD_BORDER_ALPHA)
         };
-        let background = if selected {
-            rgba((theme.accent << 8) | SESSION_FOCUS_CARD_SELECTED_BG_ALPHA)
-        } else {
-            rgba(theme.bg_card << 8)
-        };
-
         let node_id = row.node_id.clone();
         let local_terminal = if row.local_profile_id.is_some() {
             self.first_running_local_terminal(&row.node_view.terminal_ids, cx)
@@ -1914,7 +1917,7 @@ impl WorkspaceApp {
             row.node_view.terminal_ids.first().copied()
         };
         let local_profile_id = row.local_profile_id.clone();
-        let mut card = div()
+        let mut card = session_item_surface(theme, selected, SESSION_FOCUS_CARD_SELECTED_BG_ALPHA)
             .mx_2()
             .mb_2()
             .p_3()
@@ -1924,9 +1927,7 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(border_color)
-            .bg(background)
             .cursor_pointer()
-            .hover(move |card| card.bg(rgb(theme.bg_hover)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -2230,7 +2231,7 @@ impl WorkspaceApp {
         };
         let (text, icon) = self.session_terminal_label_icon(session_id, index, cx);
 
-        div()
+        session_item_surface(theme, active, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
             .h(px(24.0))
             .flex()
             .flex_row()
@@ -2238,13 +2239,7 @@ impl WorkspaceApp {
             .gap(px(6.0))
             .rounded(px(self.tokens.radii.md))
             .px_2()
-            .bg(if active {
-                rgba((theme.accent << 8) | SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
-            } else {
-                rgba(theme.bg << 8)
-            })
             .text_color(rgb(text_color))
-            .hover(move |row| row.bg(rgb(theme.bg_hover)))
             .child(icon.render(12.0, rgb(text_color)))
             .child(
                 div()
@@ -3067,7 +3062,7 @@ impl WorkspaceApp {
 
     fn session_sidebar_row(&self, selected: bool, height: f32) -> gpui::Div {
         let theme = self.tokens.ui;
-        div()
+        session_item_surface(theme, selected, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
             .relative()
             .w_full()
             .min_w_0()
@@ -3077,12 +3072,6 @@ impl WorkspaceApp {
             .items_center()
             .rounded_none()
             .cursor_pointer()
-            .bg(if selected {
-                rgba((theme.accent << 8) | SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
-            } else {
-                rgba(0x00000000)
-            })
-            .hover(move |row| row.bg(rgb(theme.bg_hover)))
             .when(selected, |row| {
                 row.child(
                     div()
@@ -3659,11 +3648,6 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let active = self.active_terminal_session_id(cx) == Some(session_id);
         let (text, icon) = self.session_terminal_label_icon(session_id, index, cx);
-        let row_bg = if active {
-            rgba((theme.accent << 8) | 0x1a)
-        } else {
-            rgba(theme.bg << 8)
-        };
         let text_color = if active {
             rgb(theme.accent)
         } else {
@@ -3673,7 +3657,7 @@ impl WorkspaceApp {
         self.render_session_tree_child(
             depth,
             line_stops_here,
-            div()
+            session_item_surface(theme, active, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
                 .relative()
                 .h(px(SESSION_TREE_ITEM_HEIGHT))
                 // Auto width includes the left margin within the tree's available row width.
@@ -3684,8 +3668,6 @@ impl WorkspaceApp {
                 .rounded_none()
                 .px_2()
                 .cursor_pointer()
-                .bg(row_bg)
-                .hover(move |row| row.bg(rgb(theme.bg_hover)))
                 .when(active, |row| {
                     row.child(
                         div()
@@ -4802,6 +4784,37 @@ mod host_view_tests {
 mod host_view_render_tests {
     use super::*;
     use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn hover_highlights_only_unselected_sessions(cx: &mut TestAppContext) {
+        struct Rows(AppUiColors);
+        impl gpui::Render for Rows {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                let rows = [true, false].map(|selected| {
+                    session_item_surface(self.0, selected, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
+                        .w(px(100.0))
+                        .h(px(24.0))
+                });
+                div().flex().flex_col().children(rows)
+            }
+        }
+
+        let theme = ThemeTokens::from_builtin(oxideterm_theme::theme_by_id("default")).ui;
+        let (_, cx) = cx.add_window_view(|_, _| Rows(theme));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let accent = rgba((theme.accent << 8) | SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA).into();
+        let hover = rgb(theme.bg_hover).into();
+        for (y, expect_hover) in [(36.0, true), (12.0, false)] {
+            cx.simulate_mouse_move(point(px(50.0), px(y)), None, gpui::Modifiers::default());
+            cx.update(|window, cx| {
+                window.draw(cx).clear(cx);
+                let quads = window.painted_quads();
+                let painted = |color| quads.iter().any(|q| q.background.as_solid() == Some(color));
+                assert!(painted(accent), "selected row lost its tint at y={y}");
+                assert_eq!(painted(hover), expect_hover, "hover background at y={y}");
+            });
+        }
+    }
 
     fn isolated_fixture(cx: &mut TestAppContext, fixture_key: &str) -> Option<std::path::PathBuf> {
         let executable = std::env::current_exe().unwrap();

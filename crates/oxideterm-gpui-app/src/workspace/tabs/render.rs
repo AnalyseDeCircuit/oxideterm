@@ -107,7 +107,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn render_tab_bar(
-        &self,
+        &mut self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -158,10 +158,19 @@ impl WorkspaceApp {
             self.tab_host.read(cx).unread_terminal_output_tab_ids();
         let active_tab_id = self.active_tab_id(cx);
         let layout = self.tab_strip_layout(window, cx);
+        self.scroll_reordering_tab(&layout, window, cx);
         if !self.main_window_tabs.exiting_tabs.is_empty() {
             window.request_animation_frame();
         }
         let live_tab_count = self.main_tabs(cx).count();
+        let insertion_slot = self.main_window_tabs.drag.as_ref().and_then(|drag| {
+            (drag.mode == TabDragMode::Reorder
+                && super::navigation::tab_reorder_target_visible_index(
+                    drag.from_index,
+                    drag.drop_target_index,
+                ) != drag.from_index)
+                .then_some(drag.drop_target_index)
+        });
         let mut visible_tab_index = 0;
         for item in layout.items {
             if let TabStripItemKind::Exiting(index) = item.kind {
@@ -198,15 +207,8 @@ impl WorkspaceApp {
             let drag_state = self.main_window_tabs.drag.as_ref();
             let drag_active = drag_state.is_some_and(|drag| drag.active);
             let is_being_dragged = drag_state.is_some_and(|drag| drag.tab_id == tab_id);
-            let show_drop_indicator = drag_state.is_some_and(|drag| {
-                drag.active
-                    && drag.mode == TabDragMode::Reorder
-                    && drag.drop_target_index == current_visible_index
-                    && super::navigation::tab_reorder_target_visible_index(
-                        drag.from_index,
-                        drag.drop_target_index,
-                    ) != drag.from_index
-            });
+            let after_last = insertion_slot == Some(live_tab_count)
+                && current_visible_index + 1 == live_tab_count;
             let show_reconnect_progress = reconnect_job.is_some();
             let tab_tooltip_label = tab_text.clone();
             let tab_tooltip_id = format!("workspace-tab-title-{}", tab_id.0);
@@ -283,17 +285,20 @@ impl WorkspaceApp {
                         this.clear_workspace_tooltip(&tab_tooltip_id, cx);
                     }
                 }))
-                .when(show_drop_indicator, |tab| {
-                    tab.child(
-                        div()
-                            .absolute()
-                            .left_0()
-                            .top_0()
-                            .bottom_0()
-                            .w(px(2.0))
-                            .bg(rgb(theme.accent)),
-                    )
-                })
+                .when(
+                    insertion_slot == Some(current_visible_index) || after_last,
+                    |tab| {
+                        tab.child(
+                            div()
+                                .absolute()
+                                .when_else(after_last, |line| line.right_0(), |line| line.left_0())
+                                .top_0()
+                                .bottom_0()
+                                .w(px(2.0))
+                                .bg(rgb(theme.accent)),
+                        )
+                    },
+                )
                 .when(active || show_reconnect_progress, |tab| {
                     tab.child(
                         div()
@@ -365,21 +370,6 @@ impl WorkspaceApp {
                     .child(tab_element),
                 oxideterm_gpui_ui::motion::MotionDuration::Control,
             ));
-        }
-
-        let show_trailing_drop_indicator =
-            self.main_window_tabs.drag.as_ref().is_some_and(|drag| {
-                drag.active
-                    && drag.mode == TabDragMode::Reorder
-                    && drag.drop_target_index == live_tab_count
-                    && super::navigation::tab_reorder_target_visible_index(
-                        drag.from_index,
-                        drag.drop_target_index,
-                    ) != drag.from_index
-            });
-        if show_trailing_drop_indicator {
-            scroll_viewport =
-                scroll_viewport.child(div().w(px(2.0)).h_full().flex_none().bg(rgb(theme.accent)));
         }
 
         // Only the trailing filler is draggable. Do not mark the tabbar parent

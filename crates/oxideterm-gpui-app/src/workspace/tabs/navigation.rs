@@ -27,6 +27,20 @@ fn tab_drag_is_horizontal_reorder(delta_x: f32, delta_y: f32) -> bool {
     horizontal > TAB_DRAG_THRESHOLD_PX && horizontal >= vertical
 }
 
+impl TabDragState {
+    fn edge_scroll_step(&self, viewport: Bounds<Pixels>) -> Option<f32> {
+        let pointer = gpui::point(px(self.current_x), px(self.current_y));
+        if self.mode != TabDragMode::Reorder || !viewport.contains(&pointer) {
+            return None;
+        }
+        crate::workspace::virtual_list::browser_drag_edge_scroll_step(
+            viewport.left(),
+            viewport.right(),
+            pointer.x,
+        )
+    }
+}
+
 fn tab_drag_is_detach(delta_x: f32, delta_y: f32, tabbar_height: f32) -> bool {
     let threshold = (tabbar_height * 0.72).max(24.0);
     delta_y > threshold && delta_y.abs() >= delta_x.abs() * 0.85
@@ -1475,9 +1489,45 @@ impl WorkspaceApp {
         title
     }
 
-    fn tab_drop_target_index_for_x(&self, client_x: f32, window: &Window, cx: &mut App) -> usize {
-        let tabbar_x = client_x - self.tabbar_left_x() + self.tabbar_effective_scroll_x(window, cx);
-        self.tab_strip_layout(window, cx).insertion_index(tabbar_x)
+    pub(super) fn scroll_reordering_tab(
+        &mut self,
+        layout: &super::layout::TabStripLayout,
+        window: &Window,
+        cx: &App,
+    ) {
+        let tabs = &mut self.main_window_tabs;
+        let Some(drag) = tabs.drag.as_mut() else {
+            return;
+        };
+        let viewport = tabs.scroll_handle.bounds();
+        let limit = (layout.content_width() - f32::from(viewport.size.width)).max(0.0);
+        let offset = f32::from(-tabs.scroll_handle.offset().x).clamp(0.0, limit);
+        let Some(step) = drag
+            .edge_scroll_step(viewport)
+            .filter(|step| (*step < 0.0 && offset > 0.0) || (*step > 0.0 && offset < limit))
+        else {
+            drag.last_edge_scroll_frame = None;
+            return;
+        };
+
+        // Scroll on display frames, not mouse events. Use elapsed time so a high
+        // refresh rate or an unrelated redraw doesn't make the strip move faster.
+        let now = cx.background_executor().now();
+        let elapsed = drag
+            .last_edge_scroll_frame
+            .replace(now)
+            .map_or(0.0, |last| {
+                now.saturating_duration_since(last).as_secs_f32().min(0.05)
+            });
+        let next = (offset + step * elapsed * 60.0).clamp(0.0, limit);
+        tabs.scroll_handle
+            .set_offset(gpui::point(px(-next), px(0.0)));
+        drag.drop_target_index = layout.insertion_at_pointer(drag.current_x, &tabs.scroll_handle);
+        if (step < 0.0 && next > 0.0) || (step > 0.0 && next < limit) {
+            window.request_animation_frame();
+        } else {
+            drag.last_edge_scroll_frame = None;
+        }
     }
 
     pub(in crate::workspace) fn start_tab_drag_candidate(
@@ -1495,7 +1545,6 @@ impl WorkspaceApp {
         }
         let start_x = f32::from(event.position.x);
         let start_y = f32::from(event.position.y);
-        let tab_widths = self.tab_strip_layout(window, cx).live_widths();
         let Some(visible_index) = self.main_tabs(cx).position(|(_, tab)| tab.id == tab_id) else {
             return;
         };
@@ -1504,7 +1553,9 @@ impl WorkspaceApp {
         let destination_tab = self.active_tab_id(cx).filter(|id| *id != tab_id);
         self.split_drop_target = None;
         self.set_active_tab(tab_id, window, cx);
-        let drop_target_index = self.tab_drop_target_index_for_x(start_x, window, cx);
+        let layout = self.tab_strip_layout(window, cx);
+        let drop_target_index =
+            layout.insertion_at_pointer(start_x, &self.main_window_tabs.scroll_handle);
         self.main_window_tabs.drag = Some(TabDragState {
             tab_id,
             from_index: visible_index,
@@ -1513,7 +1564,8 @@ impl WorkspaceApp {
             start_y,
             current_x: start_x,
             current_y: start_y,
-            tab_widths,
+            tab_widths: layout.live_widths(),
+            last_edge_scroll_frame: None,
             active: false,
             mode: TabDragMode::Pending,
             drop_target_index,
@@ -1540,11 +1592,14 @@ impl WorkspaceApp {
         let previous_mode = drag.mode.clone();
         let previous_split_target = self.split_drop_target;
         let previous_drop_target_index = drag.drop_target_index;
+        let viewport = self.main_window_tabs.scroll_handle.bounds();
+        let previous_edge = drag.edge_scroll_step(viewport).map(f32::signum);
         // Browser tab drags keep pointer capture after leaving the tab label;
         // the root mouse-up is responsible for finishing or cancelling.
         drag.current_x = f32::from(event.position.x);
         drag.current_y = f32::from(event.position.y);
-        drag.tab_widths = self.tab_strip_layout(window, cx).live_widths();
+        let layout = self.tab_strip_layout(window, cx);
+        drag.tab_widths = layout.live_widths();
         let delta_x = drag.current_x - drag.start_x;
         let delta_y = drag.current_y - drag.start_y;
         // Tauri uses a 10px pointer threshold for reorder. GPUI also needs the
@@ -1562,13 +1617,19 @@ impl WorkspaceApp {
         } else if tab_drag_is_horizontal_reorder(delta_x, delta_y) {
             drag.active = true;
             drag.mode = TabDragMode::Reorder;
-            drag.drop_target_index = self.tab_drop_target_index_for_x(drag.current_x, window, cx);
+            drag.drop_target_index =
+                layout.insertion_at_pointer(drag.current_x, &self.main_window_tabs.scroll_handle);
         } else {
             drag.active = false;
             drag.mode = TabDragMode::Pending;
             drag.drop_target_index = drag.from_index;
         }
-        let changed = drag.active != was_active
+        let edge_changed = previous_edge != drag.edge_scroll_step(viewport).map(f32::signum);
+        if edge_changed {
+            drag.last_edge_scroll_frame = None;
+        }
+        let changed = edge_changed
+            || drag.active != was_active
             || drag.mode != previous_mode
             || drag.drop_target_index != previous_drop_target_index
             || self.split_drop_target != previous_split_target;

@@ -69,6 +69,10 @@ impl TabStripLayout {
         }
         index
     }
+
+    pub fn insertion_at_pointer(&self, client_x: f32, viewport: &ScrollHandle) -> usize {
+        self.insertion_index(client_x - f32::from(viewport.bounds().left() + viewport.offset().x))
+    }
 }
 
 impl WorkspaceApp {
@@ -218,8 +222,9 @@ impl ExitingTabVisual {
 mod tests {
     use super::*;
 
-    #[gpui::test]
-    fn tab_strip_render_drag_close_and_scroll_use_full_title_widths(cx: &mut gpui::TestAppContext) {
+    fn tab_strip_fixture(
+        cx: &mut gpui::TestAppContext,
+    ) -> Option<(Entity<WorkspaceApp>, &mut gpui::VisualTestContext)> {
         let executable = std::env::current_exe().unwrap();
         let fixture_key = "OXIDETERM_TAB_LAYOUT_TEST_DIR";
         let Some(directory) = std::env::var_os(fixture_key) else {
@@ -242,7 +247,7 @@ mod tests {
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
-            return;
+            return None;
         };
         assert!(default_settings_path().starts_with(PathBuf::from(directory)));
         let mut settings = SettingsStore::load_from_path(default_settings_path()).unwrap();
@@ -268,6 +273,108 @@ mod tests {
             window_shell::WorkspaceWindowShell::new(workspace, window, cx)
         });
         let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        Some((workspace, cx))
+    }
+
+    #[gpui::test]
+    fn holding_a_tab_at_either_edge_scrolls_to_its_drop_slot(cx: &mut gpui::TestAppContext) {
+        let Some((workspace, cx)) = tab_strip_fixture(cx) else {
+            return;
+        };
+        cx.simulate_resize(gpui::size(px(900.0), px(700.0)));
+        workspace.update(cx, |workspace, cx| {
+            workspace.tab_host.update(cx, |host, _| {
+                for id in 102..=115 {
+                    host.insert_and_select_main_tab(Tab {
+                        id: TabId(id),
+                        kind: TabKind::SessionManager,
+                        title: format!("Terminal session {id}"),
+                        title_source: TabTitleSource::Static,
+                        root_pane: None,
+                        active_pane_id: None,
+                    });
+                }
+            });
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let viewport = cx.debug_bounds("workspace-tab-scroll-viewport").unwrap();
+        let modifiers = gpui::Modifiers::default();
+        let offset = |cx: &gpui::VisualTestContext| {
+            workspace.read_with(cx, |w, _| w.main_window_tabs.scroll_handle.offset().x)
+        };
+        let hold = |cx: &mut gpui::VisualTestContext, frames| {
+            // No fresh pointer events. Service only frames requested by the window.
+            for _ in 0..frames {
+                cx.executor().advance_clock(Duration::from_millis(16));
+                cx.update(|window, cx| {
+                    if window.simulate_next_frame(cx) != 0 {
+                        window.draw(cx).clear(cx);
+                    }
+                });
+            }
+        };
+        for right in [true, false] {
+            let tab = cx.debug_bounds("workspace-tab-101").unwrap();
+            let edge = if right {
+                viewport.right() - px(2.0)
+            } else {
+                viewport.left() + px(2.0)
+            };
+            let pointer = gpui::point(edge, tab.center().y);
+            cx.simulate_mouse_down(tab.center(), MouseButton::Left, modifiers);
+            cx.simulate_mouse_move(pointer, Some(MouseButton::Left), modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let initial = offset(cx);
+            hold(cx, 4);
+            let scrolled = offset(cx);
+            assert!(
+                if right {
+                    scrolled < initial
+                } else {
+                    scrolled > initial
+                },
+                "holding the pointer must scroll beyond the initial move"
+            );
+            if right {
+                cx.simulate_mouse_move(viewport.center(), Some(MouseButton::Left), modifiers);
+                let paused = offset(cx);
+                hold(cx, 4);
+                assert_eq!(offset(cx), paused, "leaving the edge must stop scrolling");
+                cx.simulate_mouse_move(pointer, Some(MouseButton::Left), modifiers);
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            hold(cx, 150);
+            // Check the painted insertion line, not just the model's target slot.
+            cx.update(|window, cx| {
+                let accent = rgb(workspace.read(cx).tokens.ui.accent).into();
+                let scale = window.scale_factor();
+                assert!(
+                    window.painted_quads().iter().any(|quad| {
+                        quad.background.as_solid() == Some(accent)
+                            && (quad.bounds.size.width.0 / scale - 2.0).abs() < 0.1
+                            && (quad.bounds.center().x.0 / scale - f32::from(edge)).abs() <= 2.0
+                            && (quad.bounds.center().y.0 / scale - f32::from(pointer.y)).abs()
+                                <= 2.0
+                    }),
+                    "the insertion line must be visible at the held edge"
+                );
+            });
+            cx.simulate_mouse_up(pointer, MouseButton::Left, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            workspace.read_with(cx, |w, cx| {
+                let actual: Vec<_> = w.main_tabs(cx).map(|(_, tab)| tab.id).collect();
+                let mut expected: Vec<_> = (102..=115).map(TabId).collect();
+                expected.insert(if right { expected.len() } else { 0 }, TabId(101));
+                assert_eq!(actual, expected);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn tab_strip_render_drag_close_and_scroll_use_full_title_widths(cx: &mut gpui::TestAppContext) {
+        let Some((workspace, cx)) = tab_strip_fixture(cx) else {
+            return;
+        };
         cx.simulate_resize(gpui::size(px(1200.0), px(700.0)));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let viewport = cx.debug_bounds("workspace-tab-scroll-viewport").unwrap();

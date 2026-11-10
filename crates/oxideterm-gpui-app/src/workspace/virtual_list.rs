@@ -233,15 +233,19 @@ pub(super) fn sync_virtual_list_state_by_signatures(
     false
 }
 
-fn browser_drag_edge_scroll_step(top: Pixels, bottom: Pixels, y: Pixels) -> Option<f32> {
+pub(super) fn browser_drag_edge_scroll_step(
+    start: Pixels,
+    end: Pixels,
+    pointer: Pixels,
+) -> Option<f32> {
     let edge = BROWSER_DRAG_AUTOSCROLL_EDGE_PX;
-    let top = f32::from(top);
-    let bottom = f32::from(bottom);
-    let y = f32::from(y);
-    let step = if y < top + edge {
-        -((top + edge - y) / edge).clamp(0.0, 1.0) * BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX
-    } else if y > bottom - edge {
-        ((y - (bottom - edge)) / edge).clamp(0.0, 1.0) * BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX
+    let start = f32::from(start);
+    let end = f32::from(end);
+    let pointer = f32::from(pointer);
+    let step = if pointer < start + edge {
+        -((start + edge - pointer) / edge).clamp(0.0, 1.0) * BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX
+    } else if pointer > end - edge {
+        ((pointer - (end - edge)) / edge).clamp(0.0, 1.0) * BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX
     } else {
         0.0
     };
