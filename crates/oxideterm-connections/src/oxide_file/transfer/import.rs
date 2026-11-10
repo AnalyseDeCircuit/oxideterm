@@ -346,11 +346,7 @@ fn apply_oxide_import_with_options_inner(
         let imported_connection_id = match action {
             PlannedImportAction::Skip => {
                 result.skipped += 1;
-                store
-                    .connections()
-                    .iter()
-                    .find(|existing| existing.name == conn.name)
-                    .map(|existing| existing.id.clone())
+                find_import_conflict(store, &conn).map(|existing| existing.id.clone())
             }
             PlannedImportAction::Import => {
                 let saved = encrypted_connection_to_saved(

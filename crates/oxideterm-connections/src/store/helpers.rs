@@ -103,14 +103,14 @@ fn rename_group_path(candidate: &str, old_group: &str, new_group: &str) -> Optio
     })
 }
 
+pub(crate) fn canonical_group_name(group: Option<&str>) -> Option<&str> {
+    group
+        .map(str::trim)
+        .filter(|group| !group.is_empty() && !matches!(*group, "Ungrouped" | "未分组"))
+}
+
 fn normalize_optional_group_name(group: Option<&str>) -> Result<Option<String>> {
-    let Some(group) = group.map(str::trim).filter(|group| !group.is_empty()) else {
-        return Ok(None);
-    };
-    if matches!(group, "Ungrouped" | "未分组") {
-        return Ok(None);
-    }
-    validate_group_name(group).map(Some)
+    canonical_group_name(group).map(validate_group_name).transpose()
 }
 
 fn non_empty<'a>(value: &'a str, label: &str) -> Result<&'a str> {
