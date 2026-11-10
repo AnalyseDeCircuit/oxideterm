@@ -67,7 +67,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Move existing lines up for every line that couldn't be pulled from history.
         if from_history != lines_added {
             let delta = lines_added - from_history;
-            self.scroll_up(&(Line(0)..Line(target as i32)), delta);
+            self.scroll_up_region(&(Line(0)..Line(target as i32)), delta);
         }
 
         // Move cursor down for every line pulled from history.
@@ -93,7 +93,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Scroll up to keep content inside the window.
         let required_scrolling = (self.cursor.point.line.0 as usize + 1).saturating_sub(target);
         if required_scrolling > 0 {
-            self.scroll_up(&(Line(0)..Line(self.lines as i32)), required_scrolling);
+            self.scroll_up_region(&(Line(0)..Line(self.lines as i32)), required_scrolling);
 
             // Clamp cursors to the new viewport size.
             self.cursor.point.line = min(self.cursor.point.line, Line(target as i32 - 1));

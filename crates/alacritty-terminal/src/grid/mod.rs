@@ -264,6 +264,23 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        // Reflow may temporarily exceed the row limit. Reclaim excess rows when scrolling
+        // moves content into history, counting every eviction for command anchors.
+        if region.start == 0 && positions != 0 {
+            let excess = self.history_size().saturating_sub(self.max_scroll_limit);
+            self.decrease_scroll_limit(excess);
+            self.scrolled_out_lines = self.scrolled_out_lines.wrapping_add(excess);
+        }
+
+        self.scroll_up_region(region, positions);
+    }
+
+    // Resize rotates rows without ending the temporary reflow allowance.
+    fn scroll_up_region<D>(&mut self, region: &Range<Line>, positions: usize)
+    where
+        T: ResetDiscriminant<D>,
+        D: PartialEq,
+    {
         // When rotating the entire region with fixed lines at the top, just reset everything.
         if region.end - region.start <= positions && region.start != 0 {
             for i in (region.start.0..region.end.0).map(Line::from) {
@@ -271,14 +288,6 @@ impl<T: GridCell + Default> Grid<T> {
             }
 
             return;
-        }
-
-        // Reflow may temporarily exceed the row limit. Reclaim excess rows when scrolling
-        // moves content into history, counting every eviction for command anchors.
-        if region.start == 0 && positions != 0 {
-            let excess = self.history_size().saturating_sub(self.max_scroll_limit);
-            self.decrease_scroll_limit(excess);
-            self.scrolled_out_lines = self.scrolled_out_lines.wrapping_add(excess);
         }
 
         // Update display offset when not pinned to active area. Reflow can leave history above

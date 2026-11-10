@@ -277,6 +277,28 @@ fn scrolling_after_reflow_shrink_restores_history_limit() {
 }
 
 #[test]
+fn height_resize_does_not_reclaim_reflowed_history() {
+    let mut grid = Grid::<Cell>::new(2, 4, 2);
+    grid.increase_scroll_limit(2);
+    for (line, text) in
+        [(Line(-2), "abcd"), (Line(-1), "efgh"), (Line(0), "ijkl"), (Line(1), "mnop")]
+    {
+        for (column, c) in text.chars().enumerate() {
+            *grid[line].cell_mut(Column(column)) = cell(c);
+        }
+    }
+    grid.cursor.point = Point::new(Line(1), Column(3));
+
+    grid.resize(true, 2, 2);
+    grid.resize(true, 1, 2);
+
+    let rows: Vec<String> = (grid.topmost_line().0..1)
+        .map(|line| (0..2).map(|column| grid[Line(line)].cell(Column(column)).c).collect())
+        .collect();
+    assert_eq!(rows, ["cd", "ef", "gh", "ij", "kl", "mn", "op"]);
+}
+
+#[test]
 fn shrink_reflow_empty_cell_inside_line() {
     let mut grid = Grid::<Cell>::new(1, 5, 3);
     *grid[Line(0)].cell_mut(Column(0)) = cell('1');
