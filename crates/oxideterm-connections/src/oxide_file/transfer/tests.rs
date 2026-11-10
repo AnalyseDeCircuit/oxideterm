@@ -1695,7 +1695,7 @@ mod tests {
     fn import_planning_renames_collisions_and_replaces_only_first_duplicate() {
         let mut store = temp_store("replace-duplicate");
         store
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
+            .upsert_imported_connection(grouped_saved_connection("conn-1", "Prod", None))
             .unwrap();
 
         let payload = vec![
@@ -1717,6 +1717,186 @@ mod tests {
             plans.get(1),
             Some(PlannedImportAction::Rename(name)) if name == "Prod (Copy)"
         ));
+        let merges = plan_import(&store, &payload, ImportConflictStrategy::Merge);
+        assert!(matches!(
+            merges.as_slice(),
+            [
+                PlannedImportAction::Merge(id),
+                PlannedImportAction::Rename(name),
+            ] if id == "conn-1" && name == "Prod (Copy)"
+        ));
+    }
+
+    fn grouped_saved_connection(id: &str, name: &str, group: Option<&str>) -> SavedConnection {
+        let mut connection = saved_connection(id, name);
+        connection.group = group.map(str::to_string);
+        connection
+    }
+
+    fn grouped_payload_connection(
+        name: &str,
+        group: Option<&str>,
+        source_id: Option<&str>,
+    ) -> EncryptedConnection {
+        let mut connection = encrypted_agent_connection(name, "new.example.com");
+        connection.group = group.map(str::to_string);
+        connection.source_connection_id = source_id.map(str::to_string);
+        connection
+    }
+
+    #[test]
+    fn import_planning_treats_a_name_in_another_group_as_a_new_connection() {
+        let mut store = temp_store("same-name-other-group");
+        store
+            .upsert_imported_connection(grouped_saved_connection(
+                "conn-1",
+                "master",
+                Some("Spark"),
+            ))
+            .unwrap();
+        let payload = [grouped_payload_connection("master", Some("Trino"), None)];
+
+        for strategy in [
+            ImportConflictStrategy::Rename,
+            ImportConflictStrategy::Skip,
+            ImportConflictStrategy::Replace,
+            ImportConflictStrategy::Merge,
+        ] {
+            let plans = plan_import(&store, &payload, strategy);
+            assert!(
+                matches!(plans.as_slice(), [PlannedImportAction::Import]),
+                "{strategy:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn import_planning_keeps_same_group_conflicts_and_blank_group_equivalence() {
+        let mut store = temp_store("same-name-same-group");
+        store
+            .upsert_imported_connection(grouped_saved_connection(
+                "spark",
+                "master",
+                Some("Spark"),
+            ))
+            .unwrap();
+        store
+            .upsert_imported_connection(grouped_saved_connection("plain", "edge", None))
+            .unwrap();
+        let payload = [
+            grouped_payload_connection("master", Some("Spark"), None),
+            grouped_payload_connection("edge", Some("  "), None),
+        ];
+
+        let plans = plan_import(&store, &payload, ImportConflictStrategy::Merge);
+
+        assert!(matches!(
+            plans.as_slice(),
+            [
+                PlannedImportAction::Merge(first),
+                PlannedImportAction::Merge(second),
+            ] if first == "spark" && second == "plain"
+        ));
+    }
+
+    #[test]
+    fn import_planning_follows_a_connection_moved_to_another_group() {
+        let mut store = temp_store("moved-group");
+        store
+            .upsert_imported_connection(grouped_saved_connection("conn-1", "master", Some("Old")))
+            .unwrap();
+        let moved = [grouped_payload_connection(
+            "master",
+            Some("New"),
+            Some("conn-1"),
+        )];
+        let renamed = [grouped_payload_connection(
+            "worker",
+            Some("New"),
+            Some("conn-1"),
+        )];
+
+        assert!(matches!(
+            plan_import(&store, &moved, ImportConflictStrategy::Merge).as_slice(),
+            [PlannedImportAction::Merge(id)] if id == "conn-1"
+        ));
+        assert!(
+            matches!(
+                plan_import(&store, &renamed, ImportConflictStrategy::Merge).as_slice(),
+                [PlannedImportAction::Import]
+            ),
+            "the source id alone must not retarget a differently named connection"
+        );
+    }
+
+    #[test]
+    fn import_planning_allows_one_name_across_groups_inside_an_archive() {
+        let store = temp_store("archive-same-name");
+        let payload = [
+            grouped_payload_connection("master", Some("Spark"), None),
+            grouped_payload_connection("master", Some("Trino"), None),
+            grouped_payload_connection("master", Some("Trino"), None),
+        ];
+
+        let plans = plan_import(&store, &payload, ImportConflictStrategy::Merge);
+
+        assert!(matches!(
+            plans.as_slice(),
+            [
+                PlannedImportAction::Import,
+                PlannedImportAction::Import,
+                PlannedImportAction::Rename(name),
+            ] if name == "master (Copy)"
+        ));
+    }
+
+    #[test]
+    fn import_keeps_same_named_connections_from_different_groups_visible() {
+        let mut source = temp_store("same-name-source");
+        for (id, group) in [("spark", "Spark"), ("trino", "Trino")] {
+            source
+                .upsert_imported_connection(grouped_saved_connection(id, "master", Some(group)))
+                .unwrap();
+        }
+        let bytes = export_connections_to_oxide(
+            &source,
+            &["spark".to_string(), "trino".to_string()],
+            "secret!",
+            OxideExportOptions::default(),
+        )
+        .unwrap();
+        let mut target = temp_store("same-name-target");
+        target
+            .upsert_imported_connection(grouped_saved_connection(
+                "local-spark",
+                "master",
+                Some("Spark"),
+            ))
+            .unwrap();
+
+        let result = apply_oxide_import_with_options(
+            &mut target,
+            &bytes,
+            "secret!",
+            OxideImportOptions {
+                conflict_strategy: ImportConflictStrategy::Merge,
+                ..OxideImportOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(result.merged, 1);
+        assert_eq!(result.imported, 2);
+        let mut placed: Vec<_> = target
+            .connections()
+            .iter()
+            .map(|connection| (connection.name.as_str(), connection.group.as_deref()))
+            .collect();
+        placed.sort();
+        assert_eq!(
+            placed,
+            [("master", Some("Spark")), ("master", Some("Trino"))]
+        );
     }
 
     #[test]
