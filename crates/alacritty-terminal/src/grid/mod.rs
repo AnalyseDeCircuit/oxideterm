@@ -273,6 +273,14 @@ impl<T: GridCell + Default> Grid<T> {
             return;
         }
 
+        // Reflow may temporarily exceed the row limit. Reclaim excess rows when scrolling
+        // moves content into history, counting every eviction for command anchors.
+        if region.start == 0 && positions != 0 {
+            let excess = self.history_size().saturating_sub(self.max_scroll_limit);
+            self.decrease_scroll_limit(excess);
+            self.scrolled_out_lines = self.scrolled_out_lines.wrapping_add(excess);
+        }
+
         // Update display offset when not pinned to active area. Reflow can leave history above
         // the configured limit, so never clamp the viewport below the lines that exist.
         if self.display_offset != 0 {

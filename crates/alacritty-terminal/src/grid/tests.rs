@@ -231,6 +231,7 @@ fn shrink_reflow_preserves_history_until_widened() {
     // Both history rows need two rows at half the width. Truncating to the row limit here
     // would permanently drop the oldest row, so widening could not restore it.
     grid.resize(true, 1, 2);
+    grid.scroll_up(&(Line(0)..Line(1)), 0);
 
     grid.resize(true, 1, 4);
     assert_eq!(grid.total_lines(), 3);
@@ -242,7 +243,7 @@ fn shrink_reflow_preserves_history_until_widened() {
 }
 
 #[test]
-fn scrolling_after_reflow_shrink_evicts_oldest_history() {
+fn scrolling_after_reflow_shrink_restores_history_limit() {
     let mut grid = Grid::<Cell>::new(1, 4, 2);
     grid.increase_scroll_limit(2);
 
@@ -254,14 +255,25 @@ fn scrolling_after_reflow_shrink_evicts_oldest_history() {
 
     // Reflow leaves history above the configured row limit until scrolling resumes.
     grid.resize(true, 1, 2);
-    grid.scroll_up(&(Line(0)..Line(1)), 1);
+    grid.scroll_display(Scroll::Top);
+    for (output, oldest, newest, evicted) in [("ij", "gh", "ij", 3), ("kl", "ij", "kl", 4)] {
+        for (column, c) in output.chars().enumerate() {
+            *grid[Line(0)].cell_mut(Column(column)) = cell(c);
+        }
+        grid.scroll_up(&(Line(0)..Line(1)), 1);
 
-    assert_eq!(grid.total_lines(), 5);
-    assert_eq!(grid[Line(-4)].cell(Column(0)), cell('c'));
-    assert_eq!(grid[Line(-4)].cell(Column(1)), cell('d'));
-    assert_eq!(grid[Line(-3)].cell(Column(0)), cell('e'));
-    assert_eq!(grid[Line(-3)].cell(Column(1)), wrap_cell('f'));
-    assert_eq!(grid[Line(0)].cell(Column(0)), Cell::default());
+        assert_eq!(grid.history_size(), 2);
+        assert_eq!(grid.display_offset(), 2);
+        assert_eq!(grid.scrolled_out_lines(), evicted);
+        for (line, text) in [(Line(-2), oldest), (Line(-1), newest)] {
+            for (column, c) in text.chars().enumerate() {
+                assert_eq!(grid[line].cell(Column(column)), cell(c));
+            }
+        }
+        for column in 0..2 {
+            assert_eq!(grid[Line(0)].cell(Column(column)), Cell::default());
+        }
+    }
 }
 
 #[test]
