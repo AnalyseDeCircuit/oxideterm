@@ -63,6 +63,12 @@ OxideTerm 是一款适用于 macOS、Windows 和 Linux 的 SSH 客户端。你�
 
 ![侧边栏列出服务器工具的 SSH 终端](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
+### 混合工作区
+
+把 SSH 终端、本地终端、Markdown 笔记和 SFTP 放进同一个标签页。本机与不同服务器的页面可以自由组合，最多支持 16 个窗格。
+
+![组合 SSH、本地终端、笔记和 SFTP 的四窗格工作区](../../docs/screenshots/mixed-workspace.png)
+
 ### 文件
 
 本地和远程文件夹左右并排，传输队列在下方。

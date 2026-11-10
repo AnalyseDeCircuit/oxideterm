@@ -63,6 +63,12 @@ Eine SSH-Sitzung. Die Seitenleiste zeigt die Werkzeuge dieses Servers: weitere T
 
 ![SSH-Terminal mit Serverwerkzeugen in der Seitenleiste](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
+### Gemischter Arbeitsbereich
+
+Ein SSH-Terminal, ein lokales Terminal, Markdown-Notizen und SFTP gemeinsam in einem Tab. Kombinieren Sie Seiten verschiedener Server und Ihres eigenen Rechners in bis zu 16 Bereichen.
+
+![Arbeitsbereich mit vier Bereichen für SSH, ein lokales Terminal, Notizen und SFTP](../../docs/screenshots/mixed-workspace.png)
+
 ### Dateien
 
 Lokale und entfernte Ordner nebeneinander, darunter die Übertragungswarteschlange.

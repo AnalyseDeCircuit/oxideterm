@@ -63,6 +63,12 @@ An SSH session. The sidebar lists what you can open on this server: more termina
 
 ![SSH terminal with the server's tools in the sidebar](docs/screenshots/terminal/SSHTERMINAL.png)
 
+### Mixed workspace
+
+An SSH terminal, a local terminal, Markdown notes and SFTP together in one tab. Mix pages from different servers and your own machine in up to 16 panes.
+
+![Four-pane workspace combining SSH, a local terminal, notes and SFTP](docs/screenshots/mixed-workspace.png)
+
 ### Files
 
 Local and remote folders side by side, with the transfer queue below.

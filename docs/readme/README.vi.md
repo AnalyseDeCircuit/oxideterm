@@ -63,6 +63,12 @@ Một phiên SSH. Thanh bên liệt kê công cụ có thể mở trên máy ch�
 
 ![Terminal SSH với công cụ máy chủ ở thanh bên](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
+### Không gian làm việc kết hợp
+
+Đặt terminal SSH, terminal cục bộ, ghi chú Markdown và SFTP trong cùng một thẻ. Kết hợp các trang từ nhiều máy chủ và máy tính của bạn trong tối đa 16 ngăn.
+
+![Không gian làm việc bốn ngăn kết hợp SSH, terminal cục bộ, ghi chú và SFTP](../../docs/screenshots/mixed-workspace.png)
+
 ### Tệp
 
 Thư mục cục bộ và từ xa đặt cạnh nhau, hàng đợi truyền ở phía dưới.

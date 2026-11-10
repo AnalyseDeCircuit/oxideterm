@@ -63,6 +63,12 @@ Una sessione SSH. La barra laterale elenca gli strumenti del server: altri termi
 
 ![Terminale SSH con strumenti del server nella barra laterale](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
+### Area di lavoro mista
+
+Un terminale SSH, un terminale locale, note Markdown e SFTP nella stessa scheda. Combina pagine di server diversi e del tuo computer in un massimo di 16 pannelli.
+
+![Area di lavoro a quattro pannelli con SSH, un terminale locale, note e SFTP](../../docs/screenshots/mixed-workspace.png)
+
 ### File
 
 Cartelle locali e remote affiancate, con la coda dei trasferimenti sotto.

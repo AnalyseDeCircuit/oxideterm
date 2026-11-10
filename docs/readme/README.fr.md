@@ -63,6 +63,12 @@ Une session SSH. La barre latérale présente les outils disponibles sur ce serv
 
 ![Terminal SSH avec les outils du serveur dans la barre latérale](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
+### Espace de travail mixte
+
+Un terminal SSH, un terminal local, des notes Markdown et SFTP réunis dans un même onglet. Combinez les pages de plusieurs serveurs et de votre machine dans un maximum de 16 volets.
+
+![Espace de travail à quatre volets réunissant SSH, un terminal local, des notes et SFTP](../../docs/screenshots/mixed-workspace.png)
+
 ### Fichiers
 
 Dossiers locaux et distants côte à côte, avec la file de transfert en dessous.

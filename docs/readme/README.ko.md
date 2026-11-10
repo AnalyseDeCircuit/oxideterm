@@ -63,6 +63,12 @@ SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, S
 
 ![사이드바에 서버 도구가 표시된 SSH 터미널](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
+### 혼합 작업 공간
+
+SSH 터미널, 로컬 터미널, Markdown 노트와 SFTP를 하나의 탭에 배치할 수 있습니다. 로컬 컴퓨터와 여러 서버의 페이지를 최대 16개 창으로 자유롭게 조합할 수 있습니다.
+
+![SSH, 로컬 터미널, 노트와 SFTP를 조합한 4분할 작업 공간](../../docs/screenshots/mixed-workspace.png)
+
 ### 파일
 
 로컬 및 원격 폴더를 나란히 표시하고 아래에 전송 대기열을 둡니다.

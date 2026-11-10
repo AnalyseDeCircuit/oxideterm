@@ -63,6 +63,12 @@ Uma sessão SSH. A barra lateral mostra ferramentas deste servidor: mais termina
 
 ![Terminal SSH com ferramentas do servidor na barra lateral](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
+### Espaço de trabalho misto
+
+Um terminal SSH, um terminal local, notas Markdown e SFTP na mesma aba. Combine páginas de diferentes servidores e do seu computador em até 16 painéis.
+
+![Espaço de trabalho com quatro painéis reunindo SSH, um terminal local, notas e SFTP](../../docs/screenshots/mixed-workspace.png)
+
 ### Arquivos
 
 Pastas locais e remotas lado a lado, com a fila de transferências abaixo.
