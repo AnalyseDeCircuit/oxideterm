@@ -603,7 +603,7 @@ fn resolve_x11_forwarding(options: &SshHostOptions) -> Result<ConnectionX11Forwa
     })
 }
 
-fn parse_yes_no(value: &str) -> Result<bool> {
+pub(crate) fn parse_yes_no(value: &str) -> Result<bool> {
     if value.eq_ignore_ascii_case("yes") {
         Ok(true)
     } else if value.eq_ignore_ascii_case("no") {
@@ -613,7 +613,7 @@ fn parse_yes_no(value: &str) -> Result<bool> {
     }
 }
 
-fn parse_ssh_time_seconds(value: &str) -> Result<u32> {
+pub(crate) fn parse_ssh_time_seconds(value: &str) -> Result<u32> {
     let value = value.trim();
     if value.is_empty() {
         bail!("empty SSH time value");
@@ -1143,7 +1143,7 @@ fn remote_command_value(line: &str) -> Option<&str> {
     (!value.is_empty()).then_some(value)
 }
 
-fn strip_comment(line: &str) -> &str {
+pub(crate) fn strip_comment(line: &str) -> &str {
     let mut in_quotes = false;
     for (index, ch) in line.char_indices() {
         match ch {
@@ -1155,14 +1155,28 @@ fn strip_comment(line: &str) -> &str {
     line
 }
 
-fn split_ssh_words(line: &str) -> Vec<String> {
+pub(crate) fn split_ssh_words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
+    let mut word_started = false;
     let mut in_quotes = false;
     let mut chars = line.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
             '\\' => {
+                word_started = true;
+                // An escaped final backslash must not consume a quoted word's
+                // closing quote. Interior drive/UNC separators stay verbatim.
+                let mut remaining = chars.clone();
+                if in_quotes
+                    && remaining.next() == Some('\\')
+                    && remaining.next() == Some('"')
+                    && remaining.next().is_none_or(char::is_whitespace)
+                {
+                    chars.next();
+                    current.push('\\');
+                    continue;
+                }
                 // OpenSSH escaping is meaningful only for token delimiters here.
                 // Preserve Windows drive and UNC path separators verbatim.
                 if chars
@@ -1174,16 +1188,23 @@ fn split_ssh_words(line: &str) -> Vec<String> {
                     current.push('\\');
                 }
             }
-            '"' => in_quotes = !in_quotes,
+            '"' => {
+                word_started = true;
+                in_quotes = !in_quotes;
+            }
             ch if ch.is_whitespace() && !in_quotes => {
-                if !current.is_empty() {
+                if word_started {
                     words.push(std::mem::take(&mut current));
+                    word_started = false;
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                word_started = true;
+                current.push(ch);
+            }
         }
     }
-    if !current.is_empty() {
+    if word_started {
         words.push(current);
     }
     words

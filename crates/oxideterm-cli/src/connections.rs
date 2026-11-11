@@ -23,6 +23,7 @@ use crate::{
     write_guard::{self, WriteGuardPlan},
 };
 
+mod batch;
 mod spec;
 
 #[cfg(test)]
@@ -117,6 +118,7 @@ pub fn run(command: ConnectionsCommand) -> CliResult<i32> {
         ConnectionsAction::Diff(args) => diff_connections_snapshot(args),
         ConnectionsAction::Validate(args) => connections_validate::run(args),
         ConnectionsAction::Create(args) => create_connection(args),
+        ConnectionsAction::BatchCreate(args) => batch::batch_create(args),
         ConnectionsAction::Edit(args) => edit_connection(args),
         ConnectionsAction::Delete(args) => delete_connection(args.query, args.write),
         ConnectionsAction::Rename(args) => rename_connection(args.query, args.name, args.write),

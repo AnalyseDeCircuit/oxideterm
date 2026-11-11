@@ -3485,6 +3485,7 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::SessionManager(input) => {
+                let mut batch_input_changed = false;
                 let search_changed = self.session_manager.update(cx, |session_manager, cx| {
                     if session_manager.focused_input() != Some(input) {
                         return false;
@@ -3494,8 +3495,17 @@ impl WorkspaceApp {
                     if !session_manager.replace_input(input, replacement_range, text, cx) {
                         return false;
                     }
+                    batch_input_changed = matches!(
+                        input,
+                        SessionManagerInput::BatchPassword | SessionManagerInput::BatchKeyPath
+                    );
                     input == SessionManagerInput::Search
                 });
+                if batch_input_changed {
+                    // The batch preview embeds the fallback authentication, so
+                    // every committed keystroke must re-resolve the rows.
+                    self.refresh_batch_add_preview(cx);
+                }
                 if search_changed {
                     self.clear_session_selection_for_invisible_rows(cx);
                 }

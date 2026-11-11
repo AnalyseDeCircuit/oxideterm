@@ -216,7 +216,7 @@ pub fn saved_connection_from_ssh_host(host: SshConfigHost) -> Result<SavedConnec
     })
 }
 
-fn saved_auth_from_ssh_paths(
+pub(crate) fn saved_auth_from_ssh_paths(
     identity_file: Option<String>,
     certificate_file: Option<String>,
 ) -> SavedAuth {

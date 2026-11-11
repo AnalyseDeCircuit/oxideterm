@@ -137,6 +137,9 @@ pub(super) enum SessionManagerInput {
     OxideExportPassword,
     OxideExportConfirmPassword,
     OxideExportDescription,
+    BatchPassword,
+    BatchKeyPath,
+    BatchTemplateName,
 }
 
 impl SessionManagerInput {
@@ -148,6 +151,9 @@ impl SessionManagerInput {
             Self::OxideExportPassword => 5,
             Self::OxideExportConfirmPassword => 6,
             Self::OxideExportDescription => 7,
+            Self::BatchPassword => 8,
+            Self::BatchKeyPath => 9,
+            Self::BatchTemplateName => 10,
         }
     }
 
@@ -157,6 +163,7 @@ impl SessionManagerInput {
             Self::OxideImportPassword
                 | Self::OxideExportPassword
                 | Self::OxideExportConfirmPassword
+                | Self::BatchPassword
         )
     }
 }
@@ -482,6 +489,8 @@ pub(super) struct SessionManagerState {
     oxide_worker_threads: HashMap<oxide_actions::OxideWorkerKey, std::thread::JoinHandle<()>>,
     ssh_config_load_generation: u64,
     ssh_config_load_task: Option<Task<()>>,
+    pub(super) batch_add: Option<BatchAddDialogState>,
+    pub(super) batch_add_exit_task: Option<Task<()>>,
 }
 
 impl Default for SessionManagerState {
@@ -512,6 +521,8 @@ impl Default for SessionManagerState {
             oxide_export_dialog: None,
             status: None,
             ssh_config_hosts: Vec::new(),
+            batch_add: None,
+            batch_add_exit_task: None,
             main_grid_list_state: tauri_virtual_list_state(
                 0,
                 ListAlignment::Top,
@@ -669,7 +680,27 @@ impl SessionManagerState {
                 .oxide_export_dialog
                 .as_ref()
                 .map(|dialog| dialog.description.as_str()),
+            SessionManagerInput::BatchPassword => self
+                .batch_add
+                .as_ref()
+                .map(|dialog| dialog.password.as_str()),
+            SessionManagerInput::BatchKeyPath => self
+                .batch_add
+                .as_ref()
+                .map(|dialog| dialog.key_path.as_str()),
+            SessionManagerInput::BatchTemplateName => self
+                .batch_add
+                .as_ref()
+                .map(|dialog| dialog.rename_draft.as_str()),
         }
+    }
+
+    /// The key picker trigger only exists while the dialog authenticates with a
+    /// key, so its overlay anchor is valid only in that mode.
+    pub(in crate::workspace) fn batch_add_uses_key_auth(&self) -> bool {
+        self.batch_add
+            .as_ref()
+            .is_some_and(|dialog| dialog.auth_kind == batch_add_dialogs::BatchAddAuthKind::Key)
     }
 
     pub(in crate::workspace) fn replace_input(
@@ -712,6 +743,27 @@ impl SessionManagerState {
                 };
                 dialog.error = None;
                 &mut dialog.description
+            }
+            SessionManagerInput::BatchPassword => {
+                let Some(dialog) = self.batch_add.as_mut() else {
+                    return false;
+                };
+                dialog.error = None;
+                &mut dialog.password
+            }
+            SessionManagerInput::BatchKeyPath => {
+                let Some(dialog) = self.batch_add.as_mut() else {
+                    return false;
+                };
+                dialog.error = None;
+                &mut dialog.key_path
+            }
+            SessionManagerInput::BatchTemplateName => {
+                let Some(dialog) = self.batch_add.as_mut() else {
+                    return false;
+                };
+                dialog.error = None;
+                &mut dialog.rename_draft
             }
         };
         replace_utf16(value, replacement_range, text);
@@ -1041,6 +1093,8 @@ impl std::fmt::Debug for OxideExportDialogState {
 
 // Keep the manager split by UI surface and behavior while preserving one workspace boundary.
 mod actions;
+mod batch_add_dialogs;
+mod batch_add_templates;
 mod ble_actions;
 mod controls;
 mod dialogs;
@@ -1061,10 +1115,11 @@ mod views;
 // Recreate the former flat include scope without exposing internal helpers to the workspace.
 #[allow(unused_imports)]
 use self::{
-    actions::*, ble_actions::*, controls::*, dialogs::*, helpers::*, oxide_actions::*,
-    oxide_dialog_common::*, oxide_dialog_helpers::*, oxide_export_dialogs::*,
-    oxide_export_selection_dialogs::*, oxide_export_summary_dialogs::*, oxide_import_dialogs::*,
-    oxide_import_preview_dialogs::*, oxide_import_result_dialogs::*, surface::*, tree::*, views::*,
+    actions::*, batch_add_dialogs::*, batch_add_templates::*, ble_actions::*, controls::*,
+    dialogs::*, helpers::*, oxide_actions::*, oxide_dialog_common::*, oxide_dialog_helpers::*,
+    oxide_export_dialogs::*, oxide_export_selection_dialogs::*, oxide_export_summary_dialogs::*,
+    oxide_import_dialogs::*, oxide_import_preview_dialogs::*, oxide_import_result_dialogs::*,
+    surface::*, tree::*, views::*,
 };
 
 // Preserve the workspace-facing session manager API at its original visibility.

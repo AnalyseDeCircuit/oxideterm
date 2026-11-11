@@ -62,6 +62,25 @@ oxideterm connections export --format raw-safe --json
 
 For password or passphrase input, prefer `--password-stdin`, `--password-env`, `--passphrase-stdin`, or `--passphrase-env`. Do not pass secret values directly as shell arguments.
 
+`connections batch-create` creates many connections at once from an OpenSSH-style template plus one data line per host.
+
+Template: at most one `Host` block, whose `HostName` is `{host}` or omitted. Placeholders `{host}`, `{profile}`, `{user}`, `{port}`, `{name}`, `{group}` are substituted in `User`, `IdentityFile`, `CertificateFile`, and `ProxyCommand`; `Port` takes a literal number. Comment lines starting with `#` are dropped, and any other directive is reported with its line number.
+
+Data: `[user[:auth]@]host[:port][?name=…&group=…&profile=…&tags=a,b]`, one connection per line, `#` starts a comment. Every row needs a username from the row or the template. When a template value a row actually uses contains `{profile}` (the template user, its `ProxyCommand`, or the template identity for rows without their own credential), that row must supply `profile=`. An inline `auth` slot that contains `/` or `\`, or starts with `~`, is a private key path; anything else is a password. Use `key=` to force a key path and `pass=` to force a password that happens to look like a path. A row's inline credential beats the template `IdentityFile`. Rows without one use the template identity; if the template has no identity file, the shared `--password-env`/`--password-stdin`/`--key-path` flags supply authentication, and they are rejected when the template carries `IdentityFile` or `CertificateFile`. An empty slot (`user:@host`) is an error, and a batch is limited to 2,000 rows.
+
+Input: `--spec <path>` points to a JSON file with `template`, `data`, and an optional `duplicate` policy. It cannot be combined with `--template-file`/`--data-file`. `--dry-run` lists the rows that would be added, skipped, or rejected without writing; `--json` switches the report to JSON. Writes need `--yes`, and a write is refused while any line is invalid, so a batch is never applied partially.
+
+Duplicates: rows are the same connection only when the account and the credential match (`user@host:port` plus the same key or password); such a repeated row is always skipped. A name that already exists for the same `user@host:port` is reported as `batchUnchanged` when the row repeats it under the default skip policy, and as `batchUpdate` when the row differs (a new `group=` or `tags=` lands on the stored connection); the same name on a different target is skipped by default, or suffixed when you pass `--duplicate rename`. A `ProxyCommand` template needs ProxyCommand authorization enabled in the app settings.
+
+```sh
+oxideterm connections batch-create --template-file ./template.conf --data-file ./hosts.txt --dry-run
+oxideterm connections batch-create --template-file ./template.conf --data-file ./hosts.txt --password-env OX_SSH_PW --yes
+```
+
+Inline credentials in a data or spec file are plaintext on disk: prefer `--password-stdin`/`--password-env` for a shared password, and protect or delete any file that carries one.
+
+ProxyCommand placeholders are expanded within individual arguments, so spaces and quotes in data do not create extra arguments. Use a direct executable, such as `ProxyCommand aws ssm start-session --profile {profile} --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p`. Keep the executable and any inline shell script fixed; pass dynamic values to a POSIX shell as separate positional arguments. Windows command hosts and `env -S` do not accept dynamic values in batch templates.
+
 ## Backups and Restore
 
 ```sh

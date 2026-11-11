@@ -64,6 +64,20 @@ impl WorkspaceApp {
                 .flex_none(),
             )
             .child(
+                self.render_toolbar_button(
+                    LucideIcon::Layers,
+                    self.i18n.t("sessionManager.batchAdd.button"),
+                    ButtonVariant::Ghost,
+                    has_background,
+                    show_primary_labels,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.open_batch_add_dialog(cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .flex_none(),
+            )
+            .child(
                 div()
                     .flex_none()
                     .border_l_1()

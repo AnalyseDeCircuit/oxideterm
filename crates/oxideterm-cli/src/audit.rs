@@ -25,6 +25,7 @@ pub(crate) fn command_name(command: &Command) -> Option<&'static str> {
             ConnectionsAction::Diff(..) => "connections diff",
             ConnectionsAction::Validate(..) => "connections validate",
             ConnectionsAction::Create(..) => "connections create",
+            ConnectionsAction::BatchCreate(..) => "connections batch-create",
             ConnectionsAction::Edit(..) => "connections edit",
             ConnectionsAction::Delete(..) => "connections delete",
             ConnectionsAction::Rename(..) => "connections rename",

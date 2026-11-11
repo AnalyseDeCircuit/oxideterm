@@ -133,6 +133,9 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
     OxideExport {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
+    BatchAdd {
+        phase: oxideterm_gpui_ui::motion::ExitPhase,
+    },
     CommandPalette,
     VersionMigration,
     Onboarding,
@@ -198,14 +201,15 @@ impl ActiveWindowModalOwner {
             Self::AiTextEditor => 41,
             Self::OxideImport { .. } => 42,
             Self::OxideExport { .. } => 43,
-            Self::CommandPalette => 44,
-            Self::VersionMigration => 45,
-            Self::Onboarding => 46,
-            Self::LegalNotice { .. } => 47,
-            Self::NativeUpdateReleaseNotes { .. } => 48,
-            Self::Shortcuts => 49,
-            Self::AppLockDialog => 50,
-            Self::MermaidZoom => 51,
+            Self::BatchAdd { .. } => 44,
+            Self::CommandPalette => 45,
+            Self::VersionMigration => 46,
+            Self::Onboarding => 47,
+            Self::LegalNotice { .. } => 48,
+            Self::NativeUpdateReleaseNotes { .. } => 49,
+            Self::Shortcuts => 50,
+            Self::AppLockDialog => 51,
+            Self::MermaidZoom => 52,
         }
     }
 
@@ -237,6 +241,7 @@ impl ActiveWindowModalOwner {
             | Self::SettingsSshConfigImport { phase }
             | Self::OxideImport { phase }
             | Self::OxideExport { phase }
+            | Self::BatchAdd { phase }
             | Self::LegalNotice { phase }
             | Self::NativeUpdateReleaseNotes { phase } => phase,
             Self::NewConnection
@@ -291,6 +296,7 @@ impl ActiveWindowModalOwner {
                 | Self::SshTunnel
                 | Self::OxideImport { .. }
                 | Self::OxideExport { .. }
+                | Self::BatchAdd { .. }
                 | Self::CommandPalette
                 | Self::AppLockDialog
                 | Self::Onboarding
@@ -368,6 +374,7 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) ai_text_editor_open: bool,
     pub(in crate::workspace) oxide_import_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) oxide_export_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
+    pub(in crate::workspace) batch_add_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) command_palette_open: bool,
     pub(in crate::workspace) version_migration_open: bool,
     pub(in crate::workspace) onboarding_open: bool,
@@ -547,6 +554,9 @@ impl ActiveWindowModalProjection {
         let oxide_export_owner = self
             .oxide_export_phase
             .map(|phase| ActiveWindowModalOwner::OxideExport { phase });
+        let batch_add_owner = self
+            .batch_add_phase
+            .map(|phase| ActiveWindowModalOwner::BatchAdd { phase });
         let version_migration_owner = self
             .version_migration_open
             .then_some(ActiveWindowModalOwner::VersionMigration);
@@ -599,6 +609,7 @@ impl ActiveWindowModalProjection {
             ai_text_editor_owner,
             oxide_import_owner,
             oxide_export_owner,
+            batch_add_owner,
             command_palette_owner,
             version_migration_owner,
             onboarding_owner,
@@ -677,7 +688,7 @@ impl WorkspaceApp {
                 .is_some()
                 .then_some(plugins.confirm_phase())
         };
-        let (oxide_import_phase, oxide_export_phase) = {
+        let (oxide_import_phase, oxide_export_phase, batch_add_phase) = {
             let session_manager = self.session_manager.read(cx);
             (
                 session_manager
@@ -686,6 +697,10 @@ impl WorkspaceApp {
                     .map(|dialog| dialog.presence.phase()),
                 session_manager
                     .oxide_export_dialog
+                    .as_ref()
+                    .map(|dialog| dialog.presence.phase()),
+                session_manager
+                    .batch_add
                     .as_ref()
                     .map(|dialog| dialog.presence.phase()),
             )
@@ -750,6 +765,7 @@ impl WorkspaceApp {
             ai_text_editor_open: self.ai_text_editor_dialog.is_some(),
             oxide_import_phase,
             oxide_export_phase,
+            batch_add_phase,
             command_palette_open: self.command_palette.read(cx).is_open(),
             version_migration_open: self.version_migration.open,
             onboarding_open: self.onboarding.open,
@@ -996,6 +1012,14 @@ impl WorkspaceApp {
             && self.quick_command_text_editor_focused(window, cx)
             && !matches!(event.keystroke.key.as_str(), "escape" | "tab")
         {
+            return false;
+        }
+        if matches!(owner, ActiveWindowModalOwner::BatchAdd { .. })
+            && self.batch_add_text_editor_focused(window, cx)
+            && !matches!(event.keystroke.key.as_str(), "escape" | "tab")
+        {
+            // The focused template or data editor owns document keys; Escape
+            // and tab stay on the modal route so the dialog can close or cycle.
             return false;
         }
         if owner == ActiveWindowModalOwner::NewConnection
@@ -1268,6 +1292,33 @@ impl WorkspaceApp {
             }
             ActiveWindowModalOwner::OxideExport { .. } => {
                 let _ = self.handle_oxide_export_modal_key(event, cx);
+            }
+            ActiveWindowModalOwner::BatchAdd { .. } => {
+                if event.keystroke.key.as_str() == "escape" {
+                    // Esc cancels inline naming, then the dropdowns, then the dialog.
+                    let consumed = self.session_manager.update(cx, |session_manager, cx| {
+                        let Some(dialog) = session_manager.batch_add.as_mut() else {
+                            return false;
+                        };
+                        if dialog.renaming_id.is_some() || dialog.new_template_naming {
+                            dialog.renaming_id = None;
+                            dialog.new_template_naming = false;
+                            dialog.rename_draft.clear();
+                            cx.notify();
+                            return true;
+                        }
+                        let open = dialog.template_menu_open || dialog.key_menu_open;
+                        if open {
+                            dialog.template_menu_open = false;
+                            dialog.key_menu_open = false;
+                            cx.notify();
+                        }
+                        open
+                    });
+                    if !consumed {
+                        self.begin_batch_add_dialog_exit(cx);
+                    }
+                }
             }
             ActiveWindowModalOwner::CommandPalette => {
                 self.handle_command_palette_key(event, window, cx);

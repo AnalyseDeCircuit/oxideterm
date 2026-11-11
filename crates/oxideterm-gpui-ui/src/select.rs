@@ -60,6 +60,8 @@ pub enum SelectAnchorId {
     AuditTime,
     AuditSearchField,
     SettingsLanguage,
+    SessionManagerBatchTemplate,
+    SessionManagerBatchKeyAuth,
     SettingsUpdateChannel,
     SettingsAppearanceTheme,
     SettingsAppearanceTerminalTheme,

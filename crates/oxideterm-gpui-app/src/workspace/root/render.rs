@@ -499,6 +499,7 @@ impl WorkspaceApp {
                     .focused_text_area_context(window, cx)
                     .is_some()
                     || this.quick_command_text_editor_focused(window, cx)
+                    || this.batch_add_text_editor_focused(window, cx)
                     || this
                         .tab_host
                         .read(cx)
@@ -1261,6 +1262,14 @@ impl WorkspaceApp {
                 self.render_new_connection_select_overlay(window, cx),
                 |root, overlay| root.child(overlay),
             )
+            .when_some(
+                self.render_batch_add_template_overlay(window, cx),
+                |root, overlay| root.child(overlay),
+            )
+            .when_some(
+                self.render_batch_add_key_overlay(window, cx),
+                |root, overlay| root.child(overlay),
+            )
             .when(
                 self.connection_flow.read(cx).has_host_key_challenge(),
                 |root| root.child(self.render_host_key_dialog(cx)),
@@ -1491,6 +1500,11 @@ impl WorkspaceApp {
                     root.child(self.render_oxide_export_dialog(cx))
                 },
             )
+            .when(self.session_manager.read(cx).batch_add.is_some(), |root| {
+                // Batch add is a workspace-level dialog: its backdrop must
+                // cover activity, session, tab, content, and companion sidebars.
+                root.child(self.render_batch_add_dialog(cx))
+            })
             .when(self.command_palette.read(cx).is_open(), |root| {
                 root.child(self.render_command_palette(window, cx))
             })

@@ -349,6 +349,13 @@ impl WorkspaceApp {
             return false;
         }
         match key {
+            "escape" if input == SessionManagerInput::BatchTemplateName => {
+                // Esc on the rename input cancels the pending rename instead of
+                // only clearing focus.
+                self.cancel_batch_template_name(cx);
+                self.ime_marked_text = None;
+                true
+            }
             "escape" => {
                 self.session_manager.update(cx, |session_manager, cx| {
                     // Escape clears focus without copying any secret input draft.
@@ -360,6 +367,10 @@ impl WorkspaceApp {
             }
             "enter" if input == SessionManagerInput::GroupName => {
                 self.submit_session_group_editor(cx);
+                true
+            }
+            "enter" if input == SessionManagerInput::BatchTemplateName => {
+                self.commit_batch_template_name(cx);
                 true
             }
             "backspace" => {
@@ -394,6 +405,20 @@ impl WorkspaceApp {
                             .is_some_and(|dialog| {
                                 dialog.description.pop().is_some() || dialog.error.take().is_some()
                             }),
+                        SessionManagerInput::BatchPassword => {
+                            session_manager.batch_add.as_mut().is_some_and(|dialog| {
+                                dialog.password.pop().is_some() || dialog.error.take().is_some()
+                            })
+                        }
+                        SessionManagerInput::BatchKeyPath => {
+                            session_manager.batch_add.as_mut().is_some_and(|dialog| {
+                                dialog.key_path.pop().is_some() || dialog.error.take().is_some()
+                            })
+                        }
+                        SessionManagerInput::BatchTemplateName => session_manager
+                            .batch_add
+                            .as_mut()
+                            .is_some_and(|dialog| dialog.rename_draft.pop().is_some()),
                     };
                     if changed {
                         cx.notify();

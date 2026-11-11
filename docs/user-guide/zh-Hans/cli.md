@@ -62,6 +62,25 @@ oxideterm connections export --format raw-safe --json
 
 密码或密钥口令输入优先使用 `--password-stdin`、`--password-env`、`--passphrase-stdin` 或 `--passphrase-env`。不要把凭据值直接写进 shell 参数。
 
+`connections batch-create` 依据一份 OpenSSH 风格模板和每台主机一行的数据一次创建多条连接。
+
+模板：最多一个 `Host` 块，`HostName` 必须写 `{host}` 或省略。占位符 `{host}`、`{profile}`、`{user}`、`{port}`、`{name}`、`{group}` 会在 `User`、`IdentityFile`、`CertificateFile`、`ProxyCommand` 中替换；`Port` 取字面数字。以 `#` 开头的注释行会被丢弃，其他不受支持的指令会按行号报错。
+
+数据：`[user[:auth]@]host[:port][?name=…&group=…&profile=…&tags=a,b]`，每行一个连接，`#` 开头为注释。每行都需要用户名，来自行内或模板。当该行真正用到的模板值包含 `{profile}`（模板用户名、其 `ProxyCommand`，或该行没有自身凭据时用到的模板身份文件）时，这一行必须提供 `profile=`。冒号后的 `auth` 含 `/`、`\` 或以 `~` 开头时视为私钥路径，其余视为password；`key=` 用于强制指定密钥路径，`pass=` 用于强制指定看起来像路径的password。行内凭据优先于模板 `IdentityFile`；没有行内凭据的行使用模板身份文件；模板没有身份文件时，才由共享的 `--password-env`/`--password-stdin`/`--key-path` 提供认证，模板带 `IdentityFile` 或 `CertificateFile` 时这些参数会被拒绝。空槽（`user:@host`）是错误，一个批次最多 2,000 行。
+
+输入：`--spec <路径>` 指向含 `template`、`data` 与可选 `duplicate` 策略的 JSON 文件，不能与 `--template-file`/`--data-file` 同时使用。`--dry-run` 列出将新增、跳过、拒绝的行而不写入；`--json` 输出 JSON 报告。写入需要 `--yes`，且只要有任何行无效就拒绝写入，批次不会部分落盘。
+
+重复：只有账号与凭据都相同（`user@host:port` 加同一个密钥或密码）的行才算同一条连接，这类重复行始终跳过；显示名已存在且 `user@host:port` 相同时，默认跳过策略下完全一致的行报告为 `batchUnchanged`，有差异的行报告为 `batchUpdate`（新增的 `group=`/`tags=` 落到原连接上）；同名但目标不同时默认跳过，传 `--duplicate rename` 才自动改名。模板包含 `ProxyCommand` 时，需要在应用设置中开启 ProxyCommand 授权。
+
+```sh
+oxideterm connections batch-create --template-file ./template.conf --data-file ./hosts.txt --dry-run
+oxideterm connections batch-create --template-file ./template.conf --data-file ./hosts.txt --password-env OX_SSH_PW --yes
+```
+
+数据文件或 spec 文件中的行内凭据是磁盘上的明文：共享密码优先使用 `--password-stdin`/`--password-env`，并保护或删除携带凭据的文件。
+
+ProxyCommand 按独立参数替换占位符，数据中的空格和引号不会产生额外参数。建议直接调用可执行文件，例如 `ProxyCommand aws ssm start-session --profile {profile} --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p`。程序名和内联 Shell 脚本必须固定；POSIX Shell 的动态值应通过独立的位置参数传入。批量模板不允许向 Windows 命令解释器或 `env -S` 传入动态值。
+
 ## 备份与恢复
 
 ```sh
