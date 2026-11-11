@@ -15,6 +15,7 @@ OxideTerm 2.3.2 扩展了 macOS 主机工具和 Herdr 会话管理，支持从�
 - 停止 Herdr 会话、删除已停止的会话，以及关闭工作区、标签或窗格前会要求确认。面板分别提示未安装、服务器未运行和查询失败，不再把这些情况都显示为空列表。（PR [#753](https://github.com/AnalyseDeCircuit/oxideterm/pull/753)）
 - macOS 主机支持查看 Apple GPU 利用率和已用统一内存；统一内存按实际已用量显示，当前不提供 GPU 进程占用数据。
 - macOS 本机监控加入逐核心 CPU 数据，macOS 主机监控加入磁盘读写速率。
+- 修复部分 Linux 主机的磁盘容量被错误显示为约 2 GB、使用率显示为 100% 的问题；旧版 mawk 的整数格式上限不再截断磁盘采样数值。
 - Homebrew 软件包列表区分 formula 与 cask，显示已安装版本和可用更新，并支持查看详情、升级和卸载。
 - macOS 服务与计划任务显示所属系统域或用户域、运行状态和启用状态。服务支持启动、停止和重启；计划任务支持启用、禁用，以及立即运行已加载的任务。系统日志保留时间和级别，查询失败时显示错误。
 - Docker 服务未启动或无法连接时会明确提示原因。仅在权限不足时尝试免密码提权，提权失败后保留原始错误。
@@ -60,6 +61,7 @@ OxideTerm 2.3.2 expanded macOS Host Tools and Herdr session management, added co
 - Stopping a Herdr session, deleting a stopped session, and closing a workspace, tab or pane require confirmation. The panel distinguishes a missing installation, a stopped server and a failed query instead of showing them all as empty lists. (PR [#753](https://github.com/AnalyseDeCircuit/oxideterm/pull/753))
 - macOS hosts gained Apple GPU utilization and used unified-memory readings. The memory reading shows actual usage rather than a dedicated VRAM capacity; per-process GPU usage is currently unavailable.
 - Local macOS monitoring gained per-core CPU readings, and macOS host monitoring gained disk read and write rates.
+- Fixed disk capacity appearing as roughly 2 GB with 100% usage on some Linux hosts. Disk samples no longer hit the integer-format limit in older mawk versions.
 - Homebrew inventory distinguishes formulae and casks, shows installed versions and available updates, and supports inspection, upgrades and uninstallation.
 - macOS services and scheduled tasks show their system or user domain, running state and enabled state. Services support start, stop and restart. Scheduled tasks can be enabled or disabled, and loaded tasks can run immediately. System logs retain timestamps and levels, with errors reported when a query fails.
 - Docker reports when its daemon is stopped or unreachable. Passwordless elevation is attempted only for permission errors, and the original error is retained if that retry fails.

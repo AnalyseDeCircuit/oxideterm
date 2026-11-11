@@ -69,7 +69,8 @@ const METRICS_COMMAND_LINUX_SYSTEM: &str = concat!(
     // Match the parser's interface exclusions and retain only byte counters in its wire layout.
     "echo '===NETDEV==='; awk -F: 'NF==2 {name=$1;gsub(/^[[:space:]]+|[[:space:]]+$/,\"\",name);if(name==\"lo\" || name~/^(veth|docker|br-|virbr|cni|flannel)/)next;data=$2;sub(/^[[:space:]]+/,\"\",data);n=split(data,v,/[[:space:]]+/);if(n>=9)printf \"%s: %s 0 0 0 0 0 0 0 %s\\n\",name,v[1],v[9]}' /proc/net/dev 2>/dev/null; ",
     "echo '===NPROC==='; (nproc 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null || true); ",
-    "echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%d\\t%d\\t%s\\n\", $6, $3*1024, $2*1024, p}'"
+    // Decimal float formatting avoids mawk's 32-bit integer printf limit.
+    "echo '===DISKS==='; df -P -k 2>/dev/null | awk 'NR>1 && $1 ~ /^\\/dev/ {p=$5; gsub(/%/,\"\",p); printf \"%s\\t%.0f\\t%.0f\\t%s\\n\", $6, $3*1024, $2*1024, p}'"
 );
 // Keep process sampling on short, machine-readable `ps` output. A previous
 // `/proc` walker could emit a non-empty but unusable table, preventing fallback
@@ -1399,6 +1400,17 @@ function Get-Counter {{ {counter} }}
                     " wlan0: 9007199254740993 0 0 0 0 0 0 0 8007199254740993\n",
                 ),
                 "eth0: 100 0 0 0 0 0 0 0 200\nwlan0: 9007199254740993 0 0 0 0 0 0 0 8007199254740993\n",
+            ),
+            (
+                "DISKS",
+                vec![],
+                concat!(
+                    "Filesystem 1024-blocks Used Available Capacity Mounted on\n",
+                    "/dev/vda1 41943040 10485760 31457280 25% /\n",
+                    "/dev/vdb1 8589934592 4294967296 4294967296 50% /data\n",
+                    "tmpfs 2097152 0 2097152 0% /run\n",
+                ),
+                "/\t10737418240\t42949672960\t25\n/data\t4398046511104\t8796093022208\t50\n",
             ),
         ] {
             let marker = format!("echo '==={section}==='; ");
