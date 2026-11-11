@@ -285,6 +285,7 @@
         "multiple_host_blocks": "僅支援一個 Host 區塊",
         "host_name_requires_placeholder": "HostName 必須寫成 {host} 或省略",
         "proxy_command_empty": "ProxyCommand 需要命令內容",
+        "proxy_command_unsafe": "代理程式和行內指令碼必須固定，請將動態值作為獨立參數傳入。",
         "port_invalid": "連接埠無效",
         "timeout_invalid": "逾時值無效",
         "flag_invalid": "取值應為 yes 或 no",

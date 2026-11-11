@@ -79,6 +79,8 @@ oxideterm connections batch-create --template-file ./template.conf --data-file .
 
 Inline credentials in a data or spec file are plaintext on disk: prefer `--password-stdin`/`--password-env` for a shared password, and protect or delete any file that carries one.
 
+ProxyCommand placeholders are expanded within individual arguments, so spaces and quotes in data do not create extra arguments. Use a direct executable, such as `ProxyCommand aws ssm start-session --profile {profile} --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p`. Keep the executable and any inline shell script fixed; pass dynamic values to a POSIX shell as separate positional arguments. Windows command hosts and `env -S` do not accept dynamic values in batch templates.
+
 ## Backups and Restore
 
 ```sh

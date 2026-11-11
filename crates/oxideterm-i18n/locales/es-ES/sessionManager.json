@@ -285,6 +285,7 @@
         "multiple_host_blocks": "Solo se admite un bloque Host",
         "host_name_requires_placeholder": "HostName debe ser {host} u omitirse",
         "proxy_command_empty": "ProxyCommand necesita un comando",
+        "proxy_command_unsafe": "El ejecutable del proxy y el script en línea deben ser fijos. Pasa los valores variables como argumentos separados.",
         "port_invalid": "Puerto no válido",
         "timeout_invalid": "Tiempo de espera no válido",
         "flag_invalid": "Se esperaba yes o no",

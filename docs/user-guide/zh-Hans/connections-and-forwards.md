@@ -74,6 +74,8 @@ OxideTerm 会导入名称、分组、主机、端口、用户名以及受支持�
 
 会话管理工具栏的“批量添加”一次创建多条连接：一份 SSH config 风格的模板加一份按行排列的主机数据。
 
+保存的模板（包括 ProxyCommand 中的凭据）存入系统钥匙串或便携版加密库。AWS 预设直接调用 `aws`。ProxyCommand 按独立参数替换占位符，程序名和内联脚本必须固定；动态值应作为 POSIX Shell 的独立位置参数传入，或直接传给可执行文件。批量模板不允许向 Windows 命令解释器或 `env -S` 传入动态值。
+
 模板最多一个 `Host` 块（`HostName` 写 `{host}` 或省略），其余为共享指令。`{host}`、`{profile}`、`{user}`、`{port}`、`{name}`、`{group}` 会在 `User`、`IdentityFile`、`CertificateFile`、`ProxyCommand` 中替换；`Port` 取字面数字，带引号的值会去掉引号，其他不受支持的指令会按行号报错；花括号专用于占位符，占位符之外的 `}` 也会被拒绝。`IdentityFile` 仅是没有自身凭据的行的兜底认证，`ProxyCommand` 则应用于每一行；当该行真正用到的模板值包含 `{profile}` 时，这一行必须提供 `profile=`。
 
 数据行格式为 `[user[:auth]@]host[:port][?name="…"&group=…&profile=…&tags=a,b]`，每行一个连接，`#` 开头为注释。每行都需要用户名，来自行内或模板。冒号后的内容按形态判断：含 `/` 或 `\`、或以 `~` 开头的值是私钥路径（`ops:~/.ssh/id_ed25519@db1`），其余视为密码（`ops:example-pw`）。密码本身看起来像路径时用 `pass=` 强制为密码，不含分隔符的密钥路径用 `key=` 强制为密钥。行内凭据优先于模板 `IdentityFile`，后者优先于弹窗默认认证，预览表会显示每行最终使用的认证方式。空槽（`user:@host`）视为错误。

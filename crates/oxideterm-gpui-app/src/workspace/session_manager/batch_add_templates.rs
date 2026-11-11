@@ -1,8 +1,83 @@
 use super::*;
 
-use oxideterm_atomic_file::durable_write;
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-pub(super) const BATCH_TEMPLATES_FILENAME: &str = "oxideterm-batch-templates.json";
+    #[test]
+    fn batch_templates_keep_secret_text_in_the_portable_vault() {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_BATCH_TEMPLATE_TEST_DIR";
+        let Some(root) = std::env::var_os(fixture_key) else {
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .args([
+                    "batch_templates_keep_secret_text_in_the_portable_vault",
+                    "--nocapture",
+                ])
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        oxideterm_portable_runtime::initialize_portable_runtime().unwrap();
+        oxideterm_portable_runtime::keystore::create_portable_keystore("test-only-password")
+            .unwrap();
+        let settings = oxideterm_settings::default_settings_path();
+        assert!(settings.starts_with(std::path::PathBuf::from(root)));
+        let template = BatchTemplatePreset {
+            id: "test-preset".into(),
+            name: "Protected template".into(),
+            template: "User ops\nProxyCommand proxy --token template-secret-marker\n".into(),
+            created_at: 123,
+        };
+        save_batch_templates(&settings, &[template.clone()]).unwrap();
+        let plain_path = settings
+            .parent()
+            .unwrap()
+            .join("oxideterm-batch-templates.json");
+        assert!(
+            !plain_path.exists(),
+            "template text must not be written to an ordinary JSON file"
+        );
+        let vault_path = oxideterm_portable_runtime::portable_keystore_file_path()
+            .unwrap()
+            .unwrap();
+        let vault = std::fs::read(vault_path).unwrap();
+        assert!(!String::from_utf8_lossy(&vault).contains("template-secret-marker"));
+        assert!(!format!("{template:?}").contains("template-secret-marker"));
+        let (loaded, error) = load_batch_templates(&settings);
+        assert_eq!(error, None);
+        assert_eq!(loaded, vec![template]);
+        save_batch_templates(&settings, &[]).unwrap();
+        assert_eq!(load_batch_templates(&settings), (vec![], None));
+        oxideterm_portable_runtime::keystore::store_secret(
+            BATCH_TEMPLATES_SERVICE,
+            "catalog",
+            "invalid catalog",
+        )
+        .unwrap();
+        assert!(save_batch_templates(&settings, &[]).is_err());
+        assert_eq!(
+            oxideterm_portable_runtime::keystore::get_secret(BATCH_TEMPLATES_SERVICE, "catalog")
+                .unwrap()
+                .as_str(),
+            "invalid catalog"
+        );
+    }
+}
+
 /// Factory templates are never persisted and never deletable: every load
 /// re-seeds them so the dialog always has usable starting points.
 pub(super) const DEFAULT_BATCH_TEMPLATE_ID: &str = "preset-default";
@@ -14,54 +89,57 @@ pub(super) fn is_factory_batch_template_id(id: &str) -> bool {
     id.starts_with("preset-")
 }
 
-/// A saved template for the batch-add dialog, mirroring the SFTP path bookmark
-/// persistence shape (id/name/createdAt next to the settings file).
+/// Template contents can include proxy credentials and share the catalog's protected storage.
 #[derive(Clone, Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 pub(super) struct BatchTemplatePreset {
     pub(super) id: String,
     pub(super) name: String,
-    pub(super) template: String,
+    pub(super) template: SecretString,
     #[serde(rename = "createdAt")]
     pub(super) created_at: u64,
 }
 
-fn batch_templates_path(settings_path: &std::path::Path) -> std::path::PathBuf {
-    settings_path
-        .parent()
-        .unwrap_or(settings_path)
-        .join(BATCH_TEMPLATES_FILENAME)
+const BATCH_TEMPLATES_SERVICE: &str = "com.oxideterm.batch-templates";
+
+fn batch_templates_account(settings_path: &std::path::Path, portable: bool) -> String {
+    if portable {
+        // The encrypted vault moves with the portable data directory.
+        "catalog".to_owned()
+    } else {
+        format!("catalog:{}", settings_path.display())
+    }
+}
+
+fn read_batch_templates(
+    settings_path: &std::path::Path,
+) -> Result<Vec<BatchTemplatePreset>, String> {
+    let portable = oxideterm_portable_runtime::is_portable_mode()
+        .map_err(|_| "sessionManager.batchAdd.templates_load_failed".to_owned())?;
+    let account = batch_templates_account(settings_path, portable);
+    let text = if portable {
+        match oxideterm_portable_runtime::keystore::get_secret(BATCH_TEMPLATES_SERVICE, &account) {
+            Ok(text) => Some(text),
+            Err(oxideterm_portable_runtime::keystore::PortableKeystoreError::NotFound(_)) => None,
+            Err(_) => return Err("sessionManager.batchAdd.templates_load_failed".into()),
+        }
+    } else {
+        oxideterm_secret_store::NativeSecretStore::new(BATCH_TEMPLATES_SERVICE)
+            .get_preserving_multiline(&account)
+            .map_err(|_| "sessionManager.batchAdd.templates_load_failed")?
+    };
+    match text {
+        Some(text) => serde_json::from_str(&text)
+            .map_err(|_| "sessionManager.batchAdd.templates_load_failed".into()),
+        None => Ok(Vec::new()),
+    }
 }
 
 fn load_batch_templates(
     settings_path: &std::path::Path,
 ) -> (Vec<BatchTemplatePreset>, Option<String>) {
-    let path = batch_templates_path(settings_path);
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            // No catalog yet is the normal first-run state, not a failure.
-            return (Vec::new(), None);
-        }
-        // An unreadable catalog must not look empty: a later save would
-        // overwrite presets the user cannot see.
-        Err(error) => {
-            return (Vec::new(), Some(format!("{}: {error}", path.display())));
-        }
-    };
-    match serde_json::from_slice::<Vec<BatchTemplatePreset>>(&bytes) {
+    match read_batch_templates(settings_path) {
         Ok(templates) => (templates, None),
-        Err(error) => {
-            // Keep the unreadable catalog next to the original instead of
-            // letting the next save overwrite the only copy of the user's
-            // templates, and report it so the dialog can say so.
-            let backup =
-                path.with_extension(format!("json.corrupt-{}", oxideterm_local_files::now_ms()));
-            let backup_note = match std::fs::copy(&path, &backup) {
-                Ok(_) => format!("{}", backup.display()),
-                Err(copy_error) => format!("{} ({copy_error})", path.display()),
-            };
-            (Vec::new(), Some(format!("{error} [{backup_note}]")))
-        }
+        Err(error) => (Vec::new(), Some(error)),
     }
 }
 
@@ -69,9 +147,23 @@ pub(super) fn save_batch_templates(
     settings_path: &std::path::Path,
     templates: &[BatchTemplatePreset],
 ) -> Result<(), String> {
-    let bytes = serde_json::to_vec_pretty(templates).map_err(|error| error.to_string())?;
-    durable_write(&batch_templates_path(settings_path), &bytes)
-        .map_err(|error| format!("{}: {error}", BATCH_TEMPLATES_FILENAME))
+    // An unreadable catalog must not be replaced by a partial, empty UI list.
+    read_batch_templates(settings_path)?;
+    let text = Zeroizing::new(
+        serde_json::to_string(templates)
+            .map_err(|_| "sessionManager.batchAdd.templates_save_failed")?,
+    );
+    let portable = oxideterm_portable_runtime::is_portable_mode()
+        .map_err(|_| "sessionManager.batchAdd.templates_load_failed".to_owned())?;
+    let account = batch_templates_account(settings_path, portable);
+    if portable {
+        oxideterm_portable_runtime::keystore::store_secret(BATCH_TEMPLATES_SERVICE, &account, &text)
+            .map_err(|_| "sessionManager.batchAdd.templates_save_failed".into())
+    } else {
+        oxideterm_secret_store::NativeSecretStore::new(BATCH_TEMPLATES_SERVICE)
+            .store(&account, &text)
+            .map_err(|_| "sessionManager.batchAdd.templates_save_failed".into())
+    }
 }
 
 /// Two saves within the same millisecond would otherwise share an id, and every
@@ -98,10 +190,7 @@ fn default_batch_template_preset(id: &str, name: String) -> BatchTemplatePreset 
             "  User user.name\n",
             "  Port 22\n",
             "  IdentityFile ~/.ssh/key\n",
-            // The commented variant documents the Windows alternative; the
-            // parser drops comment lines, so only the sh form stays active.
-            "  ProxyCommand sh -c \"aws ssm start-session --profile {profile} --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'\"\n",
-            "  # ProxyCommand powershell.exe \"aws ssm start-session --profile {profile} --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p'\"\n",
+            "  ProxyCommand aws ssm start-session --profile {profile} --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p\n",
         ),
         _ => concat!(
             "Host xx\n",
@@ -114,7 +203,7 @@ fn default_batch_template_preset(id: &str, name: String) -> BatchTemplatePreset 
     BatchTemplatePreset {
         id: id.to_owned(),
         name,
-        template: template.to_owned(),
+        template: template.into(),
         created_at: 0,
     }
 }
@@ -165,12 +254,7 @@ impl WorkspaceApp {
         let presets = self.batch_template_presets();
         let first_template = presets[0].template.clone();
         let (user_templates, load_error) = load_batch_templates(self.settings_store.path());
-        let load_error = load_error.map(|error| {
-            format!(
-                "{}: {error}",
-                self.i18n.t("sessionManager.batchAdd.templates_load_failed")
-            )
-        });
+        let load_error = load_error.map(|key| self.i18n.t(&key));
         let templates = batch_templates_with_presets(user_templates, presets);
         let editor = self.session_manager.update(cx, |session_manager, cx| {
             let Some(dialog) = session_manager.batch_add.as_mut() else {
@@ -186,7 +270,7 @@ impl WorkspaceApp {
         });
         if let Some(editor) = editor {
             editor.update(cx, |editor, cx| {
-                editor.replace_text_external(first_template, cx);
+                editor.replace_text_external(first_template.expose_secret().to_owned(), cx);
             });
         }
         cx.notify();
@@ -223,7 +307,7 @@ impl WorkspaceApp {
             .and_then(|dialog| dialog.template_editor.clone());
         if let Some(editor) = editor {
             editor.update(cx, |editor, cx| {
-                editor.replace_text_external(template.template, cx);
+                editor.replace_text_external(template.template.expose_secret().to_owned(), cx);
             });
         }
         cx.notify();
@@ -242,6 +326,7 @@ impl WorkspaceApp {
             .as_ref()
             .and_then(|dialog| dialog.template_editor.as_ref())
             .map(|editor| editor.read(cx).buffer().text())
+            .map(Zeroizing::new)
             .unwrap_or_default();
         if template_text.trim().is_empty() {
             let empty_error = self.i18n.t("sessionManager.batchAdd.template_empty_save");
@@ -283,7 +368,7 @@ impl WorkspaceApp {
             else {
                 return None;
             };
-            template.template = template_text;
+            template.template = template_text.into();
             dialog.error = None;
             cx.notify();
             Some(
@@ -315,6 +400,7 @@ impl WorkspaceApp {
             .as_ref()
             .and_then(|dialog| dialog.template_editor.as_ref())
             .map(|editor| editor.read(cx).buffer().text())
+            .map(Zeroizing::new)
             .unwrap_or_default();
         if template_text.trim().is_empty() {
             let empty_error = self.i18n.t("sessionManager.batchAdd.template_empty_save");
@@ -375,6 +461,7 @@ impl WorkspaceApp {
             .as_ref()
             .and_then(|dialog| dialog.template_editor.as_ref())
             .map(|editor| editor.read(cx).buffer().text())
+            .map(Zeroizing::new)
             .unwrap_or_default();
         let name = self
             .session_manager
@@ -425,7 +512,7 @@ impl WorkspaceApp {
                 let preset = BatchTemplatePreset {
                     id: new_batch_template_id(&dialog.templates),
                     name: name.clone(),
-                    template: template_text,
+                    template: template_text.into(),
                     created_at: oxideterm_local_files::now_ms(),
                 };
                 let id = preset.id.clone();
@@ -502,10 +589,7 @@ impl WorkspaceApp {
         let Err(error) = result else {
             return;
         };
-        let message = format!(
-            "{}: {error}",
-            self.i18n.t("sessionManager.batchAdd.templates_save_failed")
-        );
+        let message = self.i18n.t(&error);
         // The in-memory list has already been mutated, so a failed write would
         // otherwise show a rename or deletion that never reached the disk.
         let presets = self.batch_template_presets();
@@ -524,7 +608,7 @@ impl WorkspaceApp {
                 dialog.selected_template_id = Some(DEFAULT_BATCH_TEMPLATE_ID.to_owned());
             }
             dialog.error = Some(match load_error {
-                Some(load_error) => format!("{message}; {load_error}"),
+                Some(load_error) => self.i18n.t(&load_error),
                 None => message,
             });
             cx.notify();

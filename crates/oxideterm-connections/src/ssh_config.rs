@@ -1158,11 +1158,25 @@ pub(crate) fn strip_comment(line: &str) -> &str {
 pub(crate) fn split_ssh_words(line: &str) -> Vec<String> {
     let mut words = Vec::new();
     let mut current = String::new();
+    let mut word_started = false;
     let mut in_quotes = false;
     let mut chars = line.chars().peekable();
     while let Some(ch) = chars.next() {
         match ch {
             '\\' => {
+                word_started = true;
+                // An escaped final backslash must not consume a quoted word's
+                // closing quote. Interior drive/UNC separators stay verbatim.
+                let mut remaining = chars.clone();
+                if in_quotes
+                    && remaining.next() == Some('\\')
+                    && remaining.next() == Some('"')
+                    && remaining.next().is_none_or(char::is_whitespace)
+                {
+                    chars.next();
+                    current.push('\\');
+                    continue;
+                }
                 // OpenSSH escaping is meaningful only for token delimiters here.
                 // Preserve Windows drive and UNC path separators verbatim.
                 if chars
@@ -1174,16 +1188,23 @@ pub(crate) fn split_ssh_words(line: &str) -> Vec<String> {
                     current.push('\\');
                 }
             }
-            '"' => in_quotes = !in_quotes,
+            '"' => {
+                word_started = true;
+                in_quotes = !in_quotes;
+            }
             ch if ch.is_whitespace() && !in_quotes => {
-                if !current.is_empty() {
+                if word_started {
                     words.push(std::mem::take(&mut current));
+                    word_started = false;
                 }
             }
-            _ => current.push(ch),
+            _ => {
+                word_started = true;
+                current.push(ch);
+            }
         }
     }
-    if !current.is_empty() {
+    if word_started {
         words.push(current);
     }
     words

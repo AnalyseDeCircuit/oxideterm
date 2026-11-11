@@ -285,6 +285,7 @@
         "multiple_host_blocks": "Chỉ hỗ trợ một khối Host",
         "host_name_requires_placeholder": "HostName phải là {host} hoặc bỏ qua",
         "proxy_command_empty": "ProxyCommand cần một lệnh",
+        "proxy_command_unsafe": "Giữ cố định chương trình proxy và tập lệnh nội tuyến. Truyền các giá trị thay đổi bằng đối số riêng.",
         "port_invalid": "Cổng không hợp lệ",
         "timeout_invalid": "Thời gian chờ không hợp lệ",
         "flag_invalid": "Cần yes hoặc no",

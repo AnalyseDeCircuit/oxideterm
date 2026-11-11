@@ -285,6 +285,7 @@
         "multiple_host_blocks": "Host ブロックは 1 つのみサポートされます",
         "host_name_requires_placeholder": "HostName は {host} と書くか省略してください",
         "proxy_command_empty": "ProxyCommand にはコマンドが必要です",
+        "proxy_command_unsafe": "プロキシの実行ファイルとインラインスクリプトは固定してください。変動する値は別の引数で渡してください。",
         "port_invalid": "ポートが無効です",
         "timeout_invalid": "タイムアウト値が無効です",
         "flag_invalid": "yes または no を指定してください",

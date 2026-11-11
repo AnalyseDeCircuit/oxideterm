@@ -38,6 +38,10 @@ pub enum BatchIssueKind {
     HostNameRequiresPlaceholder,
     #[error("ProxyCommand needs a command")]
     ProxyCommandEmpty,
+    #[error(
+        "keep ProxyCommand executable and inline scripts fixed; pass dynamic values as separate arguments"
+    )]
+    ProxyCommandUnsafe,
     #[error("invalid port")]
     PortInvalid,
     #[error("invalid timeout")]
@@ -87,6 +91,7 @@ impl BatchIssueKind {
             Self::MultipleHostBlocks => "multiple_host_blocks",
             Self::HostNameRequiresPlaceholder => "host_name_requires_placeholder",
             Self::ProxyCommandEmpty => "proxy_command_empty",
+            Self::ProxyCommandUnsafe => "proxy_command_unsafe",
             Self::PortInvalid => "port_invalid",
             Self::TimeoutInvalid => "timeout_invalid",
             Self::FlagInvalid => "flag_invalid",
@@ -130,7 +135,7 @@ pub struct BatchTemplate {
     pub port: Option<u16>,
     pub identity_file: Option<String>,
     pub certificate_file: Option<String>,
-    pub proxy_command: Option<String>,
+    pub proxy_command: Option<SecretString>,
     pub connect_timeout_seconds: Option<u64>,
     /// `Some` only when the template states `ForwardAgent`; `no` must be able
     /// to disable forwarding that a stored connection enables.
@@ -140,7 +145,8 @@ pub struct BatchTemplate {
 impl BatchTemplate {
     pub fn uses_profile(&self) -> bool {
         self.proxy_command
-            .as_deref()
+            .as_ref()
+            .map(SecretString::expose_secret)
             .is_some_and(|command| command.contains("{profile}"))
     }
 
@@ -169,8 +175,9 @@ impl BatchTemplate {
                 .transpose()?,
             proxy_command: self
                 .proxy_command
-                .as_deref()
-                .map(|value| substitute_placeholders(value, substitution))
+                .as_ref()
+                .map(SecretString::expose_secret)
+                .map(|value| substitute_proxy_arguments(value, substitution))
                 .transpose()?,
         })
     }
@@ -180,7 +187,7 @@ impl BatchTemplate {
 struct ResolvedTemplate {
     identity_file: Option<String>,
     certificate_file: Option<String>,
-    proxy_command: Option<String>,
+    proxy_command: Option<SecretString>,
 }
 
 impl ResolvedTemplate {
@@ -273,7 +280,7 @@ pub struct ResolvedBatchRow {
     pub group: Option<String>,
     pub tags: Vec<String>,
     pub auth: SavedAuth,
-    pub proxy_command: Option<String>,
+    pub proxy_command: Option<SecretString>,
     pub connect_timeout_seconds: Option<u64>,
     pub forward_agent: Option<bool>,
     /// Set when the row updates a saved connection instead of adding one.
@@ -520,7 +527,8 @@ pub fn parse_batch_template(text: &str) -> Result<BatchTemplate, BatchIssue> {
                     BatchIssue::new(line_number, BatchIssueKind::ProxyCommandEmpty)
                 })?;
                 validate_template_placeholders(value, line_number)?;
-                template.proxy_command = Some(value.to_owned());
+                validate_proxy_arguments(value, line_number)?;
+                template.proxy_command = Some(SecretString::new(value));
             }
             "connecttimeout" => {
                 if template.connect_timeout_seconds.is_some() {
@@ -640,7 +648,11 @@ pub fn resolve_batch_rows(
         };
         // The template username may itself carry placeholders (`User {host}`),
         // so resolve it before the row settings that reference `{user}`.
-        let template_username = match template.username.as_deref() {
+        let template_username = match template
+            .username
+            .as_deref()
+            .filter(|_| row.username.is_none())
+        {
             Some(raw) => {
                 let pre_username = BatchSubstitution {
                     line: row.line,
@@ -863,7 +875,7 @@ fn merge_batch_update(
     if let Some(command) = row.proxy_command {
         connection.proxy_command = Some(SavedProxyCommand {
             keychain_id: None,
-            plaintext_command: Some(SecretString::new(command)),
+            plaintext_command: Some(command),
         });
     }
     if row.connect_timeout_seconds.is_some() {
@@ -1013,7 +1025,7 @@ fn saved_connection_from_row(row: ResolvedBatchRow, now: chrono::DateTime<Utc>) 
         upstream_proxy: SavedUpstreamProxyPolicy::UseGlobal,
         proxy_command: row.proxy_command.map(|command| SavedProxyCommand {
             keychain_id: None,
-            plaintext_command: Some(SecretString::new(command)),
+            plaintext_command: Some(command),
         }),
         options,
         created_at: now,
@@ -1052,9 +1064,140 @@ impl BatchSubstitution<'_> {
     }
 }
 
+fn has_proxy_substitutions(value: &str) -> bool {
+    if value.contains('{') {
+        return true;
+    }
+    let mut chars = value.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '%' && matches!(chars.next(), Some('h' | 'n' | 'r' | 'p')) {
+            return true;
+        }
+    }
+    false
+}
+
+fn validate_proxy_arguments(value: &str, line: usize) -> Result<(), BatchIssue> {
+    let words = split_ssh_words(value);
+    if words
+        .first()
+        .is_none_or(|program| has_proxy_substitutions(program))
+    {
+        return Err(BatchIssue::new(line, BatchIssueKind::ProxyCommandUnsafe));
+    }
+    // Explicit interpreters may still run fixed scripts with dynamic positional
+    // arguments. Data must never be inserted into the script itself.
+    for (index, word) in words.iter().enumerate() {
+        let executable = word
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(word)
+            .to_ascii_lowercase();
+        let executable = executable.strip_suffix(".exe").unwrap_or(&executable);
+        let posix = matches!(
+            executable,
+            "sh" | "ash" | "bash" | "dash" | "zsh" | "ksh" | "fish" | "csh" | "tcsh"
+        );
+        let powershell = matches!(executable, "powershell" | "pwsh");
+        let cmd = executable == "cmd";
+        let dynamic = |word: &String| has_proxy_substitutions(word);
+        // Windows command hosts can join trailing arguments back into code.
+        // env -S also reparses one argument, so neither accepts substituted data.
+        if ((powershell || cmd) && words[index + 1..].iter().any(dynamic))
+            || (executable == "env"
+                && words[index + 1..]
+                    .iter()
+                    .any(|word| word == "-S" || word.starts_with("--split-string"))
+                && words[index + 1..].iter().any(dynamic))
+        {
+            return Err(BatchIssue::new(line, BatchIssueKind::ProxyCommandUnsafe));
+        }
+        if !posix && !powershell && !cmd {
+            continue;
+        }
+        for (offset, option) in words[index + 1..].iter().enumerate() {
+            let option = option.to_ascii_lowercase();
+            let script_option = (posix
+                && option.starts_with('-')
+                && !option.starts_with("--")
+                && option.contains('c'))
+                || (powershell
+                    && matches!(
+                        option.as_str(),
+                        "-c" | "-command" | "-commandwithargs" | "-encodedcommand" | "-enc"
+                    ))
+                || (cmd && matches!(option.as_str(), "/c" | "/k"));
+            if script_option {
+                let script = words.get(index + offset + 2);
+                if script.is_some_and(|script| has_proxy_substitutions(script)) {
+                    return Err(BatchIssue::new(line, BatchIssueKind::ProxyCommandUnsafe));
+                }
+                break;
+            }
+            if !option.starts_with('-') {
+                if dynamic(&words[index + offset + 1]) {
+                    return Err(BatchIssue::new(line, BatchIssueKind::ProxyCommandUnsafe));
+                }
+                break;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn substitute_proxy_arguments(
+    value: &str,
+    substitution: &BatchSubstitution<'_>,
+) -> Result<SecretString, BatchIssue> {
+    validate_proxy_arguments(value, substitution.line)?;
+    let mut result = zeroize::Zeroizing::new(String::new());
+    for word in split_ssh_words(value) {
+        let word = zeroize::Zeroizing::new(word);
+        let expanded =
+            zeroize::Zeroizing::new(substitute_template_value(&word, substitution, true)?);
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        // Preserve the SSH-config tokenizer's Windows path rules, escaping a
+        // final backslash so it does not consume the closing quote.
+        if !expanded.is_empty()
+            && !expanded.ends_with('\\')
+            && !expanded
+                .chars()
+                .any(|ch| ch.is_whitespace() || matches!(ch, '"' | '#'))
+        {
+            result.push_str(&expanded);
+            continue;
+        }
+        let body = expanded.as_str();
+        result.push('"');
+        let mut previous_backslash = false;
+        for ch in body.chars() {
+            if ch == '"' || (previous_backslash && (ch.is_whitespace() || ch == '#')) {
+                result.push('\\');
+            }
+            result.push(ch);
+            previous_backslash = ch == '\\';
+        }
+        if expanded.ends_with('\\') {
+            result.push('\\');
+        }
+        result.push('"');
+    }
+    Ok(result.into())
+}
+
 fn substitute_placeholders(
     value: &str,
     substitution: &BatchSubstitution<'_>,
+) -> Result<String, BatchIssue> {
+    substitute_template_value(value, substitution, false)
+}
+
+fn substitute_template_value(
+    value: &str,
+    substitution: &BatchSubstitution<'_>,
+    escape_proxy_tokens: bool,
 ) -> Result<String, BatchIssue> {
     let mut result = String::with_capacity(value.len());
     let mut rest = value;
@@ -1079,7 +1222,12 @@ fn substitute_placeholders(
                 },
             ));
         };
-        result.push_str(&replacement);
+        if escape_proxy_tokens {
+            // These bytes came from data, not from the template's OpenSSH tokens.
+            result.push_str(&replacement.replace('%', "%%"));
+        } else {
+            result.push_str(&replacement);
+        }
         rest = &rest[start + end_offset + 1..];
     }
     result.push_str(rest);
@@ -1433,6 +1581,105 @@ impl fmt::Debug for ResolvedBatchRow {
 mod tests {
     use super::*;
 
+    #[test]
+    fn batch_proxy_arguments_keep_imported_values_literal() {
+        let template = parse_batch_template("User ops\nIdentityFile ~/.ssh/key\nProxyCommand proxy --profile {profile} --target %h\n").unwrap();
+        let data = parse_batch_data("db1?profile=\"prod --extra %h\"").unwrap();
+        let preview =
+            resolve_batch_rows(&template, &data, None, &[], BatchDuplicateNamePolicy::Skip);
+        let command = preview.addable_rows().remove(0).proxy_command.unwrap();
+        let arguments = crate::resolve_proxy_command(command, "db1", "db1", Some("ops"), Some(22));
+        assert_eq!(
+            arguments
+                .iter()
+                .map(SecretString::expose_secret)
+                .collect::<Vec<_>>(),
+            vec!["proxy", "--profile", "prod --extra %h", "--target", "db1"]
+        );
+    }
+
+    #[test]
+    fn batch_proxy_scripts_cannot_interpolate_host_data() {
+        for command in [
+            r#"sh -c "echo {profile}""#,
+            r#"/bin/bash -lc "echo %h""#,
+            r#"C:\bin\bash.exe -lc "echo {profile}""#,
+            r#"powershell.exe -Command "echo {host}""#,
+            r#"cmd.exe /C "echo {profile}""#,
+            r#"env sh -c "echo {profile}""#,
+            r#"powershell.exe "echo {profile}""#,
+            r#"cmd.exe /C echo {profile}"#,
+            r#"env -S "sh -c {profile}""#,
+            r#"sh {profile}"#,
+        ] {
+            assert!(
+                parse_batch_template(&format!("User ops\nProxyCommand {command}\n")).is_err(),
+                "{command}"
+            );
+        }
+        let command = r#"sh -c "printf %s \"$1\"" proxy {profile}"#;
+        let template =
+            parse_batch_template(&format!("User ops\nProxyCommand {command}\n")).unwrap();
+        assert_eq!(
+            template
+                .proxy_command
+                .as_ref()
+                .map(SecretString::expose_secret),
+            Some(command)
+        );
+    }
+
+    #[test]
+    fn batch_inline_username_does_not_require_unused_template_profile() {
+        let template = parse_batch_template("User {profile}\nIdentityFile ~/.ssh/key\n").unwrap();
+        let data = parse_batch_data("ops@db1").unwrap();
+        let preview =
+            resolve_batch_rows(&template, &data, None, &[], BatchDuplicateNamePolicy::Skip);
+        assert_eq!(preview.issues, vec![]);
+        assert_eq!(preview.addable_rows()[0].username, "ops");
+    }
+
+    #[test]
+    fn batch_proxy_quoting_preserves_paths_quotes_empty_arguments_and_shell_positionals() {
+        for command in [
+            r#"proxy {profile} "{group}""#,
+            r#"sh -c "exec proxy \"$1\" \"$2\"" proxy {profile} "{group}""#,
+        ] {
+            let template = parse_batch_template(&format!(
+                "User ops\nIdentityFile ~/.ssh/key\nProxyCommand {command}\n"
+            ))
+            .unwrap();
+            for value in [
+                r#"profile" --extra"#,
+                r#"C:\Program Files\profile\"#,
+                "prod;id;#",
+                "$(id)",
+                "a\\ b",
+                "a\\#b",
+                "%h",
+            ] {
+                let mut data = parse_batch_data("db1").unwrap();
+                data.rows[0].profile = Some(value.into());
+                let preview =
+                    resolve_batch_rows(&template, &data, None, &[], BatchDuplicateNamePolicy::Skip);
+                assert!(preview.issues.is_empty(), "{:?}", preview.issues);
+                let resolved = preview.addable_rows().remove(0).proxy_command.unwrap();
+                let arguments =
+                    crate::resolve_proxy_command(resolved, "db1", "db1", Some("ops"), Some(22));
+                let arguments = arguments
+                    .iter()
+                    .map(SecretString::expose_secret)
+                    .collect::<Vec<_>>();
+                let expected = if command.starts_with("sh") {
+                    vec!["sh", "-c", "exec proxy \"$1\" \"$2\"", "proxy", value, ""]
+                } else {
+                    vec!["proxy", value, ""]
+                };
+                assert_eq!(arguments, expected);
+            }
+        }
+    }
+
     fn key_auth() -> SavedAuth {
         SavedAuth::Key {
             key_path: "/tmp/id_ed25519".to_owned(),
@@ -1620,7 +1867,10 @@ mod tests {
         )
         .expect("Keyword=value with a multiword command parses");
         assert_eq!(
-            template.proxy_command.as_deref(),
+            template
+                .proxy_command
+                .as_ref()
+                .map(SecretString::expose_secret),
             Some("ssh -W %h:%p jump"),
             "only the first token is split, the rest stays in the value"
         );
@@ -1749,7 +1999,7 @@ mod tests {
     #[test]
     fn profile_placeholder_is_required_per_row() {
         let template = parse_batch_template(
-            "Host --\n  User jaime.su\n  IdentityFile ~/.ssh/kn\n  ProxyCommand powershell.exe \"aws ssm start-session --profile {profile} --target %h --parameters 'portNumber=%p'\"\n",
+            "Host --\n  User jaime.su\n  IdentityFile ~/.ssh/kn\n  ProxyCommand aws ssm start-session --profile {profile} --target %h --parameters portNumber=%p\n",
         )
         .expect("template parses");
         assert!(template.uses_profile());
@@ -1769,7 +2019,8 @@ mod tests {
             .as_ref()
             .expect("first row is addable")
             .proxy_command
-            .as_deref()
+            .as_ref()
+            .map(SecretString::expose_secret)
             .expect("proxy resolved");
         assert!(
             command.contains("--profile prod-main"),
@@ -1932,7 +2183,7 @@ mod tests {
 
         // A row value carrying a brace cannot smuggle one into the saved value.
         let template = parse_batch_template(
-            "Host --\n  HostName {host}\n  User ops\n  ProxyCommand sh -c \"echo {profile}\"\n",
+            "Host --\n  HostName {host}\n  User ops\n  ProxyCommand echo {profile}\n",
         )
         .expect("template parses");
         let data = parse_batch_data("db1?profile=prod}").expect("data parses");
@@ -2241,7 +2492,7 @@ mod tests {
         let path = directory.path().join("connections.json");
         let mut store = ConnectionStore::load(&path).expect("store loads");
         let template = parse_batch_template(
-            "Host --\n  User jaime.su\n  IdentityFile ~/.ssh/kn\n  ProxyCommand sh -c \"aws ssm start-session --profile {profile} --target %h\"\n",
+            "Host --\n  User jaime.su\n  IdentityFile ~/.ssh/kn\n  ProxyCommand aws ssm start-session --profile {profile} --target %h\n",
         )
         .expect("template parses");
         let data = parse_batch_data("i-1?profile=prod&tags=prod\ni-2?profile=uat&group=uat\n")
@@ -2267,7 +2518,7 @@ mod tests {
                 .expect("proxy command secret is protected");
             assert_eq!(
                 command.expose_secret(),
-                format!("sh -c \"aws ssm start-session --profile {profile} --target %h\""),
+                format!("aws ssm start-session --profile {profile} --target %h"),
                 "each row must keep its own substituted profile"
             );
         }
@@ -2304,7 +2555,7 @@ mod tests {
             group: None,
             tags: Vec::new(),
             auth: key_auth(),
-            proxy_command: Some("aws ssm start-session --profile secret-profile".to_owned()),
+            proxy_command: Some("aws ssm start-session --profile secret-profile".into()),
             connect_timeout_seconds: None,
             forward_agent: None,
             replace_id: None,

@@ -79,6 +79,8 @@ oxideterm connections batch-create --template-file ./template.conf --data-file .
 
 数据文件或 spec 文件中的行内凭据是磁盘上的明文：共享密码优先使用 `--password-stdin`/`--password-env`，并保护或删除携带凭据的文件。
 
+ProxyCommand 按独立参数替换占位符，数据中的空格和引号不会产生额外参数。建议直接调用可执行文件，例如 `ProxyCommand aws ssm start-session --profile {profile} --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p`。程序名和内联 Shell 脚本必须固定；POSIX Shell 的动态值应通过独立的位置参数传入。批量模板不允许向 Windows 命令解释器或 `env -S` 传入动态值。
+
 ## 备份与恢复
 
 ```sh
