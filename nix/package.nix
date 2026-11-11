@@ -124,7 +124,7 @@ rustPlatform.buildRustPackage {
     #    the matching entry below with the `got:` sha256 output.
     # 4. Run `nix flake check -L` to ensure package checks pass.
     outputHashes = {
-      "russh-0.65.0" = "sha256-k2an35ugi4+YniYC7y4DqOxS5zE1IF3XGK6Y54e7bvU=";
+      "russh-0.65.0" = "sha256-1PUooricsd02sjf/bQukGDgM/w0+dqj555bpxF6K1dA=";
     };
   };
 
