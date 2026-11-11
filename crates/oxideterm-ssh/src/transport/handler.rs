@@ -113,6 +113,7 @@ struct NativeClientHandler {
     strict: bool,
     trust_host_key: Option<bool>,
     expected_host_key_fingerprint: Option<String>,
+    host_key_replacement: Option<crate::HostKeyReplacement>,
     agent_forwarding_requested: bool,
     agent_forwarding_accepted: Arc<AtomicBool>,
     agent_forwarding_endpoint: Option<SshAgentEndpoint>,
@@ -157,6 +158,7 @@ impl NativeClientHandler {
             strict,
             trust_host_key,
             expected_host_key_fingerprint,
+            host_key_replacement: None,
             agent_forwarding_requested,
             agent_forwarding_accepted: Arc::new(AtomicBool::new(false)),
             agent_forwarding_endpoint,
@@ -170,6 +172,13 @@ impl NativeClientHandler {
             auth_banners: new_auth_banner_sink(),
             connection_progress: None,
         })
+    }
+
+    fn with_host_key_replacement(mut self, replacement: Option<crate::HostKeyReplacement>) -> Self {
+        self.host_key_replacement = replacement.filter(|replacement| {
+            replacement.host.eq_ignore_ascii_case(&self.host) && replacement.port == self.port
+        });
+        self
     }
 
     fn check_server_key_policy(
@@ -195,6 +204,12 @@ impl NativeClientHandler {
             return Ok(false);
         };
         let actual_fingerprint = public_key_fingerprint(server_public_key);
+        if let Some(replacement) = self.host_key_replacement.take() {
+            replacement.apply(server_public_key)?;
+            self.expected_host_key_fingerprint = Some(replacement.fingerprint);
+            self.trust_host_key = Some(false);
+            return Ok(true);
+        }
         tracing::debug!(
             host = self.host.as_str(),
             port = self.port,

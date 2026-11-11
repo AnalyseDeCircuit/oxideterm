@@ -988,6 +988,7 @@ impl SshTransportClient {
                 x11_forward_handler.clone(),
             )?
             .with_connection_progress(self.connection_progress.clone())
+            .with_host_key_replacement(self.config.host_key_replacement.clone())
             .with_audit_context(audit.clone());
             let auth_banners = handler.auth_banners();
             let agent_forwarding_accepted = handler.agent_forwarding_acceptance();
@@ -1195,6 +1196,7 @@ impl SshTransportClient {
             x11_forward_handler,
         )?
         .with_connection_progress(self.connection_progress.clone())
+        .with_host_key_replacement(config.host_key_replacement.clone())
         .with_audit_context(audit.cloned());
         let auth_banners = handler.auth_banners();
         let agent_forwarding_accepted = handler.agent_forwarding_acceptance();
@@ -1360,7 +1362,9 @@ impl SshTransportClient {
             "SSH proxy hop TCP stream established"
         );
         let audit = self.audit_for_hop(hop, audit);
-        let handler = proxy_hop_handler(hop)?.with_audit_context(audit.clone());
+        let handler = proxy_hop_handler(hop)?
+            .with_host_key_replacement(self.config.host_key_replacement.clone())
+            .with_audit_context(audit.clone());
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
@@ -1404,7 +1408,9 @@ impl SshTransportClient {
             "SSH proxy hop tunneled connection starting"
         );
         let audit = self.audit_for_hop(hop, audit);
-        let handler = proxy_hop_handler(hop)?.with_audit_context(audit.clone());
+        let handler = proxy_hop_handler(hop)?
+            .with_host_key_replacement(self.config.host_key_replacement.clone())
+            .with_audit_context(audit.clone());
         let mut handle = tokio::time::timeout(
             Duration::from_secs(self.config.timeout_secs),
             client::connect_stream(
@@ -1475,6 +1481,7 @@ impl SshTransportClient {
             remote_forward_handler,
             x11_forward_handler,
         )?
+        .with_host_key_replacement(self.config.host_key_replacement.clone())
         .with_audit_context(audit.cloned());
         let auth_banners = handler.auth_banners();
         let agent_forwarding_accepted = handler.agent_forwarding_acceptance();

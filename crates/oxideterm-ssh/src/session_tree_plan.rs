@@ -28,6 +28,7 @@ pub struct NativeSessionTreeConnectStep {
     pub port: u16,
     pub trust_host_key: Option<bool>,
     pub expected_host_key_fingerprint: Option<String>,
+    pub host_key_replacement: Option<crate::HostKeyReplacement>,
     pub preflight_verified: bool,
 }
 
@@ -52,6 +53,7 @@ impl NativeSessionTreeConnectStep {
     ) -> Self {
         self.trust_host_key = Some(trust_host_key);
         self.expected_host_key_fingerprint = Some(expected_host_key_fingerprint.into());
+        self.host_key_replacement = None;
         self.preflight_verified = false;
         self
     }
@@ -92,6 +94,7 @@ impl NativeSessionTreeConnectPlan {
                 port: endpoint.port,
                 trust_host_key: None,
                 expected_host_key_fingerprint: None,
+                host_key_replacement: None,
                 preflight_verified: false,
             })
             .collect::<Vec<_>>();
@@ -139,6 +142,7 @@ impl NativeSessionTreeConnectPlan {
         };
         step.trust_host_key = Some(trust_host_key);
         step.expected_host_key_fingerprint = Some(expected_host_key_fingerprint.into());
+        step.host_key_replacement = None;
         step.preflight_verified = false;
         Ok(())
     }
@@ -151,6 +155,7 @@ impl NativeSessionTreeConnectPlan {
         step.preflight_verified = true;
         step.trust_host_key = None;
         step.expected_host_key_fingerprint = None;
+        step.host_key_replacement = None;
         Ok(())
     }
 

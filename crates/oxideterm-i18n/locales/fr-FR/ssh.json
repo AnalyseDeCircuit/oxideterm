@@ -234,12 +234,11 @@
       "expected_fingerprint": "Empreinte attendue",
       "actual_fingerprint": "Empreinte actuelle",
       "cancelled": "Confirmation de clé d’hôte SSH annulée.",
-      "changed_requires_remove": "Les clés d’hôte modifiées sont bloquées tant que la clé enregistrée n’est pas supprimée.",
       "actions": {
         "cancel": "Annuler",
         "trust_once": "Faire confiance une fois",
         "trust_save": "Faire confiance et enregistrer",
-        "remove_saved": "Supprimer la clé enregistrée"
+        "replace_saved": "Remplacer la clé et se connecter"
       }
     },
     "kbi": {

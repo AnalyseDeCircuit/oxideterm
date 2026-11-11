@@ -234,12 +234,11 @@
       "expected_fingerprint": "预期指纹",
       "actual_fingerprint": "实际指纹",
       "cancelled": "已取消 SSH 主机密钥确认。",
-      "changed_requires_remove": "主机密钥变更时必须先移除已保存的密钥。",
       "actions": {
         "cancel": "取消",
         "trust_once": "仅信任本次",
         "trust_save": "信任并保存",
-        "remove_saved": "删除已保存密钥"
+        "replace_saved": "替换密钥并连接"
       }
     },
     "kbi": {

@@ -234,12 +234,11 @@
       "expected_fingerprint": "Expected fingerprint",
       "actual_fingerprint": "Actual fingerprint",
       "cancelled": "SSH host key confirmation was cancelled.",
-      "changed_requires_remove": "Changed host keys are blocked until the saved key is removed.",
       "actions": {
         "cancel": "Cancel",
         "trust_once": "Trust Once",
         "trust_save": "Trust and Save",
-        "remove_saved": "Remove Saved Key"
+        "replace_saved": "Replace key and connect"
       }
     },
     "kbi": {

@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "Vertrauenswürdige Hosts",
+      "description": "Gespeicherte SSH-Hostschlüssel verwalten.",
+      "search": "Hosts, Ports oder Fingerabdrücke suchen",
+      "refresh": "Aktualisieren",
+      "open_file": "Datei öffnen",
+      "source": "Vertrauensdatei: {{path}}",
+      "error": "Hostschlüssel konnten nicht aktualisiert werden: {{error}}",
+      "loading": "Wird verarbeitet…",
+      "empty": "Keine gespeicherten Hostschlüssel.",
+      "no_matches": "Keine passenden Hosts.",
+      "copy": "Fingerabdruck kopieren",
+      "confirm_delete": "Nach dem Entfernen muss der Host bei der nächsten Verbindung erneut bestätigt werden.",
+      "cancel": "Abbrechen",
+      "confirm": "Schlüssel löschen",
+      "delete": "Löschen",
+      "read_only": "Schreibgeschützter Eintrag. In der Quelldatei verwalten."
+    },
     "credentials": {
       "title": "Zugangsdaten",
       "description": "Passwörter zur Rechteerhöhung und SSH-Bestätigungscodes verwalten."

@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "신뢰하는 호스트",
+      "description": "저장된 SSH 호스트 키를 관리합니다.",
+      "search": "호스트, 포트 또는 지문 검색",
+      "refresh": "새로 고침",
+      "open_file": "파일 열기",
+      "source": "신뢰 파일: {{path}}",
+      "error": "호스트 키를 업데이트할 수 없습니다: {{error}}",
+      "loading": "처리 중…",
+      "empty": "저장된 호스트 키가 없습니다.",
+      "no_matches": "일치하는 호스트가 없습니다.",
+      "copy": "지문 복사",
+      "confirm_delete": "키를 삭제하면 다음 연결 시 호스트를 다시 확인해야 합니다.",
+      "cancel": "취소",
+      "confirm": "키 삭제",
+      "delete": "삭제",
+      "read_only": "읽기 전용 항목입니다. 원본 파일에서 관리하세요."
+    },
     "credentials": {
       "title": "인증 정보",
       "description": "권한 상승 암호와 SSH 인증 코드를 관리합니다."

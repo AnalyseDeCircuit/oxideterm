@@ -234,12 +234,11 @@
       "expected_fingerprint": "預期指紋",
       "actual_fingerprint": "實際指紋",
       "cancelled": "已取消 SSH 主機金鑰確認。",
-      "changed_requires_remove": "主機金鑰變更時必須先移除已儲存的金鑰。",
       "actions": {
         "cancel": "取消",
         "trust_once": "僅信任本次",
         "trust_save": "信任並儲存",
-        "remove_saved": "刪除已儲存金鑰"
+        "replace_saved": "取代金鑰並連線"
       }
     },
     "kbi": {

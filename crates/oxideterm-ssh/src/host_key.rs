@@ -3,7 +3,7 @@
 
 use std::{
     collections::HashMap,
-    fs::{self, OpenOptions},
+    fs,
     io::{BufRead, BufReader, Write},
     path::{Path, PathBuf},
     sync::{Arc, LazyLock},
@@ -31,6 +31,9 @@ use crate::{
 
 const CACHE_TTL_SECS: u64 = 3600;
 const MAX_CACHE_ENTRIES: usize = 500;
+
+mod management;
+pub use management::{HostKeyReplacement, KnownHostEntry, KnownHostsSnapshot, list_known_hosts};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
@@ -250,19 +253,6 @@ impl KnownHostsStore {
             };
         }
 
-        let host_only = host.to_lowercase();
-        if let Some(entries) = self.hosts.get(&host_only) {
-            if let Some(result) =
-                check_known_host_entries(entries, &actual_key_type, &actual_key_b64, &fingerprint)
-            {
-                return result;
-            }
-            return HostKeyVerification::Unknown {
-                fingerprint,
-                key_type: actual_key_type,
-            };
-        }
-
         HostKeyVerification::Unknown {
             fingerprint,
             key_type: actual_key_type,
@@ -296,11 +286,7 @@ impl KnownHostsStore {
         expected_fingerprint: &str,
     ) -> Result<(), SshTransportError> {
         let lookup_key = Self::make_key(host, port);
-        let host_only_key = Self::normalize_hostname(host);
-        let mut lookup_keys = vec![lookup_key.clone()];
-        if host_only_key != lookup_key {
-            lookup_keys.push(host_only_key);
-        }
+        let lookup_keys = vec![lookup_key.clone()];
         let removed_any =
             rewrite_without_host_key(&self.path, &lookup_keys, key_type, expected_fingerprint)?;
 
@@ -384,17 +370,7 @@ fn append_known_host_line(
     key_type: &str,
     key_data: &str,
 ) -> Result<(), SshTransportError> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))?;
-    }
-    let mut file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))?;
-    writeln!(file, "{host} {key_type} {key_data}")
-        .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))
+    management::append_key(path, host, key_type, key_data)
 }
 
 fn rewrite_without_host_key(
@@ -403,65 +379,13 @@ fn rewrite_without_host_key(
     remove_key_type: &str,
     remove_fingerprint: &str,
 ) -> Result<bool, SshTransportError> {
-    if !path.exists() {
-        return Ok(false);
-    }
-
-    let content = fs::read_to_string(path)
-        .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))?;
-    let remove_hosts = remove_hosts
-        .iter()
-        .map(|host| host.to_lowercase())
-        .collect::<Vec<_>>();
-    let mut removed_any = false;
-
-    let filtered = content
-        .lines()
-        .filter_map(|line| {
-            let parts = line.split_whitespace().collect::<Vec<_>>();
-            if parts.len() < 3 {
-                return Some(line.to_string());
-            }
-
-            let hostnames = parts[0];
-            let key_type = parts[1];
-            let key_data = parts[2];
-            if key_type != remove_key_type
-                || fingerprint_from_known_hosts_key_data(key_data) != remove_fingerprint
-            {
-                return Some(line.to_string());
-            }
-
-            let kept_hostnames = hostnames
-                .split(',')
-                .filter(|hostname| {
-                    let canonical = KnownHostsStore::canonical_host_entry(hostname);
-                    !remove_hosts.contains(&canonical)
-                })
-                .collect::<Vec<_>>();
-
-            if kept_hostnames.len() == hostnames.split(',').count() {
-                return Some(line.to_string());
-            }
-
-            removed_any = true;
-            if kept_hostnames.is_empty() {
-                return None;
-            }
-
-            let mut rebuilt = vec![
-                kept_hostnames.join(","),
-                key_type.to_string(),
-                key_data.to_string(),
-            ];
-            rebuilt.extend(parts.iter().skip(3).map(|part| (*part).to_string()));
-            Some(rebuilt.join(" "))
-        })
-        .collect::<Vec<_>>();
-
-    fs::write(path, filtered.join("\n") + "\n")
-        .map_err(|error| SshTransportError::HostKeyCheckFailed(error.to_string()))?;
-    Ok(removed_any)
+    management::rewrite_key(
+        path,
+        remove_hosts,
+        remove_key_type,
+        remove_fingerprint,
+        None,
+    )
 }
 
 pub fn verify_host_key(
@@ -469,7 +393,9 @@ pub fn verify_host_key(
     port: u16,
     server_public_key: &PublicKey,
 ) -> Result<HostKeyVerification, SshTransportError> {
-    if HOST_KEY_CACHE.get_verified(host, port).is_some() {
+    if HOST_KEY_CACHE.get_verified(host, port).as_deref()
+        == Some(public_key_fingerprint(server_public_key).as_str())
+    {
         return Ok(HostKeyVerification::Verified);
     }
     Ok(KnownHostsStore::new()?.verify(host, port, server_public_key))
@@ -645,10 +571,6 @@ pub async fn check_host_key_with_route(
     legacy_compatibility: bool,
     algorithms: &SshAlgorithmPreferences,
 ) -> HostKeyStatus {
-    if HOST_KEY_CACHE.get_verified(host, port).is_some() {
-        return HostKeyStatus::Verified;
-    }
-
     let stream: Result<BoxedSshForwardStream, SshTransportError> = match proxy_command {
         Some(_) if upstream_proxy.is_some() => Err(SshTransportError::ConnectionFailed(
             "ProxyCommand cannot be combined with an upstream proxy".to_string(),
@@ -714,10 +636,6 @@ pub async fn check_host_key_via_stream(
     legacy_compatibility: bool,
     algorithms: &SshAlgorithmPreferences,
 ) -> HostKeyStatus {
-    if HOST_KEY_CACHE.get_verified(host, port).is_some() {
-        return HostKeyStatus::Verified;
-    }
-
     let handler = PreflightHandler::new(host.to_string(), port);
     let status = Arc::clone(&handler.status);
     let config = match preflight_client_config(timeout_secs, legacy_compatibility, algorithms) {
@@ -763,14 +681,14 @@ mod tests {
     static CACHE_TEST_LOCK: LazyLock<std::sync::Mutex<()>> =
         LazyLock::new(|| std::sync::Mutex::new(()));
 
-    fn sample_public_key() -> PublicKey {
+    pub(super) fn sample_public_key() -> PublicKey {
         parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ",
         )
         .unwrap()
     }
 
-    fn alternate_public_key() -> PublicKey {
+    pub(super) fn alternate_public_key() -> PublicKey {
         parse_public_key_base64(
             "AAAAC3NzaC1lZDI1NTE5AAAAIA6rWI3G1sz07DnfFlrouTcysQlj2P+jpNSOEWD9OJ3X",
         )
@@ -808,6 +726,13 @@ mod tests {
             store.verify("alias.example.com", 22, &key),
             HostKeyVerification::Verified
         );
+        assert_eq!(
+            store.verify("example.com", 2222, &key),
+            HostKeyVerification::Unknown {
+                fingerprint: public_key_fingerprint(&key),
+                key_type: public_key_type(&key),
+            }
+        );
         let alternate = alternate_public_key();
         assert_eq!(
             store.verify("example.com", 22, &alternate),
@@ -821,23 +746,140 @@ mod tests {
     }
 
     #[test]
-    fn accepted_host_key_cache_verifies_key_and_preflight_before_network() {
-        let _guard = CACHE_TEST_LOCK.lock().unwrap();
-        let key = sample_public_key();
-        let host = "cached-before-dns.invalid";
-        HOST_KEY_CACHE.clear();
-
-        accept_host_key_for_session(host, 2222, public_key_fingerprint(&key));
-
-        assert_eq!(
-            verify_host_key(host, 2222, &key).unwrap(),
-            HostKeyVerification::Verified
-        );
+    fn accepted_host_key_cache_does_not_skip_the_live_server_probe() {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_HOST_KEY_TEST_DIR";
+        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
+            // Portable runtime paths are process-wide; never write the user's trust file.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            fs::hard_link(&executable, &child).unwrap();
+            fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .args([
+                    "host_key::tests::accepted_host_key_cache_does_not_skip_the_live_server_probe",
+                    "--exact",
+                    "--nocapture",
+                ])
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+        let path = default_known_hosts_path().unwrap();
+        assert!(path.starts_with(PathBuf::from(fixture_dir)));
         let runtime = tokio::runtime::Runtime::new().unwrap();
-        let status = runtime.block_on(check_host_key(host, 2222, 1));
+        runtime.block_on(async {
+            struct Peer;
+            impl russh::server::Handler for Peer {
+                type Error = russh::Error;
+                async fn auth_none(&mut self, _: &str) -> Result<russh::server::Auth, Self::Error> {
+                    Ok(russh::server::Auth::Accept)
+                }
+            }
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let old_key = sample_public_key();
+            let new_key = russh::keys::PrivateKey::random(
+                &mut rand10::rng(),
+                russh::keys::Algorithm::Ed25519,
+            )
+            .unwrap();
+            let new_public_key = new_key.public_key().clone();
+            let expected = public_key_fingerprint(&old_key);
+            let actual = public_key_fingerprint(&new_public_key);
+            learn_host_key("127.0.0.1", port, &old_key).unwrap();
+            let original = fs::read_to_string(&path).unwrap();
+            assert_eq!(
+                verify_host_key("127.0.0.1", port, &old_key).unwrap(),
+                HostKeyVerification::Verified
+            );
+            let server = tokio::spawn(async move {
+                let config = Arc::new(russh::server::Config {
+                    keys: vec![new_key],
+                    ..Default::default()
+                });
+                let mut sessions = tokio::task::JoinSet::new();
+                loop {
+                    let (stream, _) = listener.accept().await.unwrap();
+                    let config = config.clone();
+                    sessions.spawn(async move {
+                        if let Ok(session) = russh::server::run_stream(config, stream, Peer).await {
+                            let _ = session.await;
+                        }
+                    });
+                }
+            });
+            let changed = HostKeyStatus::Changed {
+                expected_fingerprint: expected.clone(),
+                actual_fingerprint: actual.clone(),
+                key_type: "ssh-ed25519".into(),
+            };
+            assert_eq!(check_host_key("127.0.0.1", port, 5).await, changed);
 
-        assert_eq!(status, HostKeyStatus::Verified);
-        HOST_KEY_CACHE.clear();
+            let mut config = crate::SshConfig::password("127.0.0.1", port, "fixture", "unused");
+            config.timeout_secs = 5;
+            config.strict_host_key_checking = true;
+            config.expected_host_key_fingerprint = Some(actual.clone());
+            config.trust_host_key = Some(true);
+            config.host_key_replacement = Some(HostKeyReplacement {
+                host: config.host.clone(),
+                port,
+                key_type: "ssh-ed25519".into(),
+                previous_fingerprint: expected.clone(),
+                fingerprint: expected.clone(),
+            });
+            let rejected = crate::SshTransportClient::new(config.clone())
+                .test_connection()
+                .await;
+            assert!(matches!(
+                rejected,
+                Err(SshTransportError::HostKeyChanged { .. })
+            ));
+            assert_eq!(fs::read_to_string(&path).unwrap(), original);
+
+            config.host_key_replacement.as_mut().unwrap().fingerprint = actual.clone();
+            assert!(
+                !serde_json::to_value(&config)
+                    .unwrap()
+                    .as_object()
+                    .unwrap()
+                    .contains_key("host_key_replacement")
+            );
+            crate::SshTransportClient::new(config)
+                .test_connection()
+                .await
+                .unwrap();
+            assert_eq!(
+                fs::read_to_string(&path).unwrap(),
+                format!(
+                    "[127.0.0.1]:{port} ssh-ed25519 {}\n",
+                    new_public_key.public_key_base64()
+                )
+            );
+            assert_eq!(
+                check_host_key("127.0.0.1", port, 5).await,
+                HostKeyStatus::Verified
+            );
+            remove_host_key("127.0.0.1", port, "ssh-ed25519", &actual).unwrap();
+            assert_eq!(
+                check_host_key("127.0.0.1", port, 5).await,
+                HostKeyStatus::Unknown {
+                    fingerprint: actual,
+                    key_type: "ssh-ed25519".into(),
+                }
+            );
+            server.abort();
+            let _ = server.await;
+        });
     }
 
     #[test]

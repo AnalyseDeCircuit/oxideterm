@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "信頼済みホスト",
+      "description": "保存済みの SSH ホストキーを管理します。",
+      "search": "ホスト、ポート、フィンガープリントを検索",
+      "refresh": "更新",
+      "open_file": "ファイルを開く",
+      "source": "信頼ファイル：{{path}}",
+      "error": "ホストキーを更新できませんでした：{{error}}",
+      "loading": "処理中…",
+      "empty": "保存済みのホストキーはありません。",
+      "no_matches": "一致するホストはありません。",
+      "copy": "フィンガープリントをコピー",
+      "confirm_delete": "削除すると、次回の接続時にホストの確認が必要になります。",
+      "cancel": "キャンセル",
+      "confirm": "キーを削除",
+      "delete": "削除",
+      "read_only": "読み取り専用の項目です。元のファイルで管理してください。"
+    },
     "credentials": {
       "title": "認証情報",
       "description": "権限昇格用パスワードと SSH 確認コードを管理します。"

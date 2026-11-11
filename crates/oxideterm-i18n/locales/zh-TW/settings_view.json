@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "已信任主機",
+      "description": "管理已儲存的 SSH 主機金鑰。",
+      "search": "搜尋主機、連接埠或指紋",
+      "refresh": "重新整理",
+      "open_file": "開啟檔案",
+      "source": "信任檔案：{{path}}",
+      "error": "無法更新主機金鑰：{{error}}",
+      "loading": "處理中…",
+      "empty": "尚無已儲存的主機金鑰。",
+      "no_matches": "沒有符合的主機。",
+      "copy": "複製指紋",
+      "confirm_delete": "刪除後，下次連線需要重新確認此主機。",
+      "cancel": "取消",
+      "confirm": "確認刪除",
+      "delete": "刪除",
+      "read_only": "唯讀項目，請在來源檔案中管理。"
+    },
     "credentials": {
       "title": "憑證",
       "description": "管理提權密碼和 SSH 驗證碼。"

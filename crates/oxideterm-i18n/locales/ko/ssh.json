@@ -234,12 +234,11 @@
       "expected_fingerprint": "예상 지문",
       "actual_fingerprint": "실제 지문",
       "cancelled": "SSH 호스트 키 확인이 취소되었습니다.",
-      "changed_requires_remove": "변경된 호스트 키는 저장된 키를 제거할 때까지 차단됩니다.",
       "actions": {
         "cancel": "취소",
         "trust_once": "이번만 신뢰",
         "trust_save": "신뢰하고 저장",
-        "remove_saved": "저장된 키 제거"
+        "replace_saved": "키 교체 후 연결"
       }
     },
     "kbi": {

@@ -507,6 +507,16 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
             ],
         ),
         settings_search_entry(
+            SettingsTab::Connections,
+            6,
+            "settings_view.known_hosts.title",
+            &[
+                "settings_view.known_hosts.description",
+                "settings_view.known_hosts.source",
+                "settings_view.known_hosts.search",
+            ],
+        ),
+        settings_search_entry(
             SettingsTab::Privilege,
             0,
             "settings_view.privilege_credentials.title",

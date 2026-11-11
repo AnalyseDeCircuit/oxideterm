@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "Hôtes de confiance",
+      "description": "Gérez les clés d’hôte SSH enregistrées.",
+      "search": "Rechercher des hôtes, ports ou empreintes",
+      "refresh": "Actualiser",
+      "open_file": "Ouvrir le fichier",
+      "source": "Fichier de confiance : {{path}}",
+      "error": "Impossible de mettre à jour les clés d’hôte : {{error}}",
+      "loading": "Traitement en cours…",
+      "empty": "Aucune clé d’hôte enregistrée.",
+      "no_matches": "Aucun hôte correspondant.",
+      "copy": "Copier l’empreinte",
+      "confirm_delete": "Après la suppression, vous devrez confirmer cet hôte à la prochaine connexion.",
+      "cancel": "Annuler",
+      "confirm": "Supprimer la clé",
+      "delete": "Supprimer",
+      "read_only": "Entrée en lecture seule. Gérez-la dans le fichier source."
+    },
     "credentials": {
       "title": "Identifiants",
       "description": "Gérez les mots de passe d’élévation et les codes de vérification SSH."

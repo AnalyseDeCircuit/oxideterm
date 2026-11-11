@@ -620,6 +620,7 @@ impl WorkspaceApp {
             3 => self.settings_ssh_section(0, cx),
             4 => self.ssh_config_import_section(cx),
             5 => self.connection_importers_section(cx),
+            6 => self.settings_known_hosts_section(cx),
             _ => div().into_any_element(),
         }
     }

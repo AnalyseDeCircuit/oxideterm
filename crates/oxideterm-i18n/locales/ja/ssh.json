@@ -234,12 +234,11 @@
       "expected_fingerprint": "期待されるフィンガープリント",
       "actual_fingerprint": "実際のフィンガープリント",
       "cancelled": "SSHホストキーの確認をキャンセルしました。",
-      "changed_requires_remove": "変更されたホストキーは、保存済みキーを削除するまでブロックされます。",
       "actions": {
         "cancel": "キャンセル",
         "trust_once": "今回だけ信頼",
         "trust_save": "信頼して保存",
-        "remove_saved": "保存済みキーを削除"
+        "replace_saved": "キーを置き換えて接続"
       }
     },
     "kbi": {

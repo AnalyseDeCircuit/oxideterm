@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "Máy chủ tin cậy",
+      "description": "Quản lý khóa SSH của máy chủ đã lưu.",
+      "search": "Tìm máy chủ, cổng hoặc dấu vân tay",
+      "refresh": "Làm mới",
+      "open_file": "Mở tệp",
+      "source": "Tệp tin cậy: {{path}}",
+      "error": "Không thể cập nhật khóa máy chủ: {{error}}",
+      "loading": "Đang xử lý…",
+      "empty": "Chưa có khóa máy chủ nào được lưu.",
+      "no_matches": "Không có máy chủ phù hợp.",
+      "copy": "Sao chép dấu vân tay",
+      "confirm_delete": "Sau khi xóa khóa này, bạn cần xác nhận lại máy chủ ở lần kết nối tiếp theo.",
+      "cancel": "Hủy",
+      "confirm": "Xóa khóa",
+      "delete": "Xóa",
+      "read_only": "Mục chỉ đọc. Hãy quản lý trong tệp nguồn."
+    },
     "credentials": {
       "title": "Thông tin xác thực",
       "description": "Quản lý mật khẩu nâng quyền và mã xác minh SSH."

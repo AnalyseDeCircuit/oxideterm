@@ -116,7 +116,9 @@ pub fn persisted_settings_input_value(
             .unwrap_or_default(),
         SettingsInput::ConnectionDefaultUsername => settings.connection_defaults.username.clone(),
         SettingsInput::ConnectionDefaultPort => settings.connection_defaults.port.to_string(),
-        SettingsInput::ConnectionImportTargetGroup => return None,
+        SettingsInput::ConnectionImportTargetGroup | SettingsInput::KnownHostsSearch => {
+            return None;
+        }
         SettingsInput::NetworkProxyHost => settings
             .network
             .upstream_proxy
@@ -524,7 +526,9 @@ pub fn apply_persisted_settings_input_draft(
         SettingsInput::ConnectionDefaultPort => parse_i64(draft)
             .map(|value| settings.connection_defaults.port = value.clamp(1, 65_535))
             .into(),
-        SettingsInput::ConnectionImportTargetGroup => SettingsInputDraftApply::Unhandled,
+        SettingsInput::ConnectionImportTargetGroup | SettingsInput::KnownHostsSearch => {
+            SettingsInputDraftApply::Unhandled
+        }
         SettingsInput::NetworkProxyHost => {
             edit_upstream_proxy(settings, |proxy| proxy.host = draft.trim().to_string())
         }

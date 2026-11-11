@@ -115,6 +115,9 @@ pub struct SshConfig {
     pub trust_host_key: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_host_key_fingerprint: Option<String>,
+    // Replacement authority belongs to this connection attempt, never persisted profiles.
+    #[serde(skip)]
+    pub host_key_replacement: Option<crate::HostKeyReplacement>,
     #[serde(default)]
     pub agent_forwarding: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -618,6 +621,7 @@ impl Default for SshConfig {
             strict_host_key_checking: false,
             trust_host_key: None,
             expected_host_key_fingerprint: None,
+            host_key_replacement: None,
             agent_forwarding: false,
             identity_agent: None,
             agent_forwarding_socket: None,

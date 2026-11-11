@@ -206,7 +206,7 @@ pub fn settings_tab_section_count(
         SettingsTab::Terminal => terminal_settings_section_count(dynamic.terminal_page),
         SettingsTab::Appearance => 5,
         // Reconnect controls share one card and therefore one virtual section.
-        SettingsTab::Connections => 6,
+        SettingsTab::Connections => 7,
         SettingsTab::Privilege => 2,
         SettingsTab::Network => 4,
         SettingsTab::Sftp => 3,

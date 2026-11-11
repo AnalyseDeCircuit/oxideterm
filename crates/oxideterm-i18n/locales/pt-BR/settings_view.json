@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "Hosts confiáveis",
+      "description": "Gerencie as chaves de host SSH salvas.",
+      "search": "Buscar hosts, portas ou impressões digitais",
+      "refresh": "Atualizar",
+      "open_file": "Abrir arquivo",
+      "source": "Arquivo de confiança: {{path}}",
+      "error": "Não foi possível atualizar as chaves de host: {{error}}",
+      "loading": "Processando…",
+      "empty": "Nenhuma chave de host salva.",
+      "no_matches": "Nenhum host correspondente.",
+      "copy": "Copiar impressão digital",
+      "confirm_delete": "Após remover esta chave, você precisará confirmar o host na próxima conexão.",
+      "cancel": "Cancelar",
+      "confirm": "Excluir chave",
+      "delete": "Excluir",
+      "read_only": "Entrada somente leitura. Gerencie-a no arquivo de origem."
+    },
     "credentials": {
       "title": "Credenciais",
       "description": "Gerencie senhas de elevação e códigos de verificação SSH."

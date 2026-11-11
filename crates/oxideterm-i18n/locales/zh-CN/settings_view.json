@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "已信任主机",
+      "description": "管理已保存的 SSH 主机密钥。",
+      "search": "搜索主机、端口或指纹",
+      "refresh": "刷新",
+      "open_file": "打开文件",
+      "source": "信任文件：{{path}}",
+      "error": "无法更新主机密钥：{{error}}",
+      "loading": "正在处理…",
+      "empty": "暂无已保存的主机密钥。",
+      "no_matches": "没有匹配的主机。",
+      "copy": "复制指纹",
+      "confirm_delete": "删除后，下次连接需要重新确认此主机。",
+      "cancel": "取消",
+      "confirm": "确认删除",
+      "delete": "删除",
+      "read_only": "只读条目，请在来源文件中管理。"
+    },
     "credentials": {
       "title": "凭据",
       "description": "管理提权密码和 SSH 验证码。"

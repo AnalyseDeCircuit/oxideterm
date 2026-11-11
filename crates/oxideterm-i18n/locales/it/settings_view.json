@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "Host attendibili",
+      "description": "Gestisci le chiavi host SSH salvate.",
+      "search": "Cerca host, porte o impronte",
+      "refresh": "Aggiorna",
+      "open_file": "Apri file",
+      "source": "File di attendibilità: {{path}}",
+      "error": "Impossibile aggiornare le chiavi host: {{error}}",
+      "loading": "Elaborazione…",
+      "empty": "Nessuna chiave host salvata.",
+      "no_matches": "Nessun host corrispondente.",
+      "copy": "Copia impronta",
+      "confirm_delete": "Dopo l’eliminazione dovrai confermare questo host alla prossima connessione.",
+      "cancel": "Annulla",
+      "confirm": "Elimina chiave",
+      "delete": "Elimina",
+      "read_only": "Voce di sola lettura. Gestiscila nel file di origine."
+    },
     "credentials": {
       "title": "Credenziali",
       "description": "Gestisci le password di elevazione e i codici di verifica SSH."

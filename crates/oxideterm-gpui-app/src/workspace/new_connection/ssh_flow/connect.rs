@@ -831,24 +831,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn continue_active_proxy_session_tree_preflight_only(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(action) = self.connection_flow.read(cx).proxy_connect_next_action() else {
-            return;
-        };
-        match action {
-            NativeSessionTreeConnectAction::Preflight { step } => {
-                self.start_session_tree_step_preflight(step, cx);
-            }
-            _ => self.report_proxy_session_tree_error(
-                "proxy connect plan is not waiting for host-key preflight".to_string(),
-                cx,
-            ),
-        }
-    }
-
     pub(super) fn start_session_tree_step_preflight(
         &mut self,
         step: NativeSessionTreeConnectStep,
@@ -1127,11 +1109,17 @@ impl WorkspaceApp {
         &mut self,
         persist: bool,
         fingerprint: String,
+        replacement: Option<oxideterm_ssh::HostKeyReplacement>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let result = self.connection_flow.update(cx, |connection_flow, cx| {
-            connection_flow.accept_active_proxy_connect_host_key(persist, fingerprint, cx)
+            connection_flow.accept_active_proxy_connect_host_key(
+                persist,
+                fingerprint,
+                replacement,
+                cx,
+            )
         });
         if let Err(error) = result {
             self.report_proxy_session_tree_error(error, cx);
@@ -1154,7 +1142,7 @@ impl WorkspaceApp {
         step: &NativeSessionTreeConnectStep,
         upstream_proxy: Option<UpstreamProxyConfig>,
     ) {
-        if step.trust_host_key.is_none() && upstream_proxy.is_none() {
+        if step.trust_host_key.is_none() && !step.preflight_verified && upstream_proxy.is_none() {
             return;
         }
         if let Some(snapshot) = self.node_router.node_runtime_snapshot(&step.node_id) {
@@ -1170,6 +1158,13 @@ impl WorkspaceApp {
                 config.strict_host_key_checking = true;
                 config.trust_host_key = Some(trust_host_key);
                 config.expected_host_key_fingerprint = Some(fingerprint);
+                config.host_key_replacement = step.host_key_replacement.clone();
+            } else if step.preflight_verified {
+                // A fresh check supersedes acceptance retained by an earlier connection.
+                config.strict_host_key_checking = true;
+                config.trust_host_key = None;
+                config.expected_host_key_fingerprint = None;
+                config.host_key_replacement = None;
             }
             // Tauri passes host-key acceptance as connectNode options. Native
             // stores the same one-step options on the node config immediately

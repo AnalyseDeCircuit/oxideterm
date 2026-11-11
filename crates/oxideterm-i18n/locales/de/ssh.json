@@ -234,12 +234,11 @@
       "expected_fingerprint": "Erwarteter Fingerabdruck",
       "actual_fingerprint": "Aktueller Fingerabdruck",
       "cancelled": "SSH-Hostschlüsselbestätigung wurde abgebrochen.",
-      "changed_requires_remove": "Geänderte Hostschlüssel bleiben blockiert, bis der gespeicherte Schlüssel entfernt wird.",
       "actions": {
         "cancel": "Abbrechen",
         "trust_once": "Einmal vertrauen",
         "trust_save": "Vertrauen und speichern",
-        "remove_saved": "Gespeicherten Schlüssel entfernen"
+        "replace_saved": "Schlüssel ersetzen und verbinden"
       }
     },
     "kbi": {

@@ -9,6 +9,7 @@ version.workspace = true
 
 [dependencies]
 oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 base64.workspace = true
 dashmap.workspace = true
@@ -28,6 +29,7 @@ serde_json.workspace = true
 sha2.workspace = true
 signature.workspace = true
 ssh-encoding.workspace = true
+tempfile = "3.23"
 thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
@@ -42,6 +44,5 @@ windows.workspace = true
 
 [dev-dependencies]
 russh-sftp = { path = "../russh-sftp" }
-tempfile = "3.23"
 tokio = { workspace = true, features = ["test-util"] }
 rand10.workspace = true

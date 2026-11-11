@@ -234,12 +234,11 @@
       "expected_fingerprint": "Impronta prevista",
       "actual_fingerprint": "Impronta attuale",
       "cancelled": "Conferma della chiave host SSH annullata.",
-      "changed_requires_remove": "Le chiavi host modificate sono bloccate finché la chiave salvata non viene rimossa.",
       "actions": {
         "cancel": "Annulla",
         "trust_once": "Fidati una volta",
         "trust_save": "Fidati e salva",
-        "remove_saved": "Rimuovi chiave salvata"
+        "replace_saved": "Sostituisci chiave e connetti"
       }
     },
     "kbi": {

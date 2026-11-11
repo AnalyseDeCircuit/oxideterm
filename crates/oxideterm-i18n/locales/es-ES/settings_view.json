@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "Hosts de confianza",
+      "description": "Administra las claves SSH de host guardadas.",
+      "search": "Buscar hosts, puertos o huellas",
+      "refresh": "Actualizar",
+      "open_file": "Abrir archivo",
+      "source": "Archivo de confianza: {{path}}",
+      "error": "No se pudieron actualizar las claves de host: {{error}}",
+      "loading": "Procesando…",
+      "empty": "No hay claves de host guardadas.",
+      "no_matches": "No hay hosts coincidentes.",
+      "copy": "Copiar huella",
+      "confirm_delete": "Al eliminar esta clave, tendrás que confirmar el host en la próxima conexión.",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar clave",
+      "delete": "Eliminar",
+      "read_only": "Entrada de solo lectura. Adminístrala en el archivo de origen."
+    },
     "credentials": {
       "title": "Credenciales",
       "description": "Gestiona las contraseñas de elevación y los códigos de verificación SSH."

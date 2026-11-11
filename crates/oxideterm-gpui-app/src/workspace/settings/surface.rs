@@ -583,6 +583,22 @@ impl WorkspaceApp {
                 settings.general.update_channel.hash(&mut hasher);
             }
             SettingsTab::Connections => {
+                if index == SETTINGS_SECTION_HEADER_ITEM_COUNT + 6 {
+                    let state = &self.settings_workspace.read(cx).known_hosts;
+                    state.query.hash(&mut hasher);
+                    state.task.is_some().hash(&mut hasher);
+                    state.error.hash(&mut hasher);
+                    state
+                        .snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.entries.len())
+                        .hash(&mut hasher);
+                    state
+                        .pending_delete
+                        .as_ref()
+                        .map(|entry| (&entry.host, entry.port, &entry.fingerprint))
+                        .hash(&mut hasher);
+                }
                 self.connection_store.connections().len().hash(&mut hasher);
                 self.connection_store
                     .managed_ssh_keys()

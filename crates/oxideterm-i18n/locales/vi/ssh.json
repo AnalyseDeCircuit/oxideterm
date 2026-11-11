@@ -234,12 +234,11 @@
       "expected_fingerprint": "Dấu vân tay mong đợi",
       "actual_fingerprint": "Dấu vân tay thực tế",
       "cancelled": "Đã hủy xác nhận khóa máy chủ SSH.",
-      "changed_requires_remove": "Khóa máy chủ đã thay đổi bị chặn cho đến khi khóa đã lưu được xóa.",
       "actions": {
         "cancel": "Hủy",
         "trust_once": "Tin cậy một lần",
         "trust_save": "Tin cậy và lưu",
-        "remove_saved": "Xóa khóa đã lưu"
+        "replace_saved": "Thay khóa và kết nối"
       }
     },
     "kbi": {

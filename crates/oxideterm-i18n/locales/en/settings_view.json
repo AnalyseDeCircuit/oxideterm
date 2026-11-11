@@ -1,5 +1,23 @@
 {
   "settings_view": {
+    "known_hosts": {
+      "title": "Trusted hosts",
+      "description": "Manage saved SSH host keys.",
+      "search": "Search hosts, ports or fingerprints",
+      "refresh": "Refresh",
+      "open_file": "Open file",
+      "source": "Trust file: {{path}}",
+      "error": "Could not update host keys: {{error}}",
+      "loading": "Working…",
+      "empty": "No saved host keys.",
+      "no_matches": "No matching hosts.",
+      "copy": "Copy fingerprint",
+      "confirm_delete": "Removing this key requires confirmation on the next connection.",
+      "cancel": "Cancel",
+      "confirm": "Delete key",
+      "delete": "Delete",
+      "read_only": "Read-only entry. Manage it in the source file."
+    },
     "credentials": {
       "title": "Credentials",
       "description": "Manage privilege passwords and SSH verification codes."

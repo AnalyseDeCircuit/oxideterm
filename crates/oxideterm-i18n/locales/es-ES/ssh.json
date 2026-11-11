@@ -234,12 +234,11 @@
       "expected_fingerprint": "Huella esperada",
       "actual_fingerprint": "Huella actual",
       "cancelled": "Se canceló la confirmación de la clave de host SSH.",
-      "changed_requires_remove": "Las claves de host cambiadas se bloquean hasta eliminar la clave guardada.",
       "actions": {
         "cancel": "Cancelar",
         "trust_once": "Confiar una vez",
         "trust_save": "Confiar y guardar",
-        "remove_saved": "Eliminar clave guardada"
+        "replace_saved": "Reemplazar clave y conectar"
       }
     },
     "kbi": {

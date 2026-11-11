@@ -234,12 +234,11 @@
       "expected_fingerprint": "Impressão digital esperada",
       "actual_fingerprint": "Impressão digital atual",
       "cancelled": "A confirmação da chave de host SSH foi cancelada.",
-      "changed_requires_remove": "Chaves de host alteradas ficam bloqueadas até que a chave salva seja removida.",
       "actions": {
         "cancel": "Cancelar",
         "trust_once": "Confiar uma vez",
         "trust_save": "Confiar e salvar",
-        "remove_saved": "Remover chave salva"
+        "replace_saved": "Substituir chave e conectar"
       }
     },
     "kbi": {

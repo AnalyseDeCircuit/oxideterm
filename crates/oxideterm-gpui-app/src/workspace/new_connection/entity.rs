@@ -327,12 +327,16 @@ impl ConnectionFlowEntity {
         &mut self,
         persist: bool,
         fingerprint: String,
+        replacement: Option<oxideterm_ssh::HostKeyReplacement>,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
         let Some(run) = self.active_proxy_connect_run.as_mut() else {
             return Ok(());
         };
         let result = run.plan.accept_current_host_key(persist, fingerprint);
+        if result.is_ok() {
+            run.plan.steps[run.plan.current_index].host_key_replacement = replacement;
+        }
         cx.notify();
         result
     }
@@ -720,16 +724,6 @@ impl ConnectionFlowEntity {
             cx.notify();
         }
         challenge
-    }
-
-    pub(in crate::workspace) fn restore_host_key_challenge(
-        &mut self,
-        challenge: HostKeyChallenge,
-        cx: &mut Context<Self>,
-    ) {
-        self.host_key_exit_task = None;
-        self.host_key_challenge = Some(challenge);
-        cx.notify();
     }
 
     pub(in crate::workspace) fn begin_host_key_challenge_exit(
@@ -1176,6 +1170,7 @@ mod tests {
                     port: 22,
                     trust_host_key: None,
                     expected_host_key_fingerprint: None,
+                    host_key_replacement: None,
                     preflight_verified: false,
                 }],
                 current_index: 0,
@@ -1291,9 +1286,17 @@ mod tests {
             assert_eq!(context.step_index, 0);
             assert!(entity.restore_proxy_connect_preflight_context(context, cx));
 
+            let replacement = oxideterm_ssh::HostKeyReplacement {
+                host: "target.example.test".to_string(),
+                port: 22,
+                key_type: "ssh-ed25519".to_string(),
+                previous_fingerprint: "SHA256:old".to_string(),
+                fingerprint: "SHA256:test".to_string(),
+            };
             assert!(entity.open_active_proxy_host_key_challenge(
-                HostKeyStatus::Unknown {
-                    fingerprint: "SHA256:test".to_string(),
+                HostKeyStatus::Changed {
+                    expected_fingerprint: "SHA256:old".to_string(),
+                    actual_fingerprint: "SHA256:test".to_string(),
                     key_type: "ssh-ed25519".to_string(),
                 },
                 cx,
@@ -1304,11 +1307,18 @@ mod tests {
             assert!(challenge.session_tree_challenge);
 
             entity
-                .accept_active_proxy_connect_host_key(false, "SHA256:test".to_string(), cx)
+                .accept_active_proxy_connect_host_key(
+                    true,
+                    "SHA256:test".to_string(),
+                    Some(replacement.clone()),
+                    cx,
+                )
                 .expect("accepted host key");
             assert!(matches!(
                 entity.proxy_connect_next_action(),
-                Some(NativeSessionTreeConnectAction::Connect { .. })
+                Some(NativeSessionTreeConnectAction::Connect { step })
+                    if step.host_key_replacement == Some(replacement)
+                        && step.expected_host_key_fingerprint.as_deref() == Some("SHA256:test")
             ));
             assert!(entity.advance_active_proxy_connect_after_node_connected(&target_node_id, cx));
             assert!(matches!(
@@ -1333,7 +1343,7 @@ mod tests {
                 .take_host_key_challenge(cx)
                 .expect("owned host-key challenge");
             assert!(!entity.has_host_key_challenge());
-            entity.restore_host_key_challenge(challenge, cx);
+            entity.open_host_key_challenge(challenge, cx);
             assert!(entity.has_host_key_challenge());
             assert!(entity.begin_host_key_challenge_exit(Duration::ZERO, cx));
             assert!(!entity.has_host_key_challenge());
