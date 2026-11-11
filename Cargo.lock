@@ -6982,7 +6982,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-acp-host-tools"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "agent-client-protocol",
  "bytes",
@@ -7002,7 +7002,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ai"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "agent-client-protocol",
  "anyhow",
@@ -7043,7 +7043,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ai-tasks"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7061,7 +7061,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-app-lock"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -7084,14 +7084,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-atomic-file"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "tempfile",
 ]
 
 [[package]]
 name = "oxideterm-audit"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -7117,11 +7117,11 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-backend-classification"
-version = "2.3.1"
+version = "2.3.2"
 
 [[package]]
 name = "oxideterm-background-media"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "async-channel",
  "fast_image_resize",
@@ -7149,7 +7149,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ble"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "btleplug",
  "dbus",
@@ -7161,7 +7161,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-cli"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "chrono",
  "clap",
@@ -7188,7 +7188,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-cloud-sync"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "automerge",
@@ -7223,7 +7223,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-connection-monitor"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -7237,7 +7237,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-connections"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "argon2 0.5.3",
@@ -7271,7 +7271,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-desktop-presence"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "block2 0.6.2",
@@ -7286,7 +7286,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-editor-core"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
@@ -7295,7 +7295,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-editor-syntax"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "memchr",
  "oxideterm-editor-core",
@@ -7325,14 +7325,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-environment"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "oxideterm-forwarding"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "chrono",
  "dashmap",
@@ -7356,7 +7356,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ftp"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-atomic-file",
  "oxideterm-audit",
@@ -7376,7 +7376,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-app"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7482,7 +7482,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-background"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "ash",
  "chrono",
@@ -7499,7 +7499,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-cloud-sync"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7526,7 +7526,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-editor"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "gpui-pre",
  "oxideterm-editor-core",
@@ -7547,7 +7547,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-ide"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "gpui-pre",
  "oxideterm-audit",
@@ -7565,7 +7565,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-markdown"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "ego-tree",
  "gpui-pre",
@@ -7586,7 +7586,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-platform"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "futures",
@@ -7607,7 +7607,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-remote-desktop"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "gpui-pre",
  "image",
@@ -7618,7 +7618,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-settings-view"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "gpui-pre",
  "oxideterm-ai",
@@ -7634,7 +7634,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-terminal"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "async-channel",
@@ -7682,7 +7682,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-gpui-ui"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "gpui-pre",
  "oxideterm-theme",
@@ -7690,14 +7690,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-i18n"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "oxideterm-ide-core"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-editor-core",
  "serde",
@@ -7708,7 +7708,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ide-fs"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7739,7 +7739,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-image-decoder"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "fast_image_resize",
@@ -7750,7 +7750,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-local-files"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "chrono",
  "dirs",
@@ -7765,7 +7765,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-modem-transfer"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "criterion 0.5.1",
  "thiserror 2.0.20",
@@ -7773,7 +7773,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-mosh"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "oxideterm-ssh",
@@ -7786,7 +7786,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-network-proxy"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "oxideterm-connections",
@@ -7800,18 +7800,18 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-notification-center"
-version = "2.3.1"
+version = "2.3.2"
 
 [[package]]
 name = "oxideterm-pcm-audio"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "cpal",
 ]
 
 [[package]]
 name = "oxideterm-plugin-host-api"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -7843,7 +7843,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-plugin-manifest"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-remote-desktop",
  "serde",
@@ -7852,7 +7852,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-plugin-protocol"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-plugin-manifest",
  "serde",
@@ -7862,7 +7862,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-plugin-registry"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "futures-util",
  "oxideterm-ai",
@@ -7882,7 +7882,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-plugin-wasm-runtime"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-plugin-manifest",
  "oxideterm-plugin-protocol",
@@ -7897,7 +7897,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-portable-runtime"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "argon2 0.5.3",
  "base64 0.22.1",
@@ -7917,7 +7917,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-preview"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "chardetng",
  "encoding_rs",
@@ -7936,7 +7936,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-public-mcp"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -7964,7 +7964,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-quick-commands"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-atomic-file",
  "oxideterm-audit",
@@ -7976,7 +7976,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-remote-desktop"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "oxideterm-atomic-file",
@@ -7990,14 +7990,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-render-policy"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "oxideterm-secret-store"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -8011,7 +8011,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-security-key"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -8022,7 +8022,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-session-adapter"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "chrono",
  "keyring",
@@ -8036,7 +8036,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-settings"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "oxideterm-atomic-file",
@@ -8052,7 +8052,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-settings-model"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-ai",
  "oxideterm-cloud-sync",
@@ -8065,7 +8065,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-sftp"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8099,7 +8099,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-skills"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "dirs",
  "serde",
@@ -8110,7 +8110,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ssh"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "dashmap",
@@ -8146,7 +8146,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-ssh-launch"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "percent-encoding",
  "serde",
@@ -8157,7 +8157,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -8201,7 +8201,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal-encoding"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "encoding_rs",
  "zeroize",
@@ -8209,7 +8209,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal-graphics"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -8228,18 +8228,18 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal-model"
-version = "2.3.1"
+version = "2.3.2"
 
 [[package]]
 name = "oxideterm-terminal-recording"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde_json",
 ]
 
 [[package]]
 name = "oxideterm-terminal-semantic"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "criterion 0.5.1",
  "oxideterm-editor-syntax",
@@ -8251,7 +8251,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal-triggers"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "criterion 0.5.1",
  "oxideterm-atomic-file",
@@ -8265,7 +8265,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-terminal-unicode"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "oxideterm-terminal-model",
  "unicode-bidi",
@@ -8274,14 +8274,14 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-theme"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde",
 ]
 
 [[package]]
 name = "oxideterm-tmux"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "memchr",
  "zeroize",
@@ -8289,7 +8289,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-topology"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "chrono",
  "serde",
@@ -8297,7 +8297,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-trzsz"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "flate2",
@@ -8316,7 +8316,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-update"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -8343,11 +8343,11 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-workspace"
-version = "2.3.1"
+version = "2.3.2"
 
 [[package]]
 name = "oxideterm-wsl-graphics"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
@@ -8358,7 +8358,7 @@ dependencies = [
 
 [[package]]
 name = "oxideterm-x11-forwarding"
-version = "2.3.1"
+version = "2.3.2"
 dependencies = [
  "rand 0.8.6",
  "serde",
