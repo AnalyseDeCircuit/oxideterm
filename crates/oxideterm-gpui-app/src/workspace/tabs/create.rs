@@ -784,9 +784,10 @@ impl WorkspaceApp {
             .with_preference_overrides(preference_overrides)
         });
 
-        // BLE owns no SSH node and is intentionally not persistable.
+        // BLE owns no SSH node and is intentionally not persistable. GATT
+        // handle publishing and plugin hook refresh happen inside the shared
+        // registration funnel.
         self.register_terminal_pane(pane_id, session_id, pane.clone(), window, cx);
-        self.refresh_native_plugin_terminal_hooks(cx);
         self.insert_tab(
             Tab {
                 id: tab_id,

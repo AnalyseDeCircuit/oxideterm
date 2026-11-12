@@ -654,13 +654,13 @@
       "agent_installing": "Installing agent: {{percent}}% ({{transferred}} / {{total}} KiB)",
       "agent_starting": "Starting agent…"
     },
-      "ble": {
-        "connection_failed": "BLE connection failed: {error}",
-        "runtime_init_failed": "failed to initialize BLE runtime",
-        "adapter_index_out_of_range": "bluetooth adapter index {n} is out of range",
-        "service_not_found": "service {uuid} not found",
-        "no_notify_write_pair": "selected service has no notify+write characteristic pair"
-      }
+    "ble": {
+      "connection_failed": "BLE connection failed: {error}",
+      "runtime_init_failed": "failed to initialize BLE runtime",
+      "adapter_index_out_of_range": "bluetooth adapter index {n} is out of range",
+      "service_not_found": "service {uuid} not found",
+      "no_notify_write_pair": "selected service has no notify+write characteristic pair"
+    }
   },
   "search": {
     "placeholder": "Search",

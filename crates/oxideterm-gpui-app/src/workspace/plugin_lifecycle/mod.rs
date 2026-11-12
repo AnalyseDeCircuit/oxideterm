@@ -18,10 +18,12 @@ use oxideterm_sftp::BackgroundTransferState;
 use serde_json::{Value, json};
 
 use super::{
-    TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor, TerminalSessionId,
-    WorkspaceApp, WorkspaceOverlayIntent, plugin_entity, plugin_host, plugin_runtime,
+    PaneId, TelnetSessionConfig, TerminalInputInterceptor, TerminalOutputProcessor,
+    TerminalSessionId, WorkspaceApp, WorkspaceOverlayIntent, plugin_entity, plugin_host,
+    plugin_runtime,
 };
 
+mod ble;
 mod host_api_snapshot;
 mod ide;
 mod product_host_calls;
@@ -56,6 +58,10 @@ pub(super) use ui_helpers::native_plugin_theme_snapshot;
 use ui_helpers::*;
 use ui_host_calls::*;
 
+pub(in crate::workspace) use ble::{
+    BleNotificationRouter, ble_session_handles_for_plugins, spawn_ble_notification_dispatcher,
+};
+
 #[cfg(test)]
 use super::delivery;
 #[cfg(test)]
@@ -63,6 +69,7 @@ use oxideterm_plugin_host_api::terminal::NativePluginTerminalNodeSnapshot;
 use oxideterm_plugin_host_api::{
     ai::*,
     backend::*,
+    ble::native_plugin_ble_response,
     catalog::{allowed_host_apis_for_capabilities, is_supported_host_api_capability},
     forwarding::{native_plugin_forward_response, native_plugin_forward_saved_forwards},
     host_tools::*,
@@ -149,12 +156,65 @@ impl WorkspaceApp {
                 let ok = self.write_native_plugin_node_terminal_text(&node_id, &text, cx);
                 plugin_runtime::PluginResponse::ok(request.request_id, json!(ok))
             }
+            NativePluginTerminalAction::WriteLocal { terminal_id, text } => {
+                let ok = match terminal_id.as_deref() {
+                    Some(terminal_id) => {
+                        self.write_native_plugin_terminal_local_display(terminal_id, &text, cx)
+                    }
+                    None => self.write_native_plugin_active_terminal_local_display(&text, cx),
+                };
+                plugin_runtime::PluginResponse::ok(request.request_id, json!(ok))
+            }
             NativePluginTerminalAction::ClearBuffer { node_id } => {
                 self.clear_native_plugin_node_terminal_buffer(&node_id, cx);
                 plugin_runtime::PluginResponse::ok(request.request_id, Value::Null)
             }
             NativePluginTerminalAction::OpenTelnet { host, port } => {
                 self.open_native_plugin_telnet_terminal(&request.request_id, host, port, window, cx)
+            }
+            NativePluginTerminalAction::Notify {
+                title,
+                description,
+                variant,
+            } => {
+                // Display-only channel: overlay notices render above the
+                // workspace without touching any session transport.
+                let tx = self.overlay.read(cx).notice_sender();
+                let _ = tx.send(oxideterm_gpui_terminal::TerminalNotice {
+                    title,
+                    description,
+                    status_text: None,
+                    progress: None,
+                    variant: match variant.as_str() {
+                        "success" => oxideterm_gpui_terminal::TerminalNoticeVariant::Success,
+                        "error" => oxideterm_gpui_terminal::TerminalNoticeVariant::Error,
+                        "warning" => oxideterm_gpui_terminal::TerminalNoticeVariant::Warning,
+                        _ => oxideterm_gpui_terminal::TerminalNoticeVariant::Default,
+                    },
+                });
+                plugin_runtime::PluginResponse::ok(request.request_id, json!(true))
+            }
+            NativePluginTerminalAction::ReportToolbarActionState {
+                action_id,
+                state_id,
+                pane_id,
+            } => {
+                // The plugin resolved the chip click; the host applies the
+                // reported state only while the pane is still open. The
+                // overlay anchor takes the window processing this batch.
+                let pane_id = PaneId(pane_id);
+                let applied = self.tab_host.read(cx).panes().contains_key(&pane_id);
+                if applied {
+                    self.apply_plugin_toolbar_state(
+                        &request.plugin_id,
+                        &action_id,
+                        &state_id,
+                        pane_id,
+                        Some(window.window_handle()),
+                        cx,
+                    );
+                }
+                plugin_runtime::PluginResponse::ok(request.request_id, json!(applied))
             }
         };
         let _ = request.response_tx.send(response);
@@ -483,6 +543,41 @@ impl WorkspaceApp {
         true
     }
 
+    // Display-only writes render on the terminal screen without touching the
+    // session transport, the recorder, or the session log, so they skip the
+    // connection-state gating the transport writes need.
+    fn write_native_plugin_active_terminal_local_display(
+        &mut self,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(pane) = self.active_pane(cx) else {
+            return false;
+        };
+        pane.update(cx, |pane, cx| {
+            pane.feed_plugin_local_display(text.as_bytes(), cx)
+        })
+    }
+
+    // Session-addressed display write: BLE and serial sessions have no SSH
+    // node, so the pane is resolved from the terminal session id directly.
+    fn write_native_plugin_terminal_local_display(
+        &mut self,
+        terminal_id: &str,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(session_id) = terminal_id.parse::<u64>().ok().map(TerminalSessionId) else {
+            return false;
+        };
+        let Some(pane) = native_plugin_pane_for_session(self, session_id, cx) else {
+            return false;
+        };
+        pane.update(cx, |pane, cx| {
+            pane.feed_plugin_local_display(text.as_bytes(), cx)
+        })
+    }
+
     pub(super) fn refresh_native_plugin_terminal_hooks(&mut self, cx: &mut Context<Self>) {
         let contributions = self.plugin_entity.read(cx).registry().contributions();
         let mut actions = Vec::new();
@@ -547,9 +642,10 @@ impl WorkspaceApp {
         } else {
             let runtime = self.forwarding_runtime.clone();
             let host_api_resolver = native_plugin_terminal_hook_host_api_resolver();
-            Some(Arc::new(move |bytes: &[u8]| {
+            Some(Arc::new(move |bytes: &[u8], session_id: Option<&str>| {
                 native_plugin_apply_input_interceptors(
                     bytes,
+                    session_id,
                     &hooks,
                     runtime_host.clone(),
                     runtime.clone(),
@@ -1331,7 +1427,12 @@ impl WorkspaceApp {
                         }
                     }
                 }
-                plugin_entity::PluginRuntimeIntent::StateChanged => {}
+                plugin_entity::PluginRuntimeIntent::StateChanged => {
+                    // Activation/deactivation results land here; keep the
+                    // contributed toolbar chips' availability in sync with
+                    // runtime state.
+                    self.sync_plugin_toolbar_state(cx);
+                }
             }
         }
         self.start_pending_plugin_connections(cx);
@@ -1538,10 +1639,16 @@ impl WorkspaceApp {
             .filter(|transport| transport.transport == "telnet")
             .map(|transport| transport.plugin_id.clone())
             .collect::<std::collections::HashSet<_>>();
+        // The resolver outlives this call, so it carries the live registry
+        // and resolves handles per BLE call instead of a frozen snapshot.
+        let ble_handles = self.ble_gatt_handles.clone();
+        let ble_runtime = self.forwarding_runtime.clone();
+        let ble_bridge = self.ble_notification_router.bridge();
         Arc::new(move |plugin_id, permissions, call| {
             let audit_context = if matches!(
                 call.namespace.as_str(),
                 "api"
+                    | "ble"
                     | "secrets"
                     | "sftp"
                     | "scp"
@@ -1608,6 +1715,27 @@ impl WorkspaceApp {
                                 &request_senders.confirm,
                             ));
                         }
+                        if call.namespace == "ui" && call.method == "notify" {
+                            // The notice overlay rides the terminal request
+                            // delivery: it is the same display-only pane
+                            // effect with the same lifecycle handling.
+                            return Some(native_plugin_terminal_response(
+                                &plugin_id,
+                                call,
+                                &request_senders.terminal,
+                            ));
+                        }
+                        if call.namespace == "toolbar" && call.method == "reportActionState" {
+                            // The plugin resolved the chip click semantics;
+                            // the state lands on the GPUI thread through the
+                            // terminal request channel under the calling
+                            // plugin's identity.
+                            return Some(native_plugin_terminal_response(
+                                &plugin_id,
+                                call,
+                                &request_senders.terminal,
+                            ));
+                        }
                         if call.namespace == "secrets" {
                             return Some(native_plugin_secret_response(
                                 &plugin_id,
@@ -1622,6 +1750,20 @@ impl WorkspaceApp {
                                 &sftp_router,
                                 &sftp_runtime,
                                 Some(&transfer_manager),
+                            ));
+                        }
+                        if call.namespace == "ble" {
+                            // Resolve against the live registry so sessions
+                            // opened after this resolver was built stay
+                            // reachable (reconnect also mints new ids).
+                            let ble_handles = ble_session_handles_for_plugins(&ble_handles);
+                            return Some(native_plugin_ble_response(
+                                &plugin_id,
+                                call,
+                                &permissions,
+                                &ble_handles,
+                                &ble_runtime,
+                                &ble_bridge,
                             ));
                         }
                         if call.namespace == "scp" {
@@ -1695,10 +1837,11 @@ impl WorkspaceApp {
                         if call.namespace == "terminal"
                             && matches!(
                                 call.method.as_str(),
-                                "writeToActive" | "writeToNode" | "clearBuffer"
+                                "writeToActive" | "writeToNode" | "writeLocal" | "clearBuffer"
                             )
                         {
                             return Some(native_plugin_terminal_response(
+                                &plugin_id,
                                 call,
                                 &request_senders.terminal,
                             ));
@@ -1714,6 +1857,7 @@ impl WorkspaceApp {
                                 ));
                             }
                             return Some(native_plugin_terminal_response(
+                                &plugin_id,
                                 call,
                                 &request_senders.terminal,
                             ));
@@ -1856,7 +2000,8 @@ impl WorkspaceApp {
         }
         if matches!(
             namespace,
-            "connections"
+            "ble"
+                | "connections"
                 | "sessions"
                 | "eventLog"
                 | "notifications"
@@ -1878,6 +2023,7 @@ impl WorkspaceApp {
             || (namespace == "i18n" && matches!(method, "getLanguage" | "t"))
             || (namespace == "storage" && method == "get")
             || (namespace == "settings" && matches!(method, "get" | "exportSyncableSettings"))
+            || (namespace == "toolbar" && method == "reportActionState")
         {
             // The synchronous resolver already completed these calls. Their
             // retained outbound effects are audit records, not a second action.

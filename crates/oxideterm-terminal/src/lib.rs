@@ -94,7 +94,12 @@ pub use selection::TerminalSelectionRange;
 // oxideterm-ble directly alongside oxideterm-terminal.
 pub use oxideterm_ble::BleAdapterGuard;
 pub use session::{
-    BleConnectionStatus, BleResolveError, BleResolveStage, BleResolvedLink, BleSessionConfig,
+    BLE_GATT_PROPERTY_INDICATE, BLE_GATT_PROPERTY_NOTIFY, BLE_GATT_PROPERTY_READ,
+    BLE_GATT_PROPERTY_WRITE, BLE_GATT_PROPERTY_WRITE_WITHOUT_RESPONSE,
+};
+pub use session::{
+    BleConnectionStatus, BleGattCharacteristicInfo, BleGattError, BleGattHandle,
+    BleGattServiceInfo, BleResolveError, BleResolveStage, BleResolvedLink, BleSessionConfig,
     MoshConnectionStatus, MoshPredictionDisplay, MoshTerminalConfig, SerialControlLine,
     SerialControlState, SerialDisplayMode, SerialError, SerialErrorCode, SerialFlowControl,
     SerialLineEnding, SerialParity, SerialPortInfo, SerialRuntimeOptions, SerialSendMode,

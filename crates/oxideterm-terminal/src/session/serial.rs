@@ -568,7 +568,11 @@ impl SerialSession {
         // Modem framing is defined on raw serial bytes, before display plugins.
         let processed_output = apply_terminal_output_processor(&self.output_processor, bytes);
         let bytes = processed_output.as_ref();
-        let terminal_bytes = self.prepare_display_output(bytes);
+        let terminal_bytes = if remote_output {
+            self.prepare_display_output(bytes)
+        } else {
+            self.prepare_local_display_output(bytes)
+        };
         if terminal_bytes.is_empty() {
             return;
         }
@@ -2009,6 +2013,63 @@ mod serial_tests {
         );
         assert!(session.buffer_text().contains("48 69"));
         assert!(session.buffer_text().contains("|Hi|"));
+    }
+
+    #[test]
+    fn serial_local_echo_renders_through_receive_line_ending_transforms() {
+        let mut session = test_serial_session();
+        let (command_tx, command_rx) = crossbeam_channel::unbounded();
+        session.command_tx = command_tx;
+        session
+            .set_serial_runtime_options(SerialRuntimeOptions {
+                line_ending: SerialLineEnding::Cr,
+                output_line_ending: SerialLineEnding::CrLf,
+                local_echo: true,
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Text send mode converts the typed LF to the send line ending (CR)
+        // on the wire. The local echo must render through the receive
+        // transforms, so the echoed CR becomes CRLF and each entry lands on
+        // its own row instead of overwriting the previous one in place.
+        session.write_input(b"first\n").unwrap();
+        session.write_input(b"second\n").unwrap();
+
+        assert!(matches!(
+            command_rx.recv().unwrap(),
+            SerialCommand::Data(bytes) if bytes == b"first\r"
+        ));
+        assert!(matches!(
+            command_rx.recv().unwrap(),
+            SerialCommand::Data(bytes) if bytes == b"second\r"
+        ));
+        let buffer = session.buffer_text();
+        let lines: Vec<&str> = buffer
+            .lines()
+            .filter(|line| !line.is_empty())
+            .collect();
+        assert_eq!(lines, ["first", "second"]);
+    }
+
+    #[test]
+    fn plugin_local_display_ignores_receive_line_ending_setting() {
+        let mut session = test_serial_session();
+        session
+            .set_serial_runtime_options(SerialRuntimeOptions {
+                output_line_ending: SerialLineEnding::Lf,
+                ..Default::default()
+            })
+            .unwrap();
+
+        // Plugin writeLocal text is already CRLF-formatted; the receive
+        // line-ending setting shapes device traffic and must not rewrite it
+        // (LF collapse would staircase the panel rows).
+        session.feed_local_display(b"first\r\nsecond\r\n");
+
+        let snapshot = session.snapshot();
+        assert_eq!(snapshot.lines[0].text().trim_end(), "first");
+        assert_eq!(snapshot.lines[1].text().trim_end(), "second");
     }
 
     #[test]

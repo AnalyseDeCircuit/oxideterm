@@ -31,6 +31,12 @@ pub struct BleSessionConfig {
     pub device_id: oxideterm_ble::BlePeripheralId,
     pub service_uuid: uuid::Uuid,
     pub device_label: String,
+    /// Advertised name from the discovery flow, kept separate from
+    /// `device_label` (which falls back to the address) so the plugin sessions
+    /// projection can report identity without re-deriving it.
+    pub device_name: Option<String>,
+    /// MAC address of the matched peripheral; identity-level metadata only.
+    pub device_address: String,
     /// BLE carries the same raw byte stream as a serial console, so both
     /// transports share their send/display options.
     pub runtime_options: SerialRuntimeOptions,
@@ -51,6 +57,390 @@ impl BleSessionConfig {
     }
 }
 
+/// Property bits mirrored from the GATT specification so plugin host APIs can
+/// inspect characteristics without importing btleplug.
+pub const BLE_GATT_PROPERTY_READ: u8 = 0x02;
+pub const BLE_GATT_PROPERTY_WRITE_WITHOUT_RESPONSE: u8 = 0x04;
+pub const BLE_GATT_PROPERTY_WRITE: u8 = 0x08;
+pub const BLE_GATT_PROPERTY_NOTIFY: u8 = 0x10;
+pub const BLE_GATT_PROPERTY_INDICATE: u8 = 0x20;
+
+/// One GATT characteristic as published by the session worker after service
+/// discovery. Payload bytes never appear here: the table is metadata only.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BleGattCharacteristicInfo {
+    pub uuid: uuid::Uuid,
+    /// Bitmask of the `BLE_GATT_PROPERTY_*` flags.
+    pub properties: u8,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BleGattServiceInfo {
+    pub uuid: uuid::Uuid,
+    pub characteristics: Vec<BleGattCharacteristicInfo>,
+}
+
+/// Error codes for plugin GATT host calls. Transport-level failures report
+/// `NotConnected`; messages stay free of GATT payload content. `SessionNotFound`
+/// and `InvalidEncoding` are produced by the host API resolution, not the worker.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BleGattError {
+    SessionNotFound,
+    NotConnected,
+    UnsupportedCharacteristic,
+    WriteTooLarge,
+    InvalidEncoding,
+    Timeout,
+}
+
+impl BleGattError {
+    /// Stable snake_case codes matching the plugin host API conventions.
+    pub fn code(&self) -> &'static str {
+        match self {
+            Self::SessionNotFound => "ble_session_not_found",
+            Self::NotConnected => "ble_not_connected",
+            Self::UnsupportedCharacteristic => "ble_unsupported_characteristic",
+            Self::WriteTooLarge => "ble_write_too_large",
+            Self::InvalidEncoding => "ble_invalid_encoding",
+            Self::Timeout => "ble_timeout",
+        }
+    }
+}
+
+/// Worker-serialized GATT operations. Commands share the worker's select loop
+/// with keyboard input so ATT transactions never overlap on the link.
+pub enum BleGattCommand {
+    Read {
+        service_uuid: Option<uuid::Uuid>,
+        characteristic_uuid: uuid::Uuid,
+        response_tx: tokio::sync::oneshot::Sender<Result<Vec<u8>, BleGattError>>,
+    },
+    Write {
+        service_uuid: Option<uuid::Uuid>,
+        characteristic_uuid: uuid::Uuid,
+        data: Vec<u8>,
+        /// `None` follows the profile snapshot captured in the shared state.
+        write_without_response: Option<bool>,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), BleGattError>>,
+    },
+    NotifySubscribe {
+        service_uuid: Option<uuid::Uuid>,
+        characteristic_uuid: uuid::Uuid,
+        /// Bounded per-route queue; a full queue drops notifications instead
+        /// of stalling the radio path.
+        sender: tokio::sync::mpsc::Sender<Vec<u8>>,
+        response_tx: tokio::sync::oneshot::Sender<Result<u64, BleGattError>>,
+    },
+    NotifyUnsubscribe {
+        characteristic_uuid: uuid::Uuid,
+        route_id: u64,
+        response_tx: tokio::sync::oneshot::Sender<Result<(), BleGattError>>,
+    },
+}
+
+/// One plugin notification route. The resolved service uuid is kept so the
+/// CCCD toggle can find the live btleplug object without re-scanning services.
+struct BleGattNotifyRoute {
+    id: u64,
+    sender: tokio::sync::mpsc::Sender<Vec<u8>>,
+    service_uuid: uuid::Uuid,
+}
+
+type BleGattNotifyRoutes = std::collections::HashMap<uuid::Uuid, Vec<BleGattNotifyRoute>>;
+
+enum BleGattCccdAction {
+    Enable,
+    Disable,
+    None,
+}
+
+/// GATT metadata published by the worker after service discovery. The worker
+/// is the only writer (once per link lifecycle); host callers read to validate
+/// requests and to answer describe calls without touching the radio.
+pub struct BleGattSharedState {
+    default_service_uuid: uuid::Uuid,
+    /// Profile snapshot so an omitted writeType follows the terminal's choice.
+    write_without_response: bool,
+    /// Identity of the matched peripheral; fixed at construction from the
+    /// discovery flow and never refreshed afterwards.
+    device_name: Option<String>,
+    device_address: String,
+    services: std::sync::Mutex<Vec<BleGattServiceInfo>>,
+    /// Zero means the MTU has not been negotiated yet.
+    negotiated_mtu: std::sync::atomic::AtomicU16,
+    connected: std::sync::atomic::AtomicBool,
+}
+
+impl BleGattSharedState {
+    fn new(
+        default_service_uuid: uuid::Uuid,
+        write_without_response: bool,
+        device_name: Option<String>,
+        device_address: String,
+    ) -> Self {
+        Self {
+            default_service_uuid,
+            write_without_response,
+            device_name,
+            device_address,
+            services: std::sync::Mutex::new(Vec::new()),
+            negotiated_mtu: std::sync::atomic::AtomicU16::new(0),
+            connected: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Replaces the published table after discovery. Called only by the
+    /// worker while establishing the link.
+    fn publish_services(&self, services: &std::collections::BTreeSet<btleplug::api::Service>) {
+        let table = services
+            .iter()
+            .map(|service| BleGattServiceInfo {
+                uuid: service.uuid,
+                characteristics: service
+                    .characteristics
+                    .iter()
+                    .map(|characteristic| BleGattCharacteristicInfo {
+                        uuid: characteristic.uuid,
+                        properties: char_prop_flags_to_properties(characteristic.properties),
+                    })
+                    .collect(),
+            })
+            .collect();
+        // A poisoned lock means a caller panicked mid-snapshot; the table is
+        // still a complete vector, so recover it instead of panicking here.
+        *self
+            .services
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = table;
+    }
+
+    fn set_negotiated_mtu(&self, mtu: u16) {
+        self.negotiated_mtu
+            .store(mtu, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn default_service_uuid(&self) -> uuid::Uuid {
+        self.default_service_uuid
+    }
+
+    /// Profile snapshot used when a plugin write omits `writeType`.
+    pub fn write_without_response(&self) -> bool {
+        self.write_without_response
+    }
+
+    pub fn device_name(&self) -> Option<String> {
+        self.device_name.clone()
+    }
+
+    pub fn device_address(&self) -> String {
+        self.device_address.clone()
+    }
+
+    pub fn services(&self) -> Vec<BleGattServiceInfo> {
+        self.services
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    pub fn negotiated_mtu(&self) -> Option<u16> {
+        match self
+            .negotiated_mtu
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            0 => None,
+            mtu => Some(mtu),
+        }
+    }
+
+    pub fn connected(&self) -> bool {
+        self.connected.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
+/// Command surface shared with the workspace so plugin host calls drive the
+/// GATT data plane without touching the terminal byte stream. The session
+/// worker owns the radio; a failed command send means the worker is gone and
+/// the link is down.
+#[derive(Clone)]
+pub struct BleGattHandle {
+    command_tx: tokio::sync::mpsc::Sender<BleGattCommand>,
+    state: Arc<BleGattSharedState>,
+}
+
+impl BleGattHandle {
+    fn new(
+        command_tx: tokio::sync::mpsc::Sender<BleGattCommand>,
+        state: Arc<BleGattSharedState>,
+    ) -> Self {
+        Self { command_tx, state }
+    }
+
+    pub fn shared_state(&self) -> &BleGattSharedState {
+        &self.state
+    }
+
+    pub async fn read(
+        &self,
+        service_uuid: Option<uuid::Uuid>,
+        characteristic_uuid: uuid::Uuid,
+    ) -> Result<Vec<u8>, BleGattError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(BleGattCommand::Read {
+                service_uuid,
+                characteristic_uuid,
+                response_tx,
+            })
+            .await
+            .map_err(|_| BleGattError::NotConnected)?;
+        response_rx.await.map_err(|_| BleGattError::NotConnected)?
+    }
+
+    pub async fn write(
+        &self,
+        service_uuid: Option<uuid::Uuid>,
+        characteristic_uuid: uuid::Uuid,
+        data: Vec<u8>,
+        write_without_response: Option<bool>,
+    ) -> Result<(), BleGattError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(BleGattCommand::Write {
+                service_uuid,
+                characteristic_uuid,
+                data,
+                write_without_response,
+                response_tx,
+            })
+            .await
+            .map_err(|_| BleGattError::NotConnected)?;
+        response_rx.await.map_err(|_| BleGattError::NotConnected)?
+    }
+
+    /// Registers a notification route and returns its id for later removal.
+    /// Device-side CCCD enablement is reference counted inside the worker.
+    pub async fn notify_subscribe(
+        &self,
+        service_uuid: Option<uuid::Uuid>,
+        characteristic_uuid: uuid::Uuid,
+        sender: tokio::sync::mpsc::Sender<Vec<u8>>,
+    ) -> Result<u64, BleGattError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(BleGattCommand::NotifySubscribe {
+                service_uuid,
+                characteristic_uuid,
+                sender,
+                response_tx,
+            })
+            .await
+            .map_err(|_| BleGattError::NotConnected)?;
+        response_rx.await.map_err(|_| BleGattError::NotConnected)?
+    }
+
+    pub async fn notify_unsubscribe(
+        &self,
+        characteristic_uuid: uuid::Uuid,
+        route_id: u64,
+    ) -> Result<(), BleGattError> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        self.command_tx
+            .send(BleGattCommand::NotifyUnsubscribe {
+                characteristic_uuid,
+                route_id,
+                response_tx,
+            })
+            .await
+            .map_err(|_| BleGattError::NotConnected)?;
+        response_rx.await.map_err(|_| BleGattError::NotConnected)?
+    }
+}
+
+/// Mirrors btleplug property flags onto the plugin-facing bitmask. Only the
+/// properties the host API reasons about are projected.
+fn char_prop_flags_to_properties(flags: btleplug::api::CharPropFlags) -> u8 {
+    let mut properties = 0u8;
+    let mut project = |flag: btleplug::api::CharPropFlags, property: u8| {
+        if flags.contains(flag) {
+            properties |= property;
+        }
+    };
+    project(btleplug::api::CharPropFlags::READ, BLE_GATT_PROPERTY_READ);
+    project(
+        btleplug::api::CharPropFlags::WRITE_WITHOUT_RESPONSE,
+        BLE_GATT_PROPERTY_WRITE_WITHOUT_RESPONSE,
+    );
+    project(btleplug::api::CharPropFlags::WRITE, BLE_GATT_PROPERTY_WRITE);
+    project(
+        btleplug::api::CharPropFlags::NOTIFY,
+        BLE_GATT_PROPERTY_NOTIFY,
+    );
+    project(
+        btleplug::api::CharPropFlags::INDICATE,
+        BLE_GATT_PROPERTY_INDICATE,
+    );
+    properties
+}
+
+/// Resolves a characteristic against the published table. An omitted
+/// `service_uuid` restricts the search to the session's configured service,
+/// matching how every other session path resolves roles.
+fn find_gatt_characteristic(
+    services: &[BleGattServiceInfo],
+    service_uuid: Option<uuid::Uuid>,
+    default_service_uuid: uuid::Uuid,
+    characteristic_uuid: uuid::Uuid,
+) -> Option<(uuid::Uuid, u8)> {
+    let service_uuid = service_uuid.unwrap_or(default_service_uuid);
+    services
+        .iter()
+        .find(|service| service.uuid == service_uuid)
+        .and_then(|service| {
+            service
+                .characteristics
+                .iter()
+                .find(|characteristic| characteristic.uuid == characteristic_uuid)
+                .map(|characteristic| (service_uuid, characteristic.properties))
+        })
+}
+
+/// Largest single-ATT-write payload the current link accepts. Plugin writes
+/// are never auto-chunked so frame boundaries stay in plugin hands.
+fn gatt_write_budget(negotiated_mtu: u16) -> usize {
+    (negotiated_mtu as usize).saturating_sub(BLE_ATT_HEADER_BYTES)
+}
+
+/// Decides the device-side CCCD transition for a route-count change. The
+/// terminal's own notify characteristic keeps its subscription for the whole
+/// session lifetime, so its CCCD is never toggled here.
+fn gatt_cccd_action(
+    characteristic_uuid: uuid::Uuid,
+    terminal_notify_uuid: uuid::Uuid,
+    routes_before: usize,
+    routes_after: usize,
+) -> BleGattCccdAction {
+    if characteristic_uuid == terminal_notify_uuid {
+        return BleGattCccdAction::None;
+    }
+    match (routes_before, routes_after) {
+        (0, n) if n > 0 => BleGattCccdAction::Enable,
+        (n, 0) if n > 0 => BleGattCccdAction::Disable,
+        _ => BleGattCccdAction::None,
+    }
+}
+
+/// Fans a notification payload out to every subscribed route. Bounded route
+/// queues drop on overflow: stalling the radio path or the terminal stream
+/// for a slow plugin is never acceptable.
+fn dispatch_gatt_notification(routes: &BleGattNotifyRoutes, uuid: uuid::Uuid, data: &[u8]) {
+    if let Some(entries) = routes.get(&uuid) {
+        for route in entries {
+            let _ = route.sender.try_send(data.to_vec());
+        }
+    }
+}
+
 pub struct BleSession {
     audit: Option<oxideterm_audit::AuditContext>,
     recording_sink: Option<oxideterm_audit::RecordingSink>,
@@ -68,6 +458,9 @@ pub struct BleSession {
     runtime: Option<Runtime>,
     worker: Option<tokio::task::JoinHandle<()>>,
     command_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
+    /// GATT data-plane surface for plugin host calls; `None` only when the
+    /// private worker runtime failed to start.
+    gatt: Option<BleGattHandle>,
     /// Closes the worker outside the bounded data channel: a stalled device
     /// write can fill that channel, and a close silently dropped there would
     /// leak the notify registration and the physical link.
@@ -136,6 +529,15 @@ impl BleSession {
             listener.activity_sender(),
         );
         let (command_tx, command_rx) = tokio::sync::mpsc::channel(256);
+        // Bounded like the keyboard channel: host calls serialize through the
+        // worker select loop, and backpressure belongs to the caller's timeout.
+        let (gatt_tx, gatt_rx) = tokio::sync::mpsc::channel(16);
+        let gatt_state = Arc::new(BleGattSharedState::new(
+            config.service_uuid,
+            config.write_without_response,
+            config.device_name.clone(),
+            config.device_address.clone(),
+        ));
         let close_token = tokio_util::sync::CancellationToken::new();
         let term_config = interactive_terminal_config(scrollback_lines);
         let term = Arc::new(FairMutex::new(Term::new(term_config, &size, listener)));
@@ -166,6 +568,8 @@ impl BleSession {
                 adapter_guard,
                 resolved_link,
                 command_rx,
+                gatt_rx,
+                gatt_state.clone(),
                 worker_tx,
                 close_token.clone(),
                 i18n.clone(),
@@ -176,6 +580,9 @@ impl BleSession {
             ));
         }
 
+        let gatt = runtime
+            .as_ref()
+            .map(|_| BleGattHandle::new(gatt_tx.clone(), gatt_state.clone()));
         let runtime_options = config.runtime_options;
         Self {
             audit,
@@ -194,6 +601,7 @@ impl BleSession {
             runtime,
             worker,
             command_tx,
+            gatt,
             close_token,
             title: None,
             graphics_ingress: GraphicsIngress::new(graphics_options),
@@ -378,7 +786,11 @@ impl BleSession {
         // Preserve protocol bytes before optional plugin display transforms.
         let processed_output = self.process_terminal_output(bytes);
         let bytes = processed_output.as_ref();
-        let terminal_bytes = self.prepare_display_output(bytes);
+        let terminal_bytes = if remote_output {
+            self.prepare_display_output(bytes)
+        } else {
+            self.prepare_local_display_output(bytes)
+        };
         if terminal_bytes.is_empty() {
             return;
         }
@@ -496,6 +908,10 @@ impl TerminalSessionBackend for BleSession {
 
     fn ble_negotiated_mtu(&self) -> Option<u16> {
         self.negotiated_mtu
+    }
+
+    fn ble_gatt_handle(&self) -> Option<BleGattHandle> {
+        self.gatt.clone()
     }
 
     fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()> {
@@ -679,6 +1095,247 @@ async fn write_with_mtu(
         peripheral.write(characteristic, chunk, write_type).await?;
     }
     Ok(())
+}
+
+/// Looks up the live btleplug characteristic object for a radio operation.
+fn find_btleplug_characteristic(
+    services: &std::collections::BTreeSet<btleplug::api::Service>,
+    service_uuid: uuid::Uuid,
+    characteristic_uuid: uuid::Uuid,
+) -> Option<btleplug::api::Characteristic> {
+    services
+        .iter()
+        .find(|service| service.uuid == service_uuid)
+        .and_then(|service| {
+            service
+                .characteristics
+                .iter()
+                .find(|characteristic| characteristic.uuid == characteristic_uuid)
+                .cloned()
+        })
+}
+
+async fn wait_gatt_operation<T>(
+    response: &mut tokio::sync::oneshot::Sender<Result<T, BleGattError>>,
+    operation: impl std::future::Future<Output = Result<T, BleGattError>>,
+) -> Option<Result<T, BleGattError>> {
+    // A host timeout drops the receiver. Retire its queued/in-flight work so
+    // the session can resume notifications, input, and link checks.
+    tokio::select! {
+        biased;
+        _ = response.closed() => None,
+        result = operation => Some(result),
+    }
+}
+
+fn gatt_notification_is_unambiguous(
+    services: &[BleGattServiceInfo],
+    characteristic: uuid::Uuid,
+) -> bool {
+    services
+        .iter()
+        .flat_map(|service| &service.characteristics)
+        .filter(|entry| entry.uuid == characteristic)
+        .count() == 1
+}
+
+/// Validates the discovered GATT surface before issuing platform operations.
+async fn execute_gatt_command(
+    peripheral: &btleplug::platform::Peripheral,
+    services: &std::collections::BTreeSet<btleplug::api::Service>,
+    state: &BleGattSharedState,
+    routes: &mut BleGattNotifyRoutes,
+    terminal_notify_uuid: uuid::Uuid,
+    next_route_id: &mut u64,
+    command: BleGattCommand,
+) {
+    use btleplug::api::Peripheral as _;
+    match command {
+        BleGattCommand::Read {
+            service_uuid,
+            characteristic_uuid,
+            mut response_tx,
+        } => {
+            let operation = async {
+                let table = state.services();
+                let (service_uuid, properties) = find_gatt_characteristic(
+                    &table,
+                    service_uuid,
+                    state.default_service_uuid(),
+                    characteristic_uuid,
+                )
+                .ok_or(BleGattError::UnsupportedCharacteristic)?;
+                if properties & BLE_GATT_PROPERTY_READ == 0 {
+                    return Err(BleGattError::UnsupportedCharacteristic);
+                }
+                let characteristic =
+                    find_btleplug_characteristic(services, service_uuid, characteristic_uuid)
+                        .ok_or(BleGattError::UnsupportedCharacteristic)?;
+                peripheral
+                    .read(&characteristic)
+                    .await
+                    .map_err(|_| BleGattError::NotConnected)
+            };
+            if let Some(outcome) = wait_gatt_operation(&mut response_tx, operation).await {
+                let _ = response_tx.send(outcome);
+            }
+        }
+        BleGattCommand::Write {
+            service_uuid,
+            characteristic_uuid,
+            data,
+            write_without_response,
+            mut response_tx,
+        } => {
+            let write_without_response =
+                write_without_response.unwrap_or_else(|| state.write_without_response());
+            let operation = async {
+                let table = state.services();
+                let (service_uuid, properties) = find_gatt_characteristic(
+                    &table,
+                    service_uuid,
+                    state.default_service_uuid(),
+                    characteristic_uuid,
+                )
+                .ok_or(BleGattError::UnsupportedCharacteristic)?;
+                let required = if write_without_response {
+                    BLE_GATT_PROPERTY_WRITE_WITHOUT_RESPONSE
+                } else {
+                    BLE_GATT_PROPERTY_WRITE
+                };
+                if properties & required == 0 {
+                    return Err(BleGattError::UnsupportedCharacteristic);
+                }
+                let characteristic =
+                    find_btleplug_characteristic(services, service_uuid, characteristic_uuid)
+                        .ok_or(BleGattError::UnsupportedCharacteristic)?;
+                // No auto-chunking: frame boundaries belong to the plugin, and
+                // a silent split would corrupt register-style writes.
+                if data.len() > gatt_write_budget(peripheral.mtu()) {
+                    return Err(BleGattError::WriteTooLarge);
+                }
+                let write_type = if write_without_response {
+                    btleplug::api::WriteType::WithoutResponse
+                } else {
+                    btleplug::api::WriteType::WithResponse
+                };
+                peripheral
+                    .write(&characteristic, &data, write_type)
+                    .await
+                    .map_err(|_| BleGattError::NotConnected)
+            };
+            if let Some(outcome) = wait_gatt_operation(&mut response_tx, operation).await {
+                let _ = response_tx.send(outcome);
+            }
+        }
+        BleGattCommand::NotifySubscribe {
+            service_uuid,
+            characteristic_uuid,
+            sender,
+            response_tx,
+        } => {
+            let outcome = async {
+                let table = state.services();
+                // btleplug notifications contain only the characteristic UUID.
+                // Reject collisions rather than attribute data to the wrong service.
+                if !gatt_notification_is_unambiguous(&table, characteristic_uuid) {
+                    return Err(BleGattError::UnsupportedCharacteristic);
+                }
+                let (service_uuid, properties) = find_gatt_characteristic(
+                    &table,
+                    service_uuid,
+                    state.default_service_uuid(),
+                    characteristic_uuid,
+                )
+                .ok_or(BleGattError::UnsupportedCharacteristic)?;
+                if properties & (BLE_GATT_PROPERTY_NOTIFY | BLE_GATT_PROPERTY_INDICATE) == 0 {
+                    return Err(BleGattError::UnsupportedCharacteristic);
+                }
+                let routes_before = routes.get(&characteristic_uuid).map_or(0, Vec::len);
+                // The terminal stream's CCCD is already enabled for the whole
+                // session; other characteristics are enabled for the first
+                // route and reference counted from there.
+                if routes_before == 0 && characteristic_uuid != terminal_notify_uuid {
+                    let characteristic =
+                        find_btleplug_characteristic(services, service_uuid, characteristic_uuid)
+                            .ok_or(BleGattError::UnsupportedCharacteristic)?;
+                    tokio::time::timeout(
+                        Duration::from_secs(5),
+                        peripheral.subscribe(&characteristic),
+                    )
+                    .await
+                    .map_err(|_| BleGattError::Timeout)?
+                    .map_err(|_| BleGattError::NotConnected)?;
+                }
+                let route_id = *next_route_id;
+                *next_route_id += 1;
+                routes
+                    .entry(characteristic_uuid)
+                    .or_default()
+                    .push(BleGattNotifyRoute {
+                        id: route_id,
+                        sender,
+                        service_uuid,
+                    });
+                Ok(route_id)
+            }
+            .await;
+            let _ = response_tx.send(outcome);
+        }
+        BleGattCommand::NotifyUnsubscribe {
+            characteristic_uuid,
+            route_id,
+            response_tx,
+        } => {
+            let outcome = async {
+                let routes_before = routes.get(&characteristic_uuid).map_or(0, Vec::len);
+                let removed = routes
+                    .get_mut(&characteristic_uuid)
+                    .and_then(|entries| {
+                        let index = entries
+                            .iter()
+                            .position(|route| route.id == route_id)?;
+                        Some(entries.remove(index))
+                    });
+                let now_empty = routes
+                    .get(&characteristic_uuid)
+                    .is_some_and(|entries| entries.is_empty());
+                if now_empty {
+                    routes.remove(&characteristic_uuid);
+                }
+                let Some(removed) = removed else {
+                    // Idempotent off(): an already-gone route is not an error.
+                    return Ok(());
+                };
+                let action = gatt_cccd_action(
+                    characteristic_uuid,
+                    terminal_notify_uuid,
+                    routes_before,
+                    routes.get(&characteristic_uuid).map_or(0, Vec::len),
+                );
+                if let BleGattCccdAction::Disable = action {
+                    if let Some(characteristic) = find_btleplug_characteristic(
+                        services,
+                        removed.service_uuid,
+                        characteristic_uuid,
+                    ) {
+                        // Bounded like the shutdown cleanup: a stalled
+                        // unsubscribe must not freeze the select loop, and
+                        // losing the CCCD toggle is acceptable because the
+                        // route is already gone from the fan-out table.
+                        let _ = tokio::time::timeout(
+                            Duration::from_millis(500),
+                            peripheral.unsubscribe(&characteristic),
+                        )
+                        .await;
+                    }
+                }
+                Ok(())
+            }
+            .await;
+            let _ = response_tx.send(outcome);
+        }
+    }
 }
 
 /// Progress milestones reported while resolving a saved BLE profile.
@@ -928,11 +1585,15 @@ async fn ble_direct_session_config(
         .as_ref()
         .map(|device| device.address.clone())
         .unwrap_or_else(|| identity_label.to_owned());
+    let device_name = name.clone();
+    let device_label = device_name.clone().unwrap_or_else(|| address.clone());
     BleSessionConfig {
         adapter_index,
         device_id: peripheral.id(),
         service_uuid: target_service,
-        device_label: name.unwrap_or_else(|| address.clone()),
+        device_label,
+        device_name,
+        device_address: address,
         runtime_options,
         mtu,
         write_without_response,
@@ -1308,6 +1969,8 @@ pub async fn ble_resolve_profile_to_session(
             .name
             .clone()
             .unwrap_or_else(|| device.address.clone()),
+        device_name: device.name.clone(),
+        device_address: device.address.clone(),
         runtime_options,
         mtu,
         write_without_response,
@@ -1390,6 +2053,8 @@ async fn run_ble_worker(
     mut adapter_guard: Option<oxideterm_ble::BleAdapterGuard>,
     resolved_link: Option<BleResolvedLink>,
     mut command_rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    mut gatt_rx: tokio::sync::mpsc::Receiver<BleGattCommand>,
+    gatt_state: Arc<BleGattSharedState>,
     worker_tx: crate::backpressure::ByteBoundedSender<BleWorkerEvent>,
     close_token: tokio_util::sync::CancellationToken,
     i18n: oxideterm_i18n::I18n,
@@ -1472,6 +2137,9 @@ async fn run_ble_worker(
             return;
         }
         let services = peripheral.services();
+        // Publish the full table so plugin describe/read validation never
+        // needs extra platform round-trips.
+        gatt_state.publish_services(&services);
         let Some(service) = services
             .iter()
             .find(|service| service.uuid == config.service_uuid)
@@ -1506,6 +2174,9 @@ async fn run_ble_worker(
                 return;
             }
         }
+        gatt_state
+            .connected
+            .store(true, std::sync::atomic::Ordering::Release);
         let _ = worker_tx.send_control(BleWorkerEvent::Connected);
 
         let mut notifications = match peripheral.notifications().await {
@@ -1521,7 +2192,12 @@ async fn run_ble_worker(
         // Emit the negotiated MTU once after subscribe completes; platforms that
         // update the value later will re-emit it on the first link-check tick.
         let mut last_mtu = peripheral.mtu();
+        gatt_state.set_negotiated_mtu(last_mtu);
         let _ = worker_tx.send_control(BleWorkerEvent::NegotiatedMtu(last_mtu));
+        // Plugin notification routes live for the connected phase only; the
+        // cleanup below drops them together with the link.
+        let mut gatt_routes: BleGattNotifyRoutes = std::collections::HashMap::new();
+        let mut gatt_route_id: u64 = 0;
         loop {
             tokio::select! {
                 // Close rides the cancel token, not the data channel, so it wins
@@ -1541,6 +2217,7 @@ async fn run_ble_worker(
                     let current_mtu = peripheral.mtu();
                     if current_mtu != last_mtu {
                         last_mtu = current_mtu;
+                        gatt_state.set_negotiated_mtu(current_mtu);
                         let _ = worker_tx.send_control(BleWorkerEvent::NegotiatedMtu(current_mtu));
                     }
                 }
@@ -1549,6 +2226,9 @@ async fn run_ble_worker(
                         Some(notification) if notification.uuid == notify_uuid => {
                             let data = notification.value;
                             let data_len = data.len();
+                            // Plugin routes mirror the terminal stream without
+                            // consuming from it; bounded queues drop overflow.
+                            dispatch_gatt_notification(&gatt_routes, notification.uuid, &data);
                             // Output backpressure waits for the UI drain; the
                             // cancel branch keeps shutdown reaching the cleanup
                             // below instead of waiting out the stalled consumer.
@@ -1561,11 +2241,43 @@ async fn run_ble_worker(
                                 }
                             }
                         }
-                        Some(_) => {}
+                        Some(notification) => {
+                            // Characteristics the terminal itself never subscribed
+                            // to stream here only when a plugin route enabled them.
+                            dispatch_gatt_notification(&gatt_routes, notification.uuid, &notification.value);
+                        }
                         None => {
                             let _ = worker_tx.send_control(BleWorkerEvent::Closed);
                             break;
                         }
+                    }
+                }
+                gatt = async {
+                    if let Some(command) = gatt_rx.recv().await {
+                        Some(command)
+                    } else {
+                        // Every handle clone was dropped; park this arm instead
+                        // of spinning on the closed channel.
+                        std::future::pending::<Option<BleGattCommand>>().await
+                    }
+                } => {
+                    let Some(command) = gatt else {
+                        continue;
+                    };
+                    // A stalled GATT operation must not delay the close: the
+                    // cancel branch drops the in-flight operation, and the
+                    // missing response reads as a dead link on the host side.
+                    tokio::select! {
+                        _ = close_token.cancelled() => break,
+                        () = execute_gatt_command(
+                            &peripheral,
+                            &services,
+                            &gatt_state,
+                            &mut gatt_routes,
+                            notify_uuid,
+                            &mut gatt_route_id,
+                            command,
+                        ) => {}
                     }
                 }
                 command = command_rx.recv() => {
@@ -1602,6 +2314,9 @@ async fn run_ble_worker(
     // Every exit path releases the notify registration and the physical link,
     // otherwise the next open reuses a live connection and receives one extra
     // copy of every peer notification per leaked attempt.
+    gatt_state
+        .connected
+        .store(false, std::sync::atomic::Ordering::Release);
     if let Some(characteristic) = subscribed {
         // A stalled unsubscribe must still leave time to disconnect the link.
         let _ = tokio::time::timeout(
@@ -1751,5 +2466,329 @@ mod ble_tests {
         let mut characteristics = std::collections::BTreeSet::new();
         characteristics.insert(read_only);
         assert!(select_channel_characteristics(&characteristics, true).is_none());
+    }
+
+    #[test]
+    fn gatt_write_budget_excludes_att_header() {
+        assert_eq!(gatt_write_budget(23), 20);
+        assert_eq!(gatt_write_budget(513), 510);
+        // A link that never negotiated past the header cannot carry payload.
+        assert_eq!(gatt_write_budget(3), 0);
+    }
+
+    #[test]
+    fn gatt_cccd_action_reference_counts_around_terminal_channel() {
+        let terminal = uuid::Uuid::from_u128(0x0001);
+        let other = uuid::Uuid::from_u128(0x0002);
+        // The terminal stream owns its CCCD for the whole session lifetime.
+        assert!(matches!(
+            gatt_cccd_action(terminal, terminal, 0, 1),
+            BleGattCccdAction::None
+        ));
+        assert!(matches!(
+            gatt_cccd_action(other, terminal, 0, 1),
+            BleGattCccdAction::Enable
+        ));
+        assert!(matches!(
+            gatt_cccd_action(other, terminal, 1, 0),
+            BleGattCccdAction::Disable
+        ));
+        assert!(matches!(
+            gatt_cccd_action(other, terminal, 1, 2),
+            BleGattCccdAction::None
+        ));
+        assert!(matches!(
+            gatt_cccd_action(other, terminal, 2, 1),
+            BleGattCccdAction::None
+        ));
+        assert!(matches!(
+            gatt_cccd_action(other, terminal, 0, 0),
+            BleGattCccdAction::None
+        ));
+    }
+
+    fn gatt_service(
+        uuid: u128,
+        characteristics: &[btleplug::api::Characteristic],
+    ) -> BleGattServiceInfo {
+        BleGattServiceInfo {
+            uuid: uuid::Uuid::from_u128(uuid),
+            characteristics: characteristics
+                .iter()
+                .map(|characteristic| BleGattCharacteristicInfo {
+                    uuid: characteristic.uuid,
+                    properties: char_prop_flags_to_properties(characteristic.properties),
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn find_gatt_characteristic_scopes_by_requested_service() {
+        let default_service = uuid::Uuid::from_u128(0x0010);
+        let other_service = uuid::Uuid::from_u128(0x0011);
+        let default_char = characteristic(0x0020, btleplug::api::CharPropFlags::READ);
+        let other_char = characteristic(0x0021, btleplug::api::CharPropFlags::READ);
+        let services = vec![
+            gatt_service(0x0010, &[default_char.clone()]),
+            gatt_service(0x0011, &[other_char.clone()]),
+        ];
+        // An omitted service restricts the search to the session's service.
+        assert_eq!(
+            find_gatt_characteristic(&services, None, default_service, default_char.uuid),
+            Some((default_service, BLE_GATT_PROPERTY_READ))
+        );
+        // An explicit service reaches characteristics outside the session's.
+        assert_eq!(
+            find_gatt_characteristic(
+                &services,
+                Some(other_service),
+                default_service,
+                other_char.uuid
+            ),
+            Some((other_service, BLE_GATT_PROPERTY_READ))
+        );
+        // A characteristic from another service must not leak through the
+        // default scope, and vice versa.
+        assert_eq!(
+            find_gatt_characteristic(&services, None, default_service, other_char.uuid),
+            None
+        );
+        assert_eq!(
+            find_gatt_characteristic(
+                &services,
+                Some(other_service),
+                default_service,
+                default_char.uuid
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn char_prop_flags_map_onto_plugin_properties() {
+        let flags = btleplug::api::CharPropFlags::READ
+            | btleplug::api::CharPropFlags::WRITE_WITHOUT_RESPONSE
+            | btleplug::api::CharPropFlags::NOTIFY;
+        assert_eq!(
+            char_prop_flags_to_properties(flags),
+            BLE_GATT_PROPERTY_READ
+                | BLE_GATT_PROPERTY_WRITE_WITHOUT_RESPONSE
+                | BLE_GATT_PROPERTY_NOTIFY
+        );
+    }
+
+    fn gatt_btleplug_service(
+        uuid: u128,
+        characteristics: &[btleplug::api::Characteristic],
+    ) -> btleplug::api::Service {
+        btleplug::api::Service {
+            uuid: uuid::Uuid::from_u128(uuid),
+            primary: true,
+            characteristics: characteristics.iter().cloned().collect(),
+        }
+    }
+
+    #[test]
+    fn shared_state_publishes_discovery_and_roles() {
+        let state = BleGattSharedState::new(
+            uuid::Uuid::from_u128(0x0010),
+            true,
+            Some("Sensor Board".to_string()),
+            "12:34:56:78:9A:BC".to_string(),
+        );
+        assert_eq!(state.negotiated_mtu(), None);
+        assert!(!state.connected());
+        let read_char = characteristic(0x0020, btleplug::api::CharPropFlags::READ);
+        let services = std::collections::BTreeSet::from([gatt_btleplug_service(0x0010, &[read_char])]);
+        state.publish_services(&services);
+        state.set_negotiated_mtu(185);
+        state
+            .connected
+            .store(true, std::sync::atomic::Ordering::Release);
+        let table = state.services();
+        assert_eq!(table.len(), 1);
+        assert_eq!(table[0].uuid, uuid::Uuid::from_u128(0x0010));
+        assert_eq!(table[0].characteristics.len(), 1);
+        assert_eq!(table[0].characteristics[0].uuid, uuid::Uuid::from_u128(0x0020));
+        assert_eq!(
+            table[0].characteristics[0].properties,
+            BLE_GATT_PROPERTY_READ
+        );
+        assert_eq!(state.default_service_uuid(), uuid::Uuid::from_u128(0x0010));
+        assert!(state.write_without_response());
+        assert_eq!(state.device_name().as_deref(), Some("Sensor Board"));
+        assert_eq!(state.device_address(), "12:34:56:78:9A:BC");
+        assert_eq!(state.negotiated_mtu(), Some(185));
+        assert!(state.connected());
+    }
+
+    #[tokio::test]
+    async fn gatt_handle_reports_not_connected_when_worker_is_gone() {
+        let state = Arc::new(BleGattSharedState::new(
+            uuid::Uuid::from_u128(0x0010),
+            true,
+            None,
+            "12:34:56:78:9A:BC".to_string(),
+        ));
+        let (command_tx, command_rx) = tokio::sync::mpsc::channel(16);
+        drop(command_rx);
+        let handle = BleGattHandle::new(command_tx, state);
+        let error = handle
+            .read(None, uuid::Uuid::from_u128(0x0020))
+            .await
+            .unwrap_err();
+        assert_eq!(error, BleGattError::NotConnected);
+        assert_eq!(error.code(), "ble_not_connected");
+    }
+
+    #[tokio::test]
+    async fn gatt_abandoned_operations_release_worker_and_skip_queued_io() {
+        let (mut response, receiver) = tokio::sync::oneshot::channel::<Result<(), BleGattError>>();
+        let (started, started_rx) = tokio::sync::oneshot::channel();
+        let worker = tokio::spawn(async move {
+            wait_gatt_operation(&mut response, async {
+                let _ = started.send(());
+                std::future::pending().await
+            })
+            .await
+        });
+        started_rx.await.unwrap();
+        drop(receiver);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), worker)
+                .await
+                .unwrap()
+                .unwrap(),
+            None
+        );
+
+        let (mut response, receiver) = tokio::sync::oneshot::channel::<Result<(), BleGattError>>();
+        drop(receiver);
+        let mut executed = false;
+        let result = wait_gatt_operation(&mut response, async {
+            executed = true;
+            Ok(())
+        })
+        .await;
+        assert_eq!(result, None);
+        assert!(!executed, "expired queued writes must not reach the device");
+
+        let (mut response, _receiver) = tokio::sync::oneshot::channel();
+        assert_eq!(
+            wait_gatt_operation(&mut response, async { Ok(vec![0x12, 0x34]) }).await,
+            Some(Ok(vec![0x12, 0x34]))
+        );
+    }
+
+    #[test]
+    fn gatt_notifications_reject_uuid_collisions_across_services() {
+        let uuid = uuid::Uuid::from_u128(0x20);
+        let mut services = vec![BleGattServiceInfo {
+            uuid: uuid::Uuid::from_u128(0x10),
+            characteristics: vec![BleGattCharacteristicInfo {
+                uuid,
+                properties: BLE_GATT_PROPERTY_NOTIFY,
+            }],
+        }];
+        assert!(gatt_notification_is_unambiguous(&services, uuid));
+        services.push(BleGattServiceInfo {
+            uuid: uuid::Uuid::from_u128(0x11),
+            characteristics: services[0].characteristics.clone(),
+        });
+        assert!(!gatt_notification_is_unambiguous(&services, uuid));
+        assert!(!gatt_notification_is_unambiguous(
+            &services,
+            uuid::Uuid::from_u128(0x21)
+        ));
+    }
+
+    #[tokio::test]
+    async fn gatt_handle_round_trips_commands_through_worker_channel() {
+        let state = Arc::new(BleGattSharedState::new(
+            uuid::Uuid::from_u128(0x0010),
+            true,
+            None,
+            "12:34:56:78:9A:BC".to_string(),
+        ));
+        let (command_tx, mut command_rx) = tokio::sync::mpsc::channel(16);
+        let handle = BleGattHandle::new(command_tx, state);
+        let worker = tokio::spawn(async move {
+            match command_rx.recv().await.expect("read command") {
+                BleGattCommand::Read {
+                    service_uuid,
+                    characteristic_uuid,
+                    response_tx,
+                } => {
+                    assert_eq!(service_uuid, None);
+                    assert_eq!(characteristic_uuid, uuid::Uuid::from_u128(0x0020));
+                    let _ = response_tx.send(Ok(vec![0x01, 0xa0]));
+                }
+                _ => panic!("expected Read command first"),
+            }
+            match command_rx.recv().await.expect("subscribe command") {
+                BleGattCommand::NotifySubscribe {
+                    service_uuid,
+                    characteristic_uuid,
+                    sender,
+                    response_tx,
+                } => {
+                    assert_eq!(service_uuid, None);
+                    assert_eq!(characteristic_uuid, uuid::Uuid::from_u128(0x0021));
+                    let _ = sender.send(vec![0xff]).await;
+                    let _ = response_tx.send(Ok(7));
+                }
+                _ => panic!("expected NotifySubscribe command second"),
+            }
+        });
+
+        let data = handle
+            .read(None, uuid::Uuid::from_u128(0x0020))
+            .await
+            .unwrap();
+        assert_eq!(data, vec![0x01, 0xa0]);
+
+        let (notify_tx, mut notify_rx) = tokio::sync::mpsc::channel(4);
+        let route_id = handle
+            .notify_subscribe(None, uuid::Uuid::from_u128(0x0021), notify_tx)
+            .await
+            .unwrap();
+        assert_eq!(route_id, 7);
+        assert_eq!(notify_rx.recv().await.as_deref(), Some(&[0xff][..]));
+
+        worker.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn dispatch_gatt_notification_fans_out_and_drops_on_full_queue() {
+        let uuid = uuid::Uuid::from_u128(0x0020);
+        let service = uuid::Uuid::from_u128(0x0010);
+        let (first_tx, mut first_rx) = tokio::sync::mpsc::channel(1);
+        let (second_tx, mut second_rx) = tokio::sync::mpsc::channel(1);
+        let mut routes = std::collections::HashMap::new();
+        routes.insert(
+            uuid,
+            vec![
+                BleGattNotifyRoute {
+                    id: 1,
+                    sender: first_tx,
+                    service_uuid: service,
+                },
+                BleGattNotifyRoute {
+                    id: 2,
+                    sender: second_tx,
+                    service_uuid: service,
+                },
+            ],
+        );
+        dispatch_gatt_notification(&routes, uuid, b"first");
+        assert_eq!(first_rx.recv().await.as_deref(), Some(b"first".as_slice()));
+        assert_eq!(second_rx.recv().await.as_deref(), Some(b"first".as_slice()));
+        // A full route queue drops the newest payload instead of stalling the
+        // radio path; the queued payload survives for the consumer.
+        dispatch_gatt_notification(&routes, uuid, b"second");
+        dispatch_gatt_notification(&routes, uuid, b"third");
+        assert_eq!(first_rx.recv().await.as_deref(), Some(b"second".as_slice()));
+        assert_eq!(second_rx.recv().await.as_deref(), Some(b"second".as_slice()));
     }
 }

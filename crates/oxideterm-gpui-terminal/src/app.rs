@@ -142,8 +142,11 @@ impl TerminalKeybindings {
 }
 
 pub type SharedTerminalSession = Arc<Mutex<TerminalSession>>;
+/// Input interceptors receive the raw bytes plus the owning terminal session
+/// id (when the pane is bound to one), so hook handlers can attribute the
+/// keystrokes to a concrete session instead of relying on focus heuristics.
 pub type TerminalInputInterceptor =
-    Arc<dyn Fn(&[u8]) -> TerminalInputInterceptorResult + Send + Sync>;
+    Arc<dyn Fn(&[u8], Option<&str>) -> TerminalInputInterceptorResult + Send + Sync>;
 pub type TerminalInputBroadcaster = Rc<dyn Fn(TerminalBroadcastInputKind, &[u8], &mut App)>;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 const TERMINAL_ANIMATION_INTERVAL: Duration = Duration::from_millis(16);
@@ -161,7 +164,9 @@ const TERMINAL_SEARCH_DEBOUNCE: Duration = Duration::from_millis(24);
 const BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL: Duration = Duration::from_millis(32);
 const TERMINAL_AUTOSUGGEST_MAX_CANDIDATES: usize = 8;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// ToolbarActionInvoked carries an owned id, so the enum is Clone but not
+// Copy; the workspace consumes it by value in one place.
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TerminalPaneEvent {
     InputActivity,
     X11ForwardingStatus(oxideterm_ssh::X11ForwardingStatus),
@@ -198,6 +203,11 @@ pub enum TerminalPaneEvent {
     TelnetLineEndingsChanged {
         input: Option<SerialLineEnding>,
         output: Option<SerialLineEnding>,
+    },
+    // The pane only reports toolbar chips by id; the embedder owns their
+    // semantics, state, and fan-out back to every open pane.
+    ToolbarActionInvoked {
+        id: SharedString,
     },
 }
 
@@ -300,6 +310,13 @@ pub struct TerminalCursorAnchor {
 pub enum TerminalInputInterceptorResult {
     Continue(Vec<u8>),
     Suppress,
+    /// Plugin-requested local display: `echo` renders on the pane screen only
+    /// (never forwarded to the session, never recorded), while `send`, when
+    /// present, is still written to the session transport afterwards.
+    LocalEcho {
+        echo: Vec<u8>,
+        send: Option<Vec<u8>>,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -526,9 +543,16 @@ pub struct TerminalPane {
     context_action_requested: Option<TerminalContextAction>,
     archive_path_requested: Option<Zeroizing<String>>,
     plugin_text_actions: Vec<TerminalPluginTextAction>,
+    // Embedder-pushed toolbar chips (e.g. plugin surfaces). Pane-owned render
+    // state outside the preferences snapshot: a wholesale preference push
+    // (theme or language refresh) must not clear them.
+    toolbar_actions: Vec<TerminalToolbarActionSpec>,
     pending_plugin_text: Option<(TerminalPluginTextAction, zeroize::Zeroizing<String>)>,
     pending_trigger_matches: VecDeque<oxideterm_terminal_triggers::TriggerMatched>,
     plugin_input_interceptor: Option<TerminalInputInterceptor>,
+    // Owning terminal session id, stamped by the workspace at pane
+    // registration; interceptors use it to attribute input to a session.
+    plugin_session_id: Option<String>,
     win32_pressed_keys: HashSet<String>,
     input_broadcaster: Option<TerminalInputBroadcaster>,
     #[cfg(test)]
@@ -1320,9 +1344,11 @@ impl TerminalPane {
             context_action_requested: None,
             archive_path_requested: None,
             plugin_text_actions: Vec::new(),
+            toolbar_actions: Vec::new(),
             pending_plugin_text: None,
             pending_trigger_matches: VecDeque::new(),
             plugin_input_interceptor: None,
+            plugin_session_id: None,
             win32_pressed_keys: HashSet::new(),
             input_broadcaster: None,
             #[cfg(test)]
@@ -2755,6 +2781,20 @@ impl TerminalPane {
         self.set_serial_runtime_options(options, cx);
     }
 
+    /// Replaces the embedder-pushed toolbar chips. Only pushes that actually
+    /// change the specs notify, so wholesale workspace syncs stay cheap.
+    pub fn set_toolbar_actions(
+        &mut self,
+        actions: Vec<TerminalToolbarActionSpec>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.toolbar_actions == actions {
+            return;
+        }
+        self.toolbar_actions = actions;
+        cx.notify();
+    }
+
     pub fn ssh_connection_handle(&self) -> Option<SshConnectionHandle> {
         self.terminal.lock().ssh_connection_handle()
     }
@@ -2964,7 +3004,7 @@ impl TerminalPane {
         if !self.terminal_accepts_input() {
             return false;
         }
-        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
+        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes(), cx) else {
             return false;
         };
         let bytes = Zeroizing::new(bytes);
@@ -3145,7 +3185,7 @@ impl TerminalPane {
         if bytes.is_empty() || !self.terminal_accepts_input() {
             return false;
         }
-        let Some(bytes) = self.apply_plugin_input_interceptor(bytes) else {
+        let Some(bytes) = self.apply_plugin_input_interceptor(bytes, cx) else {
             return false;
         };
         let bytes = zeroize::Zeroizing::new(bytes);
@@ -3192,7 +3232,7 @@ impl TerminalPane {
         if text.is_empty() || !self.terminal_accepts_input() {
             return false;
         }
-        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
+        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes(), cx) else {
             return false;
         };
         let bytes = zeroize::Zeroizing::new(bytes);
@@ -3384,6 +3424,37 @@ impl TerminalPane {
 
     pub fn set_plugin_input_interceptor(&mut self, interceptor: Option<TerminalInputInterceptor>) {
         self.plugin_input_interceptor = interceptor;
+    }
+
+    /// Displays plugin-provided bytes on this pane's screen only. The payload
+    /// renders through the session's local-display channel, so it never reaches
+    /// the device, the terminal recorder, or the session log.
+    pub fn feed_plugin_local_display(&mut self, bytes: &[u8], cx: &mut Context<Self>) -> bool {
+        if bytes.is_empty() || !self.terminal_accepts_input() {
+            return false;
+        }
+        // Always retake the snapshot: local display bytes never cross the
+        // session output path, so no device event would ever repaint them.
+        let snapshot = {
+            let mut terminal = self.terminal.lock();
+            terminal.feed_local_display(bytes);
+            terminal.scroll_to_bottom();
+            // Consume term damage under the same lock: the stamped snapshot
+            // becomes the pane baseline, so pending scroll damage must not
+            // survive and re-shift it on the next incremental render.
+            terminal.snapshot_consuming_damage()
+        };
+        self.clear_smooth_scroll_remainder();
+        self.snapshot = self.stamp_snapshot(snapshot);
+        self.last_terminal_input = Instant::now();
+        self.reset_cursor_blink();
+        cx.notify();
+        true
+    }
+
+    /// Stamps the owning terminal session id used by plugin input hooks.
+    pub fn set_plugin_session_id(&mut self, session_id: Option<String>) {
+        self.plugin_session_id = session_id;
     }
 
     pub fn set_input_broadcaster(&mut self, broadcaster: Option<TerminalInputBroadcaster>) {
@@ -4450,7 +4521,7 @@ impl TerminalPane {
         if !self.terminal_accepts_input() {
             return false;
         }
-        let Some(bytes) = self.apply_plugin_input_interceptor(semantic_bytes) else {
+        let Some(bytes) = self.apply_plugin_input_interceptor(semantic_bytes, cx) else {
             return false;
         };
         let bytes = Zeroizing::new(bytes);
@@ -4528,15 +4599,40 @@ impl TerminalPane {
         self.snapshot = self.stamp_snapshot(snapshot);
     }
 
-    fn apply_plugin_input_interceptor(&self, bytes: &[u8]) -> Option<Vec<u8>> {
+    fn apply_plugin_input_interceptor(
+        &mut self,
+        bytes: &[u8],
+        cx: &mut Context<Self>,
+    ) -> Option<Vec<u8>> {
         let Some(interceptor) = &self.plugin_input_interceptor else {
             return Some(bytes.to_vec());
         };
         // Plugin input hooks run before command tracking and shell writes so a
         // transformed or suppressed payload has the same boundary as Tauri.
-        match interceptor(bytes) {
+        match interceptor(bytes, self.plugin_session_id.as_deref()) {
             TerminalInputInterceptorResult::Continue(bytes) => Some(bytes),
             TerminalInputInterceptorResult::Suppress => None,
+            TerminalInputInterceptorResult::LocalEcho { echo, send } => {
+                if !echo.is_empty() {
+                    // Screen-only rendering: bypasses TerminalEvent::Output, so
+                    // the recorder and session log never observe these bytes.
+                    // The pane snapshot must be retaken immediately: a fully
+                    // suppressed keystroke never reaches the session, so
+                    // nothing else would repaint the echoed character.
+                    let snapshot = {
+                        let mut terminal = self.terminal.lock();
+                        terminal.feed_local_display(&echo);
+                        terminal.scroll_to_bottom();
+                        // Consume term damage under the same lock so the
+                        // stamped snapshot is an exact pane baseline.
+                        terminal.snapshot_consuming_damage()
+                    };
+                    self.clear_smooth_scroll_remainder();
+                    self.snapshot = self.stamp_snapshot(snapshot);
+                    cx.notify();
+                }
+                send
+            }
         }
     }
 
@@ -4715,7 +4811,7 @@ impl TerminalPane {
         if !self.terminal_accepts_input() {
             return false;
         }
-        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes()) else {
+        let Some(bytes) = self.apply_plugin_input_interceptor(text.as_bytes(), cx) else {
             return false;
         };
         let bytes = Zeroizing::new(bytes);
@@ -5730,7 +5826,7 @@ mod tests {
                 cx,
             );
             for replacement in [None, Some(b"replacement".to_vec())] {
-                pane.set_plugin_input_interceptor(Some(Arc::new(move |_| match &replacement {
+                pane.set_plugin_input_interceptor(Some(Arc::new(move |_, _| match &replacement {
                     Some(bytes) => TerminalInputInterceptorResult::Continue(bytes.clone()),
                     None => TerminalInputInterceptorResult::Suppress,
                 })));
@@ -5925,7 +6021,7 @@ mod tests {
         let received = events.clone();
         let _subscription = cx.update(|_, cx| {
             cx.subscribe(&pane, move |_, event, _| {
-                received.borrow_mut().push(*event);
+                received.borrow_mut().push(event.clone());
             })
         });
         pane.update(cx, |pane, cx| {

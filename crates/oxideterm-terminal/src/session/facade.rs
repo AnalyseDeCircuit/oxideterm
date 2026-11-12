@@ -444,6 +444,12 @@ impl TerminalSession {
         self.backend.write_protocol_bytes(bytes)
     }
 
+    /// Screen-only display channel: renders bytes like device output but keeps
+    /// them out of the device stream, the recorder, and session logs.
+    pub fn feed_local_display(&mut self, bytes: &[u8]) {
+        self.backend.feed_local_display(bytes)
+    }
+
     pub fn write_text(&mut self, text: &str) -> Result<()> {
         self.backend.write_text(text)
     }
@@ -480,6 +486,11 @@ impl TerminalSession {
     /// ATT MTU currently negotiated with the BLE peripheral; `None` before negotiation or for non-BLE.
     pub fn ble_negotiated_mtu(&self) -> Option<u16> {
         self.backend.ble_negotiated_mtu()
+    }
+
+    /// GATT data-plane command surface for plugin host calls; `None` for non-BLE.
+    pub fn ble_gatt_handle(&self) -> Option<BleGattHandle> {
+        self.backend.ble_gatt_handle()
     }
 
     pub fn set_output_processor(&mut self, processor: Option<TerminalOutputProcessor>) {
@@ -839,6 +850,10 @@ impl TerminalSession {
 
     pub fn snapshot(&self) -> TerminalSnapshot {
         self.backend.snapshot()
+    }
+
+    pub fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        self.backend.snapshot_consuming_damage()
     }
 
     pub fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {

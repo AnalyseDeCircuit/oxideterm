@@ -348,6 +348,15 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         snapshot_from_term(&term, self.size, &self.graphics, &self.palette)
     }
 
+    fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        let snapshot = snapshot_from_term(&term, self.size, &self.graphics, &self.palette);
+        // Reset under the same lock so the stamped snapshot is an exact
+        // baseline and later output accumulates fresh damage.
+        term.reset_damage();
+        snapshot
+    }
+
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         let mut term = self.term.lock();
         incremental_snapshot_from_term(

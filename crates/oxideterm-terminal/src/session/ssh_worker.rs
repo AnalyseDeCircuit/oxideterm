@@ -1064,6 +1064,10 @@ impl TerminalSessionBackend for SshPtySession {
         self.shared.core.lock().snapshot()
     }
 
+    fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        self.shared.core.lock().snapshot_consuming_damage()
+    }
+
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         self.shared.core.lock().snapshot_incremental(previous)
     }

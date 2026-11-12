@@ -505,6 +505,20 @@ impl Default for TerminalModemLabels {
     }
 }
 
+/// A toolbar chip owned by the embedder: the pane only renders the pushed
+/// specs and reports clicks by id, without interpreting their semantics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerminalToolbarActionSpec {
+    pub id: SharedString,
+    pub label: String,
+    /// False renders the chip disabled; `disabled_hint` explains why.
+    pub enabled: bool,
+    /// Marks the chip active (the pane currently exhibits this action's mode).
+    pub active: bool,
+    /// Tooltip shown while disabled; ignored when enabled.
+    pub disabled_hint: Option<String>,
+}
+
 #[derive(Clone, Debug)]
 pub struct TerminalSerialControlLabels {
     pub serial: String,

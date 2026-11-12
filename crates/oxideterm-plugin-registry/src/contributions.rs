@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Contribution indexing and runtime registration rows.
+//! Contribution indexing and runtime registration rows.  
 
 use super::*;
 
@@ -17,6 +17,7 @@ pub struct NativePluginContributionStore {
     pub connection_hooks: Vec<NativePluginConnectionHookContribution>,
     pub api_commands: Vec<NativePluginApiCommandContribution>,
     pub host_monitors: Vec<NativePluginHostMonitorContribution>,
+    pub terminal_toolbar_actions: Vec<NativePluginTerminalToolbarActionContribution>,
     pub runtime_commands: Vec<NativePluginRuntimeCommandContribution>,
     pub runtime_keybindings: Vec<NativePluginRuntimeKeybindingContribution>,
     pub runtime_context_menus: Vec<NativePluginRuntimeContextMenuContribution>,
@@ -173,6 +174,16 @@ impl NativePluginContributionStore {
                     }
                 }));
         }
+        if let Some(terminal_toolbar) = &contributes.terminal_toolbar {
+            self.terminal_toolbar_actions
+                .extend(terminal_toolbar.iter().cloned().map(|definition| {
+                    NativePluginTerminalToolbarActionContribution {
+                        plugin_id: plugin_id.clone(),
+                        plugin_name: plugin_name.clone(),
+                        definition,
+                    }
+                }));
+        }
     }
 
     #[allow(dead_code)]
@@ -187,6 +198,7 @@ impl NativePluginContributionStore {
             + self.connection_hooks.len()
             + self.api_commands.len()
             + self.host_monitors.len()
+            + self.terminal_toolbar_actions.len()
             + self.runtime_commands.len()
             + self.runtime_keybindings.len()
             + self.runtime_context_menus.len()

@@ -533,9 +533,36 @@ impl WorkspaceApp {
             i18n.t("plugin.language_dismiss"),
             cx,
         );
+        let (ble_notification_router, ble_notification_registrations) =
+            plugin_lifecycle::BleNotificationRouter::new();
+        let (plugin_deactivation_tx, plugin_deactivation_rx) =
+            tokio::sync::mpsc::unbounded_channel();
         let plugin_entity = cx.new(move |cx| {
             plugin_entity::PluginWorkspaceEntity::new(plugin_task_runtime, plugin_registry, cx)
         });
+        plugin_entity.update(cx, |plugins, _cx| {
+            plugins.set_plugin_deactivation_sink(plugin_deactivation_tx);
+            // Toolbar plugins are mode-gated: the generic toolbar surface
+            // starts their runtimes from pane states on demand, so they must
+            // not start with the supervisor bootstrap.
+            let toolbar_plugin_ids = plugins
+                .registry()
+                .contributions()
+                .terminal_toolbar_actions
+                .iter()
+                .map(|entry| entry.plugin_id.clone())
+                .collect::<std::collections::HashSet<_>>();
+            for plugin_id in toolbar_plugin_ids {
+                plugins.defer_bootstrap_activation(plugin_id);
+            }
+        });
+        plugin_lifecycle::spawn_ble_notification_dispatcher(
+            ble_notification_router.clone(),
+            ble_notification_registrations,
+            plugin_deactivation_rx,
+            cx,
+        )
+        .detach();
         let plugin_entity_subscription = cx.subscribe(
             &plugin_entity,
             |workspace, _plugin_entity, event: &plugin_entity::PluginWorkspaceEvent, cx| {
@@ -547,7 +574,7 @@ impl WorkspaceApp {
         let tab_host_subscription = cx.subscribe(
             &tab_host,
             |workspace, _tab_host, event: &tabs::WorkspaceTabHostEvent, cx| {
-                workspace.enqueue_tab_host_window_effect(*event, cx);
+                workspace.enqueue_tab_host_window_effect(event.clone(), cx);
             },
         );
         let command_palette =
@@ -663,6 +690,8 @@ impl WorkspaceApp {
             .measure_all(),
             detached_local_terminal_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             plugin_entity,
+            ble_gatt_handles: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            ble_notification_router,
             _plugin_entity_subscription: plugin_entity_subscription,
             split_drag: None,
             disclosure_motions: disclosure_motion::DisclosureMotions::default(),
@@ -697,6 +726,9 @@ impl WorkspaceApp {
             ai_entity,
             acp_entity,
             mosh_plugin_sessions: Arc::new(oxideterm_mosh::MoshPluginSessions::default()),
+            plugin_overlay_members: HashMap::new(),
+            plugin_overlay_generation: 0,
+            plugin_toolbar_states: HashMap::new(),
             skill_registry,
             skill_workspace_root,
             loaded_conversation_skills: HashMap::new(),

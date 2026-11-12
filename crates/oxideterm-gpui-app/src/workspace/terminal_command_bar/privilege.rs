@@ -874,6 +874,12 @@ impl WorkspaceApp {
         }
         let recording_status = self.active_terminal_recording_status(cx);
         let recording_active = recording_status.state != TerminalRecordingState::Idle;
+        // Show the overlay card only while the bound member's pane itself
+        // holds focus in its frontmost window: focus on any other pane hides
+        // it, and the visibility poll reports the change to the plugin.
+        let plugin_overlay = self.plugin_overlay_visible(cx)
+            && self.plugin_overlay_targets_window(window.window_handle(), cx)
+            && window.is_window_active();
         if self.active_pane(cx).is_none()
             || !self.settings_store.settings().terminal.command_bar.enabled
         {
@@ -883,6 +889,9 @@ impl WorkspaceApp {
                 .child(terminal)
                 .when(recording_active, |surface| {
                     surface.child(self.render_terminal_recording_controls(recording_status, cx))
+                })
+                .when(plugin_overlay, |surface| {
+                    surface.child(self.render_plugin_overlay_panel(cx))
                 })
                 .into_any_element();
         }
@@ -906,6 +915,9 @@ impl WorkspaceApp {
                     .child(terminal)
                     .when(recording_active, |surface| {
                         surface.child(self.render_terminal_recording_controls(recording_status, cx))
+                    })
+                    .when(plugin_overlay, |surface| {
+                        surface.child(self.render_plugin_overlay_panel(cx))
                     }),
             )
             .when(

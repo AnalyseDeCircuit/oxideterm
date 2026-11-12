@@ -73,6 +73,9 @@ pub(super) fn native_plugin_active_terminal_target(
     if let Some(config) = workspace.serial_terminal_configs.get(&session_id) {
         return native_plugin_serial_terminal_target(session_id, config);
     }
+    if let Some(target) = native_plugin_ble_terminal_target(workspace, session_id) {
+        return target;
+    }
     let terminal_type = if workspace.active_terminal_kind(cx)
         == Some(oxideterm_terminal::TerminalSessionKind::LocalPty)
     {
@@ -122,6 +125,34 @@ pub(super) fn native_plugin_active_terminal_target(
         "connectionState": connection_state,
         "label": label,
     })
+}
+
+/// BLE panes own no SSH node; report the session as a `ble` target so plugin
+/// focus resolution can prefer the visible session instead of guessing from
+/// the sessions tree, which intentionally omits BLE.
+fn native_plugin_ble_terminal_target(
+    workspace: &WorkspaceApp,
+    session_id: TerminalSessionId,
+) -> Option<Value> {
+    let handle = workspace
+        .ble_gatt_handles
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(&session_id)
+        .cloned()?;
+    let state = handle.shared_state();
+    let device = state
+        .device_name()
+        .unwrap_or_else(|| state.device_address());
+    Some(json!({
+        "sessionId": session_id.0.to_string(),
+        "terminalType": "ble",
+        "terminalTransport": "ble",
+        "nodeId": null,
+        "connectionId": null,
+        "connectionState": if state.connected() { "active" } else { "error" },
+        "label": format!("BLE {device}"),
+    }))
 }
 
 fn native_plugin_serial_terminal_target(

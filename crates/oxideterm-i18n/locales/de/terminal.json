@@ -654,13 +654,13 @@
       "agent_installing": "Agent wird installiert: {{percent}}% ({{transferred}} / {{total}} KiB)",
       "agent_starting": "Agent wird gestartet…"
     },
-      "ble": {
-        "connection_failed": "BLE-Verbindung fehlgeschlagen: {error}",
-        "runtime_init_failed": "Initialisierung der BLE-Laufzeit fehlgeschlagen",
-        "adapter_index_out_of_range": "Bluetooth-Adapter-Index {n} liegt außerhalb des gültigen Bereichs",
-        "service_not_found": "Dienst {uuid} nicht gefunden",
-        "no_notify_write_pair": "Der ausgewählte Dienst hat kein Notify+Write-Merkmalspaar"
-      }
+    "ble": {
+      "connection_failed": "BLE-Verbindung fehlgeschlagen: {error}",
+      "runtime_init_failed": "Initialisierung der BLE-Laufzeit fehlgeschlagen",
+      "adapter_index_out_of_range": "Bluetooth-Adapter-Index {n} liegt außerhalb des gültigen Bereichs",
+      "service_not_found": "Dienst {uuid} nicht gefunden",
+      "no_notify_write_pair": "Der ausgewählte Dienst hat kein Paar aus Notify- und Write-Merkmal"
+    }
   },
   "search": {
     "placeholder": "Suchen",

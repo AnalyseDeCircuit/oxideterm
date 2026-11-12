@@ -2,7 +2,7 @@ use super::*;
 use gpui::TestAppContext;
 use oxideterm_connections::{ConnectionStoreData, SavedProxyHop};
 
-fn isolated_workspace_fixture(
+pub(in crate::workspace) fn isolated_workspace_fixture(
     cx: &mut TestAppContext,
     fixture_key: &str,
 ) -> Option<std::path::PathBuf> {

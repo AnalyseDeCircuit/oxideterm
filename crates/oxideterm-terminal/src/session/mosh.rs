@@ -825,6 +825,25 @@ impl TerminalSessionBackend for MoshTerminalSession {
         )
     }
 
+    fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        let snapshot = snapshot_from_term(
+            &term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            &self.palette,
+        );
+        // Reset under the same lock so the stamped snapshot is an exact
+        // baseline and later output accumulates fresh damage.
+        term.reset_damage();
+        snapshot
+    }
+
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         incremental_snapshot_from_term(
             &mut self.term.lock(),

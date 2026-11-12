@@ -163,6 +163,13 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         "Opens a known workspace page or focuses an existing tab."
     ),
     api!(
+        "ui",
+        "notify",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_UI_WRITE),
+        "Shows a display-only notice overlay; it never reaches any session transport."
+    ),
+    api!(
         "app",
         "refreshAfterExternalSync",
         Mutating,
@@ -546,6 +553,13 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         Mutating,
         Some(NATIVE_PLUGIN_CAPABILITY_TERMINAL_WRITE),
         "Writes input to a node terminal."
+    ),
+    api!(
+        "terminal",
+        "writeLocal",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_TERMINAL_WRITE),
+        "Writes display-only text onto a terminal screen; unlike write calls it never reaches the session transport or the session log."
     ),
     api!(
         "terminal",
@@ -1346,6 +1360,13 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         "Shows a host notification."
     ),
     api!(
+        "toolbar",
+        "reportActionState",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_UI_WRITE),
+        "Reports the toolbar action state the plugin resolved for one pane click."
+    ),
+    api!(
         "storage",
         "set",
         Mutating,
@@ -1365,6 +1386,48 @@ pub static HOST_API_CATALOG: &[HostApiDescriptor] = &[
         BaselineRead,
         None,
         "Returns plugin-scoped storage."
+    ),
+    api!(
+        "ble",
+        "describe",
+        BaselineRead,
+        None,
+        "Returns the live BLE session GATT projection without payload content."
+    ),
+    api!(
+        "ble",
+        "sessions",
+        BaselineRead,
+        None,
+        "Lists live BLE sessions with device identity for plugin-side nodeId discovery."
+    ),
+    api!(
+        "ble",
+        "read",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_BLE_READ),
+        "Reads one GATT characteristic on the current BLE session."
+    ),
+    api!(
+        "ble",
+        "write",
+        Mutating,
+        Some(NATIVE_PLUGIN_CAPABILITY_BLE_WRITE),
+        "Writes one GATT characteristic on the current BLE session."
+    ),
+    api!(
+        "ble",
+        "onNotification",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_BLE_READ),
+        "Subscribes to GATT notifications for one characteristic."
+    ),
+    api!(
+        "ble",
+        "offNotification",
+        SensitiveRead,
+        Some(NATIVE_PLUGIN_CAPABILITY_BLE_READ),
+        "Removes a plugin GATT notification subscription."
     ),
 ];
 
@@ -1488,6 +1551,7 @@ mod tests {
 
         let ui = allowed_host_apis_for_capabilities([NATIVE_PLUGIN_CAPABILITY_UI_WRITE]);
         assert!(ui.contains(&"ui.registerActivityBarItem".to_string()));
+        assert!(ui.contains(&"ui.notify".to_string()));
 
         let forward =
             allowed_host_apis_for_capabilities([NATIVE_PLUGIN_CAPABILITY_NETWORK_FORWARD]);

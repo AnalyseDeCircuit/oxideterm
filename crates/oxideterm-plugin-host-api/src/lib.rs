@@ -6,6 +6,7 @@
 pub mod ai;
 pub mod app;
 pub mod backend;
+pub mod ble;
 pub mod capabilities;
 pub mod catalog;
 pub mod forwarding;

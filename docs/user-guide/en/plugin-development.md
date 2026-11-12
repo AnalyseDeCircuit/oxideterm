@@ -1309,6 +1309,8 @@ Current capability names are:
 | `sessions.read` | Read full session trees, active-node projections, and event logs |
 | `terminal.content.read` | Read terminal targets, selection, scrollback, or search results |
 | `terminal.write` | Write terminal input, clear a buffer, or open a Telnet transport |
+| `ble.read` | Read GATT characteristics and subscribe to BLE notifications on BLE terminal sessions |
+| `ble.write` | Write GATT characteristics on BLE terminal sessions |
 | `credentials.raw.read` | Return raw plugin-scoped secret values |
 | `credentials.manage` | Store, test, or delete plugin-scoped secrets through the host broker |
 | `network.http` | Permit HTTP/HTTPS through the legacy request adapter |
@@ -1965,6 +1967,25 @@ Host Tools action names are closed enums: `process` supports `stop`, `continue`,
 | `terminal.writeToNode` | `{ nodeId: string, text: string }` | `boolean` |
 | `terminal.clearBuffer` | `{ nodeId: string }` | Clear result |
 | `terminal.openTelnet` | `{ host: string, port?: number }` | `{ sessionId, info }` |
+
+### BLE Devices
+
+BLE host calls operate on GATT characteristics of a BLE terminal session. BLE sessions own no SSH node and are absent from the sessions tree, so `sessionId` is the BLE terminal session id. A reconnect creates a new session id; stale ids fail with `ble_session_not_found` and the plugin reacquires the current id through `ble.sessions` (a focused plugin surface has no active terminal, so `terminal.getMetadata` cannot be relied on). Calls that need the link return `ble_not_connected` while the connection is down. GATT payloads never appear in logs, audit records, or error text.
+
+| Host API | Capability | Args | Result |
+|---|---|---|---|
+| `ble.sessions` | baseline | `{}` | `{ sessions: [{ sessionId, deviceName, deviceAddress, serviceUuid, connected }] }` |
+| `ble.describe` | baseline | `{ sessionId: string }` | `{ serviceUuid, negotiatedMtu, connected, services: [{ uuid, characteristics: [{ uuid, properties }] }] }` |
+| `ble.read` | `ble.read` | `{ sessionId: string, characteristicUuid: string, serviceUuid?: string, encoding?: 'hex' \| 'base64' \| 'utf8', timeoutMs?: number, maxLength?: number }` | `{ data, encoding, length }` |
+| `ble.write` | `ble.write` | `{ sessionId: string, characteristicUuid: string, data: string, dataEncoding?: 'hex' \| 'base64' \| 'utf8', writeType?: 'withResponse' \| 'withoutResponse', serviceUuid?: string, timeoutMs?: number }` | `null` |
+| `ble.onNotification` | `ble.read` | `{ sessionId: string, characteristicUuid: string, serviceUuid?: string }` | `null` |
+| `ble.offNotification` | `ble.read` | `{ sessionId: string, characteristicUuid: string }` | `null` |
+
+`data` strings follow `encoding` / `dataEncoding`; `hex` is the default and `properties` is a bitmask of GATT property flags. `ble.sessions` owns device identity (advertised name, `null` when the device advertises none, and MAC address); `describe` reports the GATT surface only: the terminal service with all of its characteristics, the negotiated MTU, and the link state. An omitted `writeType` follows the connection profile. `timeoutMs` gives up the wait (default 5000, capped at 60000) without tearing the link down. A read exceeding `maxLength` fails with `ble_read_too_large` instead of truncating register data.
+
+Notification subscriptions follow calls, not manifest declarations: `ble.onNotification` replaces the active route for the same characteristic, `ble.offNotification` is an idempotent removal, and deactivating the plugin or closing the session tears routes down. Notifications arrive as `ble.notification` events carrying `{ sessionId, characteristicUuid, data, encoding, length }` with fixed hex `data`; they cannot be subscribed through `event-subscription`. Routes do not survive reconnection — resubscribe after acquiring the new session id.
+
+When a read or write times out, the worker stops waiting for that operation and skips expired queued requests. A write already submitted to the device cannot be rolled back. Notification setup has a five-second device-operation timeout. Because platform notifications identify characteristics by UUID alone, subscribing to a UUID present in multiple discovered services returns `ble_unsupported_characteristic`, even when `serviceUuid` is supplied.
 
 ### SFTP And Transfers
 

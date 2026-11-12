@@ -169,6 +169,11 @@ pub trait TerminalSessionBackend: Send {
         bail!("Only SSH terminals support this reconnect operation")
     }
     fn write_protocol_bytes(&mut self, bytes: &[u8]) -> Result<()>;
+    /// Displays bytes on the pane screen only: the payload never reaches the
+    /// device, the recorder, or session logs. Raw-stream backends render it
+    /// through the same pipeline as device output with recording disabled;
+    /// other backends leave this as a no-op.
+    fn feed_local_display(&mut self, _bytes: &[u8]) {}
     fn write_text(&mut self, text: &str) -> Result<()>;
     fn paste_text(&mut self, text: &str) -> Result<()>;
     fn set_encoding(&mut self, encoding: TerminalEncoding);
@@ -217,6 +222,11 @@ pub trait TerminalSessionBackend: Send {
     }
     /// ATT MTU negotiated with the BLE peripheral; `None` for non-BLE sessions or before negotiation.
     fn ble_negotiated_mtu(&self) -> Option<u16> {
+        None
+    }
+    /// GATT data-plane command surface for plugin host calls; `None` for
+    /// non-BLE sessions.
+    fn ble_gatt_handle(&self) -> Option<BleGattHandle> {
         None
     }
     fn set_trzsz_policy(&mut self, _policy: Option<TrzszTransferPolicy>) {}
@@ -302,6 +312,14 @@ pub trait TerminalSessionBackend: Send {
         String::new()
     }
     fn snapshot(&self) -> TerminalSnapshot;
+    /// Takes a full snapshot and resets grid damage while still holding the
+    /// term lock, so the returned snapshot becomes an exact baseline: any
+    /// output arriving afterwards accumulates fresh damage. Callers must
+    /// install the result immediately (e.g. stamp it into the pane); a lock
+    /// gap between reading and resetting would race with async output.
+    fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        self.snapshot()
+    }
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         let _ = previous;
         self.snapshot()

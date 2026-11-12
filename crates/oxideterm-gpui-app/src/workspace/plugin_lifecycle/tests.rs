@@ -1507,6 +1507,35 @@ fn terminal_write_host_calls_parse_text_and_node_id() {
             if node_id == "node-1" && text == "pwd\n"
     ));
 
+    let local = native_plugin_terminal_action_from_call(&plugin_runtime::PluginHostCall {
+        request_id: "terminal-write-local".to_string(),
+        namespace: "terminal".to_string(),
+        method: "writeLocal".to_string(),
+        args: serde_json::json!({ "terminalId": "session-7", "text": "help\r\n" }),
+    })
+    .unwrap();
+    assert!(matches!(
+        local,
+        NativePluginTerminalAction::WriteLocal { ref terminal_id, ref text }
+            if terminal_id.as_deref() == Some("session-7") && text == "help\r\n"
+    ));
+
+    // A node id must not address a local write; only terminalId selects the
+    // session, otherwise the write falls back to the active terminal.
+    let local_without_session =
+        native_plugin_terminal_action_from_call(&plugin_runtime::PluginHostCall {
+            request_id: "terminal-write-local-active".to_string(),
+            namespace: "terminal".to_string(),
+            method: "writeLocal".to_string(),
+            args: serde_json::json!({ "nodeId": "node-1", "text": "help\r\n" }),
+        })
+        .unwrap();
+    assert!(matches!(
+        local_without_session,
+        NativePluginTerminalAction::WriteLocal { ref terminal_id, .. }
+            if terminal_id.is_none()
+    ));
+
     let clear = native_plugin_terminal_action_from_call(&plugin_runtime::PluginHostCall {
         request_id: "terminal-clear-buffer".to_string(),
         namespace: "terminal".to_string(),
@@ -1531,6 +1560,35 @@ fn terminal_write_host_calls_parse_text_and_node_id() {
         NativePluginTerminalAction::OpenTelnet { ref host, port }
             if host == "example.com" && port == 2323
     ));
+
+    let report = native_plugin_terminal_action_from_call(&plugin_runtime::PluginHostCall {
+        request_id: "toolbar-report-1".to_string(),
+        namespace: "toolbar".to_string(),
+        method: "reportActionState".to_string(),
+        args: serde_json::json!({
+            "actionId": "demo-mode",
+            "stateId": "inline",
+            "paneId": 42,
+        }),
+    })
+    .unwrap();
+    assert!(matches!(
+        report,
+        NativePluginTerminalAction::ReportToolbarActionState { ref action_id, ref state_id, pane_id }
+            if action_id == "demo-mode" && state_id == "inline" && pane_id == 42
+    ));
+
+    // A report without the pane identity must be rejected: the host may not
+    // apply a state it cannot attribute to an open pane.
+    match native_plugin_terminal_action_from_call(&plugin_runtime::PluginHostCall {
+        request_id: "toolbar-report-2".to_string(),
+        namespace: "toolbar".to_string(),
+        method: "reportActionState".to_string(),
+        args: serde_json::json!({ "actionId": "demo-mode", "stateId": "inline" }),
+    }) {
+        Ok(_) => panic!("a report without paneId must be rejected"),
+        Err(error) => assert!(error.contains("paneId"), "{error}"),
+    }
 }
 
 #[test]
@@ -1561,10 +1619,14 @@ fn terminal_input_interceptors_run_in_order_and_fail_open() {
         test_terminal_hook("timeout", "demo.timeout"),
         test_terminal_hook("second", "demo.second"),
     ];
-    let result = native_plugin_reduce_input_interceptors(b"ls", &hooks, |hook, args| {
-        match hook.registration_id.as_str() {
+    let result =
+        native_plugin_reduce_input_interceptors(b"ls", Some("42"), &hooks, |hook, args| match hook
+            .registration_id
+            .as_str()
+        {
             "first" => {
                 assert_eq!(args["data"], "ls");
+                assert_eq!(args["terminalId"], "42");
                 Some(json!({ "data": "sudo ls" }))
             }
             "timeout" => None,
@@ -1573,24 +1635,60 @@ fn terminal_input_interceptors_run_in_order_and_fail_open() {
                 Some(json!("sudo ls -la"))
             }
             _ => unreachable!(),
-        }
-    });
+        });
 
     match result {
         TerminalInputInterceptorResult::Continue(bytes) => {
             assert_eq!(bytes, b"sudo ls -la");
         }
         TerminalInputInterceptorResult::Suppress => panic!("input should not be suppressed"),
+        TerminalInputInterceptorResult::LocalEcho { .. } => {
+            panic!("input should not carry a local echo")
+        }
     }
 }
 
 #[test]
 fn terminal_input_interceptor_null_suppresses_input() {
     let hooks = vec![test_terminal_hook("suppress", "demo.suppress")];
-    let result = native_plugin_reduce_input_interceptors(b"rm -rf /tmp/demo", &hooks, |_, _| {
-        Some(Value::Null)
-    });
+    let result =
+        native_plugin_reduce_input_interceptors(b"rm -rf /tmp/demo", None, &hooks, |_, _| {
+            Some(Value::Null)
+        });
     assert!(matches!(result, TerminalInputInterceptorResult::Suppress));
+}
+
+#[test]
+fn terminal_input_interceptor_echo_holds_and_releases() {
+    let hooks = vec![test_terminal_hook("echo", "demo.echo")];
+    // Local echo with suppress: bytes render on the screen only.
+    let held = native_plugin_reduce_input_interceptors(b"a", None, &hooks, |_, _| {
+        Some(json!({ "echo": "a", "suppress": true }))
+    });
+    match held {
+        TerminalInputInterceptorResult::LocalEcho { echo, send } => {
+            assert_eq!(echo, b"a");
+            assert!(send.is_none());
+        }
+        TerminalInputInterceptorResult::Continue(_) => {
+            panic!("echoed input should not be forwarded")
+        }
+        TerminalInputInterceptorResult::Suppress => panic!("echoed input should not vanish"),
+    }
+    // Release: erase bytes are displayed locally while the full line goes out.
+    let released = native_plugin_reduce_input_interceptors(b"x", None, &hooks, |_, _| {
+        Some(json!({ "echo": "\u{8} \u{8}", "text": "/mx" }))
+    });
+    match released {
+        TerminalInputInterceptorResult::LocalEcho { echo, send } => {
+            assert_eq!(echo, b"\x08 \x08");
+            assert_eq!(send.unwrap(), b"/mx");
+        }
+        TerminalInputInterceptorResult::Continue(_) => {
+            panic!("release should keep its local erase echo")
+        }
+        TerminalInputInterceptorResult::Suppress => panic!("release should still forward"),
+    }
 }
 
 #[test]
