@@ -3,7 +3,9 @@
 
 use std::{borrow::Cow, fmt};
 
-use encoding_rs::{BIG5, EUC_JP, EUC_KR, Encoding, GB18030, GBK, SHIFT_JIS, UTF_8, WINDOWS_1252};
+use encoding_rs::{
+    BIG5, EUC_JP, EUC_KR, EncoderResult, Encoding, GB18030, GBK, SHIFT_JIS, UTF_8, WINDOWS_1252,
+};
 use zeroize::{Zeroize, Zeroizing};
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
@@ -162,8 +164,10 @@ impl TerminalInputEncoder {
             return Cow::Borrowed(text.as_bytes());
         }
 
-        let (bytes, _encoding, _had_errors) = self.encoding.encoding_rs().encode(text);
-        bytes
+        Cow::Owned(encode_without_html_references(
+            self.encoding.encoding_rs(),
+            text,
+        ))
     }
 
     pub fn encode_paste(self, text: &str, bracketed: bool) -> Vec<u8> {
@@ -184,6 +188,31 @@ impl TerminalInputEncoder {
             encoded.zeroize();
         }
         bytes
+    }
+}
+
+/// Encodes `text`, sending `?` for a character that `encoding` can't represent.
+///
+/// `Encoding::encode` follows HTML form submission and replaces such a
+/// character with a numeric character reference like `&#128512;`, which a
+/// remote shell would receive as typed text. The buffer is sized for the
+/// worst case up front so pasted secrets are not left behind by reallocation.
+fn encode_without_html_references(encoding: &'static Encoding, text: &str) -> Vec<u8> {
+    let mut encoder = encoding.new_encoder();
+    let worst_case = encoder
+        .max_buffer_length_from_utf8_without_replacement(text.len())
+        .unwrap_or(text.len().saturating_mul(4));
+    let mut bytes = Vec::with_capacity(worst_case);
+    let mut remaining = text;
+    loop {
+        let (result, read) =
+            encoder.encode_from_utf8_to_vec_without_replacement(remaining, &mut bytes, true);
+        remaining = &remaining[read..];
+        match result {
+            EncoderResult::InputEmpty => return bytes,
+            EncoderResult::Unmappable(_) => bytes.push(b'?'),
+            EncoderResult::OutputFull => bytes.reserve(remaining.len().saturating_mul(4)),
+        }
     }
 }
 
@@ -413,6 +442,29 @@ mod tests {
                 decoded.extend_from_slice(&decoder.decode_to_utf8_bytes(&wire[split..]));
                 assert_eq!(decoded, text.as_bytes(), "{encoding}, split {split}");
             }
+        }
+    }
+
+    #[test]
+    fn unmappable_input_becomes_a_question_mark_instead_of_an_html_reference() {
+        // encoding_rs's `Encoding::encode` follows HTML form submission and
+        // would send `&#128512;` to the remote shell.
+        let samples: &[(TerminalEncoding, &str, &[u8])] = &[
+            (TerminalEncoding::Gbk, "a😀你", b"a?\xc4\xe3"),
+            (TerminalEncoding::Big5, "é體", b"?\xc5\xe9"),
+            (TerminalEncoding::ShiftJis, "한こ", b"?\x82\xb1"),
+            (TerminalEncoding::EucKr, "😀한", b"?\xc7\xd1"),
+            (TerminalEncoding::Windows1252, "中é€", b"?\xe9\x80"),
+            // GB18030 maps every character, so nothing is replaced.
+            (TerminalEncoding::Gb18030, "😀", b"\x94\x39\xfc\x36"),
+        ];
+        for &(encoding, text, wire) in samples {
+            let encoder = TerminalInputEncoder::new(encoding);
+            assert_eq!(encoder.encode_text(text).as_ref(), wire, "{encoding}");
+            let mut pasted = b"\x1b[200~".to_vec();
+            pasted.extend_from_slice(wire);
+            pasted.extend_from_slice(b"\x1b[201~");
+            assert_eq!(encoder.encode_paste(text, true), pasted, "{encoding}");
         }
     }
 
