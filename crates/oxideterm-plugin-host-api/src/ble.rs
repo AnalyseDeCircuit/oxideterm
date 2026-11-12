@@ -153,7 +153,7 @@ pub fn native_plugin_ble_response(
     // caller holds the runtime lock. `block_in_place` hands the LIFO task to
     // other workers, and `recv_timeout` bounds the wait either way.
     let audit_context = oxideterm_audit::AuditContext::current_request();
-    const BLE_HOOK_RESPONSE_TIMEOUT: Duration = Duration::from_secs(30);
+    let hook_timeout = ble_hook_response_timeout(&method, &args);
     let wait = || {
         let abandoned = abandoned.clone();
         runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
@@ -166,7 +166,7 @@ pub fn native_plugin_ble_response(
                 let _ = response_tx.send(result);
             },
         ));
-        response_rx.recv_timeout(BLE_HOOK_RESPONSE_TIMEOUT)
+        response_rx.recv_timeout(hook_timeout)
     };
     let received = if tokio::runtime::Handle::try_current().is_ok() {
         tokio::task::block_in_place(wait)
@@ -495,6 +495,17 @@ fn native_plugin_ble_optional_service_uuid_arg(args: &Value) -> Result<Option<uu
     }
 }
 
+fn ble_hook_response_timeout(method: &str, args: &Value) -> Duration {
+    // The async operation owns the requested deadline; allow its error to
+    // reach the synchronous caller before the worker-stall guard expires.
+    let operation_ms = if matches!(method, "read" | "write") {
+        native_plugin_ble_timeout_ms_arg(args).unwrap_or(BLE_DEFAULT_TIMEOUT_MS)
+    } else {
+        BLE_DEFAULT_TIMEOUT_MS
+    };
+    Duration::from_millis(operation_ms.saturating_add(5000).max(30_000))
+}
+
 fn native_plugin_ble_timeout_ms_arg(args: &Value) -> Result<u64, String> {
     match args.get("timeoutMs") {
         None | Some(Value::Null) => Ok(BLE_DEFAULT_TIMEOUT_MS),
@@ -743,6 +754,25 @@ fn ble_gatt_error_message(error: BleGattError) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hook_guard_allows_the_full_requested_operation_timeout() {
+        for method in ["read", "write"] {
+            for (requested, expected) in [
+                (5000, 30_000),
+                (45_000, 50_000),
+                (60_000, 65_000),
+                (600_000, 65_000),
+            ] {
+                assert_eq!(
+                    super::ble_hook_response_timeout(
+                        method,
+                        &serde_json::json!({"timeoutMs": requested})
+                    ),
+                    std::time::Duration::from_millis(expected)
+                );
+            }
+        }
+    }
     use super::*;
     use crate::catalog::{AccessTier, HOST_API_CATALOG, allowed_host_apis_for_capabilities};
     use oxideterm_terminal::{

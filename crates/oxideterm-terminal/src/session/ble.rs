@@ -1115,11 +1115,31 @@ fn find_btleplug_characteristic(
         })
 }
 
-/// Executes one plugin GATT command against the live peripheral. Property
-/// checks run against the published table first so unsupported targets fail
-/// with a precise code instead of an opaque platform error. Responses are
-/// sent from here; the caller's cancel branch may drop the response, which
-/// the host side already treats as a dead link.
+async fn wait_gatt_operation<T>(
+    response: &mut tokio::sync::oneshot::Sender<Result<T, BleGattError>>,
+    operation: impl std::future::Future<Output = Result<T, BleGattError>>,
+) -> Option<Result<T, BleGattError>> {
+    // A host timeout drops the receiver. Retire its queued/in-flight work so
+    // the session can resume notifications, input, and link checks.
+    tokio::select! {
+        biased;
+        _ = response.closed() => None,
+        result = operation => Some(result),
+    }
+}
+
+fn gatt_notification_is_unambiguous(
+    services: &[BleGattServiceInfo],
+    characteristic: uuid::Uuid,
+) -> bool {
+    services
+        .iter()
+        .flat_map(|service| &service.characteristics)
+        .filter(|entry| entry.uuid == characteristic)
+        .count() == 1
+}
+
+/// Validates the discovered GATT surface before issuing platform operations.
 async fn execute_gatt_command(
     peripheral: &btleplug::platform::Peripheral,
     services: &std::collections::BTreeSet<btleplug::api::Service>,
@@ -1134,9 +1154,9 @@ async fn execute_gatt_command(
         BleGattCommand::Read {
             service_uuid,
             characteristic_uuid,
-            response_tx,
+            mut response_tx,
         } => {
-            let outcome = async {
+            let operation = async {
                 let table = state.services();
                 let (service_uuid, properties) = find_gatt_characteristic(
                     &table,
@@ -1155,20 +1175,21 @@ async fn execute_gatt_command(
                     .read(&characteristic)
                     .await
                     .map_err(|_| BleGattError::NotConnected)
+            };
+            if let Some(outcome) = wait_gatt_operation(&mut response_tx, operation).await {
+                let _ = response_tx.send(outcome);
             }
-            .await;
-            let _ = response_tx.send(outcome);
         }
         BleGattCommand::Write {
             service_uuid,
             characteristic_uuid,
             data,
             write_without_response,
-            response_tx,
+            mut response_tx,
         } => {
             let write_without_response =
                 write_without_response.unwrap_or_else(|| state.write_without_response());
-            let outcome = async {
+            let operation = async {
                 let table = state.services();
                 let (service_uuid, properties) = find_gatt_characteristic(
                     &table,
@@ -1202,9 +1223,10 @@ async fn execute_gatt_command(
                     .write(&characteristic, &data, write_type)
                     .await
                     .map_err(|_| BleGattError::NotConnected)
+            };
+            if let Some(outcome) = wait_gatt_operation(&mut response_tx, operation).await {
+                let _ = response_tx.send(outcome);
             }
-            .await;
-            let _ = response_tx.send(outcome);
         }
         BleGattCommand::NotifySubscribe {
             service_uuid,
@@ -1214,6 +1236,11 @@ async fn execute_gatt_command(
         } => {
             let outcome = async {
                 let table = state.services();
+                // btleplug notifications contain only the characteristic UUID.
+                // Reject collisions rather than attribute data to the wrong service.
+                if !gatt_notification_is_unambiguous(&table, characteristic_uuid) {
+                    return Err(BleGattError::UnsupportedCharacteristic);
+                }
                 let (service_uuid, properties) = find_gatt_characteristic(
                     &table,
                     service_uuid,
@@ -1232,10 +1259,13 @@ async fn execute_gatt_command(
                     let characteristic =
                         find_btleplug_characteristic(services, service_uuid, characteristic_uuid)
                             .ok_or(BleGattError::UnsupportedCharacteristic)?;
-                    peripheral
-                        .subscribe(&characteristic)
-                        .await
-                        .map_err(|_| BleGattError::NotConnected)?;
+                    tokio::time::timeout(
+                        Duration::from_secs(5),
+                        peripheral.subscribe(&characteristic),
+                    )
+                    .await
+                    .map_err(|_| BleGattError::Timeout)?
+                    .map_err(|_| BleGattError::NotConnected)?;
                 }
                 let route_id = *next_route_id;
                 *next_route_id += 1;
@@ -2610,6 +2640,67 @@ mod ble_tests {
             .unwrap_err();
         assert_eq!(error, BleGattError::NotConnected);
         assert_eq!(error.code(), "ble_not_connected");
+    }
+
+    #[tokio::test]
+    async fn gatt_abandoned_operations_release_worker_and_skip_queued_io() {
+        let (mut response, receiver) = tokio::sync::oneshot::channel::<Result<(), BleGattError>>();
+        let (started, started_rx) = tokio::sync::oneshot::channel();
+        let worker = tokio::spawn(async move {
+            wait_gatt_operation(&mut response, async {
+                let _ = started.send(());
+                std::future::pending().await
+            })
+            .await
+        });
+        started_rx.await.unwrap();
+        drop(receiver);
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(1), worker)
+                .await
+                .unwrap()
+                .unwrap(),
+            None
+        );
+
+        let (mut response, receiver) = tokio::sync::oneshot::channel::<Result<(), BleGattError>>();
+        drop(receiver);
+        let mut executed = false;
+        let result = wait_gatt_operation(&mut response, async {
+            executed = true;
+            Ok(())
+        })
+        .await;
+        assert_eq!(result, None);
+        assert!(!executed, "expired queued writes must not reach the device");
+
+        let (mut response, _receiver) = tokio::sync::oneshot::channel();
+        assert_eq!(
+            wait_gatt_operation(&mut response, async { Ok(vec![0x12, 0x34]) }).await,
+            Some(Ok(vec![0x12, 0x34]))
+        );
+    }
+
+    #[test]
+    fn gatt_notifications_reject_uuid_collisions_across_services() {
+        let uuid = uuid::Uuid::from_u128(0x20);
+        let mut services = vec![BleGattServiceInfo {
+            uuid: uuid::Uuid::from_u128(0x10),
+            characteristics: vec![BleGattCharacteristicInfo {
+                uuid,
+                properties: BLE_GATT_PROPERTY_NOTIFY,
+            }],
+        }];
+        assert!(gatt_notification_is_unambiguous(&services, uuid));
+        services.push(BleGattServiceInfo {
+            uuid: uuid::Uuid::from_u128(0x11),
+            characteristics: services[0].characteristics.clone(),
+        });
+        assert!(!gatt_notification_is_unambiguous(&services, uuid));
+        assert!(!gatt_notification_is_unambiguous(
+            &services,
+            uuid::Uuid::from_u128(0x21)
+        ));
     }
 
     #[tokio::test]

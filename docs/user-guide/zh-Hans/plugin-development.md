@@ -1925,6 +1925,8 @@ BLE 宿主调用作用于 BLE 终端会话的 GATT 特征值。BLE 会话没有 
 
 通知订阅跟随调用而非 manifest 声明：`ble.onNotification` 替换同一特征的现有路由，`ble.offNotification` 是幂等移除，插件停用或会话关闭都会撤销路由。通知以 `ble.notification` 事件送达，载荷为 `{ sessionId, characteristicUuid, data, encoding, length }`，其中 `data` 固定为 hex；该事件不能通过 `event-subscription` 订阅。路由不跨重连保留——取得新会话 id 后需重新订阅。
 
+读写超时后，worker 会停止等待该操作，并跳过已过期的排队请求；已经提交给设备的写入无法撤回。通知订阅的设备操作超时为五秒。由于底层通知仅通过特征 UUID 标识来源，当同一个特征 UUID 出现在多个已发现的服务中时，即使提供了 `serviceUuid`，订阅也会返回 `ble_unsupported_characteristic`，避免错误分发通知。
+
 ### SFTP 与传输
 
 | 宿主 API | 能力 | 参数 | 返回 |

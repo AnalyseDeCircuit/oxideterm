@@ -1985,6 +1985,8 @@ BLE host calls operate on GATT characteristics of a BLE terminal session. BLE se
 
 Notification subscriptions follow calls, not manifest declarations: `ble.onNotification` replaces the active route for the same characteristic, `ble.offNotification` is an idempotent removal, and deactivating the plugin or closing the session tears routes down. Notifications arrive as `ble.notification` events carrying `{ sessionId, characteristicUuid, data, encoding, length }` with fixed hex `data`; they cannot be subscribed through `event-subscription`. Routes do not survive reconnection — resubscribe after acquiring the new session id.
 
+When a read or write times out, the worker stops waiting for that operation and skips expired queued requests. A write already submitted to the device cannot be rolled back. Notification setup has a five-second device-operation timeout. Because platform notifications identify characteristics by UUID alone, subscribing to a UUID present in multiple discovered services returns `ble_unsupported_characteristic`, even when `serviceUuid` is supplied.
+
 ### SFTP And Transfers
 
 | Host API | Capability | Args | Result |
