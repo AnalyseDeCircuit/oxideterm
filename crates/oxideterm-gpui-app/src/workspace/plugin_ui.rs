@@ -924,6 +924,10 @@ impl WorkspaceApp {
             ),
             "alert" => self.render_native_plugin_alert_control(control),
             "divider" => self.render_native_plugin_divider_control(),
+            // Flexible filler for layout rows: pushes trailing controls to the
+            // far edge without hardcoding host-side row arrangements.
+            "spacer" => div().flex_1().min_w_0().into_any_element(),
+            "readout" => self.render_native_plugin_readout_control(control),
             "markdown" => self.render_native_plugin_text_block_control(control, false),
             "code" | "codeBlock" | "code-block" => {
                 self.render_native_plugin_text_block_control(control, true)
@@ -2008,6 +2012,49 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
+    /// Static icon + value pair with an optional hover hint, used by plugin
+    /// status rows. The host owns the tooltip chrome so plugins can expose
+    /// hints without an interactive control; the icon carries meaning and
+    /// the text carries the value, matching the app's own status bars.
+    fn render_native_plugin_readout_control(
+        &self,
+        control: &plugin_host::NativePluginDeclarativeUiControl,
+    ) -> AnyElement {
+        let muted = rgb(self.tokens.ui.text_muted);
+        let row = div()
+            .id(gpui::ElementId::Name(
+                format!(
+                    "native-plugin-readout-{}",
+                    control.id.as_deref().unwrap_or("readout")
+                )
+                .into(),
+            ))
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .when_some(
+                control.icon.as_deref().map(LucideIcon::from_plugin_name),
+                |row, icon| row.child(Self::render_lucide_icon(icon, 13.0, muted)),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(native_plugin_control_text(control)),
+            );
+        match control.tooltip.as_deref() {
+            Some(hint) => {
+                let tokens = self.tokens;
+                let hint = hint.to_string();
+                row.tooltip(move |_window, cx| {
+                    oxideterm_gpui_ui::tooltip::tooltip_view(tokens, hint.clone(), None, cx)
+                })
+                .into_any_element()
+            }
+            None => row.into_any_element(),
+        }
+    }
+
     fn render_native_plugin_text_block_control(
         &self,
         control: &plugin_host::NativePluginDeclarativeUiControl,
@@ -2328,12 +2375,11 @@ impl WorkspaceApp {
     }
 }
 
-pub(super) fn localize_native_plugin_schema(
-    schema: &mut plugin_host::NativePluginDeclarativeUiSchema,
-    locale: oxideterm_i18n::Locale,
-) {
+/// Locale tag shared by plugin-facing surfaces: schema translation keys and
+/// locale bundle file names inside plugin packages use the same tags.
+pub(super) fn native_plugin_locale_tag(locale: oxideterm_i18n::Locale) -> &'static str {
     use oxideterm_i18n::Locale;
-    let locale = match locale {
+    match locale {
         Locale::De => "de",
         Locale::En => "en",
         Locale::EsEs => "es-ES",
@@ -2345,7 +2391,14 @@ pub(super) fn localize_native_plugin_schema(
         Locale::Vi => "vi",
         Locale::ZhCn => "zh-CN",
         Locale::ZhTw => "zh-TW",
-    };
+    }
+}
+
+pub(super) fn localize_native_plugin_schema(
+    schema: &mut plugin_host::NativePluginDeclarativeUiSchema,
+    locale: oxideterm_i18n::Locale,
+) {
+    let locale = native_plugin_locale_tag(locale);
     let Some(messages) = schema
         .translations
         .get(locale)

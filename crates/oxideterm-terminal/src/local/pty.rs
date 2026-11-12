@@ -955,6 +955,22 @@ impl LocalPtySession {
         snapshot_from_term(&term, self.size, &self.graphics, &self.palette)
     }
 
+    /// Full snapshot that also clears grid damage under the same term lock, so
+    /// the result can be installed as a pane baseline without leaving stale
+    /// scroll damage that would re-shift an already scrolled previous snapshot.
+    pub fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        if let Some(snapshot) = self.tmux_display.snapshot(self.size, None) {
+            return snapshot;
+        }
+        let term = self.display_term();
+        let mut term = term.lock();
+        let snapshot = snapshot_from_term(&term, self.size, &self.graphics, &self.palette);
+        // The reset must happen while the term lock is still held: releasing it
+        // first would let async output race in between and lose its damage.
+        term.reset_damage();
+        snapshot
+    }
+
     pub fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         if let Some(snapshot) = self.tmux_display.snapshot(self.size, Some(previous)) {
             return snapshot;
@@ -1585,6 +1601,68 @@ mod incremental_snapshot_tests {
         assert!(cells[0].style_origin.foreground_is_default_background());
         assert!(!cells[1].style_origin.foreground_is_default_background());
         assert!(!cells[2].style_origin.foreground_is_default_background());
+    }
+
+    #[test]
+    fn stamped_snapshot_consumes_scroll_damage_for_next_incremental_render() {
+        // The plugin local-display stamp path takes a full snapshot after the
+        // grid scrolled and clears term damage under the same lock. The next
+        // render pass must treat the stamped snapshot as an exact baseline: an
+        // incremental rebuild without new output has to reproduce it instead of
+        // applying the stale scroll a second time, which duplicated the freshly
+        // rendered bottom rows on screen.
+        let size = TerminalSize {
+            cols: 12,
+            rows: 6,
+            cell_width: 0,
+            cell_height: 0,
+        };
+        let (listener, _events) = local_event_channel();
+        let mut term = Term::new(Config::default(), &size, listener);
+        // A fresh term starts fully damaged; production has render cycles
+        // before the feed, so consume the initial damage to reach the same
+        // incremental ScrollUp state the bug needs.
+        term.reset_damage();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        // Fill the screen with the cursor walking down every row, then reset
+        // damage like a production render cycle would. Text writes do not
+        // damage their row; only cursor motion does, so this keeps the later
+        // burst's damage limited to the bottom row.
+        for index in 0..5 {
+            parser.advance(&mut term, format!("row-{index}\r\n").as_bytes());
+        }
+        term.reset_damage();
+        // The burst scrolls three lines in while the cursor never leaves the
+        // bottom row, so the pending damage carries a scroll with a narrow
+        // dirty set — exactly the state the stamp path must consume.
+        for index in 5..8 {
+            parser.advance(&mut term, format!("row-{index}\r\n").as_bytes());
+        }
+        let graphics = TerminalGraphicsState::default();
+        let palette = TerminalPalette::default();
+        let stamped = snapshot_from_term_with_display_offset(
+            &term,
+            size,
+            &graphics,
+            &palette,
+            0,
+            size.rows,
+        );
+        // Independent content expectations: the burst scrolled three rows into
+        // scrollback, leaving the fill lines shifted up and the burst rows at
+        // the bottom below the still-empty cursor line.
+        let rendered: Vec<String> = stamped
+            .lines
+            .iter()
+            .map(|line| line.text().trim_end().to_owned())
+            .collect();
+        assert_eq!(
+            rendered,
+            vec!["row-3", "row-4", "row-5", "row-6", "row-7", ""]
+        );
+        term.reset_damage();
+        let rebuilt = incremental_snapshot_from_term(&mut term, size, &graphics, &palette, &stamped);
+        assert_snapshot_content_eq(&rebuilt, &stamped);
     }
 
     #[test]

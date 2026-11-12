@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::manifest::{
     NativePluginActivityBarItemDef, NativePluginAiToolDef, NativePluginDeclarativeUiSchema,
     NativePluginHostMonitorDef, NativePluginSettingDef, NativePluginShortcutDef,
-    NativePluginSidebarDef, NativePluginTabDef,
+    NativePluginSidebarDef, NativePluginTabDef, NativePluginTerminalToolbarActionDef,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,6 +77,13 @@ pub struct NativePluginHostMonitorContribution {
     pub plugin_id: String,
     pub plugin_name: String,
     pub definition: NativePluginHostMonitorDef,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct NativePluginTerminalToolbarActionContribution {
+    pub plugin_id: String,
+    pub plugin_name: String,
+    pub definition: NativePluginTerminalToolbarActionDef,
 }
 
 #[derive(Clone, Debug, PartialEq)]

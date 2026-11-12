@@ -3735,7 +3735,7 @@ mod tests {
 
             let attempted = Arc::new(std::sync::Mutex::new(Vec::<Vec<u8>>::new()));
             let writes = attempted.clone();
-            pane.set_plugin_input_interceptor(Some(Arc::new(move |bytes| {
+            pane.set_plugin_input_interceptor(Some(Arc::new(move |bytes, _session_id| {
                 writes.lock().unwrap().push(bytes.to_vec());
                 super::super::TerminalInputInterceptorResult::Suppress
             })));

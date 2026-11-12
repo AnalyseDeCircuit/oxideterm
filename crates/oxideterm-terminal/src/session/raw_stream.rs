@@ -39,6 +39,12 @@ macro_rules! raw_stream_backend_methods {
         self.feed_plain_transport_output(&trailing_output);
     }
 
+    fn feed_local_display(&mut self, bytes: &[u8]) {
+        // Local display output renders on the screen but must stay out of
+        // recording, session logs, and the device stream (remote_output=false).
+        self.feed_display_output(bytes, false);
+    }
+
     fn interrupt_modem_transfer(&mut self) {
         self.modem_consumer.interrupt_transfer();
     }
@@ -248,6 +254,25 @@ macro_rules! raw_stream_backend_methods {
         )
     }
 
+    fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        let mut term = self.term.lock();
+        let snapshot = snapshot_from_term(
+            &term,
+            TerminalSize {
+                cols: self.resize.cols,
+                rows: self.resize.rows,
+                cell_width: self.resize.cell_width,
+                cell_height: self.resize.cell_height,
+            },
+            &self.graphics,
+            &self.palette,
+        );
+        // Reset under the same lock so the stamped snapshot is an exact
+        // baseline and later output accumulates fresh damage.
+        term.reset_damage();
+        snapshot
+    }
+
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         let mut term = self.term.lock();
         incremental_snapshot_from_term(
@@ -310,7 +335,10 @@ macro_rules! raw_stream_backend_methods {
         if self.runtime_options.local_echo {
             // Local echo is pane feedback, never device output: keep it out of
             // recording and file consumers like the serial backend does.
-            self.feed_display_output(&encoded, false);
+            // Unlike plugin writeLocal it represents device-style traffic, so
+            // it is shaped by the display transforms before local rendering.
+            let shaped = self.prepare_display_output(&encoded);
+            self.feed_display_output(&shaped, false);
         }
         Ok(())
     }
@@ -474,6 +502,16 @@ macro_rules! raw_stream_inherent_methods {
                 format_serial_hexdump(bytes, &mut self.hexdump_offset, true)
             }
         }
+    }
+
+    /// Plugin local display (writeLocal) carries display-ready assistant UI
+    /// text. The device display transforms above — receive line-ending
+    /// normalization, console ingress filtering, hex/mixed dump — shape
+    /// device traffic and would corrupt that text, so it bypasses them. The
+    /// rest of the shared pipeline (magic scan, graphics ingress, triggers)
+    /// still applies.
+    fn prepare_local_display_output(&self, bytes: &[u8]) -> Vec<u8> {
+        bytes.to_vec()
     }
 
     fn flush_buffered_modem_output(&mut self) -> bool {

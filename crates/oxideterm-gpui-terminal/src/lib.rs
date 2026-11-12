@@ -42,8 +42,8 @@ pub use terminal_ui::{
     TerminalCommandSelectionLabels, TerminalHighlightMatchScope, TerminalHighlightRenderMode,
     TerminalHighlightRule, TerminalHighlightRuleSetOverride, TerminalKittyFileTransmissionLabels,
     TerminalModemLabels, TerminalNotice, TerminalNoticeVariant, TerminalPasteLabels,
-    TerminalSerialControlLabels, TerminalSessionLogLabels, TerminalTmuxLabels, TerminalTrzszLabels,
-    TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
-    resolved_terminal_semantic_scheme, terminal_semantic_color, terminal_semantic_line_band,
-    terminal_semantic_variant_color,
+    TerminalSerialControlLabels, TerminalSessionLogLabels, TerminalTmuxLabels,
+    TerminalToolbarActionSpec, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
+    TerminalUiPreferences, TerminalUiTheme, resolved_terminal_semantic_scheme,
+    terminal_semantic_color, terminal_semantic_line_band, terminal_semantic_variant_color,
 };

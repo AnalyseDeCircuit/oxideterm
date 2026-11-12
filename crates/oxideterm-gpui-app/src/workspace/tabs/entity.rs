@@ -110,7 +110,9 @@ struct TerminalPaneWindowAffinity {
     current: AnyWindowHandle,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+// TerminalPaneDelivery forwards the pane event payload, which is Clone but
+// not Copy (ToolbarActionInvoked carries an owned id).
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum WorkspaceTabHostEvent {
     CloseProcessCheckReady,
     RecordingElapsedTick {
@@ -1142,7 +1144,7 @@ impl WorkspaceTabHostEntity {
                 pane_id,
                 session_id,
                 window_handle,
-                event: *event,
+                event: event.clone(),
             });
         });
         self.pane_subscriptions.insert(pane_id, subscription);
@@ -1187,6 +1189,15 @@ impl WorkspaceTabHostEntity {
                 pane.update(cx, |pane, cx| pane.set_render_cache_visible(active, cx));
             }
         }
+    }
+
+    pub(in crate::workspace) fn terminal_session_id_for_pane(
+        &self,
+        pane_id: PaneId,
+    ) -> Option<TerminalSessionId> {
+        self.terminal_locations
+            .iter()
+            .find_map(|(session_id, location)| (location.pane_id == pane_id).then_some(*session_id))
     }
 
     pub(in crate::workspace) fn unbind_terminal_location_for_pane(
@@ -2830,7 +2841,7 @@ mod tests {
             event_recorder._subscription = Some(cx.subscribe(
                 &tab_host,
                 |event_recorder, _tab_host, event, _cx| {
-                    event_recorder.events.push(*event);
+                    event_recorder.events.push(event.clone());
                 },
             ));
         });
@@ -3096,7 +3107,7 @@ mod tests {
             event_recorder._subscription = Some(cx.subscribe(
                 &tab_host,
                 |event_recorder, _tab_host, event, _cx| {
-                    event_recorder.events.push(*event);
+                    event_recorder.events.push(event.clone());
                 },
             ));
         });

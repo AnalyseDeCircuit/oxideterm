@@ -501,7 +501,7 @@
       "serial_loading_ports": "正在載入序列埠...",
       "serial_no_ports": "找不到序列埠。你仍可手動輸入連接埠路徑。",
       "serial_select_detected_port": "選擇偵測到的序列埠",
-      "serial_baud_rate": "鮑率",
+      "serial_baud_rate": "波特率",
       "serial_data_bits": "資料位元",
       "serial_stop_bits": "停止位元",
       "serial_parity": "同位檢查",
@@ -518,7 +518,7 @@
       "serial_profile_name": "設定檔名稱",
       "serial_profile_name_placeholder": "實驗室主控台",
       "serial_save_failed": "儲存序列埠設定檔失敗",
-      "serial_invalid_baud_rate": "鮑率必須大於 0",
+      "serial_invalid_baud_rate": "波特率必須大於 0",
       "serial_port_required": "請選擇或輸入序列埠路徑",
       "ble_save_failed": "無法儲存 BLE 連線",
       "ble_secondary_suffix": " · 次要"

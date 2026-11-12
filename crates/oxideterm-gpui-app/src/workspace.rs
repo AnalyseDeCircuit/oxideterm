@@ -38,6 +38,7 @@ mod plugin_entity;
 mod plugin_lifecycle;
 mod plugin_manager;
 mod plugin_preview;
+mod plugin_toolbar;
 mod plugin_ui;
 mod public_mcp;
 mod quick_commands;
@@ -113,10 +114,10 @@ use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, Animation, AnimationExt, AnyElement, AnyWindowHandle, App, Bounds,
     ClipboardEntry, ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable,
-    FollowMode, Image, ImageFormat, IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment,
-    ListState, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    ObjectFit, ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba,
-    ScrollHandle, ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Task,
+    FollowMode, FontWeight, Image, ImageFormat, IntoElement, KeyDownEvent, KeyUpEvent,
+    ListAlignment, ListState, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage,
+    Rgba, ScrollHandle, ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Task,
     TextLayout, Timer, UniformListScrollHandle, Window, anchored, canvas, deferred, div,
     prelude::*, px, relative, rgb, rgba, svg,
 };
@@ -191,11 +192,11 @@ use oxideterm_gpui_terminal::{
     TerminalPane, TerminalPaneEvent, TerminalPasteLabels, TerminalRecordingState,
     TerminalRecordingStatus, TerminalSearchStatus, TerminalSerialControlLabels,
     TerminalSessionLogContext, TerminalSessionLogLabels, TerminalSessionLogOptions,
-    TerminalSessionLogState, TerminalSessionLogStatus, TerminalTmuxLabels, TerminalTrzszLabels,
-    TerminalUiPreferenceOverrides, TerminalUiPreferences, TerminalUiTheme,
-    TerminalWorkingDirectorySource, detect_custom_privilege_prompt, prune_terminal_session_logs,
-    resolved_terminal_semantic_scheme, terminal_semantic_line_band,
-    terminal_semantic_variant_color,
+    TerminalSessionLogState, TerminalSessionLogStatus, TerminalTmuxLabels,
+    TerminalToolbarActionSpec, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
+    TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
+    detect_custom_privilege_prompt, prune_terminal_session_logs, resolved_terminal_semantic_scheme,
+    terminal_semantic_line_band, terminal_semantic_variant_color,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
@@ -266,10 +267,10 @@ use oxideterm_ssh_launch::{
     NativeConnectionLaunch, TemporaryMoshLaunch, TemporarySshLaunch, TemporaryTelnetLaunch,
 };
 use oxideterm_terminal::{
-    BleSessionConfig, LocalPtyConfig, MoshTerminalConfig, RemoteShellIntegrationStatus,
-    SerialSessionConfig, ShellInfo, SshSessionConfig, TelnetSessionConfig,
-    TerminalCommandMarkDetectionSource, TerminalCursorShape, TerminalLifecycle,
-    load_local_shell_history_commands, scan_shells,
+    BleGattHandle, BleSessionConfig, LocalPtyConfig, MoshTerminalConfig,
+    RemoteShellIntegrationStatus, SerialSessionConfig, ShellInfo, SshSessionConfig,
+    TelnetSessionConfig, TerminalCommandMarkDetectionSource, TerminalCursorShape,
+    TerminalLifecycle, load_local_shell_history_commands, scan_shells,
 };
 use oxideterm_theme::{
     AppUiColors, TerminalTheme, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
@@ -872,6 +873,10 @@ pub(crate) struct WorkspaceApp {
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,
+    // Shared behind a mutex so plugin host-call resolvers resolve handles per
+    // call instead of holding a frozen activation-time snapshot.
+    ble_gatt_handles: Arc<std::sync::Mutex<HashMap<TerminalSessionId, BleGattHandle>>>,
+    ble_notification_router: plugin_lifecycle::BleNotificationRouter,
     _plugin_entity_subscription: Subscription,
     split_drag: Option<SplitDrag>,
     disclosure_motions: disclosure_motion::DisclosureMotions,
@@ -889,6 +894,21 @@ pub(crate) struct WorkspaceApp {
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
     acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
     mosh_plugin_sessions: Arc<oxideterm_mosh::MoshPluginSessions>,
+    // Panes whose plugin toolbar state currently declares `overlay`; one
+    // member per pane, in-memory only, never persisted. The single physical
+    // card binds to whichever member is the active pane; the binding is
+    // derived from focus, never stored. The host owns the binding
+    // transitions, the render gate, and the card chrome, while the plugin
+    // owns the card content and refresh semantics.
+    plugin_overlay_members: HashMap<PaneId, plugin_toolbar::PluginOverlayAnchor>,
+    // Monotonic counter feeding each claimed anchor's generation so retired
+    // poll loops can detect that a newer claim replaced theirs.
+    plugin_overlay_generation: u64,
+    // Authoritative per-pane toolbar state for plugin-contributed chips:
+    // (plugin id, action id, pane id) -> state id. A missing entry means the
+    // action's declared default state; the pane's toolbar specs are only a
+    // render mirror pushed from here. Entries exist for open panes only.
+    plugin_toolbar_states: HashMap<(String, String, PaneId), String>,
     skill_registry: std::sync::Arc<parking_lot::RwLock<oxideterm_skills::SkillRegistry>>,
     skill_workspace_root: Option<std::path::PathBuf>,
     loaded_conversation_skills: HashMap<String, HashMap<String, String>>,

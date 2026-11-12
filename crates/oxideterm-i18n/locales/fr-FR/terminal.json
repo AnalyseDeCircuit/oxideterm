@@ -654,13 +654,13 @@
       "agent_installing": "Installation de l’agent : {{percent}}% ({{transferred}} / {{total}} KiB)",
       "agent_starting": "Démarrage de l’agent…"
     },
-      "ble": {
-        "connection_failed": "Échec de la connexion BLE : {error}",
-        "runtime_init_failed": "Échec de l'initialisation du runtime BLE",
-        "adapter_index_out_of_range": "L'index de l'adaptateur Bluetooth {n} est hors limites",
-        "service_not_found": "Service {uuid} introuvable",
-        "no_notify_write_pair": "Le service sélectionné n'a pas de paire de caractéristiques notify+write"
-      }
+    "ble": {
+      "connection_failed": "Échec de la connexion BLE : {error}",
+      "runtime_init_failed": "Échec de l'initialisation du runtime BLE",
+      "adapter_index_out_of_range": "L'index de l'adaptateur Bluetooth {n} est hors plage",
+      "service_not_found": "Service {uuid} introuvable",
+      "no_notify_write_pair": "Le service sélectionné n'a pas de paire de caractéristiques notify+write"
+    }
   },
   "search": {
     "placeholder": "Rechercher",

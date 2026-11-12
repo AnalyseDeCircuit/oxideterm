@@ -126,6 +126,8 @@ pub struct NativePluginContributes {
     pub api_commands: Option<Vec<String>>,
     #[serde(default)]
     pub host_monitors: Option<Vec<NativePluginHostMonitorDef>>,
+    #[serde(default)]
+    pub terminal_toolbar: Option<Vec<NativePluginTerminalToolbarActionDef>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -253,6 +255,46 @@ pub struct NativePluginTabDef {
     pub icon: String,
 }
 
+/// A multi-state toolbar chip a plugin adds to every terminal pane. Label
+/// keys resolve in the plugin's own locale bundle (`manifest.locales`), which
+/// the host reads from the package directory so the chip follows the app
+/// locale even while the plugin runtime is stopped. The host assigns no
+/// meaning to the state id strings: it cycles through `states` in declaration
+/// order and demotes to `default_state`. It does interpret the per-state
+/// `overlay` flag, described below.
+///
+/// When a state is marked `overlay`, the host provides the anchor primitive:
+/// it pins the workspace-unique overlay card to the pane that entered the
+/// state, gates rendering on that pane's focus, draws the card chrome, and
+/// delivers visibility events. The card's content and refresh semantics
+/// belong entirely to the plugin, which renders `overlay_tab`'s runtime view.
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginTerminalToolbarActionDef {
+    pub id: String,
+    pub label_key: String,
+    pub states: Vec<NativePluginTerminalToolbarStateDef>,
+    pub default_state: String,
+    /// Locale-bundle key for the tooltip shown while the plugin is unavailable.
+    #[serde(default)]
+    pub disabled_hint_key: Option<String>,
+    /// Contributed tab id whose runtime view fills the overlay card body.
+    /// Required when one of `states` declares `overlay`.
+    #[serde(default)]
+    pub overlay_tab: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativePluginTerminalToolbarStateDef {
+    pub id: String,
+    pub label_key: String,
+    /// Entering this state anchors the plugin's overlay card to the pane.
+    /// At most one state per action may set it.
+    #[serde(default)]
+    pub overlay: bool,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct NativePluginSidebarDef {
     pub id: String,
@@ -343,6 +385,9 @@ pub struct NativePluginDeclarativeUiControl {
     pub placeholder: Option<String>,
     #[serde(default)]
     pub icon: Option<String>,
+    /// Hover hint for static readouts; the host renders the tooltip chrome.
+    #[serde(default)]
+    pub tooltip: Option<String>,
     #[serde(default)]
     pub variant: Option<String>,
     #[serde(default)]

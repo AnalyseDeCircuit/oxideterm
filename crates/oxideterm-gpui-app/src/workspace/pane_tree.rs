@@ -235,16 +235,34 @@ impl WorkspaceApp {
             // Weak routing endpoints follow pane remounts without taking
             // ownership of the pane, its SSH channel, or the physical node.
             pane.set_input_broadcaster(Some(broadcaster));
+            // Plugin input hooks attribute keystrokes to this session id.
+            pane.set_plugin_session_id(Some(session_id.0.to_string()));
         });
         self.tab_host.update(cx, |tab_host, cx| {
-            tab_host.register_terminal_pane(pane_id, session_id, pane, window_handle, cx);
+            tab_host.register_terminal_pane(pane_id, session_id, pane.clone(), window_handle, cx);
         });
         // The live terminal session is the capability owner. A later tab move
         // reuses this registration instead of minting another owner identity.
         self.ai_runtime_context.update(cx, |runtime, _cx| {
             runtime.register_terminal_session(session_id, terminal_label);
         });
+        // Publish the GATT command surface for plugin host calls. This shared
+        // pane funnel is the single registration point, so every session
+        // creation path (current and future) publishes BLE sessions; non-BLE
+        // sessions expose no handle and are skipped. Registry cleanup on close
+        // is hygiene; the session worker's drop ends pumps and CCCD state on
+        // its own.
+        if let Some(handle) = pane.read(cx).shared_session().lock().ble_gatt_handle() {
+            self.ble_gatt_handles
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .insert(session_id, handle);
+        }
         self.refresh_native_plugin_terminal_hooks(cx);
+        // A newly registered pane has no stored toolbar state, so its chips
+        // render the contributed default states with live plugin availability
+        // without touching the states other panes display.
+        self.push_plugin_toolbar_specs_for_pane(pane_id, &pane, cx);
     }
 
     pub(super) fn handle_terminal_pane_delivery(
@@ -407,6 +425,66 @@ impl WorkspaceApp {
             TerminalPaneEvent::TelnetLineEndingsChanged { input, output } => {
                 self.persist_telnet_line_endings(session_id, input, output, cx);
             }
+            TerminalPaneEvent::ToolbarActionInvoked { id } => {
+                // Spec ids are "plugin_id:action_id"; an unknown pair means
+                // the plugin stopped declaring the chip, so drop the click.
+                let Some((plugin_id, action_id)) = id.split_once(':') else {
+                    return;
+                };
+                let Some(definition) = self.plugin_toolbar_definition(plugin_id, action_id, cx)
+                else {
+                    return;
+                };
+                // The toolbar chip stops mouse propagation, so the container
+                // click handler that normally activates and focuses the pane
+                // never runs. Clicking the chip is a pane-level interaction:
+                // activate the clicked pane first so the synchronous overlay
+                // handover (anchor claim and render gate) targets the pane
+                // that owns the click; keyboard focus lands on the next frame
+                // through needs_active_pane_focus.
+                let tab_id = self
+                    .tab_host
+                    .read(cx)
+                    .tabs()
+                    .iter()
+                    .find(|tab| {
+                        tab.root_pane
+                            .as_ref()
+                            .is_some_and(|root| root.contains_pane(pane_id))
+                    })
+                    .map(|tab| tab.id);
+                if let Some(tab_id) = tab_id {
+                    self.tab_host
+                        .update(cx, |host, _| host.set_active_pane(Some(tab_id), pane_id));
+                    self.needs_active_pane_focus = true;
+                }
+                if !self.native_plugin_available(plugin_id, cx) {
+                    return;
+                }
+                // The plugin owns the state semantics. Wake its runtime so
+                // the first click (every pane at the default state, runtime
+                // stopped) is still delivered, then hand the click over as an
+                // event; the plugin reports the resolved state back through
+                // toolbar.reportActionState.
+                let resolver = self.native_plugin_host_api_resolver(cx);
+                self.plugin_entity.update(cx, |plugins, _cx| {
+                    let _ = plugins.start_runtime_plugin_activation(plugin_id, resolver);
+                });
+                let current = self
+                    .plugin_toolbar_state(plugin_id, action_id, pane_id)
+                    .cloned()
+                    .unwrap_or_else(|| definition.default_state.clone());
+                self.dispatch_native_plugin_event(
+                    plugin_id.to_string(),
+                    plugin_host::NATIVE_PLUGIN_TOOLBAR_ACTION_CLICKED_EVENT,
+                    serde_json::json!({
+                        "actionId": action_id,
+                        "paneId": pane_id.0,
+                        "currentState": current,
+                    }),
+                    cx,
+                );
+            }
             TerminalPaneEvent::PrivilegePromptStateChanged => {
                 if self.active_pane_id(cx) == Some(pane_id)
                     && self.sync_active_privilege_prompt_inline_hint(cx)
@@ -546,6 +624,13 @@ impl WorkspaceApp {
         pane_id: &PaneId,
         cx: &mut Context<Self>,
     ) -> Option<gpui::Entity<TerminalPane>> {
+        // Capture the session id up front: the GATT registry cleanup below
+        // keys on it, and tab_host unbinds the pane->session mapping at the
+        // end of this funnel, so a late lookup could silently miss.
+        let session_id = self
+            .tab_host
+            .read(cx)
+            .terminal_session_id_for_pane(*pane_id);
         self.release_shell_ide_for_pane(*pane_id, cx);
         self.clear_workspace_tooltip(&format!("terminal-timestamp-{}", pane_id.0), cx);
         if let Some(terminal) = self
@@ -557,6 +642,18 @@ impl WorkspaceApp {
         {
             self.close_plugin_connection_terminal(&terminal, cx);
         }
+        // Drop the BLE GATT registry entry with the pane. Notification pumps
+        // observe the session worker's drop and tear down their routes
+        // themselves, so no explicit cancellation is needed here.
+        if let Some(session_id) = session_id {
+            self.ble_gatt_handles
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .remove(&session_id);
+        }
+        // Toolbar states are pane-anchored; dropping them releases the
+        // overlay anchor and re-derives the affected plugin runtimes.
+        self.plugin_toolbar_pane_closed(pane_id, cx);
         if self
             .ai_entity
             .read(cx)

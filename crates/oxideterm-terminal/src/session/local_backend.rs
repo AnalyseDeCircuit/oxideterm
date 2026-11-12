@@ -221,6 +221,10 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::snapshot(self)
     }
 
+    fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        LocalPtySession::snapshot_consuming_damage(self)
+    }
+
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         LocalPtySession::snapshot_incremental(self, previous)
     }

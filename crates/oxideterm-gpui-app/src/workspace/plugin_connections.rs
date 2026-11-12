@@ -98,21 +98,7 @@ impl WorkspaceApp {
             .registry()
             .plugins()
             .iter()
-            .filter(|plugin| {
-                matches!(
-                    plugin.state,
-                    plugin_host::NativePluginState::ReadyProcess
-                        | plugin_host::NativePluginState::Loading
-                        | plugin_host::NativePluginState::Active
-                ) && matches!(
-                    plugin.runtime_plan,
-                    plugin_host::NativePluginRuntimePlan::Process { .. }
-                ) && !plugin_host::native_plugin_requires_permission_review(
-                    &plugin.manifest,
-                    &plugin.runtime_plan,
-                    &plugin.config,
-                )
-            })
+            .filter(|plugin| plugin_host::native_plugin_process_activatable(plugin))
             .flat_map(|plugin| {
                 plugin
                     .manifest

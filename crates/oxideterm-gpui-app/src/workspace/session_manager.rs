@@ -1136,4 +1136,4 @@ pub(in crate::workspace) use self::views::{
 };
 
 #[cfg(test)]
-mod tests;
+pub(in crate::workspace) mod tests;

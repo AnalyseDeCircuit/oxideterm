@@ -918,7 +918,7 @@
         "parameters": "參數",
         "confirmation": "確認策略",
         "port_path": "序列埠路徑",
-        "baud_rate": "鮑率",
+        "baud_rate": "波特率",
         "data_bits": "資料位元",
         "stop_bits": "停止位元",
         "parity": "同位檢查",

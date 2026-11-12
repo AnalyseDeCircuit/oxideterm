@@ -63,6 +63,50 @@ fn connection_declarations_validate_provider_permissions_and_form_boundaries() {
     }
 }
 
+#[test]
+fn terminal_hook_declarations_require_their_capabilities() {
+    let mut manifest = minimal_manifest();
+    manifest.contributes = Some(
+        serde_json::from_value(serde_json::json!({
+            "terminalHooks": {"inputInterceptor": true, "outputProcessor": true}
+        }))
+        .unwrap(),
+    );
+    // Hooks without any capability declaration fail with the mirrored gate.
+    assert_eq!(
+        validate_native_plugin_manifest(&manifest).unwrap_err(),
+        "contributes.terminalHooks.inputInterceptor requires the terminal.content.read and terminal.write capabilities"
+    );
+    manifest.permissions.capabilities = vec!["terminal.write".into()];
+    assert_eq!(
+        validate_native_plugin_manifest(&manifest).unwrap_err(),
+        "contributes.terminalHooks.inputInterceptor requires the terminal.content.read and terminal.write capabilities"
+    );
+    // Both interceptor capabilities satisfy the interceptor but the output
+    // processor still needs terminal.content.read alone to pass everything.
+    manifest.permissions.capabilities =
+        vec!["terminal.content.read".into(), "terminal.write".into()];
+    validate_native_plugin_manifest(&manifest).unwrap();
+    manifest.contributes = Some(
+        serde_json::from_value(serde_json::json!({
+            "terminalHooks": {"outputProcessor": true}
+        }))
+        .unwrap(),
+    );
+    manifest.permissions.capabilities = vec!["terminal.write".into()];
+    assert_eq!(
+        validate_native_plugin_manifest(&manifest).unwrap_err(),
+        "contributes.terminalHooks.outputProcessor requires the terminal.content.read capability"
+    );
+    manifest.permissions.capabilities = vec!["terminal.content.read".into()];
+    validate_native_plugin_manifest(&manifest).unwrap();
+    // Declaring no hooks keeps manifests without capabilities valid.
+    manifest.contributes =
+        Some(serde_json::from_value(serde_json::json!({"terminalHooks": {}})).unwrap());
+    manifest.permissions.capabilities.clear();
+    validate_native_plugin_manifest(&manifest).unwrap();
+}
+
 use std::io::Write as _;
 use std::time::{SystemTime, UNIX_EPOCH};
 use zip::{ZipWriter, write::SimpleFileOptions};
@@ -1857,9 +1901,18 @@ fn manifest_only_contributions_follow_persisted_enable_state() {
     fs::create_dir_all(&plugin_dir).unwrap();
     let mut manifest = minimal_manifest();
     manifest.contributes = Some(sample_contributes());
+    // sample_contributes declares an input interceptor, whose registration the
+    // host gates behind these capabilities.
+    manifest.permissions.capabilities =
+        vec!["terminal.content.read".into(), "terminal.write".into()];
     write_manifest(&plugin_dir, &manifest);
 
     let mut registry = NativePluginRegistry::discover(&settings_path);
+    // The interceptor capabilities require approval before the plugin becomes
+    // ready; enabling records the approval.
+    registry
+        .set_plugin_enabled("com.example.demo", true)
+        .unwrap();
     assert_eq!(
         registry.plugins()[0].state,
         NativePluginState::ReadyManifestOnly
@@ -1874,6 +1927,20 @@ fn manifest_only_contributions_follow_persisted_enable_state() {
     assert_eq!(contributions.connection_hooks.len(), 1);
     assert_eq!(contributions.api_commands.len(), 1);
     assert_eq!(contributions.host_monitors.len(), 1);
+    assert_eq!(contributions.terminal_toolbar_actions.len(), 1);
+    assert_eq!(
+        contributions.terminal_toolbar_actions[0]
+            .definition
+            .default_state,
+        "off"
+    );
+    assert_eq!(
+        contributions.terminal_toolbar_actions[0]
+            .definition
+            .states
+            .len(),
+        2
+    );
     assert_eq!(
         contributions
             .host_monitor("com.example.demo", "workers")
@@ -1918,9 +1985,18 @@ fn plugin_setting_values_resolve_defaults_validate_and_persist() {
     fs::create_dir_all(&plugin_dir).unwrap();
     let mut manifest = minimal_manifest();
     manifest.contributes = Some(sample_contributes());
+    // sample_contributes declares an input interceptor, whose registration the
+    // host gates behind these capabilities.
+    manifest.permissions.capabilities =
+        vec!["terminal.content.read".into(), "terminal.write".into()];
     write_manifest(&plugin_dir, &manifest);
 
     let mut registry = NativePluginRegistry::discover(&settings_path);
+    // The interceptor capabilities require approval before contributions are
+    // served; enabling records the approval.
+    registry
+        .set_plugin_enabled("com.example.demo", true)
+        .unwrap();
     assert_eq!(
         registry.plugin_setting_value("com.example.demo", "mode"),
         Some(Value::String("auto".to_string()))
@@ -2044,9 +2120,18 @@ fn runtime_registrations_feed_host_owned_contribution_store_and_cleanup() {
         }),
         ..NativePluginContributes::default()
     });
+    // The declared input interceptor and output processor are gated behind
+    // these capabilities by manifest validation.
+    manifest.permissions.capabilities =
+        vec!["terminal.content.read".into(), "terminal.write".into()];
     write_manifest(&plugin_dir, &manifest);
 
     let mut registry = NativePluginRegistry::discover(&settings_path);
+    // The interceptor capabilities require approval before the plugin serves
+    // contributions; enabling records the approval.
+    registry
+        .set_plugin_enabled("com.example.demo", true)
+        .unwrap();
     registry
         .apply_runtime_registration(PluginRegistration {
             registration_id: "cmd-1".to_string(),
@@ -2360,6 +2445,10 @@ fn toggling_another_plugin_preserves_loading_and_active_tabs() {
         entry: "plugin.wasm".into(),
     });
     manifest.contributes = Some(sample_contributes());
+    // sample_contributes declares an input interceptor, whose registration the
+    // host gates behind these capabilities.
+    manifest.permissions.capabilities =
+        vec!["terminal.content.read".into(), "terminal.write".into()];
     fs::write(plugin_dir.join("plugin.wasm"), b"\0asm").unwrap();
     write_manifest(&plugin_dir, &manifest);
     let other_dir = plugins_dir.join("com.example.other");
@@ -2670,6 +2759,7 @@ fn disabled_or_loading_declarative_buttons_are_not_actionable() {
         description: None,
         placeholder: None,
         icon: None,
+        tooltip: None,
         variant: None,
         tone: None,
         size: None,
@@ -2904,6 +2994,134 @@ fn malformed_contribution_definition_is_rejected_with_diagnostic() {
 }
 
 #[test]
+fn terminal_toolbar_contributions_validate_ids_and_default_state() {
+    let action = NativePluginTerminalToolbarActionDef {
+        id: "demo-mode".to_string(),
+        label_key: "terminal.demo.button".to_string(),
+        states: vec![NativePluginTerminalToolbarStateDef {
+            id: "off".to_string(),
+            label_key: "terminal.demo.off".to_string(),
+            overlay: false,
+        }],
+        default_state: "off".to_string(),
+        disabled_hint_key: None,
+        overlay_tab: None,
+    };
+    assert!(
+        validate_native_plugin_contributions(&NativePluginContributes {
+            terminal_toolbar: Some(vec![action.clone()]),
+            ..NativePluginContributes::default()
+        })
+        .is_ok()
+    );
+
+    let unknown_default = NativePluginTerminalToolbarActionDef {
+        default_state: "missing".to_string(),
+        ..action.clone()
+    };
+    let error = validate_native_plugin_contributions(&NativePluginContributes {
+        terminal_toolbar: Some(vec![unknown_default]),
+        ..NativePluginContributes::default()
+    })
+    .unwrap_err();
+    assert!(error.contains("is not a declared state"), "{error}");
+
+    let error = validate_native_plugin_contributions(&NativePluginContributes {
+        terminal_toolbar: Some(vec![action.clone(), action]),
+        ..NativePluginContributes::default()
+    })
+    .unwrap_err();
+    assert!(
+        error.contains("Duplicate contributes.terminalToolbar id"),
+        "{error}"
+    );
+}
+
+#[test]
+fn terminal_toolbar_overlay_states_validate_anchor_tab() {
+    let state = |id: &str, overlay: bool| NativePluginTerminalToolbarStateDef {
+        id: id.to_string(),
+        label_key: format!("terminal.demo.{id}"),
+        overlay,
+    };
+    let tab = || NativePluginTabDef {
+        id: "demo-tab".to_string(),
+        title: "Demo".to_string(),
+        icon: "star".to_string(),
+    };
+    let action = |states: Vec<NativePluginTerminalToolbarStateDef>, overlay_tab: Option<&str>| {
+        NativePluginTerminalToolbarActionDef {
+            id: "demo-mode".to_string(),
+            label_key: "terminal.demo.button".to_string(),
+            states,
+            default_state: "off".to_string(),
+            disabled_hint_key: None,
+            overlay_tab: overlay_tab.map(str::to_string),
+        }
+    };
+
+    for (label, action, tabs, expected) in [
+        (
+            "a second overlay state is rejected",
+            action(
+                vec![
+                    state("off", false),
+                    state("inline", true),
+                    state("overlay", true),
+                ],
+                Some("demo-tab"),
+            ),
+            Some(vec![tab()]),
+            "more than one overlay state",
+        ),
+        (
+            "an overlay state without overlayTab is rejected",
+            action(vec![state("off", false), state("overlay", true)], None),
+            Some(vec![tab()]),
+            "requires overlayTab",
+        ),
+        (
+            "overlayTab pointing at an undeclared tab is rejected",
+            action(
+                vec![state("off", false), state("overlay", true)],
+                Some("other-tab"),
+            ),
+            Some(vec![tab()]),
+            "is not a declared tab",
+        ),
+        (
+            "overlayTab without any contributed tabs is rejected",
+            action(
+                vec![state("off", false), state("overlay", true)],
+                Some("demo-tab"),
+            ),
+            None,
+            "is not a declared tab",
+        ),
+    ] {
+        let error = validate_native_plugin_contributions(&NativePluginContributes {
+            tabs,
+            terminal_toolbar: Some(vec![action]),
+            ..NativePluginContributes::default()
+        })
+        .unwrap_err();
+        assert!(error.contains(expected), "{label}: {error}");
+    }
+
+    assert!(
+        validate_native_plugin_contributions(&NativePluginContributes {
+            tabs: Some(vec![tab()]),
+            terminal_toolbar: Some(vec![action(
+                vec![state("off", false), state("overlay", true)],
+                Some("demo-tab"),
+            )]),
+            ..NativePluginContributes::default()
+        })
+        .is_ok()
+    );
+}
+
+#[test]
 fn legacy_js_plugin_cannot_be_enabled_by_native_toggle() {
     let temp_dir = unique_temp_dir("plugin-legacy-enable");
     let settings_path = temp_dir.join("settings.json");
@@ -3097,6 +3315,25 @@ fn sample_contributes() -> NativePluginContributes {
             output: NativePluginHostMonitorOutputDef::default(),
             timeout_seconds: 10,
             max_output_bytes: 256 * 1024,
+        }]),
+        terminal_toolbar: Some(vec![NativePluginTerminalToolbarActionDef {
+            id: "demo-mode".to_string(),
+            label_key: "terminal.demo.button".to_string(),
+            states: vec![
+                NativePluginTerminalToolbarStateDef {
+                    id: "off".to_string(),
+                    label_key: "terminal.demo.off".to_string(),
+                    overlay: false,
+                },
+                NativePluginTerminalToolbarStateDef {
+                    id: "on".to_string(),
+                    label_key: "terminal.demo.on".to_string(),
+                    overlay: false,
+                },
+            ],
+            default_state: "off".to_string(),
+            disabled_hint_key: Some("terminal.demo.unavailable".to_string()),
+            overlay_tab: None,
         }]),
     }
 }

@@ -654,13 +654,13 @@
       "agent_installing": "正在安装代理：{{percent}}%（{{transferred}} / {{total}} KiB）",
       "agent_starting": "正在启动代理…"
     },
-      "ble": {
-        "connection_failed": "BLE 连接失败：{error}",
-        "runtime_init_failed": "BLE 运行时初始化失败",
-        "adapter_index_out_of_range": "蓝牙适配器索引 {n} 越界",
-        "service_not_found": "未找到服务 {uuid}",
-        "no_notify_write_pair": "所选服务缺少 notify+write 特征对"
-      }
+    "ble": {
+      "connection_failed": "BLE 连接失败：{error}",
+      "runtime_init_failed": "BLE 运行时初始化失败",
+      "adapter_index_out_of_range": "蓝牙适配器索引 {n} 越界",
+      "service_not_found": "未找到服务 {uuid}",
+      "no_notify_write_pair": "所选服务缺少 notify+write 特征对"
+    }
   },
   "search": {
     "placeholder": "搜索",

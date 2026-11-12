@@ -904,6 +904,30 @@ impl TerminalSessionBackend for SshPtyCore {
         )
     }
 
+    fn snapshot_consuming_damage(&self) -> TerminalSnapshot {
+        let size = TerminalSize {
+            cols: self.parser_state.resize.cols,
+            rows: self.parser_state.resize.rows,
+            cell_width: self.parser_state.resize.cell_width,
+            cell_height: self.parser_state.resize.cell_height,
+        };
+        if let Some(snapshot) = self.parser_state.tmux_display.snapshot(size, None) {
+            return snapshot;
+        }
+        let term = self.parser_state.display_term();
+        let mut term = term.lock();
+        let snapshot = snapshot_from_term(
+            &term,
+            size,
+            &self.parser_state.graphics,
+            &self.parser_state.palette,
+        );
+        // Reset under the same lock so the stamped snapshot is an exact
+        // baseline and later output accumulates fresh damage.
+        term.reset_damage();
+        snapshot
+    }
+
     fn snapshot_incremental(&self, previous: &TerminalSnapshot) -> TerminalSnapshot {
         let size = TerminalSize {
             cols: self.parser_state.resize.cols,

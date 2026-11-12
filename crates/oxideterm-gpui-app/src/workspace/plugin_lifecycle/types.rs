@@ -104,16 +104,43 @@ impl NativePluginConfirmDialog {
 }
 
 pub(in crate::workspace) struct NativePluginTerminalRequest {
+    pub(in crate::workspace) plugin_id: String,
     pub(in crate::workspace) request_id: String,
     pub(in crate::workspace) action: NativePluginTerminalAction,
     pub(in crate::workspace) response_tx: mpsc::Sender<plugin_runtime::PluginResponse>,
 }
 
 pub(in crate::workspace) enum NativePluginTerminalAction {
-    WriteActive { text: String },
-    WriteNode { node_id: String, text: String },
-    ClearBuffer { node_id: String },
-    OpenTelnet { host: String, port: u16 },
+    WriteActive {
+        text: String,
+    },
+    WriteNode {
+        node_id: String,
+        text: String,
+    },
+    WriteLocal {
+        terminal_id: Option<String>,
+        text: String,
+    },
+    ClearBuffer {
+        node_id: String,
+    },
+    OpenTelnet {
+        host: String,
+        port: u16,
+    },
+    Notify {
+        title: String,
+        description: Option<String>,
+        variant: String,
+    },
+    /// The plugin resolved the state for a toolbar chip click; the host
+    /// applies it for the pane under the requesting plugin's identity.
+    ReportToolbarActionState {
+        action_id: String,
+        state_id: String,
+        pane_id: u64,
+    },
 }
 
 /// Describes a plugin effect that must be applied with a live workspace window.

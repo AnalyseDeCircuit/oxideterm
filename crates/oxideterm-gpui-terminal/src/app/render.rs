@@ -1585,8 +1585,46 @@ impl TerminalPane {
                         }
                     }),
                 ),
-            );
+            )
+            .child(self.render_terminal_toolbar_separator())
+            .children(self.render_toolbar_actions(cx));
         self.render_terminal_control_bar(information_row, control_row, cx)
+    }
+
+    /// Embedder-pushed toolbar chips, only rendered on the BLE control bar
+    /// where plugin surfaces operate. Clicking an enabled chip reports its id
+    /// to the embedder, which owns the semantics; disabled chips only expose
+    /// their hint tooltip. The mouse handlers stop propagation so the click
+    /// never reaches the pane-surface focus or container activation handlers —
+    /// the embedder activates the pane itself.
+    fn render_toolbar_actions(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        self.toolbar_actions
+            .iter()
+            .map(|spec| {
+                if spec.enabled {
+                    let invoke = cx.listener({
+                        let id = spec.id.clone();
+                        move |_this, _event: &MouseDownEvent, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            cx.emit(TerminalPaneEvent::ToolbarActionInvoked { id: id.clone() });
+                        }
+                    });
+                    self.render_terminal_toolbar_action(spec.label.clone(), true, spec.active)
+                        .on_mouse_down(MouseButton::Left, invoke)
+                        .into_any_element()
+                } else {
+                    let tokens = self.theme.tokens;
+                    let hint = spec.disabled_hint.clone().unwrap_or_default();
+                    self.render_terminal_toolbar_action(spec.label.clone(), false, false)
+                        .id(SharedString::from(format!("toolbar-action-{}", spec.id)))
+                        .tooltip(move |_, cx| {
+                            oxideterm_gpui_ui::tooltip::tooltip_view(tokens, hint.clone(), None, cx)
+                        })
+                        .into_any_element()
+                }
+            })
+            .collect()
     }
 
     fn render_serial_control_bar(&self, cx: &mut Context<Self>) -> AnyElement {

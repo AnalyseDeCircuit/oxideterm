@@ -197,6 +197,29 @@ impl NativePluginRegistry {
             .collect()
     }
 
+    /// Activation plan for one installed process plugin regardless of its
+    /// current runtime state. Registry state can lag a just-completed
+    /// deactivation, and on-demand activation (mode-gated plugins) must still
+    /// be able to restart such a runtime.
+    pub fn process_activation_plan(
+        &self,
+        plugin_id: &str,
+    ) -> Option<NativePluginProcessActivationPlan> {
+        let plugin = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.manifest.id == plugin_id)?;
+        let NativePluginRuntimePlan::Process { entry } = &plugin.runtime_plan else {
+            return None;
+        };
+        Some(NativePluginProcessActivationPlan {
+            plugin_id: plugin.manifest.id.clone(),
+            manifest: plugin.manifest.clone(),
+            install_dir: plugin.install_dir.clone(),
+            entry: entry.clone(),
+        })
+    }
+
     /// ACP processes are launched lazily by the ACP owner, never by the plugin supervisor.
     pub fn acp_agents(&self) -> Vec<NativePluginAcpAgent> {
         self.plugins

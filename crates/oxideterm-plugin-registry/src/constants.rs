@@ -11,11 +11,8 @@ pub(crate) const PLUGIN_MANIFEST_FILENAME: &str = "plugin.json";
 pub(crate) const PLUGIN_CONFIG_SCHEMA_VERSION: u32 = 1;
 pub(crate) const PLUGIN_STORAGE_MAX_KEY_BYTES: usize = 256;
 pub(crate) const PLUGIN_STORAGE_MAX_PLUGIN_BYTES: usize = 256 * 1024;
-#[allow(dead_code)]
 pub(crate) const PLUGIN_PACKAGE_MAX_BYTES: u64 = 50 * 1024 * 1024;
-#[allow(dead_code)]
 pub(crate) const PLUGIN_PACKAGE_MAX_EXTRACTED_BYTES: u64 = 100 * 1024 * 1024;
-#[allow(dead_code)]
 pub(crate) const PLUGIN_PACKAGE_MAX_ENTRIES: usize = 2048;
 pub const NATIVE_PLUGIN_UI_EVENT: &str = "ui.event";
 pub(crate) const NATIVE_PLUGIN_DECLARATIVE_UI_FORM_KIND: &str = "form";
@@ -55,11 +52,16 @@ pub(crate) const NATIVE_PLUGIN_DECLARATIVE_UI_CONTROL_KINDS: &[&str] = &[
     "emptyState",
     "empty-state",
     "divider",
+    "spacer",
+    "readout",
     "keyValue",
     "key-value",
     "keyValueRow",
     "key-value-row",
 ];
+// Delivered only through the ble.onNotification dynamic subscription bridge; it
+// is deliberately absent from PHASE4 so events.on cannot attach to it.
+pub const NATIVE_PLUGIN_BLE_NOTIFICATION_EVENT: &str = "ble.notification";
 pub const NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT: &str = "app.themeChanged";
 pub const NATIVE_PLUGIN_APP_SETTINGS_CHANGED_EVENT: &str = "app.settingsChanged";
 pub const NATIVE_PLUGIN_I18N_LANGUAGE_CHANGED_EVENT: &str = "i18n.languageChanged";
@@ -81,6 +83,14 @@ pub const NATIVE_PLUGIN_LIFECYCLE_CONNECT_EVENT: &str = "lifecycle.onConnect";
 pub const NATIVE_PLUGIN_LIFECYCLE_DISCONNECT_EVENT: &str = "lifecycle.onDisconnect";
 pub const NATIVE_PLUGIN_LIFECYCLE_LINK_DOWN_EVENT: &str = "lifecycle.onLinkDown";
 pub const NATIVE_PLUGIN_LIFECYCLE_RECONNECT_EVENT: &str = "lifecycle.onReconnect";
+// Toolbar events are dispatched to the plugin that owns the anchor or the
+// clicked chip, never broadcast to subscribers, so they are deliberately
+// absent from PHASE4.
+pub const NATIVE_PLUGIN_TOOLBAR_ACTION_CLICKED_EVENT: &str = "toolbar.actionClicked";
+pub const NATIVE_PLUGIN_TOOLBAR_OVERLAY_OPENED_EVENT: &str = "toolbar.overlayOpened";
+pub const NATIVE_PLUGIN_TOOLBAR_OVERLAY_CLOSED_EVENT: &str = "toolbar.overlayClosed";
+pub const NATIVE_PLUGIN_TOOLBAR_OVERLAY_VISIBILITY_CHANGED_EVENT: &str =
+    "toolbar.overlayVisibilityChanged";
 pub(crate) const NATIVE_PLUGIN_PHASE4_SUBSCRIPTION_EVENTS: &[&str] = &[
     NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT,
     NATIVE_PLUGIN_APP_SETTINGS_CHANGED_EVENT,

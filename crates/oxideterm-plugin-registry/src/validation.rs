@@ -258,6 +258,28 @@ pub(crate) fn validate_native_plugin_manifest(
     }
     if let Some(contributes) = &manifest.contributes {
         validate_native_plugin_contributions(contributes)?;
+        // Mirror the runtime registration gates so a manifest that declares a
+        // terminal hook without its capabilities fails at load with a precise
+        // error instead of a generic runtime failure at activation.
+        if let Some(hooks) = &contributes.terminal_hooks {
+            let capabilities =
+                normalize_native_plugin_capabilities(&manifest.permissions.capabilities)?;
+            let has = |capability: &str| capabilities.iter().any(|c| c == capability);
+            if hooks.input_interceptor.unwrap_or(false)
+                && (!has("terminal.content.read") || !has("terminal.write"))
+            {
+                return Err(
+                    "contributes.terminalHooks.inputInterceptor requires the terminal.content.read and terminal.write capabilities"
+                        .into(),
+                );
+            }
+            if hooks.output_processor.unwrap_or(false) && !has("terminal.content.read") {
+                return Err(
+                    "contributes.terminalHooks.outputProcessor requires the terminal.content.read capability"
+                        .into(),
+                );
+            }
+        }
         if let Some(previews) = &contributes.file_previews {
             if !manifest
                 .runtime
@@ -568,6 +590,94 @@ pub(crate) fn validate_native_plugin_contributions(
     }
     if let Some(host_monitors) = &contributes.host_monitors {
         validate_native_plugin_host_monitors(host_monitors)?;
+    }
+    if let Some(actions) = &contributes.terminal_toolbar {
+        let mut action_ids = HashSet::new();
+        for action in actions {
+            validate_manifest_text_field("contributes.terminalToolbar.id", &action.id)?;
+            validate_manifest_text_field(
+                "contributes.terminalToolbar.labelKey",
+                &action.label_key,
+            )?;
+            if !action_ids.insert(action.id.as_str()) {
+                return Err(format!(
+                    "Duplicate contributes.terminalToolbar id \"{}\"",
+                    action.id
+                ));
+            }
+            if action.states.is_empty() {
+                return Err(format!(
+                    "Toolbar action \"{}\" requires at least one state",
+                    action.id
+                ));
+            }
+            if let Some(overlay_tab) = &action.overlay_tab {
+                validate_manifest_text_field(
+                    "contributes.terminalToolbar.overlayTab",
+                    overlay_tab,
+                )?;
+            }
+            let mut state_ids = HashSet::new();
+            let mut overlay_states = 0usize;
+            for state in &action.states {
+                validate_manifest_text_field("contributes.terminalToolbar.states.id", &state.id)?;
+                validate_manifest_text_field(
+                    "contributes.terminalToolbar.states.labelKey",
+                    &state.label_key,
+                )?;
+                if !state_ids.insert(state.id.as_str()) {
+                    return Err(format!(
+                        "Duplicate state \"{}\" in toolbar action \"{}\"",
+                        state.id, action.id
+                    ));
+                }
+                if state.overlay {
+                    overlay_states += 1;
+                }
+            }
+            if overlay_states > 1 {
+                return Err(format!(
+                    "Toolbar action \"{}\" declares more than one overlay state",
+                    action.id
+                ));
+            }
+            if overlay_states == 1 {
+                // The host renders the overlay card from a contributed tab's
+                // runtime view, so an anchored state must name an existing tab.
+                let overlay_tab = action.overlay_tab.as_deref().ok_or_else(|| {
+                    format!(
+                        "Toolbar action \"{}\" with an overlay state requires overlayTab",
+                        action.id
+                    )
+                })?;
+                let known_tab = contributes
+                    .tabs
+                    .as_ref()
+                    .is_some_and(|tabs| tabs.iter().any(|tab| tab.id == overlay_tab));
+                if !known_tab {
+                    return Err(format!(
+                        "overlayTab \"{}\" of toolbar action \"{}\" is not a declared tab",
+                        overlay_tab, action.id
+                    ));
+                }
+            }
+            validate_manifest_text_field(
+                "contributes.terminalToolbar.defaultState",
+                &action.default_state,
+            )?;
+            if !state_ids.contains(action.default_state.as_str()) {
+                return Err(format!(
+                    "defaultState \"{}\" of toolbar action \"{}\" is not a declared state",
+                    action.default_state, action.id
+                ));
+            }
+            if let Some(hint_key) = &action.disabled_hint_key {
+                validate_manifest_text_field(
+                    "contributes.terminalToolbar.disabledHintKey",
+                    hint_key,
+                )?;
+            }
+        }
     }
     Ok(())
 }

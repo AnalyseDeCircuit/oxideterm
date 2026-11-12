@@ -31,6 +31,8 @@ pub(crate) enum LucideIcon {
     ArrowUp,
     ArrowUpDown,
     ArrowUpAZ,
+    Battery,
+    BatteryFull,
     Bell,
     Bluetooth,
     BookOpen,
@@ -134,10 +136,12 @@ pub(crate) enum LucideIcon {
     SplitSquareHorizontal,
     SplitSquareVertical,
     Square,
+    SquareActivity,
     Star,
     StopCircle,
     Sun,
     Terminal,
+    Thermometer,
     Trash2,
     Upload,
     UserRound,
@@ -170,6 +174,8 @@ impl LucideIcon {
             "arrowup" => Self::ArrowUp,
             "arrowupdown" => Self::ArrowUpDown,
             "arrowupaz" => Self::ArrowUpAZ,
+            "battery" => Self::Battery,
+            "batteryfull" => Self::BatteryFull,
             "bell" => Self::Bell,
             "bluetooth" => Self::Bluetooth,
             "bookopen" => Self::BookOpen,
@@ -273,10 +279,12 @@ impl LucideIcon {
             "splitsquarehorizontal" | "squaresplithorizontal" => Self::SplitSquareHorizontal,
             "splitsquarevertical" | "squaresplitvertical" => Self::SplitSquareVertical,
             "square" => Self::Square,
+            "squareactivity" => Self::SquareActivity,
             "star" => Self::Star,
             "sun" => Self::Sun,
             "stopcircle" | "circlestop" => Self::StopCircle,
             "terminal" => Self::Terminal,
+            "thermometer" => Self::Thermometer,
             "trash" | "trash2" => Self::Trash2,
             "upload" => Self::Upload,
             "user" | "userround" => Self::UserRound,
@@ -304,6 +312,8 @@ impl LucideIcon {
             Self::ArrowUp => "lucide/arrow-up.svg",
             Self::ArrowUpDown => "lucide/arrow-up-down.svg",
             Self::ArrowUpAZ => "lucide/arrow-up-a-z.svg",
+            Self::Battery => "lucide/battery.svg",
+            Self::BatteryFull => "lucide/battery-full.svg",
             Self::Bell => "lucide/bell.svg",
             Self::Bluetooth => "lucide/bluetooth.svg",
             Self::BookOpen => "lucide/book-open.svg",
@@ -407,10 +417,12 @@ impl LucideIcon {
             Self::SplitSquareHorizontal => "lucide/square-split-horizontal.svg",
             Self::SplitSquareVertical => "lucide/square-split-vertical.svg",
             Self::Square => "lucide/square.svg",
+            Self::SquareActivity => "lucide/square-activity.svg",
             Self::Star => "lucide/star.svg",
             Self::StopCircle => "lucide/circle-stop.svg",
             Self::Sun => "lucide/sun.svg",
             Self::Terminal => "lucide/terminal.svg",
+            Self::Thermometer => "lucide/thermometer.svg",
             Self::Trash2 => "lucide/trash-2.svg",
             Self::Upload => "lucide/upload.svg",
             Self::UserRound => "lucide/user-round.svg",
@@ -509,6 +521,8 @@ impl AssetSource for NativeAssets {
             "lucide/arrow-up.svg" => ARROW_UP,
             "lucide/arrow-up-down.svg" => ARROW_UP_DOWN,
             "lucide/arrow-up-a-z.svg" => ARROW_UP_A_Z,
+            "lucide/battery.svg" => BATTERY,
+            "lucide/battery-full.svg" => BATTERY_FULL,
             "lucide/bell.svg" => BELL,
             "lucide/bluetooth.svg" => BLUETOOTH,
             "lucide/book-open.svg" => BOOK_OPEN,
@@ -620,10 +634,12 @@ impl AssetSource for NativeAssets {
             "lucide/square-split-horizontal.svg" => SQUARE_SPLIT_HORIZONTAL,
             "lucide/square-split-vertical.svg" => SQUARE_SPLIT_VERTICAL,
             "lucide/square.svg" => SQUARE,
+            "lucide/square-activity.svg" => SQUARE_ACTIVITY,
             "lucide/star.svg" => STAR,
             "lucide/circle-stop.svg" => CIRCLE_STOP,
             "lucide/sun.svg" => SUN,
             "lucide/terminal.svg" => TERMINAL,
+            "lucide/thermometer.svg" => THERMOMETER,
             "lucide/trash-2.svg" => TRASH_2,
             "lucide/upload.svg" => UPLOAD,
             "lucide/user-round.svg" => USER_ROUND,
@@ -889,6 +905,8 @@ const ARROW_RIGHT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" 
 const ARROW_UP: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>"#;
 const ARROW_UP_DOWN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></svg>"#;
 const ARROW_UP_A_Z: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/><path d="M20 8h-5"/><path d="M15 10V6.5a2.5 2.5 0 0 1 5 0V10"/><path d="M15 14h5l-5 6h5"/></svg>"#;
+const BATTERY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="10" x="2" y="7" rx="2" ry="2"/><line x1="22" x2="22" y1="11" y2="13"/></svg>"#;
+const BATTERY_FULL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="10" x="2" y="7" rx="2" ry="2"/><line x1="6" x2="6" y1="9" y2="15"/><line x1="10" x2="10" y1="9" y2="15"/><line x1="14" x2="14" y1="9" y2="15"/><line x1="22" x2="22" y1="11" y2="13"/></svg>"#;
 const BELL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"/><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"/></svg>"#;
 const BLUETOOTH: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 7 10 10-5 5V2l5 5L7 17"/></svg>"#;
 const BOOK_OPEN: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>"#;
@@ -991,8 +1009,10 @@ const SPARKLES: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" hei
 const SQUARE_SPLIT_HORIZONTAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 19H5c-1 0-2-1-2-2V7c0-1 1-2 2-2h3"/><path d="M16 5h3c1 0 2 1 2 2v10c0 1-1 2-2 2h-3"/><line x1="12" x2="12" y1="4" y2="20"/></svg>"#;
 const SQUARE_SPLIT_VERTICAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 8V5c0-1 1-2 2-2h10c1 0 2 1 2 2v3"/><path d="M19 16v3c0 1-1 2-2 2H7c-1 0-2-1-2-2v-3"/><line x1="4" x2="20" y1="12" y2="12"/></svg>"#;
 const SQUARE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/></svg>"#;
+const SQUARE_ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M8 12h2l2 5 2-9 2 5h2"/></svg>"#;
 const STAR: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.12 2.12 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.12 2.12 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.12 2.12 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.12 2.12 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.12 2.12 0 0 0 1.597-1.16z"/></svg>"#;
 const TERMINAL: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg>"#;
+const THERMOMETER: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/></svg>"#;
 const TRASH_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></svg>"#;
 const UPLOAD: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m17 8-5-5-5 5"/><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></svg>"#;
 const USER_ROUND: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 20a6 6 0 0 0-12 0"/><circle cx="12" cy="10" r="4"/></svg>"#;

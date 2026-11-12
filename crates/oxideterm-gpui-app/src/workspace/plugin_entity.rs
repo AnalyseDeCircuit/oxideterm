@@ -175,6 +175,11 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     runtime_intents: VecDeque<PluginRuntimeIntent>,
     active_runtime_plugin_ids: HashSet<String>,
     runtime_generations: HashMap<String, u64>,
+    // Mode-gated plugins never start with the supervisor bootstrap; they
+    // activate on demand from their feature surface. Feature code registers
+    // ids via `defer_bootstrap_activation`, keeping this entity independent
+    // of any specific plugin module.
+    bootstrap_deferred_plugin_ids: HashSet<String>,
     owned_tasks: Arc<Mutex<HashMap<u64, Option<tokio::task::AbortHandle>>>>,
     next_owned_task_id: AtomicU64,
     release_shutdown_started: bool,
@@ -218,6 +223,10 @@ pub(in crate::workspace) struct PluginWorkspaceEntity {
     transfer_progress_last_emitted: Option<Instant>,
     runtime_profiler_last_emitted: Option<Instant>,
     event_log_last_id: u64,
+    // Workspace-owned hook for feature-scoped per-plugin cleanup (e.g. BLE
+    // notification routes). Set via `set_plugin_deactivation_sink`; the entity
+    // itself never inspects the payload beyond the plugin id.
+    plugin_deactivation_sink: Option<tokio::sync::mpsc::UnboundedSender<String>>,
 }
 
 impl PluginWorkspaceEntity {
@@ -250,6 +259,7 @@ impl PluginWorkspaceEntity {
             runtime_intents: VecDeque::new(),
             active_runtime_plugin_ids: HashSet::new(),
             runtime_generations: HashMap::new(),
+            bootstrap_deferred_plugin_ids: HashSet::new(),
             owned_tasks: Arc::new(Mutex::new(HashMap::new())),
             next_owned_task_id: AtomicU64::new(1),
             release_shutdown_started: false,
@@ -292,6 +302,7 @@ impl PluginWorkspaceEntity {
             transfer_progress_last_emitted: None,
             runtime_profiler_last_emitted: None,
             event_log_last_id: 0,
+            plugin_deactivation_sink: None,
         };
         entity.schedule_runtime_delivery(cx);
         entity.schedule_runtime_pushes();
@@ -790,6 +801,13 @@ impl PluginWorkspaceEntity {
         }
     }
 
+    /// Registers a mode-gated plugin that must not start with the supervisor
+    /// bootstrap. The feature surface owns activation and calls this before
+    /// `start_runtime_bootstrap` runs.
+    pub(in crate::workspace) fn defer_bootstrap_activation(&mut self, plugin_id: String) {
+        self.bootstrap_deferred_plugin_ids.insert(plugin_id);
+    }
+
     pub(in crate::workspace) fn start_runtime_bootstrap(
         &mut self,
         host_api_resolver: plugin_runtime::NativeHostApiResolver,
@@ -797,7 +815,12 @@ impl PluginWorkspaceEntity {
         if self.release_shutdown_started || self.compatibility_refresh_pending {
             return false;
         }
-        let process_plans = self.registry.process_activation_plans();
+        let process_plans = self
+            .registry
+            .process_activation_plans()
+            .into_iter()
+            .filter(|plan| !self.bootstrap_deferred_plugin_ids.contains(&plan.plugin_id))
+            .collect::<Vec<_>>();
         let wasm_plans = self.registry.wasm_activation_plans();
         if process_plans.is_empty() && wasm_plans.is_empty() {
             return false;
@@ -1017,8 +1040,86 @@ impl PluginWorkspaceEntity {
         ));
     }
 
+    pub(in crate::workspace) fn set_plugin_deactivation_sink(
+        &mut self,
+        sink: tokio::sync::mpsc::UnboundedSender<String>,
+    ) {
+        self.plugin_deactivation_sink = Some(sink);
+    }
+
+    /// Activates one deferred process plugin on demand. Returns false when the
+    /// plugin is not an activatable process runtime (missing, disabled, or
+    /// pending permission review).
+    pub(in crate::workspace) fn start_runtime_plugin_activation(
+        &mut self,
+        plugin_id: &str,
+        host_api_resolver: plugin_runtime::NativeHostApiResolver,
+    ) -> bool {
+        if self.release_shutdown_started {
+            return false;
+        }
+        // Live ownership is authoritative: registry state can lag a completed
+        // deactivation, so re-activation keys off the running id set plus the
+        // in-flight Loading state instead of ReadyProcess.
+        let already_running = self.active_runtime_plugin_ids.contains(plugin_id)
+            || self.registry.plugins().iter().any(|plugin| {
+                plugin.manifest.id == plugin_id
+                    && plugin.state == plugin_host::NativePluginState::Loading
+            });
+        if already_running {
+            return false;
+        }
+        let Some(plan) = self.registry.process_activation_plan(plugin_id) else {
+            return false;
+        };
+        let _ = self.registry_mut().mark_runtime_loading(&plan.plugin_id);
+        self.start_runtime_services();
+        let host = self.runtime_host.clone();
+        let delivery_tx = self.runtime_delivery_tx.clone();
+        self.spawn_owned_task(async move {
+            let mut host = host.lock().await;
+            host.set_host_api_resolver(host_api_resolver);
+            let result =
+                match super::plugin_lifecycle::native_plugin_permissions(&plan.manifest, true) {
+                    Ok(permissions) => {
+                        host.activate_process_plugin(
+                            plan.manifest,
+                            plan.install_dir,
+                            plan.entry,
+                            permissions,
+                            NATIVE_PLUGIN_LIFECYCLE_TIMEOUT,
+                        )
+                        .await
+                    }
+                    Err(error) => Err(error),
+                };
+            let _ = delivery_tx.send(NativePluginRuntimeDelivery::Activation {
+                plugin_id: plan.plugin_id,
+                result,
+            });
+        });
+        true
+    }
+
+    /// Stops a running plugin unconditionally (mode switch, not an error path).
+    pub(in crate::workspace) fn stop_runtime_plugin(&mut self, plugin_id: &str) {
+        let running = self.active_runtime_plugin_ids.contains(plugin_id)
+            || self.registry.plugins().iter().any(|plugin| {
+                plugin.manifest.id == plugin_id
+                    && plugin.state == plugin_host::NativePluginState::Loading
+            });
+        if running {
+            self.start_runtime_deactivation(plugin_id.to_string());
+        }
+    }
+
     fn start_runtime_deactivation(&mut self, plugin_id: String) {
         self.connections.stop_plugin(&plugin_id);
+        if let Some(sink) = &self.plugin_deactivation_sink {
+            // Cancel feature-scoped subscriptions even while the workspace is
+            // releasing, so no plugin outlives its notification routes.
+            let _ = sink.send(plugin_id.clone());
+        }
         if self.release_shutdown_started {
             return;
         }
@@ -3187,6 +3288,7 @@ mod tests {
         senders
             .terminal
             .send(NativePluginTerminalRequest {
+                plugin_id: "plugin.test".to_string(),
                 request_id: "terminal-clear".to_string(),
                 action: NativePluginTerminalAction::ClearBuffer {
                     node_id: "node-test".to_string(),
@@ -3828,6 +3930,7 @@ read request
         senders
             .terminal
             .send(NativePluginTerminalRequest {
+                plugin_id: "plugin.release".to_string(),
                 request_id: "terminal-release".to_string(),
                 action: NativePluginTerminalAction::ClearBuffer {
                     node_id: "node-release".to_string(),
