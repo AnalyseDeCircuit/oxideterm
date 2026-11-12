@@ -201,6 +201,10 @@ pub struct EncodingMismatchDetector {
     observed_bytes: usize,
     sample: Vec<u8>,
     invalid_bytes: usize,
+    // The start of a UTF-8 sequence that the last read cut off, completed by
+    // the next one before it is judged.
+    incomplete: [u8; 3],
+    incomplete_len: usize,
     emitted: bool,
 }
 
@@ -217,6 +221,8 @@ impl EncodingMismatchDetector {
             observed_bytes: 0,
             sample: Vec::new(),
             invalid_bytes: 0,
+            incomplete: [0; 3],
+            incomplete_len: 0,
             emitted: false,
         }
     }
@@ -231,7 +237,8 @@ impl EncodingMismatchDetector {
         }
 
         self.observed_bytes = self.observed_bytes.saturating_add(bytes.len());
-        self.invalid_bytes = self.invalid_bytes.saturating_add(invalid_utf8_bytes(bytes));
+        let invalid = self.invalid_utf8_bytes(bytes);
+        self.invalid_bytes = self.invalid_bytes.saturating_add(invalid);
         let remaining = Self::MAX_SAMPLE_BYTES.saturating_sub(self.sample.len());
         self.sample
             .extend_from_slice(&bytes[..bytes.len().min(remaining)]);
@@ -260,6 +267,66 @@ impl EncodingMismatchDetector {
             sample_bytes: self.sample.len(),
             invalid_ratio: ratio,
         })
+    }
+}
+
+impl EncodingMismatchDetector {
+    /// Counts the bytes of `bytes` that are not UTF-8, treating a sequence
+    /// split across reads as the whole sequence.
+    fn invalid_utf8_bytes(&mut self, mut bytes: &[u8]) -> usize {
+        let mut invalid = 0;
+        if self.incomplete_len != 0 {
+            let pending = self.incomplete_len;
+            let width = match self.incomplete[0] {
+                0xf0..=0xff => 4,
+                0xe0..=0xef => 3,
+                _ => 2,
+            };
+            let taken = (width - pending).min(bytes.len());
+            let mut joined = [0; 4];
+            joined[..pending].copy_from_slice(&self.incomplete[..pending]);
+            joined[pending..pending + taken].copy_from_slice(&bytes[..taken]);
+            let joined = &joined[..pending + taken];
+            self.incomplete_len = 0;
+            match std::str::from_utf8(joined) {
+                Ok(_) => bytes = &bytes[taken..],
+                Err(error) => match error.error_len() {
+                    // Still cut off: `taken` used up this read.
+                    None => {
+                        self.incomplete[..joined.len()].copy_from_slice(joined);
+                        self.incomplete_len = joined.len();
+                        return 0;
+                    }
+                    Some(len) => {
+                        invalid += len;
+                        bytes = &bytes[len.saturating_sub(pending)..];
+                    }
+                },
+            }
+        }
+
+        let mut index = 0;
+        while index < bytes.len() {
+            match std::str::from_utf8(&bytes[index..]) {
+                Ok(_) => break,
+                Err(error) => {
+                    index += error.valid_up_to();
+                    match error.error_len() {
+                        Some(len) => {
+                            invalid += len;
+                            index += len;
+                        }
+                        None => {
+                            let tail = &bytes[index..];
+                            self.incomplete[..tail.len()].copy_from_slice(tail);
+                            self.incomplete_len = tail.len();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        invalid
     }
 }
 
@@ -296,30 +363,6 @@ fn score_decoded_text(encoding: TerminalEncoding, sample: &[u8]) -> i32 {
         }
     }
     score
-}
-
-fn invalid_utf8_bytes(bytes: &[u8]) -> usize {
-    let mut index = 0;
-    let mut invalid = 0;
-    while index < bytes.len() {
-        match std::str::from_utf8(&bytes[index..]) {
-            Ok(_) => break,
-            Err(error) => {
-                index += error.valid_up_to();
-                match error.error_len() {
-                    Some(len) => {
-                        invalid += len;
-                        index += len;
-                    }
-                    None => {
-                        invalid += bytes.len().saturating_sub(index);
-                        break;
-                    }
-                }
-            }
-        }
-    }
-    invalid
 }
 
 fn prepare_paste_text(text: &str, bracketed: bool) -> Zeroizing<String> {
@@ -473,5 +516,40 @@ mod tests {
                 assert!(hint.is_none());
             }
         }
+    }
+
+    #[test]
+    fn mismatch_detector_counts_utf8_split_across_reads_as_valid() {
+        let utf8 = "你好世界，终端输出".repeat(16);
+        let gbk = TerminalInputEncoder::new(TerminalEncoding::Gbk)
+            .encode_text(&utf8)
+            .into_owned();
+        // Small reads, as a serial line delivers them, split most characters.
+        for chunk_len in [1, 2, 5, 7] {
+            let mut detector = EncodingMismatchDetector::new(TerminalEncoding::Utf8);
+            let hints = utf8
+                .as_bytes()
+                .chunks(chunk_len)
+                .filter_map(|chunk| detector.observe(chunk))
+                .count();
+            assert_eq!(hints, 0, "UTF-8 in {chunk_len}-byte reads");
+            assert_eq!(detector.invalid_bytes, 0, "UTF-8 in {chunk_len}-byte reads");
+
+            let mut detector = EncodingMismatchDetector::new(TerminalEncoding::Utf8);
+            let hint = gbk
+                .chunks(chunk_len)
+                .find_map(|chunk| detector.observe(chunk))
+                .unwrap_or_else(|| panic!("GBK in {chunk_len}-byte reads"));
+            assert!(hint.suggestions.contains(&TerminalEncoding::Gbk));
+        }
+
+        // A cut-off sequence that the next read doesn't complete is still invalid.
+        let mut detector = EncodingMismatchDetector::new(TerminalEncoding::Utf8);
+        detector.observe(b"a\xe4\xbd");
+        assert_eq!(detector.invalid_bytes, 0);
+        detector.observe(b"A\xe4");
+        assert_eq!(detector.invalid_bytes, 2);
+        detector.observe(b"\xbd\xa0");
+        assert_eq!(detector.invalid_bytes, 2);
     }
 }
