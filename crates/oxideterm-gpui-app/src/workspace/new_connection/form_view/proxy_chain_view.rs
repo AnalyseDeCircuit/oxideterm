@@ -1281,7 +1281,7 @@ impl WorkspaceApp {
                             .selectable_overflow_y_scroll(&self.selectable_text_scroll_handle(
                                 "new-connection-jump-server-body-scroll",
                             ))
-                            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                            .on_scroll(cx.listener(|this, _event, _window, cx| {
                                 // Keep native anchored selects aligned with Tauri/Radix:
                                 // scrolling the modal body closes popup content tied to a moved trigger.
                                 if this.connection_form_state(cx).open_select.is_some() {
@@ -1543,7 +1543,7 @@ impl WorkspaceApp {
                         .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                             cx.stop_propagation();
                         })
-                        .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+                        .on_scroll(|_event, _window, cx| cx.stop_propagation()),
                 )
             })
             .into_any_element()

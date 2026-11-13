@@ -157,7 +157,7 @@ impl WorkspaceApp {
             } else {
                 CursorStyle::OpenHand
             })
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
                 let host_tools = this.host_tools.clone();
                 host_tools.update(cx, |host_tools, cx| {
                     host_tools.zoom_topology_graph(event, cx);
@@ -730,7 +730,7 @@ impl HostToolsEntity {
         changed
     }
 
-    fn zoom_topology_graph(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) -> bool {
+    fn zoom_topology_graph(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) -> bool {
         let delta = event.delta.pixel_delta(px(16.0));
         let vertical = f32::from(delta.y);
         if vertical == 0.0 {

@@ -235,7 +235,7 @@ impl WorkspaceApp {
                                 .selectable_overflow_y_scroll(
                                     &self.selectable_text_scroll_handle("ssh-tunnel-form-scroll"),
                                 )
-                                .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+                                .on_scroll(cx.listener(|this, _, _, cx| {
                                     if this.connection_form_state(cx).open_select.is_some() {
                                         this.close_new_connection_select(cx);
                                         this.clear_new_connection_select_anchor(cx);

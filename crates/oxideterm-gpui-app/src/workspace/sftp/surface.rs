@@ -1294,12 +1294,11 @@ impl WorkspaceApp {
             .overflow_hidden()
             .track_scroll(&scroll_handle)
             .text_size(px(ui.text_sm))
-            .on_scroll_wheel(self.sftp_listener(
-                cx,
-                move |this, event: &ScrollWheelEvent, _window, cx| {
+            .on_scroll(
+                self.sftp_listener(cx, move |this, event: &ScrollEvent, _window, cx| {
                     this.handle_sftp_breadcrumb_scroll(pane, event, cx);
-                },
-            ))
+                }),
+            )
             .child(
                 // Track the direct content row so GPUI measures the real overflow width.
                 inner,

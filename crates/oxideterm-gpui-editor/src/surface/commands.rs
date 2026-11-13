@@ -170,31 +170,31 @@ impl TextEditorView {
                 return;
             }
         } else {
-            if matches_tauri_plain_mod_key(key, modifiers, "f") && self.open_search(cx) {
+            if matches_tauri_plain_mod_key(key, modifiers, "f", cx) && self.open_search(cx) {
                 cx.stop_propagation();
                 return;
             }
-            if matches_tauri_plain_mod_key(key, modifiers, "s") {
+            if matches_tauri_plain_mod_key(key, modifiers, "s", cx) {
                 self.save(window, cx);
                 return;
             }
-            if matches_tauri_plain_mod_key(key, modifiers, "c") {
+            if matches_tauri_plain_mod_key(key, modifiers, "c", cx) {
                 self.copy_selection_to_clipboard(cx);
                 return;
             }
-            if matches_tauri_plain_mod_key(key, modifiers, "x") {
+            if matches_tauri_plain_mod_key(key, modifiers, "x", cx) {
                 self.cut_selection_to_clipboard(cx);
                 return;
             }
-            if matches_tauri_plain_mod_key(key, modifiers, "v") {
+            if matches_tauri_plain_mod_key(key, modifiers, "v", cx) {
                 self.paste_from_clipboard(cx);
                 return;
             }
-            if matches_tauri_plain_mod_key(key, modifiers, "a") {
+            if matches_tauri_plain_mod_key(key, modifiers, "a", cx) {
                 self.select_all(cx);
                 return;
             }
-            if matches_tauri_mod_key(key, modifiers, "z") {
+            if matches_tauri_mod_key(key, modifiers, "z", cx) {
                 if modifiers.shift {
                     self.redo(cx);
                 } else {
@@ -202,11 +202,11 @@ impl TextEditorView {
                 }
                 return;
             }
-            if matches_tauri_plain_mod_key(key, modifiers, "y") {
+            if matches_tauri_plain_mod_key(key, modifiers, "y", cx) {
                 self.redo(cx);
                 return;
             }
-            if matches_tauri_plain_mod_key(key, modifiers, "d") {
+            if matches_tauri_plain_mod_key(key, modifiers, "d", cx) {
                 self.add_next_find_match_as_cursor(cx);
                 return;
             }
@@ -380,12 +380,22 @@ impl TextEditorView {
     }
 }
 
-fn matches_tauri_plain_mod_key(key: &str, modifiers: Modifiers, expected_key: &str) -> bool {
-    matches_tauri_mod_key(key, modifiers, expected_key) && !modifiers.shift
+fn matches_tauri_plain_mod_key(
+    key: &str,
+    modifiers: Modifiers,
+    expected_key: &str,
+    cx: &gpui::App,
+) -> bool {
+    matches_tauri_mod_key(key, modifiers, expected_key, cx) && !modifiers.shift
 }
 
-fn matches_tauri_mod_key(key: &str, modifiers: Modifiers, expected_key: &str) -> bool {
+fn matches_tauri_mod_key(
+    key: &str,
+    modifiers: Modifiers,
+    expected_key: &str,
+    cx: &gpui::App,
+) -> bool {
     // CodeMirror's `Mod-*` maps to Command on macOS and Control on
     // Windows/Linux; GPUI exposes that same intent as the secondary modifier.
-    modifiers.secondary() && !modifiers.alt && key.eq_ignore_ascii_case(expected_key)
+    modifiers.secondary(cx) && !modifiers.alt && key.eq_ignore_ascii_case(expected_key)
 }

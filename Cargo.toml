@@ -90,12 +90,16 @@ members = [
   "crates/gpui-ce/gpui_macos",
   "crates/gpui-ce/gpui_wgpu",
   "crates/gpui-ce/gpui_windows",
+  "crates/gpui-ce/xim-ctext",
+  "crates/gpui-ce/zed-xim",
   "crates/russh-sftp",
 ]
 default-members = ["crates/oxideterm-gpui-app"]
 resolver = "2"
 
 [patch.crates-io]
+xim-ctext = { path = "crates/gpui-ce/xim-ctext" }
+zed-xim = { path = "crates/gpui-ce/zed-xim" }
 alacritty_terminal = { path = "crates/alacritty-terminal" }
 gpui-pre = { path = "crates/gpui-ce/gpui" }
 gpui-pre-apple = { path = "crates/gpui-ce/gpui_apple" }
@@ -165,8 +169,8 @@ futures = "0.3"
 futures-concurrency = "7.7.1"
 fs2 = "0.4"
 flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
-gpui = { package = "gpui-pre", version = "=0.3.7" }
-gpui_platform = { package = "gpui-pre-platform", version = "=0.3.7", features = ["font-kit", "wayland", "x11"] }
+gpui = { package = "gpui-pre", version = "=0.3.12" }
+gpui_platform = { package = "gpui-pre-platform", version = "=0.3.12", features = ["font-kit", "wayland", "x11"] }
 hdrhistogram = "7"
 heapless = "0.9.2"
 heck = "0.5"
@@ -333,7 +337,7 @@ windows = { version = "0.61", features = [
 ] }
 windows-core = "0.61"
 web-time = "1.1.0"
-wgpu = "29.0.3"
+wgpu = "30.0.1"
 whoami = "1.6"
 zeroize = { version = "1.8", features = ["serde"] }
 zip = { version = "2.0", default-features = false, features = ["deflate", "time"] }

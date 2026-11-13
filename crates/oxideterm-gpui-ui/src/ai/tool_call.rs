@@ -1,7 +1,7 @@
 use gpui::{
-    Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, ScrollHandle,
-    ScrollWheelEvent, SharedString, Stateful, StatefulInteractiveElement, Styled, div, prelude::*,
-    px, rgb,
+    Div, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, ScrollEvent,
+    ScrollHandle, SharedString, Stateful, StatefulInteractiveElement, Styled, div, prelude::*, px,
+    rgb,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -252,9 +252,9 @@ pub fn ai_tool_pre(
         .font_family(mono_font_family)
         .text_color(muted_text(tokens, AI_MUTED_TEXT_60_ALPHA))
         .whitespace_normal()
-        .on_scroll_wheel({
+        .on_scroll({
             let scroll_handle = scroll_handle.clone();
-            move |event: &ScrollWheelEvent, window, cx| {
+            move |event: &ScrollEvent, window, cx| {
                 let old_offset = scroll_handle.offset();
                 let max_offset = scroll_handle.max_offset();
                 let delta = event.delta.pixel_delta(window.line_height());

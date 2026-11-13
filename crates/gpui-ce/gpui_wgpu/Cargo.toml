@@ -12,7 +12,7 @@
 [package]
 edition = "2024"
 name = "gpui-pre-wgpu"
-version = "0.3.7"
+version = "0.3.12"
 build = false
 publish = false
 autolib = false
@@ -20,7 +20,7 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Zed's `gpui_wgpu` crate (gpui-pre snapshot of zed@1a28cff)"
+description = "Zed's `gpui_wgpu` crate (gpui-pre snapshot of zed@d2a4fb6)"
 readme = false
 license = "Apache-2.0"
 repository = "https://github.com/zed-industries/zed"
@@ -29,7 +29,7 @@ resolver = "2"
 [package.metadata.gpui-pre]
 zed-crate = "gpui_wgpu"
 zed-version = "0.1.0"
-zed-rev = "1a28cff4b409169bac058bca40dfbfeb7621d19b"
+zed-rev = "d2a4fb6ded7c470be25d1541281da3882495b65b"
 
 [features]
 bench-support = [
@@ -64,7 +64,7 @@ version = "1"
 features = ["derive"]
 
 [dependencies.collections]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-collections"
 
 [dependencies.cosmic-text]
@@ -76,15 +76,16 @@ version = "0.2"
 [dependencies.font-kit]
 version = "0.14.1-zed"
 optional = true
+default-features = false
 package = "zed-font-kit"
 
 [dependencies.gpui]
-version = "=0.3.7"
+version = "=0.3.12"
 default-features = false
 package = "gpui-pre"
 
 [dependencies.gpui_util]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-util"
 
 [dependencies.image]
@@ -113,11 +114,9 @@ default-features = false
 version = "0.14.0"
 
 [dependencies.log]
-version = "0.4.16"
-features = [
-    "kv_unstable_serde",
-    "serde",
-]
+version = "0.4"
+features = ["std"]
+default-features = false
 
 [dependencies.parking_lot]
 version = "0.12.1"
@@ -146,15 +145,30 @@ default-features = false
 [dependencies.unicode-segmentation]
 version = "1.10"
 
-[dependencies.wgpu]
-version = "29.0.4"
+[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wgpu]
+version = "30.0.1"
+features = [
+    "std",
+    "metal",
+    "gles",
+    "vulkan",
+    "wgsl",
+    "webgpu",
+]
+default-features = false
+package = "wgpu"
+
+[target.'cfg(not(any(target_os = "linux", target_os = "freebsd")))'.dependencies.wgpu]
+version = "30.0.1"
+default-features = true
+package = "wgpu"
 
 [dev-dependencies.image]
 version = "0.25.1"
 default-features = false
 
 [dev-dependencies.gpui]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre"
 default-features = false
 features = ["test-support"]
@@ -164,8 +178,10 @@ version = "0.3"
 features = ["HtmlCanvasElement"]
 
 [target.'cfg(target_family = "wasm")'.dependencies.wgpu]
-version = "29.0.4"
+version = "30.0.1"
 features = ["webgl"]
+default-features = false
+package = "wgpu"
 
 [lints.clippy]
 dbg_macro = "deny"

@@ -208,7 +208,7 @@ impl WorkspaceApp {
                             .w_full()
                             .max_h(px(288.0))
                             .selectable_overflow_y_scroll(&scroll)
-                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                            .on_scroll(|_, _, cx| cx.stop_propagation())
                             .child(list),
                     )
                     .vertical_scrollbar(&scroll),

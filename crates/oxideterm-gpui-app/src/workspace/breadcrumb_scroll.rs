@@ -1,9 +1,9 @@
-use gpui::{Pixels, Point, ScrollHandle, ScrollWheelEvent, px};
+use gpui::{Pixels, Point, ScrollEvent, ScrollHandle, px};
 
 /// Applies dominant wheel movement to a measured horizontal breadcrumb viewport.
 pub(super) fn scroll_breadcrumb_by_wheel(
     scroll_handle: &ScrollHandle,
-    event: &ScrollWheelEvent,
+    event: &ScrollEvent,
     line_height: Pixels,
 ) -> Option<bool> {
     let max_scroll = f32::from(scroll_handle.max_offset().x);

@@ -1446,7 +1446,7 @@ mod tests {
             "Combining empty styles should not produce a non-empty style."
         );
 
-        let mut style_b = HighlightStyle {
+        let style_b = HighlightStyle {
             color: Some(red()),
             strikethrough: Some(StrikethroughStyle {
                 thickness: px(2.),
@@ -1476,7 +1476,7 @@ mod tests {
             "Blending a style with an empty style should not change the style."
         );
 
-        let mut style_c = expected_style;
+        let style_c = expected_style;
 
         let style_d = HighlightStyle {
             color: Some(blue().alpha(0.7)),

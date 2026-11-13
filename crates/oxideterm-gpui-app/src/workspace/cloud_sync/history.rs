@@ -885,7 +885,7 @@ impl CloudSyncWorkspaceEntity {
                     .h(px(
                         row_count as f32 * CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT
                     ))
-                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                    .on_scroll(|_, _, cx| cx.stop_propagation())
                     .child(tauri_virtual_list(
                         state,
                         Self::rollback_backup_list_spec(),
@@ -953,7 +953,7 @@ impl CloudSyncWorkspaceEntity {
                 .h(px(
                     row_count as f32 * CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT
                 ))
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .on_scroll(|_, _, cx| cx.stop_propagation())
                 .child(tauri_virtual_list(
                     state,
                     Self::history_list_spec(),

@@ -582,7 +582,7 @@ impl WorkspaceApp {
                     .size_full()
                     .min_w_0()
                     .overflow_y_scrollbar()
-                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                    .on_scroll(cx.listener(|this, _event, _window, cx| {
                         this.close_native_plugin_select(cx);
                     }))
                     .child(
@@ -637,7 +637,7 @@ impl WorkspaceApp {
             .min_h_0()
             .w_full()
             .overflow_y_scrollbar()
-            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+            .on_scroll(cx.listener(|this, _event, _window, cx| {
                 this.close_native_plugin_select(cx);
             }))
             .px_2()

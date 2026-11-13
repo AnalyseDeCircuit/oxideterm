@@ -755,13 +755,17 @@ impl WorkspaceApp {
                             // the generic blur path below.
                             return true;
                         }
-                        return self.handle_knowledge_document_dialog_key(event, cx);
+                        if self.handle_knowledge_document_dialog_key(event, cx) {
+                            return true;
+                        }
                     }
                     SettingsInput::KnowledgeCollectionName => {
                         if modifiers.platform || modifiers.control {
                             return true;
                         }
-                        return self.handle_knowledge_collection_dialog_key(event, cx);
+                        if self.handle_knowledge_collection_dialog_key(event, cx) {
+                            return true;
+                        }
                     }
                     _ => {}
                 }

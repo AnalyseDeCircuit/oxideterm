@@ -155,7 +155,7 @@ impl WorkspaceApp {
                     .bg(rgb(theme.bg_sunken))
                     .font_family(sample_font.clone())
                     .text_color(rgb(theme.text))
-                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                    .on_scroll(|_, _, cx| cx.stop_propagation())
                     .child(
                         div()
                             .flex()

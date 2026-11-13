@@ -14,7 +14,7 @@ fn file_manager_dialog_exit_shield() -> AnyElement {
         .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
             cx.stop_propagation();
         })
-        .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation())
+        .on_scroll(|_event, _window, cx| cx.stop_propagation())
         .into_any_element()
 }
 

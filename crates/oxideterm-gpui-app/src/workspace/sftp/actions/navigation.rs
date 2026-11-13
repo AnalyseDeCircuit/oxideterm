@@ -689,7 +689,7 @@ impl WorkspaceApp {
     pub(in crate::workspace::sftp) fn handle_sftp_breadcrumb_scroll(
         &mut self,
         pane: SftpPane,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         cx: &mut Context<Self>,
     ) {
         let ui = self.sftp_ui_metrics();

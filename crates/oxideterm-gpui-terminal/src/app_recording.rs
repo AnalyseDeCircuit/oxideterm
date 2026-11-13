@@ -19,8 +19,10 @@ impl TerminalPane {
     pub fn start_recording(&mut self, title: Option<String>, cx: &mut Context<Self>) {
         let context = self.terminal.lock().audit_context();
         let audit = oxideterm_audit::AuditOperation::in_request(
-            context.as_ref(), oxideterm_audit::AuditCategory::Automation,
-            "terminal_recording_start", None,
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::Automation,
+            "terminal_recording_start",
+            None,
         );
         let options = TerminalRecordingOptions {
             title,
@@ -37,8 +39,12 @@ impl TerminalPane {
             options,
         ));
         self.sync_terminal_output_events_enabled();
-        audit.finish(oxideterm_audit::AuditOutcome::Succeeded,
-            oxideterm_audit::AuditEvidence::Lifecycle, None, None);
+        audit.finish(
+            oxideterm_audit::AuditOutcome::Succeeded,
+            oxideterm_audit::AuditEvidence::Lifecycle,
+            None,
+            None,
+        );
         cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
     }
@@ -50,12 +56,21 @@ impl TerminalPane {
             let changed = recorder.status().state != before;
             let context = self.terminal.lock().audit_context();
             let audit = oxideterm_audit::AuditOperation::in_request(
-                context.as_ref(), oxideterm_audit::AuditCategory::Automation,
-                "terminal_recording_pause", None,
+                context.as_ref(),
+                oxideterm_audit::AuditCategory::Automation,
+                "terminal_recording_pause",
+                None,
             );
-            audit.finish(if changed { oxideterm_audit::AuditOutcome::Succeeded }
-                else { oxideterm_audit::AuditOutcome::Unchanged },
-                oxideterm_audit::AuditEvidence::Lifecycle, None, None);
+            audit.finish(
+                if changed {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Unchanged
+                },
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
             self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
@@ -69,12 +84,21 @@ impl TerminalPane {
             let changed = recorder.status().state != before;
             let context = self.terminal.lock().audit_context();
             let audit = oxideterm_audit::AuditOperation::in_request(
-                context.as_ref(), oxideterm_audit::AuditCategory::Automation,
-                "terminal_recording_resume", None,
+                context.as_ref(),
+                oxideterm_audit::AuditCategory::Automation,
+                "terminal_recording_resume",
+                None,
             );
-            audit.finish(if changed { oxideterm_audit::AuditOutcome::Succeeded }
-                else { oxideterm_audit::AuditOutcome::Unchanged },
-                oxideterm_audit::AuditEvidence::Lifecycle, None, None);
+            audit.finish(
+                if changed {
+                    oxideterm_audit::AuditOutcome::Succeeded
+                } else {
+                    oxideterm_audit::AuditOutcome::Unchanged
+                },
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
             self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
@@ -85,10 +109,17 @@ impl TerminalPane {
         if self.recorder.take().is_some() {
             let context = self.terminal.lock().audit_context();
             oxideterm_audit::AuditOperation::in_request(
-                context.as_ref(), oxideterm_audit::AuditCategory::Automation,
-                "terminal_recording_discard", None,
-            ).finish(oxideterm_audit::AuditOutcome::Succeeded,
-                oxideterm_audit::AuditEvidence::Lifecycle, None, None);
+                context.as_ref(),
+                oxideterm_audit::AuditCategory::Automation,
+                "terminal_recording_discard",
+                None,
+            )
+            .finish(
+                oxideterm_audit::AuditOutcome::Succeeded,
+                oxideterm_audit::AuditEvidence::Lifecycle,
+                None,
+                None,
+            );
             self.sync_terminal_output_events_enabled();
             cx.emit(TerminalPaneEvent::RecordingStatusChanged);
             cx.notify();
@@ -99,15 +130,21 @@ impl TerminalPane {
         let recorder = self.recorder.take()?;
         let context = self.terminal.lock().audit_context();
         let audit = oxideterm_audit::AuditOperation::in_request(
-            context.as_ref(), oxideterm_audit::AuditCategory::Automation,
-            "terminal_recording_stop", None,
+            context.as_ref(),
+            oxideterm_audit::AuditCategory::Automation,
+            "terminal_recording_stop",
+            None,
         );
         self.sync_terminal_output_events_enabled();
         cx.emit(TerminalPaneEvent::RecordingStatusChanged);
         cx.notify();
         let content = recorder.stop();
-        audit.finish(oxideterm_audit::AuditOutcome::Succeeded,
-            oxideterm_audit::AuditEvidence::Lifecycle, None, Some(content.len() as u64));
+        audit.finish(
+            oxideterm_audit::AuditOutcome::Succeeded,
+            oxideterm_audit::AuditEvidence::Lifecycle,
+            None,
+            Some(content.len() as u64),
+        );
         Some(content)
     }
 
@@ -185,7 +222,7 @@ impl TerminalPane {
     #[doc(hidden)]
     pub fn benchmark_scroll_pixels(&mut self, delta: f32, cx: &mut Context<Self>) -> usize {
         self.handle_scroll(
-            &gpui::ScrollWheelEvent {
+            &gpui::ScrollEvent {
                 position: gpui::point(gpui::px(32.), gpui::px(32.)),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.), gpui::px(delta))),
                 touch_phase: gpui::TouchPhase::Moved,
@@ -273,7 +310,6 @@ impl TerminalPane {
         self.mark_terminal_content_changed(cx);
         cx.notify();
     }
-
 }
 
 fn asciicast_palette(theme: oxideterm_theme::TerminalTheme) -> String {

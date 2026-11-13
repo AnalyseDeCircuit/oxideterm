@@ -1,4 +1,4 @@
-use crate::{Action, DummyKeyboardMapper, KeyBinding, KeyBindingContextPredicate, SharedString};
+use crate::{Action, App, KeyBinding, KeyBindingContextPredicate, SharedString};
 use std::{any::TypeId, collections::HashMap};
 
 /// A generic collection of `Action` -> keystrokes which can be bound under a shared key-context.
@@ -9,7 +9,11 @@ use std::{any::TypeId, collections::HashMap};
 /// gpui::actions!([MyAction]);
 /// # #[gpui::test]
 /// # fn test(app: &mut gpui::TestAppContext) {
-/// app.bind_keys(ActionBindingCollection::default().with::<MyAction>("enter").as_keybindings(None));
+/// app.update(|cx| {
+///     let collection = ActionBindingCollection::default().with::<MyAction>("enter");
+///     let bindings = collection.as_keybindings(None, cx).collect::<Vec<_>>();
+///     cx.bind_keys(bindings);
+/// });
 /// # }
 /// ```
 #[derive(Default)]
@@ -41,7 +45,11 @@ impl ActionBindingCollection {
 
     /// Creates an iterator of `KeyBinding` which represents all action+keystrokes in this collection bound to the same key-context.
     /// This sequence can be provided to `App::bind_keys`, and any elements which use the same `InteractiveElement::key_context` will receive the bound actions.
-    pub fn as_keybindings(&self, context: Option<&str>) -> impl Iterator<Item = KeyBinding> {
+    pub fn as_keybindings<'a>(
+        &'a self,
+        context: Option<&str>,
+        cx: &'a App,
+    ) -> impl Iterator<Item = KeyBinding> + 'a {
         let context_predicate =
             context.map(|context| KeyBindingContextPredicate::parse(context).unwrap().into());
         let iter = self.entries.iter();
@@ -55,7 +63,7 @@ impl ActionBindingCollection {
                     context_predicate.clone(),
                     false,
                     None,
-                    &DummyKeyboardMapper,
+                    cx,
                 );
                 keybinding.expect("failed to load keybinding")
             })
@@ -77,7 +85,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn test_single_binding(_cx: &mut TestAppContext) {
+    fn test_single_binding(cx: &mut TestAppContext) {
         let collection = ActionBindingCollection::default();
         let collection = collection.with::<TestAction>("enter");
 
@@ -85,12 +93,12 @@ mod tests {
         let entry = entry.map(|entry| &entry.keystrokes);
         assert_eq!(entry, Some(&vec![SharedString::new_static("enter")]));
 
-        let out_bindings = collection.as_keybindings(None).collect::<Vec<_>>();
+        let out_bindings = cx.update(|cx| collection.as_keybindings(None, cx).collect::<Vec<_>>());
         assert_eq!(out_bindings.len(), 1);
     }
 
     #[gpui::test]
-    fn test_single_action_many_keys(_cx: &mut TestAppContext) {
+    fn test_single_action_many_keys(cx: &mut TestAppContext) {
         let collection = ActionBindingCollection::default();
         let collection = collection.with::<TestAction>("enter");
         let collection = collection.with::<TestAction>("escape");
@@ -105,18 +113,20 @@ mod tests {
             ])
         );
 
-        let out_bindings = collection.as_keybindings(None).collect::<Vec<_>>();
+        let out_bindings = cx.update(|cx| collection.as_keybindings(None, cx).collect::<Vec<_>>());
         assert_eq!(out_bindings.len(), 2);
     }
 
     #[gpui::test]
-    fn test_single_action_many_keys_context(_cx: &mut TestAppContext) {
+    fn test_single_action_many_keys_context(cx: &mut TestAppContext) {
         let collection = ActionBindingCollection::default();
         let collection = collection.with::<TestAction>("enter");
         let collection = collection.with::<TestAction>("escape");
-        let out_bindings = collection
-            .as_keybindings(Some("test_content"))
-            .collect::<Vec<_>>();
+        let out_bindings = cx.update(|cx| {
+            collection
+                .as_keybindings(Some("test_content"), cx)
+                .collect::<Vec<_>>()
+        });
         assert_eq!(out_bindings.len(), 2);
     }
 }

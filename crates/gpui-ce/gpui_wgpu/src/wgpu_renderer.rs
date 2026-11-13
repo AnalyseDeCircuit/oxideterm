@@ -419,10 +419,10 @@ impl From<&Underline> for GpuUnderline {
 struct GpuTextSprite {
     order: u32,
     pad: u32,
+    tile: GpuAtlasTile,
     bounds: PodBounds,
     content_mask: PodBounds,
     color: GpuHsla,
-    tile: GpuAtlasTile,
     transformation: GpuTransformationMatrix,
 }
 
@@ -459,12 +459,12 @@ impl From<&SubpixelSprite> for GpuTextSprite {
 struct GpuPolychromeSprite {
     order: u32,
     corner_shape: u32,
+    tile: GpuAtlasTile,
     grayscale: u32,
     opacity: f32,
     bounds: PodBounds,
     content_mask: PodBounds,
     corner_radii: GpuCorners,
-    tile: GpuAtlasTile,
 }
 
 impl From<&PolychromeSprite> for GpuPolychromeSprite {
@@ -918,6 +918,7 @@ impl WgpuRenderer {
         };
 
         let mut shared_context = gpu_context.shared.borrow_mut();
+        let surface_configured = shared_context.context.is_none();
         let context = match shared_context.context.as_mut() {
             Some(context) => {
                 context.check_compatible_with_surface(&surface)?;
@@ -926,6 +927,7 @@ impl WgpuRenderer {
             None => shared_context.context.insert(WgpuContext::new(
                 instance,
                 &surface,
+                &config,
                 compositor_gpu,
                 extra_requirements.as_ref(),
             )?),
@@ -938,6 +940,7 @@ impl WgpuRenderer {
             context,
             surface,
             config,
+            surface_configured,
             compositor_gpu,
             extra_requirements,
             atlas,
@@ -965,19 +968,22 @@ impl WgpuRenderer {
         config: WgpuSurfaceConfig,
     ) -> anyhow::Result<Self> {
         let atlas = Arc::new(WgpuAtlas::from_context(context));
-        Self::new_internal(None, context, surface, config, None, None, atlas)
+        Self::new_internal(None, context, surface, config, false, None, None, atlas)
     }
 
-    fn new_internal(
-        gpu_context: Option<GpuContext>,
-        context: &WgpuContext,
-        surface: wgpu::Surface<'static>,
-        config: WgpuSurfaceConfig,
-        compositor_gpu: Option<CompositorGpuHint>,
-        extra_requirements: Option<WgpuDeviceRequirements>,
-        atlas: Arc<WgpuAtlas>,
-    ) -> anyhow::Result<Self> {
-        let surface_caps = surface.get_capabilities(&context.adapter);
+    /// Returns the surface configuration for `config`, along with the transparent and
+    /// opaque alpha modes that the surface supports.
+    pub(crate) fn surface_configuration(
+        surface: &wgpu::Surface<'_>,
+        adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
+        config: &WgpuSurfaceConfig,
+    ) -> anyhow::Result<(
+        wgpu::SurfaceConfiguration,
+        wgpu::CompositeAlphaMode,
+        wgpu::CompositeAlphaMode,
+    )> {
+        let surface_caps = surface.get_capabilities(adapter);
         let preferred_formats = [
             wgpu::TextureFormat::Bgra8Unorm,
             wgpu::TextureFormat::Rgba8Unorm,
@@ -986,12 +992,18 @@ impl WgpuRenderer {
             .iter()
             .find(|f| surface_caps.formats.contains(f))
             .copied()
-            .or_else(|| surface_caps.formats.iter().find(|f| !f.is_srgb()).copied())
+            .or_else(|| {
+                surface_caps
+                    .formats
+                    .iter()
+                    .find(|format| !format.is_srgb())
+                    .copied()
+            })
             .or_else(|| surface_caps.formats.first().copied())
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "Surface reports no supported texture formats for adapter {:?}",
-                    context.adapter.get_info().name
+                    adapter.get_info().name
                 )
             })?;
 
@@ -1005,7 +1017,7 @@ impl WgpuRenderer {
                     .ok_or_else(|| {
                         anyhow::anyhow!(
                             "Surface reports no supported alpha modes for adapter {:?}",
-                            context.adapter.get_info().name
+                            adapter.get_info().name
                         )
                     })
             };
@@ -1026,7 +1038,6 @@ impl WgpuRenderer {
             opaque_alpha_mode
         };
 
-        let device = Arc::clone(&context.device);
         let max_texture_size = device.limits().max_texture_dimension_2d;
 
         let requested_width = config.size.width.0 as u32;
@@ -1045,6 +1056,7 @@ impl WgpuRenderer {
         let surface_config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
+            color_space: wgpu::SurfaceColorSpace::Auto,
             width: clamped_width.max(1),
             height: clamped_height.max(1),
             present_mode: config
@@ -1055,10 +1067,31 @@ impl WgpuRenderer {
             alpha_mode,
             view_formats: vec![],
         };
-        // Configure the surface immediately. The adapter selection process already validated
-        // that this adapter can successfully configure this surface.
-        surface.configure(&context.device, &surface_config);
 
+        Ok((surface_config, transparent_alpha_mode, opaque_alpha_mode))
+    }
+
+    fn new_internal(
+        gpu_context: Option<GpuContext>,
+        context: &WgpuContext,
+        surface: wgpu::Surface<'static>,
+        config: WgpuSurfaceConfig,
+        surface_configured: bool,
+        compositor_gpu: Option<CompositorGpuHint>,
+        extra_requirements: Option<WgpuDeviceRequirements>,
+        atlas: Arc<WgpuAtlas>,
+    ) -> anyhow::Result<Self> {
+        let (surface_config, transparent_alpha_mode, opaque_alpha_mode) =
+            Self::surface_configuration(&surface, &context.adapter, &context.device, &config)?;
+        // Adapter selection configures the surface with this same configuration when it
+        // creates the context, so only configure it here when that did not happen.
+        if !surface_configured {
+            surface.configure(&context.device, &surface_config);
+        }
+
+        let surface_format = surface_config.format;
+        let alpha_mode = surface_config.alpha_mode;
+        let max_texture_size = context.device.limits().max_texture_dimension_2d;
         let core = WgpuRendererCore::new(context, atlas.clone(), surface_format, alpha_mode);
 
         Ok(Self {
@@ -1442,19 +1475,6 @@ impl WgpuRendererCore {
             &shader_module,
         );
 
-        let paths_blend = wgpu::BlendState {
-            color: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::One,
-                dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
-                operation: wgpu::BlendOperation::Add,
-            },
-            alpha: wgpu::BlendComponent {
-                src_factor: wgpu::BlendFactor::One,
-                dst_factor: wgpu::BlendFactor::One,
-                operation: wgpu::BlendOperation::Add,
-            },
-        };
-
         let paths = create_pipeline(
             "paths",
             "vs_path",
@@ -1464,7 +1484,7 @@ impl WgpuRendererCore {
             wgpu::PrimitiveTopology::TriangleStrip,
             &[Some(wgpu::ColorTargetState {
                 format: surface_format,
-                blend: Some(paths_blend),
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
             1,
@@ -1888,7 +1908,7 @@ impl WgpuRenderer {
             return false;
         }
 
-        frame.present();
+        core.resources.queue.present(frame);
         true
     }
 }
@@ -3494,6 +3514,14 @@ impl WgpuRenderer {
             .window_handle()
             .map_err(|e| anyhow::anyhow!("Failed to get window handle: {e}"))?;
 
+        let config = WgpuSurfaceConfig {
+            size: gpui::Size {
+                width: gpui::DevicePixels(self.surface_config.width as i32),
+                height: gpui::DevicePixels(self.surface_config.height as i32),
+            },
+            transparent: self.surface_config.alpha_mode != wgpu::CompositeAlphaMode::Opaque,
+            preferred_present_mode: Some(self.surface_config.present_mode),
+        };
         enum RecoveryAction {
             AdoptRecoveredContext,
             RebuildSharedContext,
@@ -3542,6 +3570,7 @@ impl WgpuRenderer {
                     let context = WgpuContext::new(
                         instance,
                         &surface,
+                        &config,
                         self.compositor_gpu,
                         self.extra_requirements.as_ref(),
                     )?;
@@ -3564,20 +3593,13 @@ impl WgpuRenderer {
             }
         };
 
-        let config = WgpuSurfaceConfig {
-            size: gpui::Size {
-                width: gpui::DevicePixels(self.surface_config.width as i32),
-                height: gpui::DevicePixels(self.surface_config.height as i32),
-            },
-            transparent: self.surface_config.alpha_mode != wgpu::CompositeAlphaMode::Opaque,
-            preferred_present_mode: Some(self.surface_config.present_mode),
-        };
         let extra_reqs = self.extra_requirements.clone();
         let compositor_gpu = self.compositor_gpu;
         let atlas = self.atlas.clone();
         let replacement = (|| {
             let shared = gpu_context.shared.borrow();
             let context = shared.context.as_ref().expect("context should exist");
+            let surface_configured = recovered_surface.is_some();
             let surface = match recovered_surface {
                 Some(surface) => surface,
                 None => create_surface(&context.instance, window_handle.as_raw())?,
@@ -3588,6 +3610,7 @@ impl WgpuRenderer {
                 context,
                 surface,
                 config,
+                surface_configured,
                 compositor_gpu,
                 extra_reqs,
                 atlas.clone(),
@@ -3657,6 +3680,9 @@ pub struct WgpuHeadlessRenderer {
 impl WgpuHeadlessRenderer {
     pub fn new() -> anyhow::Result<Self> {
         let (context, target_format) = WgpuContext::new_headless()?;
+        // The device may be shared with earlier renderers; observe only errors raised from
+        // here on, including any while this renderer builds its pipelines.
+        let observed_error_generation = context.errors().current_generation();
         let atlas = Arc::new(WgpuAtlas::from_context(&context));
         let core = WgpuRendererCore::new(
             &context,
@@ -3669,7 +3695,7 @@ impl WgpuHeadlessRenderer {
             context,
             core,
             render_target: None,
-            observed_error_generation: 0,
+            observed_error_generation,
         })
     }
 
@@ -3832,7 +3858,7 @@ impl WgpuHeadlessRenderer {
             .map_err(|error| anyhow::anyhow!("Failed to map headless readback buffer: {error}"))?;
         self.check_gpu_errors()?;
 
-        let mapped_data = readback_buffer.slice(..).get_mapped_range();
+        let mapped_data = readback_buffer.slice(..).get_mapped_range()?;
         let pixel_capacity = usize::try_from(u64::from(bytes_per_row) * u64::from(height))
             .map_err(|_| anyhow::anyhow!("Headless image size exceeds addressable memory"))?;
         let mut pixels = Vec::with_capacity(pixel_capacity);
@@ -4493,10 +4519,10 @@ mod tests {
             order, pad, bounds, content_mask, color, thickness, wavy
         });
         assert_struct_layout!(&module, GpuTextSprite => "MonochromeSprite" {
-            order, pad, bounds, content_mask, color, tile, transformation
+            order, pad, tile, bounds, content_mask, color, transformation
         });
         assert_struct_layout!(&module, GpuPolychromeSprite => "PolychromeSprite" {
-            order, corner_shape, grayscale, opacity, bounds, content_mask, corner_radii, tile
+            order, corner_shape, tile, grayscale, opacity, bounds, content_mask, corner_radii
         });
         assert_struct_layout!(&module, SurfaceParams => "SurfaceParams" {
             bounds, content_mask, opacity, rotation, sample_size
@@ -4643,7 +4669,7 @@ mod tests {
             ],
         );
         assert_struct_layout!(&module, GpuTextSprite => "SubpixelSprite" {
-            order, pad, bounds, content_mask, color, tile, transformation
+            order, pad, tile, bounds, content_mask, color, transformation
         });
         assert_storage_array_stride::<GpuTextSprite>(
             &module,

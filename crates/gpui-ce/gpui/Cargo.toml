@@ -12,7 +12,7 @@
 [package]
 edition = "2024"
 name = "gpui-pre"
-version = "0.3.7"
+version = "0.3.12"
 authors = ["Nathan Sobo <nathan@zed.dev>"]
 build = "build.rs"
 publish = false
@@ -21,7 +21,7 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Zed's GPU-accelerated UI framework (gpui-pre snapshot of zed@1a28cff)"
+description = "Zed's GPU-accelerated UI framework (gpui-pre snapshot of zed@d2a4fb6)"
 homepage = "https://gpui.rs"
 readme = "README.md"
 keywords = [
@@ -36,18 +36,19 @@ resolver = "2"
 
 [package.metadata.cargo-shear]
 ignored = [
-    "bindgen",
-    "font-kit",
     "getrandom",
     "objc2",
     "objc2-metal",
 ]
-ignored-paths = ["src/_ownership_and_data_flow.rs"]
+ignored-paths = [
+    "src/_ownership_and_data_flow.rs",
+    "benches/focus_cleanup.rs",
+]
 
 [package.metadata.gpui-pre]
 zed-crate = "gpui"
 zed-version = "0.2.2"
-zed-rev = "1a28cff4b409169bac058bca40dfbfeb7621d19b"
+zed-rev = "d2a4fb6ded7c470be25d1541281da3882495b65b"
 
 [features]
 bench = ["bench-support"]
@@ -62,18 +63,29 @@ default = [
     "x11",
     "windows-manifest",
 ]
+font-kit = []
+hot-reload = [
+    "dep:async-tungstenite",
+    "dep:dioxus-cli-config",
+    "dep:dioxus-devtools-types",
+    "dep:smol",
+    "dep:subsecond",
+]
 inspector = ["gpui_macros/inspector"]
-leak-detection = ["backtrace"]
+leak-detection = []
 profiler = ["dep:hdrhistogram"]
 screen-capture = ["scap"]
 stacker = ["dep:stacksafe"]
 test-support = [
-    "leak-detection",
+    "bench_metrics?/test-support",
     "collections/test-support",
     "http_client/test-support",
     "wayland",
     "x11",
     "proptest",
+    "dep:futures-concurrency",
+    "dep:postage",
+    "dep:web-time",
 ]
 wayland = []
 windows-manifest = ["dep:embed-resource"]
@@ -102,12 +114,9 @@ version = "1"
 [dependencies.tracing]
 version = "0.1"
 
-[dependencies.unicode-segmentation]
-version = "1.12"
-
 [dev-dependencies.gpui_platform]
 package = "gpui-pre-platform"
-version = "=0.3.7"
+version = "=0.3.12"
 features = ["font-kit", "wayland", "x11", "test-support"]
 
 [dev-dependencies.env_logger]
@@ -121,12 +130,12 @@ version = "1"
 
 [dev-dependencies.bench_metrics]
 package = "gpui-pre-bench-metrics"
-version = "=0.3.7"
+version = "=0.3.12"
 features = ["test-support"]
 
 [dev-dependencies.scheduler]
 package = "gpui-pre-scheduler"
-version = "=0.3.7"
+version = "=0.3.12"
 features = ["test-support"]
 
 [[test]]
@@ -145,10 +154,9 @@ version = "4.7"
 
 [dependencies.backtrace]
 version = "0.3"
-optional = true
 
 [dependencies.bench_metrics]
-version = "=0.3.7"
+version = "=0.3.12"
 optional = true
 package = "gpui-pre-bench-metrics"
 
@@ -157,10 +165,14 @@ version = "2.6.0"
 
 [dependencies.chrono]
 version = "0.4"
-features = ["serde"]
+features = [
+    "std",
+    "serde",
+]
+default-features = true
 
 [dependencies.collections]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-collections"
 
 [dependencies.criterion]
@@ -168,19 +180,14 @@ version = "0.8.2"
 features = ["html_reports"]
 optional = true
 
-[dependencies.ctor]
-version = "1.0.12"
-
 [dependencies.derive_more]
-version = "2.1.1"
+version = "2.1"
 features = [
-    "add",
-    "add_assign",
     "deref",
     "deref_mut",
-    "display",
-    "from",
     "from_str",
+    "add",
+    "add_assign",
     "mul",
     "mul_assign",
     "not",
@@ -194,17 +201,18 @@ version = "0.3.34"
 
 [dependencies.futures-concurrency]
 version = "7.7.1"
+optional = true
 
 [dependencies.gpui_macros]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-macros"
 
 [dependencies.gpui_shared_string]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-shared-string"
 
 [dependencies.gpui_util]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-util"
 
 [dependencies.hdrhistogram]
@@ -216,8 +224,13 @@ default-features = false
 version = "0.9.2"
 
 [dependencies.http_client]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-http-client"
+
+[dependencies.icu_segmenter]
+version = "2.3.0"
+features = ["compiled_data"]
+default-features = false
 
 [dependencies.image]
 version = "0.25.1"
@@ -254,11 +267,9 @@ features = ["image", "only_u8x4"]
 version = "0.14.0"
 
 [dependencies.log]
-version = "0.4.16"
-features = [
-    "kv_unstable_serde",
-    "serde",
-]
+version = "0.4"
+features = ["std"]
+default-features = false
 
 [dependencies.lyon]
 version = "1.0"
@@ -275,12 +286,11 @@ version = "0.12.1"
 [dependencies.pin-project]
 version = "1.1.10"
 
-[dependencies.pollster]
-version = "0.4.0"
-
 [dependencies.postage]
 version = "0.5"
-features = ["futures-traits"]
+features = ["blocking"]
+optional = true
+default-features = false
 
 [dependencies.profiling]
 version = "1"
@@ -293,16 +303,29 @@ package = "proptest"
 
 [dependencies.rand]
 version = "0.9"
+features = [
+    "std",
+    "std_rng",
+    "os_rng",
+    "small_rng",
+    "thread_rng",
+]
+default-features = false
 
 [dependencies.raw-window-handle]
 version = "0.6"
 
 [dependencies.refineable]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-refineable"
 
 [dependencies.regex]
 version = "1.5"
+features = [
+    "std",
+    "perf",
+]
+default-features = true
 
 [dependencies.resvg]
 version = "0.46.0"
@@ -315,21 +338,26 @@ features = [
 default-features = false
 
 [dependencies.scheduler]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-scheduler"
 
 [dependencies.schemars]
 version = "1.0"
-features = ["indexmap2"]
+features = [
+    "std",
+    "indexmap2",
+    "derive",
+]
+default-features = false
 
 [dependencies.seahash]
 version = "4.1"
 
 [dependencies.serde]
-version = "1.0.221"
+version = "1.0"
 features = [
-    "derive",
     "rc",
+    "derive",
 ]
 
 [dependencies.serde_json]
@@ -350,7 +378,13 @@ features = [
 ]
 
 [dependencies.spin]
-version = "0.10.0"
+version = "0.10"
+features = [
+    "mutex",
+    "spin_mutex",
+    "lock_api",
+]
+default-features = false
 
 [dependencies.stacksafe]
 version = "1.0"
@@ -361,17 +395,30 @@ version = "0.28"
 features = ["derive"]
 
 [dependencies.sum_tree]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-sum-tree"
 
 [dependencies.taffy]
-version = "0.13.0"
+version = "0.15.0"
+features = [
+    "std",
+    "taffy_tree",
+    "flexbox",
+    "grid",
+    "block_layout",
+    "float_layout",
+    "content_size",
+]
+default-features = false
 
 [dependencies.thiserror]
 version = "2.0.12"
 
 [dependencies.ttf-parser]
 version = "0.25"
+
+[dependencies.unicode-segmentation]
+version = "1.12"
 
 [dependencies.url]
 version = "2.2"
@@ -380,17 +427,11 @@ version = "2.2"
 version = "0.46.0"
 default-features = false
 
-[dependencies.util_macros]
-version = "=0.3.7"
-package = "gpui-pre-util-macros"
-
 [dependencies.uuid]
-version = "1.1.2"
+version = "1.1"
 features = [
-    "v4",
-    "v5",
-    "v7",
     "serde",
+    "v4",
 ]
 
 [dependencies.waker-fn]
@@ -398,14 +439,18 @@ version = "1.2.0"
 
 [dependencies.web-time]
 version = "1.1.0"
+optional = true
 
 [build-dependencies.embed-resource]
 version = "3.0"
 optional = true
 
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies.async-channel]
-version = "2.5.0"
+version = "2.5"
 default-features = false
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies.libc]
+version = "0.2"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "windows"))'.dependencies.scap]
 version = "0.0.8-zed"
@@ -413,125 +458,92 @@ optional = true
 default-features = false
 package = "zed-scap"
 
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-core-foundation]
+version = "0.3.2"
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-core-video]
+version = "0.3.2"
+features = [
+    "CVBuffer",
+    "CVImageBuffer",
+    "CVPixelBuffer",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))'.dependencies.async-tungstenite]
+version = "0.33"
+optional = true
+
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))'.dependencies.dioxus-cli-config]
+version = "0.7.10"
+optional = true
+
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))'.dependencies.dioxus-devtools-types]
+version = "0.7.10"
+optional = true
+
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))'.dependencies.smol]
+version = "2.0"
+optional = true
+
+[target.'cfg(any(target_os = "macos", target_os = "linux", target_os = "windows", target_os = "ios"))'.dependencies.subsecond]
+version = "0.7.10"
+optional = true
+
 [target.'cfg(not(all(target_arch = "wasm32", target_os = "unknown")))'.dependencies.async-channel]
-version = "2.5.0"
+version = "2.5"
+features = ["std"]
+default-features = false
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies.pollster]
+version = "0.4.0"
 
 [target.'cfg(target_family = "wasm")'.dependencies.getrandom]
 version = "0.3.4"
 features = ["wasm_js"]
 
 [target.'cfg(target_family = "wasm")'.dependencies.uuid]
-version = "1.1.2"
+version = "1.1"
 features = [
-    "v4",
-    "v5",
-    "v7",
     "serde",
     "js",
 ]
 
-[target.'cfg(target_os = "macos")'.dependencies.core-video]
-version = "0.5.2"
-features = ["metal"]
-
-[target.'cfg(target_os = "macos")'.dependencies.font-kit]
-version = "0.14.1-zed"
-optional = true
-package = "zed-font-kit"
-
 [target.'cfg(target_os = "macos")'.dependencies.log]
-version = "0.4.16"
-features = [
-    "kv_unstable_serde",
-    "serde",
-]
+version = "0.4"
+features = ["std"]
+default-features = false
 
 [target.'cfg(target_os = "macos")'.dependencies.objc2]
 version = "0.6"
 optional = true
 
-[target.'cfg(target_os = "macos")'.dependencies.objc2-core-foundation]
-version = "0.3.2"
-default-features = false
-
-[target.'cfg(target_os = "macos")'.dependencies.objc2-core-video]
-version = "0.3.2"
-features = [
-    "CVBuffer",
-    "CVImageBuffer",
-]
-default-features = false
-
 [target.'cfg(target_os = "macos")'.dependencies.objc2-metal]
 version = "0.3"
 optional = true
 
-[target.'cfg(target_os = "macos")'.build-dependencies.bindgen]
-version = "0.72"
-
 [target.'cfg(target_os = "windows")'.dependencies.windows]
 version = "0.62"
 features = [
-    "Data_Xml_Dom",
-    "Foundation_Numerics",
-    "Globalization_DateTimeFormatting",
-    "Storage_Search",
-    "Storage_Streams",
-    "System_Threading",
-    "UI_Notifications",
-    "UI_ViewManagement",
-    "Wdk_System_SystemServices",
     "Win32_Foundation",
-    "Win32_Globalization",
-    "Win32_Graphics_Direct3D",
-    "Win32_Graphics_Direct3D11",
-    "Win32_Graphics_Direct3D_Fxc",
-    "Win32_Graphics_DirectComposition",
-    "Win32_Graphics_DirectWrite",
-    "Win32_Graphics_DirectManipulation",
-    "Win32_Graphics_Dwm",
-    "Win32_Graphics_Dxgi",
-    "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
-    "Win32_Graphics_Imaging",
-    "Win32_Graphics_Hlsl",
-    "Win32_Networking_WinSock",
     "Win32_Security",
-    "Win32_Security_Credentials",
-    "Win32_Security_Cryptography",
     "Win32_Storage_FileSystem",
-    "Win32_Storage_Packaging_Appx",
     "Win32_System_Com",
     "Win32_System_Com_StructuredStorage",
-    "Win32_System_Console",
-    "Win32_System_Diagnostics_Debug",
-    "Win32_System_DataExchange",
     "Win32_System_IO",
-    "Win32_System_JobObjects",
     "Win32_System_LibraryLoader",
-    "Win32_System_Memory",
     "Win32_System_Ole",
-    "Win32_System_Performance",
-    "Win32_System_Pipes",
-    "Win32_System_Power",
-    "Win32_System_RestartManager",
-    "Win32_System_SystemInformation",
-    "Win32_System_SystemServices",
     "Win32_System_Threading",
     "Win32_System_Variant",
-    "Win32_System_WinRT",
-    "Win32_UI_Controls",
-    "Win32_UI_HiDpi",
-    "Win32_UI_Input_Ime",
-    "Win32_UI_Input_KeyboardAndMouse",
-    "Win32_UI_Input_Pointer",
     "Win32_UI_Shell",
     "Win32_UI_Shell_Common",
     "Win32_UI_Shell_PropertiesSystem",
     "Win32_UI_WindowsAndMessaging",
-    "Win32_Media",
-    "Win32_Foundation",
     "Win32_System_Power",
+    "Win32_System_RemoteDesktop",
+    "Win32_System_WindowsProgramming",
 ]
 
 [lints.clippy]

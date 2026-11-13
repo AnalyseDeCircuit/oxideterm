@@ -151,26 +151,20 @@ impl WorkspaceApp {
                 oxideterm_gpui_ui::tooltip::tooltip_view(tokens, label.clone(), None, cx)
             });
         Some(
-            material_surface(
-                &tokens,
-                div(),
-                MaterialRole::StickyHeader,
-            )
-            .w_full()
-            .px(px(tokens.spacing.three))
-            .py(px(tokens.spacing.two))
-            .border_b_1()
-            .border_color(self.workspace_chrome_divider())
-            .occlude()
-            .on_scroll_wheel(
-                cx.listener(move |_, event: &gpui::ScrollWheelEvent, _, cx| {
+            material_surface(&tokens, div(), MaterialRole::StickyHeader)
+                .w_full()
+                .px(px(tokens.spacing.three))
+                .py(px(tokens.spacing.two))
+                .border_b_1()
+                .border_color(self.workspace_chrome_divider())
+                .occlude()
+                .on_scroll(cx.listener(move |_, event: &gpui::ScrollEvent, _, cx| {
                     wheel_state.scroll_by(-event.delta.pixel_delta(px(20.0)).y);
                     cx.notify();
                     cx.stop_propagation();
-                }),
-            )
-            .child(button)
-            .into_any_element(),
+                }))
+                .child(button)
+                .into_any_element(),
         )
     }
 }
