@@ -2009,13 +2009,14 @@ impl PlatformWindow for X11Window {
             .state
             .borrow()
             .renderer
+            .as_ref()?
             .gpu_context()
             .map(|context| Box::new(context) as Box<dyn std::any::Any>)
     }
 
     fn gpu_device_lost(&self) -> Option<bool> {
         // The shared error state remains readable while GPU resources are released.
-        Some(self.0.state.borrow().renderer.device_lost())
+        Some(self.0.state.borrow().renderer.as_ref()?.device_lost())
     }
 
     fn play_system_bell(&self) {

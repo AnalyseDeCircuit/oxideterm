@@ -460,10 +460,7 @@ impl DirectWriteState {
                 };
                 let len = remaining_bytes.min(run.len - run_offset);
                 if len > 0 {
-                    segment_runs.push(FontRun {
-                        len,
-                        font_id: run.font_id,
-                    });
+                    segment_runs.push(FontRun { len, ..*run });
                 }
                 remaining_bytes -= len;
                 run_offset += len;

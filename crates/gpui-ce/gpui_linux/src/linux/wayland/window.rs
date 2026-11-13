@@ -2380,13 +2380,14 @@ impl PlatformWindow for WaylandWindow {
     fn gpu_context(&self) -> Option<Box<dyn std::any::Any>> {
         self.borrow()
             .renderer
+            .as_ref()?
             .gpu_context()
             .map(|context| Box::new(context) as Box<dyn std::any::Any>)
     }
 
     fn gpu_device_lost(&self) -> Option<bool> {
         // The shared error state remains readable while GPU resources are released.
-        Some(self.borrow().renderer.device_lost())
+        Some(self.borrow().renderer.as_ref()?.device_lost())
     }
 
     fn play_system_bell(&self) {
