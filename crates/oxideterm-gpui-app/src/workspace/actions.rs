@@ -415,14 +415,15 @@ mod terminal_search_tests {
 mod knowledge_dialog_key_tests {
     use super::*;
 
-    #[gpui::test]
-    fn knowledge_document_title_enter_creates_document(cx: &mut gpui::TestAppContext) {
+    /// Re-enters the current test inside a portable child process so the
+    /// workspace fixture cannot poison the shared test process during teardown.
+    ///
+    /// Returns `false` in the parent process, where the test must stop after the
+    /// child reported its result.
+    fn enter_portable_fixture(cx: &mut gpui::TestAppContext) -> bool {
         let executable = std::env::current_exe().unwrap();
         let fixture_key = "OXIDETERM_KNOWLEDGE_DIALOG_TEST_DIR";
         let Some(fixture_dir) = std::env::var_os(fixture_key) else {
-            // WorkspaceApp owns background tasks and process-wide settings. Run the
-            // UI interaction in a portable child so this test cannot poison the
-            // shared test process during teardown.
             let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
             let child = directory.path().join(executable.file_name().unwrap());
             std::fs::hard_link(&executable, &child).unwrap();
@@ -453,13 +454,21 @@ mod knowledge_dialog_key_tests {
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
-            return;
+            return false;
         };
         cx.executor().allow_parking();
         assert!(default_settings_path().starts_with(std::path::PathBuf::from(fixture_dir)));
         let mut settings = SettingsStore::load_from_path(default_settings_path()).unwrap();
         settings.settings_mut().onboarding_completed = true;
         settings.save().unwrap();
+        true
+    }
+
+    #[gpui::test]
+    fn knowledge_document_title_enter_creates_document(cx: &mut gpui::TestAppContext) {
+        if !enter_portable_fixture(cx) {
+            return;
+        }
 
         let (shell, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
@@ -676,6 +685,48 @@ mod knowledge_dialog_key_tests {
             assert!(workspace.selected_ime_range.is_none());
             assert!(workspace.ime_marked_text.is_none());
             assert!(workspace.standard_confirm_focus().is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn closed_dialog_still_releases_a_focused_title_input(cx: &mut gpui::TestAppContext) {
+        if !enter_portable_fixture(cx) {
+            return;
+        }
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            crate::workspace::window_shell::WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+
+        // The dialog handlers decline every key once the dialog is not open, and
+        // no current path leaves the title input focused in that state. Build it
+        // directly: the key must still reach the shared Escape cleanup instead of
+        // being swallowed with the input focused.
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.ai_entity.update(cx, |ai, cx| {
+                    assert!(ai.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
+                    assert!(
+                        !ai.knowledge_document_dialog_open(),
+                        "the fixture must start without an open dialog"
+                    );
+                });
+            });
+            window.draw(cx).clear(cx);
+        });
+
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.ai_entity.read(cx).focused_settings_input(),
+                None,
+                "Escape must release the focused dialog input"
+            );
+            assert!(workspace.selected_ime_range.is_none());
+            assert!(workspace.ime_marked_text.is_none());
         });
     }
 }
