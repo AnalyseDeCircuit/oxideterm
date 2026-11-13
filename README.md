@@ -57,17 +57,17 @@ Idle memory before and after the move from Tauri (1.x) to native GPUI (2.0). The
 
 ## Screenshots
 
-### Terminal
-
-An SSH session. The sidebar lists what you can open on this server: more terminals, SFTP, the IDE and port forwarding.
-
-![SSH terminal with the server's tools in the sidebar](docs/screenshots/terminal/SSHTERMINAL.png)
-
 ### Mixed workspace
 
 An SSH terminal, a local terminal, Markdown notes and SFTP together in one tab. Mix pages from different servers and your own machine in up to 16 panes.
 
 ![Four-pane workspace combining SSH, a local terminal, notes and SFTP](docs/screenshots/mixed-workspace.png)
+
+### Terminal
+
+An SSH session. The sidebar lists what you can open on this server: more terminals, SFTP, the IDE and port forwarding.
+
+![SSH terminal with the server's tools in the sidebar](docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### Files
 

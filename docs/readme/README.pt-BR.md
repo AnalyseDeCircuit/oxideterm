@@ -57,17 +57,17 @@ Memória em repouso antes e depois da migração de Tauri (1.x) para GPUI nativo
 
 ## Capturas de tela
 
-### Terminal
-
-Uma sessão SSH. A barra lateral mostra ferramentas deste servidor: mais terminais, SFTP, IDE e encaminhamento de portas.
-
-![Terminal SSH com ferramentas do servidor na barra lateral](../../docs/screenshots/terminal/SSHTERMINAL.png)
-
 ### Espaço de trabalho misto
 
 Um terminal SSH, um terminal local, notas Markdown e SFTP na mesma aba. Combine páginas de diferentes servidores e do seu computador em até 16 painéis.
 
 ![Espaço de trabalho com quatro painéis reunindo SSH, um terminal local, notas e SFTP](../../docs/screenshots/mixed-workspace.png)
+
+### Terminal
+
+Uma sessão SSH. A barra lateral mostra ferramentas deste servidor: mais terminais, SFTP, IDE e encaminhamento de portas.
+
+![Terminal SSH com ferramentas do servidor na barra lateral](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### Arquivos
 

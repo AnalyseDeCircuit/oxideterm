@@ -57,17 +57,17 @@ Leerlaufspeicher vor und nach dem Wechsel von Tauri (1.x) zu nativem GPUI (2.0).
 
 ## Screenshots
 
-### Terminal
-
-Eine SSH-Sitzung. Die Seitenleiste zeigt die Werkzeuge dieses Servers: weitere Terminals, SFTP, IDE und Portweiterleitung.
-
-![SSH-Terminal mit Serverwerkzeugen in der Seitenleiste](../../docs/screenshots/terminal/SSHTERMINAL.png)
-
 ### Gemischter Arbeitsbereich
 
 Ein SSH-Terminal, ein lokales Terminal, Markdown-Notizen und SFTP gemeinsam in einem Tab. Kombinieren Sie Seiten verschiedener Server und Ihres eigenen Rechners in bis zu 16 Bereichen.
 
 ![Arbeitsbereich mit vier Bereichen für SSH, ein lokales Terminal, Notizen und SFTP](../../docs/screenshots/mixed-workspace.png)
+
+### Terminal
+
+Eine SSH-Sitzung. Die Seitenleiste zeigt die Werkzeuge dieses Servers: weitere Terminals, SFTP, IDE und Portweiterleitung.
+
+![SSH-Terminal mit Serverwerkzeugen in der Seitenleiste](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### Dateien
 

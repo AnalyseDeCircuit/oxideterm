@@ -57,17 +57,17 @@ OxideTerm 是一款適用於 macOS、Windows 和 Linux 的 SSH 用戶端。你�
 
 ## 截圖
 
-### 終端機
-
-一個 SSH 工作階段。側邊欄列出了這台伺服器上可以開啟的內容：更多終端機、SFTP、IDE 和連接埠轉發。
-
-![側邊欄列出伺服器工具的 SSH 終端機](../../docs/screenshots/terminal/SSHTERMINAL.png)
-
 ### 混合工作區
 
 將 SSH 終端機、本機終端機、Markdown 筆記和 SFTP 放進同一個分頁。本機與不同伺服器的頁面可以自由組合，最多支援 16 個窗格。
 
 ![組合 SSH、本機終端機、筆記和 SFTP 的四窗格工作區](../../docs/screenshots/mixed-workspace.png)
+
+### 終端機
+
+一個 SSH 工作階段。側邊欄列出了這台伺服器上可以開啟的內容：更多終端機、SFTP、IDE 和連接埠轉發。
+
+![側邊欄列出伺服器工具的 SSH 終端機](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### 檔案
 
