@@ -326,6 +326,8 @@ pub(crate) struct TerminalLayoutPerformance {
     #[cfg(feature = "bench")]
     pub(crate) semantic_roles_micros: u64,
     #[cfg(feature = "bench")]
+    pub(crate) links_micros: u64,
+    #[cfg(feature = "bench")]
     pub(crate) highlights_micros: u64,
     #[cfg(feature = "bench")]
     pub(crate) semantic_command_lines: usize,
@@ -938,6 +940,8 @@ impl TerminalElement {
             .then(|| ime_cursor_bounds_for_snapshot(&self.snapshot, &self.metrics))
             .flatten();
         let marked_text = self.marked_text_run(ime_cursor_bounds.is_some());
+        #[cfg(feature = "bench")]
+        let links_started = Instant::now();
         let link_ranges = if let Some(cache) = cache.as_deref_mut() {
             self.cached_link_ranges_for_rows(visible_rows.clone(), cache)
         } else {
@@ -948,6 +952,10 @@ impl TerminalElement {
             )
         };
 
+        #[cfg(feature = "bench")]
+        if let Some(cache) = cache.as_deref_mut() {
+            cache.performance.links_micros = duration_micros(links_started.elapsed());
+        }
         let row_style_hasher = self.row_layout_style_hasher();
         for row_index in visible_rows {
             let Some(row) = self.snapshot.lines.get(row_index) else {

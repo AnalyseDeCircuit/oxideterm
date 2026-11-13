@@ -28,16 +28,22 @@ const ARCHIVE_SUFFIXES: &[(&str, ArchiveKind)] = &[
 ];
 
 pub fn archive_kind(file_name: &str) -> Option<ArchiveKind> {
-    let lower = file_name.to_ascii_lowercase();
     ARCHIVE_SUFFIXES
         .iter()
-        .find_map(|(suffix, kind)| lower.ends_with(suffix).then_some(*kind))
+        .find_map(|(suffix, kind)| has_archive_suffix(file_name, suffix).then_some(*kind))
 }
 
 pub fn is_archive_path(path: &str) -> bool {
     archive_kind(path).is_some()
-        || path.to_ascii_lowercase().ends_with(".7z")
-        || path.to_ascii_lowercase().ends_with(".rar")
+        || has_archive_suffix(path, ".7z")
+        || has_archive_suffix(path, ".rar")
+}
+
+fn has_archive_suffix(path: &str, suffix: &str) -> bool {
+    // Terminal link discovery probes ordinary words too; compare ASCII suffix bytes without
+    // allocating a lowercase copy or assuming the candidate starts on a UTF-8 boundary.
+    path.as_bytes()[path.len().saturating_sub(suffix.len())..]
+        .eq_ignore_ascii_case(suffix.as_bytes())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -343,4 +349,36 @@ pub fn plan_archive_command(
         destination,
         command,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn archive_suffixes_preserve_case_and_format_boundaries() {
+        for (path, expected_kind, recognized) in [
+            ("包.ZIP", Some(ArchiveKind::Zip), true),
+            ("backup.TAR", Some(ArchiveKind::Tar), true),
+            ("backup.TaR.Gz", Some(ArchiveKind::TarGzip), true),
+            ("backup.TGZ", Some(ArchiveKind::TarGzip), true),
+            ("backup.TAR.BZ2", Some(ArchiveKind::TarBzip2), true),
+            ("backup.TBZ2", Some(ArchiveKind::TarBzip2), true),
+            ("backup.TBZ", Some(ArchiveKind::TarBzip2), true),
+            ("backup.TAR.XZ", Some(ArchiveKind::TarXz), true),
+            ("backup.TXZ", Some(ArchiveKind::TarXz), true),
+            ("backup.TAR.ZST", Some(ArchiveKind::TarZstd), true),
+            ("backup.TZST", Some(ArchiveKind::TarZstd), true),
+            ("包.7Z", None, true),
+            ("包.RaR", None, true),
+            ("", None, false),
+            ("zip", None, false),
+            ("普通日志🦀", None, false),
+            ("archive.zip.log", None, false),
+            ("archive.tar.gz/entry", None, false),
+        ] {
+            assert_eq!(archive_kind(path), expected_kind, "{path}");
+            assert_eq!(is_archive_path(path), recognized, "{path}");
+        }
+    }
 }

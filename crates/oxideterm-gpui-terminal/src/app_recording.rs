@@ -248,6 +248,12 @@ impl TerminalPane {
 
     #[cfg(feature = "bench")]
     #[doc(hidden)]
+    pub fn benchmark_link_stage_micros(&self) -> u64 {
+        self.layout_cache.lock().performance().links_micros
+    }
+
+    #[cfg(feature = "bench")]
+    #[doc(hidden)]
     pub fn benchmark_layout_cache_hit_percent(&self) -> u8 {
         self.layout_cache.lock().performance().cache_hit_percent
     }

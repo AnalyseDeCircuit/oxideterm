@@ -6,10 +6,11 @@ use std::{
 
 use gpui::SharedString;
 use oxideterm_terminal::{TerminalCell, TerminalSnapshot};
+use zeroize::Zeroizing;
 
-#[derive(Clone, Debug)]
 struct LinkText {
-    text: String,
+    // URL and path scans share one character buffer; terminal contents stay local to this row.
+    text: Zeroizing<Vec<char>>,
     boundaries: Vec<usize>,
 }
 
@@ -127,8 +128,8 @@ pub(super) fn detect_link_ranges_for_rows_with_path_detection(
 }
 
 fn link_text_for_row(row: &oxideterm_terminal::TerminalRow) -> LinkText {
-    let mut text = String::new();
-    let mut boundaries = Vec::new();
+    let mut text = Zeroizing::new(Vec::with_capacity(row.cells.len()));
+    let mut boundaries = Vec::with_capacity(row.cells.len() + 1);
     let mut skip_wide_spacer = false;
     let mut last_end_col = 0;
 
@@ -209,7 +210,7 @@ fn detect_url_ranges(
     const HTTPS_PREFIX: [char; 8] = ['h', 't', 't', 'p', 's', ':', '/', '/'];
     const HTTP_PREFIX: [char; 7] = ['h', 't', 't', 'p', ':', '/', '/'];
 
-    let chars: Vec<char> = link_text.text.chars().collect();
+    let chars = link_text.text.as_slice();
     let mut ranges = Vec::new();
     let mut index = 0;
     while index < chars.len() {
@@ -229,7 +230,7 @@ fn detect_url_ranges(
         while index < chars.len() && !is_link_terminator(chars[index]) {
             index += 1;
         }
-        let end = trim_link_end(&chars, start, index);
+        let end = trim_link_end(chars, start, index);
         if end > start + prefix_len {
             let Some((start_col, end_col)) = char_range_to_cell_range(link_text, start, end) else {
                 continue;
@@ -256,7 +257,7 @@ fn detect_path_ranges(
     link_text: &LinkText,
     existing_links: &[TerminalLinkRange],
 ) -> Vec<TerminalLinkRange> {
-    let chars: Vec<char> = link_text.text.chars().collect();
+    let chars = link_text.text.as_slice();
     let mut ranges = Vec::new();
     let mut index = 0;
     while index < chars.len() {
@@ -279,7 +280,7 @@ fn detect_path_ranges(
                 index += 1;
             }
         }
-        let end = trim_link_end(&chars, start, index);
+        let end = trim_link_end(chars, start, index);
         if end <= start {
             continue;
         }

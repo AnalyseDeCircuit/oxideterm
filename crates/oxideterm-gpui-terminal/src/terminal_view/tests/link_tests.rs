@@ -1,6 +1,33 @@
 use super::*;
 
 #[test]
+fn link_ranges_preserve_wide_combining_and_quoted_archive_columns() {
+    let mut snapshot = selection_snapshot("");
+    snapshot.lines = vec![row_from_text_with_wide_spacers(
+        "e 中文 https://example.com/文). '报告 备份.TAR.GZ' noise",
+    )];
+    snapshot.cols = snapshot.lines[0].cells.len();
+    snapshot.lines[0].cells_mut()[0].set_zerowidth("\u{301}".into());
+    snapshot.lines[0].refresh_signature();
+    let links = display_link_ranges_with_path_detection(&snapshot, true);
+    assert_eq!(
+        links
+            .iter()
+            .map(|link| (
+                link.start_col,
+                link.end_col,
+                link.kind,
+                link.target.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            (7, 29, TerminalLinkKind::Url, "https://example.com/文"),
+            (32, 50, TerminalLinkKind::Path, "'报告 备份.TAR.GZ'"),
+        ]
+    );
+}
+
+#[test]
 fn link_detection_preserves_ranges_and_prefers_explicit_targets() {
     for (source, explicit, kind, start, end, target) in [
         (
