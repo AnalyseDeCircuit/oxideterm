@@ -55,8 +55,13 @@ pub(super) fn tab_reorder_target_visible_index(
     insertion_slot.saturating_sub(usize::from(source_visible_index < insertion_slot))
 }
 
-fn tabbar_tauri_wheel_scroll_delta(delta_x: f32, delta_y: f32) -> f32 {
-    if delta_y != 0.0 { delta_y } else { delta_x }
+fn tabbar_wheel_scroll_delta(delta_x: f32, delta_y: f32) -> f32 {
+    // Minor cross-axis trackpad movement must not override the intended direction.
+    if delta_x.abs() > delta_y.abs() {
+        delta_x
+    } else {
+        delta_y
+    }
 }
 
 // GPUI wheel deltas are applied to negative scroll offsets. The tab bar keeps a
@@ -1423,10 +1428,10 @@ impl WorkspaceApp {
         let delta = event
             .delta
             .pixel_delta(px(self.tokens.metrics.tabbar_height));
-        // Tauri TabBar intercepts vertical wheel movement and applies it to
-        // scrollLeft. Keep ScrollHandle as the measured clamp, but make this
+        // Keep vertical wheels usable while respecting the dominant trackpad axis.
+        // Keep ScrollHandle as the measured clamp, but make this
         // the only wheel adapter so GPUI's default listener cannot double-scroll.
-        let scroll_delta = tabbar_tauri_wheel_scroll_delta(f32::from(delta.x), f32::from(delta.y));
+        let scroll_delta = tabbar_wheel_scroll_delta(f32::from(delta.x), f32::from(delta.y));
         if scroll_delta == 0.0 {
             return;
         }
@@ -1700,6 +1705,36 @@ impl WorkspaceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tabbar_wheel_scroll_ignores_minor_cross_axis_movement() {
+        for (direction, expected) in [
+            (-1.0, [112.0, 124.0, 136.0, 148.0]),
+            (1.0, [88.0, 76.0, 64.0, 52.0]),
+        ] {
+            let mut scroll_x = 100.0;
+            for (minor_delta, expected_scroll) in [0.0, 0.4, -0.3, 0.0].into_iter().zip(expected) {
+                let delta = tabbar_wheel_scroll_delta(direction * 12.0, minor_delta);
+                scroll_x = tabbar_scroll_x_after_wheel(scroll_x, delta, 500.0);
+                assert_eq!(scroll_x, expected_scroll);
+            }
+        }
+    }
+
+    #[test]
+    fn tabbar_vertical_wheel_scroll_preserves_direction_and_bounds() {
+        for (delta_x, delta_y, current, expected) in [
+            (0.0, -12.0, 100.0, 112.0),
+            (0.4, -12.0, 100.0, 112.0),
+            (-0.3, 12.0, 100.0, 88.0),
+            (0.0, -12.0, 495.0, 500.0),
+            (0.0, 12.0, 5.0, 0.0),
+            (0.0, 0.0, 100.0, 100.0),
+        ] {
+            let delta = tabbar_wheel_scroll_delta(delta_x, delta_y);
+            assert_eq!(tabbar_scroll_x_after_wheel(current, delta, 500.0), expected);
+        }
+    }
 
     #[test]
     fn tab_drag_axes_distinguish_reorder_and_detach() {
