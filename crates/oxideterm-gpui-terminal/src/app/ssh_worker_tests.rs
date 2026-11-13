@@ -1,11 +1,220 @@
 use super::*;
 use gpui::{
-    AvailableSpace, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent, TestAppContext, point,
-    size,
+    AppContext, AvailableSpace, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent,
+    TestAppContext, point, size,
 };
 
 #[path = "../../../oxideterm-terminal/tests/support/ssh_peer.rs"]
 mod ssh_peer;
+
+#[cfg(unix)]
+#[test]
+fn bash_redraw_over_ssh_preserves_prompt_after_resize_and_scroll() {
+    use oxideterm_terminal::{LocalCommand, LocalPtyConfig, LocalPtySession, TerminalEncoding};
+
+    let mut peer = ssh_peer::SshPeer::new();
+    let config =
+        SshSessionConfig::from(peer.config.take().unwrap()).with_runtime(peer.runtime.clone());
+    let mut terminal = TerminalSession::ssh(config, 80, 24);
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let mut bash = LocalPtySession::spawn_with_config_graphics_and_encoding(
+        80,
+        24,
+        LocalPtyConfig {
+            command: Some(LocalCommand {
+                program: "/bin/bash".into(),
+                args: zeroize::Zeroizing::new(vec![
+                    "--noprofile".into(),
+                    "--norc".into(),
+                    "-i".into(),
+                ]),
+            }),
+            cwd: Some(directory.path().to_path_buf()),
+            load_profile: false,
+            ..Default::default()
+        },
+        Default::default(),
+        TerminalEncoding::Utf8,
+        100,
+    )
+    .unwrap();
+    let output = Arc::new(Mutex::new(Vec::new()));
+    let captured = output.clone();
+    bash.set_output_processor(Some(Arc::new(move |bytes| {
+        captured.lock().extend_from_slice(bytes);
+        bytes.to_vec()
+    })));
+    terminal
+        .write_input(b"PS1='ready> '; printf 'row%02d\\n' {1..30}\r")
+        .unwrap();
+    let mut previous = terminal.snapshot();
+    for (cols, rows, expected) in [
+        (80, 24, "row30"),
+        (40, 8, "size=8 40"),
+        (100, 20, "size=20 100"),
+    ] {
+        if cols != 80 {
+            // Leave a wrapped input line for Readline to redraw on SIGWINCH.
+            terminal.write_input(b"printf 'abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz'; printf '\\nsize='; stty size").unwrap();
+            let (input, _) = peer.input.recv_timeout(Duration::from_secs(5)).unwrap();
+            bash.write_input(&input).unwrap();
+            terminal.resize_with_cell_size(cols, rows, 8, 16).unwrap();
+            // The SSH startup size can precede this request in the transport queue.
+            loop {
+                let accepted = peer.resize.recv_timeout(Duration::from_secs(5)).unwrap();
+                bash.resize(accepted.0 as usize, accepted.1 as usize)
+                    .unwrap();
+                if accepted == (cols as u32, rows as u32) {
+                    break;
+                }
+            }
+            terminal.write_input(b"\r").unwrap();
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            for (input, _) in peer.input.try_iter() {
+                bash.write_input(&input).unwrap();
+            }
+            bash.drain_output();
+            let bytes = std::mem::take(&mut *output.lock());
+            if !bytes.is_empty() {
+                peer.runtime.block_on(sender.data(channel, bytes)).unwrap();
+            }
+            let scrolled = terminal.scroll_lines_snapshot_incremental(1, &previous);
+            previous = terminal.scroll_lines_snapshot_incremental(-1, &scrolled);
+            let full = terminal.snapshot();
+            // Compare only after the parser is stable; SSH can advance between snapshot calls.
+            let text = terminal.buffer_text();
+            if text.lines().any(|line| line.trim_end() == expected)
+                && full.lines[full.cursor_row].text().trim_end() == "ready>"
+            {
+                let current = terminal.snapshot_incremental(&previous);
+                assert_eq!(
+                    current
+                        .lines
+                        .iter()
+                        .map(|row| row.text())
+                        .collect::<Vec<_>>(),
+                    full.lines.iter().map(|row| row.text()).collect::<Vec<_>>()
+                );
+                assert_eq!(
+                    (current.cursor_row, current.cursor_col),
+                    (full.cursor_row, 7)
+                );
+                assert!(current.cursor_row < rows);
+                previous = current;
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "Bash did not settle at {cols}x{rows}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+    }
+    bash.shutdown();
+    terminal.shutdown();
+    peer.stop();
+}
+
+#[gpui::test]
+fn viewport_resize_recovers_after_ssh_queue_backpressure(cx: &mut TestAppContext) {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config =
+        SshSessionConfig::from(peer.config.take().unwrap()).with_runtime(peer.runtime.clone());
+    let (_, cx) = cx.add_window_view(|_, _| super::tests::TerminalTestRoot);
+    let pane = cx.update(|window, cx| {
+        cx.new(|cx| {
+            TerminalPane::new_ssh_with_preferences(config, Default::default(), window, cx).unwrap()
+        })
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let terminal = pane.read_with(cx, |pane, _| pane.terminal.clone());
+    let activity = terminal.lock().activity_receiver();
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let release_rx = std::sync::Mutex::new(Some(release_rx));
+    terminal
+        .lock()
+        .set_output_processor(Some(Arc::new(move |bytes| {
+            if let Some(release) = release_rx.lock().unwrap().take() {
+                entered_tx.send(()).unwrap();
+                release.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            bytes.to_vec()
+        })));
+    let target = pane.update(cx, |pane, cx| {
+        let bounds = Bounds::new(
+            point(px(0.0), px(0.0)),
+            size(
+                px(640.0),
+                pane.metrics.line_height * 8.0 + px(TERMINAL_CONTENT_PADDING * 2.0),
+            ),
+        );
+        pane.apply_viewport_bounds(bounds, 1.0, cx);
+        pane.pending_pty_resize.unwrap()
+    });
+    peer.runtime
+        .block_on(sender.data(channel, b"output\r\nprompt> ".to_vec()))
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    // Hold the real parser while filling its bounded control queue. No resize
+    // failure hook is needed, and releasing the parser restores the same session.
+    let rejected = (0..1024).any(|_| terminal.lock().set_focused(false).is_err());
+    let pending_after_failure = pane.update(cx, |pane, cx| {
+        pane.flush_pending_pty_resize(pane.pty_resize_generation, cx);
+        let error = pane.resize_grid(20, 4, cx).unwrap_err();
+        assert_eq!(
+            error,
+            "The terminal backend rejected the requested grid size."
+        );
+        pane.pending_pty_resize
+    });
+    release_tx.send(()).unwrap();
+    assert!(
+        rejected,
+        "the control queue must actually apply backpressure"
+    );
+    assert_eq!(pending_after_failure, Some(target));
+    peer.runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while terminal.lock().set_focused(false).is_err() {
+                assert!(activity.notified().await);
+            }
+        })
+        .await
+        .unwrap();
+    });
+    cx.run_until_parked();
+    cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE);
+    cx.run_until_parked();
+    peer.runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while terminal.lock().snapshot().rows != 8 {
+                assert!(activity.notified().await);
+            }
+        })
+        .await
+        .unwrap();
+    });
+    cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE);
+    cx.run_until_parked();
+    pane.read_with(cx, |pane, _| {
+        assert_eq!((pane.snapshot.cols, pane.snapshot.rows), (target.0, 8));
+        assert_eq!(pane.pending_pty_resize, None);
+        assert!(pane.snapshot.cursor_row < 8);
+        assert!(
+            terminal
+                .lock()
+                .buffer_text()
+                .trim_end()
+                .ends_with("prompt>")
+        );
+    });
+    terminal.lock().shutdown();
+    peer.stop();
+}
 
 #[gpui::test]
 fn ssh_search_refreshes_during_output(cx: &mut TestAppContext) {

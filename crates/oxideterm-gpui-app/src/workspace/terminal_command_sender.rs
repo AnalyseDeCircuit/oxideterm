@@ -3,6 +3,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+use std::{cell::Cell, rc::Rc};
 
 use gpui::{AppContext, Context, Entity, Task, Timer, WeakEntity};
 use oxideterm_gpui_editor::{
@@ -22,7 +23,6 @@ pub(super) const TERMINAL_SENDER_DEFAULT_HEIGHT: f32 = 280.0;
 pub(super) const TERMINAL_SENDER_MIN_HEIGHT: f32 = 260.0;
 pub(super) const TERMINAL_SENDER_MAX_VIEWPORT_RATIO: f32 = 0.65;
 const TERMINAL_SENDER_MIN_TERMINAL_HEIGHT: f32 = 180.0;
-const TERMINAL_SENDER_WINDOW_CHROME_RESERVE: f32 = 96.0;
 pub(super) const TERMINAL_SENDER_RESIZE_HOTZONE_HEIGHT: f32 = 14.0;
 pub(super) const TERMINAL_SENDER_MIN_INTERVAL_MS: u64 = 20;
 pub(super) const TERMINAL_SENDER_MAX_INTERVAL_MS: u64 = 60_000;
@@ -71,6 +71,17 @@ enum TerminalCommandSenderLayout {
 }
 
 impl TerminalCommandSenderLayout {
+    fn panel_height(self, preferred_height: f32, available_height: f32) -> f32 {
+        match self {
+            Self::Hidden => 0.0,
+            // The compact input is fixed chrome. Reserving terminal space here
+            // would make it compete with the quick-command dock's own reserve.
+            Self::Compact => super::terminal_command_bar::TERMINAL_SENDER_COMPACT_HEIGHT
+                .min(available_height.max(0.0)),
+            Self::Expanded => adjusted_sender_panel_height(preferred_height, 0.0, available_height),
+        }
+    }
+
     fn toggled_visibility(self) -> Self {
         if self == Self::Hidden {
             Self::Compact
@@ -185,6 +196,7 @@ pub(super) struct TerminalCommandSenderEntity {
     compact_suggestions_open: bool,
     compact_suggestion_highlighted: Option<usize>,
     panel_height: f32,
+    pub(super) available_height: Rc<Cell<f32>>,
     resize_drag: Option<TerminalCommandSenderResizeDrag>,
     documents: Vec<TerminalCommandSenderDocument>,
     active_document_id: TerminalCommandSenderId,
@@ -220,6 +232,7 @@ impl TerminalCommandSenderEntity {
             compact_suggestions_open: false,
             compact_suggestion_highlighted: None,
             panel_height: TERMINAL_SENDER_DEFAULT_HEIGHT,
+            available_height: Rc::new(Cell::new(0.0)),
             resize_drag: None,
             documents: vec![first],
             active_document_id: first_id,
@@ -1058,21 +1071,17 @@ impl TerminalCommandSenderEntity {
             .find(|document| document.id == sender_id)
     }
 
-    pub(super) fn panel_height_for_viewport(&self, viewport_height: f32) -> f32 {
-        adjusted_sender_panel_height(self.panel_height, 0.0, viewport_height)
+    pub(super) fn panel_height(&self) -> f32 {
+        self.layout
+            .panel_height(self.panel_height, self.available_height.get())
     }
 
     pub(super) fn is_resizing(&self) -> bool {
         self.resize_drag.is_some()
     }
 
-    pub(super) fn start_resize(
-        &mut self,
-        cursor_y: gpui::Pixels,
-        viewport_height: f32,
-        cx: &mut Context<Self>,
-    ) {
-        let current_height = self.panel_height_for_viewport(viewport_height);
+    pub(super) fn start_resize(&mut self, cursor_y: gpui::Pixels, cx: &mut Context<Self>) {
+        let current_height = self.panel_height();
         self.panel_height = current_height;
         self.resize_drag = Some(TerminalCommandSenderResizeDrag {
             start_cursor_y: cursor_y,
@@ -1084,7 +1093,6 @@ impl TerminalCommandSenderEntity {
     pub(super) fn update_resize(
         &mut self,
         cursor_y: gpui::Pixels,
-        viewport_height: f32,
         dragging: bool,
         cx: &mut Context<Self>,
     ) {
@@ -1098,7 +1106,7 @@ impl TerminalCommandSenderEntity {
         let next_height = adjusted_sender_panel_height(
             drag.start_height,
             f32::from(cursor_y - drag.start_cursor_y),
-            viewport_height,
+            self.available_height.get(),
         );
         if (next_height - self.panel_height).abs() >= f32::EPSILON {
             self.panel_height = next_height;
@@ -1112,9 +1120,12 @@ impl TerminalCommandSenderEntity {
         }
     }
 
-    pub(super) fn reset_height(&mut self, viewport_height: f32, cx: &mut Context<Self>) {
-        let height =
-            adjusted_sender_panel_height(TERMINAL_SENDER_DEFAULT_HEIGHT, 0.0, viewport_height);
+    pub(super) fn reset_height(&mut self, cx: &mut Context<Self>) {
+        let height = adjusted_sender_panel_height(
+            TERMINAL_SENDER_DEFAULT_HEIGHT,
+            0.0,
+            self.available_height.get(),
+        );
         let changed = (height - self.panel_height).abs() >= f32::EPSILON;
         self.panel_height = height;
         self.resize_drag = None;
@@ -1229,16 +1240,13 @@ fn plan_failure(error: TerminalSenderPlanError) -> TerminalCommandSenderFailure 
     }
 }
 
-fn adjusted_sender_panel_height(start_height: f32, delta_y: f32, viewport_height: f32) -> f32 {
+fn adjusted_sender_panel_height(start_height: f32, delta_y: f32, available_height: f32) -> f32 {
     // Moving the divider upward grows the bottom sender panel.
-    let ratio_limit = viewport_height * TERMINAL_SENDER_MAX_VIEWPORT_RATIO;
-    let terminal_limit = viewport_height
-        - TERMINAL_SENDER_WINDOW_CHROME_RESERVE
-        - TERMINAL_SENDER_MIN_TERMINAL_HEIGHT;
-    let maximum = ratio_limit
-        .min(terminal_limit)
-        .max(TERMINAL_SENDER_MIN_HEIGHT);
-    (start_height - delta_y).clamp(TERMINAL_SENDER_MIN_HEIGHT, maximum)
+    let ratio_limit = available_height * TERMINAL_SENDER_MAX_VIEWPORT_RATIO;
+    let terminal_limit = (available_height - TERMINAL_SENDER_MIN_TERMINAL_HEIGHT).max(0.0);
+    let maximum = ratio_limit.min(terminal_limit).max(0.0);
+    // The preferred minimum must yield to the terminal when the surface is small.
+    (start_height - delta_y).clamp(TERMINAL_SENDER_MIN_HEIGHT.min(maximum), maximum)
 }
 
 #[cfg(test)]
@@ -1255,6 +1263,38 @@ mod tests {
             paste: "Paste".to_string(),
             select_all: "Select all".to_string(),
         }
+    }
+
+    #[test]
+    fn sender_height_reserves_terminal_space_in_the_measured_surface() {
+        for (available, requested, delta, expected) in [
+            (800.0, 280.0, 0.0, 280.0),
+            (800.0, 280.0, -1000.0, 520.0),
+            (400.0, 280.0, 0.0, 220.0),
+            (200.0, 280.0, 0.0, 20.0),
+            (120.0, 280.0, 0.0, 0.0),
+            (0.0, 280.0, 0.0, 0.0),
+        ] {
+            assert_eq!(
+                adjusted_sender_panel_height(requested, delta, available),
+                expected
+            );
+        }
+        for available in [180.0, 200.0, 400.0] {
+            assert_eq!(
+                TerminalCommandSenderLayout::Compact.panel_height(280.0, available),
+                super::super::terminal_command_bar::TERMINAL_SENDER_COMPACT_HEIGHT,
+                "compact input must remain stable while the adjacent dock adjusts its height",
+            );
+        }
+        assert_eq!(
+            TerminalCommandSenderLayout::Compact.panel_height(280.0, 12.0),
+            12.0
+        );
+        assert_eq!(
+            TerminalCommandSenderLayout::Hidden.panel_height(280.0, 400.0),
+            0.0
+        );
     }
 
     #[test]
