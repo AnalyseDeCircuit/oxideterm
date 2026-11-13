@@ -253,3 +253,74 @@ async fn send_request(
         .expect("read HTTP response");
     String::from_utf8_lossy(&response).into_owned()
 }
+
+#[tokio::test]
+async fn terminal_history_http_preserves_scope_schema_and_domain_errors() {
+    use oxideterm_public_mcp::history::{
+        HistoryBuffer, HistoryError, HistoryRequest, HistorySelection,
+    };
+    use oxideterm_public_mcp::{PublicToolCall, TerminalRef};
+    let clients = Arc::new(ClientRegistry::default());
+    let client = clients
+        .register(
+            "History reader",
+            ClientApprovalMode::Standard,
+            [ToolGroup::Basic, ToolGroup::TerminalObserve],
+        )
+        .unwrap();
+    let denied = clients
+        .register(
+            "No terminal content",
+            ClientApprovalMode::Standard,
+            [ToolGroup::Basic],
+        )
+        .unwrap();
+    let auth = Zeroizing::new(format!("Bearer {}", client.credential.expose()));
+    let denied_auth = Zeroizing::new(format!("Bearer {}", denied.credential.expose()));
+    let (broker, mut receiver) = DomainBroker::channel(2);
+    let state = Arc::new(PublicMcpState {
+        clients,
+        approvals: Arc::default(),
+        audit: Arc::new(AuditStore::new(8)),
+        artifacts: Arc::default(),
+        broker,
+    });
+    let server = start_http_server(&tokio::runtime::Handle::current(), state, 0).unwrap();
+    let terminal = TerminalRef::new();
+    let body=json!({"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"terminals_history","arguments":{"request":{"kind":"snapshot","terminal_ref":terminal,"buffer":"primary","selection":{"kind":"screen"}}}}}).to_string();
+    let response = send_request(server.port(), Some(&denied_auth), &body, None).await;
+    assert_eq!(response_json(&response)["result"]["isError"], true);
+    tokio::select! { biased; _ = receiver.recv() => panic!("unauthorized or malformed request reached broker"), _ = std::future::ready(()) => {} }
+    let finish = async {
+        let Some(DomainMessage::Request(request)) = receiver.recv().await else {
+            panic!("missing history request")
+        };
+        assert_eq!(request.client_ref, client.projection.client_ref);
+        let PublicToolCall::TerminalHistory(args) = &request.call else {
+            panic!("wrong domain call")
+        };
+        assert!(
+            matches!(&args.request,HistoryRequest::Snapshot {terminal_ref,buffer:HistoryBuffer::Primary,selection:HistorySelection::Screen {},slot:0,..} if terminal_ref==&terminal)
+        );
+        request.finish(HistoryError::SnapshotTooLarge.envelope());
+    };
+    let (response, ()) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(
+            send_request(server.port(), Some(&auth), &body, None),
+            finish
+        )
+    })
+    .await
+    .unwrap();
+    let result = &response_json(&response)["result"];
+    assert_eq!(
+        result["structuredContent"]["data"]["reason"],
+        "snapshot_too_large"
+    );
+    assert_eq!(result["isError"], true);
+    let malformed=json!({"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"terminals_history","arguments":{"request":{"kind":"page","cursor":"history_unknown","terminal_ref":terminal}}}}).to_string();
+    let response = send_request(server.port(), Some(&auth), &malformed, None).await;
+    assert_eq!(response_json(&response)["result"]["isError"], true);
+    tokio::select! { biased; _ = receiver.recv() => panic!("unauthorized or malformed request reached broker"), _ = std::future::ready(()) => {} }
+    server.shutdown().await;
+}

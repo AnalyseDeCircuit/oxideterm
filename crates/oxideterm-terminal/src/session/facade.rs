@@ -840,6 +840,17 @@ impl TerminalSession {
         self.backend.clear_buffer();
     }
 
+    pub fn history_capture(
+        &self,
+        alternate: bool,
+        screen: bool,
+        previous: Option<&crate::TerminalHistoryStamp>,
+        byte_limit: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::TerminalHistoryCapture, crate::TerminalHistoryError> {
+        self.backend
+            .history_capture(alternate, screen, previous, byte_limit, cancelled)
+    }
     pub fn buffer_text(&self) -> String {
         self.backend.buffer_text()
     }

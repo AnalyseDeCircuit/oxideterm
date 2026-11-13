@@ -995,6 +995,19 @@ impl ServerHandler for PublicMcpService {
                 ),
                 Err(error) => *error,
             },
+            "terminals_history" => {
+                match parse_arguments::<crate::history::HistoryArgs>(arguments) {
+                    Ok(args) if args.validate() => {
+                        self.execute_call(&client, PublicToolCall::TerminalHistory(args))
+                            .await
+                    }
+                    Ok(_) => tool_error(
+                        "invalid_arguments",
+                        "The terminal history request is invalid",
+                    ),
+                    Err(error) => *error,
+                }
+            }
             "terminals_find" => {
                 match parse_arguments::<crate::calls::FindTerminalArgs>(arguments) {
                     Ok(args)
@@ -1753,7 +1766,14 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         ),
         define_tool::<ReadTerminalArgs>(
             "terminals_read",
-            "Read a bounded visible terminal snapshot with a generation cursor.",
+            "Read the visible viewport with a generation cursor. Use terminals_history for output independent of user scrolling.",
+            ToolGroup::TerminalObserve,
+            true,
+            false,
+        ),
+        define_tool::<crate::history::HistoryArgs>(
+            "terminals_history",
+            "Read frozen primary or alternate terminal history independent of user scrolling. Select all or screen, page using next_cursor, and release when done. Snapshot replaces the selected client slot (0 or 1); serialize each slot. release_slot abandons a lost snapshot under memory pressure. unchanged is not command completion.",
             ToolGroup::TerminalObserve,
             true,
             false,
@@ -2833,10 +2853,13 @@ fn remote_path_is_valid(path: &str) -> bool {
 
 fn envelope_result(envelope: ToolEnvelope) -> CallToolResult {
     match envelope.outcome {
-        ToolOutcome::Failed => CallToolResult::structured_error(json!({
-            "outcome": envelope.outcome,
-            "error": envelope.error,
-        })),
+        ToolOutcome::Failed => {
+            let mut result = json!({ "outcome": envelope.outcome, "error": envelope.error });
+            if let Some(data) = envelope.data {
+                result["data"] = data;
+            }
+            CallToolResult::structured_error(result)
+        }
         ToolOutcome::Accepted => CallToolResult::structured(
             envelope
                 .data

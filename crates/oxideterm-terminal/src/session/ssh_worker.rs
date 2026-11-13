@@ -1056,6 +1056,19 @@ impl TerminalSessionBackend for SshPtySession {
         self.shared.core.lock().command_output_text(mark)
     }
 
+    fn history_capture(
+        &self,
+        alternate: bool,
+        screen: bool,
+        previous: Option<&crate::TerminalHistoryStamp>,
+        byte_limit: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::TerminalHistoryCapture, crate::TerminalHistoryError> {
+        self.shared
+            .core
+            .lock()
+            .history_capture(alternate, screen, previous, byte_limit, cancelled)
+    }
     fn buffer_text(&self) -> String {
         self.shared.core.lock().buffer_text()
     }

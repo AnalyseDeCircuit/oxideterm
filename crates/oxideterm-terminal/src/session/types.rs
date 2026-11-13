@@ -305,6 +305,16 @@ pub trait TerminalSessionBackend: Send {
     fn set_selection(&self, selection: Option<crate::TerminalSelectionRange>);
     fn selection(&self) -> Option<crate::TerminalSelectionRange>;
     fn clear_buffer(&mut self);
+    fn history_capture(
+        &self,
+        _alternate: bool,
+        _screen: bool,
+        _previous: Option<&crate::TerminalHistoryStamp>,
+        _byte_limit: usize,
+        _cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::TerminalHistoryCapture, crate::TerminalHistoryError> {
+        Err(crate::TerminalHistoryError::Unsupported)
+    }
     fn buffer_text(&self) -> String {
         String::new()
     }

@@ -829,6 +829,7 @@ impl WorkspaceApp {
         client_ref: &oxideterm_public_mcp::ClientRef,
         cx: &mut Context<Self>,
     ) {
+        self.public_mcp.history.lock().revoke_client(client_ref);
         let terminal_refs = self
             .public_mcp
             .terminals
@@ -886,6 +887,10 @@ impl WorkspaceApp {
             // A UI-owned pane close revokes only its public handle; an SSH node
             // remains owned by NodeRouter and any other registered consumers.
             self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
+            self.public_mcp
+                .history
+                .lock()
+                .revoke_terminal(&terminal_ref, false);
             self.public_mcp.terminals.remove(&terminal_ref);
         }
     }
@@ -905,6 +910,10 @@ impl WorkspaceApp {
             })
             .collect::<Vec<_>>();
         for (terminal_ref, client_ref) in terminal_refs {
+            self.public_mcp
+                .history
+                .lock()
+                .revoke_terminal(&terminal_ref, true);
             // The public handle stays stable; recordings end at the old shell boundary.
             self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
         }
@@ -953,6 +962,7 @@ impl WorkspaceApp {
             "serial": serial,
             "capabilities": {
                 "read": true,
+                "history_read": true,
                 "find": true,
                 "input": interactive,
                 "resize": true,

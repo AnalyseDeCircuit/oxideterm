@@ -325,6 +325,8 @@ pub struct Term<T> {
     /// Opposite of the active grid. While the alternate screen buffer is active, this will be the
     /// primary grid. Otherwise it is the alternate screen buffer.
     inactive_grid: Grid<Cell>,
+    history_identity: u64,
+    history_switches: u64,
 
     /// Index into `charsets`, pointing to what ASCII is currently being mapped to.
     active_charset: CharsetIndex,
@@ -508,6 +510,11 @@ impl<T> Term<T> {
 
         Term {
             inactive_grid,
+            history_identity: {
+                static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            },
+            history_switches: 0,
             scroll_region,
             event_proxy,
             damage,
@@ -745,6 +752,14 @@ impl<T> Term<T> {
         &self.grid
     }
 
+    pub fn history_identity(&self) -> u64 {
+        self.history_identity
+    }
+
+    pub fn history_switches(&self) -> u64 {
+        self.history_switches
+    }
+
     /// Primary-screen annotations survive a resize while an alternate screen is active.
     pub fn primary_grid(&self) -> &Grid<Cell> {
         if self.mode.contains(TermMode::ALT_SCREEN) {
@@ -875,6 +890,7 @@ impl<T> Term<T> {
 
     /// Swap primary and alternate screen buffer.
     pub fn swap_alt(&mut self) {
+        self.history_switches = self.history_switches.wrapping_add(1);
         if !self.mode.contains(TermMode::ALT_SCREEN) {
             // Set alt screen cursor to the current primary screen cursor.
             self.inactive_grid.cursor = self.grid.cursor.clone();

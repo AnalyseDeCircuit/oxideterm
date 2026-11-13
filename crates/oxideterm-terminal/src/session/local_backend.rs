@@ -205,6 +205,19 @@ impl TerminalSessionBackend for LocalPtySession {
         LocalPtySession::clear_buffer(self);
     }
 
+    fn history_capture(
+        &self,
+        alternate: bool,
+        screen: bool,
+        previous: Option<&crate::TerminalHistoryStamp>,
+        byte_limit: usize,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<crate::TerminalHistoryCapture, crate::TerminalHistoryError> {
+        let term = self.display_term();
+        let term = term.lock();
+        crate::history::freeze_history(&term, alternate, screen, previous, byte_limit, cancelled)
+    }
+
     fn buffer_text(&self) -> String {
         let term = self.display_term();
         let term = term.lock();

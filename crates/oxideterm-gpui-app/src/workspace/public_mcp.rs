@@ -34,6 +34,7 @@ mod connections;
 pub(in crate::workspace) mod desktops;
 mod files;
 mod forwards;
+mod history;
 mod host_tools;
 mod quick_commands;
 mod recordings;
@@ -88,6 +89,8 @@ pub(in crate::workspace) struct PublicMcpWorkspaceBridge {
     terminals: HashMap<TerminalRef, PublicMcpTerminalRecord>,
     pending_terminal_opens: HashMap<String, PublicMcpPendingTerminalOpen>,
     recordings: HashMap<RecordingRef, PublicMcpRecordingRecord>,
+    history: Arc<Mutex<oxideterm_public_mcp::history::HistoryStore>>,
+    history_cleanup: Option<Task<()>>,
     desktops: HashMap<DesktopRef, PublicMcpDesktopRecord>,
     runtime_handles: Arc<Mutex<PublicMcpRuntimeHandles>>,
 }
@@ -402,6 +405,8 @@ impl PublicMcpWorkspaceBridge {
             terminals: HashMap::new(),
             pending_terminal_opens: HashMap::new(),
             recordings: HashMap::new(),
+            history: Arc::default(),
+            history_cleanup: None,
             desktops: HashMap::new(),
             runtime_handles: Arc::default(),
         }
@@ -1160,6 +1165,7 @@ impl WorkspaceApp {
             ToolGroup::DesktopClipboard => {
                 self.revoke_public_mcp_client_desktop_clipboard_content(client_ref, cx)
             }
+            ToolGroup::TerminalObserve => self.public_mcp.history.lock().revoke_client(client_ref),
             ToolGroup::CommandExecute => self.public_mcp.revoke_client_commands(client_ref),
             ToolGroup::QuickCommandExecute => self
                 .public_mcp
@@ -1183,7 +1189,6 @@ impl WorkspaceApp {
             | ToolGroup::ConnectionRead
             | ToolGroup::ConnectionManage
             | ToolGroup::CredentialManage
-            | ToolGroup::TerminalObserve
             | ToolGroup::TerminalInput
             | ToolGroup::CommandObserve
             | ToolGroup::AuditRead
@@ -1238,6 +1243,7 @@ impl WorkspaceApp {
     fn revoke_public_mcp_client_runtime(&mut self, client_ref: &ClientRef, cx: &mut Context<Self>) {
         // Active domain work shares the broker cancellation token used by timeout and disconnect.
         self.public_mcp.state.broker.cancel_client(client_ref);
+        self.public_mcp.history.lock().revoke_client(client_ref);
         self.revoke_public_mcp_client_recordings(client_ref, cx);
         self.revoke_public_mcp_client_desktops(client_ref, cx);
         self.revoke_public_mcp_client_terminals(client_ref, cx);
@@ -1382,6 +1388,9 @@ impl WorkspaceApp {
                 }
                 PublicToolCall::TerminalState(_) => {
                     self.handle_public_mcp_terminal_state(request, cx)
+                }
+                PublicToolCall::TerminalHistory(_) => {
+                    self.handle_public_mcp_terminal_history(request, cx)
                 }
                 PublicToolCall::ReadTerminal(_) => {
                     self.handle_public_mcp_terminal_read(request, cx)
