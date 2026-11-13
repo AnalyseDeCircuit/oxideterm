@@ -492,7 +492,7 @@ impl WorkspaceApp {
                         },
                     ))
             })
-            .on_scroll_wheel(self.sftp_listener(cx, |this, _event, _window, cx| {
+            .on_scroll(self.sftp_listener(cx, |this, _event, _window, cx| {
                 // The menu is positioned in window coordinates, so any pane
                 // scroll invalidates the row that produced the coordinates.
                 this.sftp_view().update(cx, |sftp, cx| {

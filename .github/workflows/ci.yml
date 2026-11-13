@@ -75,6 +75,10 @@ jobs:
           OXIDETERM_AGENT_DIR: ${{ github.workspace }}/crates/oxideterm-gpui-app/resources/agents
         run: cargo test --workspace
 
+      - name: XIM client protocol regression tests
+        if: steps.scope.outputs.rust == 'true'
+        run: cargo test -p zed-xim --features x11rb-client --lib --locked
+
   i18n:
     name: i18n completeness
     runs-on: ubuntu-latest

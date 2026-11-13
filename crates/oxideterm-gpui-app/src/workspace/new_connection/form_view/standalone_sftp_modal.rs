@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{App, Point, ScrollHandle, ScrollWheelEvent};
+use gpui::{App, Point, ScrollEvent, ScrollHandle};
 use oxideterm_gpui_ui::ScrollableElement;
 
 const STANDALONE_SFTP_COMMON_COLUMN_WIDTH: f32 = 320.0;
@@ -8,7 +8,7 @@ const STANDALONE_SFTP_VIEWPORT_MARGIN: f32 = 32.0;
 
 fn handle_standalone_sftp_column_scroll(
     scroll_handle: &ScrollHandle,
-    event: &ScrollWheelEvent,
+    event: &ScrollEvent,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -353,7 +353,7 @@ impl WorkspaceApp {
             .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
             .overflow_hidden()
             .track_scroll(&scroll_handle)
-            .on_scroll_wheel(move |event, window, cx| {
+            .on_scroll(move |event, window, cx| {
                 handle_standalone_sftp_column_scroll(&wheel_scroll_handle, event, window, cx);
             })
             .child(
@@ -564,7 +564,7 @@ impl WorkspaceApp {
             })
             .overflow_hidden()
             .track_scroll(&scroll_handle)
-            .on_scroll_wheel(move |event, window, cx| {
+            .on_scroll(move |event, window, cx| {
                 handle_standalone_sftp_column_scroll(&wheel_scroll_handle, event, window, cx);
             })
             .child(

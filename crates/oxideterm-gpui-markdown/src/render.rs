@@ -627,7 +627,7 @@ pub fn render_document_virtual_with_code_actions(
         )
         .when_some(opts.scroll_sync.as_ref(), |root, sync| {
             let input = sync.clone();
-            root.on_scroll_wheel(move |_, _, _| input.user_input())
+            root.on_scroll(move |_, _, _| input.user_input())
                 .child(sync.finish_probe(scroll_handle))
         })
         .into_any_element()
@@ -697,7 +697,7 @@ pub fn render_document_virtual_selectable(
         )
         .when_some(opts.scroll_sync.as_ref(), |root, sync| {
             let input = sync.clone();
-            root.on_scroll_wheel(move |_, _, _| input.user_input())
+            root.on_scroll(move |_, _, _| input.user_input())
                 .child(sync.finish_probe(scroll_handle))
         })
         .into_any_element()

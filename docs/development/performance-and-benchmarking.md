@@ -26,6 +26,28 @@ Use the same fixture size, warm-up count, measured-run count, terminal dimension
 
 ## In-App Performance Work
 
+### GPUI 0.3.12 Upgrade Check (2026-11-13)
+
+Compared the 0.3.7 baseline at `4483695eb` with `d5bee9aa8` on an Apple M5,
+macOS 26.6.2, Rust 1.97.0. The baseline's GPUI, terminal and dependency files
+match the migration parent `1d2be3d30`. Both runs used the dev profile, native
+text shaping, the existing tracked allocator, `BENCH_MEASUREMENT=wall-time`,
+20 samples, 1 s warm-up and 3 s measurement. No other local build or test ran
+during measurement.
+
+| Terminal workload | Before | After | Criterion change test |
+| --- | ---: | ---: | --- |
+| Plain streaming output | 1.8142 ms | 1.7499 ms | No significant change, p = 0.48 |
+| Mixed Unicode output | 2.0178 ms | 1.9830 ms | No significant change, p = 0.77 |
+| Unchanged warmed content | 775.77 µs | 772.31 µs | No significant change, p = 0.73 |
+
+Times are Criterion's printed slope estimates; its change test compares sample
+means. This dev-profile check found no significant whole-workload regression.
+Reproduce with the existing `terminal_render` benchmark, selecting
+`terminal_internal_(plain|unicode|warm)$` and passing `--profile dev` to Cargo.
+The baseline was saved as `before-gpui-0312` under `target/criterion`; candidate
+runs use `--baseline before-gpui-0312`.
+
 ### Incremental Terminal Drawing (2026-11-03)
 
 Four shared Rust improvements are retained on top of the decoration/color

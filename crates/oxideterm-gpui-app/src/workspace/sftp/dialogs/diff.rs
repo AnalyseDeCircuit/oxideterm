@@ -139,7 +139,7 @@ impl WorkspaceApp {
                     .selectable_overflow_y_scroll(&self.sftp_view().read(cx).diff_document_scroll)
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
                     .text_size(px(ui.text_xs))
-                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                    .on_scroll(|_, _, cx| cx.stop_propagation())
                     .when(line_count == 0, |body| {
                         body.child(
                             div()
@@ -198,7 +198,7 @@ impl WorkspaceApp {
                                         .collect::<Vec<_>>()
                                 },
                             )
-                            .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
+                            .on_scroll(|_, _, cx| cx.stop_propagation()),
                         )
                     }),
             )

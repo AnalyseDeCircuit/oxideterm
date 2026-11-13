@@ -11,7 +11,7 @@ use std::{
 use gpui::{
     AnyElement, App, Bounds, Context, DispatchPhase, Div, Element, ElementId, ElementInputHandler,
     Entity, FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollWheelEvent,
+    MouseButton, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, ScrollEvent,
     SharedString, Task, TextRun, Window, div, point, prelude::*, px, rgb,
 };
 use oxideterm_editor_core::{
@@ -1357,7 +1357,7 @@ impl TextEditorView {
         selections
     }
 
-    fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    fn handle_scroll(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
         self.scroll_origin = EditorScrollOrigin::User;
         let delta = event.delta.pixel_delta(px(self.metrics.line_height));
         let dx = if event.modifiers.shift {

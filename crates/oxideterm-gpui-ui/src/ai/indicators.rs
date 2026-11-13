@@ -209,7 +209,7 @@ pub fn ai_context_popover(tokens: &ThemeTokens) -> Div {
             .border_color(bg_alpha(tokens, tokens.ui.border, AI_HEADER_BORDER_ALPHA))
             // Keep wheel input local to the popover, matching browser popover
             // scroll chaining rules even when the compact panel has no scrollbar.
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+            .on_scroll(|_, _, cx| cx.stop_propagation());
     crate::surface::theme_overlay_surface_shadow(popover, tokens)
 }
 

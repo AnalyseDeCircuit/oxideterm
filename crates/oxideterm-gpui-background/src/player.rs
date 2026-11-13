@@ -855,13 +855,8 @@ impl Player {
         if let Some(frame) = &self.current
             && let Some(native) = &frame.native
         {
-            use core_foundation::base::TCFType;
-            // Bridge a retained immutable CF object; the GPU submission below owns its lifetime.
-            let buffer = unsafe {
-                core_video::pixel_buffer::CVPixelBuffer::wrap_under_get_rule(
-                    std::ptr::from_ref(&*native.buffer).cast_mut().cast(),
-                )
-            };
+            // Retain the decoded buffer until the GPU submission completes.
+            let buffer = native.buffer.clone();
             let (width, height) = if fit == BackgroundFit::Tile {
                 self.info
                     .as_ref()

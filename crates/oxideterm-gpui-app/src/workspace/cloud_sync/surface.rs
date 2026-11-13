@@ -99,7 +99,7 @@ impl WorkspaceApp {
                 div()
                     .id("cloud-sync-scroll")
                     .size_full()
-                    .on_scroll_wheel(move |_event, _window, cx| {
+                    .on_scroll(move |_event, _window, cx| {
                         scroll_cloud_sync.update(cx, |cloud_sync, cx| {
                             cloud_sync.close_select_for_scroll(cx);
                         });

@@ -1,5 +1,4 @@
 impl IdeSurface {
-
     fn render_disconnected_overlay(&self) -> AnyElement {
         div()
             .absolute()
@@ -14,7 +13,7 @@ impl IdeSurface {
             .gap_2()
             .bg(rgba(IDE_OVERLAY_ALPHA))
             .occlude()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .text_color(rgb(self.tokens.ui.text))
             .child(self.icon("lucide/wifi-off.svg", 32.0, self.tokens.ui.error))
             .child(self.labels.disconnected_overlay.clone())
@@ -201,11 +200,7 @@ impl IdeSurface {
                             tokens,
                             self.labels.overwrite.clone(),
                             resolving.then(|| {
-                                self.spinner_icon(
-                                    "ide-conflict-overwrite-spinner",
-                                    14.0,
-                                    0xffffff,
-                                )
+                                self.spinner_icon("ide-conflict-overwrite-spinner", 14.0, 0xffffff)
                             }),
                             ToolbarButtonOptions {
                                 button: ButtonOptions {
@@ -350,42 +345,40 @@ impl IdeSurface {
             .child(dialog_header(tokens).child(dialog_title(tokens, title)))
             .child(
                 modal_body(tokens)
-                    .child(
-                        IdeSurfaceInputElement::new(
-                            text_input_control(
-                                tokens,
-                                TextInputView {
-                                    value: &input.value,
-                                    placeholder,
-                                    focused: true,
-                                    caret_visible: true,
-                                    secret: false,
-                                    selected_all: false,
-                                    selected_range: input.selection_range.clone(),
-                                    marked_text: input
-                                        .marked_text
-                                        .as_ref()
-                                        .map(|marked| marked.text.as_str()),
-                                },
-                            )
-                            .w_full()
-                            .opacity(if input.submitting { 0.5 } else { 1.0 })
-                            .border_color(rgb(if input.error.is_some() {
-                                tokens.ui.error
-                            } else {
-                                tokens.ui.accent
-                            }))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, window, cx| {
-                                    window.focus(&this.modal_focus_handle, cx);
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                            cx.entity(),
-                            self.modal_focus_handle.clone(),
+                    .child(IdeSurfaceInputElement::new(
+                        text_input_control(
+                            tokens,
+                            TextInputView {
+                                value: &input.value,
+                                placeholder,
+                                focused: true,
+                                caret_visible: true,
+                                secret: false,
+                                selected_all: false,
+                                selected_range: input.selection_range.clone(),
+                                marked_text: input
+                                    .marked_text
+                                    .as_ref()
+                                    .map(|marked| marked.text.as_str()),
+                            },
+                        )
+                        .w_full()
+                        .opacity(if input.submitting { 0.5 } else { 1.0 })
+                        .border_color(rgb(if input.error.is_some() {
+                            tokens.ui.error
+                        } else {
+                            tokens.ui.accent
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, window, cx| {
+                                window.focus(&this.modal_focus_handle, cx);
+                                cx.stop_propagation();
+                            }),
                         ),
-                    )
+                        cx.entity(),
+                        self.modal_focus_handle.clone(),
+                    ))
                     .when_some(input.error.clone(), |this, error| {
                         this.child(
                             div()
@@ -471,41 +464,39 @@ impl IdeSurface {
                     .border_b_1()
                     .border_color(rgb(tokens.ui.border))
                     .child(self.icon("lucide/search.svg", 15.0, tokens.ui.text_muted))
-                    .child(
-                        IdeSurfaceInputElement::new(
-                            text_input_control(
-                                tokens,
-                                TextInputView {
-                                    value: &self.search.query,
-                                    placeholder: self.labels.search_placeholder.clone(),
-                                    focused: true,
-                                    caret_visible: true,
-                                    secret: false,
-                                    selected_all: false,
-                                    selected_range: self.search.selection_range.clone(),
-                                    marked_text: self
-                                        .search
-                                        .marked_text
-                                        .as_ref()
-                                        .map(|marked| marked.text.as_str()),
-                                },
-                            )
-                            .flex_1()
-                            .min_w_0()
-                            .h(px(28.0))
-                            .rounded(px(tokens.radii.sm))
-                            .bg(rgb(tokens.ui.bg_sunken))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, window, cx| {
-                                    window.focus(&this.focus_handle, cx);
-                                    cx.stop_propagation();
-                                }),
-                            ),
-                            cx.entity(),
-                            self.focus_handle.clone(),
+                    .child(IdeSurfaceInputElement::new(
+                        text_input_control(
+                            tokens,
+                            TextInputView {
+                                value: &self.search.query,
+                                placeholder: self.labels.search_placeholder.clone(),
+                                focused: true,
+                                caret_visible: true,
+                                secret: false,
+                                selected_all: false,
+                                selected_range: self.search.selection_range.clone(),
+                                marked_text: self
+                                    .search
+                                    .marked_text
+                                    .as_ref()
+                                    .map(|marked| marked.text.as_str()),
+                            },
+                        )
+                        .flex_1()
+                        .min_w_0()
+                        .h(px(28.0))
+                        .rounded(px(tokens.radii.sm))
+                        .bg(rgb(tokens.ui.bg_sunken))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, window, cx| {
+                                window.focus(&this.focus_handle, cx);
+                                cx.stop_propagation();
+                            }),
                         ),
-                    )
+                        cx.entity(),
+                        self.focus_handle.clone(),
+                    ))
                     .child(
                         div()
                             .size(px(24.0))
@@ -590,7 +581,7 @@ impl IdeSurface {
             .flex()
             .flex_col()
             .gap_1()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+            .on_scroll(|_, _, cx| cx.stop_propagation());
 
         if self.search.results.is_empty() {
             return list
@@ -683,13 +674,11 @@ impl IdeSurface {
         }
         if unsaved > 0 {
             details = details.child(
-                div()
-                    .text_color(rgb(TAILWIND_RED_400))
-                    .child(
-                        self.labels
-                            .delete_has_unsaved
-                            .replace("{{count}}", &unsaved.to_string()),
-                    ),
+                div().text_color(rgb(TAILWIND_RED_400)).child(
+                    self.labels
+                        .delete_has_unsaved
+                        .replace("{{count}}", &unsaved.to_string()),
+                ),
             );
         }
 
@@ -976,9 +965,7 @@ impl IdeSurface {
                     .min_w_0()
                     .h(px(tokens.metrics.form_input_height))
                     .bg(rgb(tokens.ui.bg_sunken))
-                    .font_family(SharedString::from(
-                        tokens.metrics.markdown_code_font_family,
-                    ))
+                    .font_family(SharedString::from(tokens.metrics.markdown_code_font_family))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &MouseDownEvent, window, cx| {
@@ -1009,18 +996,14 @@ impl IdeSurface {
             .rounded(px(tokens.radii.md))
             .border_1()
             .border_color(rgb(tokens.ui.border))
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+            .on_scroll(|_, _, cx| cx.stop_propagation());
 
         if self.folder_picker.loading {
             return list
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(self.spinner_icon(
-                    "ide-folder-picker-loading",
-                    24.0,
-                    tokens.ui.text_muted,
-                ))
+                .child(self.spinner_icon("ide-folder-picker-loading", 24.0, tokens.ui.text_muted))
                 .into_any_element();
         }
 
@@ -1155,5 +1138,4 @@ impl IdeSurface {
         list = list.child(rows);
         list.into_any_element()
     }
-
 }

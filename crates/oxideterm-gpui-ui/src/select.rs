@@ -660,7 +660,7 @@ pub fn select_popup_with_max_height(
         .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
             cx.stop_propagation();
         })
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn select_event_boundary(menu: Div) -> Div {
@@ -672,7 +672,7 @@ pub fn select_event_boundary(menu: Div) -> Div {
     .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
         cx.stop_propagation();
     })
-    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+    .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn select_panel_popup_with_max_height(

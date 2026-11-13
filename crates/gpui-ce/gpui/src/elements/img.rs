@@ -976,6 +976,7 @@ mod tests {
     use super::*;
     use crate::{ParentElement as _, TestAppContext, canvas, div, point, px, size};
     use image::{Frame, ImageBuffer, Rgba};
+    use smallvec::SmallVec;
 
     const TEST_IMG_ID: &str = "test-img";
 

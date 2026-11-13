@@ -154,7 +154,7 @@ impl WorkspaceApp {
                         // rectangular overflow mask cannot expose a second corner color.
                         material_surface(&self.tokens, dialog, MaterialRole::Dialog)
                     })
-                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                    .on_scroll(|_, _, cx| cx.stop_propagation())
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                         cx.stop_propagation();
                     })
@@ -292,7 +292,7 @@ impl WorkspaceApp {
                         .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
                             cx.stop_propagation();
                         })
-                        .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+                        .on_scroll(|_event, _window, cx| cx.stop_propagation()),
                 )
             })
             .into_any_element()

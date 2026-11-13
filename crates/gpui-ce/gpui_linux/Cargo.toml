@@ -12,7 +12,7 @@
 [package]
 edition = "2024"
 name = "gpui-pre-linux"
-version = "0.3.7"
+version = "0.3.12"
 build = false
 publish = false
 autolib = false
@@ -20,23 +20,19 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Zed's `gpui_linux` crate (gpui-pre snapshot of zed@1a28cff)"
+description = "Zed's `gpui_linux` crate (gpui-pre snapshot of zed@d2a4fb6)"
 readme = false
 license = "Apache-2.0"
 repository = "https://github.com/zed-industries/zed"
 resolver = "2"
 
 [package.metadata.cargo-shear]
-ignored = [
-    "bitflags",
-    "scap",
-    "x11-clipboard",
-]
+ignored = ["scap"]
 
 [package.metadata.gpui-pre]
 zed-crate = "gpui_linux"
 zed-version = "0.1.0"
-zed-rev = "1a28cff4b409169bac058bca40dfbfeb7621d19b"
+zed-rev = "d2a4fb6ded7c470be25d1541281da3882495b65b"
 
 [features]
 default = [
@@ -49,7 +45,7 @@ screen-capture = [
 ]
 test-support = ["gpui/test-support"]
 wayland = [
-    "bitflags",
+    "dep:accesskit_unix",
     "gpui_wgpu",
     "ashpd/wayland",
     "calloop-wayland-source",
@@ -63,15 +59,16 @@ wayland = [
     "xkbcommon/wayland",
     "open",
     "gpui/wayland",
+    "uuid/v5",
 ]
 x11 = [
+    "dep:accesskit_unix",
     "gpui_wgpu",
     "ashpd",
     "as-raw-xcb-connection",
     "x11rb",
     "xkbcommon/x11",
     "xim",
-    "x11-clipboard",
     "filedescriptor",
     "open",
     "scap?/x11",
@@ -88,6 +85,7 @@ features = ["enumn"]
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.accesskit_unix]
 version = "0.22"
+optional = true
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.anyhow]
 version = "1.0.86"
@@ -101,18 +99,12 @@ version = "0.13"
 features = [
     "async-io",
     "inhibit",
-    "notification",
     "open_uri",
     "file_chooser",
     "settings",
-    "trash",
 ]
 optional = true
 default-features = false
-
-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.bitflags]
-version = "2.6.0"
-optional = true
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.bytemuck]
 version = "1"
@@ -125,7 +117,7 @@ version = "0.4.1"
 optional = true
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.collections]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-collections"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.filedescriptor]
@@ -136,33 +128,31 @@ optional = true
 version = "0.3.34"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.gpui]
-version = "=0.3.7"
+version = "=0.3.12"
 default-features = false
 package = "gpui-pre"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.gpui_util]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-util"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.gpui_wgpu]
-version = "=0.3.7"
+version = "=0.3.12"
 features = ["font-kit"]
 optional = true
 package = "gpui-pre-wgpu"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.http_client]
-version = "=0.3.7"
+version = "=0.3.12"
 package = "gpui-pre-http-client"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.libc]
 version = "0.2"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.log]
-version = "0.4.16"
-features = [
-    "kv_unstable_serde",
-    "serde",
-]
+version = "0.4"
+features = ["std"]
+default-features = false
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.notify-rust]
 version = "4"
@@ -209,13 +199,8 @@ features = ["derive"]
 version = "2.2"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.uuid]
-version = "1.1.2"
-features = [
-    "v4",
-    "v5",
-    "v7",
-    "serde",
-]
+version = "1.1"
+features = ["serde"]
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.wayland-backend]
 version = "0.3.15"
@@ -253,10 +238,6 @@ version = "0.3.9"
 features = ["client"]
 optional = true
 
-[target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.x11-clipboard]
-version = "0.9.3"
-optional = true
-
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.x11rb]
 version = "0.13.1"
 features = [
@@ -281,7 +262,7 @@ optional = true
 package = "zed-xim"
 
 [target.'cfg(any(target_os = "linux", target_os = "freebsd"))'.dependencies.xkbcommon]
-version = "0.8.0"
+version = "0.8"
 optional = true
 default-features = false
 

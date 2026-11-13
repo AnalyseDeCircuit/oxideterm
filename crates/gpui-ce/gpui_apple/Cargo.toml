@@ -12,7 +12,7 @@
 [package]
 edition = "2024"
 name = "gpui-pre-apple"
-version = "0.3.7"
+version = "0.3.12"
 build = "build.rs"
 publish = false
 autolib = false
@@ -20,7 +20,7 @@ autobins = false
 autoexamples = false
 autotests = false
 autobenches = false
-description = "Zed's `gpui_apple` crate (gpui-pre snapshot of zed@1a28cff)"
+description = "Zed's `gpui_apple` crate (gpui-pre snapshot of zed@d2a4fb6)"
 readme = false
 license = "Apache-2.0"
 repository = "https://github.com/zed-industries/zed"
@@ -29,11 +29,17 @@ resolver = "2"
 [package.metadata.gpui-pre]
 zed-crate = "gpui_apple"
 zed-version = "0.1.0"
-zed-rev = "1a28cff4b409169bac058bca40dfbfeb7621d19b"
+zed-rev = "d2a4fb6ded7c470be25d1541281da3882495b65b"
 
 [features]
 bench-support = ["gpui/bench-support"]
 default = []
+font-kit = [
+    "dep:font-kit",
+    "dep:core-text",
+    "dep:objc2-core-text",
+    "dep:pathfinder_geometry",
+]
 runtime_shaders = []
 test-support = ["gpui/test-support"]
 
@@ -43,48 +49,62 @@ path = "src/gpui_apple.rs"
 doctest = false
 
 [dependencies.gpui]
-version = "=0.3.7"
+version = "=0.3.12"
 default-features = false
 package = "gpui-pre"
 
-[target.'cfg(target_os = "macos")'.dependencies.anyhow]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.anyhow]
 version = "1.0.86"
 
-[target.'cfg(target_os = "macos")'.dependencies.block2]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.async-task]
+version = "4.7"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.block2]
 version = "0.6"
 
-[target.'cfg(target_os = "macos")'.dependencies.cocoa]
-version = "0.26.0"
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.collections]
+version = "=0.3.12"
+package = "gpui-pre-collections"
 
-[target.'cfg(target_os = "macos")'.dependencies.core-foundation]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.core-foundation]
 version = "0.10"
 
-[target.'cfg(target_os = "macos")'.dependencies.core-video]
-version = "0.5.2"
-features = ["metal"]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.core-foundation-sys]
+version = "0.8.6"
 
-[target.'cfg(target_os = "macos")'.dependencies.derive_more]
-version = "2.1.1"
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.core-graphics]
+version = "0.24"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.core-text]
+version = "21"
+optional = true
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.dispatch2]
+version = "0.3"
 features = [
-    "add",
-    "add_assign",
-    "deref",
-    "deref_mut",
-    "display",
-    "from",
-    "from_str",
-    "mul",
-    "mul_assign",
-    "not",
+    "std",
+    "block2",
 ]
+default-features = false
 
-[target.'cfg(target_os = "macos")'.dependencies.etagere]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.etagere]
 version = "0.2"
 
-[target.'cfg(target_os = "macos")'.dependencies.foreign-types]
-version = "0.5"
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.font-kit]
+version = "0.14.1-zed"
+features = ["source"]
+optional = true
+default-features = false
+package = "zed-font-kit"
 
-[target.'cfg(target_os = "macos")'.dependencies.image]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.futures]
+version = "0.3.34"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.gpui_util]
+version = "=0.3.12"
+package = "gpui-pre-util"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.image]
 version = "0.25.1"
 features = [
     "bmp",
@@ -105,31 +125,170 @@ features = [
 ]
 default-features = false
 
-[target.'cfg(target_os = "macos")'.dependencies.log]
-version = "0.4.16"
-features = [
-    "kv_unstable_serde",
-    "serde",
-]
-
-[target.'cfg(target_os = "macos")'.dependencies.metal]
-version = "0.33"
-
-[target.'cfg(target_os = "macos")'.dependencies.objc]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.libc]
 version = "0.2"
 
-[target.'cfg(target_os = "macos")'.dependencies.objc2]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.log]
+version = "0.4"
+features = ["std"]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.mach2]
 version = "0.6"
 
-[target.'cfg(target_os = "macos")'.dependencies.parking_lot]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2]
+version = "0.6"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-core-foundation]
+version = "0.3.2"
+features = [
+    "std",
+    "CFData",
+    "CFDictionary",
+    "CFString",
+    "CFNumber",
+    "CFBase",
+    "CFCGTypes",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-core-graphics]
+version = "0.3.2"
+features = [
+    "CGDirectDisplay",
+    "CGColorSpace",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-core-text]
+version = "0.3.2"
+features = [
+    "std",
+    "CTFont",
+    "CTFontDescriptor",
+]
+optional = true
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-core-video]
+version = "0.3.2"
+features = [
+    "CVBase",
+    "CVBuffer",
+    "CVImageBuffer",
+    "CVPixelBuffer",
+    "CVMetalTexture",
+    "CVMetalTextureCache",
+    "CVReturn",
+    "objc2",
+    "objc2-metal",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-foundation]
+version = "0.3.2"
+features = [
+    "NSArray",
+    "NSAttributedString",
+    "NSBundle",
+    "NSCoder",
+    "NSData",
+    "NSDate",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSError",
+    "NSGeometry",
+    "NSNull",
+    "NSObjCRuntime",
+    "NSObject",
+    "NSProcessInfo",
+    "NSRange",
+    "NSRunLoop",
+    "NSSet",
+    "NSString",
+    "NSURL",
+    "NSValue",
+    "objc2-core-foundation",
+    "std",
+    "NSThread",
+    "NSNotification",
+    "NSOperation",
+    "NSProcessInfo",
+    "block2",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-metal]
+version = "0.3.2"
+features = [
+    "std",
+    "block2",
+    "dispatch2",
+    "MTLAllocation",
+    "MTLBlitCommandEncoder",
+    "MTLBuffer",
+    "MTLCommandBuffer",
+    "MTLCommandEncoder",
+    "MTLCommandQueue",
+    "MTLDevice",
+    "MTLDrawable",
+    "MTLLibrary",
+    "MTLPixelFormat",
+    "MTLRenderCommandEncoder",
+    "MTLRenderPass",
+    "MTLRenderPipeline",
+    "MTLResource",
+    "MTLTexture",
+    "MTLTypes",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-quartz-core]
+version = "0.3.2"
+features = [
+    "std",
+    "CALayer",
+    "CAMetalDisplayLink",
+    "CAMetalLayer",
+    "objc2-metal",
+    "objc2-core-foundation",
+    "objc2-core-graphics",
+    "objc2-metal",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.objc2-security]
+version = "0.3.2"
+features = [
+    "std",
+    "SecBase",
+    "SecItem",
+]
+default-features = false
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.parking_lot]
 version = "0.12.1"
 
-[target.'cfg(target_os = "macos")'.build-dependencies.cbindgen]
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.pathfinder_geometry]
+version = "0.5"
+optional = true
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.smallvec]
+version = "1.6"
+features = [
+    "union",
+    "const_new",
+]
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies.thiserror]
+version = "2.0.12"
+
+[target.'cfg(any(target_os = "macos", target_os = "ios"))'.build-dependencies.cbindgen]
 version = "0.28.0"
 default-features = false
 
 [target.'cfg(target_os = "macos")'.build-dependencies.gpui]
-version = "=0.3.7"
+version = "=0.3.12"
 default-features = false
 package = "gpui-pre"
 

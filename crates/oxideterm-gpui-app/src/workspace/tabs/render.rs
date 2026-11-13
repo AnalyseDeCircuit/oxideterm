@@ -150,7 +150,7 @@ impl WorkspaceApp {
             .pl(px(self.tokens.metrics.tabbar_leading_offset))
             .overflow_hidden()
             .track_scroll(&self.main_window_tabs.scroll_handle)
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, window, cx| {
                 this.handle_tabbar_scroll(event, window, cx);
             }));
 

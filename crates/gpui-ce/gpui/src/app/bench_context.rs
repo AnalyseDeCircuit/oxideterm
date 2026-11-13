@@ -12,14 +12,15 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-pub use bench_metrics::{BenchMeasurement, MetricReport};
+pub use bench_metrics::{BenchMeasurement, CountingAllocator, MetricReport};
 use hdrhistogram::Histogram;
 
 use crate::{
     AnyView, AnyWindowHandle, App, AppCell, AppContext, BackgroundExecutor, Bounds, Context, Empty,
-    Entity, EntityId, Focusable, ForegroundExecutor, Global, Platform, PlatformHeadlessRenderer,
-    PlatformTextSystem, Render, Reservation, Scene, Task, TestPlatform, ThreadedDispatcher,
-    VisualContext, Window, WindowBounds, WindowHandle, WindowOptions,
+    Entity, EntityId, Focusable, ForegroundExecutor, Global, Pixels, Platform,
+    PlatformHeadlessRenderer, PlatformTextSystem, Render, Reservation, Scene, Size, Task,
+    TestPlatform, ThreadedDispatcher, VisualContext, Window, WindowBounds, WindowHandle,
+    WindowOptions,
     app::GpuiBorrow,
     profiler::{
         self, FrameEvent, FrameTimingCollector,
@@ -1319,6 +1320,25 @@ impl<'a, 'measurement> BenchWindowContext<'a, 'measurement> {
             .update_window(self.window, |_, window, cx| update(window, cx))
             .expect("benchmark window was unexpectedly closed")
     }
+
+    /// Resizes the window's content area as the platform does when the user drags its
+    /// edge, through the window's resize callback. The next frame redraws at the new size.
+    ///
+    /// Must not be called from inside [`Self::update`]: the callback updates the window.
+    pub fn simulate_resize(&mut self, size: Size<Pixels>) {
+        let mut platform_window = {
+            let mut app = self.cx.app.borrow_mut();
+            app.windows
+                .get_mut(self.window.window_id())
+                .and_then(|window| window.as_deref_mut())
+                .expect("benchmark window was unexpectedly closed")
+                .platform_window
+                .as_test()
+                .expect("benchmark platform window")
+                .clone()
+        };
+        platform_window.simulate_resize(size);
+    }
 }
 
 impl AppContext for BenchWindowContext<'_, '_> {
@@ -1464,13 +1484,9 @@ impl VisualContext for BenchWindowContext<'_, '_> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        rc::Rc,
-        sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        },
-    };
+    #[cfg(feature = "test-support")]
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::{rc::Rc, sync::Arc};
 
     use super::*;
     use crate::profiler::{TraceTestGuard, journal::install_test_foreground_journal};
@@ -1496,6 +1512,7 @@ mod tests {
     /// Runs `benchmark` under a wall-time primary with a fake counter as the
     /// secondary metric and returns the per-iteration values the report
     /// recorded for it.
+    #[cfg(feature = "test-support")]
     fn secondary_values_per_iteration(
         counter: Arc<AtomicU64>,
         benchmark: impl Fn(&mut BenchAppContext, &Arc<AtomicU64>),
@@ -1537,6 +1554,7 @@ mod tests {
             .collect()
     }
 
+    #[cfg(feature = "test-support")]
     #[test]
     fn secondary_metric_is_normalized_per_iteration_for_bench_iter() {
         let values = secondary_values_per_iteration(Arc::new(AtomicU64::new(0)), |cx, counter| {
@@ -1551,6 +1569,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "test-support")]
     #[test]
     fn secondary_metric_is_accumulated_across_per_iteration_batches() {
         let values = secondary_values_per_iteration(Arc::new(AtomicU64::new(0)), |cx, counter| {

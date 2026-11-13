@@ -5,7 +5,10 @@ impl WorkspaceApp {
         model: &str,
         cx: &App,
     ) -> AiReasoningLevel {
-        if let Some(value) = self.ai_entity.read(cx).conversation_state()
+        if let Some(value) = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, model)
@@ -25,11 +28,7 @@ impl WorkspaceApp {
             .and_then(|models| models.get(model))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("auto");
-        oxideterm_ai::normalize_reasoning_level_for_model(
-            &provider.provider_type,
-            model,
-            value,
-        )
+        oxideterm_ai::normalize_reasoning_level_for_model(&provider.provider_type, model, value)
     }
 
     pub(in crate::workspace) fn render_ai_reasoning_indicator(
@@ -41,8 +40,7 @@ impl WorkspaceApp {
             return None;
         }
         let providers = ai_provider_views(&settings.ai.providers);
-        let provider =
-            active_provider_view(&providers, settings.ai.active_provider_id.as_deref())?;
+        let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())?;
         let model = active_model_selection(settings.ai.active_model.as_deref())?;
         let capability = model_reasoning_capability(&provider.provider_type, &model);
         if capability.levels.is_empty() {
@@ -108,8 +106,7 @@ impl WorkspaceApp {
             return None;
         }
         let providers = ai_provider_views(&settings.ai.providers);
-        let provider =
-            active_provider_view(&providers, settings.ai.active_provider_id.as_deref())?;
+        let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())?;
         let model = active_model_selection(settings.ai.active_model.as_deref())?;
         let capability = model_reasoning_capability(&provider.provider_type, &model);
         if capability.levels.is_empty() {
@@ -125,7 +122,7 @@ impl WorkspaceApp {
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
             .shadow_lg()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .py(px(self.tokens.spacing.one))
             .child(
                 div()
@@ -160,32 +157,27 @@ impl WorkspaceApp {
                     })
                     .cursor_pointer()
                     .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-                    .child(
-                        div()
-                            .w(px(14.0))
-                            .flex_none()
-                            .when(is_selected, |check| {
-                                check.child(Self::render_lucide_icon(
-                                    LucideIcon::Check,
-                                    14.0,
-                                    rgb(self.tokens.ui.accent),
-                                ))
-                            }),
-                    )
+                    .child(div().w(px(14.0)).flex_none().when(is_selected, |check| {
+                        check.child(Self::render_lucide_icon(
+                            LucideIcon::Check,
+                            14.0,
+                            rgb(self.tokens.ui.accent),
+                        ))
+                    }))
                     .child(label)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.select_ai_reasoning_level(
-                            provider_id.clone(),
-                            provider_type.clone(),
-                            model_for_click.clone(),
-                            level,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                ),
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.select_ai_reasoning_level(
+                                provider_id.clone(),
+                                provider_type.clone(),
+                                model_for_click.clone(),
+                                level,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ),
             );
         }
         if !capability.known_model {
@@ -310,9 +302,10 @@ impl WorkspaceApp {
                     let model_for_hover = model_for_click.clone();
                     cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
                         let next = Some((provider_id.clone(), model_for_hover.clone()));
-                        if this.ai_entity.update(cx, |ai, _cx| {
-                            ai.set_model_selector_highlight(next)
-                        }) {
+                        if this
+                            .ai_entity
+                            .update(cx, |ai, _cx| ai.set_model_selector_highlight(next))
+                        {
                             // Pointer hover and keyboard navigation share the
                             // same active-item state, matching Radix menu focus.
                             cx.notify();
@@ -361,11 +354,7 @@ impl WorkspaceApp {
                 active,
                 false,
                 active.then(|| {
-                    Self::render_lucide_icon(
-                        LucideIcon::Check,
-                        12.0,
-                        rgb(self.tokens.ui.accent),
-                    )
+                    Self::render_lucide_icon(LucideIcon::Check, 12.0, rgb(self.tokens.ui.accent))
                 }),
             );
             if self.ai_acp_model_discovery_is_pending(&agent_id, cx) {
@@ -380,20 +369,13 @@ impl WorkspaceApp {
                     )
                     .into_any_element();
             }
-            panel = panel.child(
-                    row
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.select_ai_model_from_selector(
-                                provider_id.clone(),
-                                label.clone(),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ),
-                );
+            panel = panel.child(row.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.select_ai_model_from_selector(provider_id.clone(), label.clone(), cx);
+                    cx.stop_propagation();
+                }),
+            ));
             return self
                 .append_ai_acp_session_controls(
                     panel,
@@ -450,9 +432,10 @@ impl WorkspaceApp {
                     let choice_label = choice_label.clone();
                     cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
                         let next = Some((provider_id.clone(), choice_label.clone()));
-                        if this.ai_entity.update(cx, |ai, _cx| {
-                            ai.set_model_selector_highlight(next)
-                        }) {
+                        if this
+                            .ai_entity
+                            .update(cx, |ai, _cx| ai.set_model_selector_highlight(next))
+                        {
                             cx.notify();
                         }
                     })

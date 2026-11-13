@@ -341,7 +341,7 @@ fn mouse_clipboard_paste_overrides_tracking_and_preserves_confirmation(cx: &mut 
 
 #[gpui::test]
 fn application_scroll_accumulates_small_deltas_until_remote_input(cx: &mut TestAppContext) {
-    use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase};
+    use gpui::{ScrollDelta, ScrollEvent, TouchPhase};
 
     let mut peer = ssh_peer::SshPeer::new();
     let config =
@@ -396,7 +396,7 @@ fn application_scroll_accumulates_small_deltas_until_remote_input(cx: &mut TestA
             for (direction, steps) in [(1.0, 3), (-1.0, 4)] {
                 for _ in 0..steps {
                     pane.handle_scroll(
-                        &ScrollWheelEvent {
+                        &ScrollEvent {
                             position: point(px(0.0), px(0.0)),
                             delta: ScrollDelta::Pixels(point(
                                 px(0.0),

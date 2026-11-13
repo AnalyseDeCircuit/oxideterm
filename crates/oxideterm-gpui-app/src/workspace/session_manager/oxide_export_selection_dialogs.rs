@@ -444,14 +444,14 @@ impl WorkspaceApp {
                             .unwrap_or_else(|| div().into_any_element())
                     },
                 ))
-                .child(div().absolute().inset_0().on_scroll_wheel({
+                .child(div().absolute().inset_0().on_scroll({
                     let list_state = self
                         .session_manager
                         .read(cx)
                         .oxide_export_connection_list_state
                         .clone();
                     let session_manager = self.session_manager.clone();
-                    move |event: &ScrollWheelEvent, _window, cx| {
+                    move |event: &ScrollEvent, _window, cx| {
                         let delta = event.delta.pixel_delta(px(20.0));
                         let scroll_distance = -f32::from(delta.y);
                         if scroll_distance.abs() < 0.01 {

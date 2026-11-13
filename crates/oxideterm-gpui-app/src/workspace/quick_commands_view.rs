@@ -2589,7 +2589,7 @@ impl WorkspaceApp {
         div()
             .flex_1()
             .min_h(px(0.0))
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(tauri_virtual_list(
                 state,
                 spec,

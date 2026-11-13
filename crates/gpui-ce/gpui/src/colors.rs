@@ -1,5 +1,5 @@
-use crate::Rgba;
-use crate::{App, Global, Window, WindowAppearance, rgb};
+//! The default colors used by GPUI.
+use crate::{App, Global, Rgba, Window, WindowAppearance, rgb};
 use std::ops::Deref;
 use std::sync::Arc;
 
