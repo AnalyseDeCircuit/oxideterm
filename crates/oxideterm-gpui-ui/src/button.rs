@@ -4,15 +4,18 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::surface::{color_for_background, color_with_alpha};
+use crate::surface::color_for_background;
 
 const BUTTON_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70
 const BUTTON_FOCUS_RING_WIDTH: f32 = 2.0; // Tauri focus-visible:ring-2
 const BUTTON_ACTIVE_BACKGROUND_ALPHA: u32 = 0x66; // Tauri [data-bg-active] color-mix(... 40%, transparent)
 const BUTTON_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri [data-bg-active] hover color-mix(... 50%, transparent)
 const BUTTON_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri [data-bg-active] border color-mix(... 75%, transparent)
-const BUTTON_FILLED_HOVER_ALPHA: u32 = 0xdd; // Filled primary hover: keep the inverse tone, mute slightly
-const BUTTON_DESTRUCTIVE_HOVER_ALPHA: u32 = 0xcc; // Destructive hover stays on the error tone
+/// How far a filled button's hover colour moves toward the panel surface.
+/// Mixing opaque channels keeps the hover independent of what renders behind a
+/// translucent dialog or a background image; an alpha tint would composite with
+/// that background and change contrast per theme.
+const BUTTON_FILLED_HOVER_MIX: f32 = 0.12;
 const TOOLBAR_BUTTON_ICON_GAP: f32 = 6.0; // Tauri toolbar gap-1.5
 const ICON_BUTTON_DISABLED_OPACITY: f32 = 0.35; // Tauri disabled icon button opacity
 const ICON_BUTTON_IDLE_OPACITY: f32 = 0.5; // Tauri muted toolbar icon opacity
@@ -728,16 +731,34 @@ fn toolbar_hover_background(
         return explicit;
     }
     match variant {
-        ButtonVariant::Default => color_with_alpha(tokens.ui.text, BUTTON_FILLED_HOVER_ALPHA),
-        ButtonVariant::Destructive => {
-            color_with_alpha(tokens.ui.error, BUTTON_DESTRUCTIVE_HOVER_ALPHA)
-        }
+        ButtonVariant::Default => rgb(mix_toward(
+            tokens.ui.text,
+            tokens.ui.bg_panel,
+            BUTTON_FILLED_HOVER_MIX,
+        )),
+        ButtonVariant::Destructive => rgb(mix_toward(
+            tokens.ui.error,
+            tokens.ui.bg_panel,
+            BUTTON_FILLED_HOVER_MIX,
+        )),
         _ => color_for_background(
             tokens.ui.bg_hover,
             has_background,
             BUTTON_ACTIVE_HOVER_ALPHA,
         ),
     }
+}
+
+/// Mixes two opaque colours channel by channel; `ratio` weights `base`.
+fn mix_toward(base: u32, toward: u32, amount: f32) -> u32 {
+    let channel = |shift: u32| {
+        let base = ((base >> shift) & 0xff) as f32;
+        let toward = ((toward >> shift) & 0xff) as f32;
+        (base * (1.0 - amount) + toward * amount)
+            .round()
+            .clamp(0.0, 255.0) as u32
+    };
+    (channel(16) << 16) | (channel(8) << 8) | channel(0)
 }
 
 pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOptions) -> Div {
@@ -981,19 +1002,20 @@ pub fn button_focus_visible(tokens: &ThemeTokens, button: Div, focused: bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surface::color_with_alpha;
 
     #[test]
     fn filled_toolbar_buttons_hover_with_their_own_tint() {
         let tokens = oxideterm_theme::default_tokens();
         let neutral = rgb(tokens.ui.bg_hover);
 
-        // Lock the visual strength independently of the helper: primary keeps
-        // the inverse tone at 87%, destructive keeps the error tone at 80%.
-        assert_eq!(BUTTON_FILLED_HOVER_ALPHA, 0xdd);
-        assert_eq!(BUTTON_DESTRUCTIVE_HOVER_ALPHA, 0xcc);
-
         let primary = toolbar_hover_background(&tokens, ButtonVariant::Default, false, None);
-        assert_eq!(primary, color_with_alpha(tokens.ui.text, 0xdd));
+        assert_eq!(primary.a, 1.0, "hover must stay opaque over any background");
+        assert_ne!(
+            primary,
+            rgb(tokens.ui.text),
+            "hover must mute the resting tone"
+        );
         assert_ne!(primary, neutral, "a primary button must not hover grey");
         assert_eq!(
             toolbar_hover_background(&tokens, ButtonVariant::Default, true, None),
@@ -1001,9 +1023,23 @@ mod tests {
             "filled variants ignore the surrounding background flag"
         );
 
+        // A light theme must keep a dark primary hover; the colour comes from
+        // the theme's own text/panel tokens, not from a fixed shade.
+        let mut light = oxideterm_theme::default_tokens();
+        light.ui.text = 0x101010;
+        light.ui.bg_panel = 0xffffff;
+        let light_primary = toolbar_hover_background(&light, ButtonVariant::Default, false, None);
+        assert_eq!(light_primary.a, 1.0);
+        assert!(
+            light_primary.r < 0.2,
+            "a light theme needs a dark hover fill"
+        );
+        assert_ne!(light_primary, rgb(light.ui.text));
+
         let destructive =
             toolbar_hover_background(&tokens, ButtonVariant::Destructive, false, None);
-        assert_eq!(destructive, color_with_alpha(tokens.ui.error, 0xcc));
+        assert_eq!(destructive.a, 1.0);
+        assert_ne!(destructive, rgb(tokens.ui.error));
         assert_ne!(destructive, neutral);
 
         let explicit = rgba(0x11223344);
