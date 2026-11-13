@@ -1187,12 +1187,12 @@ impl WorkspaceApp {
         let mut saved_targets: HashMap<String, (u32, NodeId)> = HashMap::new();
         let mut ui_nodes = Vec::with_capacity(snapshot.nodes.len());
         for node in &snapshot.nodes {
-            let title = node
-                .origin
-                .saved_connection_id()
-                .and_then(|id| self.connection_store.get(id))
-                .map(|connection| connection.name.clone())
-                .unwrap_or_else(|| format!("{}@{}", node.config.username, node.config.host));
+            let title = saved_tree_node_title(
+                &self.connection_store,
+                &node.origin,
+                &node.config.username,
+                &node.config.host,
+            );
             if let Some(saved_connection_id) = node.origin.saved_connection_id() {
                 let rank = restored_saved_node_rank(&node.origin);
                 let entry = saved_targets
@@ -1245,6 +1245,31 @@ pub(in crate::workspace) fn restored_saved_node_rank(origin: &NodeOrigin) -> u32
         NodeOrigin::AutoRoute { hop_index, .. } => *hop_index,
         NodeOrigin::DrillDown { .. } | NodeOrigin::Direct => 0,
     }
+}
+
+pub(in crate::workspace) fn saved_tree_node_title(
+    store: &ConnectionStore,
+    origin: &NodeOrigin,
+    username: &str,
+    host: &str,
+) -> String {
+    let title = origin.saved_connection_id().and_then(|id| {
+        let connection = store.get(id)?;
+        if let NodeOrigin::ManualPreset { hop_index, .. } = origin {
+            // The saved id owns the whole route; it is not the identity of each hop.
+            if !connection.proxy_chain.is_empty() {
+                if (*hop_index as usize) < connection.proxy_chain.len() {
+                    return None;
+                }
+            } else if *hop_index == 0
+                && let Some(jump_id) = connection.options.jump_host.as_deref()
+            {
+                return store.get(jump_id).map(|jump| jump.name.clone());
+            }
+        }
+        Some(connection.name.clone())
+    });
+    title.unwrap_or_else(|| format!("{username}@{host}"))
 }
 
 pub(in crate::workspace) fn write_session_tree_snapshot(

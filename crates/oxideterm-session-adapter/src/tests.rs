@@ -274,6 +274,16 @@ fn legacy_jump_host_becomes_runtime_proxy_chain() {
     assert_eq!(chain[0].host, "jump.example.com");
     assert_eq!(chain[0].port, 2200);
     assert_eq!(chain[0].username, "jump");
+    let settings = PersistedSettings::default();
+    let restored_jump = ssh_config_for_saved_connection_hop(&store, &settings, &target, 0)
+        .expect("restore the referenced jump");
+    assert_eq!(restored_jump.host, "jump.example.com");
+    assert_eq!(restored_jump.port, 2200);
+    let restored_target = ssh_config_for_saved_connection_hop(&store, &settings, &target, 1)
+        .expect("restore the destination after the referenced jump");
+    assert_eq!(restored_target.host, "target.example.com");
+    assert!(restored_target.proxy_chain.is_none());
+    assert!(ssh_config_for_saved_connection_hop(&store, &settings, &target, 2).is_none());
     let _ = std::fs::remove_file(path);
 }
 

@@ -100,7 +100,24 @@ fn saved_node_route_matches_config(
     };
     // A changed negotiation policy needs a new physical connection while the
     // old node remains available to its existing terminal and tool consumers.
-    if runtime_config.connection_key() != requested_config.connection_key() {
+    let mut requested_target = requested_config.clone();
+    let hops = requested_target.proxy_chain.take().unwrap_or_default();
+    if runtime_config.connection_key() != requested_target.connection_key() {
+        return false;
+    }
+    let Ok(path) = node_router.path_to_node(node_id) else {
+        return false;
+    };
+    // Materialized nodes carry one hop each, not the original embedded chain.
+    // Compare each hop's policy as well as the route's endpoint identities.
+    if path.len() != hops.len() + 1
+        || !path.iter().zip(hops).all(|(id, hop)| {
+            node_router.node_runtime_snapshot(id).is_some_and(|node| {
+                node.config.connection_key()
+                    == ssh_config_from_proxy_hop(hop, requested_config).connection_key()
+            })
+        })
+    {
         return false;
     }
     let proxy_hops = requested_config
@@ -1412,11 +1429,10 @@ impl WorkspaceApp {
         target_title: String,
     ) -> Result<NodeTreeExpansion> {
         let proxy_chain = config.proxy_chain.take().unwrap_or_default();
-        let connect_timeout_seconds = config.timeout_secs;
         // Consume the detached chain so runtime authentication material is not cloned.
         let hops = proxy_chain
             .into_iter()
-            .map(|hop| ssh_config_from_proxy_hop(hop, connect_timeout_seconds))
+            .map(|hop| ssh_config_from_proxy_hop(hop, &config))
             .collect::<Vec<_>>();
         let expansion = self
             .node_router
@@ -1434,11 +1450,10 @@ impl WorkspaceApp {
         target_title: String,
     ) -> Result<NodeTreeExpansion> {
         let proxy_chain = config.proxy_chain.take().unwrap_or_default();
-        let connect_timeout_seconds = config.timeout_secs;
         // Consume the detached chain so runtime authentication material is not cloned.
         let hops = proxy_chain
             .into_iter()
-            .map(|hop| ssh_config_from_proxy_hop(hop, connect_timeout_seconds))
+            .map(|hop| ssh_config_from_proxy_hop(hop, &config))
             .collect::<Vec<_>>();
         let expansion = self.node_router.expand_manual_preset_under_parent(
             parent_node_id.clone(),
@@ -1472,7 +1487,12 @@ impl WorkspaceApp {
             let title = if node_id == &expansion.target_node_id {
                 target_title.clone()
             } else {
-                format!("{}@{}", snapshot.username, snapshot.host)
+                saved_tree_node_title(
+                    &self.connection_store,
+                    &snapshot.origin,
+                    &snapshot.username,
+                    &snapshot.host,
+                )
             };
             self.ssh_nodes.insert(
                 node_id.clone(),
@@ -2097,7 +2117,7 @@ impl WorkspaceApp {
     }
 }
 
-fn ssh_config_from_proxy_hop(hop: ProxyHopConfig, connect_timeout_seconds: u64) -> SshConfig {
+fn ssh_config_from_proxy_hop(hop: ProxyHopConfig, target: &SshConfig) -> SshConfig {
     let ProxyHopConfig {
         totp,
         host,
@@ -2119,7 +2139,8 @@ fn ssh_config_from_proxy_hop(hop: ProxyHopConfig, connect_timeout_seconds: u64) 
         port,
         username,
         auth,
-        timeout_secs: connect_timeout_seconds,
+        timeout_secs: target.timeout_secs,
+        upstream_proxy: target.upstream_proxy.clone(),
         proxy_chain: None,
         agent_forwarding,
         identity_agent,
@@ -2188,7 +2209,10 @@ mod create_tests {
                 trust_host_key: Some(false),
                 expected_host_key_fingerprint: Some("SHA256:test".to_string()),
             },
-            connect_timeout_seconds,
+            &SshConfig {
+                timeout_secs: connect_timeout_seconds,
+                ..SshConfig::default()
+            },
         );
 
         assert_eq!(config.host, "jump.example.com");
@@ -2352,6 +2376,119 @@ mod create_tests {
     }
 
     #[test]
+    fn restored_saved_proxy_route_preserves_hop_names_and_reuse_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store =
+            oxideterm_connections::ConnectionStore::load(directory.path().join("connections.json"))
+                .unwrap();
+        let mut jump = saved_connection_metadata("jump");
+        jump.name = "Saved jump".into();
+        jump.host = "jump.example.com".into();
+        jump.auth = oxideterm_connections::SavedAuth::Agent;
+        store.upsert_imported_connection(jump).unwrap();
+        let mut target = saved_connection_metadata("destination");
+        target.name = "Saved destination".into();
+        target.auth = oxideterm_connections::SavedAuth::Agent;
+        target.options.jump_host = Some("jump".into());
+        target.upstream_proxy = SavedUpstreamProxyPolicy::Custom {
+            proxy: oxideterm_connections::SavedUpstreamProxyConfig {
+                protocol: oxideterm_connections::SavedUpstreamProxyProtocol::Socks5,
+                host: "proxy.example.com".into(),
+                port: 1080,
+                auth: oxideterm_connections::SavedUpstreamProxyAuth::None,
+                remote_dns: true,
+                no_proxy: String::new(),
+            },
+        };
+        store.upsert_imported_connection(target.clone()).unwrap();
+        let settings = PersistedSettings::default();
+        let requested =
+            oxideterm_session_adapter::ssh_config_from_saved_connection(&store, &settings, &target)
+                .unwrap();
+        let mut config = requested.clone();
+        let hops = config
+            .proxy_chain
+            .take()
+            .unwrap()
+            .into_iter()
+            .map(|hop| ssh_config_from_proxy_hop(hop, &config))
+            .collect();
+        let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        let route = router
+            .expand_manual_preset("destination", hops, config)
+            .unwrap();
+        let titles = |router: &NodeRouter| {
+            route
+                .path_node_ids
+                .iter()
+                .map(|id| {
+                    let node = router.node_metadata(id).unwrap();
+                    saved_tree_node_title(&store, &node.origin, &node.username, &node.host)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(titles(&router), ["Saved jump", "Saved destination"]);
+        assert_eq!(
+            router
+                .node_runtime_snapshot(&route.path_node_ids[0])
+                .unwrap()
+                .config
+                .upstream_proxy
+                .unwrap()
+                .host,
+            "proxy.example.com"
+        );
+
+        let bytes = serde_json::to_vec(&router.export_persistence_snapshot()).unwrap();
+        let persisted: NodeTreePersistenceSnapshot = serde_json::from_slice(&bytes).unwrap();
+        let mut snapshot = router.export_tree_snapshot();
+        for node in &mut snapshot.nodes {
+            let saved = persisted
+                .nodes
+                .iter()
+                .find(|saved| saved.id == node.id)
+                .unwrap();
+            assert!(saved.config.is_none());
+            node.config = saved_origin_config(&store, &settings, &saved.origin).unwrap();
+        }
+        let restored = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
+        restored.apply_tree_snapshot(snapshot).unwrap();
+        assert_eq!(titles(&restored), ["Saved jump", "Saved destination"]);
+        assert_eq!(
+            restored
+                .node_metadata(&route.path_node_ids[0])
+                .unwrap()
+                .host,
+            "jump.example.com"
+        );
+        assert_eq!(
+            restored.path_to_node(&route.target_node_id).unwrap(),
+            route.path_node_ids
+        );
+        let nodes = HashMap::from([(
+            route.target_node_id.clone(),
+            WorkspaceSshNode::new(
+                Some("destination".into()),
+                &requested,
+                "Saved destination".into(),
+                Vec::new(),
+                NodeReadiness::Disconnected,
+            ),
+        )]);
+        let index = HashMap::from([("destination".into(), route.target_node_id.clone())]);
+        assert_eq!(
+            reusable_indexed_saved_node_for_config(
+                &index,
+                &nodes,
+                &restored,
+                "destination",
+                &requested,
+            ),
+            Some(route.target_node_id)
+        );
+    }
+
+    #[test]
     fn saved_node_route_rejects_a_different_proxy_chain() {
         let router = NodeRouter::new(SshConnectionRegistry::new(ConnectionPoolConfig::default()));
         let expansion = router
@@ -2361,10 +2498,10 @@ mod create_tests {
                 SshConfig::password("target.example.com", 22, "ops", "pw"),
             )
             .unwrap();
-        let requested = SshConfig {
+        let mut requested = SshConfig {
             proxy_chain: Some(vec![ProxyHopConfig {
                 totp: None,
-                host: "new-jump.example.com".to_string(),
+                host: "old-jump.example.com".to_string(),
                 port: 22,
                 username: "ops".to_string(),
                 auth: AuthMethod::password("pw"),
@@ -2380,6 +2517,19 @@ mod create_tests {
             ..SshConfig::password("target.example.com", 22, "ops", "pw")
         };
 
+        assert!(saved_node_route_matches_config(
+            &router,
+            &expansion.target_node_id,
+            &requested,
+        ));
+        requested.proxy_chain.as_mut().unwrap()[0].legacy_ssh_compatibility = true;
+        assert!(!saved_node_route_matches_config(
+            &router,
+            &expansion.target_node_id,
+            &requested
+        ));
+        requested.proxy_chain.as_mut().unwrap()[0].legacy_ssh_compatibility = false;
+        requested.proxy_chain.as_mut().unwrap()[0].host = "new-jump.example.com".into();
         assert!(!saved_node_route_matches_config(
             &router,
             &expansion.target_node_id,

@@ -550,37 +550,32 @@ pub fn ssh_config_for_saved_connection_hop(
     hop_index: u32,
 ) -> Option<SshConfig> {
     let hop_index = hop_index as usize;
-    if let Some(hop) = connection.proxy_chain.get(hop_index) {
+    let mut target = ssh_config_from_saved_connection(store, settings, connection)?;
+    let hops = target.proxy_chain.take().unwrap_or_default();
+    if hop_index == hops.len() {
+        return Some(target);
+    }
+    if let Some(hop) = hops.into_iter().nth(hop_index) {
         return Some(SshConfig {
-            totp: store.totp_binding(hop.totp_credential_id.as_deref()),
-            host: hop.host.clone(),
+            totp: hop.totp,
+            host: hop.host,
             port: hop.port,
-            username: hop.username.clone(),
-            auth: auth_method_from_saved_auth(store, &hop.auth)?,
+            username: hop.username,
+            auth: hop.auth,
             timeout_secs: connection.options.effective_connect_timeout_seconds(),
             proxy_chain: None,
-            upstream_proxy: upstream_proxy_config_from_saved_policy(
-                store,
-                settings,
-                &connection.upstream_proxy,
-            )
-            .ok()?,
+            upstream_proxy: target.upstream_proxy.clone(),
             agent_forwarding: hop.agent_forwarding,
-            identity_agent: hop.identity_agent.clone(),
-            agent_forwarding_socket: hop.agent_forwarding_socket.clone(),
-            strict_host_key_checking: true,
+            identity_agent: hop.identity_agent,
+            agent_forwarding_socket: hop.agent_forwarding_socket,
+            legacy_ssh_compatibility: hop.legacy_ssh_compatibility,
+            ssh_algorithms: hop.ssh_algorithms,
+            strict_host_key_checking: hop.strict_host_key_checking,
+            trust_host_key: hop.trust_host_key,
+            expected_host_key_fingerprint: hop.expected_host_key_fingerprint,
             ..SshConfig::default()
         });
     }
-
-    if hop_index == connection.proxy_chain.len() {
-        let mut target = ssh_config_from_saved_connection(store, settings, connection)?;
-        // Each node in a materialized chain connects through its parent, so the
-        // per-node config must not recursively apply the persisted proxy chain.
-        target.proxy_chain = None;
-        return Some(target);
-    }
-
     None
 }
 
