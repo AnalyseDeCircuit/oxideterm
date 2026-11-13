@@ -566,7 +566,7 @@ impl WorkspaceApp {
             .on_mouse_down(MouseButton::Left, |_, _, cx: &mut App| {
                 cx.stop_propagation();
             })
-            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+            .on_scroll(cx.listener(|this, _event, _window, cx| {
                 this.close_native_plugin_select(cx);
             }))
             .child(

@@ -1169,7 +1169,7 @@ impl WorkspaceApp {
             .overflow_hidden()
             .track_scroll(&self.file_manager.read(cx).path_scroll)
             .text_size(px(FILE_MANAGER_TEXT_SM))
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
                 this.handle_file_manager_breadcrumb_scroll(event, cx);
             }))
             .child(inner)
@@ -1412,7 +1412,7 @@ impl WorkspaceApp {
             .id("file-manager-list-scroll")
             .flex_1()
             .min_h(px(0.0))
-            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+            .on_scroll(cx.listener(|this, _event, _window, cx| {
                 // Context-menu coordinates and row payloads describe the
                 // pre-scroll list, so scrolling invalidates both immediately.
                 if this.clear_file_manager_context_menu_immediately(cx) {

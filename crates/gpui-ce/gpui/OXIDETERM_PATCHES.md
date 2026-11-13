@@ -1,7 +1,7 @@
 # OxideTerm GPUI Vendor Ledger
 
-OxideTerm uses Longbridge's crates.io `gpui-pre` 0.3.7 publication, the version
-pinned by GPUI Kit v0.7.0. The six locally patched packages retain
+OxideTerm uses Longbridge's crates.io `gpui-pre` 0.3.12 publication, the version
+pinned by GPUI Kit v0.9.1. The six locally patched packages retain
 OxideTerm framework changes and selected capabilities inherited from GPUI-CE.
 This is not an unmodified Zed tree.
 
@@ -9,7 +9,7 @@ The authoritative provenance record is [`UPSTREAM_BASELINE.toml`](./UPSTREAM_BAS
 It records the published package names and versions, pristine registry archive
 checksums, and each package's `package.metadata.gpui-pre` Zed crate, version,
 and revision. The recorded Zed revision is
-`1a28cff4b409169bac058bca40dfbfeb7621d19b`.
+`d2a4fb6ded7c470be25d1541281da3882495b65b`.
 
 The previous hybrid inputs remain historical provenance:
 Zed `0969b0dba3f3411592fce801d00f8d81b8dcf902`, GPUI-CE
@@ -24,7 +24,7 @@ samples with that graph.
 
 ## Local Patch Boundary
 
-Only six published packages are patched to local workspace members:
+Six published GPUI packages are patched to local workspace members:
 
 | Published package | Local directory |
 | --- | --- |
@@ -45,16 +45,42 @@ The old 18-directory CE closure is not the new dependency boundary.
 
 | Category | Disposition |
 | --- | --- |
-| Six package sources and manifests | Adopt the published 0.3.7 source and package metadata; reconcile local integration changes against that source |
+| Six package sources and manifests | Adopt the published 0.3.12 source and package metadata; reconcile local integration changes against that source |
 | CE backdrop/content filters, extended colors, and window capabilities | Retain as community-derived local patches; preserve their original license and attribution |
 | Framework and native fixes described below | Preserve the product contract in the corresponding patched core/backend; use upstream equivalents only when the complete contract is present |
 | Utility/platform dependencies outside the six packages | Use registry implementations instead of carrying the old local CE package layout |
-| Product API differences | Adapt product call sites to 0.3.7; do not introduce unused framework compatibility code |
+| Product API differences | Adapt product call sites to 0.3.12; do not introduce unused framework compatibility code |
 | Platform qualification | Native compilation, framework tests, and manual renderer/input checks remain separate verification gates |
 
 The inventory below describes the required semantics, not a claim that a source
 merge has already passed platform validation. Review the final diff for each
 category and record any upstream-equivalent replacement explicitly.
+
+### 0.3.12 integration
+
+- Apple text shaping moved from `gpui_macos/src/text_system.rs` to
+  `gpui_apple/src/text_system.rs`; the letter-spacing and duplicate-font logging
+  patches follow that implementation. Metal and CoreVideo use objc2 retained
+  objects, including native video buffers supplied by the background player.
+- The upstream executor-based animation clock replaces the equivalent local
+  clock patch. Content-hash layout caching remains a local extension after its
+  removal upstream and uses the new single-threaded cache ownership.
+- Explicitly declared WebP images retain their single-frame contract; resource
+  images still animate. The existing resource/declared-image regression covers
+  pixels, delays and resized output, replacing upstream's conflicting new
+  clipboard-animation expectation. Animation decoding keeps the local memory budget.
+- macOS supports the new Metal display-link frame source while retaining the
+  closed-window callback guards, accessibility-cycle cleanup, and lazy filter
+  and path texture allocation.
+- Linux GPU device requirements persist on the platform across the new
+  headless/windowed connection lifecycle. WGPU 30 surface configuration follows
+  upstream; device-loss recovery retains bounded, non-blocking retries and
+  software adapters rather than introducing a render-thread sleep.
+- `xim-ctext` and `zed-xim` are separately patched MIT dependencies. Compound
+  text accepts both 7-bit and 8-bit Chinese/Korean segments without overflow.
+  Malformed text returns `InvalidCompoundText`; synchronous commits are still
+  acknowledged, and X11 retains the connection for subsequent valid input.
+  Decoder tests and real client commit/preedit dispatch tests cover these paths.
 
 ## Renderer Baseline: No Blade
 
@@ -431,7 +457,7 @@ fonts and fonts without the requested glyph are excluded. Successful fallback
 uses debug logging; asset listing/loading failures and usvg's unresolved-glyph
 warnings remain visible.
 
-`crates/gpui-ce/gpui_macos/src/text_system.rs` logs successful PostScript-name
+`crates/gpui-ce/gpui_apple/src/text_system.rs` logs successful PostScript-name
 deduplication at debug level. Invalid-font and missing-required-glyph diagnostics
 remain warnings.
 
@@ -449,7 +475,7 @@ at the window paint boundary, where logical layout bounds have been snapped to d
 Preserve the explicit temporary bindings that release internal locks before processing owned
 results or entering later dispatch work:
 
-- `crates/gpui-ce/gpui_macos/src/text_system.rs` releases the font database read lock before
+- `crates/gpui-ce/gpui_apple/src/text_system.rs` releases the font database read lock before
   extending the family-name result;
 - `crates/gpui-ce/gpui_macos/src/window.rs` releases the window-state lock before returning from
   the input method command branches;

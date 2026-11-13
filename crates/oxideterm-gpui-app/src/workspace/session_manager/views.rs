@@ -1395,7 +1395,7 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     )
-                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+                    .on_scroll(cx.listener(|this, _event, _window, cx| {
                         // Close pointer-positioned menus before the virtual rows move.
                         this.close_session_row_menus(cx);
                     }))

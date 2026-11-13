@@ -630,7 +630,7 @@ impl Render for TerminalPane {
             .on_key_up(cx.listener(|this, event, _window, cx| {
                 this.handle_key_up(event, cx);
             }))
-            .on_scroll_wheel(cx.listener(|this, event, _window, cx| {
+            .on_scroll(cx.listener(|this, event, _window, cx| {
                 this.handle_scroll(event, cx);
             }))
             .when_some(background_layer, |pane, background| pane.child(background))
@@ -920,7 +920,7 @@ impl TerminalPane {
             .flex()
             .flex_col()
             .line_height(px(18.0))
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .h(px(header_height))

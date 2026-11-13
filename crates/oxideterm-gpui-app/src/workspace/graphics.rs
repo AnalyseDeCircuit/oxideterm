@@ -1421,7 +1421,7 @@ impl WorkspaceApp {
                         });
                         cx.stop_propagation();
                     }))
-                    .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+                    .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
                         this.graphics.update(cx, |graphics, _cx| {
                             graphics.send_vnc_scroll(event.position, &event.delta);
                         });

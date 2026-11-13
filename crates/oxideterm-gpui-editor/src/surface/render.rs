@@ -6,7 +6,7 @@ use std::{cell::Cell, collections::BTreeMap, ops::Range, rc::Rc};
 use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Context, CursorStyle, Div,
     EmptyView, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement,
-    Render, ScrollWheelEvent, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
+    Render, ScrollEvent, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
     deferred, div, prelude::FluentBuilder, px, rgb, rgba,
 };
 use oxideterm_editor_core::{BufferOffset, Selection};
@@ -174,7 +174,7 @@ impl Render for TextEditorView {
                     cx.stop_propagation();
                 }),
             )
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _window, cx| {
+            .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
                 this.handle_scroll(event, cx);
             }))
             .child(
@@ -770,7 +770,7 @@ impl TextEditorView {
                     window.focus(&this.focus_handle, cx);
                     this.activate_caret_blink(cx);
                     if let Some(offset) = this.offset_for_window_point(event.position, window) {
-                        if (event.modifiers.secondary() || event.modifiers.control)
+                        if (event.modifiers.secondary(cx) || event.modifiers.control)
                             && !event.modifiers.alt
                             && !event.modifiers.shift
                             && this.modified_word_click(offset, window, cx)
@@ -2045,7 +2045,8 @@ mod tests {
             cx.update(|window, cx| window.draw(cx).clear(cx));
             editor.update(cx, |editor, cx| {
                 editor.handle_scroll(
-                    &ScrollWheelEvent {
+                    &ScrollEvent {
+                        source: gpui::ScrollSource::Pointer,
                         position: editor.content_bounds.unwrap().center(),
                         delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-10000.0))),
                         modifiers: gpui::Modifiers::default(),

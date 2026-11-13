@@ -371,7 +371,7 @@ impl WorkspaceApp {
         let read_only_selection_workspace = cx.entity();
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode, cx);
 
-        let mut key_context = gpui::KeyContext::new_with_defaults();
+        let mut key_context = gpui::KeyContext::new_with_defaults(cx.platform_info().os);
         key_context.add("Workspace");
         #[cfg(target_os = "macos")]
         if self
@@ -834,7 +834,7 @@ impl WorkspaceApp {
                         this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
                 }),
             )
-            .on_scroll_wheel(cx.listener(|this, _event: &ScrollWheelEvent, _window, cx| {
+            .on_scroll(cx.listener(|this, _event: &ScrollEvent, _window, cx| {
                 // Portal backdrops already occlude wheel input. This catches
                 // inline select/popover states that have no full-window layer,
                 // closing them before the same wheel event scrolls the page or

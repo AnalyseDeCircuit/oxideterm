@@ -510,7 +510,7 @@ impl IdeSurface {
         )
         .track_scroll(&self.tree_scroll_handle)
         .size_full()
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
         .into_any_element()
     }
 

@@ -268,7 +268,6 @@ impl<E: IntoElement + 'static> Element for SpringAnimationElement<E> {
         cx: &mut App,
     ) -> (crate::LayoutId, Self::RequestLayoutState) {
         window.with_element_state(global_id.unwrap(), |state, window| {
-            // The platform clock keeps animation time aligned with scheduler timers and tests.
             let now = cx.background_executor().now();
             let initial = self.initial.unwrap_or(self.target);
             let mut state = state.unwrap_or_else(|| SpringElementState {
@@ -403,7 +402,7 @@ impl<E: IntoElement + 'static> Element for AnimationElement<E> {
             // The platform clock keeps animation time aligned with scheduler timers and tests.
             let now = cx.background_executor().now();
             let mut state = state.unwrap_or_else(|| AnimationState {
-                start: now,
+                start: cx.background_executor().now(),
                 animation_ix: 0,
                 delayed_frame_pending: Rc::new(Cell::new(false)),
             });
@@ -424,7 +423,7 @@ impl<E: IntoElement + 'static> Element for AnimationElement<E> {
                     // Reduce modulo the duration before f32 conversion, which loses sub-second precision at scale.
                     Duration::from_nanos((elapsed.as_nanos() % duration.as_nanos()) as u64)
                 } else {
-                    now.duration_since(state.start)
+                    cx.background_executor().now() - state.start
                 };
                 let mut delta = elapsed.as_secs_f32() / duration.as_secs_f32();
 
@@ -434,7 +433,7 @@ impl<E: IntoElement + 'static> Element for AnimationElement<E> {
                         if animation_ix >= self.animations.len() - 1 {
                             done = true;
                         } else {
-                            state.start = now;
+                            state.start = cx.background_executor().now();
                             state.animation_ix += 1;
                         }
                         delta = 1.0;

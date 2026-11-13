@@ -116,6 +116,11 @@ impl X11Display {
 }
 
 impl PlatformDisplay for X11Display {
+    // An X screen spans every monitor, so it has no single refresh rate.
+    fn refresh_interval(&self) -> Option<std::time::Duration> {
+        None
+    }
+
     fn id(&self) -> DisplayId {
         self.display_id
     }

@@ -465,7 +465,7 @@ impl WorkspaceApp {
             .min_h(px(0.0))
             .h(px(list_height))
             .max_h(px(TERMINAL_CWD_MENU_MAX_HEIGHT))
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .child(tauri_virtual_list(
                 state,
                 spec,

@@ -145,7 +145,7 @@ pub fn ai_model_selector_dropdown(
             .border_color(rgb(tokens.ui.border))
             // Tauri dropdown menus are wheel boundaries: scrolling over the model
             // selector must never move the chat/sidebar underneath the overlay.
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .when(placement == AiModelSelectorPlacement::Down, |panel| panel)
             .when(placement == AiModelSelectorPlacement::Up, |panel| panel);
     crate::surface::theme_overlay_surface_shadow(panel, tokens)
@@ -195,7 +195,7 @@ pub fn ai_model_selector_list(id: impl Into<ElementId>) -> Stateful<Div> {
         .max_h(px(MODEL_SELECTOR_LIST_MAX_HEIGHT))
         .overflow_y_scroll()
         .py(px(4.0))
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn ai_model_selector_empty_search(tokens: &ThemeTokens, label: impl Into<String>) -> Div {

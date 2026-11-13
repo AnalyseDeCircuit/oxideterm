@@ -5,7 +5,7 @@ use std::{
 
 use super::window::WaylandWindowStatePtr;
 use gpui::{
-    Modifiers, Pixels, PlatformInput, Point, ScrollDelta, ScrollWheelEvent, TouchPhase, point, px,
+    Modifiers, Pixels, PlatformInput, Point, ScrollDelta, ScrollEvent, TouchPhase, point, px,
 };
 
 const KINETIC_SCROLL_HISTORY_WINDOW: Duration = Duration::from_millis(150);
@@ -125,7 +125,8 @@ impl KineticScrollController {
 
         let finished = is_kinetic_scroll_stopped(kinetic_scroll.velocity);
 
-        let input = PlatformInput::ScrollWheel(ScrollWheelEvent {
+        let input = PlatformInput::Scroll(ScrollEvent {
+            source: gpui::ScrollSource::Pointer,
             position: kinetic_scroll.position,
             delta: ScrollDelta::Pixels(delta),
             modifiers: kinetic_scroll.modifiers,
@@ -159,7 +160,8 @@ impl KineticScrollController {
 
         Some((
             kinetic_scroll.window,
-            PlatformInput::ScrollWheel(ScrollWheelEvent {
+            PlatformInput::Scroll(ScrollEvent {
+                source: gpui::ScrollSource::Pointer,
                 position: kinetic_scroll.position,
                 delta: ScrollDelta::Pixels(point(px(0.0), px(0.0))),
                 modifiers: kinetic_scroll.modifiers,
@@ -179,7 +181,8 @@ impl KineticScrollController {
         if is_kinetic_scroll_stopped(velocity) {
             return Some((
                 window,
-                PlatformInput::ScrollWheel(ScrollWheelEvent {
+                PlatformInput::Scroll(ScrollEvent {
+                    source: gpui::ScrollSource::Pointer,
                     position,
                     delta: ScrollDelta::Pixels(point(px(0.0), px(0.0))),
                     modifiers,

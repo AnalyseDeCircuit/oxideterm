@@ -147,7 +147,7 @@ pub fn modal_backdrop(backdrop: Rgba) -> Div {
         .bg(backdrop)
         .occlude()
         .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn dialog_backdrop() -> Div {
@@ -216,7 +216,7 @@ pub fn popover_backdrop() -> Div {
         .bottom_0()
         .bg(backdrop_color(role))
         .occlude()
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn overlay_content_boundary<E>(content: E) -> E
@@ -233,7 +233,7 @@ where
         .on_mouse_down(MouseButton::Right, |_event, _window, cx| {
             cx.stop_propagation();
         })
-        .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+        .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
 pub fn dialog_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
