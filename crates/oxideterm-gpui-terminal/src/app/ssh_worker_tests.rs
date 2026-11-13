@@ -48,6 +48,8 @@ fn bash_redraw_over_ssh_preserves_prompt_after_resize_and_scroll() {
     terminal
         .write_input(b"PS1='ready> '; printf 'row%02d\\n' {1..30}\r")
         .unwrap();
+    let activity = terminal.activity_receiver();
+    let mut batch = 0;
     let mut previous = terminal.snapshot();
     for (cols, rows, expected) in [
         (80, 24, "row30"),
@@ -77,17 +79,35 @@ fn bash_redraw_over_ssh_preserves_prompt_after_resize_and_scroll() {
                 bash.write_input(&input).unwrap();
             }
             bash.drain_output();
-            let bytes = std::mem::take(&mut *output.lock());
+            let mut bytes = std::mem::take(&mut *output.lock());
             if !bytes.is_empty() {
+                // A completed SSH send does not mean the parser consumed it. A
+                // trailing title marker fences this batch without consuming damage.
+                batch += 1;
+                let marker = format!("resize-probe-{batch}");
+                bytes.extend_from_slice(format!("\x1b]2;{marker}\x07").as_bytes());
                 peer.runtime.block_on(sender.data(channel, bytes)).unwrap();
+                peer.runtime.block_on(async {
+                    tokio::time::timeout(Duration::from_secs(5), async {
+                        while terminal.title().as_deref() != Some(marker.as_str()) {
+                            assert!(activity.notified().await);
+                        }
+                    })
+                    .await
+                    .expect("SSH parser did not consume the output batch");
+                });
             }
             let scrolled = terminal.scroll_lines_snapshot_incremental(1, &previous);
             previous = terminal.scroll_lines_snapshot_incremental(-1, &scrolled);
             let full = terminal.snapshot();
-            // Compare only after the parser is stable; SSH can advance between snapshot calls.
+            // Readline may still be emitting its resize redraw into the local PTY.
+            // Compare after its final prompt reaches the now-quiescent SSH parser.
             let text = terminal.buffer_text();
             if text.lines().any(|line| line.trim_end() == expected)
-                && full.lines[full.cursor_row].text().trim_end() == "ready>"
+                && full
+                    .lines
+                    .get(full.cursor_row)
+                    .is_some_and(|line| line.text().trim_end() == "ready>")
             {
                 let current = terminal.snapshot_incremental(&previous);
                 assert_eq!(
