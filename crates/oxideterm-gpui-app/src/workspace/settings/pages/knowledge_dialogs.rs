@@ -287,6 +287,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_knowledge_create_dialog(&mut self, cx: &mut Context<Self>) {
+        self.clear_knowledge_dialog_input_state(cx);
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
@@ -317,6 +318,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_knowledge_document_dialog(&mut self, cx: &mut Context<Self>) {
+        self.clear_knowledge_dialog_input_state(cx);
         let delay = oxideterm_gpui_ui::motion::duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,

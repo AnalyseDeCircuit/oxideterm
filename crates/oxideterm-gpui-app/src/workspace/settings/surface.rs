@@ -181,7 +181,7 @@ impl WorkspaceApp {
             .size_full()
             .min_w(px(0.0))
             .min_h(px(0.0))
-            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+            .on_scroll(cx.listener(|this, _event, _window, cx| {
                 this.pause_settings_caret_blink_during_scroll(cx);
                 // Tauri only closes an open select on page scroll. When no select is
                 // visible, keep wheel scrolling free of state writes so large settings

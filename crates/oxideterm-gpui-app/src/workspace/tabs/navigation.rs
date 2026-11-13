@@ -1410,7 +1410,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn handle_tabbar_scroll(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

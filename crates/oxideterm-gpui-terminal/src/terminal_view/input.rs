@@ -4,7 +4,7 @@
 
 use std::borrow::Cow;
 
-use gpui::{MouseButton, ScrollDelta, ScrollWheelEvent, px};
+use gpui::{MouseButton, ScrollDelta, ScrollEvent, px};
 use oxideterm_settings::{TerminalBackspaceSequence, TerminalDeleteSequence};
 use oxideterm_terminal::TermMode;
 
@@ -116,7 +116,7 @@ impl TerminalMouseButtonCode {
         }
     }
 
-    fn from_scroll(event: &ScrollWheelEvent) -> Self {
+    fn from_scroll(event: &ScrollEvent) -> Self {
         let is_positive = match event.delta {
             ScrollDelta::Pixels(pixels) => pixels.y > px(0.0),
             ScrollDelta::Lines(lines) => lines.y > 0.0,
@@ -176,7 +176,7 @@ pub(crate) fn mouse_moved_report(
 
 pub(crate) fn mouse_scroll_report(
     point: TerminalPoint,
-    event: &ScrollWheelEvent,
+    event: &ScrollEvent,
     mode: TermMode,
 ) -> Option<Vec<u8>> {
     if mode.intersects(TermMode::MOUSE_MODE) {

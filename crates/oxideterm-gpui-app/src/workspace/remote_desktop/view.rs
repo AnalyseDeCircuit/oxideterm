@@ -830,14 +830,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
-            .on_scroll_wheel(
-                cx.listener(move |this, event: &ScrollWheelEvent, _window, cx| {
-                    if this.handle_remote_desktop_wheel(tab_id, event.position, &event.delta, cx) {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            );
+            .on_scroll(cx.listener(move |this, event: &ScrollEvent, _window, cx| {
+                if this.handle_remote_desktop_wheel(tab_id, event.position, &event.delta, cx) {
+                    cx.notify();
+                }
+                cx.stop_propagation();
+            }));
 
         div()
             .size_full()

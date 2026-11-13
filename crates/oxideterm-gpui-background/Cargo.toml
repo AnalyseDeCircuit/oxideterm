@@ -24,7 +24,3 @@ ash = "0.38"
 [dev-dependencies]
 tempfile = "3.23"
 gpui = { workspace = true, features = ["test-support"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-core-foundation = "0.10"
-core-video = "0.5.2"

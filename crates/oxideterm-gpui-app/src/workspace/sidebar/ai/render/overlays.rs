@@ -28,9 +28,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let next_size = current_window_size(window);
-        let previous_size = self.ai_entity.update(cx, |ai, _cx| {
-            ai.replace_overlay_window_size(next_size)
-        });
+        let previous_size = self
+            .ai_entity
+            .update(cx, |ai, _cx| ai.replace_overlay_window_size(next_size));
         let Some(previous_size) = previous_size else {
             return;
         };
@@ -87,142 +87,139 @@ impl WorkspaceApp {
         let panel_right = f32::from(panel_anchor.bounds.right());
         let panel_width = f32::from(panel_anchor.bounds.size.width);
 
-        let (corner, anchor_x, anchor_y, popup, dismiss_from_outside) = if self
-            .ai_entity
-            .read(cx)
-            .chat_ui()
-            .conversation_list_open
-        {
-            let top = self
-                .select_anchors
-                .get(&SelectAnchorId::AiConversationList)
-                .map(|anchor| f32::from(anchor.bounds.bottom()) + AI_FLOATING_GAP)
-                .unwrap_or_else(|| {
-                    f32::from(panel_anchor.bounds.top()) + AI_CHAT_PANEL_HEADER_HEIGHT
-                });
-            let dropdown_width = (panel_width - AI_TOP_FLOATING_INSET_X * 2.0).max(0.0);
-            (
-                Corner::TopLeft,
-                panel_left + AI_TOP_FLOATING_INSET_X,
-                top,
-                self.render_ai_conversation_dropdown(dropdown_width, cx),
-                true,
-            )
-        } else if self.ai_entity.read(cx).chat_ui().menu_open {
-            let anchor = self
-                .select_anchors
-                .get(&SelectAnchorId::AiChatMenu)
-                .copied()?;
-            let left = ai_sidebar_popup_left(
-                f32::from(anchor.bounds.right()) - AI_CHAT_MENU_WIDTH,
-                AI_CHAT_MENU_WIDTH,
-                panel_left,
-                panel_right,
-            );
-            let top = f32::from(anchor.bounds.bottom()) + AI_FLOATING_GAP / 2.0;
-            (
-                Corner::TopLeft,
-                left,
-                top,
-                self.render_ai_chat_menu(cx),
-                true,
-            )
-        } else if self
-            .ai_entity
-            .read(cx)
-            .model_selector_is_open(AiModelSelectorScope::Sidebar)
-        {
-            let anchor = self.select_anchors.get(&SelectAnchorId::AiModelSelector)?;
-            (
-                Corner::BottomLeft,
-                ai_sidebar_popup_left(
-                    f32::from(anchor.bounds.left()),
-                    AI_MODEL_SELECTOR_DROPDOWN_WIDTH,
+        let (corner, anchor_x, anchor_y, popup, dismiss_from_outside) =
+            if self.ai_entity.read(cx).chat_ui().conversation_list_open {
+                let top = self
+                    .select_anchors
+                    .get(&SelectAnchorId::AiConversationList)
+                    .map(|anchor| f32::from(anchor.bounds.bottom()) + AI_FLOATING_GAP)
+                    .unwrap_or_else(|| {
+                        f32::from(panel_anchor.bounds.top()) + AI_CHAT_PANEL_HEADER_HEIGHT
+                    });
+                let dropdown_width = (panel_width - AI_TOP_FLOATING_INSET_X * 2.0).max(0.0);
+                (
+                    Corner::TopLeft,
+                    panel_left + AI_TOP_FLOATING_INSET_X,
+                    top,
+                    self.render_ai_conversation_dropdown(dropdown_width, cx),
+                    true,
+                )
+            } else if self.ai_entity.read(cx).chat_ui().menu_open {
+                let anchor = self
+                    .select_anchors
+                    .get(&SelectAnchorId::AiChatMenu)
+                    .copied()?;
+                let left = ai_sidebar_popup_left(
+                    f32::from(anchor.bounds.right()) - AI_CHAT_MENU_WIDTH,
+                    AI_CHAT_MENU_WIDTH,
                     panel_left,
                     panel_right,
-                ),
-                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                self.render_ai_model_selector_dropdown(&self.ai_model_selector_providers(cx), cx),
-                true,
-            )
-        } else if self.ai_entity.read(cx).chat_ui().reasoning_menu_open {
-            let anchor = self.select_anchors.get(&SelectAnchorId::AiReasoningMenu)?;
-            (
-                Corner::BottomLeft,
-                ai_sidebar_popup_left(
-                    f32::from(anchor.bounds.left()),
-                    AI_REASONING_MENU_WIDTH,
-                    panel_left,
-                    panel_right,
-                ),
-                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                self.render_ai_reasoning_menu(cx)?,
-                true,
-            )
-        } else if self.ai_entity.read(cx).chat_ui().safety_menu_open {
-            let anchor = self.select_anchors.get(&SelectAnchorId::AiSafetyMenu)?;
-            (
-                Corner::BottomLeft,
-                ai_sidebar_popup_left(
-                    f32::from(anchor.bounds.left()),
-                    AI_MODEL_SELECTOR_DROPDOWN_WIDTH,
-                    panel_left,
-                    panel_right,
-                ),
-                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                self.render_ai_safety_menu(cx),
-                true,
-            )
-        } else if self.ai_entity.read(cx).chat_ui().context_popover_open {
-            let anchor = self.select_anchors.get(&SelectAnchorId::AiContextPopover)?;
-            // Context usage is an informational inspector rather than a menu.
-            // Reduced motion keeps only opacity, while Off mounts immediately.
-            let popover = oxideterm_gpui_ui::motion::slide_fade_in_y(
-                &self.tokens,
-                "ai-context-popover-enter",
-                div().child(self.render_ai_context_popover(cx)),
-                6.0,
-                oxideterm_gpui_ui::motion::MotionDuration::Control,
-            );
-            (
-                Corner::BottomLeft,
-                ai_sidebar_popup_left(
-                    f32::from(anchor.bounds.left()),
-                    AI_CONTEXT_POPOVER_WIDTH,
-                    panel_left,
-                    panel_right,
-                ),
-                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                popover,
-                true,
-            )
-        } else if let autocomplete_items = self.ai_chat_autocomplete_items(cx)
-            && !autocomplete_items.is_empty()
-        {
-            let anchor = self
-                .select_anchors
-                .get(&SelectAnchorId::AiAutocomplete)?;
-            let popup_width = f32::from(anchor.bounds.size.width)
-                .min((panel_width - AI_TOP_FLOATING_INSET_X * 2.0).max(1.0))
-                .max(1.0);
-            (
-                Corner::BottomLeft,
-                ai_sidebar_popup_left(
-                    f32::from(anchor.bounds.left()),
-                    popup_width,
-                    panel_left,
-                    panel_right,
-                ),
-                f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
-                div()
-                    .w(px(popup_width))
-                    .child(self.render_ai_autocomplete_popup(&autocomplete_items, cx))
-                    .into_any_element(),
-                false,
-            )
-        } else {
-            return None;
-        };
+                );
+                let top = f32::from(anchor.bounds.bottom()) + AI_FLOATING_GAP / 2.0;
+                (
+                    Corner::TopLeft,
+                    left,
+                    top,
+                    self.render_ai_chat_menu(cx),
+                    true,
+                )
+            } else if self
+                .ai_entity
+                .read(cx)
+                .model_selector_is_open(AiModelSelectorScope::Sidebar)
+            {
+                let anchor = self.select_anchors.get(&SelectAnchorId::AiModelSelector)?;
+                (
+                    Corner::BottomLeft,
+                    ai_sidebar_popup_left(
+                        f32::from(anchor.bounds.left()),
+                        AI_MODEL_SELECTOR_DROPDOWN_WIDTH,
+                        panel_left,
+                        panel_right,
+                    ),
+                    f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                    self.render_ai_model_selector_dropdown(
+                        &self.ai_model_selector_providers(cx),
+                        cx,
+                    ),
+                    true,
+                )
+            } else if self.ai_entity.read(cx).chat_ui().reasoning_menu_open {
+                let anchor = self.select_anchors.get(&SelectAnchorId::AiReasoningMenu)?;
+                (
+                    Corner::BottomLeft,
+                    ai_sidebar_popup_left(
+                        f32::from(anchor.bounds.left()),
+                        AI_REASONING_MENU_WIDTH,
+                        panel_left,
+                        panel_right,
+                    ),
+                    f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                    self.render_ai_reasoning_menu(cx)?,
+                    true,
+                )
+            } else if self.ai_entity.read(cx).chat_ui().safety_menu_open {
+                let anchor = self.select_anchors.get(&SelectAnchorId::AiSafetyMenu)?;
+                (
+                    Corner::BottomLeft,
+                    ai_sidebar_popup_left(
+                        f32::from(anchor.bounds.left()),
+                        AI_MODEL_SELECTOR_DROPDOWN_WIDTH,
+                        panel_left,
+                        panel_right,
+                    ),
+                    f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                    self.render_ai_safety_menu(cx),
+                    true,
+                )
+            } else if self.ai_entity.read(cx).chat_ui().context_popover_open {
+                let anchor = self.select_anchors.get(&SelectAnchorId::AiContextPopover)?;
+                // Context usage is an informational inspector rather than a menu.
+                // Reduced motion keeps only opacity, while Off mounts immediately.
+                let popover = oxideterm_gpui_ui::motion::slide_fade_in_y(
+                    &self.tokens,
+                    "ai-context-popover-enter",
+                    div().child(self.render_ai_context_popover(cx)),
+                    6.0,
+                    oxideterm_gpui_ui::motion::MotionDuration::Control,
+                );
+                (
+                    Corner::BottomLeft,
+                    ai_sidebar_popup_left(
+                        f32::from(anchor.bounds.left()),
+                        AI_CONTEXT_POPOVER_WIDTH,
+                        panel_left,
+                        panel_right,
+                    ),
+                    f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                    popover,
+                    true,
+                )
+            } else if let autocomplete_items = self.ai_chat_autocomplete_items(cx)
+                && !autocomplete_items.is_empty()
+            {
+                let anchor = self.select_anchors.get(&SelectAnchorId::AiAutocomplete)?;
+                let popup_width = f32::from(anchor.bounds.size.width)
+                    .min((panel_width - AI_TOP_FLOATING_INSET_X * 2.0).max(1.0))
+                    .max(1.0);
+                (
+                    Corner::BottomLeft,
+                    ai_sidebar_popup_left(
+                        f32::from(anchor.bounds.left()),
+                        popup_width,
+                        panel_left,
+                        panel_right,
+                    ),
+                    f32::from(anchor.bounds.top()) - AI_FLOATING_GAP,
+                    div()
+                        .w(px(popup_width))
+                        .child(self.render_ai_autocomplete_popup(&autocomplete_items, cx))
+                        .into_any_element(),
+                    false,
+                )
+            } else {
+                return None;
+            };
 
         let popup = deferred(
             anchored()
@@ -275,15 +272,38 @@ impl WorkspaceApp {
         dropdown_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let show_archived = self.ai_entity.read(cx).chat_ui().show_archived_conversations;
-        let page = self.ai_entity.read(cx).conversation_list_page(show_archived);
+        let show_archived = self
+            .ai_entity
+            .read(cx)
+            .chat_ui()
+            .show_archived_conversations;
+        let page = self
+            .ai_entity
+            .read(cx)
+            .conversation_list_page(show_archived);
         let loading = page.loading();
         let failed = page.failed;
         let has_more = page.has_more;
-        let count = self.ai_entity.read(cx).conversation_state().conversations.iter().filter(|item| item.archived == show_archived).count();
-        let dropdown_height = (count as f32 * AI_CONVERSATION_ROW_HEIGHT + 36.0 + if loading || failed || has_more { 36.0 } else { 0.0 }).clamp(AI_CONVERSATION_EMPTY_HEIGHT + 36.0, AI_CONVERSATION_MAX_HEIGHT);
-        let scroll_handle =
-            self.selectable_text_scroll_handle("ai-conversation-dropdown-scroll");
+        let count = self
+            .ai_entity
+            .read(cx)
+            .conversation_state()
+            .conversations
+            .iter()
+            .filter(|item| item.archived == show_archived)
+            .count();
+        let dropdown_height = (count as f32 * AI_CONVERSATION_ROW_HEIGHT
+            + 36.0
+            + if loading || failed || has_more {
+                36.0
+            } else {
+                0.0
+            })
+        .clamp(
+            AI_CONVERSATION_EMPTY_HEIGHT + 36.0,
+            AI_CONVERSATION_MAX_HEIGHT,
+        );
+        let scroll_handle = self.selectable_text_scroll_handle("ai-conversation-dropdown-scroll");
         let mut list = div()
             .id("ai-conversation-dropdown-scroll")
             .w_full()
@@ -293,7 +313,7 @@ impl WorkspaceApp {
             .selectable_overflow_y_scroll(&scroll_handle)
             // Conversation dropdown mirrors a browser popover list: wheel input
             // stays with the overlay and cannot scroll the message/sidebar body.
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation());
+            .on_scroll(|_, _, cx| cx.stop_propagation());
 
         let mut conversation_rows = {
             let ai = self.ai_entity.read(cx);
@@ -314,17 +334,50 @@ impl WorkspaceApp {
                 })
                 .collect::<Vec<_>>()
         };
-        conversation_rows.sort_by(|a, b| b.updated_at_ms.cmp(&a.updated_at_ms).then_with(|| b.id.cmp(&a.id)));
+        conversation_rows.sort_by(|a, b| {
+            b.updated_at_ms
+                .cmp(&a.updated_at_ms)
+                .then_with(|| b.id.cmp(&a.id))
+        });
         list = list.child(
-            div().flex_none().h(px(36.0)).px(px(12.0)).flex().items_center().justify_between()
-                .child(div().text_size(px(11.0)).text_color(rgb(self.tokens.ui.text_muted)).child(self.i18n.t(if show_archived { "ai.chat.archived_conversations" } else { "ai.chat.conversations" })))
-                .child(div().cursor_pointer().text_size(px(11.0)).text_color(rgb(self.tokens.ui.accent))
-                    .child(self.i18n.t(if show_archived { "ai.chat.show_active" } else { "ai.chat.archived_conversations" }))
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                        this.ai_entity.update(cx, |ai, _| ai.show_archived_conversations(!show_archived));
-                        cx.stop_propagation();
-                        cx.notify();
-                    })))
+            div()
+                .flex_none()
+                .h(px(36.0))
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .text_size(px(11.0))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t(if show_archived {
+                            "ai.chat.archived_conversations"
+                        } else {
+                            "ai.chat.conversations"
+                        })),
+                )
+                .child(
+                    div()
+                        .cursor_pointer()
+                        .text_size(px(11.0))
+                        .text_color(rgb(self.tokens.ui.accent))
+                        .child(self.i18n.t(if show_archived {
+                            "ai.chat.show_active"
+                        } else {
+                            "ai.chat.archived_conversations"
+                        }))
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                this.ai_entity.update(cx, |ai, _| {
+                                    ai.show_archived_conversations(!show_archived)
+                                });
+                                cx.stop_propagation();
+                                cx.notify();
+                            }),
+                        ),
+                ),
         );
         if conversation_rows.is_empty() && !loading && !failed {
             list = list.child(
@@ -337,7 +390,11 @@ impl WorkspaceApp {
                         SelectableTextRole::PlainDocument,
                         "ai-conversation-list",
                         "empty",
-                        self.i18n.t(if show_archived { "ai.chat.no_archived_conversations" } else { "ai.chat.no_conversations" }),
+                        self.i18n.t(if show_archived {
+                            "ai.chat.no_archived_conversations"
+                        } else {
+                            "ai.chat.no_conversations"
+                        }),
                         self.tokens.ui.text_muted,
                         cx,
                     )),
@@ -353,13 +410,33 @@ impl WorkspaceApp {
             }
         }
         if loading || failed || has_more {
-            list = list.child(div().id("ai-conversation-list-next").flex_none().h(px(36.0)).flex().items_center().justify_center()
-                .text_size(px(12.0)).text_color(rgb(self.tokens.ui.accent))
-                .child(self.i18n.t(if loading { "ai.chat.context_loading" } else if failed { "ai.chat.list_retry" } else { "ai.chat.list_more" }))
-                .when(!loading, |row| row.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| {
-                    this.ai_entity.update(cx, |ai, _| ai.request_conversation_list_page(show_archived));
-                    cx.notify();
-                }))));
+            list = list.child(
+                div()
+                    .id("ai-conversation-list-next")
+                    .flex_none()
+                    .h(px(36.0))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px(12.0))
+                    .text_color(rgb(self.tokens.ui.accent))
+                    .child(self.i18n.t(if loading {
+                        "ai.chat.context_loading"
+                    } else if failed {
+                        "ai.chat.list_retry"
+                    } else {
+                        "ai.chat.list_more"
+                    }))
+                    .when(!loading, |row| {
+                        row.cursor_pointer()
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.ai_entity.update(cx, |ai, _| {
+                                    ai.request_conversation_list_page(show_archived)
+                                });
+                                cx.notify();
+                            }))
+                    }),
+            );
         }
         material_surface(&self.tokens, div(), MaterialRole::Popover)
             .w(px(dropdown_width))
@@ -405,7 +482,11 @@ impl WorkspaceApp {
         let rename_title = title.clone();
         let archive_id = conversation.id.clone();
         let archived = conversation.archived;
-        let archive_label = self.i18n.t(if archived { "ai.chat.restore_conversation" } else { "ai.chat.archive_conversation" });
+        let archive_label = self.i18n.t(if archived {
+            "ai.chat.restore_conversation"
+        } else {
+            "ai.chat.archive_conversation"
+        });
         let archive_tokens = self.tokens;
         let delete_id = conversation.id.clone();
         let id = conversation.id;
@@ -420,49 +501,45 @@ impl WorkspaceApp {
             )
         );
         let title_control = if is_renaming {
-            let input = self.workspace_text_input(
-                rename_target,
-                TextInputView {
-                    value: &rename_draft,
-                    placeholder: String::new(),
-                    focused: rename_focused,
-                    caret_visible: self.input_caret.visible(),
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(rename_target, cx),
-                    marked_text: self.marked_text_for_target(rename_target, cx),
-                },
-            )
-            .h(px(20.0))
-            .px(px(4.0))
-            .rounded(px(self.tokens.radii.sm))
-            .border_color(rgba((self.tokens.ui.accent << 8) | 0x66))
-            .bg(rgba((self.tokens.ui.bg << 8) | 0x80))
-            .text_size(px(12.0))
-            .font_weight(gpui::FontWeight::BOLD)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    this.ai_entity.update(cx, |ai, _cx| {
-                        ai.focus_conversation_rename();
-                        ai.set_model_selector_search_focused(false);
-                    });
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(
-                        rename_target,
-                        event,
-                        window,
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(
-                |this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                },
-            ));
+            let input = self
+                .workspace_text_input(
+                    rename_target,
+                    TextInputView {
+                        value: &rename_draft,
+                        placeholder: String::new(),
+                        focused: rename_focused,
+                        caret_visible: self.input_caret.visible(),
+                        secret: false,
+                        selected_all: false,
+                        selected_range: self.ime_selected_range_for_target(rename_target, cx),
+                        marked_text: self.marked_text_for_target(rename_target, cx),
+                    },
+                )
+                .h(px(20.0))
+                .px(px(4.0))
+                .rounded(px(self.tokens.radii.sm))
+                .border_color(rgba((self.tokens.ui.accent << 8) | 0x66))
+                .bg(rgba((self.tokens.ui.bg << 8) | 0x80))
+                .text_size(px(12.0))
+                .font_weight(gpui::FontWeight::BOLD)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                        this.ai_entity.update(cx, |ai, _cx| {
+                            ai.focus_conversation_rename();
+                            ai.set_model_selector_search_focused(false);
+                        });
+                        this.ime_marked_text = None;
+                        window.focus(&this.focus_handle, cx);
+                        this.begin_ime_selection_from_mouse_down(rename_target, event, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_move(
+                    cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                        this.update_ime_selection_drag_from_mouse_move(event, window, cx);
+                    }),
+                );
             text_input_anchor_probe(
                 rename_target.anchor_id(),
                 input,
@@ -602,7 +679,7 @@ impl WorkspaceApp {
                                             LucideIcon::Terminal,
                                             10.0,
                                             rgb(self.tokens.ui.text_muted),
-                                    )),
+                                        )),
                                 )
                             })
                             .child(title_control),
@@ -621,16 +698,44 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(2.0))
                     .child(rename_button)
-                    .child(div().id(SharedString::from(format!("ai-conversation-archive-{archive_id}"))).size(px(24.0)).flex().items_center().justify_center()
-                        .rounded(px(self.tokens.radii.md)).cursor_pointer()
-                        .hover(|style| style.bg(rgba((self.tokens.ui.accent << 8) | 0x1a)))
-                        .child(Self::render_lucide_icon(if archived { LucideIcon::RotateCcw } else { LucideIcon::Archive }, 13.0, rgb(self.tokens.ui.text_muted)))
-                        .tooltip(move |_, cx| oxideterm_gpui_ui::tooltip::tooltip_view(archive_tokens, archive_label.clone(), None, cx))
-                        .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
-                            this.set_ai_conversation_archived(&archive_id, !archived, cx);
-                            cx.stop_propagation();
-                            cx.notify();
-                        })))
+                    .child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "ai-conversation-archive-{archive_id}"
+                            )))
+                            .size(px(24.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.md))
+                            .cursor_pointer()
+                            .hover(|style| style.bg(rgba((self.tokens.ui.accent << 8) | 0x1a)))
+                            .child(Self::render_lucide_icon(
+                                if archived {
+                                    LucideIcon::RotateCcw
+                                } else {
+                                    LucideIcon::Archive
+                                },
+                                13.0,
+                                rgb(self.tokens.ui.text_muted),
+                            ))
+                            .tooltip(move |_, cx| {
+                                oxideterm_gpui_ui::tooltip::tooltip_view(
+                                    archive_tokens,
+                                    archive_label.clone(),
+                                    None,
+                                    cx,
+                                )
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _, _, cx| {
+                                    this.set_ai_conversation_archived(&archive_id, !archived, cx);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
+                    )
                     .child(
                         div()
                             .flex_none()

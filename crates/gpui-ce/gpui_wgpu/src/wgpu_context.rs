@@ -1,5 +1,8 @@
 // OxideTerm modification: provide product-scoped GPU backend selection and deterministic fallback ordering.
 
+// Modified for gpui-pre (snapshot of zed@d2a4fb6): adapt device queues and sRGB detection to wgpu 30.0.1.
+#[cfg(not(target_family = "wasm"))]
+use crate::{WgpuRenderer, WgpuSurfaceConfig};
 #[cfg(not(target_family = "wasm"))]
 use anyhow::Context as _;
 #[cfg(not(target_family = "wasm"))]
@@ -14,6 +17,7 @@ const GPU_BACKEND_ENV: &str = "OXIDETERM_GPU_BACKEND";
 #[cfg(not(target_family = "wasm"))]
 const GPU_DEVICE_ID_ENV: &str = "OXIDETERM_GPU_DEVICE_ID";
 
+#[derive(Clone)]
 pub struct WgpuContext {
     pub instance: wgpu::Instance,
     pub adapter: wgpu::Adapter,
@@ -78,6 +82,12 @@ impl DeviceErrorState {
         }
         *generation = last_error.0;
         last_error.1.clone()
+    }
+
+    /// The generation an observer should start from to see only errors raised after
+    /// this call, for a renderer joining a device other renderers already used.
+    pub fn current_generation(&self) -> u64 {
+        self.last_error.lock().0
     }
 }
 
@@ -245,16 +255,24 @@ impl WgpuContext {
     pub fn new(
         instance: wgpu::Instance,
         surface: &wgpu::Surface<'_>,
+        config: &WgpuSurfaceConfig,
         compositor_gpu: Option<CompositorGpuHint>,
         extra_requirements: Option<&WgpuDeviceRequirements>,
     ) -> anyhow::Result<Self> {
-        Self::new_with_options(instance, surface, compositor_gpu, extra_requirements)
+        Self::new_with_options(
+            instance,
+            surface,
+            config,
+            compositor_gpu,
+            extra_requirements,
+        )
     }
 
     #[cfg(not(target_family = "wasm"))]
     fn new_with_options(
         instance: wgpu::Instance,
         surface: &wgpu::Surface<'_>,
+        config: &WgpuSurfaceConfig,
         compositor_gpu: Option<CompositorGpuHint>,
         extra_requirements: Option<&WgpuDeviceRequirements>,
     ) -> anyhow::Result<Self> {
@@ -267,6 +285,7 @@ impl WgpuContext {
                 &instance,
                 device_id_filter,
                 surface,
+                config,
                 compositor_gpu.as_ref(),
                 extra_requirements,
             ))?;
@@ -286,6 +305,28 @@ impl WgpuContext {
         any(test, feature = "bench-support", feature = "test-support")
     ))]
     pub(crate) fn new_headless() -> anyhow::Result<(Self, wgpu::TextureFormat)> {
+        // Creating a device takes tens of milliseconds, and benchmarks create a headless
+        // renderer for every window they open, so the process shares one device until it
+        // is lost. A static rather than a thread-local: the cached device is never dropped,
+        // because wgpu's queue reads its own thread-locals on drop and would panic if
+        // dropped while a thread's thread-locals are being destroyed.
+        static HEADLESS: Mutex<Option<(WgpuContext, wgpu::TextureFormat)>> = Mutex::new(None);
+        let mut headless = HEADLESS.lock();
+        if let Some((context, format)) = headless.as_ref()
+            && !context.device_lost()
+        {
+            return Ok((context.clone(), *format));
+        }
+        let created = Self::create_headless()?;
+        *headless = Some(created.clone());
+        Ok(created)
+    }
+
+    #[cfg(all(
+        not(target_family = "wasm"),
+        any(test, feature = "bench-support", feature = "test-support")
+    ))]
+    fn create_headless() -> anyhow::Result<(Self, wgpu::TextureFormat)> {
         let instance = Self::instance(None);
         let device_id_filter = Self::device_id_filter();
         let (adapter, device, queue, dual_source_blending, color_texture_format, target_format) =
@@ -466,6 +507,7 @@ impl WgpuContext {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
                 force_fallback_adapter: false,
+                apply_limit_buckets: false,
             })
             .await
             .map_err(|error| {
@@ -597,6 +639,7 @@ impl WgpuContext {
         instance: &wgpu::Instance,
         device_id_filter: Option<u32>,
         surface: &wgpu::Surface<'_>,
+        config: &WgpuSurfaceConfig,
         compositor_gpu: Option<&CompositorGpuHint>,
         extra_requirements: Option<&WgpuDeviceRequirements>,
     ) -> anyhow::Result<(
@@ -638,7 +681,9 @@ impl WgpuContext {
 
             log::info!("Testing adapter: {} ({:?})...", info.name, info.backend);
 
-            match Self::try_adapter_with_surface(&adapter, surface, extra_requirements).await {
+            match Self::try_adapter_with_surface(&adapter, surface, config, extra_requirements)
+                .await
+            {
                 Ok((device, queue, dual_source_blending, color_atlas_texture_format)) => {
                     log::info!(
                         "Selected GPU (passed configuration test): {} ({:?})",
@@ -691,6 +736,7 @@ impl WgpuContext {
     async fn try_adapter_with_surface(
         adapter: &wgpu::Adapter,
         surface: &wgpu::Surface<'_>,
+        config: &WgpuSurfaceConfig,
         extra_requirements: Option<&WgpuDeviceRequirements>,
     ) -> anyhow::Result<(wgpu::Device, wgpu::Queue, bool, TextureFormat)> {
         let caps = surface.get_capabilities(adapter);
@@ -703,20 +749,13 @@ impl WgpuContext {
 
         let (device, queue, dual_source_blending, color_atlas_texture_format) =
             Self::create_device(adapter, extra_requirements).await?;
+        // Test with the configuration the renderer will use, so that it doesn't need to
+        // configure the surface a second time.
+        let (surface_config, _, _) =
+            WgpuRenderer::surface_configuration(surface, adapter, &device, config)?;
         let error_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
-        let test_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: caps.formats[0],
-            width: 64,
-            height: 64,
-            present_mode: wgpu::PresentMode::Fifo,
-            desired_maximum_frame_latency: 2,
-            alpha_mode: caps.alpha_modes[0],
-            view_formats: vec![],
-        };
-
-        surface.configure(&device, &test_config);
+        surface.configure(&device, &surface_config);
 
         let error = error_scope.pop().await;
         if let Some(e) = error {
@@ -833,7 +872,8 @@ mod tests {
             backend,
             subgroup_min_size: 0,
             subgroup_max_size: 0,
-            transient_saves_memory: false,
+            transient_saves_memory: Some(false),
+            limit_bucket: None,
         }
     }
 

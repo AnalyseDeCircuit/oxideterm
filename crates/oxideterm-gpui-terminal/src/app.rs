@@ -5029,7 +5029,7 @@ impl TerminalPane {
             |(previous_cols, previous_rows, _, _)| (previous_cols, previous_rows) != (cols, rows),
         );
 
-        let next_snapshot = {
+        let next = {
             let mut terminal = self.terminal.lock();
             if !submitted
                 && terminal
@@ -5039,29 +5039,36 @@ impl TerminalPane {
                 // Backpressure must not discard the latest measured geometry.
                 return;
             }
-            terminal.snapshot()
+            // Resize acceptance only queues work for SSH. Never wait for its
+            // parser lock on the UI thread, including on acknowledgement retries.
+            terminal.try_render_snapshot(&self.snapshot, true)
         };
-        let applied = (next_snapshot.cols, next_snapshot.rows) == (cols, rows);
-        if applied {
-            self.pending_pty_resize = None;
-        }
-        // SSH accepts a queued resize before its parser publishes the new grid.
-        // Wait for that grid without enqueueing duplicate requests on every retry.
-        if !submitted || applied {
+        if !submitted {
+            // Remember acceptance even if the parser is busy, so retries only
+            // observe the grid instead of enqueueing the same resize again.
             self.last_pty_resize = Some(resize);
-            if !submitted && let Some(recorder) = self.recorder.as_mut() {
+            if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record_resize(cols, rows);
             }
-            self.clear_smooth_scroll_remainder();
-            self.snapshot = self.stamp_snapshot(next_snapshot);
-            self.mark_terminal_content_changed(cx);
             if grid_changed {
                 self.autosuggest_input_start = None;
                 // Keep collapse identities while the parser publishes rebased boundaries.
                 self.command_reflow_pending = true;
             }
-            cx.notify();
         }
+        let Some((snapshot, selection, mode)) = next else {
+            return;
+        };
+        if (snapshot.cols, snapshot.rows) == (cols, rows) {
+            self.pending_pty_resize = None;
+        }
+        // A successful incremental read consumes damage, even if the queued
+        // resize has not run yet. Always retain that frame and its selection.
+        self.clear_smooth_scroll_remainder();
+        self.render_mode = mode;
+        self.snapshot = self.stamp_snapshot_with_selection(snapshot, selection);
+        self.mark_terminal_content_changed(cx);
+        cx.notify();
     }
 
     fn content_origin(&self) -> gpui::Point<Pixels> {

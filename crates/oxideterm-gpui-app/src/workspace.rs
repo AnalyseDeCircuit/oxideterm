@@ -117,7 +117,7 @@ use gpui::{
     FollowMode, FontWeight, Image, ImageFormat, IntoElement, KeyDownEvent, KeyUpEvent,
     ListAlignment, ListState, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage,
-    Rgba, ScrollHandle, ScrollWheelEvent, SharedString, Styled, StyledImage, Subscription, Task,
+    Rgba, ScrollEvent, ScrollHandle, SharedString, Styled, StyledImage, Subscription, Task,
     TextLayout, Timer, UniformListScrollHandle, Window, anchored, canvas, deferred, div,
     prelude::*, px, relative, rgb, rgba, svg,
 };

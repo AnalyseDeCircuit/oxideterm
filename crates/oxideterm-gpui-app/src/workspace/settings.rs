@@ -177,7 +177,7 @@ pub(in crate::workspace) fn settings_dialog_inert_overlay(backdrop: Div) -> Div 
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
-            .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation()),
+            .on_scroll(|_event, _window, cx| cx.stop_propagation()),
     )
 }
 

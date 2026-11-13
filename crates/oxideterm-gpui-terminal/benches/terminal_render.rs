@@ -1005,4 +1005,4 @@ gpui::bench_group!(
     terminal_playback_output_pipeline,
     terminal_idle_no_frames
 );
-gpui::bench_main!(terminal_render);
+gpui::bench_main!(allocator = none; terminal_render);

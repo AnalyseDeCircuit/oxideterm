@@ -463,7 +463,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace::file_manager) fn handle_file_manager_breadcrumb_scroll(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         cx: &mut Context<Self>,
     ) {
         if let Some(changed) = scroll_breadcrumb_by_wheel(

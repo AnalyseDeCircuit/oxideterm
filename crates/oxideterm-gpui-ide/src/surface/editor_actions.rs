@@ -427,7 +427,9 @@ impl IdeSurface {
     }
 
     fn start_agent_watch_if_ready(&mut self, cx: &mut Context<Self>) {
-        if !self.fs.supports_watching() { return; }
+        if !self.fs.supports_watching() {
+            return;
+        }
         if !self.mount.is_visible() {
             self.stop_agent_watch(cx);
             return;
@@ -838,7 +840,7 @@ impl IdeSurface {
         {
             bindings.resolve(&event.keystroke) == Some(oxideterm_gpui_editor::EditorShortcut::Find)
         } else {
-            modifiers.secondary()
+            modifiers.secondary(cx)
                 && !modifiers.alt
                 && !modifiers.shift
                 && event.keystroke.key.eq_ignore_ascii_case("f")
@@ -848,7 +850,6 @@ impl IdeSurface {
             cx.stop_propagation();
         }
     }
-
 
     fn open_search_match(&mut self, hit: IdeSearchMatch, cx: &mut Context<Self>) {
         let Some(node_id) = self.node_id.clone() else {
@@ -868,7 +869,9 @@ impl IdeSurface {
     }
 
     fn go_to_symbol_definition(&mut self, word: String, cx: &mut Context<Self>) {
-        if !self.fs.supports_symbols() { return; }
+        if !self.fs.supports_symbols() {
+            return;
+        }
         let Some(root_path) = self.root_path.clone() else {
             return;
         };

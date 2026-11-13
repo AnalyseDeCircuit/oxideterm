@@ -119,6 +119,70 @@ fn bash_redraw_over_ssh_preserves_prompt_after_resize_and_scroll() {
 }
 
 #[gpui::test]
+fn accepted_resize_does_not_wait_for_the_ssh_parser(cx: &mut TestAppContext) {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config =
+        SshSessionConfig::from(peer.config.take().unwrap()).with_runtime(peer.runtime.clone());
+    let (_, cx) = cx.add_window_view(|_, _| super::tests::TerminalTestRoot);
+    let pane = cx.update(|window, cx| {
+        cx.new(|cx| {
+            TerminalPane::new_ssh_with_preferences(config, Default::default(), window, cx).unwrap()
+        })
+    });
+    let (sender, channel) = peer.ready.recv_timeout(Duration::from_secs(5)).unwrap();
+    let terminal = pane.read_with(cx, |pane, _| pane.terminal.clone());
+    let activity = terminal.lock().activity_receiver();
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(1);
+    let release_rx = std::sync::Mutex::new(Some(release_rx));
+    terminal
+        .lock()
+        .set_output_processor(Some(Arc::new(move |bytes| {
+            if let Some(release) = release_rx.lock().unwrap().take() {
+                entered_tx.send(()).unwrap();
+                release.recv_timeout(Duration::from_secs(10)).unwrap();
+            }
+            bytes.to_vec()
+        })));
+    peer.runtime
+        .block_on(sender.data(channel, b"prompt> ".to_vec()))
+        .unwrap();
+    entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+
+    // Completion must precede releasing the parser lock. The timeout only lets a
+    // blocking regression unwind rather than hanging the test process.
+    let (returned_tx, returned_rx) = std::sync::mpsc::sync_channel(1);
+    let release = std::thread::spawn(move || {
+        let returned = returned_rx.recv_timeout(Duration::from_secs(2)).is_ok();
+        release_tx.send(()).unwrap();
+        returned
+    });
+    let accepted = pane.update(cx, |pane, cx| pane.resize_grid(40, 8, cx));
+    let _ = returned_tx.send(());
+    assert!(release.join().unwrap(), "resize waited for the parser lock");
+    assert_eq!(accepted.unwrap(), (40, 8));
+    peer.runtime.block_on(async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while terminal.lock().snapshot().rows != 8 {
+                assert!(activity.notified().await);
+            }
+        })
+        .await
+        .unwrap();
+    });
+    cx.run_until_parked();
+    cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE);
+    cx.run_until_parked();
+    pane.read_with(cx, |pane, _| {
+        assert_eq!((pane.snapshot.cols, pane.snapshot.rows), (40, 8));
+        assert_eq!(pane.pending_pty_resize, None);
+        assert_eq!(pane.snapshot.lines[0].text().trim_end(), "prompt>");
+    });
+    terminal.lock().shutdown();
+    peer.stop();
+}
+
+#[gpui::test]
 fn viewport_resize_recovers_after_ssh_queue_backpressure(cx: &mut TestAppContext) {
     let mut peer = ssh_peer::SshPeer::new();
     let config =
@@ -550,7 +614,7 @@ fn mouse_clipboard_paste_overrides_tracking_and_preserves_confirmation(cx: &mut 
 
 #[gpui::test]
 fn application_scroll_accumulates_small_deltas_until_remote_input(cx: &mut TestAppContext) {
-    use gpui::{ScrollDelta, ScrollWheelEvent, TouchPhase};
+    use gpui::{ScrollDelta, ScrollEvent, TouchPhase};
 
     let mut peer = ssh_peer::SshPeer::new();
     let config =
@@ -605,7 +669,7 @@ fn application_scroll_accumulates_small_deltas_until_remote_input(cx: &mut TestA
             for (direction, steps) in [(1.0, 3), (-1.0, 4)] {
                 for _ in 0..steps {
                     pane.handle_scroll(
-                        &ScrollWheelEvent {
+                        &ScrollEvent {
                             position: point(px(0.0), px(0.0)),
                             delta: ScrollDelta::Pixels(point(
                                 px(0.0),

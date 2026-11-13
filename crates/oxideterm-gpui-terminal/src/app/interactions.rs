@@ -6,7 +6,7 @@ use std::{
 
 use gpui::{
     ClipboardItem, Context, KeyDownEvent, KeyUpEvent, Modifiers, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, Pixels, ScrollWheelEvent, TouchPhase, px,
+    MouseMoveEvent, MouseUpEvent, Pixels, ScrollEvent, TouchPhase, px,
 };
 use oxideterm_terminal::{
     TermMode, TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalRow,
@@ -546,7 +546,7 @@ impl TerminalPane {
         }
     }
 
-    pub(crate) fn handle_scroll(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+    pub(crate) fn handle_scroll(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) {
         self.clear_terminal_hover(cx);
         // Terminal menu payloads include row-local command marks and target
         // points; any scroll makes that semantic snapshot stale.
@@ -664,11 +664,7 @@ impl TerminalPane {
         }
     }
 
-    fn handle_horizontal_scroll(
-        &mut self,
-        event: &ScrollWheelEvent,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    fn handle_horizontal_scroll(&mut self, event: &ScrollEvent, cx: &mut Context<Self>) -> bool {
         let max_scroll = self.terminal_horizontal_scroll_limit();
         if max_scroll <= px(0.0) {
             return false;
@@ -734,7 +730,7 @@ impl TerminalPane {
 
     fn determine_scroll_delta(
         &mut self,
-        event: &ScrollWheelEvent,
+        event: &ScrollEvent,
         scroll_multiplier: f32,
     ) -> Option<TerminalWheelScrollDelta> {
         match event.touch_phase {
@@ -4113,7 +4109,7 @@ mod tests {
                 .lock()
                 .feed_recording_output(b"\x1b[H\x1b[Jprompt> ");
             pane.handle_scroll(
-                &ScrollWheelEvent {
+                &ScrollEvent {
                     delta: ScrollDelta::Lines(point(0.0, -1.0)),
                     ..Default::default()
                 },
@@ -4249,7 +4245,7 @@ mod tests {
                 let offset = pane.update(cx, |pane, cx| {
                     match input {
                         "wheel" => pane.handle_scroll(
-                            &ScrollWheelEvent {
+                            &ScrollEvent {
                                 delta: ScrollDelta::Lines(point(0.0, -2.0)),
                                 ..Default::default()
                             },
@@ -4660,7 +4656,7 @@ mod tests {
 
             let scroll_delta = pane
                 .determine_scroll_delta(
-                    &ScrollWheelEvent {
+                    &ScrollEvent {
                         delta: ScrollDelta::Pixels(point(px(0.0), event_offset)),
                         touch_phase: TouchPhase::Started,
                         ..Default::default()

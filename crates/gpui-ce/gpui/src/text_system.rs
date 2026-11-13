@@ -3,7 +3,7 @@ use crate::{
     Bounds, DevicePixels, Pixels, PlatformTextSystem, Point, Result, SharedString, Size,
     StrikethroughStyle, TextRenderingMode, UnderlineStyle, px,
 };
-use anyhow::{Context as _, anyhow};
+use anyhow::Context as _;
 use collections::{FxHashMap, FxHashSet};
 use core::fmt;
 use derive_more::{Add, Deref, FromStr, Sub};
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use smallvec::{SmallVec, smallvec};
 use std::{
     borrow::Cow,
+    cell::Cell,
     cmp,
     collections::VecDeque,
     fmt::{Debug, Display, Formatter},
@@ -230,15 +231,21 @@ impl Drop for MissingGlyphReceiver {
 /// The GPUI text rendering sub system.
 pub struct TextSystem {
     platform_text_system: Arc<dyn PlatformTextSystem>,
-    font_ids_by_font: RwLock<FxHashMap<Font, Result<FontId>>>,
+    font_ids_by_font: RwLock<FxHashMap<Font, CachedFont>>,
     font_metrics: RwLock<FxHashMap<FontId, FontMetrics>>,
     raster_bounds: RwLock<FxHashMap<RenderGlyphParams, Bounds<DevicePixels>>>,
-    wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<LineWrapper>>>,
-    font_runs_pool: Mutex<Vec<Vec<FontRun>>>,
+    wrapper_pool: Mutex<FxHashMap<FontIdWithSize, Vec<CharWidthCache>>>,
     fallback_font_stack: SmallVec<[Font; 2]>,
     font_generation: Arc<AtomicUsize>,
     missing_glyph_reporter: Arc<MissingGlyphReporter>,
     missing_glyph_receiver: Mutex<Option<MissingGlyphReceiver>>,
+}
+
+#[derive(Clone)]
+enum CachedFont {
+    Direct(FontId),
+    Fallback(FontId),
+    Missing(Arc<anyhow::Error>),
 }
 
 impl TextSystem {
@@ -252,7 +259,6 @@ impl TextSystem {
             raster_bounds: RwLock::default(),
             font_ids_by_font: RwLock::default(),
             wrapper_pool: Mutex::default(),
-            font_runs_pool: Mutex::default(),
             fallback_font_stack: smallvec![
                 // TODO: Remove this when Linux have implemented setting fallbacks.
                 font(".ZedMono"),
@@ -331,30 +337,21 @@ impl TextSystem {
         self.missing_glyph_reporter.report(missing_glyphs);
     }
 
-    /// Gets the configured font family and style without the default fallback stack.
-    /// Failed lookups are cached and invalidated when fonts are added.
+    /// Looks up the requested face without substituting the default fallback stack.
     pub fn font_id(&self, font: &Font) -> Result<FontId> {
-        fn clone_font_id_result(font_id: &Result<FontId>) -> Result<FontId> {
-            match font_id {
-                Ok(font_id) => Ok(*font_id),
-                Err(err) => Err(anyhow!("{err}")),
-            }
+        let cached = self.font_ids_by_font.read().get(font).cloned();
+        match cached {
+            Some(CachedFont::Direct(id)) => return Ok(id),
+            Some(CachedFont::Missing(error)) => return Err(anyhow::anyhow!("{error}")),
+            _ => {}
         }
-
-        let font_id = self
-            .font_ids_by_font
-            .read()
-            .get(font)
-            .map(clone_font_id_result);
-        if let Some(font_id) = font_id {
-            font_id
-        } else {
-            let font_id = self.platform_text_system.font_id(font);
-            self.font_ids_by_font
-                .write()
-                .insert(font.clone(), clone_font_id_result(&font_id));
-            font_id
-        }
+        let result = self.platform_text_system.font_id(font);
+        let cached = match &result {
+            Ok(id) => CachedFont::Direct(*id),
+            Err(error) => CachedFont::Missing(Arc::new(anyhow::anyhow!("{error}"))),
+        };
+        self.font_ids_by_font.write().insert(font.clone(), cached);
+        result
     }
 
     /// Get the Font for the Font Id.
@@ -362,7 +359,7 @@ impl TextSystem {
         let lock = self.font_ids_by_font.read();
         lock.iter()
             .filter_map(|(font, result)| match result {
-                Ok(font_id) if *font_id == id => Some(font.clone()),
+                CachedFont::Direct(font_id) if *font_id == id => Some(font.clone()),
                 _ => None,
             })
             .next()
@@ -375,23 +372,12 @@ impl TextSystem {
     ///
     /// Panics if the font and none of the fallbacks can be resolved.
     pub fn resolve_font(&self, font: &Font) -> FontId {
-        if let Ok(font_id) = self.font_id(font) {
-            return font_id;
+        if let Some(CachedFont::Direct(font_id) | CachedFont::Fallback(font_id)) =
+            self.font_ids_by_font.read().get(font)
+        {
+            return *font_id;
         }
-        for fallback in &self.fallback_font_stack {
-            if let Ok(font_id) = self.font_id(fallback) {
-                return font_id;
-            }
-        }
-
-        panic!(
-            "failed to resolve font '{}' or any of the fallbacks: {}",
-            font.family,
-            self.fallback_font_stack
-                .iter()
-                .map(|fallback| &fallback.family)
-                .join(", ")
-        );
+        self.resolve_font_uncached(font)
     }
 
     /// Prewarm any system font caches needed to shape text.
@@ -553,12 +539,12 @@ impl TextSystem {
     pub fn line_wrapper(self: &Arc<Self>, font: Font, font_size: Pixels) -> LineWrapperHandle {
         let lock = &mut self.wrapper_pool.lock();
         let font_id = self.resolve_font(&font);
-        let wrappers = lock
+        let char_widths = lock
             .entry(FontIdWithSize { font_id, font_size })
-            .or_default();
-        let wrapper = wrappers
+            .or_default()
             .pop()
-            .unwrap_or_else(|| LineWrapper::new(font_id, font_size, self.clone()));
+            .unwrap_or_default();
+        let wrapper = LineWrapper::new(font_id, font_size, self.clone(), char_widths);
 
         LineWrapperHandle {
             wrapper: Some(wrapper),
@@ -603,6 +589,68 @@ impl TextSystem {
         self.platform_text_system
             .recommended_rendering_mode(font_id, font_size)
     }
+
+    fn resolve_font_uncached(&self, font: &Font) -> FontId {
+        let mut font_error = None;
+        let font_id = {
+            let mut font_ids = self.font_ids_by_font.upgradable_read();
+            if let Some(CachedFont::Direct(font_id) | CachedFont::Fallback(font_id)) =
+                font_ids.get(font)
+            {
+                return *font_id;
+            }
+
+            let mut lookup_font = |candidate: &Font| {
+                let cached = if let Some(cached) = font_ids.get(candidate) {
+                    cached.clone()
+                } else {
+                    let cached = match self.platform_text_system.font_id(candidate) {
+                        Ok(font_id) => CachedFont::Direct(font_id),
+                        Err(error) => CachedFont::Missing(Arc::new(error)),
+                    };
+                    font_ids.with_upgraded(|font_ids| {
+                        font_ids.insert(candidate.clone(), cached.clone());
+                    });
+                    cached
+                };
+                match cached {
+                    CachedFont::Direct(font_id) => Some(font_id),
+                    CachedFont::Fallback(_) => None,
+                    CachedFont::Missing(error) => {
+                        if candidate == font {
+                            font_error = Some(error);
+                        }
+                        None
+                    }
+                }
+            };
+
+            if let Some(font_id) = lookup_font(font) {
+                Some(font_id)
+            } else {
+                let font_id = self.fallback_font_stack.iter().find_map(lookup_font);
+                if let Some(font_id) = font_id {
+                    font_ids.with_upgraded(|font_ids| {
+                        font_ids.insert(font.clone(), CachedFont::Fallback(font_id));
+                    });
+                }
+                font_id
+            }
+        };
+        if let Some(error) = font_error {
+            log::warn!("failed to load font {font:?}: {error:#}");
+        }
+        font_id.unwrap_or_else(|| {
+            panic!(
+                "failed to resolve font '{}' or any of the fallbacks: {}",
+                font.family,
+                self.fallback_font_stack
+                    .iter()
+                    .map(|fallback| &fallback.family)
+                    .join(", ")
+            );
+        })
+    }
 }
 
 #[cfg(test)]
@@ -617,6 +665,7 @@ impl TextSystem {
 #[derive(Deref)]
 pub struct WindowTextSystem {
     line_layout_cache: LineLayoutCache,
+    font_runs_buffer: Cell<Vec<FontRun>>,
     #[deref]
     text_system: Arc<TextSystem>,
 }
@@ -629,6 +678,7 @@ impl WindowTextSystem {
                 text_system.platform_text_system.clone(),
                 text_system.font_generation.clone(),
             ),
+            font_runs_buffer: Cell::default(),
             text_system,
         }
     }
@@ -692,74 +742,6 @@ impl WindowTextSystem {
         }
     }
 
-    /// Shape the given line using a caller-provided content hash as the cache key.
-    ///
-    /// This enables cache hits without materializing a contiguous `SharedString` for the text.
-    /// If the cache misses, `materialize_text` is invoked to produce the `SharedString` for shaping.
-    ///
-    /// Contract (caller enforced):
-    /// - Same `text_hash` implies identical text content (collision risk accepted by caller).
-    /// - `text_len` should be the UTF-8 byte length of the text (helps reduce accidental collisions).
-    ///
-    /// Like [`Self::shape_line`], this must be used only for single-line text (no `\n`).
-    pub fn shape_line_by_hash(
-        &self,
-        text_hash: u64,
-        text_len: usize,
-        font_size: Pixels,
-        runs: &[TextRun],
-        force_width: Option<Pixels>,
-        materialize_text: impl FnOnce() -> SharedString,
-    ) -> ShapedLine {
-        let mut decoration_runs = SmallVec::<[DecorationRun; 32]>::new();
-        for run in runs {
-            if let Some(last_run) = decoration_runs.last_mut()
-                && last_run.color == run.color
-                && last_run.underline == run.underline
-                && last_run.strikethrough == run.strikethrough
-                && last_run.background_color == run.background_color
-            {
-                last_run.len += run.len as u32;
-                continue;
-            }
-            decoration_runs.push(DecorationRun {
-                len: run.len as u32,
-                color: run.color,
-                background_color: run.background_color,
-                underline: run.underline,
-                strikethrough: run.strikethrough,
-            });
-        }
-
-        let mut used_force_width = force_width;
-        let layout = self.layout_line_by_hash(
-            text_hash,
-            text_len,
-            font_size,
-            runs,
-            used_force_width,
-            || {
-                let text = materialize_text();
-                debug_assert!(
-                    text.find('\n').is_none(),
-                    "text argument should not contain newlines"
-                );
-                text
-            },
-        );
-
-        // We only materialize actual text on cache miss; on hit we avoid allocations.
-        // Since `ShapedLine` carries a `SharedString`, use an empty placeholder for hits.
-        // NOTE: Callers must not rely on `ShapedLine.text` for content when using this API.
-        let text: SharedString = SharedString::new_static("");
-
-        ShapedLine {
-            layout,
-            text,
-            decoration_runs,
-        }
-    }
-
     /// Shape a multi line string of text, at the given font_size, for painting to the screen.
     /// Subsets of the text can be styled independently with the `runs` parameter,
     /// where each run dictates the length of utf8 characters in `text` that it styles.
@@ -781,10 +763,10 @@ impl WindowTextSystem {
         line_clamp: Option<usize>,
     ) -> Result<SmallVec<[WrappedLine; 1]>> {
         let mut runs = runs.iter().filter(|run| run.len > 0).cloned().peekable();
-        let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
+        let mut font_runs = self.font_runs_buffer.take();
 
         let mut lines = SmallVec::new();
-        let mut max_wrap_lines = line_clamp;
+        let max_wrap_lines = line_clamp;
         let mut wrapped_lines = 0;
 
         let mut process_line = |line_text: SharedString, line_start, line_end| {
@@ -898,7 +880,7 @@ impl WindowTextSystem {
             process_line(text.into(), 0, end);
         }
 
-        self.font_runs_pool.lock().push(font_runs);
+        self.font_runs_buffer.set(font_runs);
 
         Ok(lines)
     }
@@ -919,7 +901,7 @@ impl WindowTextSystem {
         force_width: Option<Pixels>,
     ) -> Arc<LineLayout> {
         let mut last_run = None::<&TextRun>;
-        let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
+        let mut font_runs = self.font_runs_buffer.take();
         font_runs.clear();
 
         for run in runs.iter() {
@@ -960,7 +942,7 @@ impl WindowTextSystem {
             force_width,
         );
 
-        self.font_runs_pool.lock().push(font_runs);
+        self.font_runs_buffer.set(font_runs);
 
         layout
     }
@@ -1005,7 +987,7 @@ impl WindowTextSystem {
         force_width: Option<Pixels>,
     ) -> Option<Arc<LineLayout>> {
         let mut last_run = None::<&TextRun>;
-        let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
+        let mut font_runs = self.font_runs_buffer.take();
         font_runs.clear();
 
         for run in runs.iter() {
@@ -1047,7 +1029,7 @@ impl WindowTextSystem {
             force_width,
         );
 
-        self.font_runs_pool.lock().push(font_runs);
+        self.font_runs_buffer.set(font_runs);
 
         layout
     }
@@ -1070,7 +1052,7 @@ impl WindowTextSystem {
         materialize_text: impl FnOnce() -> SharedString,
     ) -> Arc<LineLayout> {
         let mut last_run = None::<&TextRun>;
-        let mut font_runs = self.font_runs_pool.lock().pop().unwrap_or_default();
+        let mut font_runs = self.font_runs_buffer.take();
         font_runs.clear();
 
         for run in runs.iter() {
@@ -1113,7 +1095,7 @@ impl WindowTextSystem {
             materialize_text,
         );
 
-        self.font_runs_pool.lock().push(font_runs);
+        self.font_runs_buffer.set(font_runs);
 
         layout
     }
@@ -1142,7 +1124,7 @@ impl Drop for LineWrapperHandle {
                 font_size: wrapper.font_size,
             })
             .unwrap()
-            .push(wrapper);
+            .push(wrapper.into_char_widths());
     }
 }
 
@@ -1467,6 +1449,55 @@ pub fn font_name_with_fallbacks<'a>(name: &'a str, system: &'a str) -> &'a str {
         ".ZedSans" | "Zed Plex Sans" => "IBM Plex Sans",
         ".ZedMono" | "Zed Plex Mono" => "Lilex",
         _ => name,
+    }
+}
+
+#[cfg(test)]
+mod font_resolution_tests {
+    use super::*;
+    use crate::NoopTextSystem;
+
+    #[test]
+    fn caches_resolved_font_fallbacks() {
+        let mut text_system = TextSystem::new(Arc::new(NoopTextSystem::new()));
+        let requested = font("Missing Font").bold().italic();
+        let missing = CachedFont::Missing(Arc::new(anyhow::anyhow!("missing font")));
+        {
+            let mut font_ids = text_system.font_ids_by_font.write();
+            font_ids.insert(requested.clone(), missing.clone());
+            for fallback in &text_system.fallback_font_stack {
+                font_ids.insert(fallback.clone(), missing.clone());
+            }
+            font_ids.insert(font("Arial"), CachedFont::Direct(FontId(42)));
+        }
+
+        assert_eq!(text_system.resolve_font(&requested), FontId(42));
+        assert_eq!(text_system.get_font_for_id(FontId(42)), Some(font("Arial")));
+
+        text_system.fallback_font_stack.clear();
+        assert_eq!(text_system.resolve_font(&requested), FontId(42));
+    }
+}
+
+#[cfg(test)]
+mod line_wrapper_pool_tests {
+    use super::*;
+    use crate::NoopTextSystem;
+
+    #[test]
+    fn pooled_line_wrappers_do_not_retain_text_system() {
+        let text_system = Arc::new(TextSystem::new(Arc::new(NoopTextSystem::new())));
+        let weak_text_system = Arc::downgrade(&text_system);
+
+        let mut wrapper = text_system.line_wrapper(font(".ZedMono"), px(16.));
+        let fragments = [LineFragment::text("hello world")];
+        wrapper
+            .wrap_line(&fragments, px(40.), IndentAdjustment::default())
+            .for_each(drop);
+        drop(wrapper);
+        drop(text_system);
+
+        assert!(weak_text_system.upgrade().is_none());
     }
 }
 

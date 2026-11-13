@@ -552,7 +552,7 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .bg(plugin_manager_root_bg(theme.bg, has_background))
             .text_color(rgb(theme.text))
-            .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
+            .on_scroll(cx.listener(|this, _event, _window, cx| {
                 if this.open_settings_select == Some(SettingsSelect::PluginMarketplaceSort) {
                     this.close_settings_select();
                     this.clear_settings_select_anchors();

@@ -218,13 +218,13 @@ impl WorkspaceApp {
             .when_some(row_action_menu, |surface, menu| {
                 let menu =
                     self.render_session_manager_row_action_menu(menu, window, has_background, cx);
-                let backdrop = self
-                    .workspace_context_menu_backdrop(menu, cx)
-                    .on_scroll_wheel(cx.listener(|this, _event, _window, cx| {
-                        // Pointer-positioned menus are stale as soon as their list scrolls.
-                        this.close_session_row_menus(cx);
-                        cx.stop_propagation();
-                    }));
+                let backdrop =
+                    self.workspace_context_menu_backdrop(menu, cx)
+                        .on_scroll(cx.listener(|this, _event, _window, cx| {
+                            // Pointer-positioned menus are stale as soon as their list scrolls.
+                            this.close_session_row_menus(cx);
+                            cx.stop_propagation();
+                        }));
                 surface.child(backdrop)
             })
             .when(view_mode_menu_open, |surface| {

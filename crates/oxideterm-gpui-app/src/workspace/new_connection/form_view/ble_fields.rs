@@ -498,7 +498,7 @@ impl WorkspaceApp {
                             .flex_col()
                             .max_h(px(300.0))
                             .overflow_y_scroll()
-                            .on_scroll_wheel(|_event, _window, cx| cx.stop_propagation())
+                            .on_scroll(|_event, _window, cx| cx.stop_propagation())
                             .child(body),
                     )
                     .into_any_element()

@@ -411,6 +411,9 @@ impl AiWorkspaceEntity {
             self.knowledge_page.new_collection_connection_id = None;
             self.knowledge_page.create_presence.reopen();
             self.knowledge_page.create_exit_task = None;
+            if self.focused_settings_input == Some(SettingsInput::KnowledgeCollectionName) {
+                self.clear_focused_settings_input();
+            }
         }
     }
 

@@ -98,7 +98,7 @@ impl WorkspaceApp {
                             .overflow_y_scroll()
                             .track_scroll(&self.onboarding.scroll_handle)
                             .vertical_scrollbar(&self.onboarding.scroll_handle)
-                            .on_scroll_wheel(cx.listener(|this, _, _, cx| {
+                            .on_scroll(cx.listener(|this, _, _, cx| {
                                 if this.open_settings_select.is_some() {
                                     this.close_settings_select();
                                     this.clear_settings_select_anchors();

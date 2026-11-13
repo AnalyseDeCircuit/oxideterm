@@ -75,7 +75,7 @@ fn terminal_trigger_connection_list(
                 .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
                 .overflow_y_scroll()
                 .track_scroll(scroll)
-                .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+                .on_scroll(|_, _, cx| cx.stop_propagation())
                 .child(div().w_full().flex().flex_col().gap(px(4.0)).children(rows)),
         )
         .vertical_scrollbar(scroll)
@@ -2139,7 +2139,7 @@ mod tests {
             window.draw(app).clear(app);
         });
         let first = cx.debug_bounds("connection-0").unwrap();
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position: gpui::point(px(300.0), px(250.0)),
             delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-2_000.0))),
             ..Default::default()

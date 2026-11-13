@@ -35,7 +35,7 @@ impl WorkspaceApp {
             .bg(rgba((theme.bg_elevated << 8) | SUGGESTIONS_BG_ALPHA))
             .shadow_lg()
             .occlude()
-            .on_scroll_wheel(|_, _, cx| cx.stop_propagation())
+            .on_scroll(|_, _, cx| cx.stop_propagation())
             .font_family(settings_mono_font_family(self.settings_store.settings()));
 
         let active_scope = usize::from(self.terminal_history_all_connections);

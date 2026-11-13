@@ -1256,7 +1256,7 @@ impl WorkspaceApp {
                                 .collect::<Vec<_>>()
                         },
                     )
-                    .on_scroll_wheel(|_, _, cx| cx.stop_propagation()),
+                    .on_scroll(|_, _, cx| cx.stop_propagation()),
                 ),
             )
             .into_any_element()
@@ -1387,12 +1387,10 @@ impl WorkspaceApp {
                                 .collect::<Vec<_>>()
                         },
                     )
-                    .on_scroll_wheel(cx.listener(
-                        |this, _event, _window, cx| {
-                            this.load_more_file_manager_stream_preview(cx);
-                            cx.stop_propagation();
-                        },
-                    )),
+                    .on_scroll(cx.listener(|this, _event, _window, cx| {
+                        this.load_more_file_manager_stream_preview(cx);
+                        cx.stop_propagation();
+                    })),
                 ),
             )
             .into_any_element();

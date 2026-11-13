@@ -538,7 +538,7 @@ impl TextEditorView {
         }
         let shortcut = if let Some(bindings) = cx.try_global::<super::EditorKeybindings>() {
             bindings.resolve(&event.keystroke)
-        } else if event.keystroke.modifiers.secondary()
+        } else if event.keystroke.modifiers.secondary(cx)
             && !event.keystroke.modifiers.alt
             && !event.keystroke.modifiers.shift
         {
@@ -576,7 +576,7 @@ impl TextEditorView {
             "escape" => {
                 self.close_search(window, cx);
             }
-            "enter" if event.keystroke.modifiers.secondary() => {
+            "enter" if event.keystroke.modifiers.secondary(cx) => {
                 self.insert_search_newline(replacement_focused, window, cx);
             }
             "enter" => {

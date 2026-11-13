@@ -4,8 +4,10 @@ use crate::{
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use crate::{DevicePixels, Size};
-#[cfg(target_os = "macos")]
-use core_video::pixel_buffer::CVPixelBuffer;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use objc2_core_foundation::CFRetained;
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+use objc2_core_video::{CVPixelBuffer, CVPixelBufferGetHeight, CVPixelBufferGetWidth};
 use refineable::Refineable;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use std::sync::Arc;
@@ -13,8 +15,8 @@ use std::sync::Arc;
 /// A source of a surface's content.
 pub enum SurfaceSource {
     /// A macOS image buffer from CoreVideo
-    #[cfg(target_os = "macos")]
-    Surface(CVPixelBuffer),
+    #[cfg(any(target_os = "macos", target_os = "ios"))]
+    Surface(CFRetained<CVPixelBuffer>),
     /// A GPU texture handle (type-erased to avoid depending on wgpu)
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     Texture {
@@ -28,7 +30,7 @@ pub enum SurfaceSource {
 impl Clone for SurfaceSource {
     fn clone(&self) -> Self {
         match *self {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             SurfaceSource::Surface(ref buf) => SurfaceSource::Surface(buf.clone()),
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             SurfaceSource::Texture { ref texture, size } => SurfaceSource::Texture {
@@ -42,7 +44,7 @@ impl Clone for SurfaceSource {
 impl std::fmt::Debug for SurfaceSource {
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             SurfaceSource::Surface(ref buf) => _f.debug_tuple("Surface").field(buf).finish(),
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             SurfaceSource::Texture { size, .. } => _f
@@ -53,9 +55,9 @@ impl std::fmt::Debug for SurfaceSource {
     }
 }
 
-#[cfg(target_os = "macos")]
-impl From<CVPixelBuffer> for SurfaceSource {
-    fn from(value: CVPixelBuffer) -> Self {
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+impl From<CFRetained<CVPixelBuffer>> for SurfaceSource {
+    fn from(value: CFRetained<CVPixelBuffer>) -> Self {
         SurfaceSource::Surface(value)
     }
 }
@@ -131,9 +133,12 @@ impl Element for Surface {
         _: &mut App,
     ) {
         match self.source {
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
             SurfaceSource::Surface(ref surface) => {
-                let size = crate::size(surface.get_width().into(), surface.get_height().into());
+                let size = crate::size(
+                    CVPixelBufferGetWidth(surface).into(),
+                    CVPixelBufferGetHeight(surface).into(),
+                );
                 let new_bounds = self.object_fit.get_bounds(_bounds, size);
                 // TODO: Add support for corner_radii
                 _window.paint_surface(new_bounds, surface.clone());
