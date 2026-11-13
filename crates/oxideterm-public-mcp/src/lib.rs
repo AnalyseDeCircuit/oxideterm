@@ -11,6 +11,7 @@ pub mod auth;
 pub mod broker;
 pub mod calls;
 pub mod handles;
+pub mod history;
 pub mod runtime;
 pub mod service;
 

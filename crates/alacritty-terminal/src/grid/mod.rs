@@ -144,6 +144,11 @@ pub struct Grid<T: GridCell> {
     /// Rows evicted by scrolling, independent of the bounded history size.
     #[cfg_attr(feature = "serde", serde(skip))]
     scrolled_out_lines: usize,
+    // Independent of viewport damage: read-only history observers never consume this state.
+    #[cfg_attr(feature = "serde", serde(skip))]
+    history_revision: u64,
+    #[cfg_attr(feature = "serde", serde(skip))]
+    history_cleared: u64,
 }
 
 impl<T: GridCell + Default> Grid<T> {
@@ -152,6 +157,8 @@ impl<T: GridCell + Default> Grid<T> {
             raw: Storage::with_capacity(lines, columns),
             max_scroll_limit,
             scrolled_out_lines: 0,
+            history_revision: 0,
+            history_cleared: 0,
             display_offset: 0,
             saved_cursor: Cursor::default(),
             cursor: Cursor::default(),
@@ -162,8 +169,11 @@ impl<T: GridCell + Default> Grid<T> {
 
     /// Update the size of the scrollback history.
     pub fn update_history(&mut self, history_size: usize) {
+        self.history_revision = self.history_revision.wrapping_add(1);
         let current_history_size = self.history_size();
         if current_history_size > history_size {
+            self.scrolled_out_lines = self.scrolled_out_lines
+                .wrapping_add(current_history_size - history_size);
             self.raw.shrink_lines(current_history_size - history_size);
         }
         self.display_offset = min(self.display_offset, history_size);
@@ -203,6 +213,11 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.history_revision = self.history_revision.wrapping_add(1);
+        if positions != 0 {
+            // Downward rotation discards the region's bottom rows instead of retaining them.
+            self.history_cleared = self.history_cleared.wrapping_add(1);
+        }
         // When rotating the entire region, just reset everything.
         if region.end - region.start <= positions {
             for i in (region.start.0..region.end.0).map(Line::from) {
@@ -264,6 +279,7 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.history_revision = self.history_revision.wrapping_add(1);
         // Reflow may temporarily exceed the row limit. Reclaim excess rows when scrolling
         // moves content into history, counting every eviction for command anchors.
         if region.start == 0 && positions != 0 {
@@ -281,6 +297,10 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        if positions != 0 && region.start != 0 {
+            // A partial region cannot move its discarded top rows into scrollback.
+            self.history_cleared = self.history_cleared.wrapping_add(1);
+        }
         // When rotating the entire region with fixed lines at the top, just reset everything.
         if region.end - region.start <= positions && region.start != 0 {
             for i in (region.start.0..region.end.0).map(Line::from) {
@@ -356,6 +376,8 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.history_revision = self.history_revision.wrapping_add(1);
+        // Preserve cleared screen rows in scrollback; scroll_up reports any actual eviction.
         // Determine how many lines to scroll up by.
         let end = Point::new(Line(self.lines as i32 - 1), Column(self.columns()));
         let mut iter = self.iter_from(end);
@@ -384,6 +406,7 @@ impl<T: GridCell + Default> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.history_revision = self.history_revision.wrapping_add(1);
         self.clear_history();
 
         self.saved_cursor = Cursor::default();
@@ -399,6 +422,14 @@ impl<T: GridCell + Default> Grid<T> {
 }
 
 impl<T: GridCell> Grid<T> {
+    pub fn history_revision(&self) -> u64 {
+        self.history_revision
+    }
+
+    pub fn history_cleared(&self) -> u64 {
+        self.history_cleared
+    }
+
     pub fn scrolled_out_lines(&self) -> usize {
         self.scrolled_out_lines
     }
@@ -409,6 +440,8 @@ impl<T: GridCell> Grid<T> {
         T: ResetDiscriminant<D> + GridCell + Default,
         D: PartialEq,
     {
+        self.history_revision = self.history_revision.wrapping_add(1);
+        self.history_cleared = self.history_cleared.wrapping_add(1);
         let start = match bounds.start_bound() {
             Bound::Included(line) => *line,
             Bound::Excluded(line) => *line + 1,
@@ -431,6 +464,8 @@ impl<T: GridCell> Grid<T> {
 
     #[inline]
     pub fn clear_history(&mut self) {
+        self.history_revision = self.history_revision.wrapping_add(1);
+        self.history_cleared = self.history_cleared.wrapping_add(1);
         // Explicitly purge all lines from history.
         self.raw.shrink_lines(self.history_size());
 
@@ -512,6 +547,7 @@ impl<T: GridCell> Index<Line> for Grid<T> {
 impl<T: GridCell> IndexMut<Line> for Grid<T> {
     #[inline]
     fn index_mut(&mut self, index: Line) -> &mut Row<T> {
+        self.history_revision = self.history_revision.wrapping_add(1);
         &mut self.raw[index]
     }
 }

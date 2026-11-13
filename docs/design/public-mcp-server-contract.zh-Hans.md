@@ -66,6 +66,7 @@ OxideTerm 应当作为 **MCP 服务端**，让经过用户授权的 Codex、Clau
 - 连接、节点和命令句柄均为随机且绑定客户端的外部引用；首个切片会在应用重启后重新生成连接引用，客户端需要重新浏览目录，不能缓存或构造内部连接身份。
 - `nodes_connect` 使用保存的 SSH 配置和现有受保护凭据，通过 NodeRouter 建立或复用物理节点；代理链也沿用现有节点树展开与连接顺序。
 - `commands_start` 使用当前物理 SSH 连接的独立 exec channel，返回真实退出码、有界输出和可取消 `command_ref`。
+- `terminals_history` 提供独立于用户视口的 all/screen 冻结分页、两个客户端私有快照槽、固定到期与连续性标记；`terminals_read` 继续用于视口观察。
 - `nodes_connect` 的租约包含等待连接和已就绪节点，最多全局 128 个、每客户端 32 个；`nodes_disconnect` 复用应用完整的节点断开路径，关闭对应可见 tab、转发 owner、后台任务和运行时子树，而不是只修改 NodeRouter 状态。
 - `artifacts_stage`/`artifacts_read` 使用客户端隔离、容量受限且会过期的临时文件，不接受任意本机路径；`mcp_audit_search` 只能读取调用客户端自身的脱敏记录。
 - `hosttools_catalog`/`hosttools_capture`/`hosttools_operate` 只接产品已有的类型化资源与固定动作，不暴露自由 shell 或插件调用。
@@ -141,6 +142,8 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 
 领域数据中的 `operation_ref`、`approval_ref`、`undo_ref` 和 revision 都是各自的 typed 字段，不会提升到不存在的统一顶层。`operation_ref` 只表示服务端跟踪的工作，不等价于内部任务句柄；后台命令和传输由应用运行时保留取消、完成和清理所有权。
 
+`terminals_history` 领域失败在上述信封的 `data.reason` 返回稳定原因：`invalid_request`、`invalid_revision`、`terminal_unavailable`、`buffer_unavailable`、`unsupported`、`snapshot_unavailable`、`snapshot_too_large`、`resource_limit`。单快照超限与全局预算不足分别使用后两项，不静默截断或退回视口；客户端可显式改选 screen，仍超限则失败。认证、授权及协议格式错误沿用网关规则，不泄露目标存在性；连续性 unknown 是成功结果元数据，不是错误原因。其他工具的错误语义不变。
+
 ### 2.5 内容传递与状态变化
 
 当前以版本 cursor、`mcp_operation` 即时查询和领域状态工具的再次读取为可靠状态获取方式；客户端不得假定自己一定能接收自定义 server notification。服务端未来可采用官方 Tasks/Subscriptions 扩展，但 `operation_ref` 始终是产品级事实来源，不依赖扩展才能查询或取消。Node、terminal、command、forward、transfer、desktop 与同步的内部事件会更新各自的 revision/cursor，但不直接把内部事件 DTO 变成公共协议。
@@ -165,6 +168,8 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 | `connection_ref` | 已保存连接的安全投影 | 记录删除、权限变更时失效 | 不等于连接记录 UUID；可映射为多个运行时节点。 |
 | `node_ref` | NodeRouter 拥有的 SSH 逻辑节点 | 显式断开、租约释放、节点失败或客户端撤销 | 指向共享物理节点而不是某个终端。 |
 | `terminal_ref` | 一个终端消费者 | 关闭、后端退出、租约释放时失效 | 关闭它只移除消费者，绝不等价于 `node_disconnect`。 |
+| `snapshot_ref` | 客户端私有的冻结终端历史 | 固定 5 分钟、槽替换、释放、会话替换或读取资格撤销时失效 | 分页固定读取冻结正文；同会话输出、缩放和缓冲区切换不撤销它。 |
+| `content_revision` | 客户端私有的终端内容版本令牌 | 固定 5 分钟、数量淘汰或授权/终端撤销时失效 | 不含正文，不是分页游标，不授予权限；快照释放不影响版本。 |
 | `recording_ref` | 一个客户端拥有的终端录制 | 客户端撤销或有界句柄回收时失效 | 活动录制绑定 `terminal_ref`；停止后正文与终端生命周期分离并保留十五分钟，内容授权关闭时立即不可读取。 |
 | `command_ref` | 一次受跟踪的命令执行 | 完成后保留只读状态至审计保留期 | SSH exec 可提供真实退出码；交互终端按 Shell Integration/命令标记报告可靠性。 |
 | `file_session_ref` | 一个 NodeRouter 取得的 SFTP/IDE 消费者 | 节点断开、会话关闭、客户端撤销时失效 | 通过真实 SFTP channel，而不是 shell 兼容路径。 |
@@ -176,6 +181,17 @@ MCP `2026-07-28` 请求使用 `server/discover` 做可选发现，并在每次�
 | `artifact_ref` | 有大小和时间限制的临时输入/输出内容 | 消费、过期或客户端撤销时删除 | 用于大文件、导出和截图，不能指向任意本地路径。 |
 | `approval_ref` / `undo_ref` | 不可变待批准动作 / 可回滚记录 | 单次、过期、对象变更或撤销时失效 | 只适用于原动作与原客户端。 |
 | `operation_ref` | 后台操作状态 | 取消、完成并过期或客户端撤销时失效 | 可查询、等待、取消；不是系统任务 ID。 |
+
+终端历史快照与版本采用以下生命周期和资源规则：
+
+- 每客户端两个跨终端共享的快照槽，slot 默认 0；调用方在整个分页期间独占槽并串行化其操作，超过两个独立读取任务需排队。成功 snapshot 原子替换所选槽，失败或 unchanged 不替换。首次请求重试可取得更新的冻结时刻，但只替换同一槽；以实际收到的 snapshot_ref 翻页。
+- page 从当前客户端游标解析原快照及终端消费者、缓冲区、会话世代，再检查观察授权及目标有效性，不能替换为其他终端或槽的当前内容。release 精确释放本客户端原对象，不要求终端仍存活，也不删除该槽后来安装的快照；未知或其他客户端句柄均返回 released。release_slot 释放执行时本客户端槽内容，空槽也返回 released；所有分支均需认证及工具组授权。快照不取得额外 SSH 节点所有权，释放不关闭终端或连接。
+- 单快照最多 16 MiB，全局缓存与进行中冻结合计最多 128 MiB，计入正文、行索引、容量预留和令牌记录。先预约预算再后台冻结，替换时新旧快照同时计费；对进行中的冻结，取消或撤销立即禁止发布，临时正文销毁后才返还其预约预算，失败保留旧槽。冻结有界、可取消，不在渲染路径复制全历史或每页扫描全历史。
+- 满额时可显式 release_slot，等待 released 后省略 after_revision 重新冻结；释放不需要正文预算，返回前清理旧快照/游标并返还其缓存预算，先前同槽冻结不能重新安装。释放不可恢复，不删除版本、不影响其他槽，也不保证新冻结成功；不得自动驱逐其他客户端或缩小选择。release_slot 响应丢失仅可在仍独占槽且尚未提交新 snapshot 时重试，不能在安装新快照后重放旧释放。
+- 快照和新签发版本固定有效期均为冻结 captured_at 起 5 分钟，以单调时钟判断，分页不续期；复用版本保留原起点。发布时已到期则丢弃并返回 snapshot_unavailable。版本令牌为随机不透明句柄，记录仅存元数据，绑定客户端、终端、缓冲区、selection、会话世代、内容版本与丢失标记；每客户端最多 256 条，满额淘汰最早签发记录，内存仍计入全局预算。相同基线可复用未过期记录，release/替换快照不撤销版本。
+- 快照到期、被替换、释放或游标不属于当前客户端统一返回 snapshot_unavailable，不能静默切换到新快照。未读完时省略 after_revision 从第一页重新冻结并替换本地未完成结果；unchanged 不能补齐旧正文。可另带旧版本观察连续性，但不能恢复原快照。自然到期时对应版本也已到期，应返回 unknown 的新快照；释放或替换后仍有效的版本则可返回 unchanged。
+- 发布与撤权、槽失效及会话替换使用同一运行时同步边界，校验授权代次、终端会话世代、预约和取消状态后，才原子安装快照及版本。撤权后重新授权不能恢复旧预约；校验失败零化丢弃正文，不重建缓存或转到新会话，会话替换返回 terminal_unavailable，取消/授权失败沿用网关规则。发布后撤权立即清理已发布的快照、游标及版本缓存并释放其缓存预算，阻止后续读取，但不能撤回已交付正文；仅请求自身在发布后取消时，结果仍占原槽，可由后续请求替换。
+- 请求取消仅取消本次冻结，不停止解析或命令；运行时定期清理过期缓存。终端关闭、客户端撤销、观察授权关闭、应用锁定或退出撤销快照及版本。重连替换后端而保留 terminal_ref 时，在世代切换边界撤销该终端旧快照/游标、释放缓存并禁止旧冻结发布，不影响其他终端；未过期且未淘汰的旧版本仅保留至原期限，用于新 snapshot 返回 gap/session_replaced，不能读取旧正文或返回 unchanged，版本不可用则为 unknown。新会话正文须重新冻结。
 
 ### 3.1 节点和消费者的必守规则
 
@@ -240,8 +256,9 @@ NodeRouter / connection registry ── 物理 SSH node
 | 工具 | 权限 | 关键参数 | 关键结果与约束 |
 |---|---|---|---|
 | `terminals_open` | 终端会话 / W / 确认新会话 | `source`、`cols`、`rows`、`title?` | `source` 为 `{kind:"node",node_ref}`、`{kind:"connection",connection_ref}` 或一次性 `{kind:"local"}`；保存的 Mosh、Telnet、串口经连接句柄解析，SSH 必须先取得 node。返回 `terminal_ref`、实际 transport、生命周期和能力；界面关闭 pane 会撤销句柄，SSH 重连换 pane 会迁移句柄。 |
-| `terminals_state` | 终端观察 / D / 否 | `terminal_ref` | 生命周期、尺寸、标题、编码、交互性、缓冲区计数与实际能力；不含屏幕文字。 |
-| `terminals_read` | 终端观察 / R / 否 | `terminal_ref`、`cursor?`、`line_limit`、`tail?` | 有界终端快照、增量 cursor、截断标记；原始内容按敏感数据处理。 |
+| `terminals_state` | 终端观察 / D / 否 | `terminal_ref` | 生命周期、尺寸、标题、编码、交互性、缓冲区计数与实际能力（含 `history_read`）；不含屏幕文字。 |
+| `terminals_read` | 终端观察 / R / 否 | `terminal_ref`、`cursor?`、`line_limit`、`tail?` | 当前视口快照、变化检测 generation cursor、视口内截断标记；不是历史分页或输出增量接口。原始内容按敏感数据处理。 |
+| `terminals_history` | 终端观察 / R / 否 | `request`、`line_limit?`、`byte_limit?`；terminal_ref 仅属于 snapshot 分支 | 按 primary/alternate 与 all/screen 冻结并分页；返回正文片段、内容版本、覆盖范围和缺口状态。支持 snapshot/page/release/release_slot；具体字段见本节，句柄与限额见第 3 节。 |
 | `terminals_find` | 终端观察 / R / 否 | `terminal_ref`、`query`、`limit?` | 复用终端后端的字面量 scrollback 搜索并返回有界网格坐标；当前不接受正则、大小写或整词选项。 |
 | `commands_start` | 命令执行 / X / 必须 | `node_ref`、`command`、`working_directory?` | 在已取得的 SSH node 上使用当前物理连接的独立 exec channel；固定超时 5 分钟、合并输出上限 1 MiB，返回 `command_ref` 与 `operation_ref`。交互终端精确输入使用 `terminals_submit`，不会伪装成有退出码的 exec。 |
 | `commands_state` | 命令观察 / R / 否 | `command_ref` | `running/succeeded/cancelled/failed`、真实退出码、截断状态和脱敏错误。 |
@@ -263,6 +280,53 @@ NodeRouter / connection registry ── 物理 SSH node
 | 本地终端 | 实际本地 PTY、输入、尺寸、录制 | 一次性启动，不可 `connections_save`，不伪装为远端或可同步连接。 |
 
 `commands_start` 的完成语义不能跨传输伪造。SSH `node_ref` 通过现有连接的 exec channel 返回真实 stdout、stderr 与退出状态。终端目标优先使用 Shell Integration 的结束标记和退出状态；只有命令标记时报告 `tracked_without_exit_status`；仅观察到输出稳定时报告 `output_stable` 而不是 `completed`。串口和 Telnet 没有 shell 证明时只能报告 `sent`、`waiting_for_input` 或 `output_stable`。
+
+**历史读取请求与结果**
+
+`terminals_history` 顶层仅接受 `request`、`line_limit?`、`byte_limit?`。`request` 为严格联合类型，未知字段、混用分支参数均拒绝；`terminal_ref` 仅属于 snapshot，page/release/release_slot 不接受终端、缓冲区或范围参数。
+
+| 请求 | 语义 |
+|---|---|
+| `{kind:"snapshot", terminal_ref:string, buffer:"primary", selection, slot?: 0或1, after_revision?: string}` | 原子冻结主缓冲区所选范围；范围相同且有效内容版本未变化时返回 unchanged，不复制正文。 |
+| `{kind:"snapshot", terminal_ref:string, buffer:"alternate", selection, slot?: 0或1, after_revision?: string}` | 原子冻结当前备用屏幕所选范围；备用屏幕不活动时返回 buffer_unavailable，不退回主缓冲区。 |
+| `{kind:"page", cursor:string}` | 继续读取同一个不可变快照；不重新查询实时网格。 |
+| `{kind:"release", snapshot_ref:string}` | 提前释放本客户端的快照及其分页游标；未找到属于本客户端的快照也统一返回 `released`，不查询或暴露其他客户端的记录。 |
+| `{kind:"release_slot", slot:0或1}` | 显式放弃本客户端指定槽中的快照；不需要 snapshot_ref。槽为空也返回 released，不分配正文缓存。用于首次响应丢失且预算不足以替换时的恢复。 |
+
+`selection` 必填，仅接受 `{kind:"all"}`（最早保留行至实时屏幕最后一行）或 `{kind:"screen"}`（所选缓冲区完整实时屏幕，含空行、排除历史）。screen 的 `total_rows=screen_rows`，`coverage.start_row=retained_rows-screen_rows`，`end_row_exclusive=retained_rows`。备用屏幕无历史时两种选择正文可相同，仍保留原 selection；buffer 决定目标，不自动选择活动屏幕。主屏幕在备用屏幕活动时仍独立可读；备用屏幕未活动返回 `buffer_unavailable`。不接受 tail、任意行数或实时网格偏移，不因预算不足改变范围。
+
+`line_limit` 默认 200、范围 1–1,000；`byte_limit` 默认及最大 256 KiB、最小 4 字节，仅限 snapshot/page 使用，release/release_slot 携带时拒绝。限额不改变冻结范围：line_limit 计本页涉及的不同物理行，byte_limit 只计 text 的 UTF-8 字节。单次序列化响应另限 512 KiB，JSON 转义及元数据超限时减少本页片段并保留续读位置；句柄和令牌最长 256 字节。
+
+| 字段 | 含义 |
+|---|---|
+| `status` | `snapshot`、`unchanged` 或 `released`；page 成功同样为 `snapshot`。失败的稳定 `reason` 位于既有信封的 `data.reason`。 |
+| `snapshot_ref` | 客户端私有的不可变快照句柄；仅 `snapshot` 状态存在。 |
+| `content_revision` | 后端内容版本的不透明令牌；用于下一轮变化检测，不能作为分页游标。 |
+| `buffer`、`active_buffer` | 本次读取的缓冲区与冻结时实际活动缓冲区。 |
+| `screen_rows` | 与本次冻结或 unchanged 判定在同一后端同步边界取得的实时屏幕高度；不是视口滚动偏移或所选范围行数。 |
+| `captured_at`、`expires_at` | 冻结时间和固定失效时间。 |
+| `total_rows`、`total_text_bytes` | 所选快照的物理行数与各行 text 的 UTF-8 字节数之和；不计人为添加的换行、JSON 转义或元数据，不是进程累计输出量。 |
+| `rows` | 有序片段 `{row_index, text, byte_start, row_complete, soft_wrapped}`；索引仅在本快照内稳定。 |
+| `next_cursor`、`has_more` | 是否还有此快照的正文；最后一页为 `null`、`false`。 |
+| `coverage` | `{selection, retained_rows, start_row, end_row_exclusive, has_earlier}`，以冻结时全部保留物理行为坐标描述实际覆盖范围；与 snapshot 内从零开始的 row_index 分开。 |
+| `continuity` | `baseline`、`no_retention_loss`、`gap` 或 `unknown`，描述相对 after_revision 的后端保留连续性；不是 screen 覆盖了两轮之间全部输出的证明。 |
+| `gap_reasons` | 仅在 gap 时非空，例如 `history_evicted`、`buffer_cleared`、`session_replaced`。 |
+| `continuity_reason` | unknown 时为 `revision_unavailable`，其他状态为 null；无法判断不等于确认丢失。 |
+| `revision_expires_at` | 内容版本令牌的固定失效时间；独立于快照 expires_at。 |
+
+**冻结与文字语义**
+
+- 在后端解析同步边界一次取得正文、尺寸、范围、缓冲区、版本和丢失标记；未解析输入属于后续版本。screen 直接读取实时屏幕，不先复制全历史。用户滚动、选择、查找定位、焦点、标签可见性和绘制不改变读取范围或分页顺序；读取不激活标签、改变焦点/选区/display_offset、消费渲染 damage 或发送按键，隐藏标签也可读取最新解析内容。
+- 快照冻结后，同一会话内输出、清屏、历史淘汰、resize 和主/备用切换均不改变已冻结正文及观察元数据。分页只读原快照；同一有效游标与相同限额重试返回同一页。游标绑定客户端、终端、缓冲区、快照及位置，不暴露内部坐标或接受任意偏移；每次 `has_more=true` 必须推进，超长行跨页而不丢字。
+- `row_index` 从快照内零开始；`byte_start` 位于 UTF-8 字符边界，`row_complete` 表示物理行传完，不表示程序输出了换行。text 包含组合字符、排除宽字符占位单元；保留所有物理行和末尾未换行提示符。仅非软换行裁剪末尾 U+0020，软换行保留末尾空格，同一行分片的 `soft_wrapped` 一致。非软换行全空白行 text 为空串，软换行全空格行保留空格。重建时仅在完整的非软换行物理行之间加换行，分片间及最后一行后不额外加换行。
+- `has_more=false` 仅说明本快照所选范围读完，不受 `has_earlier` 影响，最后一页不自动释放。客户端读完后保存版本并 release；后续版本必须从新快照第一页读取，不按跨快照行号或文本前后缀拼接增量，也不拼接不同 screen 快照冒充同一时刻的全历史。
+
+**内容版本与连续性**
+
+- 每个缓冲区的内容写入、擦除、清屏、历史淘汰、resize/reflow 和缓冲区切换更新相关版本；纯滚动、焦点、选择、光标闪烁与绘制不更新。主屏幕版本也反映活动缓冲区切换，不能复用视口 generation 或 damage。真实淘汰不能由历史长度推断；清除历史必须改变世代或丢失标记，局部滚动等实际删行必须更新丢失标记，不能只更新内容版本。缩高丢弃非空行、备用屏幕缩窄截断非空内容时更新丢失标记，保留到历史区或仅丢弃空白时不误报。重连/后端替换改变会话世代。
+- 省略 `after_revision` 必须创建新快照并返回 `baseline`；只有有效版本、相同 selection、内容及活动缓冲区均未变化时返回 `unchanged`，其包含版本和有效期、缓冲区、screen_rows、coverage、连续性信息，无正文、快照或游标。改变 selection 必须重新冻结。每个新快照独立计算并固定相对本次基线的观察元数据，不复用其他快照的正文或响应。
+- `no_retention_loss` 仅表示相对基线未确认后端保留损失；`gap` 报告真实损失，`unknown` 表示版本记录不可用，不能混同。screen 未选择的历史由 `has_earlier` 描述，不自动构成 gap，也不保证取得两次观察间全部输出。格式非法的版本或当前客户端已知记录的终端/缓冲区不匹配返回 `invalid_revision`；格式合法但不存在、过期、被淘汰或属于其他客户端的版本统一按 `unknown / revision_unavailable` 重新冻结，不泄露记录存在性。
+- “完整”仅指冻结时所选保留网格范围全部返回，不是原始 PTY 录制；被覆盖、清除、淘汰的文字及备用屏幕旧帧无法恢复，非软换行尾部填充空格也无法与实际尾空格区分。`unchanged`、空页、读完或输出稳定均不证明命令完成。等待提示符可轮询 screen 并读完分页，全部保留输出需显式 all；不自动滚屏、退出 TUI、重跑命令或录制。可靠完成依据沿用 Shell Integration；需完整命令输出时使用受限 SSH exec 输出、事先录制或显式文件捕获，并检查其限额。
 
 ### 4.4 SFTP、IDE 和文件传输
 
@@ -399,7 +463,8 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 2. `credentials_store`、连接、RDP/VNC、代理、云同步等含新秘密输入的工具，在网关边界转为 `Zeroizing` 所有者，交给 `oxideterm-secret-store` 或现有受保护连接存储后即清空。不会为审计、重试或异步任务克隆普通 `String`。
 3. 对现有秘密只能做存在性检查、选择受保护槽、删除，或由应用 broker 在认证动作中消费。没有 `credentials_read`、`secret_export`、`sync_key_read` 等工具。
 4. SFTP 文件、终端、录制、日志、截图和剪贴板不是“秘密字段”，但可能包含秘密；它们一律是需要显式读取许可的敏感内容，并受大小、分页、过期和审计摘要限制。
-5. Public MCP 事件、通知、工具结果、错误、遥测、诊断和插件边界均在发送前做同一份红线检查。
+5. 终端历史快照及不可避免的临时正文副本使用零化容器，不通过 Debug、日志、审计正文、诊断包、普通设置或临时明文文件泄露；审计仅记录调用、目标、字节计数和结果。
+6. Public MCP 事件、通知、工具结果、错误、遥测、诊断和插件边界均在发送前做同一份红线检查。
 
 ## 7. 现有实现映射
 
@@ -411,7 +476,7 @@ RDP/VNC helper 的 JSON line、二进制帧、证书材料、凭据和进程控�
 | 反向 MCP 客户端 | `oxideterm-ai`、`McpRegistry` 和应用设置中的 MCP 配置 | 明确隔离，防止 Public MCP 的 grant 或 client credential 被外部 MCP 配置使用。 |
 | 连接与凭据 | `oxideterm-connections`、`oxideterm-secret-store`、`SecretString` | 做脱敏 profile 投影、外部 `connection_ref` 映射、受保护存储写入 broker 和 revision 冲突检查。 |
 | SSH node | `oxideterm-ssh::NodeRouter`、`SshConnectionRegistry`、node runtime store | 为每个 MCP lease 建立专用 `ConnectionConsumer`；只通过 `acquire_connection`/`release_consumer` 使用共享物理 node。 |
-| 终端与命令 | `oxideterm-terminal::TerminalSession` facade、`SshTransportClient::run_command_capture`、local/SSH/Mosh/Telnet/serial backend | 建立 `terminal_ref`/`command_ref` 表、受限快照与字面量搜索投影；SSH exec 通过 NodeRouter 当前物理连接，交互终端只提供精确输入与真实 transport 控制，不从 tab 推断活性或伪造退出码。 |
+| 终端与命令 | `oxideterm-terminal::TerminalSession` facade、`SshTransportClient::run_command_capture`、local/SSH/Mosh/Telnet/serial backend | 建立 `terminal_ref`/`command_ref` 表、受限快照与字面量搜索投影；后端共享网格冻结、内容版本及丢失标记，SSH worker 在解析同步边界读取，Public MCP 运行时持有快照/游标及清理任务，GPUI broker 只解析确切句柄和调度，不从 pane 缓存复制或查找节点的第一个终端；后端真实支持才声明 history_read，否则返回 unsupported，不退回视口；SSH exec 通过 NodeRouter 当前物理连接，交互终端只提供精确输入与真实 transport 控制，不从 tab 推断活性或伪造退出码。 |
 | SFTP/传输 | `oxideterm-sftp`、connection registry 的 SFTP acquire 与 transfer manager | 通过真实 SFTP session 建立 file consumer；把大内容改为有界 artifact 和单文件 transfer operation。trzsz/modem 仍是终端内协议，不冒充 SFTP 公共工具。 |
 | IDE | `oxideterm-ide-fs`、`oxideterm-ide-core`、`oxideterm-editor-core` | 创建非 GPUI 的 `workspace_ref` 投影，采用结构化 edits 与 revision，而不暴露 editor entity。 |
 | Host Tools | `oxideterm-connection-monitor`、`oxideterm-acp-host-tools`、插件 host-tools adapter | 映射为固定 catalog/capture/operate；禁止把 `runExtension` 或 shell command 原样公开。 |

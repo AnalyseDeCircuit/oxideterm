@@ -466,6 +466,27 @@ fn benchmark_terminal_snapshots(criterion: &mut Criterion) {
         (BENCHMARK_ROWS * BENCHMARK_COLS) as u64,
     ));
 
+    for (name, screen, unchanged) in [
+        ("history_all", false, false),
+        ("history_screen", true, false),
+        ("history_unchanged", false, true),
+    ] {
+        group.bench_function(name, |bencher| {
+            let terminal = populated_terminal(20_000);
+            let baseline = terminal
+                .history_capture(false, screen, None, 16 * 1024 * 1024, &|| false)
+                .unwrap();
+            let previous = unchanged.then_some(&baseline.stamp);
+            bencher.iter(|| {
+                black_box(
+                    terminal
+                        .history_capture(false, screen, previous, 16 * 1024 * 1024, &|| false)
+                        .unwrap(),
+                )
+            });
+        });
+    }
+
     group.bench_function("full_visible_grid", |bencher| {
         let terminal = snapshot_benchmark_session();
         bencher.iter(|| black_box(terminal.snapshot()));

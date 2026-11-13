@@ -17,6 +17,7 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         T: ResetDiscriminant<D>,
         D: PartialEq,
     {
+        self.history_revision = self.history_revision.wrapping_add(1);
         // Use empty template cell for resetting cells due to resize.
         let template = mem::take(&mut self.cursor.template);
 
@@ -102,6 +103,10 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
         // Clamp saved cursor, since only primary cursor is scrolled into viewport.
         self.saved_cursor.point.line = min(self.saved_cursor.point.line, Line(target as i32 - 1));
 
+        // Scrolling preserves rows in history; only the remaining nonempty bottom rows are lost.
+        if (target..self.lines).any(|line| !self.raw[Line(line as i32)].is_clear()) {
+            self.history_cleared = self.history_cleared.wrapping_add(1);
+        }
         self.raw.rotate((self.lines - target) as isize);
         self.raw.shrink_visible_lines(target);
         self.lines = target;
@@ -284,7 +289,12 @@ impl<T: GridCell + Default + PartialEq> Grid<T> {
 
             loop {
                 // Remove all cells which require reflowing.
-                let mut wrapped = match row.shrink(columns) {
+                let removed = row.shrink(columns);
+                // Row::shrink returns only tails containing nonempty cells; reflow retains them.
+                if !reflow && removed.is_some() {
+                    self.history_cleared = self.history_cleared.wrapping_add(1);
+                }
+                let mut wrapped = match removed {
                     Some(wrapped) if reflow => wrapped,
                     _ => {
                         let cursor_buffer_line = self.lines - self.cursor.point.line.0 as usize - 1;

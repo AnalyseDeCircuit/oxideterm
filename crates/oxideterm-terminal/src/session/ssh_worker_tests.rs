@@ -1453,6 +1453,21 @@ fn ssh_packet_splits_preserve_grid_modes_selection_graphics_and_private_recordin
         );
         fixture.terminal.set_selection(selection);
         fixture.barrier();
+        let history = fixture
+            .terminal
+            .history_capture(false, true, None, 16 * 1024 * 1024, &|| false)
+            .unwrap();
+        assert_eq!(
+            history
+                .rows
+                .as_ref()
+                .unwrap()
+                .iter()
+                .take(3)
+                .map(|r| r.text.as_str())
+                .collect::<Vec<_>>(),
+            ["line0", "red 中文 e\u{301}", "end"]
+        );
         let actual = fixture.terminal.snapshot();
         assert_eq!(
             actual

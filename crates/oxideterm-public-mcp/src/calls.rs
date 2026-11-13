@@ -1687,6 +1687,7 @@ pub enum PublicToolCall {
     OpenTerminal(OpenTerminalArgs),
     TerminalState(TerminalHandleArgs),
     ReadTerminal(ReadTerminalArgs),
+    TerminalHistory(crate::history::HistoryArgs),
     FindTerminal(FindTerminalArgs),
     SubmitTerminal(SubmitTerminalArgs),
     ResizeTerminal(ResizeTerminalArgs),
@@ -1781,6 +1782,7 @@ impl PublicToolCall {
             Self::OpenTerminal(_) => "terminals_open",
             Self::TerminalState(_) => "terminals_state",
             Self::ReadTerminal(_) => "terminals_read",
+            Self::TerminalHistory(_) => "terminals_history",
             Self::FindTerminal(_) => "terminals_find",
             Self::SubmitTerminal(_) => "terminals_submit",
             Self::ResizeTerminal(_) => "terminals_resize",
@@ -1873,9 +1875,10 @@ impl PublicToolCall {
             Self::OpenTerminal(_) | Self::ResizeTerminal(_) | Self::CloseTerminal(_) => {
                 ToolGroup::TerminalSession
             }
-            Self::TerminalState(_) | Self::ReadTerminal(_) | Self::FindTerminal(_) => {
-                ToolGroup::TerminalObserve
-            }
+            Self::TerminalState(_)
+            | Self::ReadTerminal(_)
+            | Self::FindTerminal(_)
+            | Self::TerminalHistory(_) => ToolGroup::TerminalObserve,
             Self::SubmitTerminal(_) | Self::ControlTerminal(_) => ToolGroup::TerminalInput,
             Self::RecordingsControl(_) | Self::RecordingsStatus(_) => ToolGroup::RecordingControl,
             Self::RecordingsSearch(_) | Self::RecordingsExport(_) => ToolGroup::RecordingContent,
@@ -2072,6 +2075,7 @@ impl PublicToolCall {
             },
             Self::TerminalState(args) | Self::CloseTerminal(args) => args.terminal_ref.to_string(),
             Self::ReadTerminal(args) => args.terminal_ref.to_string(),
+            Self::TerminalHistory(args) => args.target(),
             Self::FindTerminal(args) => args.terminal_ref.to_string(),
             Self::SubmitTerminal(args) => format!(
                 "{} {} {} bytes append_enter={}",

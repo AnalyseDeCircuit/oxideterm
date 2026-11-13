@@ -20,6 +20,10 @@ mod backpressure;
 mod color;
 mod command_sender;
 mod data;
+mod history;
+pub use history::{
+    TerminalHistoryCapture, TerminalHistoryError, TerminalHistoryRow, TerminalHistoryStamp,
+};
 mod editor_integration;
 mod integration_scripts;
 mod local_graphics_event_loop;

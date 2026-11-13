@@ -7943,6 +7943,8 @@ version = "2.3.2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
+ "chacha20poly1305",
+ "chrono",
  "http",
  "http-body-util",
  "hyper",
