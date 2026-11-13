@@ -4,13 +4,15 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::surface::color_for_background;
+use crate::surface::{color_for_background, color_with_alpha};
 
 const BUTTON_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70
 const BUTTON_FOCUS_RING_WIDTH: f32 = 2.0; // Tauri focus-visible:ring-2
 const BUTTON_ACTIVE_BACKGROUND_ALPHA: u32 = 0x66; // Tauri [data-bg-active] color-mix(... 40%, transparent)
 const BUTTON_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri [data-bg-active] hover color-mix(... 50%, transparent)
 const BUTTON_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri [data-bg-active] border color-mix(... 75%, transparent)
+const BUTTON_FILLED_HOVER_ALPHA: u32 = 0xdd; // Filled primary hover: keep the inverse tone, mute slightly
+const BUTTON_DESTRUCTIVE_HOVER_ALPHA: u32 = 0xcc; // Destructive hover stays on the error tone
 const TOOLBAR_BUTTON_ICON_GAP: f32 = 6.0; // Tauri toolbar gap-1.5
 const ICON_BUTTON_DISABLED_OPACITY: f32 = 0.35; // Tauri disabled icon button opacity
 const ICON_BUTTON_IDLE_OPACITY: f32 = 0.5; // Tauri muted toolbar icon opacity
@@ -647,9 +649,12 @@ pub fn toolbar_button(
     options: ToolbarButtonOptions,
 ) -> Div {
     let disabled = options.button.disabled || options.loading;
-    let hover_bg = options.hover_background.unwrap_or_else(|| {
-        toolbar_hover_background(tokens, options.button.variant, options.has_background)
-    });
+    let hover_bg = toolbar_hover_background(
+        tokens,
+        options.button.variant,
+        options.has_background,
+        options.hover_background,
+    );
     let button_options = ButtonOptions {
         disabled,
         ..options.button
@@ -717,37 +722,21 @@ fn toolbar_hover_background(
     tokens: &ThemeTokens,
     variant: ButtonVariant,
     has_background: bool,
+    explicit: Option<Rgba>,
 ) -> Rgba {
+    if let Some(explicit) = explicit {
+        return explicit;
+    }
     match variant {
-        ButtonVariant::Default => rgba((tokens.ui.text << 8) | 0xdd),
-        ButtonVariant::Destructive => rgba((tokens.ui.error << 8) | 0xcc),
+        ButtonVariant::Default => color_with_alpha(tokens.ui.text, BUTTON_FILLED_HOVER_ALPHA),
+        ButtonVariant::Destructive => {
+            color_with_alpha(tokens.ui.error, BUTTON_DESTRUCTIVE_HOVER_ALPHA)
+        }
         _ => color_for_background(
             tokens.ui.bg_hover,
             has_background,
             BUTTON_ACTIVE_HOVER_ALPHA,
         ),
-    }
-}
-
-#[cfg(test)]
-mod hover_tests {
-    use super::*;
-
-    #[test]
-    fn filled_toolbar_buttons_hover_with_their_own_tint() {
-        let tokens = oxideterm_theme::default_tokens();
-        let neutral = color_for_background(tokens.ui.bg_hover, false, BUTTON_ACTIVE_HOVER_ALPHA);
-
-        let primary = toolbar_hover_background(&tokens, ButtonVariant::Default, false);
-        assert_eq!(primary, rgba((tokens.ui.text << 8) | 0xdd));
-        assert_ne!(primary, neutral, "a primary button must not hover grey");
-
-        let destructive = toolbar_hover_background(&tokens, ButtonVariant::Destructive, false);
-        assert_eq!(destructive, rgba((tokens.ui.error << 8) | 0xcc));
-        assert_ne!(destructive, neutral);
-
-        let secondary = toolbar_hover_background(&tokens, ButtonVariant::Secondary, false);
-        assert_eq!(secondary, neutral);
     }
 }
 
@@ -987,4 +976,48 @@ pub fn button_focus_visible(tokens: &ThemeTokens, button: Div, focused: bool) ->
     // DOM :focus-visible, so the shared primitive applies the same ring when a
     // caller marks the action as keyboard-focused.
     button.shadow(tauri_focus_visible_ring(tokens))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn filled_toolbar_buttons_hover_with_their_own_tint() {
+        let tokens = oxideterm_theme::default_tokens();
+        let neutral = rgb(tokens.ui.bg_hover);
+
+        // Lock the visual strength independently of the helper: primary keeps
+        // the inverse tone at 87%, destructive keeps the error tone at 80%.
+        assert_eq!(BUTTON_FILLED_HOVER_ALPHA, 0xdd);
+        assert_eq!(BUTTON_DESTRUCTIVE_HOVER_ALPHA, 0xcc);
+
+        let primary = toolbar_hover_background(&tokens, ButtonVariant::Default, false, None);
+        assert_eq!(primary, color_with_alpha(tokens.ui.text, 0xdd));
+        assert_ne!(primary, neutral, "a primary button must not hover grey");
+        assert_eq!(
+            toolbar_hover_background(&tokens, ButtonVariant::Default, true, None),
+            primary,
+            "filled variants ignore the surrounding background flag"
+        );
+
+        let destructive =
+            toolbar_hover_background(&tokens, ButtonVariant::Destructive, false, None);
+        assert_eq!(destructive, color_with_alpha(tokens.ui.error, 0xcc));
+        assert_ne!(destructive, neutral);
+
+        let explicit = rgba(0x11223344);
+        assert_eq!(
+            toolbar_hover_background(&tokens, ButtonVariant::Default, false, Some(explicit)),
+            explicit,
+            "an explicit hover background wins over the derived tint"
+        );
+
+        let secondary = toolbar_hover_background(&tokens, ButtonVariant::Secondary, false, None);
+        assert_eq!(secondary, neutral);
+        assert_eq!(
+            toolbar_hover_background(&tokens, ButtonVariant::Secondary, true, None),
+            color_with_alpha(tokens.ui.bg_hover, BUTTON_ACTIVE_HOVER_ALPHA)
+        );
+    }
 }
