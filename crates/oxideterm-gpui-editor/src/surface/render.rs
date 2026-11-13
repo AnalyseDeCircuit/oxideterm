@@ -661,6 +661,7 @@ impl TextEditorView {
             marked.range.start.0 >= segment_range.start && marked.range.start.0 <= segment_range.end
         });
         let marked_text = marked.map(|marked| marked.text.as_str());
+        let overlay = row_text_overlay_state(show_cursor, marked_text);
         let marked_caret_prefix = marked.map(|marked| {
             let utf16_len = marked.text.encode_utf16().count();
             let selection_end = marked.selection.end.min(utf16_len);
@@ -677,7 +678,9 @@ impl TextEditorView {
         // overlay. Fixed cell widths diverge under font fallback.
         let coordinate_line = needs_shaped_coordinates
             .then(|| self.shape_coordinate_line(segment_text, window.text_system()));
-        let cursor_x = if let Some(marked) = marked {
+        let cursor_x = if !overlay.show_caret {
+            None
+        } else if let Some(marked) = marked {
             let start = marked
                 .range
                 .start
@@ -903,7 +906,7 @@ impl TextEditorView {
                     &segment_text,
                     segment_range,
                     cursor_column,
-                    show_cursor,
+                    overlay.show_marked_text,
                     marked_text,
                     folded,
                     window,
@@ -1140,7 +1143,7 @@ impl TextEditorView {
         line_text: &str,
         line_range: Range<usize>,
         cursor_column: usize,
-        show_cursor: bool,
+        show_marked_text: bool,
         marked_text: Option<&str>,
         folded: bool,
         window: &mut Window,
@@ -1150,7 +1153,7 @@ impl TextEditorView {
         let mut cursor_drawn = false;
 
         if line_text.is_empty() {
-            if show_cursor {
+            if show_marked_text {
                 if let Some(marked_text) = marked_text {
                     row = row.child(
                         div()
@@ -1171,7 +1174,7 @@ impl TextEditorView {
             let Some(chunk_text) = line_text.get(chunk.start..chunk.end) else {
                 continue;
             };
-            if show_cursor && marked_text.is_some() && !cursor_drawn && byte_column <= chunk.end {
+            if show_marked_text && !cursor_drawn && byte_column <= chunk.end {
                 let split = byte_column.saturating_sub(chunk.start);
                 let split = split.min(chunk_text.len());
                 let (before, after) = chunk_text.split_at(split);
@@ -1191,7 +1194,7 @@ impl TextEditorView {
             }
         }
 
-        if show_cursor && marked_text.is_some() && !cursor_drawn {
+        if show_marked_text && !cursor_drawn {
             if let Some(marked_text) = marked_text {
                 row = row.child(
                     div()
@@ -1470,6 +1473,7 @@ impl TextEditorView {
         // Match CodeMirror/browser editor semantics: the caret is painted over
         // the line box and must never reserve horizontal layout space.
         div()
+            .debug_selector(|| "editor-caret".into())
             .absolute()
             .top(px(self.metrics.line_height * 0.11))
             .left(px(left))
@@ -1709,11 +1713,74 @@ fn visible_indentation_columns(
     columns_by_line
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RowTextOverlayState {
+    show_marked_text: bool,
+    show_caret: bool,
+}
+
+/// Composition owns the underlined preedit text, not the caret. The caret keeps
+/// the editor's blink cadence for plain text and marked text alike; composition
+/// only changes the column its prefix width is measured from.
+fn row_text_overlay_state(show_cursor: bool, marked_text: Option<&str>) -> RowTextOverlayState {
+    RowTextOverlayState {
+        show_marked_text: marked_text.is_some(),
+        show_caret: show_cursor,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::surface::wrap::DisplayRow;
     use oxideterm_editor_syntax::{LanguageId, StructureCache};
+
+    #[test]
+    fn marked_text_stays_visible_when_caret_blinks_off() {
+        assert_eq!(
+            row_text_overlay_state(false, Some("zhong")),
+            RowTextOverlayState {
+                show_marked_text: true,
+                show_caret: false,
+            }
+        );
+        assert_eq!(
+            row_text_overlay_state(true, Some("zhong")),
+            RowTextOverlayState {
+                show_marked_text: true,
+                show_caret: true,
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn focused_plain_text_editor_renders_blinking_caret(cx: &mut gpui::TestAppContext) {
+        use crate::surface::EDITOR_CARET_BLINK_INTERVAL;
+        let (_editor, cx) = cx.add_window_view(|window, cx| {
+            let editor = TextEditorView::new("text", &oxideterm_theme::default_tokens(), cx);
+            window.focus(&editor.focus_handle, cx);
+            editor
+        });
+        cx.simulate_resize(gpui::size(px(500.0), px(240.0)));
+        cx.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear(cx);
+        });
+        assert!(
+            cx.debug_bounds("editor-caret").is_some(),
+            "focused plain text must paint the caret without marked text"
+        );
+        for (expected_visible, phase) in [(false, "blink-off"), (true, "blink-on")] {
+            cx.executor().advance_clock(EDITOR_CARET_BLINK_INTERVAL);
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("editor-caret").is_some(),
+                expected_visible,
+                "caret visibility during {phase}"
+            );
+        }
+    }
 
     fn display_row(line: usize, start_col: usize, end_col: usize) -> DisplayRow {
         DisplayRow {
