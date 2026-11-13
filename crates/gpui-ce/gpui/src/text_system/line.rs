@@ -102,6 +102,7 @@ fn prepare_line_glyphs(
         counts[channel] += run.glyphs.len() - emoji_count;
     }
     let mut glyphs = PreparedGlyphBatch {
+        bounds: Default::default(),
         monochrome: Vec::with_capacity(counts[0]),
         subpixel: Vec::with_capacity(counts[1]),
         polychrome: Vec::with_capacity(counts[2]),

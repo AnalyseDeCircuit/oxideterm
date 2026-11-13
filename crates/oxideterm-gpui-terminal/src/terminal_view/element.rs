@@ -842,11 +842,15 @@ impl TerminalElement {
         }
         #[cfg(feature = "bench")]
         let highlights_started = Instant::now();
-        let highlight_layout = if let Some(cache) = cache.as_deref_mut() {
+        let (mut highlight_layout, cached_highlights) = if let Some(cache) = cache.as_deref_mut() {
             self.cached_highlight_layout_for_rows(&logical_lines, &semantic_roles, cache)
         } else {
-            self.highlight_layout_for_logical_lines(&logical_lines)
+            (
+                self.highlight_layout_for_logical_lines(&logical_lines),
+                Vec::new(),
+            )
         };
+        let mut foreground_lines = HashSet::new();
         #[cfg(feature = "bench")]
         if let Some(cache) = cache.as_deref_mut() {
             cache.performance.highlights_micros = duration_micros(highlights_started.elapsed());
@@ -957,6 +961,21 @@ impl TerminalElement {
                     row.line_id,
                     self.performance_metrics_enabled,
                     |previous| {
+                        // Cached rows already contain their resolved text colors. Materialize a logical
+                        // line's foreground lookup only if one of its rows actually needs rebuilding.
+                        if !cached_highlights.is_empty()
+                            && foreground_lines.insert(logical_line.range.start)
+                            && let Some((start_row, relative)) = cached_highlights
+                                .iter()
+                                .find(|(start, _)| *start == logical_line.range.start)
+                        {
+                            highlight_layout.foregrounds.extend(
+                                relative
+                                    .foregrounds
+                                    .iter()
+                                    .map(|((row, col), color)| ((start_row + row, *col), *color)),
+                            );
+                        }
                         self.row_layout(
                             row_index,
                             row,
@@ -1067,8 +1086,12 @@ impl TerminalElement {
         logical_lines: &TerminalLogicalLineIndex,
         semantic_roles: &HashMap<Range<usize>, SemanticLineRole>,
         cache: &mut TerminalLayoutCache,
-    ) -> TerminalHighlightLayout {
+    ) -> (
+        TerminalHighlightLayout,
+        Vec<(usize, Arc<TerminalLogicalHighlightLayout>)>,
+    ) {
         let mut layout = TerminalHighlightLayout::empty();
+        let mut cached = Vec::new();
 
         for logical_line in &logical_lines.lines {
             let semantic_role = semantic_roles.get(&logical_line.range).copied();
@@ -1084,9 +1107,12 @@ impl TerminalElement {
                 &relative_layout,
                 &mut layout,
             );
+            if !relative_layout.foregrounds.is_empty() {
+                cached.push((logical_line.range.start, relative_layout));
+            }
         }
 
-        layout
+        (layout, cached)
     }
 
     fn highlight_layout_for_logical_lines(
@@ -1848,12 +1874,6 @@ fn append_relative_highlight_layout(
             .outlines
             .iter()
             .map(|rect| absolute_highlight_rect(start_row, rect)),
-    );
-    layout.foregrounds.extend(
-        relative
-            .foregrounds
-            .iter()
-            .map(|((row_offset, col), color)| ((start_row + row_offset, *col), *color)),
     );
 }
 
@@ -2939,6 +2959,55 @@ mod cache_tests {
             view.semantic_roles_for_lines(&lines, Some(&mut cache))[&(0..1)],
             SemanticLineRole::Unknown
         );
+    }
+
+    #[test]
+    fn cached_foreground_colors_survive_a_mixed_hit_and_miss_frame() {
+        use crate::terminal_ui::{TerminalHighlightMatchScope, TerminalHighlightRenderMode};
+        let rows = (0..2)
+            .map(|line| row_with_text_and_cursor(line, "ERROR output", 11))
+            .collect();
+        let mut snapshot = snapshot(0, rows);
+        snapshot.cols = 12;
+        let mut view = element(snapshot).highlight_rules(vec![TerminalHighlightRule {
+            id: "error".into(),
+            pattern: "ERROR".into(),
+            foreground: Some("#ff0000".into()),
+            render_mode: TerminalHighlightRenderMode::Background,
+            match_scope: TerminalHighlightMatchScope::Match,
+            preserve_background: true,
+            enabled: true,
+            ..Default::default()
+        }]);
+        let mut cache = TerminalLayoutCache::default();
+        let first = view.layout_for_rows(0..2, Some(&mut cache));
+        let warm = view.layout_for_rows(0..2, Some(&mut cache));
+        assert!(Arc::ptr_eq(
+            &first.cached_rows[0].layout,
+            &warm.cached_rows[0].layout
+        ));
+        view.snapshot.lines[1].cells_mut()[6].ch = 'X';
+        view.snapshot.lines[1].refresh_signature();
+        let changed = view.layout_for_rows(0..2, Some(&mut cache));
+        assert!(Arc::ptr_eq(
+            &warm.cached_rows[0].layout,
+            &changed.cached_rows[0].layout
+        ));
+        assert!(!Arc::ptr_eq(
+            &warm.cached_rows[1].layout,
+            &changed.cached_rows[1].layout
+        ));
+        for frame in [&first, &warm, &changed] {
+            for row in &frame.cached_rows {
+                let colored = row
+                    .layout
+                    .text_runs
+                    .iter()
+                    .find(|run| run.text.as_ref() == "ERROR")
+                    .unwrap();
+                assert_eq!(colored.style.color, rgb(0xff0000).into());
+            }
+        }
     }
 
     #[test]

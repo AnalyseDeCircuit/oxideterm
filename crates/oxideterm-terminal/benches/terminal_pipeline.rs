@@ -160,6 +160,8 @@ fn terminal_input_corpora() -> Vec<(&'static str, Vec<u8>)> {
         ("cjk", repeated_input("终端输出性能测试中文日本語漢字かなカナ全角文字连续输出\r\n".as_bytes())),
         ("dec-lines", repeated_input(b"\x1b(0lqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqk\r\nx                                                                x\r\nmqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqj\x1b(B\r\n")),
         ("wrapped-ascii", fixed_size_input(b"x")),
+        ("ascii-overwrite", repeated_input(b"\x1b[Habcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789")),
+        ("wide-overwrite", repeated_input("\x1b[Hone中文three\x1b[Habcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnopqrstuvwxyz0123456789".as_bytes())),
         ("crlf-ascii", crlf_ascii_input()),
     ]
 }
@@ -530,6 +532,30 @@ fn benchmark_terminal_snapshots(criterion: &mut Criterion) {
         let previous = terminal.snapshot_incremental(&previous);
         bencher.iter(|| black_box(terminal.snapshot_incremental(&previous)));
     });
+
+    for (name, command) in [
+        ("cursor_same_row", b"\x1b[10;20H".as_slice()),
+        ("cursor_other_row", b"\x1b[20;20H".as_slice()),
+    ] {
+        group.bench_function(name, |bencher| {
+            let mut terminal = snapshot_benchmark_session();
+            let mut previous = terminal.snapshot_consuming_damage();
+            bencher.iter_custom(|iterations| {
+                let mut elapsed = Duration::ZERO;
+                for index in 0..iterations {
+                    terminal.feed_recording_output(if index % 2 == 0 {
+                        command
+                    } else {
+                        b"\x1b[10;10H"
+                    });
+                    let start = Instant::now();
+                    previous = black_box(terminal.snapshot_incremental(&previous));
+                    elapsed += start.elapsed();
+                }
+                elapsed
+            });
+        });
+    }
 
     group.bench_function("incremental_one_row", |bencher| {
         let mut terminal = snapshot_benchmark_session();

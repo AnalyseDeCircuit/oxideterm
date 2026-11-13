@@ -1070,9 +1070,33 @@ pub(crate) struct Frame {
 
 #[derive(Debug, Default)]
 pub(crate) struct PreparedGlyphBatch {
+    // Prepared batches are immutable once shared with the scene; clipping still varies per paint.
+    pub(crate) bounds: std::sync::OnceLock<Option<Bounds<ScaledPixels>>>,
     pub(crate) monochrome: Vec<PreparedMonochromeGlyph>,
     pub(crate) subpixel: Vec<PreparedMonochromeGlyph>,
     pub(crate) polychrome: Vec<PreparedPolychromeGlyph>,
+}
+
+impl PreparedGlyphBatch {
+    pub(crate) fn bounds(&self) -> Option<Bounds<ScaledPixels>> {
+        *self.bounds.get_or_init(|| {
+            let mut bounds: Option<Bounds<ScaledPixels>> = None;
+            for glyph in self
+                .monochrome
+                .iter()
+                .chain(&self.subpixel)
+                .map(|glyph| glyph.bounds)
+                .chain(self.polychrome.iter().map(|glyph| glyph.bounds))
+            {
+                // Empty glyphs still need the ordinary per-glyph visibility check.
+                if glyph.is_empty() {
+                    return None;
+                }
+                bounds = Some(bounds.map_or(glyph, |bounds| bounds.union(&glyph)));
+            }
+            bounds
+        })
+    }
 }
 
 #[derive(Clone, Copy, Debug)]

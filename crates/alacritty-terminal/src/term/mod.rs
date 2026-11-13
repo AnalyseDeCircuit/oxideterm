@@ -1402,22 +1402,17 @@ impl<T: EventListener> Handler for Term<T> {
             // This span will be written by either path. Inspect the writable screen cells
             // directly instead of paying for history iteration on every ASCII span.
             let cells = self.grid[line].cells_mut(start..end);
-            // Scalar input repairs both halves of wide cells before replacing them.
-            let overlaps_wide_cell = cells.iter()
-                .any(|cell| cell.flags.intersects(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER));
-            if overlaps_wide_cell {
-                for character in text[processed..].chars() {
-                    self.input(character);
-                }
-                return;
-            }
-
+            let mut written = 0;
             // Keep charset mapping outside the ordinary ASCII fill loop.
             if active_charset == StandardCharset::Ascii {
                 for (cell, byte) in cells
                     .iter_mut()
                     .zip(&bytes[processed..processed + write_len])
                 {
+                    if cell.flags.intersects(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER) {
+                        break;
+                    }
+                    written += 1;
                     cell.c = *byte as char;
                     cell.fg = template.fg;
                     cell.bg = template.bg;
@@ -1429,12 +1424,26 @@ impl<T: EventListener> Handler for Term<T> {
                     .iter_mut()
                     .zip(&bytes[processed..processed + write_len])
                 {
+                    if cell.flags.intersects(Flags::WIDE_CHAR | Flags::WIDE_CHAR_SPACER) {
+                        break;
+                    }
+                    written += 1;
                     cell.c = active_charset.map(*byte as char);
                     cell.fg = template.fg;
                     cell.bg = template.bg;
                     cell.flags = template.flags;
                     cell.extra.clone_from(&template.extra);
                 }
+            }
+
+            if written < write_len {
+                // Repair the first overlapping wide cell at its actual cursor position.
+                // Completed cells need neither a second scan nor scalar rewriting.
+                self.grid.cursor.point.column = Column(start + written);
+                processed += written;
+                self.input(bytes[processed] as char);
+                processed += 1;
+                continue;
             }
 
             processed += write_len;
@@ -3080,9 +3089,25 @@ mod tests {
         assert_batch_input_matches_scalar(&size, "insert", |term| {
             term.mode.insert(TermMode::INSERT);
         });
-        assert_batch_input_matches_scalar(&size, "overlap", |term| {
-            term.input('界');
-        });
+        for columns in [2, 8, 120] {
+            let size = TermSize::new(columns, 3);
+            for start in 0..columns {
+                for text in ["x", "overlap", "0123456789abcdefghijklmnop"] {
+                    assert_batch_input_matches_scalar(&size, text, |term| {
+                        for c in "a界e\u{301}中b文界".chars() {
+                            term.input(c);
+                        }
+                        term.goto(0, start);
+                        term.grid.cursor.template.fg = Color::Indexed(42);
+                        term.grid.cursor.template.set_hyperlink(Some(
+                            crate::term::cell::Hyperlink::new(
+                                Some("wide-overwrite"), "https://example.com".into(),
+                            ),
+                        ));
+                    });
+                }
+            }
+        }
     }
 
     #[test]

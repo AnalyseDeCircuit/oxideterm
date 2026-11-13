@@ -1168,13 +1168,22 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
     }
 
     let mut snapshot = previous.clone();
-    for row in dirty_rows.expect("partial terminal damage must contain row indexes") {
+    let dirty_rows = dirty_rows.expect("partial terminal damage must contain row indexes");
+    for &row in &dirty_rows {
         let line_id = snapshot.lines[row].line_id;
         let mut next_row = snapshot_row_from_term(term, size, palette, display_offset, row);
         next_row.line_id = line_id;
         snapshot.lines[row] = next_row;
     }
-    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, palette, display_offset);
+    refresh_snapshot_metadata(
+        &mut snapshot,
+        term,
+        size,
+        graphics,
+        palette,
+        display_offset,
+        dirty_rows,
+    );
     snapshot
 }
 
@@ -1201,6 +1210,7 @@ fn snapshot_from_term_after_scroll_up<T: EventListener>(
     let mut snapshot = previous.clone();
     snapshot.display_offset = 0;
     snapshot.scrollback_lines = scrollback_lines;
+    let mut dirty_rows = Vec::new();
     for (row, rebuild) in rebuild_rows.into_iter().enumerate() {
         let previous_row = row + scroll_up;
         if !rebuild {
@@ -1209,13 +1219,14 @@ fn snapshot_from_term_after_scroll_up<T: EventListener>(
             continue;
         }
 
+        dirty_rows.push(row);
         let mut next_row = snapshot_row_from_term(term, size, palette, 0, row);
         if previous_row < previous.lines.len() {
             next_row.line_id = previous.lines[previous_row].line_id;
         }
         snapshot.lines[row] = next_row;
     }
-    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, palette, 0);
+    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, palette, 0, dirty_rows);
     snapshot
 }
 
@@ -1276,13 +1287,17 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
                 .filter(|row| *row < previous.lines.len())
         }
     };
+    let mut rebuilt_rows = Vec::new();
     let lines = (0..size.rows)
         .map(|row| {
             previous_row_index(row)
                 .filter(|previous_row| !dirty_rows[*previous_row])
                 .and_then(|previous_row| previous.lines.get(previous_row))
                 .cloned()
-                .unwrap_or_else(|| snapshot_row_from_term(term, size, palette, display_offset, row))
+                .unwrap_or_else(|| {
+                    rebuilt_rows.push(row);
+                    snapshot_row_from_term(term, size, palette, display_offset, row)
+                })
         })
         .collect::<Vec<_>>();
 
@@ -1305,7 +1320,15 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
         lines,
         images: Vec::new(),
     };
-    refresh_snapshot_metadata(&mut snapshot, term, size, graphics, palette, display_offset);
+    refresh_snapshot_metadata(
+        &mut snapshot,
+        term,
+        size,
+        graphics,
+        palette,
+        display_offset,
+        rebuilt_rows,
+    );
     term.reset_damage();
     snapshot
 }
@@ -1331,12 +1354,10 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
 
     if cursor_row < rows.len() && cursor_col < size.cols {
         rows[cursor_row].cells_mut()[cursor_col].cursor = true;
-        let active_input_rows = mark_active_input_rows(&mut rows, cursor_row);
-        // Snapshot rows already carry content signatures. Only cursor and
-        // active-input metadata changed after row construction.
-        for row in &mut rows[active_input_rows] {
-            row.refresh_signature();
-        }
+        mark_active_input_rows(&mut rows, cursor_row);
+    }
+    for row in &mut rows {
+        row.refresh_signature();
     }
 
     let mut images = graphics.visible_images(display_offset, requested_rows);
@@ -1355,6 +1376,7 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     }
 }
 
+/// Builds cells whose signature is finalized after cursor and input metadata are applied.
 fn snapshot_row_from_term<T: EventListener>(
     term: &Term<T>,
     size: TerminalSize,
@@ -1503,7 +1525,7 @@ fn snapshot_row_from_source<T: EventListener>(
         cells.push(snapshot_cell);
     }
     cells.resize(size.cols, default_terminal_cell(palette, overrides));
-    let mut snapshot_row = TerminalRow {
+    TerminalRow {
         line_id: 0,
         source_id: source.source_id,
         absolute_line: i64::from(grid_line),
@@ -1511,9 +1533,7 @@ fn snapshot_row_from_source<T: EventListener>(
         active_input: false,
         signature: 0,
         cells: Arc::new(cells),
-    };
-    snapshot_row.refresh_signature();
-    snapshot_row
+    }
 }
 
 pub(crate) fn blank_snapshot_row(
@@ -1557,11 +1577,11 @@ fn refresh_snapshot_metadata<T: EventListener>(
     graphics: &TerminalGraphicsState,
     palette: &TerminalPalette,
     display_offset: usize,
+    mut metadata_rows: Vec<usize>,
 ) {
     let content = term.renderable_content();
     let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
     let cursor_col = content.cursor.point.column.0;
-    let mut metadata_rows = Vec::new();
     let cursor_position_changed =
         snapshot.cursor_row != cursor_row || snapshot.cursor_col != cursor_col;
     if cursor_position_changed
@@ -1598,8 +1618,8 @@ fn refresh_snapshot_metadata<T: EventListener>(
     snapshot.cursor_shape = content.cursor.shape.into();
     snapshot.images = graphics.visible_images(display_offset, snapshot.lines.len());
     resolve_sixel_backgrounds(&mut snapshot.images, palette, term.colors());
-    // Damaged rows already carry fresh signatures. Rehash only rows whose cursor or active-input
-    // metadata changed instead of walking every visible cell after a small terminal update.
+    // New rows and metadata changes share a single hash pass after cursor/input flags are final.
+    // Shared, unchanged rows retain their signatures without visiting their cells.
     metadata_rows.sort_unstable();
     metadata_rows.dedup();
     for row_index in metadata_rows {
@@ -2026,6 +2046,11 @@ mod incremental_snapshot_tests {
 
         assert!(!next.lines[0].cells[0].cursor);
         assert!(next.lines[1].cells[0].cursor);
+        // Publishing the cursor move must neither alter the old frame nor leave a stale cache key.
+        assert!(previous.lines[0].cells[0].cursor);
+        assert!(!previous.lines[1].cells[0].cursor);
+        assert_ne!(next.lines[0].signature, previous.lines[0].signature);
+        assert_ne!(next.lines[1].signature, previous.lines[1].signature);
         assert_snapshot_content_eq(
             &next,
             &snapshot_from_term(&term, size, &graphics, &TerminalPalette::default()),

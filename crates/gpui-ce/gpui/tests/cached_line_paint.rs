@@ -310,7 +310,7 @@ fn native_cached_decorations_match_reference_glyphs() {
                     }
                                 compare!(monochrome; order, pad, bounds, content_mask, color, tile, transformation);
                                 compare!(subpixel; order, pad, bounds, content_mask, color, tile, transformation);
-                                compare!(polychrome; order, pad, bounds, content_mask, opacity, grayscale, corner_radii, tile);
+                                compare!(polychrome; order, corner_shape, bounds, content_mask, opacity, grayscale, corner_radii, tile);
                                 compare!(underlines; order, pad, bounds, content_mask, color, thickness, wavy);
                             }
                         }

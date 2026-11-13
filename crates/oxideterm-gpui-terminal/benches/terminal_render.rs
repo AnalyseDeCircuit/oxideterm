@@ -738,12 +738,31 @@ fn terminal_internal_unicode(criterion: &mut criterion::Criterion<gpui::BenchMea
     });
 }
 
+fn terminal_internal_semantic_warm(criterion: &mut criterion::Criterion<gpui::BenchMeasurement>) {
+    benchmark_native_text(criterion, "terminal_internal_semantic_warm", |cx| {
+        benchmark_semantic_history(cx, 200, true, true, None);
+    });
+}
+
 fn terminal_internal_warm(criterion: &mut criterion::Criterion<gpui::BenchMeasurement>) {
     benchmark_native_text(criterion, "terminal_internal_warm", |cx| {
-        let terminal = benchmark_terminal(cx, false);
+        let terminal = benchmark_terminal(cx, true);
         let grid = benchmark_grid_size(cx, &terminal);
-        cx.bench_renderer(terminal.clone(), |_terminal, _window, cx| cx.notify());
+        let mut layout = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+        let mut scene = Vec::with_capacity(PROFILE_SAMPLE_CAPACITY);
+        let mut previous = false;
+        cx.bench_renderer(terminal.clone(), |terminal, _window, cx| {
+            if previous {
+                let (_, _, _, layout_us, scene_us) = terminal.benchmark_render_stage_micros();
+                layout.push(Duration::from_micros(layout_us));
+                scene.push(Duration::from_micros(scene_us));
+            }
+            previous = true;
+            cx.notify();
+        });
         assert_eq!(benchmark_grid_size(cx, &terminal), grid);
+        cx.record_stage_samples("warm line layout", layout);
+        cx.record_stage_samples("warm scene construction", scene);
     });
 }
 
@@ -968,6 +987,7 @@ fn terminal_idle_no_frames(cx: &mut BenchAppContext<'_, '_>) {
 
 gpui::bench_group!(
     terminal_render,
+    terminal_internal_semantic_warm,
     terminal_incremental_input,
     terminal_incremental_selection,
     terminal_incremental_scroll,

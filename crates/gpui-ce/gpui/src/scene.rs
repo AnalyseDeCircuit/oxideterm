@@ -208,6 +208,10 @@ impl Scene {
         opacity: f32,
     ) {
         let layer_order = self.layer_stack.last().copied();
+        let fully_visible = batch.bounds().is_some_and(|bounds| {
+            let bounds = bounds + origin;
+            bounds.intersect(&content_mask.bounds) == bounds
+        });
         let glyph_opacity = opacity.clamp(0.0, 1.0);
         for glyph in &batch.monochrome {
             let mut sprite = MonochromeSprite {
@@ -222,10 +226,15 @@ impl Scene {
                 tile: glyph.tile,
                 transformation: TransformationMatrix::unit(),
             };
-            let clipped_bounds = sprite.bounds.intersect(&sprite.content_mask.bounds);
-            if clipped_bounds.is_empty() {
-                continue;
-            }
+            let clipped_bounds = if fully_visible {
+                sprite.bounds
+            } else {
+                let clipped = sprite.bounds.intersect(&sprite.content_mask.bounds);
+                if clipped.is_empty() {
+                    continue;
+                }
+                clipped
+            };
             sprite.order =
                 layer_order.unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
             self.monochrome_sprites.push(sprite);
@@ -243,10 +252,15 @@ impl Scene {
                 tile: glyph.tile,
                 transformation: TransformationMatrix::unit(),
             };
-            let clipped_bounds = sprite.bounds.intersect(&sprite.content_mask.bounds);
-            if clipped_bounds.is_empty() {
-                continue;
-            }
+            let clipped_bounds = if fully_visible {
+                sprite.bounds
+            } else {
+                let clipped = sprite.bounds.intersect(&sprite.content_mask.bounds);
+                if clipped.is_empty() {
+                    continue;
+                }
+                clipped
+            };
             sprite.order =
                 layer_order.unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
             self.subpixel_sprites.push(sprite);
@@ -262,10 +276,15 @@ impl Scene {
                 corner_radii: Default::default(),
                 tile: glyph.tile,
             };
-            let clipped_bounds = sprite.bounds.intersect(&sprite.content_mask.bounds);
-            if clipped_bounds.is_empty() {
-                continue;
-            }
+            let clipped_bounds = if fully_visible {
+                sprite.bounds
+            } else {
+                let clipped = sprite.bounds.intersect(&sprite.content_mask.bounds);
+                if clipped.is_empty() {
+                    continue;
+                }
+                clipped
+            };
             sprite.order =
                 layer_order.unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
             self.polychrome_sprites.push(sprite);
@@ -1537,6 +1556,59 @@ mod tests {
             replayed.monochrome_sprites[0].order,
             scene.monochrome_sprites[0].order
         );
+    }
+
+    #[test]
+    fn cached_batch_bounds_recheck_translation_and_clipping() {
+        let glyph = prepared_monochrome_glyph(full_bounds());
+        let batch = Arc::new(PreparedGlyphBatch {
+            monochrome: vec![glyph],
+            subpixel: vec![glyph],
+            polychrome: vec![crate::window::PreparedPolychromeGlyph {
+                bounds: glyph.bounds,
+                tile: glyph.tile,
+            }],
+            ..Default::default()
+        });
+        for layer in [false, true] {
+            for x in [0.0, 50.0, 100.0, -50.0] {
+                let mut scene = Scene::default();
+                if layer {
+                    scene.push_layer(full_bounds());
+                }
+                let origin = point(sp(x), sp(0.0));
+                scene.insert_prepared_glyph_batch(batch.clone(), origin, mask(), 0.5);
+                let expected = if x == 100.0 {
+                    vec![]
+                } else {
+                    vec![full_bounds() + origin]
+                };
+                assert_eq!(
+                    scene
+                        .monochrome_sprites
+                        .iter()
+                        .map(|s| s.bounds)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(
+                    scene
+                        .subpixel_sprites
+                        .iter()
+                        .map(|s| s.bounds)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(
+                    scene
+                        .polychrome_sprites
+                        .iter()
+                        .map(|s| s.bounds)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+            }
+        }
     }
 
     #[test]
