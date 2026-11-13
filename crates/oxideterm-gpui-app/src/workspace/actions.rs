@@ -624,6 +624,39 @@ mod knowledge_dialog_key_tests {
             assert_eq!(workspace.standard_confirm_focus_owner(), None);
         });
 
+        // Confirming an empty title from the footer must return ownership to the
+        // input instead of leaving neither the input nor the footer focused.
+        cx.update(|_window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.ai_entity.update(cx, |ai, cx| {
+                    assert!(ai.replace_settings_input(
+                        SettingsInput::KnowledgeDocumentTitle,
+                        Some(0..6),
+                        "",
+                        cx,
+                    ));
+                });
+            });
+        });
+        cx.simulate_keystrokes("tab");
+        cx.simulate_keystrokes("tab");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, cx| {
+            assert!(
+                workspace
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_document_dialog_open()
+            );
+            assert_eq!(
+                workspace.ai_entity.read(cx).focused_settings_input(),
+                Some(SettingsInput::KnowledgeDocumentTitle),
+                "an empty title must keep keyboard ownership in the input"
+            );
+            assert_eq!(workspace.standard_confirm_focus_owner(), None);
+        });
+
         cx.simulate_keystrokes("escape");
         cx.run_until_parked();
         workspace.read_with(cx, |workspace, cx| {
@@ -2056,8 +2089,14 @@ impl WorkspaceApp {
                     .trim()
                     .is_empty()
                 {
-                    // Disabled primary buttons retain ownership inside the dialog.
+                    // The primary action is disabled for an empty value; return
+                    // keyboard ownership to the input instead of leaving neither
+                    // the input nor the footer focused.
+                    self.ai_entity.update(cx, |entity, cx| {
+                        entity.focus_settings_input(SettingsInput::KnowledgeCollectionName, cx);
+                    });
                     self.reset_standard_confirm_focus();
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 } else {
                     self.knowledge_create_collection(cx);
@@ -2116,8 +2155,14 @@ impl WorkspaceApp {
                     .trim()
                     .is_empty()
                 {
-                    // Disabled primary buttons retain ownership inside the dialog.
+                    // The primary action is disabled for an empty value; return
+                    // keyboard ownership to the input instead of leaving neither
+                    // the input nor the footer focused.
+                    self.ai_entity.update(cx, |entity, cx| {
+                        entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx);
+                    });
                     self.reset_standard_confirm_focus();
+                    self.show_active_input_caret(cx);
                     cx.notify();
                 } else {
                     if self.knowledge_create_blank_document(cx) {
