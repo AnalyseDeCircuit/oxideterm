@@ -89,9 +89,8 @@ impl EntityInputHandler for TextEditorView {
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if let Some(marked) = self.marked_text.take() {
-            self.cursor
-                .set_selection(Selection::caret(marked.range.start));
-            self.secondary_selections.clear();
+            self.cursor.set_selection(marked.original_selection);
+            self.secondary_selections = marked.original_secondary_selections;
             cx.notify();
         }
     }
@@ -135,10 +134,30 @@ impl EntityInputHandler for TextEditorView {
         let selection = new_selected_range.unwrap_or(text_len..text_len);
         let selection_start = selection.start.min(text_len);
         let selection_end = selection.end.min(text_len).max(selection_start);
-        self.marked_text = (!new_text.is_empty()).then(|| MarkedText {
+        // Repeated preedit updates must retain the selection from before composition,
+        // including its direction and secondary cursors, rather than the temporary caret.
+        let (original_selection, original_secondary_selections) = match self.marked_text.take() {
+            Some(marked) => (
+                marked.original_selection,
+                marked.original_secondary_selections,
+            ),
+            None => (
+                self.cursor.selection(),
+                std::mem::take(&mut self.secondary_selections),
+            ),
+        };
+        if new_text.is_empty() {
+            self.cursor.set_selection(original_selection);
+            self.secondary_selections = original_secondary_selections;
+            cx.notify();
+            return;
+        }
+        self.marked_text = Some(MarkedText {
             text: new_text.to_string(),
             range,
             selection: selection_start..selection_end,
+            original_selection,
+            original_secondary_selections,
         });
         // The buffer cursor must stay on a real buffer boundary while the IME
         // owns a virtual selection inside the preedit text.
@@ -416,5 +435,34 @@ mod tests {
         assert_eq!(utf16_index_to_byte(text, 2), 1);
         assert_eq!(utf16_index_to_byte(text, 3), 5);
         assert_eq!(utf16_slice(text, 1..3), "🚀");
+    }
+
+    #[gpui::test]
+    fn ime_regression_cancel_restores_original_selections(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("abcdef", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                for empty_update in [false, true] {
+                    let original = Selection::new(BufferOffset(3), BufferOffset(1));
+                    let secondary = Selection::caret(BufferOffset(5));
+                    editor.cursor.set_selection(original);
+                    editor.secondary_selections = vec![secondary];
+                    editor.replace_and_mark_text_in_range(None, "zh", Some(2..2), window, cx);
+                    editor.replace_and_mark_text_in_range(None, "zhong", Some(5..5), window, cx);
+                    if empty_update {
+                        editor.replace_and_mark_text_in_range(None, "", None, window, cx);
+                    } else {
+                        editor.unmark_text(window, cx);
+                    }
+                    assert_eq!(editor.buffer.text(), "abcdef");
+                    assert_eq!(editor.cursor.selection(), original);
+                    assert_eq!(editor.secondary_selections, vec![secondary]);
+                }
+                editor.replace_text_in_range(None, "X", window, cx);
+                assert_eq!(editor.buffer.text(), "aXdef");
+            });
+        });
     }
 }

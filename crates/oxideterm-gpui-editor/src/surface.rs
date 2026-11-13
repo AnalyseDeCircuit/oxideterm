@@ -231,6 +231,8 @@ struct MarkedText {
     text: String,
     range: TextRange,
     selection: std::ops::Range<usize>,
+    original_selection: Selection,
+    original_secondary_selections: Vec<Selection>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -658,7 +658,10 @@ impl TextEditorView {
             .filter_map(|column| column.checked_sub(origin.column))
             .collect::<Vec<_>>();
         let marked = self.marked_text.as_ref().filter(|marked| {
-            marked.range.start.0 >= segment_range.start && marked.range.start.0 <= segment_range.end
+            // A wrap boundary belongs to the following row. Only the physical
+            // line's final segment owns its end, including an empty line.
+            segment_range.contains(&marked.range.start.0)
+                || (marked.range.start.0 == segment_range.end && segment_range.end == line_end)
         });
         let marked_text = marked.map(|marked| marked.text.as_str());
         let overlay = row_text_overlay_state(show_cursor, marked_text);
@@ -1149,6 +1152,7 @@ impl TextEditorView {
         window: &mut Window,
     ) -> Div {
         let byte_column = byte_column_for_visual_column(line_text, cursor_column);
+        let segment_start = line_range.start;
         let mut row = div().flex().items_center();
         let mut cursor_drawn = false;
 
@@ -1157,6 +1161,7 @@ impl TextEditorView {
                 if let Some(marked_text) = marked_text {
                     row = row.child(
                         div()
+                            .debug_selector(move || format!("editor-preedit-{segment_start}"))
                             .underline()
                             .text_color(rgb(self.appearance.accent_hex))
                             .child(marked_text.to_string()),
@@ -1182,6 +1187,7 @@ impl TextEditorView {
                 if let Some(marked_text) = marked_text {
                     row = row.child(
                         div()
+                            .debug_selector(move || format!("editor-preedit-{segment_start}"))
                             .underline()
                             .text_color(rgb(self.appearance.accent_hex))
                             .child(marked_text.to_string()),
@@ -1198,6 +1204,7 @@ impl TextEditorView {
             if let Some(marked_text) = marked_text {
                 row = row.child(
                     div()
+                        .debug_selector(move || format!("editor-preedit-{segment_start}"))
                         .underline()
                         .text_color(rgb(self.appearance.accent_hex))
                         .child(marked_text.to_string()),
@@ -1789,6 +1796,47 @@ mod tests {
             end_col,
             is_first: start_col == 0,
             is_folded_header: false,
+        }
+    }
+
+    #[gpui::test]
+    fn ime_regression_preedit_has_one_row_at_wrap_boundary(cx: &mut gpui::TestAppContext) {
+        use gpui::EntityInputHandler;
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor =
+                TextEditorView::new("abcdefghijklmnop", &oxideterm_theme::default_tokens(), cx);
+            editor.settings.soft_wrap = true;
+            editor.settings.soft_wrap_column = Some(8);
+            window.focus(&editor.focus_handle, cx);
+            editor
+        });
+        cx.simulate_resize(gpui::size(px(500.0), px(240.0)));
+        cx.update(|window, app| {
+            window.activate_window();
+            editor.update(app, |editor, cx| {
+                editor
+                    .cursor
+                    .set_selection(Selection::caret(BufferOffset(8)));
+                editor.replace_and_mark_text_in_range(None, "zhong", Some(5..5), window, cx);
+            });
+            window.draw(app).clear(app);
+        });
+        for visible in [true, false] {
+            if !visible {
+                cx.executor()
+                    .advance_clock(crate::surface::EDITOR_CARET_BLINK_INTERVAL);
+                cx.run_until_parked();
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert!(
+                cx.debug_bounds("editor-preedit-0").is_none(),
+                "previous row must not duplicate composition"
+            );
+            assert!(
+                cx.debug_bounds("editor-preedit-8").is_some(),
+                "composition belongs to the continuation row"
+            );
+            assert_eq!(cx.debug_bounds("editor-caret").is_some(), visible);
         }
     }
 
