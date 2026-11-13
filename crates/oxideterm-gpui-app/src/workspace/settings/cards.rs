@@ -746,6 +746,26 @@ impl WorkspaceApp {
         if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
             let key = event.keystroke.key.as_str();
             let modifiers = event.keystroke.modifiers;
+            if matches!(key, "tab" | "enter" | "escape") {
+                match input {
+                    SettingsInput::KnowledgeDocumentTitle => {
+                        if modifiers.platform || modifiers.control {
+                            // A modified Enter is not the dialog's submit gesture;
+                            // keep focus in the title instead of falling through to
+                            // the generic blur path below.
+                            return true;
+                        }
+                        return self.handle_knowledge_document_dialog_key(event, cx);
+                    }
+                    SettingsInput::KnowledgeCollectionName => {
+                        if modifiers.platform || modifiers.control {
+                            return true;
+                        }
+                        return self.handle_knowledge_collection_dialog_key(event, cx);
+                    }
+                    _ => {}
+                }
+            }
             match key {
                 "tab" if input.is_ai_mcp() && self.ai_entity.read(cx).mcp_dialog_is_open() => {
                     if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
