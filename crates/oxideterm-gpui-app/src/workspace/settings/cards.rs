@@ -749,9 +749,18 @@ impl WorkspaceApp {
             if matches!(key, "tab" | "enter" | "escape") {
                 match input {
                     SettingsInput::KnowledgeDocumentTitle => {
+                        if modifiers.platform || modifiers.control {
+                            // A modified Enter is not the dialog's submit gesture;
+                            // keep focus in the title instead of falling through to
+                            // the generic blur path below.
+                            return true;
+                        }
                         return self.handle_knowledge_document_dialog_key(event, cx);
                     }
                     SettingsInput::KnowledgeCollectionName => {
+                        if modifiers.platform || modifiers.control {
+                            return true;
+                        }
                         return self.handle_knowledge_collection_dialog_key(event, cx);
                     }
                     _ => {}
