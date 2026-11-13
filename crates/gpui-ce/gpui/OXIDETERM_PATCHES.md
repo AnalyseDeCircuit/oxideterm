@@ -211,6 +211,10 @@ the restoration when changing blur passes or batch submission.
 compile these at runtime, so the Windows platform check also checks the release
 backend to catch missing generated shader bindings before packaging.
 
+`DirectXRenderer::render_to_image` is available under either `cfg(test)` or
+`test-support`. The renderer's own pixel tests compile in ordinary library test
+builds, even when a test-name filter skips their execution.
+
 ### Native window movement, resizing, and ownership
 
 Windows client-decorated windows perform eight-direction outer-frame hit testing instead of
