@@ -713,11 +713,13 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
 
         match str::from_utf8(&bytes[..plain_chars]) {
             Ok(parsed) => {
-                let batched_lines = plain_chars == num_bytes
-                    && parsed.len() >= MIN_BATCH_LINES_BYTES
-                    && Self::dispatch_ascii_lines(performer, parsed);
-                if !batched_lines {
-                    Self::ground_dispatch(performer, parsed);
+                let batched_bytes = if parsed.len() >= MIN_BATCH_LINES_BYTES {
+                    Self::dispatch_ascii_lines(performer, parsed)
+                } else {
+                    0
+                };
+                if batched_bytes < parsed.len() {
+                    Self::ground_dispatch(performer, &parsed[batched_bytes..]);
                 }
                 let mut processed = plain_chars;
 
@@ -905,18 +907,19 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
     }
 
     #[inline]
-    fn dispatch_ascii_lines<P: Perform>(performer: &mut P, text: &str) -> bool {
-        if !text.ends_with("\r\n") {
-            return false;
-        }
-
+    fn dispatch_ascii_lines<P: Perform>(performer: &mut P, text: &str) -> usize {
         let bytes = text.as_bytes();
+        // A transport read can end anywhere in the last line. Only dispatch the
+        // complete prefix; the remainder must reach the parser without waiting.
+        let Some(last_newline) = memchr::memrchr(b'\n', bytes) else {
+            return 0;
+        };
         let mut line_breaks = 0;
         let mut line_start = 0;
         let mut max_line_length = 0;
         let mut index = 0;
 
-        while index < bytes.len() {
+        while index <= last_newline {
             match bytes[index] {
                 b' '..=b'~' => index += 1,
                 b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
@@ -925,16 +928,16 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
                     index += 2;
                     line_start = index;
                 },
-                _ => return false,
+                _ => break,
             }
         }
 
         if line_breaks < 2 {
-            return false;
+            return 0;
         }
 
-        performer.print_text_lines(text, line_breaks, max_line_length);
-        true
+        performer.print_text_lines(&text[..line_start], line_breaks, max_line_length);
+        line_start
     }
 }
 
@@ -1192,6 +1195,24 @@ mod tests {
         parser.advance(&mut dispatcher, text.as_bytes());
 
         assert_eq!(dispatcher.dispatched, vec![TextDispatch::PrintLines(text)]);
+    }
+
+    #[test]
+    fn complete_lines_stay_batched_before_a_partial_line_or_escape() {
+        let lines = format!("{}\r\n{}\r\n", "a".repeat(64), "b".repeat(64));
+        for suffix in ["tail", "tail\x1b[31m", "tail中"] {
+            let mut dispatcher = TextDispatcher::default();
+            let mut parser = Parser::new();
+            parser.advance(&mut dispatcher, format!("{lines}{suffix}").as_bytes());
+            let mut expected = vec![
+                TextDispatch::PrintLines(lines.clone()),
+                TextDispatch::Print("tail".into()),
+            ];
+            if suffix.ends_with('中') {
+                expected.push(TextDispatch::PrintCharacter('中'));
+            }
+            assert_eq!(dispatcher.dispatched, expected, "suffix={suffix:?}");
+        }
     }
 
     #[test]

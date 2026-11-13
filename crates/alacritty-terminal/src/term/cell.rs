@@ -42,6 +42,10 @@ bitflags! {
 /// Counter for hyperlinks without explicit ID.
 static HYPERLINK_ID_SUFFIX: AtomicU32 = AtomicU32::new(0);
 
+// Combining input does not advance the cursor, so neither screen size nor the
+// scrollback limit bounds its allocation. Retain the first 1 KiB of scalars.
+const MAX_ZEROWIDTH_CHARS: usize = 256;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct Hyperlink {
@@ -165,6 +169,13 @@ impl Cell {
     /// Write a new zerowidth character to this cell.
     #[inline]
     pub fn push_zerowidth(&mut self, character: char) {
+        if self
+            .extra
+            .as_ref()
+            .is_some_and(|extra| extra.zerowidth.len() >= MAX_ZEROWIDTH_CHARS)
+        {
+            return;
+        }
         let extra = self.extra.get_or_insert(Default::default());
         Arc::make_mut(extra).zerowidth.push(character);
     }
@@ -313,6 +324,22 @@ mod tests {
 
         // Ensure that cell size isn't growing by accident.
         assert!(mem::size_of::<Cell>() <= EXPECTED_CELL_SIZE);
+    }
+
+    #[test]
+    fn combining_input_is_bounded_without_changing_shared_cells() {
+        let mut cell = Cell { c: 'e', ..Cell::default() };
+        cell.push_zerowidth('\u{301}');
+        let previous = cell.clone();
+        for _ in 0..4096 {
+            cell.push_zerowidth('\u{308}');
+        }
+        let expected: Vec<_> = std::iter::once('\u{301}')
+            .chain(std::iter::repeat_n('\u{308}', 255))
+            .collect();
+        assert_eq!(cell.zerowidth(), Some(expected.as_slice()));
+        assert_eq!(previous.zerowidth(), Some(&['\u{301}'][..]));
+        assert_eq!(cell.c, 'e');
     }
 
     #[test]

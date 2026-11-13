@@ -153,6 +153,10 @@ impl TerminalSessionBackend for LocalPtySession {
         self.apply_resize(resize)
     }
 
+    fn request_resize(&mut self, resize: TerminalResize) -> Result<()> {
+        LocalPtySession::request_resize(self, resize)
+    }
+
     fn scroll_lines(&mut self, delta: i32) {
         LocalPtySession::scroll_lines(self, delta);
     }

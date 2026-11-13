@@ -821,6 +821,87 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn queued_local_resize_does_not_wait_for_the_grid_and_reflows_before_acknowledging() {
+        let config = crate::LocalPtyConfig {
+            shell: Some(
+                crate::ShellInfo::new("resize-test", "Test", "/bin/sh")
+                    .with_args(vec!["-c".into(), "read line".into()]),
+            ),
+            load_profile: false,
+            ..Default::default()
+        };
+        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+            20,
+            4,
+            config,
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .unwrap();
+        let previous = session.snapshot();
+        let term = session.term.clone();
+        let mut guard = term.lock_unfair();
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut *guard, b"abcdefghijklmnop");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let caller = std::thread::spawn(move || {
+            session
+                .request_resize(TerminalResize::new(15, 4, 8, 16))
+                .unwrap();
+            session
+                .request_resize(TerminalResize::new(10, 4, 8, 16))
+                .unwrap();
+            tx.send(session.try_render_snapshot(&previous, false))
+                .unwrap();
+            (session, previous)
+        });
+        let accepted = rx.recv_timeout(std::time::Duration::from_millis(100));
+        drop(guard);
+        let (mut session, previous) = caller.join().unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let next = loop {
+            if let Some(snapshot) = session.try_render_snapshot(&previous, true) {
+                break Some(snapshot.0);
+            }
+            if std::time::Instant::now() >= deadline {
+                break None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        assert!(
+            matches!(accepted, Ok(None)),
+            "resize blocked on the grid or acknowledged it before reflow"
+        );
+        let next = next.expect("worker did not acknowledge the latest resize");
+        assert_eq!((next.cols, next.rows), (10, 4));
+        // Reflow may move the beginning of the logical line into scrollback.
+        let contents = session.snapshot_with_display_offset(
+            next.scrollback_lines,
+            next.rows + next.scrollback_lines,
+        );
+        session.shutdown();
+        assert_eq!(
+            contents.lines[0]
+                .cells
+                .iter()
+                .map(|cell| cell.ch)
+                .collect::<String>(),
+            "abcdefghij"
+        );
+        assert_eq!(
+            contents.lines[1]
+                .cells
+                .iter()
+                .take(6)
+                .map(|cell| cell.ch)
+                .collect::<String>(),
+            "klmnop"
+        );
+    }
+
     #[test]
     fn terminal_resize_request_clamps_to_minimum_grid() {
         let resize = TerminalResize::new(0, 1, 12, 24);

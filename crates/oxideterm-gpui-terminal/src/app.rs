@@ -5033,7 +5033,7 @@ impl TerminalPane {
             let mut terminal = self.terminal.lock();
             if !submitted
                 && terminal
-                    .resize_with_cell_size(cols, rows, cell_width_px, cell_height_px)
+                    .request_resize(cols, rows, cell_width_px, cell_height_px)
                     .is_err()
             {
                 // Backpressure must not discard the latest measured geometry.

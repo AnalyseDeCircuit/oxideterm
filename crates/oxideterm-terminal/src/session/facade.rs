@@ -791,6 +791,18 @@ impl TerminalSession {
         self.backend.scroll_lines(delta);
     }
 
+    /// Queue UI geometry without requiring a synchronous local-history reflow.
+    pub fn request_resize(
+        &mut self,
+        cols: usize,
+        rows: usize,
+        cell_width: u16,
+        cell_height: u16,
+    ) -> Result<()> {
+        self.backend
+            .request_resize(TerminalResize::new(cols, rows, cell_width, cell_height))
+    }
+
     pub fn scroll_lines_snapshot_incremental(
         &mut self,
         delta: i32,

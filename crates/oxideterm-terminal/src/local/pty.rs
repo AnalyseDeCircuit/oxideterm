@@ -10,6 +10,8 @@ pub struct LocalPtySession {
     pending_events: Vec<TerminalEvent>,
     io_thread: Option<JoinHandle<()>>,
     size: TerminalSize,
+    resize_requested: u64,
+    resize_completed: Arc<std::sync::atomic::AtomicU64>,
     title: Option<String>,
     lifecycle: TerminalLifecycle,
     process: ProcessState,
@@ -264,6 +266,8 @@ impl LocalPtySession {
             io_thread: Some(io_thread),
             size,
             title: None,
+            resize_requested: 0,
+            resize_completed: Arc::new(std::sync::atomic::AtomicU64::new(0)),
             lifecycle: TerminalLifecycle::Running,
             process,
             launch_shell: shell,
@@ -847,11 +851,12 @@ impl LocalPtySession {
             && next.rows == self.size.rows
             && next.cell_width == self.size.cell_width
             && next.cell_height == self.size.cell_height
+            && !self.resize_pending()
         {
             return Ok(());
         }
 
-        if next.cols != self.size.cols || next.rows != self.size.rows {
+        if self.resize_pending() || next.cols != self.size.cols || next.rows != self.size.rows {
             self.term.lock().resize(next);
         }
         self.notifier.on_resize(window_size(next));
@@ -859,6 +864,34 @@ impl LocalPtySession {
             self.write_control_bytes(command, None)?;
         }
         self.size = next;
+        Ok(())
+    }
+
+    fn resize_pending(&self) -> bool {
+        self.resize_completed
+            .load(std::sync::atomic::Ordering::Acquire)
+            != self.resize_requested
+    }
+
+    fn request_resize(&mut self, resize: TerminalResize) -> Result<()> {
+        let next = TerminalSize {
+            cols: resize.cols,
+            rows: resize.rows,
+            cell_width: resize.cell_width,
+            cell_height: resize.cell_height,
+        };
+        let sequence = self.resize_requested.wrapping_add(1);
+        self.notifier
+            .0
+            .send(crate::local_graphics_event_loop::LocalGraphicsMsg::Resize(
+                window_size(next),
+                Some((sequence, self.resize_completed.clone())),
+            ))?;
+        self.resize_requested = sequence;
+        self.size = next;
+        if let Some(command) = self.tmux_display.resize_command(next.cols, next.rows) {
+            self.write_control_bytes(command, None)?;
+        }
         Ok(())
     }
 
@@ -995,6 +1028,9 @@ impl LocalPtySession {
         Option<crate::TerminalSelectionRange>,
         TermMode,
     )> {
+        if self.resize_pending() {
+            return None;
+        }
         // The tmux compositor owns multiple grids and retains its existing snapshot contract.
         if self.tmux_display.is_active() {
             return Some((

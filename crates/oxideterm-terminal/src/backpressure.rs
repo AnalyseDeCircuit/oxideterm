@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use std::{
-    borrow::Cow,
     collections::VecDeque,
     sync::{Arc, Condvar, Mutex, MutexGuard},
     time::Duration,
@@ -385,38 +384,50 @@ pub(crate) struct Utf8ResidualGuard {
     residual: Vec<u8>,
 }
 
+pub(crate) struct Utf8Output<'a> {
+    prefix: [u8; UTF8_RESIDUAL_MAX_BYTES],
+    prefix_len: usize,
+    remaining: &'a [u8],
+}
+
+impl Utf8Output<'_> {
+    pub(crate) fn chunks(&self) -> impl Iterator<Item = &[u8]> {
+        [&self.prefix[..self.prefix_len], self.remaining]
+            .into_iter()
+            .filter(|bytes| !bytes.is_empty())
+    }
+}
+
 impl Utf8ResidualGuard {
-    pub(crate) fn push<'a>(&mut self, bytes: &'a [u8]) -> Option<Cow<'a, [u8]>> {
-        if bytes.is_empty() && self.residual.is_empty() {
-            return None;
-        }
-
-        if self.residual.is_empty() {
-            let split = split_before_incomplete_utf8_tail(bytes);
-            if split < bytes.len() {
-                // Retain only the incomplete scalar instead of copying the complete chunk.
-                self.residual.extend_from_slice(&bytes[split..]);
-            }
-            return (split > 0).then(|| Cow::Borrowed(&bytes[..split]));
-        }
-
-        let mut combined = Vec::with_capacity(self.residual.len() + bytes.len());
-        combined.extend_from_slice(&self.residual);
-        combined.extend_from_slice(bytes);
-        self.residual.clear();
-
-        let split = split_before_incomplete_utf8_tail(&combined);
-        if split < combined.len() {
-            self.residual.extend_from_slice(&combined[split..]);
-            combined.truncate(split);
-        }
-
-        if self.residual.len() >= UTF8_RESIDUAL_MAX_BYTES {
-            combined.extend_from_slice(&self.residual);
+    pub(crate) fn push<'a>(&mut self, bytes: &'a [u8]) -> Utf8Output<'a> {
+        let mut output = Utf8Output {
+            prefix: [0; UTF8_RESIDUAL_MAX_BYTES],
+            prefix_len: 0,
+            remaining: &[],
+        };
+        let mut consumed = 0;
+        if !self.residual.is_empty() {
+            let retained = self.residual.len();
+            let taken = bytes.len().min(UTF8_RESIDUAL_MAX_BYTES - retained);
+            output.prefix[..retained].copy_from_slice(&self.residual);
+            output.prefix[retained..retained + taken].copy_from_slice(&bytes[..taken]);
+            let len = retained + taken;
+            let split = split_before_incomplete_utf8_tail(&output.prefix[..len]);
             self.residual.clear();
+            if split == 0 {
+                self.residual.extend_from_slice(&output.prefix[..len]);
+                return output;
+            }
+            output.prefix_len = split;
+            // A new incomplete scalar in this small prefix still belongs to
+            // the borrowed input; let it join the rest without copying the block.
+            consumed = taken - (len - split);
         }
-
-        (!combined.is_empty()).then_some(Cow::Owned(combined))
+        let remaining = &bytes[consumed..];
+        let split = split_before_incomplete_utf8_tail(remaining);
+        self.residual.extend_from_slice(&remaining[split..]);
+        output.remaining = &remaining[..split];
+        output
     }
 
     pub(crate) fn flush(&mut self) -> Option<Vec<u8>> {
@@ -557,10 +568,15 @@ mod tests {
         for text in ["你", "😀"] {
             for split in 1..text.len() {
                 let mut guard = Utf8ResidualGuard::default();
-                assert_eq!(guard.push(&text.as_bytes()[..split]), None);
+                assert_eq!(guard.push(&text.as_bytes()[..split]).chunks().count(), 0);
                 assert_eq!(
-                    guard.push(&text.as_bytes()[split..]).as_deref(),
-                    Some(text.as_bytes())
+                    guard
+                        .push(&text.as_bytes()[split..])
+                        .chunks()
+                        .flatten()
+                        .copied()
+                        .collect::<Vec<_>>(),
+                    text.as_bytes()
                 );
             }
         }
@@ -576,12 +592,63 @@ mod tests {
         ] {
             let mut guard = Utf8ResidualGuard::default();
             let output = guard.push(bytes);
-            assert_eq!(output.as_deref(), emitted, "{bytes:?}");
+            let joined: Vec<_> = output.chunks().flatten().copied().collect();
+            assert_eq!(joined.as_slice(), emitted.unwrap_or_default(), "{bytes:?}");
             if must_borrow {
-                assert!(matches!(output, Some(Cow::Borrowed(_))));
+                assert_eq!(output.remaining.as_ptr(), bytes.as_ptr());
             }
             assert_eq!(guard.flush().as_deref(), residual, "{bytes:?}");
             assert_eq!(guard.flush(), None);
+        }
+    }
+
+    #[test]
+    fn utf8_guard_borrows_the_large_suffix_after_a_split_character() {
+        let mut guard = Utf8ResidualGuard::default();
+        assert_eq!(guard.push(&[0xe4, 0xbd]).chunks().count(), 0);
+        let mut next = vec![0xa0];
+        next.extend_from_slice(&[b'x'; 8192]);
+        next.extend_from_slice(&[0xf0, 0x9f]);
+        let output = guard.push(&next);
+        assert_eq!(output.remaining.as_ptr(), next[2..].as_ptr());
+        assert_eq!(output.remaining, &next[2..next.len() - 2]);
+        let joined: Vec<_> = output.chunks().flatten().copied().collect();
+        assert_eq!(joined, ["你".as_bytes(), &[b'x'; 8192]].concat());
+        assert_eq!(
+            guard
+                .push(&[0x98, 0x80])
+                .chunks()
+                .flatten()
+                .copied()
+                .collect::<Vec<_>>(),
+            "😀".as_bytes()
+        );
+    }
+
+    #[test]
+    fn utf8_guard_preserves_bytes_and_complete_scalars_across_small_reads() {
+        for input in [
+            "你😀\x1b[31m末尾".as_bytes(),
+            b"\xe4\xbd\xf0\x9f\x98\x80x",
+            b"\xff\xe4\xbd",
+        ] {
+            for width in 1..=5 {
+                let mut guard = Utf8ResidualGuard::default();
+                let mut actual = Vec::new();
+                for part in input.chunks(width) {
+                    for chunk in guard.push(part).chunks() {
+                        if std::str::from_utf8(input).is_ok() {
+                            assert!(
+                                std::str::from_utf8(chunk).is_ok(),
+                                "split a complete scalar"
+                            );
+                        }
+                        actual.extend_from_slice(chunk);
+                    }
+                }
+                actual.extend(guard.flush().unwrap_or_default());
+                assert_eq!(actual, input, "width={width}");
+            }
         }
     }
 

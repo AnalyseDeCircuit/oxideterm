@@ -64,7 +64,7 @@ pub(crate) enum LocalGraphicsMsg {
     Input(Cow<'static, [u8]>),
     ControlInput(Cow<'static, [u8]>, Option<crate::tmux::ExternalReply>),
     Shutdown,
-    Resize(WindowSize),
+    Resize(WindowSize, Option<(u64, Arc<std::sync::atomic::AtomicU64>)>),
     SetEncoding(TerminalEncoding),
     SetPalette(TerminalPalette),
     SetOutputProcessor(Option<TerminalOutputProcessor>),
@@ -278,21 +278,23 @@ where
     ) -> (usize, bool) {
         let processed_output = state.process_output(bytes);
         let processed_output = processed_output.as_ref();
-        state
-            .utf8_guard
-            .push(processed_output)
-            .map(|guarded| {
-                Self::advance_guarded_bytes(
-                    state,
-                    terminal,
-                    &guarded,
-                    size,
-                    magic_tx,
-                    event_tx,
-                    graphics_tx,
-                )
-            })
-            .unwrap_or_default()
+        let guarded = state.utf8_guard.push(processed_output);
+        let mut parsed = 0;
+        let mut changed = false;
+        for bytes in guarded.chunks() {
+            let (count, next_changed) = Self::advance_guarded_bytes(
+                state,
+                terminal,
+                bytes,
+                size,
+                magic_tx,
+                event_tx,
+                graphics_tx,
+            );
+            parsed += count;
+            changed |= next_changed;
+        }
+        (parsed, changed)
     }
 
     fn advance_processed_output(
@@ -451,7 +453,19 @@ where
                 LocalGraphicsMsg::ControlInput(input, reply) => {
                     state.push_external_tmux_write(input, reply);
                 }
-                LocalGraphicsMsg::Resize(window_size) => {
+                LocalGraphicsMsg::Resize(mut window_size, mut completion) => {
+                    // Only adjacent resizes can supersede one another; input and
+                    // protocol controls keep their position in the command stream.
+                    while matches!(self.rx.peek(), Some(LocalGraphicsMsg::Resize(..))) {
+                        let Some(LocalGraphicsMsg::Resize(next, next_completion)) = self.rx.recv()
+                        else {
+                            unreachable!()
+                        };
+                        window_size = next;
+                        if next_completion.is_some() {
+                            completion = next_completion;
+                        }
+                    }
                     let grid_changed = self.size.cols != window_size.num_cols as usize
                         || self.size.rows != window_size.num_lines as usize;
                     self.size = TerminalSize {
@@ -460,13 +474,16 @@ where
                         cell_width: window_size.cell_width,
                         cell_height: window_size.cell_height,
                     };
-                    if grid_changed {
-                        state.shell_integration.reflow_command_marks(
-                            &self.terminal.lock(),
-                            |event| {
+                    {
+                        let mut terminal = self.terminal.lock();
+                        terminal.resize(self.size);
+                        // Synchronous callers may already have resized the grid,
+                        // including a round trip back to the worker's current size.
+                        state
+                            .shell_integration
+                            .reflow_command_marks(&terminal, |event| {
                                 let _ = self.event_tx.send(event);
-                            },
-                        );
+                            });
                     }
                     self.pty.on_resize(window_size);
                     let changes = state.graphics.synchronize_grid();
@@ -483,6 +500,10 @@ where
                     if let Some(controller) = state.tmux_controller.as_mut() {
                         controller.resize(self.size);
                     }
+                    if let Some((sequence, completed)) = completion {
+                        completed.store(sequence, std::sync::atomic::Ordering::Release);
+                    }
+                    self.event_proxy.send_event(Event::Wakeup);
                 }
                 LocalGraphicsMsg::SetEncoding(encoding) => {
                     state.set_encoding(encoding);
@@ -1050,7 +1071,7 @@ impl Notify for LocalGraphicsNotifier {
 
 impl OnResize for LocalGraphicsNotifier {
     fn on_resize(&mut self, window_size: WindowSize) {
-        let _ = self.0.send(LocalGraphicsMsg::Resize(window_size));
+        let _ = self.0.send(LocalGraphicsMsg::Resize(window_size, None));
     }
 }
 

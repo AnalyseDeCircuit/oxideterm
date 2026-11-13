@@ -441,12 +441,6 @@ impl TerminalSearchSource {
         if result.cols != self.cols || result.matches.is_empty() {
             return Vec::new();
         }
-        let term = self.term.lock();
-        if term.columns() != result.cols {
-            return Vec::new();
-        }
-        let top = -(term.total_lines().saturating_sub(term.screen_lines()) as i32);
-        let bottom = term.screen_lines() as i32;
         let row_count = result.rows.len();
         let context_required = result.context_required;
         let context_bounds = |first: usize, last: usize| {
@@ -470,6 +464,12 @@ impl TerminalSearchSource {
             .filter(|(_, needed)| **needed)
             .map(|(row, _)| (row.identity, None))
             .collect();
+        let term = self.term.lock();
+        if term.columns() != result.cols {
+            return Vec::new();
+        }
+        let top = -(term.total_lines().saturating_sub(term.screen_lines()) as i32);
+        let bottom = term.screen_lines() as i32;
         for line in top..bottom {
             if let Some(position) = positions.get_mut(&term.grid()[Line(line)].identity()) {
                 *position = Some(line);
@@ -502,6 +502,9 @@ impl TerminalSearchSource {
                     .then_some(line)
             })
             .collect::<Vec<_>>();
+        // All positions and boundary checks below refer to this captured revision.
+        // Constructing, sorting and dropping potentially large result sets needs no grid lock.
+        drop(term);
         let mut matches: Vec<_> = result
             .matches
             .into_iter()

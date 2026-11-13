@@ -380,11 +380,11 @@ fn benchmark_terminal_input_breakdown(criterion: &mut Criterion) {
             },
         );
         if matches!(name, "plain" | "crlf-ascii") {
-            let mut scalar_dispatch_corpus = corpus.clone();
-            scalar_dispatch_corpus.push(b'x');
+            let mut partial_tail_corpus = corpus.clone();
+            partial_tail_corpus.push(b'x');
             group.bench_with_input(
-                BenchmarkId::new("grid-scalar-dispatch", name),
-                &scalar_dispatch_corpus,
+                BenchmarkId::new("grid-partial-tail", name),
+                &partial_tail_corpus,
                 |bencher, corpus| {
                     bencher.iter_batched(
                         || (Processor::<StdSyncHandler>::new(), benchmark_term()),

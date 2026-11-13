@@ -284,6 +284,9 @@ pub trait TerminalSessionBackend: Send {
     }
     fn set_focused(&mut self, focused: bool) -> Result<()>;
     fn resize_with_cell_size(&mut self, resize: TerminalResize) -> Result<()>;
+    fn request_resize(&mut self, resize: TerminalResize) -> Result<()> {
+        self.resize_with_cell_size(resize)
+    }
     fn scroll_lines(&mut self, delta: i32);
     fn scroll_lines_snapshot_incremental(
         &mut self,

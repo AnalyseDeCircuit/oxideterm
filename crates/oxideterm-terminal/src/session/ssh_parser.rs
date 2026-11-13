@@ -345,8 +345,8 @@ impl SshParser {
 
     pub(super) fn feed_plain_transport_output_to_terminal(&mut self, bytes: &[u8]) {
         if self.encoding.is_utf8() {
-            if let Some(bytes) = self.utf8_guard.push(bytes) {
-                self.advance_plain_transport_output(&bytes);
+            for bytes in self.utf8_guard.push(bytes).chunks() {
+                self.advance_plain_transport_output(bytes);
             }
         } else {
             self.advance_plain_transport_output(bytes);
