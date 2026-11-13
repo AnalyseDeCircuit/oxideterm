@@ -1774,7 +1774,7 @@ fn tool_definitions() -> Vec<ToolDefinition> {
         ),
         define_tool::<ResizeTerminalArgs>(
             "terminals_resize",
-            "Resize the live terminal grid using its current cell metrics.",
+            "Resize the live terminal grid using its current cell metrics. Measured panes limit the requested dimensions to their viewport capacity; the response reports the accepted dimensions.",
             ToolGroup::TerminalSession,
             false,
             false,

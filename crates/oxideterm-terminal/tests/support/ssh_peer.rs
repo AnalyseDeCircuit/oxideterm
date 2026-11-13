@@ -9,6 +9,7 @@ use tokio::runtime::Runtime;
 struct Peer {
     ready: crossbeam_channel::Sender<(server::Handle, ChannelId)>,
     input: crossbeam_channel::Sender<(Vec<u8>, Instant)>,
+    resize: crossbeam_channel::Sender<(u32, u32)>,
     forwards: std::collections::HashSet<ChannelId>,
     auth_delay: Duration,
     #[cfg(target_os = "macos")]
@@ -69,6 +70,18 @@ impl server::Handler for Peer {
         self.sessions.remove(&channel);
         session.channel_success(channel)?;
         self.ready.send((session.handle(), channel)).unwrap();
+        Ok(())
+    }
+    async fn window_change_request(
+        &mut self,
+        _: ChannelId,
+        cols: u32,
+        rows: u32,
+        _: u32,
+        _: u32,
+        _: &mut server::Session,
+    ) -> Result<(), Self::Error> {
+        let _ = self.resize.send((cols, rows));
         Ok(())
     }
     #[cfg(target_os = "macos")]
@@ -144,6 +157,9 @@ pub struct SshPeer {
     pub registry: oxideterm_ssh::SshConnectionRegistry,
     pub ready: crossbeam_channel::Receiver<(server::Handle, ChannelId)>,
     pub input: crossbeam_channel::Receiver<(Vec<u8>, Instant)>,
+    // The shared fixture is also compiled by domain suites that do not bridge a real PTY.
+    #[allow(dead_code)]
+    pub resize: crossbeam_channel::Receiver<(u32, u32)>,
     task: tokio::task::JoinHandle<()>,
 }
 impl SshPeer {
@@ -170,6 +186,7 @@ impl SshPeer {
         });
         let (ready_tx, ready_rx) = crossbeam_channel::unbounded();
         let (input_tx, input) = crossbeam_channel::unbounded();
+        let (resize_tx, resize) = crossbeam_channel::unbounded();
         let server = runtime.spawn(async move {
             let (socket, _) = listener.accept().await.unwrap();
             // Startup-cancellation tests can close before key exchange finishes.
@@ -179,6 +196,7 @@ impl SshPeer {
                 Peer {
                     ready: ready_tx,
                     input: input_tx,
+                    resize: resize_tx,
                     forwards: Default::default(),
                     auth_delay,
                     #[cfg(target_os = "macos")]
@@ -206,6 +224,7 @@ impl SshPeer {
             registry,
             ready: ready_rx,
             input,
+            resize,
             task: server,
         }
     }

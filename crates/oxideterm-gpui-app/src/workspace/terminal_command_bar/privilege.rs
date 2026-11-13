@@ -903,8 +903,14 @@ impl WorkspaceApp {
             .panel
             .available_height
             .clone();
+        let sender_available_height = self
+            .terminal_command_sender
+            .read(cx)
+            .available_height
+            .clone();
         div()
             .size_full()
+            .relative()
             .flex()
             .flex_col()
             .child(
@@ -933,15 +939,29 @@ impl WorkspaceApp {
             // The toolbar is the sender header. Hidden, compact, and expanded
             // layouts all retain the same document and running jobs below it.
             .child(self.render_terminal_command_sender_panel(window, cx))
+            // Measure the parent budget even when fixed-height children overflow it.
+            .child(div().absolute().inset_0())
             .on_children_prepainted(move |bounds, window, _| {
-                // Only the terminal and dock share this budget; all other rows have already
-                // consumed their actual layout heights, including an optional quick bar.
-                if bounds.len() >= 4 {
-                    let available =
-                        f32::from(bounds[0].size.height + bounds[bounds.len() - 2].size.height);
-                    if (panel_available_height.get() - available).abs() > 0.5 {
-                        panel_available_height.set(available);
-                        window.refresh();
+                if bounds.len() >= 5 {
+                    let surface_height = f32::from(bounds.last().unwrap().size.height);
+                    let rows = &bounds[1..bounds.len() - 1];
+                    let fixed_height: f32 = rows.iter().map(|row| f32::from(row.size.height)).sum();
+                    for (budget, own_height) in [
+                        (
+                            &panel_available_height,
+                            bounds[bounds.len() - 3].size.height,
+                        ),
+                        (
+                            &sender_available_height,
+                            bounds[bounds.len() - 2].size.height,
+                        ),
+                    ] {
+                        let available =
+                            (surface_height - fixed_height + f32::from(own_height)).max(0.0);
+                        if (budget.get() - available).abs() > 0.5 {
+                            budget.set(available);
+                            window.refresh();
+                        }
                     }
                 }
             })

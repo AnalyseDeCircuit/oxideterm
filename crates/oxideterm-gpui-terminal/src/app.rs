@@ -675,6 +675,7 @@ pub struct TerminalPane {
     last_pty_resize: Option<(usize, usize, u16, u16)>,
     pending_pty_resize: Option<(usize, usize, u16, u16)>,
     pty_resize_generation: u64,
+    pty_resize_task: Option<gpui::Task<()>>,
     trzsz_state: Arc<TrzszState>,
     trzsz_owner_id: String,
     trzsz_audit_connection_lost: Arc<std::sync::atomic::AtomicBool>,
@@ -1483,6 +1484,7 @@ impl TerminalPane {
             last_pty_resize: None,
             pending_pty_resize: None,
             pty_resize_generation: 0,
+            pty_resize_task: None,
             trzsz_state: TrzszState::new(),
             trzsz_owner_id,
             trzsz_audit_connection_lost: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -2259,6 +2261,7 @@ impl TerminalPane {
         self.metrics_dirty |= metrics_changed;
         self.last_pty_resize = None;
         self.pending_pty_resize = None;
+        self.pty_resize_task = None;
         self.viewport_scale_factor_bits = None;
         self.reset_cursor_blink();
         self.wake_terminal_scheduler();
@@ -4134,6 +4137,9 @@ impl TerminalPane {
                 cx.emit(TerminalPaneEvent::CurrentDirectoryChanged);
                 self.title = String::new().into();
                 self.last_pty_resize = None;
+                self.pending_pty_resize = None;
+                self.pty_resize_task = None;
+                self.viewport_scale_factor_bits = None;
                 self.snapshot_dirty = true;
                 TerminalEventEffect::notify()
             }
@@ -4901,6 +4907,30 @@ impl TerminalPane {
         }
         self.bounds = Some(bounds);
         self.viewport_scale_factor_bits = Some(scale_factor.to_bits());
+        let resize = self.grid_size_for_viewport(bounds, scale_factor);
+
+        if self.last_pty_resize == Some(resize)
+            && (self.snapshot.cols, self.snapshot.rows) == (resize.0, resize.1)
+        {
+            // Returning to the settled viewport must discard any intermediate animation size.
+            self.pending_pty_resize = None;
+            self.pty_resize_task = None;
+            return;
+        }
+        if self.pending_pty_resize == Some(resize) {
+            return;
+        }
+
+        self.pending_pty_resize = Some(resize);
+        self.pty_resize_generation = self.pty_resize_generation.wrapping_add(1);
+        self.schedule_pty_resize(cx);
+    }
+
+    fn grid_size_for_viewport(
+        &self,
+        bounds: Bounds<Pixels>,
+        scale_factor: f32,
+    ) -> (usize, usize, u16, u16) {
         let cell_width = self.metrics.cell_width_f32();
         let line_height = self.metrics.line_height_f32();
         let width = terminal_grid_span_for_viewport(
@@ -4914,27 +4944,32 @@ impl TerminalPane {
         let rows = whole_cells_in_span(height, line_height).max(2);
         let cell_width_px = (cell_width * scale_factor).ceil().max(1.0) as u16;
         let cell_height_px = (line_height * scale_factor).ceil().max(1.0) as u16;
-        let resize = (cols, rows, cell_width_px, cell_height_px);
+        (cols, rows, cell_width_px, cell_height_px)
+    }
 
-        if self.last_pty_resize == Some(resize) {
-            // Returning to the settled viewport must discard any intermediate animation size.
-            self.pending_pty_resize = None;
-            return;
-        }
-        if self.pending_pty_resize == Some(resize) {
-            return;
-        }
-
-        self.pending_pty_resize = Some(resize);
-        self.pty_resize_generation = self.pty_resize_generation.wrapping_add(1);
+    fn schedule_pty_resize(&mut self, cx: &mut Context<Self>) {
         let generation = self.pty_resize_generation;
-        cx.spawn(async move |weak, cx| {
-            cx.background_executor().timer(PTY_RESIZE_DEBOUNCE).await;
-            let _ = weak.update(cx, |view, cx| {
-                view.flush_pending_pty_resize(generation, cx);
-            });
-        })
-        .detach();
+        // The pane owns this retry/acknowledgement loop. Replacing the target, changing
+        // preferences, or dropping the pane cancels it without touching the shared node.
+        self.pty_resize_task = Some(cx.spawn(async move |weak, cx| {
+            loop {
+                cx.background_executor().timer(PTY_RESIZE_DEBOUNCE).await;
+                let retry = weak.update(cx, |view, cx| {
+                    if generation != view.pty_resize_generation {
+                        return false;
+                    }
+                    if view.terminal_exited {
+                        view.pending_pty_resize = None;
+                        return false;
+                    }
+                    view.flush_pending_pty_resize(generation, cx);
+                    view.pending_pty_resize.is_some()
+                });
+                if !matches!(retry, Ok(true)) {
+                    break;
+                }
+            }
+        }));
     }
 
     pub fn resize_grid(
@@ -4942,7 +4977,7 @@ impl TerminalPane {
         cols: usize,
         rows: usize,
         cx: &mut Context<Self>,
-    ) -> Result<(), String> {
+    ) -> Result<(usize, usize), String> {
         // Preserve the pane's measured cell size while changing only the requested grid.
         let (_, _, cell_width_px, cell_height_px) = self.last_pty_resize.unwrap_or_else(|| {
             (
@@ -4952,27 +4987,41 @@ impl TerminalPane {
                 self.metrics.line_height_f32().ceil().max(1.0) as u16,
             )
         });
+        // A mounted pane cannot expose rows below its physical viewport through
+        // scrollback. Headless/new panes retain the caller's initial geometry.
+        let (cols, rows) = self.bounds.map_or((cols, rows), |bounds| {
+            let (visible_cols, visible_rows, _, _) = self.grid_size_for_viewport(
+                bounds,
+                self.viewport_scale_factor_bits.map_or(1.0, f32::from_bits),
+            );
+            (cols.min(visible_cols), rows.min(visible_rows))
+        });
         let requested = (cols, rows, cell_width_px, cell_height_px);
-        self.pending_pty_resize = Some(requested);
-        self.pty_resize_generation = self.pty_resize_generation.wrapping_add(1);
+        let previous_pending = self.pending_pty_resize.replace(requested);
         self.flush_pending_pty_resize(self.pty_resize_generation, cx);
-        (self.last_pty_resize == Some(requested))
-            .then_some(())
-            .ok_or_else(|| "The terminal backend rejected the requested grid size.".to_string())
+        if self.last_pty_resize != Some(requested) {
+            // Rejected external requests must not outlive their failure response or
+            // replace a pending layout update. Its existing retry task still owns that target.
+            self.pending_pty_resize = previous_pending;
+            return Err("The terminal backend rejected the requested grid size.".to_string());
+        }
+        self.pty_resize_generation = self.pty_resize_generation.wrapping_add(1);
+        self.pty_resize_task = None;
+        if self.pending_pty_resize.is_some() {
+            self.schedule_pty_resize(cx);
+        }
+        Ok((cols, rows))
     }
 
     fn flush_pending_pty_resize(&mut self, generation: u64, cx: &mut Context<Self>) {
         if generation != self.pty_resize_generation {
             return;
         }
-        let Some((cols, rows, cell_width_px, cell_height_px)) = self.pending_pty_resize.take()
-        else {
+        let Some((cols, rows, cell_width_px, cell_height_px)) = self.pending_pty_resize else {
             return;
         };
         let resize = (cols, rows, cell_width_px, cell_height_px);
-        if self.last_pty_resize == Some(resize) {
-            return;
-        }
+        let submitted = self.last_pty_resize == Some(resize);
         // The displayed snapshot can lag an accepted resize. A cell-metric-only
         // update must not wait for a second reflow event that the backend won't emit.
         let grid_changed = self.last_pty_resize.map_or(
@@ -4980,28 +5029,46 @@ impl TerminalPane {
             |(previous_cols, previous_rows, _, _)| (previous_cols, previous_rows) != (cols, rows),
         );
 
-        let next_snapshot = {
+        let next = {
             let mut terminal = self.terminal.lock();
-            terminal
-                .resize_with_cell_size(cols, rows, cell_width_px, cell_height_px)
-                .is_ok()
-                .then(|| terminal.snapshot())
+            if !submitted
+                && terminal
+                    .resize_with_cell_size(cols, rows, cell_width_px, cell_height_px)
+                    .is_err()
+            {
+                // Backpressure must not discard the latest measured geometry.
+                return;
+            }
+            // Resize acceptance only queues work for SSH. Never wait for its
+            // parser lock on the UI thread, including on acknowledgement retries.
+            terminal.try_render_snapshot(&self.snapshot, true)
         };
-        if let Some(snapshot) = next_snapshot {
+        if !submitted {
+            // Remember acceptance even if the parser is busy, so retries only
+            // observe the grid instead of enqueueing the same resize again.
             self.last_pty_resize = Some(resize);
             if let Some(recorder) = self.recorder.as_mut() {
                 recorder.record_resize(cols, rows);
             }
-            self.clear_smooth_scroll_remainder();
-            self.snapshot = self.stamp_snapshot(snapshot);
-            self.mark_terminal_content_changed(cx);
             if grid_changed {
                 self.autosuggest_input_start = None;
                 // Keep collapse identities while the parser publishes rebased boundaries.
                 self.command_reflow_pending = true;
             }
-            cx.notify();
         }
+        let Some((snapshot, selection, mode)) = next else {
+            return;
+        };
+        if (snapshot.cols, snapshot.rows) == (cols, rows) {
+            self.pending_pty_resize = None;
+        }
+        // A successful incremental read consumes damage, even if the queued
+        // resize has not run yet. Always retain that frame and its selection.
+        self.clear_smooth_scroll_remainder();
+        self.render_mode = mode;
+        self.snapshot = self.stamp_snapshot_with_selection(snapshot, selection);
+        self.mark_terminal_content_changed(cx);
+        cx.notify();
     }
 
     fn content_origin(&self) -> gpui::Point<Pixels> {
@@ -5490,7 +5557,7 @@ mod tests {
         );
     }
 
-    struct TerminalTestRoot;
+    pub(super) struct TerminalTestRoot;
 
     struct TerminalBroadcastRecorder {
         delivered: Vec<(TerminalBroadcastInputKind, Vec<u8>)>,
@@ -5618,6 +5685,133 @@ mod tests {
                 expected
             );
         }
+    }
+
+    #[gpui::test]
+    fn measured_viewport_wins_over_resize_requests_during_window_changes(cx: &mut TestAppContext) {
+        use gpui::{Entity, ParentElement, Styled};
+
+        struct ResizeSurface {
+            pane: Entity<TerminalPane>,
+            panel_height: f32,
+        }
+        impl Render for ResizeSurface {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .child(div().flex_1().min_h_0().child(self.pane.clone()))
+                    .child(
+                        oxideterm_gpui_ui::motion::auto_height(
+                            &oxideterm_theme::default_tokens(),
+                            "resize-test-panel",
+                            Some(div().h(px(self.panel_height)).into_any_element()),
+                        )
+                        .target_height(self.panel_height),
+                    )
+            }
+        }
+        let (surface, cx) = cx.add_window_view(|window, cx| ResizeSurface {
+            pane: cx.new(|cx| {
+                TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .unwrap()
+            }),
+            panel_height: 0.0,
+        });
+        let pane = surface.read_with(cx, |surface, _| surface.pane.clone());
+        for (width, height, panel_height) in [
+            (1600.0, 1000.0, 0.0),
+            (1600.0, 1000.0, 280.0),
+            (640.0, 300.0, 80.0),
+            (1600.0, 1000.0, 0.0),
+        ] {
+            surface.update(cx, |surface, cx| {
+                surface.panel_height = panel_height;
+                cx.notify();
+            });
+            cx.simulate_resize(gpui::size(px(width), px(height)));
+            // Exercise the same animated height container used by the command sender.
+            for frame in 0..6 {
+                cx.update(|window, cx| {
+                    window.draw(cx).clear(cx);
+                    if frame < 3 {
+                        pane.update(cx, |pane, cx| {
+                            pane.resize_grid(1000, 1000, cx).unwrap();
+                        });
+                    }
+                    window.simulate_next_frame(cx);
+                });
+                cx.run_until_parked();
+                cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE);
+                cx.run_until_parked();
+            }
+            pane.update(cx, |pane, cx| {
+                let bounds = pane
+                    .bounds
+                    .expect("paint must measure the terminal viewport");
+                assert!(f32::from(bounds.size.height) <= height - panel_height);
+                assert!(f32::from(bounds.size.height) > height - panel_height - 4.0);
+                let available = f32::from(bounds.size.height) - TERMINAL_CONTENT_PADDING * 2.0;
+                let row_height = pane.metrics.line_height_f32();
+                assert!(pane.snapshot.rows as f32 * row_height <= available);
+                assert!((pane.snapshot.rows + 1) as f32 * row_height > available);
+                let expected = (pane.snapshot.cols, pane.snapshot.rows);
+                assert_eq!(pane.pending_pty_resize, None);
+                assert_eq!(pane.resize_grid(1000, 1000, cx).unwrap(), expected);
+                assert_eq!(pane.pending_pty_resize, None);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn viewport_shrink_and_external_resize_keep_the_prompt_visible(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
+                    .unwrap()
+            })
+        });
+        let bounds = pane.update(cx, |pane, cx| {
+            pane.feed_recording_output(
+                format!("{}prompt> ", "output\r\n".repeat(40)).as_bytes(),
+                cx,
+            );
+            let bounds = gpui::Bounds::new(
+                gpui::point(px(0.0), px(0.0)),
+                gpui::size(
+                    px(640.0),
+                    pane.metrics.line_height * 8.0 + px(TERMINAL_CONTENT_PADDING * 2.0),
+                ),
+            );
+            pane.apply_viewport_bounds(bounds, 1.0, cx);
+            bounds
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(PTY_RESIZE_DEBOUNCE);
+        cx.run_until_parked();
+        pane.update(cx, |pane, cx| {
+            assert_eq!(pane.snapshot.rows, 8);
+            let (cols, rows) = pane.resize_grid(120, 100, cx).unwrap();
+            assert_eq!(rows, 8);
+            assert_eq!((pane.snapshot.cols, pane.snapshot.rows), (cols, rows));
+            let snapshot = pane.terminal.lock().snapshot();
+            assert_eq!(snapshot.display_offset, 0);
+            assert_eq!(snapshot.cursor_row, 7);
+            assert_eq!(snapshot.cursor_col, 8);
+            assert!(
+                pane.terminal
+                    .lock()
+                    .buffer_text()
+                    .trim_end()
+                    .ends_with("prompt>")
+            );
+            assert!(
+                (snapshot.cursor_row + 1) as f32 * pane.metrics.line_height_f32()
+                    <= f32::from(bounds.size.height) - TERMINAL_CONTENT_PADDING * 2.0
+            );
+        });
     }
 
     #[gpui::test]

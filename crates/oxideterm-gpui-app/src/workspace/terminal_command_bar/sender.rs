@@ -6,9 +6,9 @@
 
 use super::*;
 use crate::workspace::terminal_command_sender::{
-    TERMINAL_SENDER_RESIZE_HOTZONE_HEIGHT, TerminalCommandSenderDocumentSnapshot,
-    TerminalCommandSenderFailure, TerminalCommandSenderId, TerminalCommandSenderStatus,
-    TerminalCommandSenderTarget, TerminalCommandSenderTargetScope,
+    TERMINAL_SENDER_MIN_HEIGHT, TERMINAL_SENDER_RESIZE_HOTZONE_HEIGHT,
+    TerminalCommandSenderDocumentSnapshot, TerminalCommandSenderFailure, TerminalCommandSenderId,
+    TerminalCommandSenderStatus, TerminalCommandSenderTarget, TerminalCommandSenderTargetScope,
 };
 use oxideterm_terminal::{TerminalSenderInputMode, TerminalSenderPacing};
 use zeroize::Zeroizing;
@@ -72,25 +72,28 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let sender = self.terminal_command_sender.read(cx);
-        let target_height = if !sender.is_visible() {
-            0.0
-        } else if sender.is_expanded() {
-            sender.panel_height_for_viewport(f32::from(window.viewport_size().height))
-        } else {
-            TERMINAL_SENDER_COMPACT_HEIGHT
-        };
+        let target_height = sender.panel_height();
         let mut tokens = self.tokens;
         if sender.is_resizing() {
             tokens.motion.spatial_enabled = false;
         }
-        oxideterm_gpui_ui::motion::auto_height(
+        let allow_overflow = target_height
+            >= if sender.is_expanded() {
+                TERMINAL_SENDER_MIN_HEIGHT
+            } else {
+                TERMINAL_SENDER_COMPACT_HEIGHT
+            };
+        let reveal = oxideterm_gpui_ui::motion::auto_height(
             &tokens,
             "terminal-command-sender-height",
             Some(self.render_terminal_command_sender_content(window, cx)),
         )
-        .target_height(target_height)
-        .overflow_when_settled()
-        .into_any_element()
+        .target_height(target_height);
+        if allow_overflow {
+            reveal.overflow_when_settled().into_any_element()
+        } else {
+            reveal.into_any_element()
+        }
     }
 
     fn render_terminal_command_sender_content(
@@ -110,11 +113,7 @@ impl WorkspaceApp {
         if !sender_expanded {
             return self.render_compact_terminal_command_sender(&active, window, cx);
         }
-        let viewport_height = f32::from(window.viewport_size().height);
-        let panel_height = self
-            .terminal_command_sender
-            .read(cx)
-            .panel_height_for_viewport(viewport_height);
+        let panel_height = self.terminal_command_sender.read(cx).panel_height();
         let documents = self.terminal_command_sender.read(cx).document_snapshots();
         let targets = self.terminal_command_sender_target_entries(cx);
         let sender_is_resizing = self.terminal_command_sender.read(cx).is_resizing();
@@ -122,6 +121,9 @@ impl WorkspaceApp {
 
         let panel = div()
             .relative()
+            .when(panel_height < TERMINAL_SENDER_MIN_HEIGHT, |panel| {
+                panel.overflow_hidden()
+            })
             .flex_none()
             .h(px(panel_height))
             .min_h(px(0.0))
@@ -163,16 +165,11 @@ impl WorkspaceApp {
                         cx.listener(|this, event: &MouseDownEvent, window, cx| {
                             if event.click_count >= 2 {
                                 this.terminal_command_sender.update(cx, |sender, cx| {
-                                    sender
-                                        .reset_height(f32::from(window.viewport_size().height), cx);
+                                    sender.reset_height(cx);
                                 });
                             } else {
                                 this.terminal_command_sender.update(cx, |sender, cx| {
-                                    sender.start_resize(
-                                        event.position.y,
-                                        f32::from(window.viewport_size().height),
-                                        cx,
-                                    );
+                                    sender.start_resize(event.position.y, cx);
                                 });
                             }
                             window.prevent_default();
@@ -1570,16 +1567,11 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn update_terminal_command_sender_resize(
         &mut self,
         event: &MouseMoveEvent,
-        window: &Window,
+        _window: &Window,
         cx: &mut Context<Self>,
     ) {
         self.terminal_command_sender.update(cx, |sender, cx| {
-            sender.update_resize(
-                event.position.y,
-                f32::from(window.viewport_size().height),
-                event.dragging(),
-                cx,
-            );
+            sender.update_resize(event.position.y, event.dragging(), cx);
         });
     }
 

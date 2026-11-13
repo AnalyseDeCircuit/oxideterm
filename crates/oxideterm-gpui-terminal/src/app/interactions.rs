@@ -606,7 +606,6 @@ impl TerminalPane {
         }
 
         let previous_offset = self.visible_scroll_offset();
-        let snapshot_was_dirty = self.snapshot_dirty;
         let snapshot_started = self.preferences.show_performance_overlay.then(Instant::now);
         let snapshot = {
             let folded_offset = self.folding_active().then(|| {
@@ -640,14 +639,12 @@ impl TerminalPane {
         }
         let next_offset = self.command_folding.offset(&snapshot);
         if next_offset == previous_offset {
-            if snapshot_was_dirty {
-                self.snapshot = self.stamp_snapshot(snapshot);
-                self.snapshot_dirty = false;
-            }
-            let had_remainder = self.clear_smooth_scroll_remainder();
-            if snapshot_was_dirty || had_remainder {
-                cx.notify();
-            }
+            // The backend may have consumed output damage even when scrolling was clamped.
+            self.snapshot = self.stamp_snapshot(snapshot);
+            self.snapshot_dirty = false;
+            self.refresh_command_folding();
+            self.clear_smooth_scroll_remainder();
+            cx.notify();
             return;
         }
         let applied_rows = if next_offset >= previous_offset {
@@ -4087,6 +4084,42 @@ mod tests {
                     .collect::<Vec<_>>(),
                 vec![(0, 0, 6)]
             );
+        });
+    }
+
+    #[gpui::test]
+    fn clamped_scroll_keeps_output_received_before_the_next_frame(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(20, 3, Default::default(), window, cx).unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            let snapshot = {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(b"old0\r\nold1\r\nold2");
+                let previous = terminal.snapshot();
+                terminal.snapshot_incremental(&previous)
+            };
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.snapshot_dirty = false;
+            // Output can reach the backend before the pane processes its activity event.
+            pane.terminal
+                .lock()
+                .feed_recording_output(b"\x1b[H\x1b[Jprompt> ");
+            pane.handle_scroll(
+                &ScrollEvent {
+                    delta: ScrollDelta::Lines(point(0.0, -1.0)),
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert_eq!(pane.snapshot.display_offset, 0);
+            assert_eq!(pane.visible_text_snapshot().trim_end(), "prompt>");
+            let snapshot = pane.terminal.lock().snapshot_incremental(&pane.snapshot);
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            assert_eq!(pane.visible_text_snapshot().trim_end(), "prompt>");
         });
     }
 

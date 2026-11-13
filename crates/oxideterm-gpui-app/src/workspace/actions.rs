@@ -4135,7 +4135,8 @@ mod keybinding_update_tests {
                 .track_focus(&self.focus)
                 .on_action(cx.listener(|this, _: &NewTerminal, _, _| this.actions += 1))
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| {
-                    this.input.push(event.keystroke.unparse(cx.platform_info().os));
+                    this.input
+                        .push(event.keystroke.unparse(cx.platform_info().os));
                 }))
         }
     }

@@ -1191,6 +1191,21 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
     delta: i32,
     previous: &TerminalSnapshot,
 ) -> TerminalSnapshot {
+    // The parser can advance before the UI observes its wakeup. Capture damage
+    // under the same terminal lock, before scrolling adds full-viewport damage.
+    let previous_offset = term.grid().display_offset();
+    let dirty_rows = match term.damage() {
+        TermDamage::Partial(damage) => {
+            let mut dirty_rows = vec![false; size.rows];
+            for line in damage {
+                if let Some(dirty) = dirty_rows.get_mut(line.line) {
+                    *dirty = true;
+                }
+            }
+            Some(dirty_rows)
+        }
+        TermDamage::Full | TermDamage::ScrollUp { .. } => None,
+    };
     if delta != 0 {
         term.scroll_display(Scroll::Delta(delta));
     }
@@ -1199,10 +1214,11 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
     let display_offset = term.grid().display_offset().min(scrollback_lines);
     let compatible = previous.cols == size.cols
         && previous.rows == size.rows
+        && previous.display_offset == previous_offset
         && previous.scrollback_lines == scrollback_lines
         && previous.lines.len() == size.rows;
     let offset_distance = previous.display_offset.abs_diff(display_offset);
-    if !compatible || offset_distance >= size.rows {
+    if !compatible || dirty_rows.is_none() || offset_distance >= size.rows {
         let snapshot = snapshot_from_term_with_display_offset(
             term,
             size,
@@ -1215,6 +1231,7 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
         return snapshot;
     }
 
+    let dirty_rows = dirty_rows.expect("partial damage permits row reuse");
     let previous_row_index = |row: usize| {
         if display_offset >= previous.display_offset {
             row.checked_sub(offset_distance)
@@ -1226,14 +1243,14 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
     let lines = (0..size.rows)
         .map(|row| {
             previous_row_index(row)
+                .filter(|previous_row| !dirty_rows[*previous_row])
                 .and_then(|previous_row| previous.lines.get(previous_row))
                 .cloned()
                 .unwrap_or_else(|| snapshot_row_from_term(term, size, palette, display_offset, row))
         })
         .collect::<Vec<_>>();
 
-    // The caller guarantees that the previous snapshot represented the terminal immediately
-    // before this viewport-only scroll, so overlapping rows can retain their shared cell buffers.
+    // Only overlapping rows without pending damage retain their shared cell buffers.
     let mapped_cursor_row = if display_offset >= previous.display_offset {
         previous.cursor_row.checked_add(offset_distance)
     } else {
@@ -1900,6 +1917,9 @@ mod incremental_snapshot_tests {
         let mut parser = Processor::<StdSyncHandler>::new();
         parser.advance(&mut term, b"one\r\ntwo\r\nthree\r\nfour");
         let previous = snapshot_from_term(&term, size, &graphics, &TerminalPalette::default());
+        // This fixture represents an already painted frame, with its damage consumed.
+        let _ = term.damage();
+        term.reset_damage();
 
         let next = scroll_snapshot_from_term(
             &mut term,
@@ -1913,6 +1933,35 @@ mod incremental_snapshot_tests {
 
         assert!(Arc::ptr_eq(&previous.lines[0].cells, &next.lines[1].cells));
         assert_snapshot_content_eq(&next, &full);
+    }
+
+    #[test]
+    fn scroll_snapshot_preserves_redraws_received_after_the_previous_frame() {
+        for delta in [0, 1] {
+            let mut terminal =
+                crate::TerminalSession::recording_playback(40, 6, Default::default(), 100);
+            terminal.feed_recording_output(
+                b"old0\r\nold1\r\nold2\r\nold3\r\nold4\r\nold5\r\nold6\r\nold7\r\n",
+            );
+            let previous = terminal.snapshot();
+            let previous = terminal.snapshot_incremental(&previous);
+            // A shell redraw can reach the parser before the UI processes its wakeup.
+            terminal.feed_recording_output(b"\x1b[H\x1b[Jprompt> ");
+            let scrolled = terminal.scroll_lines_snapshot_incremental(delta, &previous);
+            let current = terminal.scroll_lines_snapshot_incremental(-delta, &scrolled);
+            for snapshot in [&current, &terminal.snapshot_incremental(&current)] {
+                assert_eq!(
+                    snapshot
+                        .lines
+                        .iter()
+                        .map(|row| row.text().trim_end().to_string())
+                        .collect::<Vec<_>>(),
+                    ["prompt>", "", "", "", "", ""],
+                    "scroll delta {delta}",
+                );
+                assert_eq!((snapshot.cursor_row, snapshot.cursor_col), (0, 8));
+            }
+        }
     }
 
     #[test]
