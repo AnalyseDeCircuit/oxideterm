@@ -562,6 +562,66 @@ mod knowledge_dialog_key_tests {
             let documents =
                 oxideterm_ai::rag_list_documents(&store, &collection_id, None, None).unwrap();
             assert_eq!(documents.documents.len(), 1);
+            assert_eq!(
+                workspace.ai_entity.read(cx).focused_settings_input(),
+                Some(SettingsInput::KnowledgeDocumentTitle),
+                "a modified Enter must keep focus in the dialog input"
+            );
+        });
+
+        // Tab enters the footer at Cancel, cycles to Confirm, then wraps back to
+        // the input; Shift+Tab walks the same cycle backwards.
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.standard_confirm_focus_owner(),
+                Some(ConfirmDialogAction::Cancel)
+            );
+            assert_eq!(workspace.ai_entity.read(cx).focused_settings_input(), None);
+        });
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(
+                workspace.standard_confirm_focus_owner(),
+                Some(ConfirmDialogAction::Confirm)
+            );
+        });
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(workspace.standard_confirm_focus_owner(), None);
+            assert_eq!(
+                workspace.ai_entity.read(cx).focused_settings_input(),
+                Some(SettingsInput::KnowledgeDocumentTitle)
+            );
+        });
+        cx.simulate_keystrokes("shift-tab");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.standard_confirm_focus_owner(),
+                Some(ConfirmDialogAction::Confirm)
+            );
+            assert_eq!(workspace.ai_entity.read(cx).focused_settings_input(), None);
+        });
+        cx.simulate_keystrokes("shift-tab");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(
+                workspace.standard_confirm_focus_owner(),
+                Some(ConfirmDialogAction::Cancel)
+            );
+        });
+        cx.simulate_keystrokes("shift-tab");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.ai_entity.read(cx).focused_settings_input(),
+                Some(SettingsInput::KnowledgeDocumentTitle)
+            );
+            assert_eq!(workspace.standard_confirm_focus_owner(), None);
         });
 
         cx.simulate_keystrokes("escape");
@@ -1965,10 +2025,7 @@ impl WorkspaceApp {
         };
         match action {
             browser_behavior::ModalFooterInputKeyAction::Cancel => {
-                self.clear_knowledge_dialog_input_state(cx);
-                self.ai_entity.update(cx, |entity, cx| {
-                    entity.close_knowledge_create_dialog(Duration::ZERO, cx);
-                });
+                self.dismiss_knowledge_collection_dialog(cx);
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::FocusInput => {
@@ -1981,23 +2038,15 @@ impl WorkspaceApp {
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::FocusFooter(action) => {
-                self.ai_entity.update(cx, |entity, cx| {
-                    entity.blur_settings_input(cx);
-                });
-                self.ime_marked_text = None;
-                self.clear_ime_selection();
+                self.clear_knowledge_dialog_input_state(cx);
                 self.set_standard_confirm_focus(action);
-                self.show_active_input_caret(cx);
                 cx.notify();
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::Activate(action) => {
                 self.clear_standard_confirm_focus();
                 if action == ConfirmDialogAction::Cancel {
-                    self.clear_knowledge_dialog_input_state(cx);
-                    self.ai_entity.update(cx, |entity, cx| {
-                        entity.close_knowledge_create_dialog(Duration::ZERO, cx);
-                    });
+                    self.dismiss_knowledge_collection_dialog(cx);
                     return true;
                 }
                 if self
@@ -2012,10 +2061,7 @@ impl WorkspaceApp {
                     cx.notify();
                 } else {
                     self.knowledge_create_collection(cx);
-                    self.clear_knowledge_dialog_input_state(cx);
-                    self.ai_entity.update(cx, |entity, cx| {
-                        entity.close_knowledge_create_dialog(Duration::ZERO, cx);
-                    });
+                    self.dismiss_knowledge_collection_dialog(cx);
                 }
                 true
             }
@@ -2039,10 +2085,7 @@ impl WorkspaceApp {
         };
         match action {
             browser_behavior::ModalFooterInputKeyAction::Cancel => {
-                self.clear_knowledge_dialog_input_state(cx);
-                self.ai_entity.update(cx, |entity, cx| {
-                    entity.close_knowledge_document_dialog(Duration::ZERO, cx);
-                });
+                self.dismiss_knowledge_document_dialog(cx);
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::FocusInput => {
@@ -2055,23 +2098,15 @@ impl WorkspaceApp {
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::FocusFooter(action) => {
-                self.ai_entity.update(cx, |entity, cx| {
-                    entity.blur_settings_input(cx);
-                });
-                self.ime_marked_text = None;
-                self.clear_ime_selection();
+                self.clear_knowledge_dialog_input_state(cx);
                 self.set_standard_confirm_focus(action);
-                self.show_active_input_caret(cx);
                 cx.notify();
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::Activate(action) => {
                 self.clear_standard_confirm_focus();
                 if action == ConfirmDialogAction::Cancel {
-                    self.clear_knowledge_dialog_input_state(cx);
-                    self.ai_entity.update(cx, |entity, cx| {
-                        entity.close_knowledge_document_dialog(Duration::ZERO, cx);
-                    });
+                    self.dismiss_knowledge_document_dialog(cx);
                     return true;
                 }
                 if self
@@ -2086,10 +2121,7 @@ impl WorkspaceApp {
                     cx.notify();
                 } else {
                     if self.knowledge_create_blank_document(cx) {
-                        self.clear_knowledge_dialog_input_state(cx);
-                        self.ai_entity.update(cx, |entity, cx| {
-                            entity.close_knowledge_document_dialog(Duration::ZERO, cx);
-                        });
+                        self.dismiss_knowledge_document_dialog(cx);
                     }
                 }
                 true
@@ -2131,6 +2163,22 @@ impl WorkspaceApp {
         self.clear_standard_confirm_focus();
         self.show_active_input_caret(cx);
         cx.notify();
+    }
+
+    /// Closes the dialog from a keyboard action without the overlay exit delay:
+    /// the dialog disappears on the same frame the key is handled.
+    fn dismiss_knowledge_collection_dialog(&mut self, cx: &mut Context<Self>) {
+        self.clear_knowledge_dialog_input_state(cx);
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.close_knowledge_create_dialog(Duration::ZERO, cx);
+        });
+    }
+
+    fn dismiss_knowledge_document_dialog(&mut self, cx: &mut Context<Self>) {
+        self.clear_knowledge_dialog_input_state(cx);
+        self.ai_entity.update(cx, |entity, cx| {
+            entity.close_knowledge_document_dialog(Duration::ZERO, cx);
+        });
     }
 
     pub(super) fn handle_knowledge_delete_confirm_key(
