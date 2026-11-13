@@ -842,7 +842,13 @@ impl TerminalElement {
         }
         #[cfg(feature = "bench")]
         let highlights_started = Instant::now();
-        let (mut highlight_layout, cached_highlights) = if let Some(cache) = cache.as_deref_mut() {
+        // Empty highlight results need neither per-line cache keys nor cache lookups.
+        let (mut highlight_layout, cached_highlights) = if !self.semantic_coloring
+            && self.transient_command_highlight.is_none()
+            && !self.highlight_rules.iter().any(|rule| rule.enabled)
+        {
+            (TerminalHighlightLayout::empty(), Vec::new())
+        } else if let Some(cache) = cache.as_deref_mut() {
             self.cached_highlight_layout_for_rows(&logical_lines, &semantic_roles, cache)
         } else {
             (
@@ -942,6 +948,7 @@ impl TerminalElement {
             )
         };
 
+        let row_style_hasher = self.row_layout_style_hasher();
         for row_index in visible_rows {
             let Some(row) = self.snapshot.lines.get(row_index) else {
                 continue;
@@ -955,6 +962,7 @@ impl TerminalElement {
                     row_index,
                     logical_line,
                     semantic_role,
+                    &row_style_hasher,
                 );
                 let row_layout = cache.get_or_insert_row_with(
                     key,
@@ -1418,25 +1426,11 @@ impl TerminalElement {
         }
     }
 
-    fn row_layout_cache_key_with_logical_line(
-        &self,
-        row_index: usize,
-        logical_line: &TerminalLogicalLine,
-        semantic_role: Option<SemanticLineRole>,
-    ) -> TerminalRowLayoutCacheKey {
+    fn row_layout_style_hasher(&self) -> DefaultHasher {
+        // Every row in this layout shares these settings. Preserve the hash state so only
+        // row-dependent data is appended for each cache key, without repeating font hashing.
         let mut hasher = DefaultHasher::new();
         self.snapshot.cols.hash(&mut hasher);
-        if let Some(row) = self.snapshot.lines.get(row_index) {
-            row.line_id.hash(&mut hasher);
-            row.signature.hash(&mut hasher);
-            let has_cursor = row.cells.iter().any(|cell| cell.cursor);
-            has_cursor.hash(&mut hasher);
-            if has_cursor {
-                self.snapshot.cursor_shape.hash(&mut hasher);
-                self.grid_cursor_visible().hash(&mut hasher);
-            }
-        }
-        logical_line.signature.hash(&mut hasher);
         f32::from(self.metrics.font_size)
             .to_bits()
             .hash(&mut hasher);
@@ -1452,9 +1446,33 @@ impl TerminalElement {
         self.theme.header_foreground.hash(&mut hasher);
         self.theme.selection_background.hash(&mut hasher);
         self.transparent_background.hash(&mut hasher);
-        self.hash_semantic_layout(logical_line.range.clone(), semantic_role, &mut hasher);
         self.bidi_enabled.hash(&mut hasher);
         self.detect_file_paths_as_links.hash(&mut hasher);
+        self.highlight_rules_signature.hash(&mut hasher);
+        self.transient_command_highlight_signature.hash(&mut hasher);
+        hasher
+    }
+
+    fn row_layout_cache_key_with_logical_line(
+        &self,
+        row_index: usize,
+        logical_line: &TerminalLogicalLine,
+        semantic_role: Option<SemanticLineRole>,
+        style_hasher: &DefaultHasher,
+    ) -> TerminalRowLayoutCacheKey {
+        let mut hasher = style_hasher.clone();
+        if let Some(row) = self.snapshot.lines.get(row_index) {
+            row.line_id.hash(&mut hasher);
+            row.signature.hash(&mut hasher);
+            let has_cursor = row.cells.iter().any(|cell| cell.cursor);
+            has_cursor.hash(&mut hasher);
+            if has_cursor {
+                self.snapshot.cursor_shape.hash(&mut hasher);
+                self.grid_cursor_visible().hash(&mut hasher);
+            }
+        }
+        logical_line.signature.hash(&mut hasher);
+        self.hash_semantic_layout(logical_line.range.clone(), semantic_role, &mut hasher);
         if let Some(hovered_link) = self
             .hovered_link
             .as_ref()
@@ -1469,8 +1487,6 @@ impl TerminalElement {
             self.snapshot.cols,
             &mut hasher,
         );
-        self.highlight_rules_signature.hash(&mut hasher);
-        self.transient_command_highlight_signature.hash(&mut hasher);
         TerminalRowLayoutCacheKey {
             signature: hasher.finish(),
         }
@@ -2770,8 +2786,18 @@ mod cache_tests {
         let moved_line = moved_lines.line_for_row(0).expect("moved line");
 
         assert_eq!(
-            original.row_layout_cache_key_with_logical_line(0, original_line, None),
-            moved.row_layout_cache_key_with_logical_line(0, moved_line, None)
+            original.row_layout_cache_key_with_logical_line(
+                0,
+                original_line,
+                None,
+                &original.row_layout_style_hasher()
+            ),
+            moved.row_layout_cache_key_with_logical_line(
+                0,
+                moved_line,
+                None,
+                &moved.row_layout_style_hasher()
+            )
         );
         assert_eq!(
             original.logical_highlight_cache_key_with_logical_line(original_line, None),
@@ -2882,16 +2908,19 @@ mod cache_tests {
         ));
 
         let mut previous = recolored;
-        for metric in 0..3 {
+        for metric in 0..5 {
             match metric {
                 0 => view.metrics.font_size += px(1.),
                 1 => view.metrics.cell_width += px(1.),
-                _ => view.metrics.line_height += px(1.),
+                2 => view.metrics.line_height += px(1.),
+                3 => view.metrics.font.weight = gpui::FontWeight::BOLD,
+                _ => view.metrics.font.family = "Consolas".into(),
             }
             let resized = view.layout_for_rows(0..1, Some(&mut cache));
             let before = previous.cached_rows[0].layout.text_runs.last().unwrap();
             let after = resized.cached_rows[0].layout.text_runs.last().unwrap();
             assert_eq!(after.text.as_ref(), "bets");
+            assert_eq!(after.style.font, view.metrics.font);
             assert!(!Arc::ptr_eq(&before.cache, &after.cache));
             previous = resized;
         }
@@ -3006,6 +3035,25 @@ mod cache_tests {
                     .find(|run| run.text.as_ref() == "ERROR")
                     .unwrap();
                 assert_eq!(colored.style.color, rgb(0xff0000).into());
+            }
+        }
+        for enabled in [false, true, false] {
+            let mut rules = view.highlight_rules.to_vec();
+            rules[0].enabled = enabled;
+            view = view.highlight_rules(rules);
+            let layout = view.layout_for_rows(0..2, Some(&mut cache));
+            for row in &layout.cached_rows {
+                let first_run = &row.layout.text_runs[0];
+                assert_eq!(first_run.text, "ERROR");
+                assert_eq!(
+                    first_run.style.color,
+                    rgb(if enabled {
+                        0xff0000
+                    } else {
+                        view.theme.foreground
+                    })
+                    .into()
+                );
             }
         }
     }
