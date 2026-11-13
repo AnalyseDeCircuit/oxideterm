@@ -648,11 +648,7 @@ pub fn toolbar_button(
 ) -> Div {
     let disabled = options.button.disabled || options.loading;
     let hover_bg = options.hover_background.unwrap_or_else(|| {
-        color_for_background(
-            tokens.ui.bg_hover,
-            options.has_background,
-            BUTTON_ACTIVE_HOVER_ALPHA,
-        )
+        toolbar_hover_background(tokens, options.button.variant, options.has_background)
     });
     let button_options = ButtonOptions {
         disabled,
@@ -709,6 +705,50 @@ pub fn toolbar_button(
         (None, _) => button.when(options.show_label, |button| button.child(label)),
     };
     button_focus_visible(tokens, button, options.focus_visible)
+}
+
+/// Hover background for a toolbar button that did not pass an explicit color.
+///
+/// Primary and destructive buttons paint an inverse/error background in
+/// [`button_base`]; hovering them with the neutral `bg_hover` turned the label
+/// unreadable and looked disabled. Keep the neutral tint for the outline-family
+/// variants, and mute the variant's own background for filled ones.
+fn toolbar_hover_background(
+    tokens: &ThemeTokens,
+    variant: ButtonVariant,
+    has_background: bool,
+) -> Rgba {
+    match variant {
+        ButtonVariant::Default => rgba((tokens.ui.text << 8) | 0xdd),
+        ButtonVariant::Destructive => rgba((tokens.ui.error << 8) | 0xcc),
+        _ => color_for_background(
+            tokens.ui.bg_hover,
+            has_background,
+            BUTTON_ACTIVE_HOVER_ALPHA,
+        ),
+    }
+}
+
+#[cfg(test)]
+mod hover_tests {
+    use super::*;
+
+    #[test]
+    fn filled_toolbar_buttons_hover_with_their_own_tint() {
+        let tokens = oxideterm_theme::default_tokens();
+        let neutral = color_for_background(tokens.ui.bg_hover, false, BUTTON_ACTIVE_HOVER_ALPHA);
+
+        let primary = toolbar_hover_background(&tokens, ButtonVariant::Default, false);
+        assert_eq!(primary, rgba((tokens.ui.text << 8) | 0xdd));
+        assert_ne!(primary, neutral, "a primary button must not hover grey");
+
+        let destructive = toolbar_hover_background(&tokens, ButtonVariant::Destructive, false);
+        assert_eq!(destructive, rgba((tokens.ui.error << 8) | 0xcc));
+        assert_ne!(destructive, neutral);
+
+        let secondary = toolbar_hover_background(&tokens, ButtonVariant::Secondary, false);
+        assert_eq!(secondary, neutral);
+    }
 }
 
 pub fn icon_button(tokens: &ThemeTokens, icon: AnyElement, options: IconButtonOptions) -> Div {
