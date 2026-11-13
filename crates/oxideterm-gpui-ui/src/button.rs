@@ -4,7 +4,7 @@ use gpui::{
 };
 use oxideterm_theme::ThemeTokens;
 
-use crate::surface::color_for_background;
+use crate::surface::{color_for_background, color_with_alpha};
 
 const BUTTON_FOCUS_RING_ALPHA: u32 = 0xb3; // Tauri focus-visible:ring-theme-accent/70
 const BUTTON_FOCUS_RING_WIDTH: f32 = 2.0; // Tauri focus-visible:ring-2
@@ -16,6 +16,10 @@ const BUTTON_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri [data-bg-active] border c
 /// translucent dialog or a background image; an alpha tint would composite with
 /// that background and change contrast per theme.
 const BUTTON_FILLED_HOVER_MIX: f32 = 0.12;
+/// Destructive buttons paint a translucent error fill, so their hover tint must
+/// carry the same alpha; otherwise hovering changes how the fill composites
+/// over a translucent dialog or a background image.
+const BUTTON_DESTRUCTIVE_FILL_ALPHA: u32 = 0xe6;
 const TOOLBAR_BUTTON_ICON_GAP: f32 = 6.0; // Tauri toolbar gap-1.5
 const ICON_BUTTON_DISABLED_OPACITY: f32 = 0.35; // Tauri disabled icon button opacity
 const ICON_BUTTON_IDLE_OPACITY: f32 = 0.5; // Tauri muted toolbar icon opacity
@@ -736,11 +740,10 @@ fn toolbar_hover_background(
             tokens.ui.bg_panel,
             BUTTON_FILLED_HOVER_MIX,
         )),
-        ButtonVariant::Destructive => rgb(mix_toward(
-            tokens.ui.error,
-            tokens.ui.bg_panel,
-            BUTTON_FILLED_HOVER_MIX,
-        )),
+        ButtonVariant::Destructive => color_with_alpha(
+            mix_toward(tokens.ui.error, tokens.ui.bg_panel, BUTTON_FILLED_HOVER_MIX),
+            BUTTON_DESTRUCTIVE_FILL_ALPHA,
+        ),
         _ => color_for_background(
             tokens.ui.bg_hover,
             has_background,
@@ -941,7 +944,7 @@ fn button_base(tokens: &ThemeTokens, options: ButtonOptions, has_background: boo
             (rgba(0x00000000), rgba(0x00000000), rgb(theme.text))
         }
         ButtonVariant::Destructive => (
-            rgba((theme.error << 8) | 0xe6),
+            color_with_alpha(theme.error, BUTTON_DESTRUCTIVE_FILL_ALPHA),
             rgba((theme.error << 8) | 0xcc),
             rgb(0xffffff),
         ),
@@ -1003,7 +1006,6 @@ pub fn button_focus_visible(tokens: &ThemeTokens, button: Div, focused: bool) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::surface::color_with_alpha;
 
     #[test]
     fn filled_toolbar_buttons_hover_with_their_own_tint() {
@@ -1039,7 +1041,11 @@ mod tests {
 
         let destructive =
             toolbar_hover_background(&tokens, ButtonVariant::Destructive, false, None);
-        assert_eq!(destructive.a, 1.0);
+        assert_eq!(
+            destructive.a,
+            color_with_alpha(tokens.ui.error, BUTTON_DESTRUCTIVE_FILL_ALPHA).a,
+            "the destructive hover must keep the resting fill's alpha"
+        );
         assert_ne!(destructive, rgb(tokens.ui.error));
         assert_ne!(destructive, neutral);
 
