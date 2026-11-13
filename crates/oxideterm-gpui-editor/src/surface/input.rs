@@ -4,7 +4,7 @@
 use std::ops::Range;
 
 use gpui::{Bounds, Context, EntityInputHandler, Pixels, UTF16Selection, Window};
-use oxideterm_editor_core::{BufferOffset, TextRange};
+use oxideterm_editor_core::{BufferOffset, Selection, TextRange};
 
 use super::{MarkedText, TextEditorView};
 
@@ -62,6 +62,13 @@ impl EntityInputHandler for TextEditorView {
         _cx: &mut Context<Self>,
     ) -> Option<UTF16Selection> {
         let selection = self.cursor.selection();
+        if let Some(marked) = self.marked_text.as_ref() {
+            let start = self.buffer.utf16_offset(marked.range.start.0);
+            return Some(UTF16Selection {
+                range: start + marked.selection.start..start + marked.selection.end,
+                reversed: false,
+            });
+        }
         let range = selection.range();
         Some(UTF16Selection {
             range: self.buffer.utf16_offset(range.start.0)..self.buffer.utf16_offset(range.end.0),
@@ -81,7 +88,9 @@ impl EntityInputHandler for TextEditorView {
     }
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.marked_text.take().is_some() {
+        if let Some(marked) = self.marked_text.take() {
+            self.cursor.set_selection(marked.original_selection);
+            self.secondary_selections = marked.original_secondary_selections;
             cx.notify();
         }
     }
@@ -107,7 +116,7 @@ impl EntityInputHandler for TextEditorView {
         &mut self,
         range_utf16: Option<Range<usize>>,
         new_text: &str,
-        _new_selected_range: Option<Range<usize>>,
+        new_selected_range: Option<Range<usize>>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -121,10 +130,39 @@ impl EntityInputHandler for TextEditorView {
         // Keep the original replacement range separate from the committed
         // buffer so IME updates can replace the same composing segment without
         // corrupting the underlying text before commit.
-        self.marked_text = (!new_text.is_empty()).then(|| MarkedText {
+        let text_len = new_text.encode_utf16().count();
+        let selection = new_selected_range.unwrap_or(text_len..text_len);
+        let selection_start = selection.start.min(text_len);
+        let selection_end = selection.end.min(text_len).max(selection_start);
+        // Repeated preedit updates must retain the selection from before composition,
+        // including its direction and secondary cursors, rather than the temporary caret.
+        let (original_selection, original_secondary_selections) = match self.marked_text.take() {
+            Some(marked) => (
+                marked.original_selection,
+                marked.original_secondary_selections,
+            ),
+            None => (
+                self.cursor.selection(),
+                std::mem::take(&mut self.secondary_selections),
+            ),
+        };
+        if new_text.is_empty() {
+            self.cursor.set_selection(original_selection);
+            self.secondary_selections = original_secondary_selections;
+            cx.notify();
+            return;
+        }
+        self.marked_text = Some(MarkedText {
             text: new_text.to_string(),
             range,
+            selection: selection_start..selection_end,
+            original_selection,
+            original_secondary_selections,
         });
+        // The buffer cursor must stay on a real buffer boundary while the IME
+        // owns a virtual selection inside the preedit text.
+        self.cursor.set_selection(Selection::caret(range.start));
+        self.secondary_selections.clear();
         cx.notify();
     }
 
@@ -136,6 +174,24 @@ impl EntityInputHandler for TextEditorView {
         _cx: &mut Context<Self>,
     ) -> Option<Bounds<Pixels>> {
         let index = range_utf16.start;
+        if let Some(marked) = self.marked_text.as_ref() {
+            let marked_start = self.buffer.utf16_offset(marked.range.start.0);
+            let marked_end = marked_start + marked.text.encode_utf16().count();
+            if (marked_start..=marked_end).contains(&index) {
+                let relative = index - marked_start;
+                let byte = utf16_index_to_byte(&marked.text, relative);
+                let mut bounds = self.bounds_for_byte_offset(
+                    BufferOffset(marked.range.start.0),
+                    element_bounds,
+                    window,
+                );
+                let prefix = &marked.text[..byte];
+                bounds.origin.x += self
+                    .shape_coordinate_line(prefix, window.text_system())
+                    .width();
+                return Some(bounds);
+            }
+        }
         let byte = self.buffer.byte_offset_for_utf16(index);
         Some(self.bounds_for_byte_offset(BufferOffset(byte), element_bounds, window))
     }
@@ -156,7 +212,9 @@ impl TextEditorView {
         &self,
         range_utf16: Option<Range<usize>>,
     ) -> Option<TextRange> {
-        let range_utf16 = range_utf16?;
+        let Some(range_utf16) = range_utf16 else {
+            return self.marked_text.as_ref().map(|marked| marked.range);
+        };
         if let Some(marked) = self.marked_text.as_ref() {
             let marked_start = self.buffer.utf16_offset(marked.range.start.0);
             let marked_end = marked_start + marked.text.encode_utf16().count();
@@ -182,7 +240,7 @@ pub(super) fn keystroke_commits_platform_text(keystroke: &gpui::Keystroke) -> bo
         .is_some_and(|text| !text.is_empty() && !text.chars().any(char::is_control))
 }
 
-fn utf16_index_to_byte(text: &str, utf16_index: usize) -> usize {
+pub(super) fn utf16_index_to_byte(text: &str, utf16_index: usize) -> usize {
     if utf16_index == 0 {
         return 0;
     }
@@ -271,6 +329,105 @@ mod tests {
         });
     }
 
+    #[gpui::test]
+    fn marked_text_advances_caret_and_unmark_restores_origin(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("abc", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                editor
+                    .cursor
+                    .set_selection(oxideterm_editor_core::Selection::caret(BufferOffset(1)));
+                editor.replace_and_mark_text_in_range(Some(1..1), "zhong", Some(5..5), window, cx);
+                assert_eq!(editor.cursor.selection().head, BufferOffset(1));
+                assert!(
+                    editor
+                        .buffer
+                        .offset_to_line_col(editor.cursor.selection().head)
+                        .is_ok()
+                );
+                let expected_range = 1 + "zhong".encode_utf16().count();
+                assert_eq!(
+                    editor
+                        .selected_text_range(false, window, cx)
+                        .expect("marked text keeps a selected range")
+                        .range,
+                    expected_range..expected_range
+                );
+
+                editor.unmark_text(window, cx);
+                assert_eq!(editor.cursor.selection().head, BufferOffset(1));
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn marked_text_caret_maps_multibyte_selection_without_invalidating_cursor(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("a", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                editor
+                    .cursor
+                    .set_selection(oxideterm_editor_core::Selection::caret(BufferOffset(1)));
+                let selection_end = "中文".encode_utf16().count();
+                editor.replace_and_mark_text_in_range(
+                    Some(1..1),
+                    "中文🙂",
+                    Some(selection_end..selection_end),
+                    window,
+                    cx,
+                );
+
+                assert_eq!(editor.cursor.selection().head, BufferOffset(1));
+                assert!(
+                    editor
+                        .buffer
+                        .offset_to_line_col(editor.cursor.selection().head)
+                        .is_ok()
+                );
+                let expected_caret = 1 + selection_end;
+                assert_eq!(
+                    editor
+                        .selected_text_range(false, window, cx)
+                        .expect("marked text keeps a selected range")
+                        .range,
+                    expected_caret..expected_caret
+                );
+
+                let element_bounds = gpui::Bounds::new(
+                    gpui::point(gpui::px(0.0), gpui::px(0.0)),
+                    gpui::size(gpui::px(400.0), gpui::px(100.0)),
+                );
+                let start = editor
+                    .bounds_for_range(1..1, element_bounds, window, cx)
+                    .expect("composition start has bounds");
+                let caret = editor
+                    .bounds_for_range(expected_caret..expected_caret, element_bounds, window, cx)
+                    .expect("composition caret has bounds");
+                assert!(caret.origin.x > start.origin.x);
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn committed_marked_text_without_range_replaces_composition(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                editor.replace_and_mark_text_in_range(Some(0..0), "zhong", Some(5..5), window, cx);
+                editor.replace_text_in_range(None, "中", window, cx);
+                assert_eq!(editor.buffer.text(), "中");
+            });
+        });
+    }
+
     #[test]
     fn converts_utf16_indices_without_splitting_surrogates() {
         let text = "a🚀你";
@@ -278,5 +435,34 @@ mod tests {
         assert_eq!(utf16_index_to_byte(text, 2), 1);
         assert_eq!(utf16_index_to_byte(text, 3), 5);
         assert_eq!(utf16_slice(text, 1..3), "🚀");
+    }
+
+    #[gpui::test]
+    fn ime_regression_cancel_restores_original_selections(cx: &mut gpui::TestAppContext) {
+        let (editor, cx) = cx.add_window_view(|_, cx| {
+            TextEditorView::new("abcdef", &oxideterm_theme::default_tokens(), cx)
+        });
+        cx.update(|window, app| {
+            editor.update(app, |editor, cx| {
+                for empty_update in [false, true] {
+                    let original = Selection::new(BufferOffset(3), BufferOffset(1));
+                    let secondary = Selection::caret(BufferOffset(5));
+                    editor.cursor.set_selection(original);
+                    editor.secondary_selections = vec![secondary];
+                    editor.replace_and_mark_text_in_range(None, "zh", Some(2..2), window, cx);
+                    editor.replace_and_mark_text_in_range(None, "zhong", Some(5..5), window, cx);
+                    if empty_update {
+                        editor.replace_and_mark_text_in_range(None, "", None, window, cx);
+                    } else {
+                        editor.unmark_text(window, cx);
+                    }
+                    assert_eq!(editor.buffer.text(), "abcdef");
+                    assert_eq!(editor.cursor.selection(), original);
+                    assert_eq!(editor.secondary_selections, vec![secondary]);
+                }
+                editor.replace_text_in_range(None, "X", window, cx);
+                assert_eq!(editor.buffer.text(), "aXdef");
+            });
+        });
     }
 }

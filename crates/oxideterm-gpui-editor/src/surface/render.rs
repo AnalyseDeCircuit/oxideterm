@@ -657,7 +657,22 @@ impl TextEditorView {
             .into_iter()
             .filter_map(|column| column.checked_sub(origin.column))
             .collect::<Vec<_>>();
+        let marked = self.marked_text.as_ref().filter(|marked| {
+            // A wrap boundary belongs to the following row. Only the physical
+            // line's final segment owns its end, including an empty line.
+            segment_range.contains(&marked.range.start.0)
+                || (marked.range.start.0 == segment_range.end && segment_range.end == line_end)
+        });
+        let marked_text = marked.map(|marked| marked.text.as_str());
+        let overlay = row_text_overlay_state(show_cursor, marked_text);
+        let marked_caret_prefix = marked.map(|marked| {
+            let utf16_len = marked.text.encode_utf16().count();
+            let selection_end = marked.selection.end.min(utf16_len);
+            let byte = super::input::utf16_index_to_byte(&marked.text, selection_end);
+            &marked.text[..byte]
+        });
         let needs_shaped_coordinates = cursor_byte_column.is_some()
+            || marked_text.is_some()
             || !selection_ranges.is_empty()
             || !find_ranges.is_empty()
             || !bracket_ranges.is_empty()
@@ -666,14 +681,40 @@ impl TextEditorView {
         // overlay. Fixed cell widths diverge under font fallback.
         let coordinate_line = needs_shaped_coordinates
             .then(|| self.shape_coordinate_line(segment_text, window.text_system()));
-        let cursor_x = cursor_byte_column.map(|byte_column| {
-            f32::from(
+        let cursor_x = if !overlay.show_caret {
+            None
+        } else if let Some(marked) = marked {
+            let start = marked
+                .range
+                .start
+                .0
+                .saturating_sub(segment_range.start)
+                .min(segment_text.len());
+            let start = super::coords::floor_char_boundary(segment_text, start);
+            let start_x = f32::from(
                 coordinate_line
                     .as_ref()
-                    .expect("cursor requires shaped coordinates")
-                    .x_for_index(byte_column),
-            )
-        });
+                    .expect("marked text requires shaped coordinates")
+                    .x_for_index(start),
+            );
+            let prefix_width = f32::from(
+                self.shape_coordinate_line(
+                    marked_caret_prefix.unwrap_or_default(),
+                    window.text_system(),
+                )
+                .width(),
+            );
+            Some(start_x + prefix_width)
+        } else {
+            cursor_byte_column.map(|byte_column| {
+                f32::from(
+                    coordinate_line
+                        .as_ref()
+                        .expect("cursor requires shaped coordinates")
+                        .x_for_index(byte_column),
+                )
+            })
+        };
         let shaped_rects = |ranges: Vec<Range<usize>>, empty_range_width: f32| {
             if ranges.is_empty() {
                 return Vec::new();
@@ -703,12 +744,6 @@ impl TextEditorView {
             .then(|| self.foldable_range_starting_at(line))
             .flatten();
         let folded = display_row.is_folded_header;
-        let marked_text = self.marked_text.as_ref().and_then(|marked| {
-            (marked.range.start.0 >= segment_range.start
-                && marked.range.start.0 <= segment_range.end)
-                .then_some(marked.text.as_str())
-        });
-
         let row = div()
             .relative()
             .h(px(line_height))
@@ -874,7 +909,7 @@ impl TextEditorView {
                     &segment_text,
                     segment_range,
                     cursor_column,
-                    show_cursor,
+                    overlay.show_marked_text,
                     marked_text,
                     folded,
                     window,
@@ -1111,20 +1146,22 @@ impl TextEditorView {
         line_text: &str,
         line_range: Range<usize>,
         cursor_column: usize,
-        show_cursor: bool,
+        show_marked_text: bool,
         marked_text: Option<&str>,
         folded: bool,
         window: &mut Window,
     ) -> Div {
         let byte_column = byte_column_for_visual_column(line_text, cursor_column);
+        let segment_start = line_range.start;
         let mut row = div().flex().items_center();
         let mut cursor_drawn = false;
 
         if line_text.is_empty() {
-            if show_cursor {
+            if show_marked_text {
                 if let Some(marked_text) = marked_text {
                     row = row.child(
                         div()
+                            .debug_selector(move || format!("editor-preedit-{segment_start}"))
                             .underline()
                             .text_color(rgb(self.appearance.accent_hex))
                             .child(marked_text.to_string()),
@@ -1142,7 +1179,7 @@ impl TextEditorView {
             let Some(chunk_text) = line_text.get(chunk.start..chunk.end) else {
                 continue;
             };
-            if show_cursor && marked_text.is_some() && !cursor_drawn && byte_column <= chunk.end {
+            if show_marked_text && !cursor_drawn && byte_column <= chunk.end {
                 let split = byte_column.saturating_sub(chunk.start);
                 let split = split.min(chunk_text.len());
                 let (before, after) = chunk_text.split_at(split);
@@ -1150,6 +1187,7 @@ impl TextEditorView {
                 if let Some(marked_text) = marked_text {
                     row = row.child(
                         div()
+                            .debug_selector(move || format!("editor-preedit-{segment_start}"))
                             .underline()
                             .text_color(rgb(self.appearance.accent_hex))
                             .child(marked_text.to_string()),
@@ -1162,10 +1200,11 @@ impl TextEditorView {
             }
         }
 
-        if show_cursor && marked_text.is_some() && !cursor_drawn {
+        if show_marked_text && !cursor_drawn {
             if let Some(marked_text) = marked_text {
                 row = row.child(
                     div()
+                        .debug_selector(move || format!("editor-preedit-{segment_start}"))
                         .underline()
                         .text_color(rgb(self.appearance.accent_hex))
                         .child(marked_text.to_string()),
@@ -1441,6 +1480,7 @@ impl TextEditorView {
         // Match CodeMirror/browser editor semantics: the caret is painted over
         // the line box and must never reserve horizontal layout space.
         div()
+            .debug_selector(|| "editor-caret".into())
             .absolute()
             .top(px(self.metrics.line_height * 0.11))
             .left(px(left))
@@ -1680,11 +1720,74 @@ fn visible_indentation_columns(
     columns_by_line
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct RowTextOverlayState {
+    show_marked_text: bool,
+    show_caret: bool,
+}
+
+/// Composition owns the underlined preedit text, not the caret. The caret keeps
+/// the editor's blink cadence for plain text and marked text alike; composition
+/// only changes the column its prefix width is measured from.
+fn row_text_overlay_state(show_cursor: bool, marked_text: Option<&str>) -> RowTextOverlayState {
+    RowTextOverlayState {
+        show_marked_text: marked_text.is_some(),
+        show_caret: show_cursor,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::surface::wrap::DisplayRow;
     use oxideterm_editor_syntax::{LanguageId, StructureCache};
+
+    #[test]
+    fn marked_text_stays_visible_when_caret_blinks_off() {
+        assert_eq!(
+            row_text_overlay_state(false, Some("zhong")),
+            RowTextOverlayState {
+                show_marked_text: true,
+                show_caret: false,
+            }
+        );
+        assert_eq!(
+            row_text_overlay_state(true, Some("zhong")),
+            RowTextOverlayState {
+                show_marked_text: true,
+                show_caret: true,
+            }
+        );
+    }
+
+    #[gpui::test]
+    fn focused_plain_text_editor_renders_blinking_caret(cx: &mut gpui::TestAppContext) {
+        use crate::surface::EDITOR_CARET_BLINK_INTERVAL;
+        let (_editor, cx) = cx.add_window_view(|window, cx| {
+            let editor = TextEditorView::new("text", &oxideterm_theme::default_tokens(), cx);
+            window.focus(&editor.focus_handle, cx);
+            editor
+        });
+        cx.simulate_resize(gpui::size(px(500.0), px(240.0)));
+        cx.update(|window, cx| {
+            window.activate_window();
+            window.draw(cx).clear(cx);
+        });
+        assert!(
+            cx.debug_bounds("editor-caret").is_some(),
+            "focused plain text must paint the caret without marked text"
+        );
+        for (expected_visible, phase) in [(false, "blink-off"), (true, "blink-on")] {
+            cx.executor().advance_clock(EDITOR_CARET_BLINK_INTERVAL);
+            cx.run_until_parked();
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.debug_bounds("editor-caret").is_some(),
+                expected_visible,
+                "caret visibility during {phase}"
+            );
+        }
+    }
 
     fn display_row(line: usize, start_col: usize, end_col: usize) -> DisplayRow {
         DisplayRow {
@@ -1693,6 +1796,47 @@ mod tests {
             end_col,
             is_first: start_col == 0,
             is_folded_header: false,
+        }
+    }
+
+    #[gpui::test]
+    fn ime_regression_preedit_has_one_row_at_wrap_boundary(cx: &mut gpui::TestAppContext) {
+        use gpui::EntityInputHandler;
+        let (editor, cx) = cx.add_window_view(|window, cx| {
+            let mut editor =
+                TextEditorView::new("abcdefghijklmnop", &oxideterm_theme::default_tokens(), cx);
+            editor.settings.soft_wrap = true;
+            editor.settings.soft_wrap_column = Some(8);
+            window.focus(&editor.focus_handle, cx);
+            editor
+        });
+        cx.simulate_resize(gpui::size(px(500.0), px(240.0)));
+        cx.update(|window, app| {
+            window.activate_window();
+            editor.update(app, |editor, cx| {
+                editor
+                    .cursor
+                    .set_selection(Selection::caret(BufferOffset(8)));
+                editor.replace_and_mark_text_in_range(None, "zhong", Some(5..5), window, cx);
+            });
+            window.draw(app).clear(app);
+        });
+        for visible in [true, false] {
+            if !visible {
+                cx.executor()
+                    .advance_clock(crate::surface::EDITOR_CARET_BLINK_INTERVAL);
+                cx.run_until_parked();
+                cx.update(|window, cx| window.draw(cx).clear(cx));
+            }
+            assert!(
+                cx.debug_bounds("editor-preedit-0").is_none(),
+                "previous row must not duplicate composition"
+            );
+            assert!(
+                cx.debug_bounds("editor-preedit-8").is_some(),
+                "composition belongs to the continuation row"
+            );
+            assert_eq!(cx.debug_bounds("editor-caret").is_some(), visible);
         }
     }
 
