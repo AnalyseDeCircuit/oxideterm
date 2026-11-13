@@ -1234,7 +1234,7 @@ impl WorkspaceApp {
         form_field(
             &self.tokens,
             self.i18n.t(label_key),
-            control.into_any_element(),
+            self.settings_multiline_input_viewport(target, control.into_any_element()),
         )
     }
 

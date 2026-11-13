@@ -2510,12 +2510,16 @@ impl WorkspaceApp {
         let form = dialog_content(&self.tokens)
             .w(px(520.0))
             .max_w(relative(0.92))
+            .max_h(relative(0.90))
+            .flex()
+            .flex_col()
             .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
             .child(
                 dialog_header(&self.tokens)
+                    .flex_shrink_0()
                     .child(dialog_title(&self.tokens, self.i18n.t(title_key)))
                     .when(!description_key.is_empty(), |header| {
                         header.child(dialog_description(
@@ -2526,6 +2530,11 @@ impl WorkspaceApp {
             )
             .child(
                 div()
+                    .id("managed-key-dialog-scroll")
+                    .min_h(px(0.0))
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("managed-key-dialog-scroll"),
+                    )
                     .px(px(24.0))
                     .py(px(18.0))
                     .flex()
@@ -2535,6 +2544,7 @@ impl WorkspaceApp {
             )
             .child(
                 dialog_footer(&self.tokens)
+                    .flex_shrink_0()
                     .child(self.standard_footer_action_button(
                         self.i18n.t("common.actions.cancel"),
                         ButtonVariant::Outline,
@@ -2545,14 +2555,17 @@ impl WorkspaceApp {
                         },
                         cx,
                     ))
-                    .child(self.standard_footer_action_button(
-                        confirm_label,
-                        ButtonVariant::Default,
-                        ConfirmDialogAction::Confirm,
-                        !can_confirm,
-                        confirm,
-                        cx,
-                    )),
+                    .child(
+                        self.standard_footer_action_button(
+                            confirm_label,
+                            ButtonVariant::Default,
+                            ConfirmDialogAction::Confirm,
+                            !can_confirm,
+                            confirm,
+                            cx,
+                        )
+                        .debug_selector(|| "managed-key-confirm".into()),
+                    ),
             );
         settings_dialog_transition(
             &self.tokens,
@@ -2703,7 +2716,7 @@ impl WorkspaceApp {
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t("modals.managed_key.paste.private_key")),
             )
-            .child(control)
+            .child(self.settings_multiline_input_viewport(target, control.into_any_element()))
             .into_any_element()
     }
 
@@ -3355,6 +3368,119 @@ mod settings_connection_entity_tests {
     use gpui::{AppContext, TestAppContext};
 
     use super::*;
+
+    #[gpui::test]
+    fn managed_key_long_paste_keeps_import_visible(cx: &mut TestAppContext) {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_KEY_LAYOUT_TEST_DIR";
+        if std::env::var_os(fixture_key).is_none() {
+            // Isolate settings and key storage from the maintainer's profile.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(&executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .args([cx.test_function_name().unwrap(), "--nocapture"])
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        let mut store = SettingsStore::load_default().unwrap();
+        store.settings_mut().onboarding_completed = true;
+        store.settings_mut().onboarding_disclaimer_accepted = true;
+        store.settings_mut().ssh_config.auto_load_hosts = false;
+        store.save().unwrap();
+        crate::migration_snapshot::acknowledge_pre_2_0_migration_notice(&default_settings_path())
+            .unwrap();
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            crate::workspace::window_shell::WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        let input = SettingsInput::ManagedKeyPastePrivateKey;
+        let text = format!("{}\n", "synthetic-text-".repeat(12)).repeat(50);
+        workspace.update_in(cx, |this, window, cx| {
+            this.open_settings(window, cx);
+            this.open_managed_key_paste_dialog(cx);
+            this.settings_workspace.update(cx, |settings, cx| {
+                settings.focus_settings_entity_input(input, cx);
+            });
+            window.focus(&this.focus_handle, cx);
+        });
+        cx.update(|_, cx| cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone())));
+        workspace.update(cx, |this, cx| {
+            assert!(this.paste_active_text_input(cx));
+            assert_eq!(
+                this.settings_workspace
+                    .read(cx)
+                    .settings_entity_input_value(input),
+                Some(text.as_str())
+            );
+        });
+        cx.run_until_parked();
+        for height in [600.0, 420.0] {
+            cx.simulate_resize(gpui::size(px(800.0), px(height)));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let button = cx.debug_bounds("managed-key-confirm").unwrap();
+            assert!(
+                button.top() >= px(0.0) && button.bottom() <= px(height),
+                "{button:?}"
+            );
+            let anchor = workspace.read_with(cx, |this, _| {
+                this.text_input_anchors
+                    .get(WorkspaceImeTarget::Settings(input).anchor_id())
+                    .unwrap()
+                    .bounds
+            });
+            // A physical line has exactly one line box even when its text is wide.
+            assert!(anchor.size.height >= px(50.0 * input.textarea_line_height()));
+            let scroll = workspace.read_with(cx, |this, _| {
+                this.selectable_text_scroll_handle(format!(
+                    "multiline-input-{}",
+                    WorkspaceImeTarget::Settings(input).anchor_id().0
+                ))
+            });
+            assert!(
+                scroll.max_offset().x > px(0.0),
+                "long lines must be horizontally reachable"
+            );
+            assert!(
+                scroll.max_offset().y > px(0.0),
+                "later lines must be vertically reachable"
+            );
+            scroll.set_offset(point(px(-80.0), px(-100.0)));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let scrolled = workspace.read_with(cx, |this, _| {
+                this.text_input_anchors
+                    .get(WorkspaceImeTarget::Settings(input).anchor_id())
+                    .unwrap()
+                    .bounds
+            });
+            assert_eq!(scrolled.origin, anchor.origin + scroll.offset());
+            scroll.set_offset(point(px(0.0), px(0.0)));
+        }
+        let button = cx.debug_bounds("managed-key-confirm").unwrap();
+        cx.simulate_click(button.center(), gpui::Modifiers::default());
+        workspace.read_with(cx, |this, cx| {
+            // Clicking consumed the draft through the actual import handler.
+            assert_eq!(
+                this.settings_workspace
+                    .read(cx)
+                    .settings_entity_input_value(input),
+                Some("")
+            );
+        });
+    }
 
     #[gpui::test]
     fn managed_key_paste_request_moves_secrets_out_of_entity(cx: &mut TestAppContext) {

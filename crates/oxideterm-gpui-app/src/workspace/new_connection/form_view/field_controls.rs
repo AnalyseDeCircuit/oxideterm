@@ -853,7 +853,10 @@ impl WorkspaceApp {
         };
         let theme = self.tokens.ui;
         let mut textarea = div()
-            .w_full()
+            .w_auto()
+            .min_w_full()
+            .flex_shrink_0()
+            .whitespace_nowrap()
             .min_h(px(CONNECTION_NOTES_MIN_HEIGHT))
             .px(px(self.tokens.metrics.ui_control_padding_x))
             .py(px(CONNECTION_NOTES_VERTICAL_PADDING))
@@ -869,7 +872,6 @@ impl WorkspaceApp {
             })
             .bg(rgba((theme.bg << 8) | 0x80))
             .cursor(CursorStyle::IBeam)
-            .overflow_hidden()
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .line_height(px(CONNECTION_NOTES_LINE_HEIGHT))
             .text_color(if showing_placeholder {
@@ -910,6 +912,8 @@ impl WorkspaceApp {
                     .min_w_0()
                     .h(px(CONNECTION_NOTES_LINE_HEIGHT))
                     .min_h(px(CONNECTION_NOTES_LINE_HEIGHT))
+                    .flex_shrink_0()
+                    .whitespace_nowrap()
                     .flex()
                     .items_center()
                     .when(focused && showing_placeholder && index == 0, |line| {
@@ -929,7 +933,10 @@ impl WorkspaceApp {
         form_field(
             &self.tokens,
             label,
-            self.finish_connection_input(textarea, field, cx),
+            self.settings_multiline_input_viewport(
+                target,
+                self.finish_connection_input(textarea, field, cx),
+            ),
         )
     }
 
