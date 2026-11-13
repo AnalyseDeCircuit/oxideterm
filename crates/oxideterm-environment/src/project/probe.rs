@@ -169,7 +169,7 @@ fn collect_local_project_manifest_entries(
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };
-        if let Some(entry) = ProjectManifestEntry::new(path.to_string_lossy(), content) {
+        if let Some(entry) = ProjectManifestEntry::from_local_path(&path, content) {
             entries.push(entry);
         }
     }
@@ -202,16 +202,19 @@ mod tests {
 
     #[test]
     fn remote_project_probe_parser_reads_files() {
-        let output = format!(
-            "{}\0state\0ok\0file\0/repo/package.json\0content\0{{\"scripts\":{{\"dev\":\"vite\"}}}}\0",
-            PROJECT_SHELL_PROBE_SENTINEL
-        );
-        let outcome = parse_remote_shell_project_probe_output(&output);
-        let ProjectProbeOutcome::Ready(snapshot) = outcome else {
-            panic!("expected project");
-        };
-        assert_eq!(snapshot.root_path(), "/repo");
-        assert_eq!(snapshot.display_label(), "Node");
+        // A backslash is a legal POSIX directory character, including on a Windows client.
+        for root in ["/repo", r"/repo\name"] {
+            let output = format!(
+                "{}\0state\0ok\0file\0{root}/package.json\0content\0{{\"scripts\":{{\"dev\":\"vite\"}}}}\0",
+                PROJECT_SHELL_PROBE_SENTINEL
+            );
+            let outcome = parse_remote_shell_project_probe_output(&output);
+            let ProjectProbeOutcome::Ready(snapshot) = outcome else {
+                panic!("expected project");
+            };
+            assert_eq!(snapshot.root_path(), root);
+            assert_eq!(snapshot.display_label(), "Node");
+        }
     }
 
     #[test]
@@ -235,17 +238,36 @@ mod tests {
     #[test]
     fn local_project_probe_reads_manifest_from_parent_directory() {
         let root = temporary_directory("project-probe");
-        let child = root.join("src");
+        let project = root.join("nested project 中文");
+        let child = project.join("src");
         std::fs::create_dir_all(&child).unwrap();
-        std::fs::write(root.join("package.json"), r#"{"scripts":{"dev":"vite"}}"#).unwrap();
+        std::fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        std::fs::write(
+            project.join("package.json"),
+            r#"{"scripts":{"dev":"vite"}}"#,
+        )
+        .unwrap();
 
         let outcome = probe_local_project(&child.to_string_lossy());
+        std::fs::remove_dir_all(&root).unwrap();
 
         let ProjectProbeOutcome::Ready(snapshot) = outcome else {
             panic!("expected a detected project");
         };
-        assert_eq!(snapshot.root_path(), root.to_string_lossy());
-        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(snapshot.root_path(), project.to_string_lossy());
+        assert_eq!(snapshot.display_label(), "Node");
+        assert_eq!(
+            snapshot.facets()[0].manifest_path(),
+            project.join("package.json").to_string_lossy()
+        );
+        assert_eq!(
+            snapshot
+                .tasks()
+                .iter()
+                .map(|task| task.command())
+                .collect::<Vec<_>>(),
+            ["npm run 'dev'"]
+        );
     }
 
     #[test]

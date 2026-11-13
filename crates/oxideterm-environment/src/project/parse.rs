@@ -109,9 +109,8 @@ fn nearest_project_root(entries: &[ProjectManifestEntry]) -> Option<String> {
     entries
         .iter()
         .filter(|entry| project_root_manifest_names().contains(&entry.file_name()))
-        .map(ProjectManifestEntry::parent_path)
-        .max_by_key(|path| project_path_depth(path))
-        .map(str::to_string)
+        .max_by_key(|entry| entry.parent_depth())
+        .map(|entry| entry.parent_path().to_string())
 }
 
 fn project_root_manifest_names() -> &'static [&'static str] {
@@ -132,10 +131,6 @@ fn project_root_manifest_names() -> &'static [&'static str] {
         COMPOSE_YML,
         COMPOSE_YAML,
     ]
-}
-
-fn project_path_depth(path: &str) -> usize {
-    path.split('/').filter(|part| !part.is_empty()).count()
 }
 
 fn find_entry<'a>(
@@ -524,6 +519,30 @@ mod tests {
 
     fn manifest(path: &str, content: &str) -> ProjectManifestEntry {
         ProjectManifestEntry::new(path, content).unwrap()
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn native_project_manifests_preserve_windows_path_prefixes() {
+        for (path, root) in [
+            (r"C:\package.json", r"C:\"),
+            (r"\\server\share\repo\package.json", r"\\server\share\repo"),
+            (r"\\?\C:\repo\package.json", r"\\?\C:\repo"),
+            (r"C:\repo/app\package.json", r"C:\repo/app"),
+        ] {
+            let entry = ProjectManifestEntry::from_local_path(
+                std::path::Path::new(path),
+                r#"{"scripts":{"dev":"vite"}}"#.into(),
+            )
+            .unwrap();
+            let ProjectProbeOutcome::Ready(snapshot) =
+                interpret_project_manifest_entries(vec![entry])
+            else {
+                panic!("expected project for {path}");
+            };
+            assert_eq!(snapshot.root_path(), root);
+            assert_eq!(snapshot.facets()[0].manifest_path(), path);
+        }
     }
 
     #[test]

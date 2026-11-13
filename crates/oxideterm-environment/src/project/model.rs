@@ -1,7 +1,10 @@
 // Copyright (C) 2026 OxideTerm contributors.
 // SPDX-License-Identifier: GPL-3.0-only
 
-use std::hash::{Hash, Hasher};
+use std::{
+    hash::{Hash, Hasher},
+    path::Path,
+};
 
 /// Ownership scope for a terminal project probe.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -63,6 +66,7 @@ impl Hash for ProjectProbeKey {
 pub struct ProjectManifestEntry {
     path: String,
     content: String,
+    native_path: bool,
 }
 
 impl ProjectManifestEntry {
@@ -75,7 +79,15 @@ impl ProjectManifestEntry {
         Some(Self {
             path: path.to_string(),
             content: content.into(),
+            native_path: false,
         })
+    }
+
+    pub(super) fn from_local_path(path: &Path, content: String) -> Option<Self> {
+        // Remote POSIX paths must keep their separators even on a Windows host.
+        let mut entry = Self::new(path.to_string_lossy(), content)?;
+        entry.native_path = true;
+        Some(entry)
     }
 
     pub fn path(&self) -> &str {
@@ -87,14 +99,36 @@ impl ProjectManifestEntry {
     }
 
     pub fn file_name(&self) -> &str {
+        if self.native_path {
+            return Path::new(&self.path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or(&self.path);
+        }
         self.path.rsplit('/').next().unwrap_or(self.path.as_str())
     }
 
     pub fn parent_path(&self) -> &str {
+        if self.native_path {
+            return Path::new(&self.path)
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .and_then(|parent| parent.to_str())
+                .unwrap_or(".");
+        }
         self.path
             .rsplit_once('/')
             .map(|(parent, _)| if parent.is_empty() { "/" } else { parent })
             .unwrap_or(".")
+    }
+
+    pub(super) fn parent_depth(&self) -> usize {
+        let parent = self.parent_path();
+        if self.native_path {
+            Path::new(parent).components().count()
+        } else {
+            parent.split('/').filter(|part| !part.is_empty()).count()
+        }
     }
 }
 

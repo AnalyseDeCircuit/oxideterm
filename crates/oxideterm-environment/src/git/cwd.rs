@@ -168,17 +168,21 @@ mod tests {
 
     #[test]
     fn local_home_expansion_preserves_current_rules() {
-        let home = Path::new("/home/dev");
-        assert_eq!(expand_local_git_home_with("~", Some(home)), "/home/dev");
+        #[cfg(windows)]
+        let (home, project) = (r"C:\Users\dev", r"C:\Users\dev\project");
+        #[cfg(not(windows))]
+        let (home, project) = ("/home/dev", "/home/dev/project");
+        assert_eq!(expand_local_git_home_with("~", Some(Path::new(home))), home);
         assert_eq!(
-            expand_local_git_home_with("~/project", Some(home)),
-            "/home/dev/project"
+            expand_local_git_home_with("~/project", Some(Path::new(home))),
+            project
         );
         assert_eq!(
-            expand_local_git_home_with("~other/project", Some(home)),
+            expand_local_git_home_with("~other/project", Some(Path::new(home))),
             "~other/project"
         );
         assert_eq!(expand_local_git_home_with("~", None), "~");
+        assert_eq!(expand_local_git_home_with("~/project", None), "~/project");
     }
 
     #[test]
