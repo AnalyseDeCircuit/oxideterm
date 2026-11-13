@@ -749,7 +749,8 @@ fn toolbar_hover_background(
     }
 }
 
-/// Mixes two opaque colours channel by channel; `ratio` weights `base`.
+/// Mixes two opaque colours channel by channel: `amount` weights `toward`
+/// (`0.0` returns `base`, `1.0` returns `toward`).
 fn mix_toward(base: u32, toward: u32, amount: f32) -> u32 {
     let channel = |shift: u32| {
         let base = ((base >> shift) & 0xff) as f32;
