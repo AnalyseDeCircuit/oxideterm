@@ -1,34 +1,9 @@
 use super::*;
-use gpui::{App, Point, ScrollEvent, ScrollHandle};
-use oxideterm_gpui_ui::ScrollableElement;
+use oxideterm_gpui_ui::scroll::{Scrollbar, ScrollbarAxis};
 
 const STANDALONE_SFTP_COMMON_COLUMN_WIDTH: f32 = 320.0;
 const STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH: f32 = 390.0;
 const STANDALONE_SFTP_VIEWPORT_MARGIN: f32 = 32.0;
-
-fn handle_standalone_sftp_column_scroll(
-    scroll_handle: &ScrollHandle,
-    event: &ScrollEvent,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    let delta = event.delta.pixel_delta(window.line_height());
-    if delta.x.abs() > delta.y.abs() {
-        return;
-    }
-
-    let old_offset = scroll_handle.offset();
-    let max_offset = scroll_handle.max_offset();
-    let next_y = (old_offset.y + delta.y).clamp(-max_offset.y, px(0.0));
-    if next_y != old_offset.y {
-        scroll_handle.set_offset(Point::new(old_offset.x, next_y));
-        window.refresh();
-    }
-
-    // Consume vertical gestures even at a column boundary so the horizontal
-    // viewport never treats the remaining wheel movement as horizontal input.
-    cx.stop_propagation();
-}
 
 struct StandaloneSftpModalSnapshot {
     profile_id: Option<String>,
@@ -180,16 +155,17 @@ impl WorkspaceApp {
             self.ensure_kerberos_credentials_availability(cx);
         }
         let remote_to_remote = form.transfer_mode == StandaloneSftpTransferMode::RemoteRemote;
+        let gap = self.tokens.metrics.modal_section_gap;
         let endpoint_count = if remote_to_remote { 2.0 } else { 1.0 };
-        let sidebar_width = if shows_transport_selector {
-            NEW_CONNECTION_TYPE_SIDEBAR_WIDTH + self.tokens.metrics.modal_section_gap
-        } else {
-            0.0
-        };
-        let desired_width = sidebar_width
-            + STANDALONE_SFTP_COMMON_COLUMN_WIDTH
-            + endpoint_count
-                * (STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH + self.tokens.metrics.modal_section_gap);
+        let fields_width = STANDALONE_SFTP_COMMON_COLUMN_WIDTH
+            + endpoint_count * (STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH + gap);
+        let desired_width = fields_width
+            + 2.0 * self.tokens.metrics.modal_body_padding
+            + if shows_transport_selector {
+                NEW_CONNECTION_TYPE_SIDEBAR_WIDTH + gap
+            } else {
+                0.0
+            };
         let modal_width = desired_width
             .min(f32::from(window.viewport_size().width) - STANDALONE_SFTP_VIEWPORT_MARGIN);
         let modal_max_height = f32::from(window.viewport_size().height)
@@ -223,6 +199,39 @@ impl WorkspaceApp {
         } else {
             self.i18n.t("sftp.standalone.form_title")
         };
+        let fields_scroll = self.selectable_text_scroll_handle("standalone-sftp-form-scroll");
+        let fields = div()
+            .min_w(px(fields_width))
+            .flex()
+            .gap(px(gap))
+            .child(self.render_standalone_sftp_common_column(&form, cx))
+            .child(self.render_standalone_sftp_endpoint_column(&form, false, remote_to_remote, cx))
+            .when(remote_to_remote, |fields| {
+                fields.child(self.render_standalone_sftp_endpoint_column(&form, true, true, cx))
+            });
+        // Only fields move horizontally; the transport list stays reachable
+        // while editing either endpoint.
+        let scrollable_fields = div()
+            .flex_1()
+            .min_w_0()
+            .min_h_0()
+            .relative()
+            .child(
+                div()
+                    .id("standalone-sftp-form-scroll")
+                    .size_full()
+                    .overflow_scroll()
+                    .track_scroll(&fields_scroll)
+                    .on_scroll(cx.listener(|this, _, _, cx| {
+                        if this.connection_form_state(cx).open_select.is_some() {
+                            this.close_new_connection_select(cx);
+                            this.clear_new_connection_select_anchor(cx);
+                            cx.notify();
+                        }
+                    }))
+                    .child(fields),
+            )
+            .child(Scrollbar::new(&fields_scroll).axis(ScrollbarAxis::Both));
 
         modal_backdrop(dialog_backdrop_color())
             .on_mouse_down(
@@ -238,7 +247,7 @@ impl WorkspaceApp {
                 modal_container(&self.tokens)
                     .bg(rgb(self.tokens.ui.bg_elevated))
                     .w(px(modal_width))
-                    .max_h(px(modal_max_height))
+                    .h(px(modal_max_height))
                     .flex()
                     .flex_col()
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
@@ -250,32 +259,17 @@ impl WorkspaceApp {
                         self.i18n.t("sftp.standalone.form_description"),
                     ))
                     .child(
-                        modal_body(&self.tokens)
-                            .flex_1()
-                            .min_h(px(0.0))
-                            .overflow_x_scrollbar()
-                            .child(
-                                div()
-                                    .h_full()
-                                    .min_w(px(desired_width))
-                                    .flex()
-                                    .gap(px(self.tokens.metrics.modal_section_gap))
-                                    .when(shows_transport_selector, |content| {
-                                        content.child(self.render_transport_selector(cx))
-                                    })
-                                    .child(self.render_standalone_sftp_common_column(&form, cx))
-                                    .child(self.render_standalone_sftp_endpoint_column(
-                                        &form,
-                                        false,
-                                        remote_to_remote,
-                                        cx,
-                                    ))
-                                    .when(remote_to_remote, |content| {
-                                        content.child(self.render_standalone_sftp_endpoint_column(
-                                            &form, true, true, cx,
-                                        ))
-                                    }),
-                            ),
+                        modal_body(&self.tokens).flex_1().min_h(px(0.0)).child(
+                            div()
+                                .size_full()
+                                .min_h_0()
+                                .flex()
+                                .gap(px(gap))
+                                .when(shows_transport_selector, |content| {
+                                    content.child(self.render_transport_selector(cx))
+                                })
+                                .child(scrollable_fields),
+                        ),
                     )
                     .child(
                         modal_footer(&self.tokens)
@@ -342,20 +336,12 @@ impl WorkspaceApp {
         form: &StandaloneSftpModalSnapshot,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let scroll_handle = self.selectable_text_scroll_handle("standalone-sftp-common-column");
-        let wheel_scroll_handle = scroll_handle.clone();
         div()
             .id("standalone-sftp-common-column")
             .w(px(STANDALONE_SFTP_COMMON_COLUMN_WIDTH))
-            .min_w(px(STANDALONE_SFTP_COMMON_COLUMN_WIDTH))
-            .h_full()
+            .flex_none()
             .border_r_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-            .overflow_hidden()
-            .track_scroll(&scroll_handle)
-            .on_scroll(move |event, window, cx| {
-                handle_standalone_sftp_column_scroll(&wheel_scroll_handle, event, window, cx);
-            })
             .child(
                 div()
                     .flex()
@@ -536,8 +522,6 @@ impl WorkspaceApp {
         } else {
             "sftp.standalone.remote_host"
         };
-        let scroll_handle = self.selectable_text_scroll_handle(column_id);
-        let wheel_scroll_handle = scroll_handle.clone();
         let options = if secondary {
             self.render_standalone_sftp_secondary_options(
                 initial_remote_path,
@@ -555,17 +539,11 @@ impl WorkspaceApp {
         div()
             .id(column_id)
             .w(px(STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH))
-            .min_w(px(STANDALONE_SFTP_ENDPOINT_COLUMN_WIDTH))
-            .h_full()
+            .flex_none()
             .when(numbered && !secondary, |column| {
                 column
                     .border_r_1()
                     .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-            })
-            .overflow_hidden()
-            .track_scroll(&scroll_handle)
-            .on_scroll(move |event, window, cx| {
-                handle_standalone_sftp_column_scroll(&wheel_scroll_handle, event, window, cx);
             })
             .child(
                 div()

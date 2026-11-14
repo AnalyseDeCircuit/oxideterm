@@ -11,6 +11,103 @@ impl Render for FormPreview {
     }
 }
 
+#[gpui::test]
+fn standalone_sftp_keeps_advanced_navigation_and_scrolls_both_axes(cx: &mut gpui::TestAppContext) {
+    let Some(_) = crate::workspace::session_manager::tests::isolated_workspace_fixture(
+        cx,
+        "OXIDETERM_STANDALONE_SFTP_LAYOUT_TEST_DIR",
+    ) else {
+        return;
+    };
+    cx.executor().allow_parking();
+    let (view, cx) = cx.add_window_view(|window, cx| {
+        FormPreview(cx.new(|cx| {
+            let workspace = WorkspaceApp::new(window, cx, None, None).unwrap();
+            workspace.update_connection_form_state(cx, |state| {
+                let mut form = NewConnectionForm::default();
+                form.advanced_connections_expanded = true;
+                form.set_standalone_sftp_transfer_mode(StandaloneSftpTransferMode::RemoteRemote);
+                state.replace_with_new_form(form);
+            });
+            workspace
+        }))
+    });
+    let draw = |cx: &mut gpui::VisualTestContext| {
+        cx.update(|window, app| window.draw(app).clear(app));
+    };
+    cx.simulate_resize(gpui::size(px(1000.0), px(750.0)));
+    draw(cx);
+    let sftp = cx
+        .debug_bounds("new-connection-transport-StandaloneSftp")
+        .expect("expanded advanced group contains standalone SFTP");
+    cx.simulate_click(sftp.center(), gpui::Modifiers::default());
+
+    let workspace = view.read_with(cx, |view, _| view.0.clone());
+    let fields = workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(
+            workspace
+                .connection_form_state(cx)
+                .form
+                .as_ref()
+                .unwrap()
+                .transport,
+            NewConnectionTransport::StandaloneSftp,
+        );
+        workspace.selectable_text_scroll_handle("standalone-sftp-form-scroll")
+    });
+    cx.simulate_resize(gpui::size(px(960.0), px(460.0)));
+    draw(cx);
+    let advanced = cx.debug_bounds("new-connection-advanced-group").unwrap();
+    let viewport = fields.bounds();
+    assert!(viewport.size.height > px(0.0) && viewport.size.height < px(460.0));
+    assert!(fields.max_offset().y > px(0.0));
+    assert!(fields.max_offset().x > px(0.0));
+
+    for (delta, expected) in [
+        (
+            gpui::point(px(0.0), px(-4000.0)),
+            gpui::point(px(0.0), -fields.max_offset().y),
+        ),
+        (
+            gpui::point(px(-4000.0), px(0.0)),
+            gpui::point(-fields.max_offset().x, -fields.max_offset().y),
+        ),
+    ] {
+        cx.simulate_event(gpui::ScrollEvent {
+            position: viewport.center(),
+            delta: gpui::ScrollDelta::Pixels(delta),
+            ..Default::default()
+        });
+        draw(cx);
+        assert_eq!(fields.offset(), expected);
+        assert_eq!(
+            cx.debug_bounds("new-connection-advanced-group").unwrap(),
+            advanced,
+            "the advanced group stays outside the scrolling fields",
+        );
+    }
+
+    let navigation = workspace.read_with(cx, |workspace, _| {
+        workspace.selectable_text_scroll_handle("new-connection-transport-scroll")
+    });
+    let navigation_viewport = navigation.bounds();
+    assert!(!navigation_viewport.contains(&advanced.center()));
+    cx.simulate_event(gpui::ScrollEvent {
+        position: navigation_viewport.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-4000.0))),
+        ..Default::default()
+    });
+    draw(cx);
+    assert!(
+        navigation_viewport.contains(
+            &cx.debug_bounds("new-connection-advanced-group")
+                .unwrap()
+                .center()
+        ),
+        "the advanced group can be reached even when the dialog is short",
+    );
+}
+
 // Run with APPDATA pointing to an empty directory under target. The benchmark
 // mounts the real form without opening any network or terminal session.
 #[gpui::test]

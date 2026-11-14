@@ -2971,16 +2971,11 @@ impl WorkspaceApp {
             true,
         ));
         let plugin_types = self.plugin_connection_types(cx);
-        let has_plugin_types = !plugin_types.is_empty();
         let mut sidebar = div()
-            .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
-            .h_full()
-            .flex_none()
+            .min_h_full()
             .flex()
             .flex_col()
             .gap(px(4.0))
-            .border_r_1()
-            .border_color(rgba((theme.border << 8) | 0x80))
             .pr(px(self.tokens.spacing.three));
 
         let mut advanced_group_started = false;
@@ -2990,6 +2985,7 @@ impl WorkspaceApp {
                 sidebar = sidebar.child(div().flex_1()).child(
                     div()
                         .id("new-connection-advanced-group")
+                        .debug_selector(|| "new-connection-advanced-group".into())
                         .h(px(NEW_CONNECTION_ADVANCED_GROUP_HEIGHT))
                         .flex_none()
                         .flex()
@@ -3060,6 +3056,7 @@ impl WorkspaceApp {
                 )
             });
             let row = div()
+                .debug_selector(|| format!("new-connection-transport-{transport:?}"))
                 .w_full()
                 .h(px(NEW_CONNECTION_TRANSPORT_ROW_HEIGHT))
                 .flex_none()
@@ -3251,11 +3248,28 @@ impl WorkspaceApp {
                     ),
             );
         }
-        if has_plugin_types {
-            sidebar.overflow_y_scrollbar().into_any_element()
-        } else {
-            sidebar.into_any_element()
-        }
+        // Built-in advanced choices can overflow in short windows too.
+        let scroll = self.selectable_text_scroll_handle("new-connection-transport-scroll");
+        div()
+            .w(px(NEW_CONNECTION_TYPE_SIDEBAR_WIDTH))
+            .min_h_0()
+            .flex_none()
+            .relative()
+            .border_r_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
+            .child(
+                div()
+                    .id("new-connection-transport-scroll")
+                    .size_full()
+                    .selectable_overflow_y_scroll(&scroll)
+                    .restrict_scroll_to_axis()
+                    .child(sidebar),
+            )
+            .child(crate::workspace::selectable_vertical_scrollbar_layer(
+                "new-connection-transport-scrollbar",
+                &scroll,
+            ))
+            .into_any_element()
     }
 
     pub(super) fn render_local_terminal_form_branch(&self, cx: &mut Context<Self>) -> AnyElement {

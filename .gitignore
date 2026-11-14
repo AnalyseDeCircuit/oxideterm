@@ -48,3 +48,6 @@ docs/development/benchmarks/mixed-text-2026-09-11.md
 docs/media/social/
 docs/development/kitty-graphics-compatibility.md
 .agents/skills/hallmark/*
+# Local agent skills
+/.agents/skills/impeccable/
+/skills-lock.json

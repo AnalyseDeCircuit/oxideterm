@@ -6,7 +6,10 @@ use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonVariant, button_with},
     checkbox::checkbox,
     form_field,
-    modal::{dismissible_dialog_backdrop, modal_body, modal_container, modal_footer, modal_header},
+    modal::{
+        dialog_backdrop_color, modal_backdrop, modal_body, modal_container, modal_footer,
+        modal_header,
+    },
     section_header, segmented_tab, segmented_tabs,
 };
 
@@ -301,7 +304,7 @@ impl WorkspaceApp {
                     ),
             );
         Some(
-            dismissible_dialog_backdrop()
+            modal_backdrop(dialog_backdrop_color())
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| {
