@@ -1,20 +1,20 @@
 use super::*;
 
-pub(in crate::workspace) const SFTP_SETTINGS_CARD_PADDING: f32 = 20.0; // Tauri p-5
 // Leave room for large transfer rates and the localized unlimited placeholder.
 const SFTP_SPEED_LIMIT_INPUT_WIDTH: f32 = 180.0;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_sftp_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
-        if section_index == 0 {
-            return self.sftp_settings_card(
-                vec![
-                    self.card_title("settings_view.sftp.opening"),
+        if section == SettingsSectionId::SftpOpening {
+            return self.settings_card(
+                "settings_view.sftp.opening",
+                "",
+                self.separated_settings_rows(vec![
                     self.setting_row(
                         "settings_view.sftp.presentation",
                         "settings_view.sftp.presentation_hint",
@@ -25,7 +25,6 @@ impl WorkspaceApp {
                         ),
                         cx,
                     ),
-                    self.card_separator(),
                     self.setting_row(
                         "settings_view.sftp.protocol",
                         "settings_view.sftp.protocol_hint",
@@ -39,38 +38,32 @@ impl WorkspaceApp {
                         ),
                         cx,
                     ),
-                ],
-                20.0,
+                ]),
             );
         }
 
-        if section_index == 2 {
-            return self.sftp_settings_card(
-                vec![
-                    div()
-                        .mb(px(8.0))
-                        .child(self.setting_row(
-                            "settings_view.sftp.conflict",
-                            "settings_view.sftp.conflict_hint",
-                            self.sftp_select_control(
-                                SettingsSelect::SftpConflict,
-                                conflict_label(settings.sftp.conflict_action, &self.i18n),
-                                cx,
-                            ),
-                            cx,
-                        ))
-                        .into_any_element(),
-                ],
-                0.0,
+        if section == SettingsSectionId::SftpConflict {
+            return self.settings_card(
+                "settings_view.sftp.conflict",
+                "",
+                vec![self.setting_row(
+                    "settings_view.sftp.conflict",
+                    "settings_view.sftp.conflict_hint",
+                    self.sftp_select_control(
+                        SettingsSelect::SftpConflict,
+                        conflict_label(settings.sftp.conflict_action, &self.i18n),
+                        cx,
+                    ),
+                    cx,
+                )],
             );
         }
 
-        if section_index != 1 {
+        if section != SettingsSectionId::SftpPerformance {
             return div().into_any_element();
         }
 
         let mut performance_rows = vec![
-            self.card_title("settings_view.sftp.performance"),
             self.setting_row(
                 "settings_view.sftp.concurrent",
                 "settings_view.sftp.concurrent_hint",
@@ -81,7 +74,6 @@ impl WorkspaceApp {
                 ),
                 cx,
             ),
-            self.card_separator(),
             self.setting_row(
                 "settings_view.sftp.directory_parallelism",
                 "settings_view.sftp.directory_parallelism_hint",
@@ -92,74 +84,35 @@ impl WorkspaceApp {
                 ),
                 cx,
             ),
-            self.card_separator(),
-            self.setting_row(
+            self.bool_row(
                 "settings_view.sftp.bandwidth",
                 "settings_view.sftp.bandwidth_hint",
-                checkbox(
-                    &self.tokens,
-                    "sftp-speed-limit",
-                    String::new(),
-                    settings.sftp.speed_limit_enabled,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.edit_settings(
-                            |settings| {
-                                settings.sftp.speed_limit_enabled =
-                                    !settings.sftp.speed_limit_enabled
-                            },
-                            cx,
-                        );
-                    }),
-                )
-                .into_any_element(),
+                settings.sftp.speed_limit_enabled,
+                |settings, enabled| settings.sftp.speed_limit_enabled = enabled,
                 cx,
             ),
         ];
 
         if settings.sftp.speed_limit_enabled {
-            performance_rows.push(
-                div()
-                    .pt(px(8.0))
-                    .child(self.setting_row(
-                        "settings_view.sftp.speed_limit",
-                        "",
-                        self.settings_text_input_control(
-                            SettingsInput::SftpSpeedLimitKbps,
-                            settings.sftp.speed_limit_kbps.to_string(),
-                            self.i18n.t("settings_view.sftp.unlimited_placeholder"),
-                            SFTP_SPEED_LIMIT_INPUT_WIDTH,
-                            cx,
-                        ),
-                        cx,
-                    ))
-                    .into_any_element(),
-            );
+            performance_rows.push(self.setting_row(
+                "settings_view.sftp.speed_limit",
+                "",
+                self.settings_text_input_control(
+                    SettingsInput::SftpSpeedLimitKbps,
+                    settings.sftp.speed_limit_kbps.to_string(),
+                    self.i18n.t("settings_view.sftp.unlimited_placeholder"),
+                    SFTP_SPEED_LIMIT_INPUT_WIDTH,
+                    cx,
+                ),
+                cx,
+            ));
         }
 
-        self.sftp_settings_card(performance_rows, 16.0)
-    }
-
-    pub(in crate::workspace) fn sftp_settings_card(
-        &self,
-        rows: Vec<AnyElement>,
-        gap: f32,
-    ) -> AnyElement {
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(SFTP_SETTINGS_CARD_PADDING))
-            .flex()
-            .flex_col()
-            .gap(px(gap))
-            .children(rows);
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+        self.settings_card(
+            "settings_view.sftp.performance",
+            "",
+            self.separated_settings_rows(performance_rows),
+        )
     }
 
     pub(in crate::workspace) fn sftp_select_control(

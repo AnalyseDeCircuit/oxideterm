@@ -12,13 +12,17 @@ impl WorkspaceApp {
             cx.notify();
         });
         self.sync_settings_section_list_state(cx);
-        self.settings_section_list_state
-            .scroll_to(gpui::ListOffset {
-                item_ix: SETTINGS_SECTION_HEADER_ITEM_COUNT
-                    + 2
-                    + usize::from(self.ai_entity.read(cx).knowledge_error().is_some()),
-                offset_in_item: px(0.0),
-            });
+        if let Some(item_ix) = settings_section_list_item_index(
+            SettingsTab::Knowledge,
+            SettingsSectionId::KnowledgeDocuments,
+            self.settings_dynamic_section_counts(cx),
+        ) {
+            self.settings_section_list_state
+                .scroll_to(gpui::ListOffset {
+                    item_ix,
+                    offset_in_item: px(0.0),
+                });
+        }
         cx.notify();
     }
 

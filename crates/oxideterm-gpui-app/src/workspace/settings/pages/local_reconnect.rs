@@ -4,12 +4,12 @@ use super::*;
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_local_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
-        match section_index {
-            0 => {
+        match section {
+            SettingsSectionId::TerminalLocalShell => {
                 let mut shell_rows = vec![self.local_shell_select_row(settings, cx)];
                 shell_rows.extend(self.local_shell_options_rows(settings, cx));
                 shell_rows.push(self.card_separator());
@@ -41,10 +41,10 @@ impl WorkspaceApp {
                 }
                 self.settings_card("settings_view.local_terminal.shell", "", shell_rows)
             }
-            1 => self.settings_card(
+            SettingsSectionId::TerminalLocalShellProfile => self.settings_card(
                 "settings_view.local_terminal.shell_profile",
                 "",
-                vec![self.checkbox_row(
+                vec![self.bool_row(
                     "settings_view.local_terminal.load_shell_profile",
                     "settings_view.local_terminal.load_shell_profile_hint",
                     settings.local_terminal.load_shell_profile,
@@ -52,7 +52,9 @@ impl WorkspaceApp {
                     cx,
                 )],
             ),
-            2 => self.local_privilege_credentials_card(cx),
+            SettingsSectionId::TerminalLocalPrivilegeCredentials => {
+                self.local_privilege_credentials_card(cx)
+            }
             _ => div().into_any_element(),
         }
     }
@@ -63,13 +65,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let mut rows = vec![
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(self.tokens.ui.text))
-                .child(self.i18n.t("settings_view.local_terminal.oh_my_posh"))
-                .into_any_element(),
-            self.checkbox_row(
+            self.card_subsection_header(
+                self.i18n.t("settings_view.local_terminal.oh_my_posh"),
+                None,
+            ),
+            self.bool_row(
                 "settings_view.local_terminal.oh_my_posh_enable",
                 "settings_view.local_terminal.oh_my_posh_enable_hint",
                 settings.local_terminal.oh_my_posh_enabled,
@@ -78,25 +78,15 @@ impl WorkspaceApp {
             ),
         ];
         if settings.local_terminal.oh_my_posh_enabled {
-            rows.push(
+            rows.push(self.settings_callout(
+                SettingsCalloutTone::Info,
+                Some(LucideIcon::Info),
                 div()
-                    .px(px(12.0))
-                    .py(px(8.0))
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgba((self.tokens.ui.info << 8) | 0x33))
-                    .bg(rgba((self.tokens.ui.info << 8) | 0x1a))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.info))
-                            .child(format!(
-                                "💡 {}",
-                                self.i18n.t("settings_view.local_terminal.oh_my_posh_note")
-                            )),
-                    )
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.info))
+                    .child(self.i18n.t("settings_view.local_terminal.oh_my_posh_note"))
                     .into_any_element(),
-            );
+            ));
             rows.push(self.card_separator());
             rows.push(
                 self.setting_row(
@@ -209,15 +199,12 @@ impl WorkspaceApp {
         let strategy = div()
             .flex()
             .flex_col()
-            .gap(px(24.0))
+            .gap(px(self.tokens.metrics.settings_card_gap))
             .opacity(if reconnect_enabled { 1.0 } else { 0.4 })
-            .child(
-                div()
-                    .text_size(px(18.0))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text_heading))
-                    .child(self.i18n.t("settings_view.reconnect.strategy")),
-            )
+            .child(self.card_subsection_header(
+                self.i18n.t("settings_view.reconnect.strategy"),
+                None,
+            ))
             .child(
                 div()
                     .w_full()
@@ -278,7 +265,7 @@ impl WorkspaceApp {
         checked: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.checkbox_row(
+        self.bool_row(
             "settings_view.reconnect.enabled",
             "settings_view.reconnect.enabled_hint",
             checked,

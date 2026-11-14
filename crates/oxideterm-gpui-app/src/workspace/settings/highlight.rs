@@ -84,348 +84,246 @@ impl WorkspaceApp {
             |rule_set| rule_set.name.clone(),
         );
 
-        let semantic_card =
+        let semantic_toggle = div()
+            .flex_none()
+            .child(
+                checkbox(
+                    &self.tokens,
+                    "semantic-coloring",
+                    String::new(),
+                    settings.terminal.semantic_coloring,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.edit_settings(
+                            |settings| {
+                                settings.terminal.semantic_coloring =
+                                    !settings.terminal.semantic_coloring;
+                            },
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                ),
+            )
+            .into_any_element();
+
+        let mut semantic_rows = vec![
+            self.card_separator(),
+            self.select_setting_row(
+                "settings_view.terminal.highlight_rules.semantic_scheme",
+                "settings_view.terminal.highlight_rules.semantic_scheme_hint",
+                SettingsSelect::TerminalSemanticScheme,
+                semantic_scheme_label,
+                self.tokens.metrics.settings_select_width,
+                cx,
+            ),
             div()
                 .w_full()
-                .min_w(px(0.0))
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(self.tokens.ui.border))
-                .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-                .shadow(oxideterm_gpui_ui::theme_card_shadow(&self.tokens))
-                .p(px(self.tokens.metrics.settings_card_padding))
                 .flex()
-                .flex_col()
-                .gap(px(self.tokens.metrics.settings_card_gap))
-                .child(
-                    div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .items_center()
-                        .justify_between()
-                        .gap(px(16.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.0))
-                                .flex()
-                                .flex_col()
-                                .gap(px(4.0))
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                        .text_color(rgb(self.tokens.ui.text))
-                                        .child(
-                                            self.i18n
-                                                .t("settings_view.terminal.highlight_rules.semantic_coloring")
-                                                .to_uppercase(),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(self.i18n.t(
-                                            "settings_view.terminal.highlight_rules.semantic_coloring_hint",
-                                        )),
-                                ),
-                        )
-                        .child(
-                            div().flex_none().child(
-                                checkbox(
-                                    &self.tokens, "semantic-coloring",
-                                    String::new(),
-                                    settings.terminal.semantic_coloring,
-                                )
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        this.edit_settings(
-                                            |settings| {
-                                                settings.terminal.semantic_coloring =
-                                                    !settings.terminal.semantic_coloring;
-                                            },
-                                            cx,
-                                        );
-                                    }),
-                                ),
-                            ),
-                        ),
-                )
-                .child(self.card_separator())
-                .child(self.select_setting_row(
-                    "settings_view.terminal.highlight_rules.semantic_scheme",
-                    "settings_view.terminal.highlight_rules.semantic_scheme_hint",
-                    SettingsSelect::TerminalSemanticScheme,
-                    semantic_scheme_label,
-                    self.tokens.metrics.settings_select_width,
-                    cx,
+                .flex_row()
+                .flex_wrap()
+                .justify_end()
+                .gap(px(8.0))
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Plus,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.semantic_scheme_create"),
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.create_semantic_scheme(cx);
+                        cx.stop_propagation();
+                    }),
                 ))
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_row()
-                        .flex_wrap()
-                        .justify_end()
-                        .gap(px(8.0))
-                        .child(self.semantic_scheme_action_button(
-                            LucideIcon::Plus,
-                            self.i18n.t(
-                                "settings_view.terminal.highlight_rules.semantic_scheme_create",
-                            ),
-                            false,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.create_semantic_scheme(cx);
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.semantic_scheme_action_button(
-                            LucideIcon::Download,
-                            self.i18n.t(
-                                "settings_view.terminal.highlight_rules.semantic_scheme_import",
-                            ),
-                            false,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.import_semantic_scheme(cx);
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.semantic_scheme_action_button(
-                            LucideIcon::Upload,
-                            self.i18n.t(
-                                "settings_view.terminal.highlight_rules.semantic_scheme_export",
-                            ),
-                            active_custom_scheme.is_none(),
-                            cx.listener(|this, _event, _window, cx| {
-                                this.export_semantic_scheme(cx);
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.semantic_scheme_action_button(
-                            LucideIcon::Trash2,
-                            self.i18n.t(
-                                "settings_view.terminal.highlight_rules.semantic_scheme_delete",
-                            ),
-                            active_custom_scheme.is_none(),
-                            cx.listener(|this, _event, _window, cx| {
-                                this.delete_active_semantic_scheme(cx);
-                                cx.stop_propagation();
-                            }),
-                        )),
-                )
-                .when_some(active_custom_scheme, |body, scheme| {
-                    body.child(self.card_separator())
-                        .child(self.semantic_scheme_editor(scheme, cx))
-                })
-                .child(self.card_separator())
-                .child(self.semantic_scheme_preview(&semantic_scheme));
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Download,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.semantic_scheme_import"),
+                    false,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.import_semantic_scheme(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Upload,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.semantic_scheme_export"),
+                    active_custom_scheme.is_none(),
+                    cx.listener(|this, _event, _window, cx| {
+                        this.export_semantic_scheme(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Trash2,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.semantic_scheme_delete"),
+                    active_custom_scheme.is_none(),
+                    cx.listener(|this, _event, _window, cx| {
+                        this.delete_active_semantic_scheme(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .into_any_element(),
+        ];
+        if let Some(scheme) = active_custom_scheme {
+            semantic_rows.push(self.card_separator());
+            semantic_rows.push(self.semantic_scheme_editor(scheme, cx));
+        }
+        semantic_rows.push(self.card_separator());
+        semantic_rows.push(self.semantic_scheme_preview(&semantic_scheme));
 
-        let mut rules_card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_card))
-            .shadow(oxideterm_gpui_ui::theme_card_shadow(&self.tokens))
-            .p(px(self.tokens.metrics.settings_card_padding))
+        let semantic_card = self.settings_card_with_header(
+            "settings_view.terminal.highlight_rules.semantic_coloring",
+            "settings_view.terminal.highlight_rules.semantic_coloring_hint",
+            None,
+            Some(semantic_toggle),
+            semantic_rows,
+        );
+
+        let rules_header_actions = div()
             .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
+            .flex_row()
+            .flex_wrap()
+            .gap(px(8.0))
+            .child(self.settings_select_control(
+                SettingsSelect::HighlightPreset,
+                self.i18n
+                    .t("settings_view.terminal.highlight_rules.add_preset"),
+                add_disabled,
+                Some(168.0),
+                cx,
+            ))
             .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .items_start()
-                    .justify_between()
-                    .gap(px(16.0))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(
-                                        self.i18n
-                                            .t("settings_view.terminal.highlight_rules.title")
-                                            .to_uppercase(),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(
-                                        self.i18n.t(
-                                            "settings_view.terminal.highlight_rules.description",
-                                        ),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .gap(px(8.0))
-                            .child(
-                                self.settings_select_control(
-                                    SettingsSelect::HighlightPreset,
-                                    self.i18n
-                                        .t("settings_view.terminal.highlight_rules.add_preset"),
-                                    add_disabled,
-                                    Some(168.0),
-                                    cx,
-                                ),
-                            )
-                            .child(
-                                // Keep the max-rule guard at dispatch time as well as in the button
-                                // state so stale UI cannot add a rule past the configured limit.
-                                self.workspace_toolbar_action_button(
-                                    self.i18n
-                                        .t("settings_view.terminal.highlight_rules.add_rule"),
-                                    Some(Self::render_lucide_icon(
-                                        LucideIcon::Plus,
-                                        14.0,
-                                        rgb(self.tokens.ui.accent_text),
-                                    )),
-                                    ToolbarButtonOptions {
-                                        button: ButtonOptions {
-                                            variant: ButtonVariant::Default,
-                                            size: ButtonSize::Sm,
-                                            radius: ButtonRadius::Md,
-                                            disabled: add_disabled,
-                                        },
-                                        ..ToolbarButtonOptions::default()
-                                    },
-                                    cx.listener(move |this, _event, _window, cx| {
-                                        if this
-                                            .settings_store
-                                            .settings()
-                                            .terminal
-                                            .effective_highlight_rules()
-                                            .len()
-                                            < MAX_HIGHLIGHT_RULES
-                                        {
-                                            this.add_highlight_rule(cx);
-                                        }
-                                        cx.stop_propagation();
-                                    }),
-                                ),
-                            ),
-                    ),
+                // Keep the max-rule guard at dispatch time as well as in the button
+                // state so stale UI cannot add a rule past the configured limit.
+                self.workspace_toolbar_action_button(
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.add_rule"),
+                    Some(Self::render_lucide_icon(
+                        LucideIcon::Plus,
+                        14.0,
+                        rgb(self.tokens.ui.accent_text),
+                    )),
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Default,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: add_disabled,
+                        },
+                        ..ToolbarButtonOptions::default()
+                    },
+                    cx.listener(move |this, _event, _window, cx| {
+                        if this
+                            .settings_store
+                            .settings()
+                            .terminal
+                            .effective_highlight_rules()
+                            .len()
+                            < MAX_HIGHLIGHT_RULES
+                        {
+                            this.add_highlight_rule(cx);
+                        }
+                        cx.stop_propagation();
+                    }),
+                ),
             )
-            .child(self.card_separator())
-            .child(self.select_setting_row(
+            .into_any_element();
+
+        let mut rules_rows = vec![
+            self.card_separator(),
+            self.select_setting_row(
                 "settings_view.terminal.highlight_rules.rule_set",
                 "settings_view.terminal.highlight_rules.rule_set_hint",
                 SettingsSelect::HighlightRuleSet,
                 highlight_rule_set_label,
                 self.tokens.metrics.settings_select_width,
                 cx,
-            ))
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .justify_end()
-                    .gap(px(8.0))
-                    .child(
-                        self.semantic_scheme_action_button(
-                            LucideIcon::Plus,
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.rule_set_create"),
-                            settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.create_highlight_rule_set(cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    )
-                    .child(
-                        self.semantic_scheme_action_button(
-                            LucideIcon::Download,
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.rule_set_import"),
-                            settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.import_highlight_rule_set(cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    )
-                    .child(
-                        self.semantic_scheme_action_button(
-                            LucideIcon::Upload,
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.rule_set_export"),
-                            active_highlight_rule_set.is_none(),
-                            cx.listener(|this, _event, _window, cx| {
-                                this.export_highlight_rule_set(cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    )
-                    .child(
-                        self.semantic_scheme_action_button(
-                            LucideIcon::Trash2,
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.rule_set_delete"),
-                            active_highlight_rule_set.is_none(),
-                            cx.listener(|this, _event, _window, cx| {
-                                this.delete_active_highlight_rule_set(cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    ),
-            )
-            .when_some(active_highlight_rule_set, |card, rule_set| {
-                card.child(
-                    self.highlight_input_block(
-                        self.i18n
-                            .t("settings_view.terminal.highlight_rules.rule_set_name"),
-                        SettingsInput::HighlightRuleSetName,
-                        rule_set.name.clone(),
-                        self.i18n
-                            .t("settings_view.terminal.highlight_rules.rule_set_default_name"),
-                        320.0,
-                        cx,
-                    ),
+            ),
+            div()
+                .w_full()
+                .flex()
+                .flex_row()
+                .flex_wrap()
+                .justify_end()
+                .gap(px(8.0))
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Plus,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.rule_set_create"),
+                    settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.create_highlight_rule_set(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Download,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.rule_set_import"),
+                    settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.import_highlight_rule_set(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Upload,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.rule_set_export"),
+                    active_highlight_rule_set.is_none(),
+                    cx.listener(|this, _event, _window, cx| {
+                        this.export_highlight_rule_set(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.semantic_scheme_action_button(
+                    LucideIcon::Trash2,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.rule_set_delete"),
+                    active_highlight_rule_set.is_none(),
+                    cx.listener(|this, _event, _window, cx| {
+                        this.delete_active_highlight_rule_set(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .into_any_element(),
+        ];
+        if let Some(rule_set) = active_highlight_rule_set {
+            rules_rows.push(self.highlight_input_block(
+                self.i18n
+                    .t("settings_view.terminal.highlight_rules.rule_set_name"),
+                SettingsInput::HighlightRuleSetName,
+                rule_set.name.clone(),
+                self.i18n
+                    .t("settings_view.terminal.highlight_rules.rule_set_default_name"),
+                320.0,
+                cx,
+            ));
+        }
+        rules_rows.push(self.card_separator());
+        rules_rows.push(
+            div()
+                .flex()
+                .flex_row()
+                .justify_between()
+                .gap(px(12.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .child(limit_text)
+                .child(
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.priority_hint"),
                 )
-            })
-            .child(self.card_separator())
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(limit_text)
-                    .child(
-                        self.i18n
-                            .t("settings_view.terminal.highlight_rules.priority_hint"),
-                    ),
-            )
-            .child(self.card_separator());
+                .into_any_element(),
+        );
+        rules_rows.push(self.card_separator());
 
         if rules.is_empty() {
-            rules_card = rules_card.child(
+            rules_rows.push(
                 div()
                     .w_full()
                     .px(px(16.0))
@@ -433,18 +331,24 @@ impl WorkspaceApp {
                     .text_align(gpui::TextAlign::Center)
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.terminal.highlight_rules.empty")),
+                    .child(self.i18n.t("settings_view.terminal.highlight_rules.empty"))
+                    .into_any_element(),
             );
         } else {
             for (index, rule) in rules.iter().enumerate() {
-                rules_card =
-                    rules_card.child(self.highlight_rule_row(index, rule, rules.len(), cx));
+                rules_rows.push(self.highlight_rule_row(index, rule, rules.len(), cx));
             }
         }
+        rules_rows.push(self.card_separator());
+        rules_rows.push(self.highlight_preview(rules));
 
-        rules_card = rules_card
-            .child(self.card_separator())
-            .child(self.highlight_preview(rules));
+        let rules_card = self.settings_card_with_header(
+            "settings_view.terminal.highlight_rules.title",
+            "settings_view.terminal.highlight_rules.description",
+            None,
+            Some(rules_header_actions),
+            rules_rows,
+        );
 
         div()
             .w_full()
@@ -452,13 +356,17 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(24.0))
-            .child(self.plain_settings_card(vec![self.checkbox_row(
+            .child(self.settings_card(
                 "terminal.highlight_override.selection_matches",
-                "terminal.highlight_override.selection_matches_default_hint",
-                settings.terminal.selection_highlighting,
-                |settings, enabled| settings.terminal.selection_highlighting = enabled,
-                cx,
-            )]))
+                "",
+                vec![self.bool_row(
+                    "terminal.highlight_override.selection_matches",
+                    "terminal.highlight_override.selection_matches_default_hint",
+                    settings.terminal.selection_highlighting,
+                    |settings, enabled| settings.terminal.selection_highlighting = enabled,
+                    cx,
+                )],
+            ))
             .child(semantic_card)
             .child(rules_card)
             .into_any_element()

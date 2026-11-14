@@ -412,9 +412,15 @@ mod tests {
             });
             this.open_settings(window, cx);
             this.sync_settings_section_list_state(cx);
+            let item_ix = settings_section_list_item_index(
+                SettingsTab::Connections,
+                SettingsSectionId::ConnectionsKnownHosts,
+                this.settings_dynamic_section_counts(cx),
+            )
+            .unwrap();
             this.settings_section_list_state
                 .scroll_to(gpui::ListOffset {
-                    item_ix: SETTINGS_SECTION_HEADER_ITEM_COUNT + 6,
+                    item_ix,
                     offset_in_item: px(0.0),
                 });
         });

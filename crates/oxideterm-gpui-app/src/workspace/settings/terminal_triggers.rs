@@ -6,8 +6,6 @@ use oxideterm_terminal_triggers::{
     default_snapshot, load_snapshot, new_trigger_id, now_ms, save_snapshot, validate_snapshot,
 };
 
-// Terminal settings reserve section zero for the page switcher before page cards.
-const TERMINAL_TRIGGER_SETTINGS_SECTION_INDEX_WITH_PAGE_SWITCHER: usize = 3;
 const TERMINAL_TRIGGER_DEFAULT_COOLDOWN_MS: u64 = 1_000;
 // Trigger forms stay readable on wide settings panes instead of stretching with the window.
 const TERMINAL_TRIGGER_EDITOR_MAX_WIDTH: f32 = 1_120.0;
@@ -518,12 +516,17 @@ impl WorkspaceApp {
             settings.set_terminal_page(TerminalSettingsPage::Awareness, cx);
         });
         self.sync_settings_section_list_state(cx);
-        self.settings_section_list_state
-            .scroll_to(gpui::ListOffset {
-                item_ix: SETTINGS_SECTION_HEADER_ITEM_COUNT
-                    + TERMINAL_TRIGGER_SETTINGS_SECTION_INDEX_WITH_PAGE_SWITCHER,
-                offset_in_item: px(0.0),
-            });
+        if let Some(item_ix) = settings_section_list_item_index(
+            SettingsTab::Terminal,
+            SettingsSectionId::TerminalAwarenessTriggers,
+            self.settings_dynamic_section_counts(cx),
+        ) {
+            self.settings_section_list_state
+                .scroll_to(gpui::ListOffset {
+                    item_ix,
+                    offset_in_item: px(0.0),
+                });
+        }
         self.open_settings(window, cx);
     }
 

@@ -7,7 +7,8 @@ struct SettingsSearchResult {
     tab: SettingsTab,
     terminal_page: Option<TerminalSettingsPage>,
     ai_page: Option<AiSettingsPage>,
-    section_index: usize,
+    section: SettingsSectionId,
+    section_rank: usize,
     label: String,
     breadcrumb: String,
     score: usize,
@@ -18,15 +19,14 @@ struct SettingsSearchEntrySpec {
     tab: SettingsTab,
     terminal_page: Option<TerminalSettingsPage>,
     ai_page: Option<AiSettingsPage>,
-    section_index: usize,
+    section: SettingsSectionId,
     title_key: &'static str,
     search_keys: &'static [&'static str],
 }
 
-// Keep each card index aligned with the section order rendered for its tab or subpage.
 const fn settings_search_entry(
     tab: SettingsTab,
-    section_index: usize,
+    section: SettingsSectionId,
     title_key: &'static str,
     search_keys: &'static [&'static str],
 ) -> SettingsSearchEntrySpec {
@@ -34,7 +34,7 @@ const fn settings_search_entry(
         tab,
         terminal_page: None,
         ai_page: None,
-        section_index,
+        section,
         title_key,
         search_keys,
     }
@@ -42,7 +42,7 @@ const fn settings_search_entry(
 
 const fn terminal_search_entry(
     page: TerminalSettingsPage,
-    section_index: usize,
+    section: SettingsSectionId,
     title_key: &'static str,
     search_keys: &'static [&'static str],
 ) -> SettingsSearchEntrySpec {
@@ -50,7 +50,7 @@ const fn terminal_search_entry(
         tab: SettingsTab::Terminal,
         terminal_page: Some(page),
         ai_page: None,
-        section_index,
+        section,
         title_key,
         search_keys,
     }
@@ -58,7 +58,7 @@ const fn terminal_search_entry(
 
 const fn ai_search_entry(
     page: AiSettingsPage,
-    section_index: usize,
+    section: SettingsSectionId,
     title_key: &'static str,
     search_keys: &'static [&'static str],
 ) -> SettingsSearchEntrySpec {
@@ -66,31 +66,50 @@ const fn ai_search_entry(
         tab: SettingsTab::Ai,
         terminal_page: None,
         ai_page: Some(page),
-        section_index,
+        section,
         title_key,
         search_keys,
     }
 }
 
+fn search_spec_section_rank(spec: &SettingsSearchEntrySpec) -> usize {
+    let dynamic = SettingsDynamicSectionCounts {
+        terminal_page: spec.terminal_page.unwrap_or(TerminalSettingsPage::Display),
+        ai_page: spec.ai_page.unwrap_or(AiSettingsPage::General),
+        visible_keybinding_scope_count: 1,
+        knowledge_has_error: false,
+        knowledge_has_selected_collection: true,
+    };
+    settings_section_index(spec.tab, spec.section, dynamic).unwrap_or(usize::MAX)
+}
+
 fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
-    let window_behavior_sections =
-        usize::from(cfg!(any(target_os = "windows", target_os = "macos")));
     let mut specs = vec![
         settings_search_entry(
             SettingsTab::General,
-            0,
+            SettingsSectionId::GeneralLanguage,
             "settings_view.general.language",
             &["settings_view.general.language_hint"],
         ),
         settings_search_entry(
             SettingsTab::General,
-            3 + window_behavior_sections,
+            SettingsSectionId::GeneralExternalConnectionUris,
+            "settings_view.general.connection_uri_integration",
+            &[
+                "settings_view.general.connection_uri_integration_hint",
+                "settings_view.general.external_connection_uris",
+                "settings_view.general.external_connection_uris_hint",
+            ],
+        ),
+        settings_search_entry(
+            SettingsTab::General,
+            SettingsSectionId::GeneralDataDirectory,
             "settings_view.general.data_directory",
             &["settings_view.general.data_directory_hint"],
         ),
         settings_search_entry(
             SettingsTab::General,
-            4 + window_behavior_sections,
+            SettingsSectionId::GeneralCliCompanion,
             "settings_view.general.cli_companion",
             &[
                 "settings_view.general.cli_tool",
@@ -99,7 +118,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::General,
-            1,
+            SettingsSectionId::GeneralStartup,
             "settings_view.general.startup",
             &[
                 "settings_view.general.startup_hint",
@@ -108,7 +127,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Portable,
-            0,
+            SettingsSectionId::PortableRuntime,
             "settings_view.general.portable_runtime",
             &[
                 "settings_view.general.portable_runtime_hint",
@@ -117,7 +136,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Portable,
-            0,
+            SettingsSectionId::PortableRuntime,
             "settings_view.general.portable_migration",
             &[
                 "settings_view.general.portable_migration_installed_hint",
@@ -126,7 +145,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Display,
-            1,
+            SettingsSectionId::TerminalDisplayFont,
             "settings_view.terminal.font",
             &[
                 "settings_view.terminal.font_family",
@@ -138,7 +157,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Display,
-            2,
+            SettingsSectionId::TerminalDisplayBehavior,
             "settings_view.terminal.display_behavior",
             &[
                 "settings_view.terminal.display_behavior_hint",
@@ -150,7 +169,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Display,
-            3,
+            SettingsSectionId::TerminalDisplayCursor,
             "settings_view.terminal.cursor",
             &[
                 "settings_view.terminal.cursor_style",
@@ -159,7 +178,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Display,
-            4,
+            SettingsSectionId::TerminalDisplayCommandMarks,
             "settings_view.terminal.command_marks",
             &[
                 "settings_view.terminal.command_marks_hint",
@@ -170,7 +189,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Display,
-            5,
+            SettingsSectionId::TerminalDisplayBuffer,
             "settings_view.terminal.buffer",
             &[
                 "settings_view.terminal.scrollback",
@@ -181,7 +200,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Input,
-            1,
+            SettingsSectionId::TerminalInputClipboard,
             "settings_view.terminal.input_clipboard",
             &[
                 "settings_view.terminal.paste_protection",
@@ -200,7 +219,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Input,
-            2,
+            SettingsSectionId::TerminalInputMouseLinks,
             "settings_view.terminal.input_mouse_links",
             &[
                 "settings_view.terminal.selection_requires_shift",
@@ -215,7 +234,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Input,
-            3,
+            SettingsSectionId::TerminalInputKeyboard,
             "settings_view.terminal.input_keyboard",
             &[
                 "settings_view.terminal.free_type_mode",
@@ -230,7 +249,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Local,
-            1,
+            SettingsSectionId::TerminalLocalShell,
             "settings_view.local_terminal.shell",
             &[
                 "settings_view.local_terminal.default_shell",
@@ -241,19 +260,19 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Local,
-            2,
+            SettingsSectionId::TerminalLocalShellProfile,
             "settings_view.local_terminal.shell_profile",
             &["settings_view.local_terminal.load_shell_profile"],
         ),
         terminal_search_entry(
             TerminalSettingsPage::Local,
-            3,
+            SettingsSectionId::TerminalLocalPrivilegeCredentials,
             "settings_view.local_terminal.privilege_credentials",
             &["settings_view.local_terminal.privilege_credentials_hint"],
         ),
         terminal_search_entry(
             TerminalSettingsPage::CommandBar,
-            1,
+            SettingsSectionId::TerminalCommandBarControls,
             "settings_view.terminal.command_bar",
             &[
                 "settings_view.terminal.command_bar_git_status",
@@ -272,13 +291,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::CommandBar,
-            2,
+            SettingsSectionId::TerminalCommandBarFocusHandoff,
             "settings_view.terminal.command_bar_focus_handoff",
             &["settings_view.terminal.command_bar_focus_handoff_hint"],
         ),
         terminal_search_entry(
             TerminalSettingsPage::CommandBar,
-            3,
+            SettingsSectionId::TerminalCommandBarQuickCommands,
             "settings_view.terminal.quick_commands",
             &[
                 "settings_view.terminal.quick_bar",
@@ -289,7 +308,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Awareness,
-            1,
+            SettingsSectionId::TerminalAwarenessControls,
             "settings_view.terminal.awareness_title",
             &[
                 "settings_view.terminal.awareness_enabled",
@@ -298,7 +317,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Awareness,
-            2,
+            SettingsSectionId::TerminalAwarenessShellIntegration,
             "settings_view.connections.shell_integration.title",
             &[
                 "settings_view.connections.shell_integration.description",
@@ -307,7 +326,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Awareness,
-            3,
+            SettingsSectionId::TerminalAwarenessTriggers,
             "settings_view.terminal.triggers.title",
             &[
                 "settings_view.terminal.triggers.description",
@@ -316,7 +335,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Transfer,
-            1,
+            SettingsSectionId::TerminalTransferInBand,
             "settings_view.terminal.in_band_transfer.title",
             &[
                 "settings_view.terminal.in_band_transfer.enabled",
@@ -328,7 +347,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Transfer,
-            2,
+            SettingsSectionId::TerminalTransferXmodem,
             "settings_view.terminal.xmodem.title",
             &[
                 "settings_view.terminal.xmodem.block_size",
@@ -337,7 +356,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Logging,
-            1,
+            SettingsSectionId::TerminalLoggingSession,
             "settings_view.terminal.session_log_title",
             &[
                 "settings_view.terminal.session_log_automatic",
@@ -353,7 +372,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Highlight,
-            1,
+            SettingsSectionId::TerminalHighlightRules,
             "settings_view.terminal.highlight_rules.title",
             &[
                 "settings_view.terminal.highlight_rules.description",
@@ -376,7 +395,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Appearance,
-            0,
+            SettingsSectionId::AppearanceTheme,
             "settings_view.appearance.theme",
             &[
                 "settings_view.appearance.color_theme",
@@ -394,7 +413,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Appearance,
-            1,
+            SettingsSectionId::AppearanceLayout,
             "settings_view.appearance.layout",
             &[
                 "settings_view.appearance.density",
@@ -408,7 +427,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Appearance,
-            2,
+            SettingsSectionId::AppearanceEffects,
             "settings_view.appearance.effects",
             &[
                 "settings_view.appearance.window_opacity",
@@ -419,13 +438,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Appearance,
-            4,
+            SettingsSectionId::AppearanceAppIcon,
             "settings_view.appearance.app_icon",
             &["settings_view.appearance.app_icon_variant"],
         ),
         settings_search_entry(
             SettingsTab::Appearance,
-            3,
+            SettingsSectionId::AppearanceBackground,
             "settings_view.terminal.bg_title",
             &[
                 "settings_view.terminal.bg_enabled",
@@ -452,7 +471,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Connections,
-            3,
+            SettingsSectionId::ConnectionsSshKeys,
             "settings_view.ssh_keys.title",
             &[
                 "settings_view.ssh_keys.local_section",
@@ -463,7 +482,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Connections,
-            0,
+            SettingsSectionId::ConnectionsDefaults,
             "settings_view.connections.title",
             &[
                 "settings_view.connections.default_username",
@@ -472,7 +491,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Connections,
-            1,
+            SettingsSectionId::ConnectionsIdleTimeout,
             "settings_view.connections.idle_timeout.title",
             &[
                 "settings_view.connections.idle_timeout.label",
@@ -481,13 +500,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Connections,
-            2,
+            SettingsSectionId::ConnectionsReconnect,
             "settings_view.reconnect.title",
             &["settings_view.reconnect.description"],
         ),
         settings_search_entry(
             SettingsTab::Connections,
-            4,
+            SettingsSectionId::ConnectionsSshConfigImport,
             "settings_view.connections.ssh_config.title",
             &[
                 "settings_view.connections.ssh_config.auto_load",
@@ -497,7 +516,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Connections,
-            5,
+            SettingsSectionId::ConnectionsImporters,
             "settings_view.connections.importers.title",
             &[
                 "settings_view.connections.importers.source",
@@ -508,7 +527,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Connections,
-            6,
+            SettingsSectionId::ConnectionsKnownHosts,
             "settings_view.known_hosts.title",
             &[
                 "settings_view.known_hosts.description",
@@ -518,13 +537,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Privilege,
-            0,
+            SettingsSectionId::PrivilegeCredentials,
             "settings_view.privilege_credentials.title",
             &["settings_view.privilege_credentials.description"],
         ),
         settings_search_entry(
             SettingsTab::Network,
-            0,
+            SettingsSectionId::NetworkSharedProxy,
             "settings_view.network.shared_proxy",
             &[
                 "settings_view.network.shared_proxy_hint",
@@ -538,23 +557,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Network,
-            1,
+            SettingsSectionId::NetworkRouting,
             "settings_view.network.routing",
             &["settings_view.network.routing_hint"],
         ),
         settings_search_entry(
             SettingsTab::Network,
-            2,
-            "settings_view.general.connection_uri_integration",
-            &[
-                "settings_view.general.connection_uri_integration_hint",
-                "settings_view.general.external_connection_uris",
-                "settings_view.general.external_connection_uris_hint",
-            ],
-        ),
-        settings_search_entry(
-            SettingsTab::Network,
-            3,
+            SettingsSectionId::NetworkPublicMcp,
             "settings_view.network.public_mcp",
             &[
                 "settings_view.network.public_mcp_hint",
@@ -565,7 +574,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Sftp,
-            0,
+            SettingsSectionId::SftpOpening,
             "settings_view.sftp.opening",
             &[
                 "settings_view.sftp.presentation",
@@ -576,7 +585,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Sftp,
-            1,
+            SettingsSectionId::SftpPerformance,
             "settings_view.sftp.performance",
             &[
                 "settings_view.sftp.concurrent",
@@ -588,13 +597,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Sftp,
-            2,
+            SettingsSectionId::SftpConflict,
             "settings_view.sftp.conflict",
             &["settings_view.sftp.conflict_hint"],
         ),
         settings_search_entry(
             SettingsTab::Ide,
-            0,
+            SettingsSectionId::IdeEditing,
             "settings_view.ide.editing",
             &[
                 "settings_view.ide.auto_save",
@@ -605,7 +614,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Ide,
-            1,
+            SettingsSectionId::IdeTypography,
             "settings_view.ide.editor_typography",
             &[
                 "settings_view.ide.font_family",
@@ -617,19 +626,19 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::Tools,
-            1,
+            SettingsSectionId::AiToolsToolUse,
             "settings_view.ide.agent_mode_label",
             &["settings_view.ide.agent_mode_hint"],
         ),
         settings_search_entry(
             SettingsTab::Ide,
-            2,
+            SettingsSectionId::IdeAgent,
             "settings_view.ide.agent_title",
             &["settings_view.ide.agent_description"],
         ),
         settings_search_entry(
             SettingsTab::Ide,
-            3,
+            SettingsSectionId::IdeAgentPrivacy,
             "settings_view.ide.agent_transparency_title",
             &[
                 "settings_view.ide.agent_path_label",
@@ -639,19 +648,19 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::General,
-            1,
+            SettingsSectionId::AiGeneralSettings,
             "settings_view.ai.general",
             &["settings_view.ai.enable", "settings_view.ai.enable_hint"],
         ),
         ai_search_entry(
             AiSettingsPage::General,
-            2,
+            SettingsSectionId::AiGeneralPrivacy,
             "settings_view.ai.privacy_notice",
             &["settings_view.ai.privacy_text"],
         ),
         ai_search_entry(
             AiSettingsPage::Providers,
-            1,
+            SettingsSectionId::AiProvidersSettings,
             "settings_view.ai.provider_settings",
             &[
                 "settings_view.ai.provider_settings_summary",
@@ -662,7 +671,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::Context,
-            1,
+            SettingsSectionId::AiContextControls,
             "settings_view.ai.context_controls",
             &[
                 "settings_view.ai.max_context",
@@ -674,13 +683,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::Context,
-            2,
+            SettingsSectionId::AiContextSystemPrompt,
             "settings_view.ai.system_prompt_title",
             &["settings_view.ai.system_prompt_hint"],
         ),
         ai_search_entry(
             AiSettingsPage::Context,
-            3,
+            SettingsSectionId::AiContextMemory,
             "settings_view.ai.memory_title",
             &[
                 "settings_view.ai.memory_hint",
@@ -689,13 +698,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::Context,
-            4,
+            SettingsSectionId::AiContextModelWindows,
             "settings_view.ai.model_context_windows",
             &["settings_view.ai.model_context_windows_hint"],
         ),
         ai_search_entry(
             AiSettingsPage::Tools,
-            1,
+            SettingsSectionId::AiToolsToolUse,
             "settings_view.ai.tool_use",
             &[
                 "settings_view.ai.tool_use_enabled",
@@ -705,7 +714,16 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::Tools,
-            2,
+            SettingsSectionId::AiToolsWebSearch,
+            "settings_view.ai.web_title",
+            &[
+                "settings_view.ai.web_enabled",
+                "settings_view.ai.web_provider",
+            ],
+        ),
+        ai_search_entry(
+            AiSettingsPage::Tools,
+            SettingsSectionId::AiToolsAgents,
             "settings_view.ai.conversation_agents",
             &[
                 "settings_view.ai.conversation_agents_hint",
@@ -716,7 +734,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::Tools,
-            3,
+            SettingsSectionId::AiToolsSkills,
             "settings_view.ai.skills_title",
             &[
                 "settings_view.ai.skills_hint",
@@ -725,19 +743,19 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         ai_search_entry(
             AiSettingsPage::Tools,
-            4,
+            SettingsSectionId::AiToolsMcpServers,
             "settings_view.mcp.title",
             &["settings_view.mcp.description"],
         ),
         settings_search_entry(
             SettingsTab::Knowledge,
-            0,
+            SettingsSectionId::KnowledgeCollections,
             "settings_view.knowledge.collections",
             &["settings_view.knowledge.create_description"],
         ),
         settings_search_entry(
             SettingsTab::Knowledge,
-            1,
+            SettingsSectionId::KnowledgeEmbeddingConfig,
             "settings_view.knowledge.semantic_search",
             &[
                 "settings_view.knowledge.configure_embeddings",
@@ -748,7 +766,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Knowledge,
-            2,
+            SettingsSectionId::KnowledgeDocuments,
             "settings_view.knowledge.import_files",
             &[
                 "settings_view.knowledge.file_filter_documents",
@@ -758,7 +776,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Keybindings,
-            0,
+            SettingsSectionId::KeybindingsToolbar,
             "settings_view.keybindings.title",
             &[
                 "settings_view.keybindings.description",
@@ -767,7 +785,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Help,
-            0,
+            SettingsSectionId::HelpVersion,
             "settings_view.help.version_info",
             &[
                 "settings_view.help.update_channel_hint",
@@ -778,7 +796,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Help,
-            1,
+            SettingsSectionId::HelpDiagnostics,
             "settings_view.help.diagnostics",
             &[
                 "settings_view.help.debug_logs",
@@ -787,10 +805,15 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.help.open_logs",
             ],
         ),
-        settings_search_entry(SettingsTab::Help, 2, "settings_view.help.tech_stack", &[]),
         settings_search_entry(
             SettingsTab::Help,
-            3,
+            SettingsSectionId::HelpTechStack,
+            "settings_view.help.tech_stack",
+            &[],
+        ),
+        settings_search_entry(
+            SettingsTab::Help,
+            SettingsSectionId::HelpResources,
             "settings_view.help.resources",
             &[
                 "settings_view.help.documentation",
@@ -800,7 +823,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Help,
-            4,
+            SettingsSectionId::HelpSafety,
             "settings_view.help.safety_title",
             &[
                 "settings_view.help.safety_privacy",
@@ -810,7 +833,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         settings_search_entry(
             SettingsTab::Help,
-            5,
+            SettingsSectionId::HelpLegal,
             "settings_view.help.disclaimer",
             &[
                 "settings_view.help.copyright",
@@ -825,13 +848,13 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
     #[cfg(any(target_os = "windows", target_os = "macos"))]
     specs.push(settings_search_entry(
         SettingsTab::General,
-        2,
+        SettingsSectionId::GeneralWindowBehavior,
         "settings_view.general.window_behavior",
         &["settings_view.general.window_behavior_hint"],
     ));
     specs.push(settings_search_entry(
         SettingsTab::General,
-        2 + window_behavior_sections,
+        SettingsSectionId::GeneralAppLock,
         "settings_view.general.app_lock_title",
         &[
             "settings_view.general.app_lock_description",
@@ -841,7 +864,7 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
     #[cfg(not(target_os = "macos"))]
     specs.push(terminal_search_entry(
         TerminalSettingsPage::Input,
-        1,
+        SettingsSectionId::TerminalInputClipboard,
         "settings_view.terminal.input_clipboard",
         &[
             "settings_view.terminal.smart_copy",
@@ -851,14 +874,14 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
     #[cfg(target_os = "windows")]
     specs.push(terminal_search_entry(
         TerminalSettingsPage::Local,
-        1,
+        SettingsSectionId::TerminalLocalShell,
         "settings_view.local_terminal.shell",
         &["settings_view.local_terminal.oh_my_posh"],
     ));
     #[cfg(target_os = "linux")]
     specs.push(settings_search_entry(
         SettingsTab::Appearance,
-        1,
+        SettingsSectionId::AppearanceLayout,
         "settings_view.appearance.layout",
         &["settings_view.appearance.show_window_titlebar"],
     ));
@@ -922,7 +945,8 @@ fn settings_search_results(i18n: &I18n, query: &str) -> Vec<SettingsSearchResult
                 tab: spec.tab,
                 terminal_page: spec.terminal_page,
                 ai_page: spec.ai_page,
-                section_index: spec.section_index,
+                section: spec.section,
+                section_rank: search_spec_section_rank(&spec),
                 label,
                 breadcrumb,
                 score,
@@ -934,7 +958,7 @@ fn settings_search_results(i18n: &I18n, query: &str) -> Vec<SettingsSearchResult
             .cmp(&right.score)
             .then_with(|| left.label.chars().count().cmp(&right.label.chars().count()))
             .then_with(|| left.tab.id().cmp(right.tab.id()))
-            .then_with(|| left.section_index.cmp(&right.section_index))
+            .then_with(|| left.section_rank.cmp(&right.section_rank))
             .then_with(|| left.label.cmp(&right.label))
     });
     let mut seen = HashSet::new();
@@ -943,7 +967,7 @@ fn settings_search_results(i18n: &I18n, query: &str) -> Vec<SettingsSearchResult
             result.tab,
             result.terminal_page.map(TerminalSettingsPage::label_key),
             result.ai_page.map(AiSettingsPage::label_key),
-            result.section_index,
+            result.section,
         ))
     });
     results.truncate(SETTINGS_SEARCH_RESULT_LIMIT);
@@ -991,8 +1015,7 @@ impl WorkspaceApp {
         let Some(result) = settings_search_results(&self.i18n, &query)
             .into_iter()
             .find(|result| {
-                result.tab != SettingsTab::Knowledge
-                    || result.section_index != 2
+                result.section != SettingsSectionId::KnowledgeDocuments
                     || self.knowledge_has_selected_collection(cx)
             })
         else {
@@ -1008,12 +1031,14 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.ai_entity.update(cx, |ai, cx| {
-            let section = match (result.ai_page, result.section_index) {
-                (Some(AiSettingsPage::Providers), 1) => {
+            let section = match result.section {
+                SettingsSectionId::AiProvidersSettings => {
                     Some(AiSettingsViewSection::ProviderSettings)
                 }
-                (Some(AiSettingsPage::Tools), 1) => Some(AiSettingsViewSection::ToolUse),
-                (Some(AiSettingsPage::Context), 4) => Some(AiSettingsViewSection::ContextWindows),
+                SettingsSectionId::AiToolsToolUse => Some(AiSettingsViewSection::ToolUse),
+                SettingsSectionId::AiContextModelWindows => {
+                    Some(AiSettingsViewSection::ContextWindows)
+                }
                 _ => None,
             };
             if let Some(section) = section {
@@ -1035,21 +1060,13 @@ impl WorkspaceApp {
                     }
                 }
             }
-            if result.tab == SettingsTab::Knowledge && result.section_index == 1 {
+            if result.section == SettingsSectionId::KnowledgeEmbeddingConfig {
                 ai.expand_knowledge_embedding_config();
                 cx.notify();
             }
         });
         let tab = result.tab;
-        // Knowledge displays a transient error card before its indexed content cards.
-        let knowledge_error_offset = usize::from(
-            tab == SettingsTab::Knowledge
-                && self.settings_dynamic_section_counts(cx).knowledge_has_error,
-        );
-        let target_section_index = result.section_index + knowledge_error_offset;
-        if result.terminal_page == Some(TerminalSettingsPage::Awareness)
-            && result.section_index == 3
-        {
+        if result.section == SettingsSectionId::TerminalAwarenessTriggers {
             self.terminal_trigger_settings_pane = None;
         }
         self.settings_workspace.update(cx, |settings, cx| {
@@ -1076,11 +1093,17 @@ impl WorkspaceApp {
             self.refresh_portable_settings_snapshot(true, cx);
         }
         self.sync_settings_section_list_state(cx);
-        self.settings_section_list_state
-            .scroll_to(gpui::ListOffset {
-                item_ix: SETTINGS_SECTION_HEADER_ITEM_COUNT + target_section_index,
-                offset_in_item: px(0.0),
-            });
+        if let Some(item_ix) = settings_section_list_item_index(
+            tab,
+            result.section,
+            self.settings_dynamic_section_counts(cx),
+        ) {
+            self.settings_section_list_state
+                .scroll_to(gpui::ListOffset {
+                    item_ix,
+                    offset_in_item: px(0.0),
+                });
+        }
         cx.notify();
     }
 
@@ -1156,8 +1179,7 @@ impl WorkspaceApp {
         let results = settings_search_results(&self.i18n, query)
             .into_iter()
             .filter(|result| {
-                result.tab != SettingsTab::Knowledge
-                    || result.section_index != 2
+                result.section != SettingsSectionId::KnowledgeDocuments
                     || self.knowledge_has_selected_collection(cx)
             })
             .collect::<Vec<_>>();
@@ -1274,29 +1296,51 @@ mod settings_search_tests {
     #[test]
     fn search_routes_visible_controls_to_their_cards_and_omits_removed_controls() {
         let i18n = I18n::new(oxideterm_i18n::Locale::En);
-        for (query, tab, terminal_page, section_index) in [
+        for (query, tab, terminal_page, section) in [
             (
                 "Free Type Mode",
                 SettingsTab::Terminal,
                 Some(TerminalSettingsPage::Input),
-                3,
+                SettingsSectionId::TerminalInputKeyboard,
             ),
             (
                 "OSC 52 Clipboard Read Access",
                 SettingsTab::Terminal,
                 Some(TerminalSettingsPage::Input),
-                1,
+                SettingsSectionId::TerminalInputClipboard,
             ),
-            ("Deploy Path", SettingsTab::Ide, None, 3),
-            ("Semantic Search", SettingsTab::Knowledge, None, 1),
+            (
+                "Deploy Path",
+                SettingsTab::Ide,
+                None,
+                SettingsSectionId::IdeAgentPrivacy,
+            ),
+            (
+                "Semantic Search",
+                SettingsTab::Knowledge,
+                None,
+                SettingsSectionId::KnowledgeEmbeddingConfig,
+            ),
+            (
+                "External Connection Links",
+                SettingsTab::General,
+                None,
+                SettingsSectionId::GeneralExternalConnectionUris,
+            ),
+            (
+                "MCP Servers",
+                SettingsTab::Ai,
+                None,
+                SettingsSectionId::AiToolsMcpServers,
+            ),
         ] {
             let results = settings_search_results(&i18n, query);
             let result = results
                 .first()
                 .unwrap_or_else(|| panic!("missing search result for {query}"));
             assert_eq!(
-                (result.tab, result.terminal_page, result.section_index),
-                (tab, terminal_page, section_index),
+                (result.tab, result.terminal_page, result.section),
+                (tab, terminal_page, section),
                 "{query}"
             );
         }
@@ -1305,6 +1349,27 @@ mod settings_search_tests {
                 settings_search_results(&i18n, query).is_empty(),
                 "unexpected unavailable setting: {query}"
             );
+        }
+    }
+
+    #[test]
+    fn every_search_spec_resolves_to_a_valid_section_slot() {
+        for spec in settings_search_specs() {
+            for knowledge_has_error in [false, true] {
+                let dynamic = SettingsDynamicSectionCounts {
+                    terminal_page: spec.terminal_page.unwrap_or(TerminalSettingsPage::Display),
+                    ai_page: spec.ai_page.unwrap_or(AiSettingsPage::General),
+                    visible_keybinding_scope_count: 1,
+                    knowledge_has_error,
+                    knowledge_has_selected_collection: true,
+                };
+                assert!(
+                    settings_section_list_item_index(spec.tab, spec.section, dynamic).is_some(),
+                    "unresolvable section {:?} in {:?}",
+                    spec.section,
+                    spec.tab
+                );
+            }
         }
     }
 }

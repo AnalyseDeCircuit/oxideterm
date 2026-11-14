@@ -29,25 +29,22 @@ pub(in crate::workspace) const HELP_TECH_BADGES: [(&str, u32); 9] = [
     ("IronRDP", 0x6366f1),
 ];
 
-pub(in crate::workspace) const HELP_UPDATE_FOOTER_BORDER_ALPHA: f32 = 0.50;
-pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BG_ALPHA: f32 = 0.70;
-pub(in crate::workspace) const HELP_PORTABLE_NOTICE_BORDER_ALPHA: f32 = 0.60;
 pub(in crate::workspace) const HELP_LEGAL_NOTICE_WIDTH: f32 = 760.0;
 pub(in crate::workspace) const HELP_LEGAL_NOTICE_HEIGHT: f32 = 720.0;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_help_section(
         &mut self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        match section_index {
-            0 => self.help_version_card(cx),
-            1 => self.help_diagnostics_card(cx),
-            2 => self.help_tech_stack_card(),
-            3 => self.help_resources_card(cx),
-            4 => self.help_safety_card(),
-            5 => self.help_legal_card(cx),
+        match section {
+            SettingsSectionId::HelpVersion => self.help_version_card(cx),
+            SettingsSectionId::HelpDiagnostics => self.help_diagnostics_card(cx),
+            SettingsSectionId::HelpTechStack => self.help_tech_stack_card(),
+            SettingsSectionId::HelpResources => self.help_resources_card(cx),
+            SettingsSectionId::HelpSafety => self.help_safety_card(),
+            SettingsSectionId::HelpLegal => self.help_legal_card(cx),
             _ => div().into_any_element(),
         }
     }
@@ -76,67 +73,52 @@ impl WorkspaceApp {
             ))
             .child(self.help_portable_or_channel_row(is_portable, channel_label, cx));
 
-        // Tauri HelpAboutSection keeps the version rows and update controls inside one
-        // card, with only the update block separated by `border-t pt-4`.
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .mb(px(16.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(
-                        self.i18n
-                            .t("settings_view.help.version_info")
-                            .to_uppercase(),
-                    ),
-            )
-            .child(version_rows)
-            .child(self.help_update_footer(is_portable, cx));
-
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+        // HelpAboutSection keeps the version rows and update controls inside one
+        // card, with only the update block separated by `border-t`.
+        self.settings_card(
+            "settings_view.help.version_info",
+            "",
+            vec![
+                version_rows.into_any_element(),
+                self.help_update_footer(is_portable, cx),
+            ],
+        )
     }
 
     pub(in crate::workspace) fn help_diagnostics_card(&self, cx: &mut Context<Self>) -> AnyElement {
         // MemoryDiagnosticsPanel and the keyboard-shortcut reference are Tauri-only Help blocks.
         // GPUI keeps diagnostics lightweight: file logging is always available, while verbose
         // debug output is opt-in so normal sessions do not generate oversized logs.
-        self.plain_settings_card(vec![
-            self.card_title("settings_view.help.diagnostics"),
-            self.bool_row(
-                "settings_view.help.debug_logs",
-                "settings_view.help.debug_logs_hint",
-                self.settings_store.settings().diagnostics.debug_logging,
-                set_diagnostics_debug_logging,
-                cx,
-            ),
-            self.card_separator(),
-            self.bool_row(
-                "settings_view.terminal.show_performance_overlay",
-                "settings_view.terminal.show_performance_overlay_hint",
-                self.settings_store.settings().terminal.show_fps_overlay,
-                set_show_terminal_performance_overlay,
-                cx,
-            ),
-            self.card_separator(),
-            self.help_action_row(
-                "settings_view.help.open_logs",
-                "settings_view.help.open_logs_hint",
-                self.i18n.t("settings_view.help.open"),
-                LucideIcon::FolderOpen,
-                |this, _event, _window, cx| this.open_help_log_directory(cx),
-                cx,
-            ),
-        ])
+        self.settings_card(
+            "settings_view.help.diagnostics",
+            "",
+            vec![
+                self.bool_row(
+                    "settings_view.help.debug_logs",
+                    "settings_view.help.debug_logs_hint",
+                    self.settings_store.settings().diagnostics.debug_logging,
+                    set_diagnostics_debug_logging,
+                    cx,
+                ),
+                self.card_separator(),
+                self.bool_row(
+                    "settings_view.terminal.show_performance_overlay",
+                    "settings_view.terminal.show_performance_overlay_hint",
+                    self.settings_store.settings().terminal.show_fps_overlay,
+                    set_show_terminal_performance_overlay,
+                    cx,
+                ),
+                self.card_separator(),
+                self.help_action_row(
+                    "settings_view.help.open_logs",
+                    "settings_view.help.open_logs_hint",
+                    self.i18n.t("settings_view.help.open"),
+                    LucideIcon::FolderOpen,
+                    |this, _event, _window, cx| this.open_help_log_directory(cx),
+                    cx,
+                ),
+            ],
+        )
     }
 
     pub(in crate::workspace) fn help_tech_stack_card(&self) -> AnyElement {
@@ -155,46 +137,52 @@ impl WorkspaceApp {
             );
         }
 
-        self.plain_settings_card(vec![
-            self.card_title("settings_view.help.tech_stack"),
-            badges.into_any_element(),
-        ])
+        self.settings_card(
+            "settings_view.help.tech_stack",
+            "",
+            vec![badges.into_any_element()],
+        )
     }
 
     pub(in crate::workspace) fn help_resources_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        self.plain_settings_card(vec![
-            self.card_title("settings_view.help.resources"),
-            self.help_resource_link(
+        let links = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(2.0))
+            .child(self.help_resource_link(
                 "settings_view.help.website",
                 HELP_WEBSITE_URL,
                 LucideIcon::ExternalLink,
                 cx,
-            ),
-            self.help_resource_link(
+            ))
+            .child(self.help_resource_link(
                 "settings_view.help.documentation",
                 HELP_DOCUMENTATION_URL,
                 LucideIcon::BookOpen,
                 cx,
-            ),
-            self.help_resource_link(
+            ))
+            .child(self.help_resource_link(
                 "settings_view.help.github",
                 HELP_GITHUB_URL,
                 LucideIcon::GitFork,
                 cx,
-            ),
-            self.help_resource_link(
+            ))
+            .child(self.help_resource_link(
                 "settings_view.help.issues",
                 HELP_ISSUES_URL,
                 LucideIcon::HelpCircle,
                 cx,
-            ),
-            self.help_resource_link(
+            ))
+            .child(self.help_resource_link(
                 "settings_view.help.disclaimer",
                 HELP_LEGAL_URL,
                 LucideIcon::Shield,
                 cx,
-            ),
-        ])
+            ))
+            .into_any_element();
+
+        self.settings_card("settings_view.help.resources", "", vec![links])
     }
 
     pub(in crate::workspace) fn help_safety_card(&self) -> AnyElement {
@@ -212,10 +200,11 @@ impl WorkspaceApp {
             safety_rows = safety_rows.child(self.help_safety_row(key));
         }
 
-        self.plain_settings_card(vec![
-            self.card_title("settings_view.help.safety_title"),
-            safety_rows.into_any_element(),
-        ])
+        self.settings_card(
+            "settings_view.help.safety_title",
+            "",
+            vec![safety_rows.into_any_element()],
+        )
     }
 
     pub(in crate::workspace) fn help_safety_row(&self, key: &str) -> AnyElement {
@@ -323,12 +312,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         div()
-            .mt(px(16.0))
             .pt(px(16.0))
             .border_t_1()
-            .border_color(rgba(
-                (self.tokens.ui.border << 8) | alpha_byte(HELP_UPDATE_FOOTER_BORDER_ALPHA),
-            ))
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
             .flex()
             .flex_col()
             .gap(px(12.0))
@@ -347,39 +333,28 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn help_portable_update_notice(&self) -> AnyElement {
-        div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.border << 8) | alpha_byte(HELP_PORTABLE_NOTICE_BORDER_ALPHA),
-            ))
-            .bg(rgba(
-                (self.tokens.ui.bg_elevated << 8) | alpha_byte(HELP_PORTABLE_NOTICE_BG_ALPHA),
-            ))
-            .p(px(16.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Shield,
-                        16.0,
-                        rgb(self.tokens.ui.warning),
-                    ))
-                    .child(self.i18n.t("settings_view.help.portable_updates")),
-            )
-            .child(
-                div()
-                    .mt(px(8.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.help.portable_updates_hint")),
-            )
-            .into_any_element()
+        self.settings_callout(
+            SettingsCalloutTone::Warning,
+            Some(LucideIcon::Shield),
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(4.0))
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(self.tokens.ui.text))
+                        .child(self.i18n.t("settings_view.help.portable_updates")),
+                )
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("settings_view.help.portable_updates_hint")),
+                )
+                .into_any_element(),
+        )
     }
 
     pub(in crate::workspace) fn help_update_status_area(

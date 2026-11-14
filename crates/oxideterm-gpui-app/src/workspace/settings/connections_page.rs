@@ -601,26 +601,26 @@ fn take_optional_managed_key_secret(
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_connections_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
-        match section_index {
-            0 => self.settings_card(
+        match section {
+            SettingsSectionId::ConnectionsDefaults => self.settings_card(
                 "settings_view.connections.title",
                 "settings_view.connections.description",
                 vec![self.connection_defaults_section(settings, cx)],
             ),
-            1 => self.connection_section(
+            SettingsSectionId::ConnectionsIdleTimeout => self.connection_section(
                 "settings_view.connections.idle_timeout.title",
                 "settings_view.connections.idle_timeout.description",
                 vec![self.connection_idle_timeout_control(settings, cx)],
             ),
-            2 => self.settings_reconnect_section(0, cx),
-            3 => self.settings_ssh_section(0, cx),
-            4 => self.ssh_config_import_section(cx),
-            5 => self.connection_importers_section(cx),
-            6 => self.settings_known_hosts_section(cx),
+            SettingsSectionId::ConnectionsReconnect => self.settings_reconnect_section(0, cx),
+            SettingsSectionId::ConnectionsSshKeys => self.settings_ssh_section(0, cx),
+            SettingsSectionId::ConnectionsSshConfigImport => self.ssh_config_import_section(cx),
+            SettingsSectionId::ConnectionsImporters => self.connection_importers_section(cx),
+            SettingsSectionId::ConnectionsKnownHosts => self.settings_known_hosts_section(cx),
             _ => div().into_any_element(),
         }
     }
@@ -660,13 +660,14 @@ impl WorkspaceApp {
             .min_w_0()
             .flex()
             .flex_col()
-            .gap(px(32.0))
+            .gap(px(self.tokens.metrics.settings_card_gap))
             .child(self.ssh_key_section_header(
                 "settings_view.ssh_keys.local_section",
                 "settings_view.ssh_keys.local_description",
                 None,
             ))
             .child(local_list)
+            .child(self.card_separator())
             .child(self.ssh_key_section_header(
                 "settings_view.ssh_keys.managed_section",
                 "settings_view.ssh_keys.managed_description",
@@ -710,6 +711,7 @@ impl WorkspaceApp {
                 settings.connection_defaults.username.clone(),
                 cx,
             ))
+            .child(self.card_separator())
             .child(self.connection_labeled_input(
                 "settings_view.connections.default_port",
                 SettingsInput::ConnectionDefaultPort,
@@ -779,7 +781,7 @@ impl WorkspaceApp {
         self.connection_section(
             "settings_view.connections.ssh_config.title",
             "",
-            vec![
+            self.separated_settings_rows(vec![
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
@@ -879,7 +881,7 @@ impl WorkspaceApp {
                         }),
                     ))
                     .into_any_element(),
-            ],
+            ]),
         )
     }
 
@@ -2000,22 +2002,10 @@ impl WorkspaceApp {
                     .min_w(px(0.0))
                     .flex_1()
                     .flex_basis(px(SSH_KEY_HEADER_TEXT_BASIS))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(18.0))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(title_key)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(description_key)),
-                    ),
+                    .child(self.card_subsection_header(
+                        self.i18n.t(title_key),
+                        Some(self.i18n.t(description_key)),
+                    )),
             )
             .when_some(actions, |header, actions| header.child(actions))
             .into_any_element()

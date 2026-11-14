@@ -3,6 +3,13 @@ use super::*;
 // Match the browser slider debounce while keeping exactly one retained task.
 const BACKGROUND_BLUR_COMMIT_DELAY: Duration = Duration::from_millis(150);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::workspace) enum SettingsCalloutTone {
+    Info,
+    Warning,
+    Error,
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_select_trigger(
         &self,
@@ -91,83 +98,156 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn settings_card_frame(&self, children: Vec<AnyElement>) -> AnyElement {
+        let card = div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .p(px(self.tokens.metrics.settings_card_padding))
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_card_gap))
+            .children(children);
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn settings_card_header_text(
+        &self,
+        title: String,
+        description: Option<String>,
+        icon: Option<AnyElement>,
+        actions: Option<AnyElement>,
+    ) -> AnyElement {
+        let description = description.filter(|text| !text.is_empty());
+        let has_description = description.is_some();
+        let heading = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .when_some(icon, |row, icon| row.child(icon))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(title.to_uppercase()),
+            );
+
+        let left = div()
+            .flex_1()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(heading)
+            .when_some(description, |col, description| {
+                col.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(description),
+                )
+            });
+
+        let header = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .justify_between()
+            .gap(px(12.0));
+        let header = if has_description {
+            header.items_start()
+        } else {
+            header.items_center()
+        };
+
+        header
+            .child(left)
+            .when_some(actions, |row, actions| row.child(actions))
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn settings_card(
         &self,
         title_key: &str,
         description_key: &str,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
-            .child(
-                div()
-                    .mb(px(self.tokens.metrics.settings_card_title_nudge_y))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(title_key).to_uppercase()),
-            )
-            .when(!description_key.is_empty(), |card| {
-                card.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t(description_key)),
-                )
-            })
-            .children(rows);
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+        self.settings_card_with_header(title_key, description_key, None, None, rows)
+    }
+
+    pub(in crate::workspace) fn settings_card_with_header(
+        &self,
+        title_key: &str,
+        description_key: &str,
+        icon: Option<AnyElement>,
+        actions: Option<AnyElement>,
+        rows: Vec<AnyElement>,
+    ) -> AnyElement {
+        let description = (!description_key.is_empty()).then(|| self.i18n.t(description_key));
+        let mut children = Vec::with_capacity(rows.len() + 1);
+        children.push(self.settings_card_header_text(
+            self.i18n.t(title_key),
+            description,
+            icon,
+            actions,
+        ));
+        children.extend(rows);
+        self.settings_card_frame(children)
     }
 
     pub(in crate::workspace) fn plain_settings_card(&self, rows: Vec<AnyElement>) -> AnyElement {
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
-            .children(rows);
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+        self.settings_card_frame(rows)
+    }
+
+    pub(in crate::workspace) fn separated_settings_rows(
+        &self,
+        rows: Vec<AnyElement>,
+    ) -> Vec<AnyElement> {
+        let mut out = Vec::with_capacity(rows.len().saturating_mul(2));
+        for (index, row) in rows.into_iter().enumerate() {
+            if index > 0 {
+                out.push(self.card_separator());
+            }
+            out.push(row);
+        }
+        out
     }
 
     pub(in crate::workspace) fn terminal_input_settings_card(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        match section_index {
-            0 => {
+        match section {
+            SettingsSectionId::TerminalInputClipboard => {
                 let mut rows = Vec::new();
-                rows.push(self.checkbox_row(
+                rows.push(self.bool_row(
                     "settings_view.terminal.paste_protection",
                     "settings_view.terminal.paste_protection_hint",
                     settings.terminal.paste_protection,
                     set_paste_protection,
                     cx,
                 ));
-                rows.push(self.checkbox_row(
+                rows.push(self.bool_row(
                     "settings_view.terminal.osc52_clipboard",
                     "settings_view.terminal.osc52_clipboard_hint",
                     settings.terminal.osc52_clipboard,
                     set_osc52_clipboard,
                     cx,
                 ));
-                rows.push(self.checkbox_row(
+                rows.push(self.bool_row(
                     "settings_view.terminal.osc52_clipboard_read",
                     "settings_view.terminal.osc52_clipboard_read_hint",
                     settings.terminal.osc52_clipboard_read,
@@ -175,7 +255,7 @@ impl WorkspaceApp {
                     cx,
                 ));
                 if !cfg!(target_os = "macos") {
-                    rows.push(self.checkbox_row(
+                    rows.push(self.bool_row(
                         "settings_view.terminal.smart_copy",
                         "settings_view.terminal.smart_copy_hint",
                         settings.terminal.smart_copy,
@@ -183,53 +263,57 @@ impl WorkspaceApp {
                         cx,
                     ));
                 }
-                rows.push(self.checkbox_row(
+                rows.push(self.bool_row(
                     "settings_view.terminal.copy_on_select",
                     "settings_view.terminal.copy_on_select_hint",
                     settings.terminal.copy_on_select,
                     set_copy_on_select,
                     cx,
                 ));
-                rows.push(self.checkbox_row(
+                rows.push(self.bool_row(
                     "settings_view.terminal.middle_click_paste",
                     "settings_view.terminal.middle_click_paste_hint",
                     settings.terminal.middle_click_paste,
                     set_middle_click_paste,
                     cx,
                 ));
-                rows.push(self.checkbox_row(
+                rows.push(self.bool_row(
                     "settings_view.terminal.right_click_paste",
                     "settings_view.terminal.right_click_paste_hint",
                     settings.terminal.right_click_paste,
                     set_right_click_paste,
                     cx,
                 ));
-                self.settings_card("settings_view.terminal.input_clipboard", "", rows)
+                self.settings_card(
+                    "settings_view.terminal.input_clipboard",
+                    "",
+                    self.separated_settings_rows(rows),
+                )
             }
-            1 => {
+            SettingsSectionId::TerminalInputMouseLinks => {
                 let rows = vec![
-                    self.checkbox_row(
+                    self.bool_row(
                         "settings_view.terminal.selection_requires_shift",
                         "settings_view.terminal.selection_requires_shift_hint",
                         settings.terminal.selection_requires_shift,
                         set_selection_requires_shift,
                         cx,
                     ),
-                    self.checkbox_row(
+                    self.bool_row(
                         "settings_view.terminal.open_links_with_modifier",
                         "settings_view.terminal.open_links_with_modifier_hint",
                         settings.terminal.open_links_with_modifier,
                         set_open_links_with_modifier,
                         cx,
                     ),
-                    self.checkbox_row(
+                    self.bool_row(
                         "settings_view.terminal.detect_file_paths_as_links",
                         "settings_view.terminal.detect_file_paths_as_links_hint",
                         settings.terminal.detect_file_paths_as_links,
                         set_detect_file_paths_as_links,
                         cx,
                     ),
-                    self.checkbox_row(
+                    self.bool_row(
                         "settings_view.terminal.timestamp_hover",
                         "settings_view.terminal.timestamp_hover_hint",
                         settings.terminal.timestamp_hover,
@@ -237,18 +321,22 @@ impl WorkspaceApp {
                         cx,
                     ),
                 ];
-                self.settings_card("settings_view.terminal.input_mouse_links", "", rows)
+                self.settings_card(
+                    "settings_view.terminal.input_mouse_links",
+                    "",
+                    self.separated_settings_rows(rows),
+                )
             }
-            2 => {
+            SettingsSectionId::TerminalInputKeyboard => {
                 let rows = vec![
-                    self.checkbox_row(
+                    self.bool_row(
                         "settings_view.terminal.free_type_mode",
                         "settings_view.terminal.free_type_mode_hint",
                         settings.terminal.free_type_mode,
                         set_free_type_mode,
                         cx,
                     ),
-                    self.checkbox_row(
+                    self.bool_row(
                         "settings_view.terminal.autosuggest_enabled",
                         "settings_view.terminal.autosuggest_enabled_hint",
                         settings.terminal.autosuggest.enabled,
@@ -274,7 +362,11 @@ impl WorkspaceApp {
                         cx,
                     ),
                 ];
-                self.settings_card("settings_view.terminal.input_keyboard", "", rows)
+                self.settings_card(
+                    "settings_view.terminal.input_keyboard",
+                    "",
+                    self.separated_settings_rows(rows),
+                )
             }
             _ => div().into_any_element(),
         }
@@ -289,11 +381,120 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(in crate::workspace) fn card_subsection_header(
+        &self,
+        title: impl Into<SharedString>,
+        hint: Option<String>,
+    ) -> AnyElement {
+        let hint = hint.filter(|text| !text.is_empty());
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text_secondary))
+                    .child(title.into()),
+            )
+            .when_some(hint, |col, hint| {
+                col.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(hint),
+                )
+            })
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn settings_callout(
+        &self,
+        tone: SettingsCalloutTone,
+        icon: Option<LucideIcon>,
+        body: AnyElement,
+    ) -> AnyElement {
+        let ui = self.tokens.ui;
+        let (border_color, background, icon_color, text_color) = match tone {
+            SettingsCalloutTone::Info => (
+                rgba((ui.info << 8) | 0x4d),
+                rgba((ui.info << 8) | 0x14),
+                rgb(ui.info),
+                rgb(ui.text_muted),
+            ),
+            SettingsCalloutTone::Warning => (
+                rgba((ui.warning << 8) | 0x4d),
+                rgba((ui.warning << 8) | 0x14),
+                rgb(ui.warning),
+                rgb(ui.text_muted),
+            ),
+            SettingsCalloutTone::Error => (
+                rgba((ui.error << 8) | 0x4d),
+                rgba((ui.error << 8) | 0x14),
+                rgb(ui.error),
+                rgb(ui.error),
+            ),
+        };
+        let icon_offset_y = ((self.tokens.metrics.ui_text_xs * 1.45 - 14.0) * 0.5).max(1.0);
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(border_color)
+            .bg(background)
+            .px(px(12.0))
+            .py(px(10.0))
+            .flex()
+            .flex_row()
+            .items_start()
+            .gap(px(10.0))
+            .when_some(icon, |row, icon| {
+                row.child(
+                    div()
+                        .flex_none()
+                        .mt(px(icon_offset_y))
+                        .child(Self::render_lucide_icon(icon, 14.0, icon_color)),
+                )
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .line_height(gpui::relative(1.45))
+                    .text_color(text_color)
+                    .child(body),
+            )
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn settings_mono_box(&self, body: AnyElement) -> AnyElement {
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+            .bg(rgb(self.tokens.ui.bg_sunken))
+            .px(px(10.0))
+            .py(px(8.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_color(rgb(self.tokens.ui.text))
+            .line_height(px((self.tokens.metrics.ui_text_xs + 4.0).max(16.0)))
+            .child(body)
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn card_separator(&self) -> AnyElement {
         div()
             .h(px(1.0))
             .w_full()
-            .bg(rgba((self.tokens.ui.border << 8) | 0x80))
+            .bg(rgba((self.tokens.ui.border << 8) | 0x66))
             .into_any_element()
     }
 

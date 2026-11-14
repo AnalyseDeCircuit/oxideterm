@@ -93,16 +93,18 @@ pub(super) fn appearance_theme_palette(settings: &PersistedSettings, id: &str) -
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_appearance_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
-        match section_index {
-            0 => self.appearance_theme_card(settings, cx),
-            1 => self.appearance_layout_card(settings, cx),
-            2 => self.appearance_effects_card(settings, cx),
-            3 => self.appearance_background_card(&self.background_settings_for_controls(cx), cx),
-            4 => self.appearance_app_icon_card(settings, cx),
+        match section {
+            SettingsSectionId::AppearanceTheme => self.appearance_theme_card(settings, cx),
+            SettingsSectionId::AppearanceLayout => self.appearance_layout_card(settings, cx),
+            SettingsSectionId::AppearanceEffects => self.appearance_effects_card(settings, cx),
+            SettingsSectionId::AppearanceBackground => {
+                self.appearance_background_card(&self.background_settings_for_controls(cx), cx)
+            }
+            SettingsSectionId::AppearanceAppIcon => self.appearance_app_icon_card(settings, cx),
             _ => div().into_any_element(),
         }
     }
@@ -399,60 +401,61 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let rows = vec![
+            self.appearance_row(
+                "settings_view.appearance.density",
+                "settings_view.appearance.density_hint",
+                self.appearance_select_control(
+                    SettingsSelect::AppearanceDensity,
+                    density_label(settings.appearance.ui_density, &self.i18n),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.corner_style",
+                "settings_view.appearance.corner_style_hint",
+                self.appearance_corner_style_control(settings.appearance.corner_style, cx),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.border_radius",
+                "settings_view.appearance.border_radius_hint",
+                self.appearance_radius_control(settings, cx),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.ui_font",
+                "settings_view.appearance.ui_font_hint",
+                self.appearance_text_input_control(
+                    SettingsInput::AppearanceUiFont,
+                    settings.appearance.ui_font_family.clone(),
+                    self.i18n.t("settings_view.appearance.ui_font_placeholder"),
+                    self.tokens.metrics.settings_appearance_select_width,
+                    cx,
+                ),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.ui_font_size",
+                "settings_view.appearance.ui_font_size_hint",
+                self.appearance_slider_value_control(
+                    SettingsSlider::AppearanceUiFontSize,
+                    SelectAnchorId::SettingsAppearanceUiFontSizeSlider,
+                    APPEARANCE_UI_FONT_SIZE_MIN,
+                    APPEARANCE_UI_FONT_SIZE_MAX,
+                    settings.appearance.ui_font_size as f32,
+                    "px",
+                    cx,
+                ),
+            ),
+        ]
+        .into_iter()
+        .chain(cfg!(target_os = "linux").then(|| {
+            self.appearance_window_titlebar_row(settings.appearance.show_window_titlebar, cx)
+        }))
+        .collect();
         self.appearance_card(
             self.i18n.t("settings_view.appearance.layout"),
             None,
-            vec![
-                self.appearance_row(
-                    "settings_view.appearance.density",
-                    "settings_view.appearance.density_hint",
-                    self.appearance_select_control(
-                        SettingsSelect::AppearanceDensity,
-                        density_label(settings.appearance.ui_density, &self.i18n),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
-                ),
-                self.appearance_row(
-                    "settings_view.appearance.corner_style",
-                    "settings_view.appearance.corner_style_hint",
-                    self.appearance_corner_style_control(settings.appearance.corner_style, cx),
-                ),
-                self.appearance_row(
-                    "settings_view.appearance.border_radius",
-                    "settings_view.appearance.border_radius_hint",
-                    self.appearance_radius_control(settings, cx),
-                ),
-                self.appearance_row(
-                    "settings_view.appearance.ui_font",
-                    "settings_view.appearance.ui_font_hint",
-                    self.appearance_text_input_control(
-                        SettingsInput::AppearanceUiFont,
-                        settings.appearance.ui_font_family.clone(),
-                        self.i18n.t("settings_view.appearance.ui_font_placeholder"),
-                        self.tokens.metrics.settings_appearance_select_width,
-                        cx,
-                    ),
-                ),
-                self.appearance_row(
-                    "settings_view.appearance.ui_font_size",
-                    "settings_view.appearance.ui_font_size_hint",
-                    self.appearance_slider_value_control(
-                        SettingsSlider::AppearanceUiFontSize,
-                        SelectAnchorId::SettingsAppearanceUiFontSizeSlider,
-                        APPEARANCE_UI_FONT_SIZE_MIN,
-                        APPEARANCE_UI_FONT_SIZE_MAX,
-                        settings.appearance.ui_font_size as f32,
-                        "px",
-                        cx,
-                    ),
-                ),
-            ]
-            .into_iter()
-            .chain(cfg!(target_os = "linux").then(|| {
-                self.appearance_window_titlebar_row(settings.appearance.show_window_titlebar, cx)
-            }))
-            .collect(),
+            self.separated_settings_rows(rows),
         )
     }
 
@@ -461,58 +464,53 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.appearance_card(
-            self.i18n.t("settings_view.appearance.effects"),
-            None,
-            vec![
-                self.appearance_row(
-                    "settings_view.appearance.window_opacity",
-                    "settings_view.appearance.window_opacity_hint",
-                    self.appearance_slider_labeled_control(
-                        SettingsSlider::AppearanceWindowOpacity,
-                        SelectAnchorId::SettingsAppearanceWindowOpacitySlider,
-                        0.0,
-                        1.0,
-                        window_opacity_slider_position(settings.appearance.window_opacity),
-                        window_opacity_label(settings.appearance.window_opacity),
-                        cx,
-                    ),
+        let mut rows = self.separated_settings_rows(vec![
+            self.appearance_row(
+                "settings_view.appearance.window_opacity",
+                "settings_view.appearance.window_opacity_hint",
+                self.appearance_slider_labeled_control(
+                    SettingsSlider::AppearanceWindowOpacity,
+                    SelectAnchorId::SettingsAppearanceWindowOpacitySlider,
+                    0.0,
+                    1.0,
+                    window_opacity_slider_position(settings.appearance.window_opacity),
+                    window_opacity_label(settings.appearance.window_opacity),
+                    cx,
                 ),
-                self.appearance_row(
-                    "settings_view.appearance.animation",
-                    "settings_view.appearance.animation_hint",
-                    self.appearance_select_control(
-                        SettingsSelect::AppearanceAnimation,
-                        animation_label(settings.appearance.animation_speed, &self.i18n),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.animation",
+                "settings_view.appearance.animation_hint",
+                self.appearance_select_control(
+                    SettingsSelect::AppearanceAnimation,
+                    animation_label(settings.appearance.animation_speed, &self.i18n),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
                 ),
-                self.appearance_row(
-                    "settings_view.appearance.render_profile",
-                    "settings_view.appearance.render_profile_hint",
-                    self.appearance_select_control(
-                        SettingsSelect::AppearanceRenderProfile,
-                        render_profile_label(settings.appearance.render_profile, &self.i18n),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.render_profile",
+                "settings_view.appearance.render_profile_hint",
+                self.appearance_select_control(
+                    SettingsSelect::AppearanceRenderProfile,
+                    render_profile_label(settings.appearance.render_profile, &self.i18n),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
                 ),
-                self.appearance_row(
-                    "settings_view.appearance.frosted_glass",
-                    "settings_view.appearance.frosted_glass_hint",
-                    self.appearance_select_control(
-                        SettingsSelect::AppearanceFrostedGlass,
-                        frosted_glass_label(settings.appearance.frosted_glass, &self.i18n),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
+            ),
+            self.appearance_row(
+                "settings_view.appearance.frosted_glass",
+                "settings_view.appearance.frosted_glass_hint",
+                self.appearance_select_control(
+                    SettingsSelect::AppearanceFrostedGlass,
+                    frosted_glass_label(settings.appearance.frosted_glass, &self.i18n),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
                 ),
-            ]
-            .into_iter()
-            .chain(std::iter::once(self.appearance_vibrancy_status(settings)))
-            .collect(),
-        )
+            ),
+        ]);
+        rows.push(self.appearance_vibrancy_status(settings));
+        self.appearance_card(self.i18n.t("settings_view.appearance.effects"), None, rows)
     }
 
     pub(in crate::workspace) fn appearance_app_icon_card(
@@ -767,9 +765,8 @@ impl WorkspaceApp {
                 ));
             }
         }
-        rows.push(separator(&self.tokens, SeparatorOrientation::Horizontal).into_any_element());
-        rows.push(settings_appearance_card_title(
-            &self.tokens,
+        rows.push(self.card_separator());
+        rows.push(self.card_subsection_header(
             self.i18n.t("settings_view.terminal.bg_effects"),
             None,
         ));
@@ -847,9 +844,9 @@ impl WorkspaceApp {
             rows.extend(self.appearance_background_effect_rows(effect, cx));
         }
         if has_background {
-            rows.push(separator(&self.tokens, SeparatorOrientation::Horizontal).into_any_element());
+            rows.push(self.card_separator());
             rows.extend(self.appearance_background_interaction_rows(settings, animated_media, cx));
-            rows.push(separator(&self.tokens, SeparatorOrientation::Horizontal).into_any_element());
+            rows.push(self.card_separator());
             rows.push(self.appearance_row(
                 "settings_view.terminal.bg_readability",
                 "settings_view.terminal.bg_readability_hint",

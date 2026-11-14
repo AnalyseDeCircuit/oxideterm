@@ -410,26 +410,17 @@ impl SettingsWorkspaceEntity {
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_network_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
         let proxy = settings.network.upstream_proxy.as_ref();
-        match section_index {
-            0 => self.settings_network_shared_proxy_section(proxy, cx),
-            1 => self.settings_network_routing_section(cx),
-            2 => self.settings_card(
-                "settings_view.general.connection_uri_integration",
-                "settings_view.general.connection_uri_integration_hint",
-                vec![self.general_checkbox_row(
-                    "settings_view.general.external_connection_uris",
-                    "settings_view.general.external_connection_uris_hint",
-                    settings.general.external_connection_uris_enabled,
-                    |settings, enabled| settings.general.external_connection_uris_enabled = enabled,
-                    cx,
-                )],
-            ),
-            3 => self.settings_public_mcp_section(cx),
+        match section {
+            SettingsSectionId::NetworkSharedProxy => {
+                self.settings_network_shared_proxy_section(proxy, cx)
+            }
+            SettingsSectionId::NetworkRouting => self.settings_network_routing_section(cx),
+            SettingsSectionId::NetworkPublicMcp => self.settings_public_mcp_section(cx),
             _ => div().into_any_element(),
         }
     }
@@ -1621,7 +1612,10 @@ impl WorkspaceApp {
     }
 
     fn network_subsection_heading(&self, label_key: &str, hint_key: &str) -> AnyElement {
-        self.network_field_label(label_key, hint_key)
+        self.card_subsection_header(
+            self.i18n.t(label_key),
+            (!hint_key.is_empty()).then(|| self.i18n.t(hint_key)),
+        )
     }
 
     fn network_static_route_row(

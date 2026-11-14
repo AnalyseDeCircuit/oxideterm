@@ -18,7 +18,7 @@ use oxideterm_settings_model::{
     KnowledgeDeleteTarget, MAX_SEMANTIC_RULES, SEMANTIC_CLASSES,
     SETTINGS_SECTION_HEADER_ITEM_COUNT, SemanticClass, SemanticRuleContext, SemanticRuleDefinition,
     SemanticSchemeDocument, SettingsDynamicSectionCounts, SettingsInputDraftApply,
-    TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
+    SettingsSectionId, TERMINAL_THEME_COLOR_FIELDS, ThemeColorField, ThemeEditorSection, ThemeEditorState,
     ThemeTarget, UI_THEME_COLOR_FIELDS, add_custom_semantic_rule, ai_add_acp_agent,
     ai_add_acp_agent_preset, ai_delete_acp_agent, ai_mcp_configs, ai_mcp_server_signature,
     ai_mcp_transport_label, ai_model_context_window_panels,
@@ -35,10 +35,10 @@ use oxideterm_settings_model::{
     reconnect_base_delay_options, reconnect_delay_label, reconnect_max_attempt_options,
     reconnect_max_delay_options, save_theme_editor_snapshot_to_settings,
     set_ai_tool_policy_group_approval, set_ai_user_context_window, settings_multiline_line_ranges,
-    settings_multiline_line_selection,
+    settings_multiline_line_selection, settings_section_index, settings_section_list_item_index,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
-    take_cloud_sync_form_input_value, theme_editor_from_settings,
+    settings_tab_section_at, take_cloud_sync_form_input_value, theme_editor_from_settings,
 };
 use oxideterm_ssh::{HostKeyStatus, UpstreamProxyConfig, probe_upstream_proxy_route};
 use oxideterm_theme::BUILT_IN_THEMES;
@@ -198,6 +198,7 @@ mod ai_page;
 mod appearance;
 mod background;
 mod cards;
+pub(in crate::workspace) use cards::SettingsCalloutTone;
 mod cli_companion;
 mod connections_page;
 mod controls;

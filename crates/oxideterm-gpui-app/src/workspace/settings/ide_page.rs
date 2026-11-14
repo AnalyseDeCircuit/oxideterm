@@ -1,25 +1,21 @@
 use super::*;
 
-pub(in crate::workspace) const IDE_SETTINGS_CARD_PADDING: f32 = 20.0; // Tauri p-5.
-pub(in crate::workspace) const IDE_SETTINGS_CARD_GAP: f32 = 16.0; // Tauri space-y-4.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_SIZE: f32 = 4.0; // Tauri w-1 h-1.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_TOP_MARGIN: f32 = 6.0; // Tauri mt-1.5.
-pub(in crate::workspace) const IDE_SETTINGS_AGENT_PRIVACY_BORDER_ALPHA: u8 = 0x33; // Tauri blue-500/20.
-pub(in crate::workspace) const IDE_SETTINGS_AGENT_PRIVACY_BG_ALPHA: u8 = 0x0d; // Tauri blue-500/5.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_SUBTLE_BORDER_ALPHA: u8 = 0x80; // Tauri border/50.
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_ide_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
-        match section_index {
-            0 => self.settings_card(
+        match section {
+            SettingsSectionId::IdeEditing => self.settings_card(
                 "settings_view.ide.editing",
                 "settings_view.ide.editing_hint",
-                vec![
+                self.separated_settings_rows(vec![
                     self.bool_row(
                         "settings_view.ide.auto_save",
                         "settings_view.ide.auto_save_hint",
@@ -27,7 +23,6 @@ impl WorkspaceApp {
                         set_ide_auto_save,
                         cx,
                     ),
-                    self.card_separator(),
                     self.bool_row(
                         "settings_view.ide.word_wrap",
                         "settings_view.ide.word_wrap_hint",
@@ -35,24 +30,13 @@ impl WorkspaceApp {
                         set_ide_word_wrap,
                         cx,
                     ),
-                ],
+                ]),
             ),
-            1 => self.ide_typography_card(settings, cx),
-            2 => self.ide_agent_card(settings, cx),
-            3 => self.ide_agent_privacy_card(),
+            SettingsSectionId::IdeTypography => self.ide_typography_card(settings, cx),
+            SettingsSectionId::IdeAgent => self.ide_agent_card(settings, cx),
+            SettingsSectionId::IdeAgentPrivacy => self.ide_agent_privacy_card(),
             _ => div().into_any_element(),
         }
-    }
-
-    pub(in crate::workspace) fn ide_card(&self) -> Div {
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(IDE_SETTINGS_CARD_PADDING));
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
     }
 
     pub(in crate::workspace) fn ide_typography_card(
@@ -66,47 +50,37 @@ impl WorkspaceApp {
                 .cjk_font_family
                 .as_deref()
                 .is_some_and(cjk_font_is_custom);
-        self.ide_card()
-            .flex()
-            .flex_col()
-            .gap(px(IDE_SETTINGS_CARD_GAP))
-            .child(self.ide_card_title(self.i18n.t("settings_view.ide.editor_typography")))
-            .child(
-                self.ide_card_description(self.i18n.t("settings_view.ide.editor_typography_hint")),
-            )
-            .child(
-                self.select_setting_row(
-                    "settings_view.ide.font_family",
-                    "settings_view.ide.font_family_hint",
-                    SettingsSelect::IdeFontFamily,
-                    settings
-                        .ide
-                        .font_family
-                        .map(font_family_label)
-                        .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal")),
-                    self.tokens.metrics.settings_select_width,
+        let mut font_group = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(12.0)).child(
+            self.select_setting_row(
+                "settings_view.ide.font_family",
+                "settings_view.ide.font_family_hint",
+                SettingsSelect::IdeFontFamily,
+                settings
+                    .ide
+                    .font_family
+                    .map(font_family_label)
+                    .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal")),
+                self.tokens.metrics.settings_select_width,
+                cx,
+            ),
+        );
+        if settings.ide.font_family == Some(oxideterm_settings::FontFamily::Custom) {
+            font_group = font_group.child(self.setting_row(
+                "settings_view.terminal.custom_font_stack",
+                "settings_view.terminal.custom_font_stack_hint",
+                self.settings_text_input_control(
+                    SettingsInput::IdeCustomFontFamily,
+                    settings.ide.custom_font_family.clone(),
+                    "'Sarasa Fixed SC', 'Fira Code', monospace".to_string(),
+                    SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
                     cx,
                 ),
-            )
-            .when(
-                settings.ide.font_family == Some(oxideterm_settings::FontFamily::Custom),
-                |card| {
-                    card.child(self.setting_row(
-                        "settings_view.terminal.custom_font_stack",
-                        "settings_view.terminal.custom_font_stack_hint",
-                        self.settings_text_input_control(
-                            SettingsInput::IdeCustomFontFamily,
-                            settings.ide.custom_font_family.clone(),
-                            "'Sarasa Fixed SC', 'Fira Code', monospace".to_string(),
-                            SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
-                            cx,
-                        ),
-                        cx,
-                    ))
-                },
-            )
-            .child(self.card_separator())
-            .child(self.select_setting_row(
+                cx,
+            ));
+        }
+
+        let mut cjk_group = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(12.0)).child(
+            self.select_setting_row(
                 "settings_view.ide.cjk_font_family",
                 "settings_view.ide.cjk_font_family_hint",
                 SettingsSelect::IdeCjkFontFamily,
@@ -122,79 +96,80 @@ impl WorkspaceApp {
                 },
                 self.tokens.metrics.settings_select_width,
                 cx,
-            ))
-            .when(custom_cjk, |card| {
-                card.child(self.setting_row(
-                    "settings_view.terminal.custom_cjk_font",
-                    "settings_view.terminal.custom_cjk_font_hint",
-                    self.settings_text_input_control(
-                        SettingsInput::IdeCjkFontFamily,
-                        settings.ide.cjk_font_family.clone().unwrap_or_default(),
-                        "PingFang SC".to_string(),
-                        SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
-                        cx,
-                    ),
-                    cx,
-                ))
-            })
-            .child(self.card_separator())
-            .child(
-                self.setting_row(
-                    "settings_view.ide.font_weight",
-                    "settings_view.ide.font_weight_hint",
-                    self.ide_number_input_with_suffix(
-                        SettingsInput::IdeFontWeight,
-                        settings
-                            .ide
-                            .font_weight
-                            .map(|value| value.to_string())
-                            .unwrap_or_default(),
-                        settings.terminal.font_weight.to_string(),
-                        None,
-                        cx,
-                    ),
+            ),
+        );
+        if custom_cjk {
+            cjk_group = cjk_group.child(self.setting_row(
+                "settings_view.terminal.custom_cjk_font",
+                "settings_view.terminal.custom_cjk_font_hint",
+                self.settings_text_input_control(
+                    SettingsInput::IdeCjkFontFamily,
+                    settings.ide.cjk_font_family.clone().unwrap_or_default(),
+                    "PingFang SC".to_string(),
+                    SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
                     cx,
                 ),
-            )
-            .child(self.card_separator())
-            .child(
-                self.setting_row(
-                    "settings_view.ide.font_size",
-                    "settings_view.ide.font_size_hint",
-                    self.ide_number_input_with_suffix(
-                        SettingsInput::IdeFontSize,
-                        settings
-                            .ide
-                            .font_size
-                            .map(|value| value.to_string())
-                            .unwrap_or_default(),
-                        settings.terminal.font_size.to_string(),
-                        Some("px"),
-                        cx,
-                    ),
+                cx,
+            ));
+        }
+
+        let rows = self.separated_settings_rows(vec![
+            font_group.into_any_element(),
+            cjk_group.into_any_element(),
+            self.setting_row(
+                "settings_view.ide.font_weight",
+                "settings_view.ide.font_weight_hint",
+                self.ide_number_input_with_suffix(
+                    SettingsInput::IdeFontWeight,
+                    settings
+                        .ide
+                        .font_weight
+                        .map(|value| value.to_string())
+                        .unwrap_or_default(),
+                    settings.terminal.font_weight.to_string(),
+                    None,
                     cx,
                 ),
-            )
-            .child(self.card_separator())
-            .child(
-                self.setting_row(
-                    "settings_view.ide.line_height",
-                    "settings_view.ide.line_height_hint",
-                    self.ide_number_input_with_suffix(
-                        SettingsInput::IdeLineHeight,
-                        settings
-                            .ide
-                            .line_height
-                            .map(compact_decimal)
-                            .unwrap_or_default(),
-                        compact_decimal(settings.terminal.line_height),
-                        None,
-                        cx,
-                    ),
+                cx,
+            ),
+            self.setting_row(
+                "settings_view.ide.font_size",
+                "settings_view.ide.font_size_hint",
+                self.ide_number_input_with_suffix(
+                    SettingsInput::IdeFontSize,
+                    settings
+                        .ide
+                        .font_size
+                        .map(|value| value.to_string())
+                        .unwrap_or_default(),
+                    settings.terminal.font_size.to_string(),
+                    Some("px"),
                     cx,
                 ),
-            )
-            .into_any_element()
+                cx,
+            ),
+            self.setting_row(
+                "settings_view.ide.line_height",
+                "settings_view.ide.line_height_hint",
+                self.ide_number_input_with_suffix(
+                    SettingsInput::IdeLineHeight,
+                    settings
+                        .ide
+                        .line_height
+                        .map(compact_decimal)
+                        .unwrap_or_default(),
+                    compact_decimal(settings.terminal.line_height),
+                    None,
+                    cx,
+                ),
+                cx,
+            ),
+        ]);
+        self.settings_card(
+            "settings_view.ide.editor_typography",
+            "settings_view.ide.editor_typography_hint",
+            rows,
+        )
     }
 
     pub(in crate::workspace) fn ide_agent_card(
@@ -202,14 +177,10 @@ impl WorkspaceApp {
         _settings: &PersistedSettings,
         _cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.ide_card()
-            .flex()
-            .flex_col()
-            .gap(px(IDE_SETTINGS_CARD_GAP))
-            .child(self.ide_card_title(self.i18n.t("settings_view.ide.agent_title")))
-            .child(self.card_separator())
-            .child(self.ide_card_description(self.i18n.t("settings_view.ide.agent_description")))
-            .child(
+        self.settings_card(
+            "settings_view.ide.agent_title",
+            "settings_view.ide.agent_description",
+            vec![
                 div()
                     .flex()
                     .flex_col()
@@ -220,16 +191,10 @@ impl WorkspaceApp {
                         self.ide_feature_row("settings_view.ide.agent_feature_watch"),
                         self.ide_feature_row("settings_view.ide.agent_feature_hash"),
                         self.ide_feature_row("settings_view.ide.agent_feature_search"),
-                    ]),
-            )
-            .child(
+                    ])
+                    .into_any_element(),
+                self.card_separator(),
                 div()
-                    .pt(px(8.0))
-                    .border_t_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.border << 8)
-                            | IDE_SETTINGS_AGENT_SUBTLE_BORDER_ALPHA as u32,
-                    ))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -267,45 +232,31 @@ impl WorkspaceApp {
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t("settings_view.ide.agent_binary_size")),
-                    ),
-            )
-            .child(
+                    )
+                    .into_any_element(),
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .italic()
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.ide.agent_auto_hint")),
-            )
-            .into_any_element()
+                    .child(self.i18n.t("settings_view.ide.agent_auto_hint"))
+                    .into_any_element(),
+            ],
+        )
     }
 
     pub(in crate::workspace) fn ide_agent_privacy_card(&self) -> AnyElement {
-        self.ide_card()
-            .border_color(rgba(
-                (self.tokens.ui.info << 8) | IDE_SETTINGS_AGENT_PRIVACY_BORDER_ALPHA as u32,
-            ))
-            .bg(rgba(
-                (self.tokens.ui.info << 8) | IDE_SETTINGS_AGENT_PRIVACY_BG_ALPHA as u32,
-            ))
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Shield,
-                        16.0,
-                        rgb(self.tokens.ui.info),
-                    ))
-                    .child(self.i18n.t("settings_view.ide.agent_transparency_title")),
-            )
-            .child(
+        self.settings_card_with_header(
+            "settings_view.ide.agent_transparency_title",
+            "",
+            Some(Self::render_lucide_icon(
+                LucideIcon::Shield,
+                16.0,
+                rgb(self.tokens.ui.info),
+            )),
+            None,
+            vec![self.settings_callout(
+                SettingsCalloutTone::Info,
+                None,
                 div()
                     .flex()
                     .flex_col()
@@ -325,26 +276,10 @@ impl WorkspaceApp {
                             "settings_view.ide.agent_privacy_label",
                             "settings_view.ide.agent_privacy_detail",
                         ),
-                    ]),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ide_card_title(&self, title: String) -> AnyElement {
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .child(title.to_uppercase())
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ide_card_description(&self, description: String) -> AnyElement {
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(description)
-            .into_any_element()
+                    ])
+                    .into_any_element(),
+            )],
+        )
     }
 
     pub(in crate::workspace) fn ide_number_input_with_suffix(

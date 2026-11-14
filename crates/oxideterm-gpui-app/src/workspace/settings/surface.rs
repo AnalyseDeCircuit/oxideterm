@@ -2,8 +2,6 @@ use super::*;
 use crate::workspace::root::init::terminal_highlight_rules;
 use crate::workspace::root::init::terminal_preference_overrides;
 
-const SETTINGS_CONNECTION_IMPORTERS_SECTION_INDEX: usize = 5;
-
 fn settings_nav_item_index(groups: &[Vec<SettingsTab>], tab: SettingsTab) -> Option<usize> {
     let mut item_index = 0;
     for (group_index, group) in groups.iter().enumerate() {
@@ -77,12 +75,17 @@ impl WorkspaceApp {
         self.sync_settings_section_list_state(cx);
         // Target the importer row directly so callers do not merely land at
         // the top of a long Connections settings page.
-        self.settings_section_list_state
-            .scroll_to(gpui::ListOffset {
-                item_ix: SETTINGS_SECTION_HEADER_ITEM_COUNT
-                    + SETTINGS_CONNECTION_IMPORTERS_SECTION_INDEX,
-                offset_in_item: px(0.0),
-            });
+        if let Some(item_ix) = settings_section_list_item_index(
+            SettingsTab::Connections,
+            SettingsSectionId::ConnectionsImporters,
+            self.settings_dynamic_section_counts(cx),
+        ) {
+            self.settings_section_list_state
+                .scroll_to(gpui::ListOffset {
+                    item_ix,
+                    offset_in_item: px(0.0),
+                });
+        }
         self.open_settings(window, cx);
     }
 
@@ -222,8 +225,14 @@ impl WorkspaceApp {
         let section_index = index.saturating_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT);
         let child = if index == 0 {
             self.render_settings_virtual_header(active_tab, cx)
+        } else if let Some(section) = settings_tab_section_at(
+            active_tab,
+            section_index,
+            self.settings_dynamic_section_counts(cx),
+        ) {
+            self.render_settings_tab_section(active_tab, section, cx)
         } else {
-            self.render_settings_tab_section(active_tab, section_index, cx)
+            div().into_any_element()
         };
 
         self.wrap_settings_section_list_item(index, child, cx)
@@ -236,8 +245,14 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let item = if index == 0 {
             self.render_settings_virtual_header(SettingsTab::Ai, cx)
+        } else if let Some(section) = settings_tab_section_at(
+            SettingsTab::Ai,
+            index - SETTINGS_SECTION_HEADER_ITEM_COUNT,
+            self.settings_dynamic_section_counts(cx),
+        ) {
+            self.render_settings_ai_page_section(section, cx)
         } else {
-            self.render_settings_ai_page_section(index - 1, cx)
+            div().into_any_element()
         };
 
         self.wrap_settings_section_list_item(index, item, cx)
@@ -245,22 +260,17 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn render_settings_ai_page_section(
         &mut self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if section_index == 0 {
-            return self.ai_page_switcher(cx);
-        }
-
-        let page_section_index = section_index - 1;
-        let ai_page = self.settings_workspace.read(cx).route_snapshot().ai_page;
-        match (ai_page, page_section_index) {
-            (AiSettingsPage::General, 0) => {
+        match section {
+            SettingsSectionId::AiPageSwitcher => self.ai_page_switcher(cx),
+            SettingsSectionId::AiGeneralSettings => {
                 let settings = self.settings_store.settings();
                 self.ai_general_settings_card(settings, cx)
             }
-            (AiSettingsPage::General, 1) => self.ai_privacy_settings_card(),
-            (AiSettingsPage::Providers, 0) => {
+            SettingsSectionId::AiGeneralPrivacy => self.ai_privacy_settings_card(),
+            SettingsSectionId::AiProvidersSettings => {
                 let provider_views = self.ai_provider_views_for_settings_render(cx);
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
@@ -268,28 +278,28 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Context, 0) => {
+            SettingsSectionId::AiContextControls => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_context_controls_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Context, 1) => {
+            SettingsSectionId::AiContextSystemPrompt => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_system_prompt_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Context, 2) => {
+            SettingsSectionId::AiContextMemory => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_memory_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Context, 3) => {
+            SettingsSectionId::AiContextModelWindows => {
                 let settings = self.settings_store.settings();
                 let provider_views = ai_provider_views(settings);
                 self.ai_disabled_settings_card(
@@ -297,32 +307,32 @@ impl WorkspaceApp {
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 0) => {
+            SettingsSectionId::AiToolsToolUse => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_tool_use_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 1) => {
+            SettingsSectionId::AiToolsWebSearch => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_web_search_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 2) => self.ai_disabled_settings_card(
+            SettingsSectionId::AiToolsAgents => self.ai_disabled_settings_card(
                 self.render_ai_agent_settings(cx),
                 self.settings_store.settings().ai.enabled,
             ),
-            (AiSettingsPage::Tools, 3) => {
+            SettingsSectionId::AiToolsSkills => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_skills_section(settings, cx),
                     settings.ai.enabled,
                 )
             }
-            (AiSettingsPage::Tools, 4) => {
+            SettingsSectionId::AiToolsMcpServers => {
                 let settings = self.settings_store.settings();
                 self.ai_disabled_settings_card(
                     self.ai_mcp_servers_section(settings, cx),
@@ -448,6 +458,15 @@ impl WorkspaceApp {
         format!("{:?}", route.active_tab).hash(&mut hasher);
         index.hash(&mut hasher);
         let settings = self.settings_store.settings();
+        let section = index
+            .checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
+            .and_then(|section_index| {
+                settings_tab_section_at(
+                    route.active_tab,
+                    section_index,
+                    self.settings_dynamic_section_counts(cx),
+                )
+            });
 
         match route.active_tab {
             SettingsTab::General => {
@@ -460,12 +479,7 @@ impl WorkspaceApp {
                 cli.loading.hash(&mut hasher);
                 cli.error.is_some().hash(&mut hasher);
                 cli.status.hash(&mut hasher);
-                let app_lock_section_index =
-                    2 + usize::from(cfg!(any(target_os = "windows", target_os = "macos")));
-                if index
-                    == oxideterm_settings_model::SETTINGS_SECTION_HEADER_ITEM_COUNT
-                        + app_lock_section_index
-                {
+                if section == Some(SettingsSectionId::GeneralAppLock) {
                     // Only the application-lock card changes height when its
                     // configured action set switches between one and two buttons.
                     self.app_lock.configured.hash(&mut hasher);
@@ -474,7 +488,7 @@ impl WorkspaceApp {
             }
             SettingsTab::Terminal => {
                 format!("{:?}", route.terminal_page).hash(&mut hasher);
-                if settings_terminal_focus_handoff_list_item(route.terminal_page, index) {
+                if section == Some(SettingsSectionId::TerminalCommandBarFocusHandoff) {
                     // Selected chips can change width and wrap this card, but
                     // they must not invalidate measurements for every terminal row.
                     settings
@@ -493,8 +507,13 @@ impl WorkspaceApp {
                 settings.sftp.speed_limit_enabled.hash(&mut hasher);
             }
             SettingsTab::Appearance => {
-                let section = index.saturating_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT);
-                if matches!(section, 0 | 3) {
+                if matches!(
+                    section,
+                    Some(
+                        SettingsSectionId::AppearanceTheme
+                            | SettingsSectionId::AppearanceBackground
+                    )
+                ) {
                     settings
                         .appearance
                         .follow_system_appearance
@@ -512,12 +531,12 @@ impl WorkspaceApp {
                         (style.scope == BackgroundScope::Window).hash(&mut hasher);
                     }
                 }
-                if section == 0 {
+                if section == Some(SettingsSectionId::AppearanceTheme) {
                     let dark = self.appearance_edit_scheme().unwrap_or(self.system_dark);
                     for target in [ThemeTarget::Application, ThemeTarget::Terminal] {
                         is_custom_theme_id(target.scheme_id(settings, dark)).hash(&mut hasher);
                     }
-                } else if section == 3 {
+                } else if section == Some(SettingsSectionId::AppearanceBackground) {
                     // Source and effect capabilities add rows; paint-only adjustments keep scroll anchoring stable.
                     let style = settings
                         .terminal
@@ -583,7 +602,7 @@ impl WorkspaceApp {
                 settings.general.update_channel.hash(&mut hasher);
             }
             SettingsTab::Connections => {
-                if index == SETTINGS_SECTION_HEADER_ITEM_COUNT + 6 {
+                if section == Some(SettingsSectionId::ConnectionsKnownHosts) {
                     let state = &self.settings_workspace.read(cx).known_hosts;
                     state.query.hash(&mut hasher);
                     state.task.is_some().hash(&mut hasher);
@@ -609,8 +628,8 @@ impl WorkspaceApp {
                     .managed_key_status()
                     .is_some()
                     .hash(&mut hasher);
-                if settings_connection_importers_list_item(index) {
-                    // Importer state only changes the final importer card. Invalidating
+                if section == Some(SettingsSectionId::ConnectionsImporters) {
+                    // Importer state only changes the importer card. Invalidating
                     // earlier measured rows makes GPUI move the current scroll anchor.
                     self.settings_workspace
                         .read(cx)
@@ -671,8 +690,8 @@ impl WorkspaceApp {
                 format!("{:?}", route.ai_page).hash(&mut hasher);
                 // Hash expansion state only into the virtual row whose height
                 // can change. The compact prompt and memory cards stay stable.
-                match (route.ai_page, index) {
-                    (AiSettingsPage::Providers, 2) => {
+                match section {
+                    Some(SettingsSectionId::AiProvidersSettings) => {
                         settings.ai.providers.len().hash(&mut hasher);
                         settings.ai.web_search.enabled.hash(&mut hasher);
                         settings.ai.web_search.provider_id.hash(&mut hasher);
@@ -680,25 +699,25 @@ impl WorkspaceApp {
                             .read(cx)
                             .hash_settings_provider_layout(&mut hasher);
                     }
-                    (AiSettingsPage::Context, 5) => {
+                    Some(SettingsSectionId::AiContextModelWindows) => {
                         settings.ai.providers.len().hash(&mut hasher);
                         self.ai_entity
                             .read(cx)
                             .hash_settings_context_layout(&mut hasher);
                     }
-                    (AiSettingsPage::Tools, 2) => {
+                    Some(SettingsSectionId::AiToolsToolUse) => {
                         settings.ai.tool_use.disabled_tools.hash(&mut hasher);
                         self.ai_entity
                             .read(cx)
                             .settings_section_expanded(AiSettingsViewSection::ToolUse)
                             .hash(&mut hasher);
                     }
-                    (AiSettingsPage::Tools, 3) => {
+                    Some(SettingsSectionId::AiToolsWebSearch) => {
                         settings.ai.web_search.enabled.hash(&mut hasher);
                         settings.ai.web_search.provider_id.hash(&mut hasher);
                         settings.ai.providers.len().hash(&mut hasher);
                     }
-                    (AiSettingsPage::Tools, 4) => {
+                    Some(SettingsSectionId::AiToolsAgents) => {
                         settings.ai.tool_use.enabled.hash(&mut hasher);
                         let ai = self.ai_entity.read(cx);
                         ai.agents.settings_model_picker_open.hash(&mut hasher);
@@ -715,7 +734,7 @@ impl WorkspaceApp {
                             provider.models.hash(&mut hasher);
                         }
                     }
-                    (AiSettingsPage::Tools, 5) => {
+                    Some(SettingsSectionId::AiToolsSkills) => {
                         let state = self.settings_workspace.read(cx);
                         state.skill_search_query.hash(&mut hasher);
                         format!("{:?}", state.skill_scope_filter).hash(&mut hasher);
@@ -857,28 +876,26 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_settings_tab_section(
         &mut self,
         tab: SettingsTab,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         // Section virtualization only pays off if item rendering is lazy.
-        // Dispatch by section index instead of constructing the old full
-        // settings Vec and discarding every non-visible card.
+        // Dispatch by semantic section ID instead of constructing a full Vec
+        // or coupling renderers to hardcoded display indices.
         match tab {
-            SettingsTab::General => self.settings_general_section(section_index, cx),
-            SettingsTab::Portable => self.settings_portable_section(section_index, cx),
-            SettingsTab::Terminal => self.settings_terminal_section(section_index, cx),
-            SettingsTab::Appearance => self.settings_appearance_section(section_index, cx),
-            SettingsTab::Connections => self.settings_connections_section(section_index, cx),
-            SettingsTab::Privilege => {
-                self.settings_privilege_credentials_section(section_index, cx)
-            }
-            SettingsTab::Network => self.settings_network_section(section_index, cx),
-            SettingsTab::Sftp => self.settings_sftp_section(section_index, cx),
-            SettingsTab::Ide => self.settings_ide_section(section_index, cx),
+            SettingsTab::General => self.settings_general_section(section, cx),
+            SettingsTab::Portable => self.settings_portable_section(section, cx),
+            SettingsTab::Terminal => self.settings_terminal_section(section, cx),
+            SettingsTab::Appearance => self.settings_appearance_section(section, cx),
+            SettingsTab::Connections => self.settings_connections_section(section, cx),
+            SettingsTab::Privilege => self.settings_privilege_credentials_section(section, cx),
+            SettingsTab::Network => self.settings_network_section(section, cx),
+            SettingsTab::Sftp => self.settings_sftp_section(section, cx),
+            SettingsTab::Ide => self.settings_ide_section(section, cx),
             SettingsTab::Ai => div().into_any_element(),
-            SettingsTab::Knowledge => self.settings_knowledge_section(section_index, cx),
-            SettingsTab::Keybindings => self.settings_keybindings_section(section_index, cx),
-            SettingsTab::Help => self.settings_help_section(section_index, cx),
+            SettingsTab::Knowledge => self.settings_knowledge_section(section, cx),
+            SettingsTab::Keybindings => self.settings_keybindings_section(section, cx),
+            SettingsTab::Help => self.settings_help_section(section, cx),
         }
     }
 
@@ -1599,24 +1616,4 @@ impl WorkspaceApp {
             );
         }
     }
-}
-
-fn settings_connection_importers_list_item(list_index: usize) -> bool {
-    list_index
-        .checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
-        .is_some_and(|section_index| section_index == SETTINGS_CONNECTION_IMPORTERS_SECTION_INDEX)
-}
-
-const SETTINGS_TERMINAL_FOCUS_HANDOFF_SECTION_INDEX: usize = 1;
-
-fn settings_terminal_focus_handoff_list_item(
-    terminal_page: TerminalSettingsPage,
-    list_index: usize,
-) -> bool {
-    terminal_page == TerminalSettingsPage::CommandBar
-        && list_index
-            .checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
-            .is_some_and(|section_index| {
-                section_index == SETTINGS_TERMINAL_FOCUS_HANDOFF_SECTION_INDEX
-            })
 }

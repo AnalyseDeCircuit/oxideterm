@@ -12,6 +12,94 @@ use crate::{AiSettingsPage, SettingsTab, TerminalSettingsPage};
 
 pub const SETTINGS_SECTION_HEADER_ITEM_COUNT: usize = 1;
 
+/// Stable semantic identifier for every virtualized settings card/section.
+///
+/// Rendering order is defined in one place (`settings_tab_sections`) so card
+/// reordering, search navigation, scroll targeting, and list counts stay
+/// decoupled from hardcoded indices.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub enum SettingsSectionId {
+    GeneralStartup,
+    GeneralWindowBehavior,
+    GeneralAppLock,
+    GeneralLanguage,
+    GeneralExternalConnectionUris,
+    GeneralDataDirectory,
+    GeneralCliCompanion,
+    PortableRuntime,
+    AppearanceTheme,
+    AppearanceBackground,
+    AppearanceLayout,
+    AppearanceEffects,
+    AppearanceAppIcon,
+    TerminalPageSwitcher,
+    TerminalDisplayFont,
+    TerminalDisplayBehavior,
+    TerminalDisplayCursor,
+    TerminalDisplayCommandMarks,
+    TerminalDisplayBuffer,
+    TerminalInputClipboard,
+    TerminalInputMouseLinks,
+    TerminalInputKeyboard,
+    TerminalLocalShell,
+    TerminalLocalShellProfile,
+    TerminalLocalPrivilegeCredentials,
+    TerminalTransferInBand,
+    TerminalTransferXmodem,
+    TerminalCommandBarControls,
+    TerminalCommandBarFocusHandoff,
+    TerminalCommandBarQuickCommands,
+    TerminalAwarenessControls,
+    TerminalAwarenessShellIntegration,
+    TerminalAwarenessTriggers,
+    TerminalLoggingSession,
+    TerminalHighlightRules,
+    ConnectionsDefaults,
+    ConnectionsIdleTimeout,
+    ConnectionsReconnect,
+    ConnectionsSshKeys,
+    ConnectionsKnownHosts,
+    ConnectionsSshConfigImport,
+    ConnectionsImporters,
+    PrivilegeCredentials,
+    PrivilegeTotp,
+    NetworkSharedProxy,
+    NetworkRouting,
+    NetworkPublicMcp,
+    SftpOpening,
+    SftpPerformance,
+    SftpConflict,
+    IdeEditing,
+    IdeTypography,
+    IdeAgent,
+    IdeAgentPrivacy,
+    AiPageSwitcher,
+    AiGeneralSettings,
+    AiGeneralPrivacy,
+    AiProvidersSettings,
+    AiContextControls,
+    AiContextSystemPrompt,
+    AiContextMemory,
+    AiContextModelWindows,
+    AiToolsToolUse,
+    AiToolsWebSearch,
+    AiToolsAgents,
+    AiToolsSkills,
+    AiToolsMcpServers,
+    KnowledgeError,
+    KnowledgeCollections,
+    KnowledgeEmbeddingConfig,
+    KnowledgeDocuments,
+    KeybindingsToolbar,
+    KeybindingsScope(usize),
+    HelpVersion,
+    HelpDiagnostics,
+    HelpTechStack,
+    HelpResources,
+    HelpSafety,
+    HelpLegal,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SettingsNavigationLayout {
     groups: Vec<Vec<SettingsTab>>,
@@ -183,6 +271,208 @@ impl SettingsNavigationLayout {
     }
 }
 
+pub fn terminal_settings_sections(page: TerminalSettingsPage) -> &'static [SettingsSectionId] {
+    match page {
+        TerminalSettingsPage::Display => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalDisplayFont,
+            SettingsSectionId::TerminalDisplayBehavior,
+            SettingsSectionId::TerminalDisplayCursor,
+            SettingsSectionId::TerminalDisplayCommandMarks,
+            SettingsSectionId::TerminalDisplayBuffer,
+        ],
+        TerminalSettingsPage::Input => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalInputClipboard,
+            SettingsSectionId::TerminalInputMouseLinks,
+            SettingsSectionId::TerminalInputKeyboard,
+        ],
+        // The dedicated keybindings page owns shortcut discovery and editing.
+        TerminalSettingsPage::Local => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalLocalShell,
+            SettingsSectionId::TerminalLocalShellProfile,
+            SettingsSectionId::TerminalLocalPrivilegeCredentials,
+        ],
+        TerminalSettingsPage::Transfer => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalTransferInBand,
+            SettingsSectionId::TerminalTransferXmodem,
+        ],
+        TerminalSettingsPage::CommandBar => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalCommandBarControls,
+            SettingsSectionId::TerminalCommandBarFocusHandoff,
+            SettingsSectionId::TerminalCommandBarQuickCommands,
+        ],
+        TerminalSettingsPage::Awareness => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalAwarenessControls,
+            SettingsSectionId::TerminalAwarenessShellIntegration,
+            SettingsSectionId::TerminalAwarenessTriggers,
+        ],
+        TerminalSettingsPage::Logging => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalLoggingSession,
+        ],
+        TerminalSettingsPage::Highlight => &[
+            SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalHighlightRules,
+        ],
+    }
+}
+
+pub fn ai_settings_sections(page: AiSettingsPage) -> &'static [SettingsSectionId] {
+    match page {
+        // Feature activation and privacy guidance are independent cards.
+        AiSettingsPage::General => &[
+            SettingsSectionId::AiPageSwitcher,
+            SettingsSectionId::AiGeneralSettings,
+            SettingsSectionId::AiGeneralPrivacy,
+        ],
+        AiSettingsPage::Providers => &[
+            SettingsSectionId::AiPageSwitcher,
+            SettingsSectionId::AiProvidersSettings,
+        ],
+        // Context controls, prompt, memory, and model windows are
+        // separate cards so each virtual row owns one stable responsibility.
+        AiSettingsPage::Context => &[
+            SettingsSectionId::AiPageSwitcher,
+            SettingsSectionId::AiContextControls,
+            SettingsSectionId::AiContextSystemPrompt,
+            SettingsSectionId::AiContextMemory,
+            SettingsSectionId::AiContextModelWindows,
+        ],
+        // Global tool policy, web access, subagents, skills, and MCP have separate cards.
+        AiSettingsPage::Tools => &[
+            SettingsSectionId::AiPageSwitcher,
+            SettingsSectionId::AiToolsToolUse,
+            SettingsSectionId::AiToolsWebSearch,
+            SettingsSectionId::AiToolsAgents,
+            SettingsSectionId::AiToolsSkills,
+            SettingsSectionId::AiToolsMcpServers,
+        ],
+    }
+}
+
+pub fn settings_tab_sections(
+    tab: SettingsTab,
+    dynamic: SettingsDynamicSectionCounts,
+) -> Vec<SettingsSectionId> {
+    match tab {
+        SettingsTab::General => {
+            let mut sections = vec![SettingsSectionId::GeneralStartup];
+            if cfg!(any(target_os = "windows", target_os = "macos")) {
+                sections.push(SettingsSectionId::GeneralWindowBehavior);
+            }
+            sections.extend([
+                SettingsSectionId::GeneralAppLock,
+                SettingsSectionId::GeneralLanguage,
+                SettingsSectionId::GeneralExternalConnectionUris,
+                SettingsSectionId::GeneralDataDirectory,
+                SettingsSectionId::GeneralCliCompanion,
+            ]);
+            sections
+        }
+        SettingsTab::Portable => vec![SettingsSectionId::PortableRuntime],
+        SettingsTab::Terminal => terminal_settings_sections(dynamic.terminal_page).to_vec(),
+        SettingsTab::Appearance => vec![
+            SettingsSectionId::AppearanceTheme,
+            SettingsSectionId::AppearanceBackground,
+            SettingsSectionId::AppearanceLayout,
+            SettingsSectionId::AppearanceEffects,
+            SettingsSectionId::AppearanceAppIcon,
+        ],
+        // Reconnect controls share one card and therefore one virtual section.
+        SettingsTab::Connections => vec![
+            SettingsSectionId::ConnectionsDefaults,
+            SettingsSectionId::ConnectionsIdleTimeout,
+            SettingsSectionId::ConnectionsReconnect,
+            SettingsSectionId::ConnectionsSshKeys,
+            SettingsSectionId::ConnectionsKnownHosts,
+            SettingsSectionId::ConnectionsSshConfigImport,
+            SettingsSectionId::ConnectionsImporters,
+        ],
+        SettingsTab::Privilege => vec![
+            SettingsSectionId::PrivilegeCredentials,
+            SettingsSectionId::PrivilegeTotp,
+        ],
+        SettingsTab::Network => vec![
+            SettingsSectionId::NetworkSharedProxy,
+            SettingsSectionId::NetworkRouting,
+            SettingsSectionId::NetworkPublicMcp,
+        ],
+        SettingsTab::Sftp => vec![
+            SettingsSectionId::SftpOpening,
+            SettingsSectionId::SftpPerformance,
+            SettingsSectionId::SftpConflict,
+        ],
+        SettingsTab::Ide => vec![
+            SettingsSectionId::IdeEditing,
+            SettingsSectionId::IdeTypography,
+            SettingsSectionId::IdeAgent,
+            SettingsSectionId::IdeAgentPrivacy,
+        ],
+        SettingsTab::Ai => ai_settings_sections(dynamic.ai_page).to_vec(),
+        SettingsTab::Knowledge => {
+            let mut sections = Vec::with_capacity(4);
+            if dynamic.knowledge_has_error {
+                sections.push(SettingsSectionId::KnowledgeError);
+            }
+            sections.push(SettingsSectionId::KnowledgeCollections);
+            sections.push(SettingsSectionId::KnowledgeEmbeddingConfig);
+            if dynamic.knowledge_has_selected_collection {
+                sections.push(SettingsSectionId::KnowledgeDocuments);
+            }
+            sections
+        }
+        SettingsTab::Keybindings => {
+            let scope_count = dynamic.visible_keybinding_scope_count.max(1);
+            let mut sections = Vec::with_capacity(1 + scope_count);
+            sections.push(SettingsSectionId::KeybindingsToolbar);
+            for scope_index in 0..scope_count {
+                sections.push(SettingsSectionId::KeybindingsScope(scope_index));
+            }
+            sections
+        }
+        SettingsTab::Help => vec![
+            SettingsSectionId::HelpVersion,
+            SettingsSectionId::HelpDiagnostics,
+            SettingsSectionId::HelpTechStack,
+            SettingsSectionId::HelpResources,
+            SettingsSectionId::HelpSafety,
+            SettingsSectionId::HelpLegal,
+        ],
+    }
+}
+
+pub fn settings_tab_section_at(
+    tab: SettingsTab,
+    section_index: usize,
+    dynamic: SettingsDynamicSectionCounts,
+) -> Option<SettingsSectionId> {
+    settings_tab_sections(tab, dynamic).get(section_index).copied()
+}
+
+pub fn settings_section_index(
+    tab: SettingsTab,
+    target: SettingsSectionId,
+    dynamic: SettingsDynamicSectionCounts,
+) -> Option<usize> {
+    settings_tab_sections(tab, dynamic)
+        .into_iter()
+        .position(|section| section == target)
+}
+
+pub fn settings_section_list_item_index(
+    tab: SettingsTab,
+    target: SettingsSectionId,
+    dynamic: SettingsDynamicSectionCounts,
+) -> Option<usize> {
+    settings_section_index(tab, target, dynamic)
+        .map(|section_index| SETTINGS_SECTION_HEADER_ITEM_COUNT + section_index)
+}
+
 pub fn settings_section_list_item_count(
     tab: SettingsTab,
     dynamic: SettingsDynamicSectionCounts,
@@ -195,62 +485,25 @@ pub fn settings_tab_section_count(
     dynamic: SettingsDynamicSectionCounts,
 ) -> usize {
     match tab {
-        SettingsTab::General => {
-            if cfg!(any(target_os = "windows", target_os = "macos")) {
-                6
-            } else {
-                5
-            }
-        }
-        SettingsTab::Portable => 1,
         SettingsTab::Terminal => terminal_settings_section_count(dynamic.terminal_page),
-        SettingsTab::Appearance => 5,
-        // Reconnect controls share one card and therefore one virtual section.
-        SettingsTab::Connections => 7,
-        SettingsTab::Privilege => 2,
-        SettingsTab::Network => 4,
-        SettingsTab::Sftp => 3,
-        SettingsTab::Ide => 4,
         SettingsTab::Ai => ai_settings_section_count(dynamic.ai_page),
+        SettingsTab::Keybindings => {
+            keybinding_settings_section_count(dynamic.visible_keybinding_scope_count)
+        }
         SettingsTab::Knowledge => knowledge_settings_section_count(
             dynamic.knowledge_has_error,
             dynamic.knowledge_has_selected_collection,
         ),
-        SettingsTab::Keybindings => {
-            keybinding_settings_section_count(dynamic.visible_keybinding_scope_count)
-        }
-        SettingsTab::Help => 6,
+        _ => settings_tab_sections(tab, dynamic).len(),
     }
 }
 
 pub fn terminal_settings_section_count(page: TerminalSettingsPage) -> usize {
-    let page_cards = match page {
-        TerminalSettingsPage::Display => 5,
-        TerminalSettingsPage::Input => 3,
-        // The dedicated keybindings page owns shortcut discovery and editing.
-        TerminalSettingsPage::Local => 3,
-        TerminalSettingsPage::CommandBar => 3,
-        TerminalSettingsPage::Awareness => 3,
-        TerminalSettingsPage::Transfer => 2,
-        TerminalSettingsPage::Logging => 1,
-        TerminalSettingsPage::Highlight => 1,
-    };
-    1 + page_cards
+    terminal_settings_sections(page).len()
 }
 
 pub fn ai_settings_section_count(page: AiSettingsPage) -> usize {
-    let page_cards = match page {
-        // Feature activation and privacy guidance are independent cards.
-        AiSettingsPage::General => 2,
-        AiSettingsPage::Providers => 1,
-        // Context controls, prompt, memory, and model windows are
-        // separate cards so each virtual row owns one stable responsibility.
-        AiSettingsPage::Context => 4,
-        // Global tool policy, web access, subagents, skills, and MCP have separate cards.
-        AiSettingsPage::Tools => 5,
-    };
-    // The first section is the subpage picker, matching terminal settings.
-    1 + page_cards
+    ai_settings_sections(page).len()
 }
 
 pub fn keybinding_settings_section_count(visible_scope_count: usize) -> usize {
@@ -330,5 +583,107 @@ mod tests {
         assert_eq!(layout.groups().last(), Some(&original_first_group));
         assert!(layout.remove_empty_group(4));
         assert_eq!(layout.group_count(), 5);
+    }
+
+    #[test]
+    fn default_groups_cover_every_tab_once_in_expected_domain_order() {
+        let layout = SettingsNavigationLayout::default();
+        assert_eq!(
+            layout.groups(),
+            &[
+                vec![
+                    SettingsTab::General,
+                    SettingsTab::Appearance,
+                    SettingsTab::Portable,
+                ],
+                vec![
+                    SettingsTab::Terminal,
+                    SettingsTab::Ide,
+                    SettingsTab::Keybindings,
+                ],
+                vec![
+                    SettingsTab::Connections,
+                    SettingsTab::Sftp,
+                    SettingsTab::Privilege,
+                    SettingsTab::Network,
+                ],
+                vec![SettingsTab::Ai, SettingsTab::Knowledge],
+                vec![SettingsTab::Help],
+            ]
+        );
+        let flattened = layout
+            .groups()
+            .iter()
+            .flat_map(|group| group.iter().copied())
+            .collect::<Vec<_>>();
+        assert_eq!(flattened, SettingsTab::all());
+    }
+
+    #[test]
+    fn settings_sections_have_unique_ids_and_consistent_counts() {
+        for terminal_page in TerminalSettingsPage::all() {
+            for ai_page in AiSettingsPage::all() {
+                for knowledge_has_error in [false, true] {
+                    for knowledge_has_selected_collection in [false, true] {
+                        let dynamic = SettingsDynamicSectionCounts {
+                            terminal_page: *terminal_page,
+                            ai_page: *ai_page,
+                            visible_keybinding_scope_count: 3,
+                            knowledge_has_error,
+                            knowledge_has_selected_collection,
+                        };
+                        for tab in SettingsTab::all() {
+                            let sections = settings_tab_sections(*tab, dynamic);
+                            let unique = sections.iter().copied().collect::<HashSet<_>>();
+                            assert_eq!(unique.len(), sections.len(), "duplicate section in {tab:?}");
+                            assert_eq!(
+                                settings_tab_section_count(*tab, dynamic),
+                                sections.len(),
+                                "count mismatch in {tab:?}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn section_item_indices_track_dynamic_error_and_platform_offsets() {
+        let without_error = SettingsDynamicSectionCounts {
+            terminal_page: TerminalSettingsPage::Awareness,
+            ai_page: AiSettingsPage::Tools,
+            visible_keybinding_scope_count: 1,
+            knowledge_has_error: false,
+            knowledge_has_selected_collection: true,
+        };
+        let with_error = SettingsDynamicSectionCounts {
+            knowledge_has_error: true,
+            ..without_error
+        };
+        assert_eq!(
+            settings_section_list_item_index(
+                SettingsTab::Knowledge,
+                SettingsSectionId::KnowledgeDocuments,
+                without_error,
+            ),
+            Some(SETTINGS_SECTION_HEADER_ITEM_COUNT + 2)
+        );
+        assert_eq!(
+            settings_section_list_item_index(
+                SettingsTab::Knowledge,
+                SettingsSectionId::KnowledgeDocuments,
+                with_error,
+            ),
+            Some(SETTINGS_SECTION_HEADER_ITEM_COUNT + 3)
+        );
+        assert_eq!(
+            settings_section_list_item_index(
+                SettingsTab::Terminal,
+                SettingsSectionId::TerminalAwarenessTriggers,
+                without_error,
+            ),
+            Some(SETTINGS_SECTION_HEADER_ITEM_COUNT + 3)
+        );
     }
 }

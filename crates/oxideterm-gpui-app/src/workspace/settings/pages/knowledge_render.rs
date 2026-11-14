@@ -3,7 +3,7 @@ use super::*;
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_knowledge_section(
         &mut self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.ensure_ai_provider_key_statuses(cx);
@@ -20,58 +20,47 @@ impl WorkspaceApp {
             .as_deref()
             .and_then(|id| collections.iter().find(|collection| collection.id == id));
 
-        let mut index = section_index;
-        let knowledge_error = self
-            .ai_entity
-            .read(cx)
-            .knowledge_error()
-            .map(str::to_string);
-        if let Some(error) = knowledge_error.as_deref() {
-            if index == 0 {
-                return self.knowledge_error_row(error);
+        match section {
+            SettingsSectionId::KnowledgeError => {
+                if let Some(error) = self.ai_entity.read(cx).knowledge_error() {
+                    return self.knowledge_error_row(error);
+                }
             }
-            index -= 1;
-        }
-
-        if index == 0 {
-            return self.knowledge_collections_card(&collections, selected_id.as_deref(), cx);
-        }
-
-        if index == 1 {
-            return self.knowledge_embedding_config_section(cx);
-        }
-        if index == 2 {
-            if let Some(collection) = selected_collection {
-                let stats = self.ai_entity.update(cx, |ai, cx| {
-                    ai.request_knowledge_collection_stats(&collection.id, cx)
-                });
-                let page = self
-                    .ai_entity
-                    .read(cx)
-                    .knowledge_document_page(&collection.id);
-                return match page {
-                    Ok((page_index, documents)) => self.knowledge_documents_card(
-                        collection, documents, page_index, stats, true, cx,
-                    ),
-                    Err(error) => self.knowledge_error_row(&error),
-                };
+            SettingsSectionId::KnowledgeCollections => {
+                return self.knowledge_collections_card(&collections, selected_id.as_deref(), cx);
             }
+            SettingsSectionId::KnowledgeEmbeddingConfig => {
+                return self.knowledge_embedding_config_section(cx);
+            }
+            SettingsSectionId::KnowledgeDocuments => {
+                if let Some(collection) = selected_collection {
+                    let stats = self.ai_entity.update(cx, |ai, cx| {
+                        ai.request_knowledge_collection_stats(&collection.id, cx)
+                    });
+                    let page = self
+                        .ai_entity
+                        .read(cx)
+                        .knowledge_document_page(&collection.id);
+                    return match page {
+                        Ok((page_index, documents)) => self.knowledge_documents_card(
+                            collection, documents, page_index, stats, true, cx,
+                        ),
+                        Err(error) => self.knowledge_error_row(&error),
+                    };
+                }
+            }
+            _ => {}
         }
 
         div().into_any_element()
     }
 
     pub(in crate::workspace) fn knowledge_error_row(&self, error: &str) -> AnyElement {
-        div()
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
-            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-            .p(px(12.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .text_color(rgb(self.tokens.ui.error))
-            .child(error.to_string())
-            .into_any_element()
+        self.settings_callout(
+            SettingsCalloutTone::Error,
+            Some(LucideIcon::AlertCircle),
+            div().child(error.to_string()).into_any_element(),
+        )
     }
 
     pub(in crate::workspace) fn knowledge_collections_card(
@@ -766,20 +755,21 @@ impl WorkspaceApp {
             .read(cx)
             .knowledge_embedding_config_expanded();
 
-        div()
+        let card = div()
+            .w_full()
+            .min_w(px(0.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.border << 8) | KNOWLEDGE_SECTION_BORDER_ALPHA,
-            ))
-            .bg(rgba((self.tokens.ui.bg << 8) | KNOWLEDGE_SECTION_BG_ALPHA))
+            .border_color(rgb(self.tokens.ui.border))
+            .flex()
+            .flex_col()
             .child(
                 div()
                     .flex()
                     .items_center()
                     .justify_between()
                     .gap(px(12.0))
-                    .p(px(12.0))
+                    .p(px(self.tokens.metrics.settings_card_padding))
                     .child(
                         div()
                             .min_w(px(0.0))
@@ -890,52 +880,55 @@ impl WorkspaceApp {
                     ),
             )
             .when(embeddings_expanded, |section| {
-                section.child(
-                    div()
-                        .border_t_1()
-                        .border_color(rgba(
-                            (self.tokens.ui.border << 8) | KNOWLEDGE_SECTION_DIVIDER_ALPHA,
-                        ))
-                        .p(px(12.0))
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.0))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(self.i18n.t("settings_view.knowledge.semantic_search_description")),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .gap(px(self.tokens.metrics.settings_card_gap))
-                                .child(self.select_setting_row(
-                                    "settings_view.ai.embedding_provider",
-                                    "",
-                                    SettingsSelect::AiEmbeddingProvider,
-                                    provider_label,
-                                    self.tokens.metrics.settings_select_width,
-                                    cx,
-                                ))
-                                .child(self.setting_row(
-                                    "settings_view.ai.embedding_model",
-                                    "",
-                                    self.settings_text_input_control(
+                section
+                    .child(self.card_separator())
+                    .child(
+                        div()
+                            .p(px(self.tokens.metrics.settings_card_padding))
+                            .flex()
+                            .flex_col()
+                            .gap(px(self.tokens.metrics.settings_card_gap))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(
+                                        self.i18n
+                                            .t("settings_view.knowledge.semantic_search_description"),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .w_full()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(self.tokens.metrics.settings_row_gap))
+                                    .child(self.select_setting_row(
+                                        "settings_view.ai.embedding_provider",
+                                        "",
+                                        SettingsSelect::AiEmbeddingProvider,
+                                        provider_label,
+                                        self.tokens.metrics.settings_select_width,
+                                        cx,
+                                    ))
+                                    .child(self.card_separator())
+                                    .child(self.setting_row(
+                                        "settings_view.ai.embedding_model",
+                                        "",
+                                        self.settings_text_input_control(
                                             SettingsInput::AiEmbeddingModel,
                                             model_value,
                                             self.i18n.t("settings_view.ai.embedding_model"),
                                             224.0,
                                             cx,
-                                    ),
-                                    cx,
-                                )),
-                        ),
-                )
-            })
+                                        ),
+                                        cx,
+                                    )),
+                            ),
+                    )
+            });
+        self.settings_card_surface(card, self.tokens.ui.bg_card)
             .into_any_element()
     }
 

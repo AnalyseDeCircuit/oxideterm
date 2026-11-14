@@ -726,8 +726,7 @@ impl WorkspaceApp {
             ));
         }
 
-        self.plain_settings_card(vec![
-            self.card_title("settings_view.general.app_lock_title"),
+        let mut rows = vec![
             oxideterm_gpui_settings_view::settings_row(
                 &self.tokens,
                 div()
@@ -755,19 +754,20 @@ impl WorkspaceApp {
                 ),
                 actions.into_any_element(),
             ),
-            self.general_checkbox_row(
+            self.card_separator(),
+            self.bool_row(
                 "settings_view.general.app_lock_show_sidebar_icon",
                 "settings_view.general.app_lock_show_sidebar_icon_hint",
                 self.settings_store.settings().sidebar_ui.show_app_lock_icon,
                 |settings, enabled| settings.sidebar_ui.show_app_lock_icon = enabled,
                 cx,
             ),
-            self.app_lock
-                .error
-                .clone()
-                .map(|error| self.app_lock_error_message(error))
-                .unwrap_or_else(|| div().into_any_element()),
-        ])
+        ];
+        if let Some(error) = self.app_lock.error.clone() {
+            rows.push(self.app_lock_error_message(error));
+        }
+
+        self.settings_card("settings_view.general.app_lock_title", "", rows)
     }
 
     fn app_lock_settings_action_button(

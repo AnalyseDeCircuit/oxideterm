@@ -35,13 +35,15 @@ impl WorkspaceApp {
                     .child(provider_template_select),
             )
             .child(
-                // Tauri uses an outline small Button with literal "+ label"
-                // text here, not a lucide icon. Use the workspace action
-                // wrapper so provider creation follows the same guarded Button
-                // path as refresh/remove/save actions.
+                // Use the workspace action wrapper with LucideIcon::Plus so
+                // provider creation matches the other settings toolbar buttons.
                 self.workspace_toolbar_action_button(
-                    format!("+ {}", self.i18n.t("settings_view.ai.add_provider")),
-                    None,
+                    self.i18n.t("settings_view.ai.add_provider"),
+                    Some(Self::render_lucide_icon(
+                        LucideIcon::Plus,
+                        14.0,
+                        rgb(self.tokens.ui.text),
+                    )),
                     ToolbarButtonOptions {
                         button: ButtonOptions {
                             variant: ButtonVariant::Outline,
@@ -49,6 +51,7 @@ impl WorkspaceApp {
                             radius: ButtonRadius::Md,
                             disabled: false,
                         },
+                        icon_gap: Some(6.0),
                         ..ToolbarButtonOptions::default()
                     },
                     cx.listener(|this, _event, _window, cx| {

@@ -12,8 +12,8 @@ use crate::assets::LucideIcon;
 
 use super::{
     PORTABLE_SETTINGS_BUTTON_GAP, PORTABLE_SETTINGS_PATH_CARD_GAP, SelectableTextRole,
-    WorkspaceApp, portable_activation_label, portable_status_badge_color,
-    settings_mono_font_family,
+    SettingsCalloutTone, SettingsSectionId, WorkspaceApp, portable_activation_label,
+    portable_status_badge_color,
 };
 
 impl WorkspaceApp {
@@ -53,12 +53,12 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn settings_portable_section(
         &mut self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.ensure_portable_settings_snapshot(cx);
-        match section_index {
-            0 => div()
+        match section {
+            SettingsSectionId::PortableRuntime => div()
                 .flex()
                 .flex_col()
                 .gap(px(self.tokens.metrics.settings_page_gap))
@@ -87,11 +87,7 @@ impl WorkspaceApp {
             rows.push(self.portable_security_group(status, cx));
         }
 
-        self.plain_settings_card(
-            std::iter::once(self.card_title("settings_view.general.portable_runtime"))
-                .chain(rows)
-                .collect(),
-        )
+        self.settings_card("settings_view.general.portable_runtime", "", rows)
     }
 
     pub(in crate::workspace) fn portable_runtime_summary_row(
@@ -203,27 +199,31 @@ impl WorkspaceApp {
         mono: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let mut value_row = div()
-            .mt(px(4.0))
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.sm))
-            .bg(rgb(self.tokens.ui.bg))
-            .px(px(10.0))
-            .py(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text))
-            .line_height(px((self.tokens.metrics.ui_text_xs + 4.0).max(16.0)))
-            .child(value);
-        if mono {
-            value_row =
-                value_row.font_family(settings_mono_font_family(self.settings_store.settings()));
-        }
+        let value_el = div().child(value).into_any_element();
+        let value_row = if mono {
+            self.settings_mono_box(value_el)
+        } else {
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .rounded(px(self.tokens.radii.md))
+                .border_1()
+                .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
+                .bg(rgb(self.tokens.ui.bg_sunken))
+                .px(px(10.0))
+                .py(px(8.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text))
+                .line_height(px((self.tokens.metrics.ui_text_xs + 4.0).max(16.0)))
+                .child(value_el)
+                .into_any_element()
+        };
 
         div()
             .w_full()
             .flex()
             .flex_col()
+            .gap(px(4.0))
             .min_w(px(0.0))
             .child(self.portable_settings_text(
                 "portable-value-label",
@@ -330,18 +330,11 @@ impl WorkspaceApp {
                     ),
             )
             .when_some(action_error, |group, error| {
-                group.child(
-                    div()
-                        .rounded(px(self.tokens.radii.md))
-                        .border_1()
-                        .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
-                        .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                        .px(px(10.0))
-                        .py(px(8.0))
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(self.tokens.ui.error))
-                        .child(error),
-                )
+                group.child(self.settings_callout(
+                    SettingsCalloutTone::Error,
+                    Some(LucideIcon::AlertCircle),
+                    div().child(error).into_any_element(),
+                ))
             })
             .into_any_element()
     }
@@ -365,67 +358,51 @@ impl WorkspaceApp {
             .unwrap_or_else(|| current_data_dir.clone());
         let secret_count = portable_snapshot.exportable_secret_count.unwrap_or(0);
 
-        self.plain_settings_card(vec![
-            self.card_title("settings_view.general.portable_migration"),
-            div()
-                .flex()
-                .flex_col()
-                .child(self.portable_settings_text(
-                    "portable-migration-hint",
-                    if is_portable {
-                        "settings_view.general.portable_migration_portable_hint"
-                    } else {
-                        "settings_view.general.portable_migration_installed_hint"
-                    },
-                    if is_portable {
-                        self.i18n
-                            .t("settings_view.general.portable_migration_portable_hint")
-                    } else {
-                        self.i18n
-                            .t("settings_view.general.portable_migration_installed_hint")
-                    },
-                    self.tokens.metrics.ui_text_xs,
-                    self.tokens.ui.text_muted,
-                    None,
-                    cx,
-                ))
-                .into_any_element(),
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(PORTABLE_SETTINGS_PATH_CARD_GAP))
-                .child(self.portable_value_box(
-                    "settings_view.general.portable_migration_current_dir",
-                    current_data_dir,
-                    true,
-                    cx,
-                ))
-                .child(self.portable_value_box(
-                    "settings_view.general.portable_migration_target_dir",
-                    portable_data_dir,
-                    true,
-                    cx,
-                ))
-                .child(self.portable_settings_text(
-                    "portable-migration-secret-summary",
-                    secret_count,
-                    self.i18n_with(
-                        "settings_view.general.portable_migration_secret_summary",
-                        &[("count", secret_count.to_string())],
-                    ),
-                    self.tokens.metrics.ui_text_xs,
-                    self.tokens.ui.text_muted,
-                    None,
-                    cx,
-                ))
-                .into_any_element(),
-            div()
-                .flex()
-                .flex_row()
-                .flex_wrap()
-                .gap(px(PORTABLE_SETTINGS_BUTTON_GAP))
-                .child(
-                    self.portable_action_button(
+        let desc_key = if is_portable {
+            "settings_view.general.portable_migration_portable_hint"
+        } else {
+            "settings_view.general.portable_migration_installed_hint"
+        };
+
+        self.settings_card(
+            "settings_view.general.portable_migration",
+            desc_key,
+            self.separated_settings_rows(vec![
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(PORTABLE_SETTINGS_PATH_CARD_GAP))
+                    .child(self.portable_value_box(
+                        "settings_view.general.portable_migration_current_dir",
+                        current_data_dir,
+                        true,
+                        cx,
+                    ))
+                    .child(self.portable_value_box(
+                        "settings_view.general.portable_migration_target_dir",
+                        portable_data_dir,
+                        true,
+                        cx,
+                    ))
+                    .child(self.portable_settings_text(
+                        "portable-migration-secret-summary",
+                        secret_count,
+                        self.i18n_with(
+                            "settings_view.general.portable_migration_secret_summary",
+                            &[("count", secret_count.to_string())],
+                        ),
+                        self.tokens.metrics.ui_text_xs,
+                        self.tokens.ui.text_muted,
+                        None,
+                        cx,
+                    ))
+                    .into_any_element(),
+                div()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .gap(px(PORTABLE_SETTINGS_BUTTON_GAP))
+                    .child(self.portable_action_button(
                         self.i18n
                             .t("settings_view.general.portable_migration_export"),
                         LucideIcon::Upload,
@@ -435,10 +412,8 @@ impl WorkspaceApp {
                             this.open_oxide_export_portable_migration_dialog(cx);
                         },
                         cx,
-                    ),
-                )
-                .child(
-                    self.portable_action_button(
+                    ))
+                    .child(self.portable_action_button(
                         self.i18n
                             .t("settings_view.general.portable_migration_import"),
                         LucideIcon::Download,
@@ -448,10 +423,10 @@ impl WorkspaceApp {
                             this.open_oxide_import_portable_migration_dialog(cx);
                         },
                         cx,
-                    ),
-                )
-                .into_any_element(),
-        ])
+                    ))
+                    .into_any_element(),
+            ]),
+        )
     }
 
     pub(in crate::workspace) fn portable_action_button(

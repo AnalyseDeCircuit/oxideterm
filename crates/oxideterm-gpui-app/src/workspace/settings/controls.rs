@@ -2515,6 +2515,7 @@ impl WorkspaceApp {
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         this.edit_settings(|settings| setter(settings, !checked), cx);
+                        cx.stop_propagation();
                     }),
                 )
                 .into_any_element(),
@@ -2532,7 +2533,12 @@ impl WorkspaceApp {
     ) -> AnyElement {
         // Numeric rows use the same focus, IME, caret, and draft pipeline as
         // every other settings text field instead of simulating a click stepper.
-        let control = self.number_input(input, value.to_string(), 112.0, cx);
+        let control = self.number_input(
+            input,
+            value.to_string(),
+            self.tokens.metrics.settings_number_input_width,
+            cx,
+        );
         self.setting_row(label_key, hint_key, control, cx)
     }
 

@@ -145,14 +145,16 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn settings_keybindings_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
         let modified = crate::keybindings::modified_count(&settings.keybindings.overrides);
-        if section_index == 0 {
-            return self.keybinding_toolbar(modified, cx);
-        }
+        let section_index = match section {
+            SettingsSectionId::KeybindingsToolbar => return self.keybinding_toolbar(modified, cx),
+            SettingsSectionId::KeybindingsScope(scope_index) => scope_index + 1,
+            _ => return div().into_any_element(),
+        };
 
         let side = crate::keybindings::KeybindingSide::current();
         let query = self

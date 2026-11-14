@@ -68,46 +68,20 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ai_privacy_settings_card(&self) -> AnyElement {
         // Privacy guidance is a peer settings section rather than auxiliary
         // chrome nested inside the feature-toggle card.
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(
-                        self.i18n
-                            .t("settings_view.ai.privacy_notice")
-                            .to_uppercase(),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .line_height(px(18.0))
-                    .child(self.i18n.t("settings_view.ai.privacy_text")),
-            );
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+        self.settings_card(
+            "settings_view.ai.privacy_notice",
+            "",
+            vec![div()
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .text_color(rgb(self.tokens.ui.text_muted))
+                .line_height(px(18.0))
+                .child(self.i18n.t("settings_view.ai.privacy_text"))
+                .into_any_element()],
+        )
     }
 
     pub(in crate::workspace) fn ai_section_title(&self, key: &str) -> AnyElement {
-        div()
-            .mb(px(16.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .child(self.i18n.t(key).to_uppercase())
-            .into_any_element()
+        self.card_title(key)
     }
 
     pub(in crate::workspace) fn i18n_count(&self, key: &str, count: usize) -> String {

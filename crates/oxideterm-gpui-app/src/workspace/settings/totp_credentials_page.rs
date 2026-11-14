@@ -243,7 +243,7 @@ impl WorkspaceApp {
                     .gap_2()
                     .py_2()
                     .border_b_1()
-                    .border_color(rgb(tokens.ui.border))
+                    .border_color(rgba((tokens.ui.border << 8) | 0x66))
                     .child(
                         div()
                             .flex_1()

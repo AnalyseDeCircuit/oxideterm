@@ -150,29 +150,6 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn checkbox_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        checked: bool,
-        setter: fn(&mut PersistedSettings, bool),
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.setting_row(
-            label_key,
-            hint_key,
-            checkbox(&self.tokens, label_key.to_owned(), String::new(), checked)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.edit_settings(|settings| setter(settings, !checked), cx);
-                    }),
-                )
-                .into_any_element(),
-            cx,
-        )
-    }
-
     pub(in crate::workspace) fn settings_text_input_control(
         &self,
         input: SettingsInput,

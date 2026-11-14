@@ -375,9 +375,9 @@ impl TerminalSettingsPage {
             Self::Display,
             Self::Input,
             Self::Local,
+            Self::Transfer,
             Self::CommandBar,
             Self::Awareness,
-            Self::Transfer,
             Self::Logging,
             Self::Highlight,
         ]
@@ -453,14 +453,14 @@ impl SettingsTab {
         &[
             Self::General,
             Self::Appearance,
-            Self::Keybindings,
-            Self::Terminal,
             Self::Portable,
+            Self::Terminal,
+            Self::Ide,
+            Self::Keybindings,
             Self::Connections,
-            Self::Network,
             Self::Sftp,
             Self::Privilege,
-            Self::Ide,
+            Self::Network,
             Self::Ai,
             Self::Knowledge,
             Self::Help,
@@ -490,18 +490,18 @@ impl SettingsTab {
     }
 
     pub fn groups() -> &'static [&'static [Self]] {
-        // Keep navigation groups aligned with user tasks: application preferences,
-        // runtime behavior, remote access, productivity, then support.
+        // Group settings by domain and task frequency: application basics,
+        // workspace & terminal, remote access & network, AI & knowledge, support.
         &[
-            &[Self::General, Self::Appearance, Self::Keybindings],
-            &[Self::Terminal, Self::Portable],
+            &[Self::General, Self::Appearance, Self::Portable],
+            &[Self::Terminal, Self::Ide, Self::Keybindings],
             &[
                 Self::Connections,
-                Self::Network,
                 Self::Sftp,
                 Self::Privilege,
+                Self::Network,
             ],
-            &[Self::Ide, Self::Ai, Self::Knowledge],
+            &[Self::Ai, Self::Knowledge],
             &[Self::Help],
         ]
     }

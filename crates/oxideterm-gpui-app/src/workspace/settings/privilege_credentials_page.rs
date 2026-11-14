@@ -298,12 +298,12 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn settings_privilege_credentials_section(
         &self,
-        section_index: usize,
+        section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        match section_index {
-            0 => self.settings_privilege_credentials_card(cx),
-            1 => self.settings_totp_credentials_card(cx),
+        match section {
+            SettingsSectionId::PrivilegeCredentials => self.settings_privilege_credentials_card(cx),
+            SettingsSectionId::PrivilegeTotp => self.settings_totp_credentials_card(cx),
             _ => div().into_any_element(),
         }
     }
@@ -539,7 +539,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_base))
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text_heading))
                             .child(scope.title.clone()),
