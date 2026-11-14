@@ -510,7 +510,7 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
-                            .text_size(px(11.0))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
                             .text_color(rgb(theme.text_muted))
                             .child(self.i18n.t("tabbar.rename_tab_description")),
                     ),

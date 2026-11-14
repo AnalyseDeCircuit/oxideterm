@@ -569,26 +569,26 @@ pub(crate) fn apply_builtin_ui_overrides(theme_id: &str, mut ui: AppUiColors) ->
             ui.error = 0xdc2626;
         }
         "code-light" => {
-            // Neutral surfaces evoke a code editor while explicit states avoid white-on-white controls.
+            // Neutral surfaces preserve a calm light monochrome canvas with explicit hover, active, and sunken steps.
             ui.bg = 0xffffff;
-            ui.bg_panel = 0xf3f3f3;
-            ui.bg_card = 0xffffff;
-            ui.bg_hover = 0xe8e8e8;
-            ui.bg_active = 0xcce8ff;
-            ui.bg_secondary = 0xf3f3f3;
+            ui.bg_panel = 0xf7f8fa;
+            ui.bg_card = 0xfafbfc;
+            ui.bg_hover = 0xf1f3f5;
+            ui.bg_active = 0xe9ecef;
+            ui.bg_secondary = 0xf4f5f7;
             ui.bg_elevated = 0xffffff;
-            ui.bg_sunken = 0xeeeeee;
-            ui.text = 0x333333;
-            ui.text_muted = 0x616161;
-            ui.text_secondary = 0x555555;
-            ui.text_heading = 0x1f1f1f;
-            ui.border = 0xd4d4d4;
-            ui.border_strong = 0xb7b7b7;
-            ui.divider = 0xe5e5e5;
+            ui.bg_sunken = 0xf3f4f6;
+            ui.text = 0x24292f;
+            ui.text_muted = 0x6b7280;
+            ui.text_secondary = 0x4b5563;
+            ui.text_heading = 0x0f1419;
+            ui.border = 0xe1e4e8;
+            ui.border_strong = 0xc6cbd1;
+            ui.divider = 0xebedf0;
             ui.accent = 0x007acc;
             ui.accent_hover = 0x0062a3;
             ui.accent_text = 0xffffff;
-            ui.accent_secondary = 0x616161;
+            ui.accent_secondary = 0x6b7280;
             ui.success = 0x107c10;
             ui.warning = 0x7a6f00;
             ui.error = 0xcd3131;

@@ -2,7 +2,7 @@ use super::*;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
-use oxideterm_gpui_ui::modal::modal_backdrop;
+use oxideterm_gpui_ui::modal::{dialog_backdrop, rounded_shell_child_radius};
 use oxideterm_gpui_ui::motion::{self, MotionDuration};
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{SegmentedControlOptions, segmented_control, segmented_control_item};
@@ -18,11 +18,11 @@ impl WorkspaceApp {
         let margin = if f32::from(viewport.width) < 700.0 {
             12.0
         } else {
-            32.0
+            28.0
         };
-        let width = (f32::from(viewport.width) - margin * 2.0).max(0.0);
-        let height = (f32::from(viewport.height) - margin * 2.0).max(0.0);
-        let wide = width >= 980.0;
+        let width = (f32::from(viewport.width) - margin * 2.0).clamp(320.0, 1020.0);
+        let height = (f32::from(viewport.height) - margin * 2.0).clamp(380.0, 730.0);
+        let wide = width >= 840.0;
         let step = OnboardingStep::from_index(self.onboarding.step);
         let content = match step {
             OnboardingStep::Welcome => self.onboarding_columns(
@@ -43,8 +43,6 @@ impl WorkspaceApp {
             ),
             OnboardingStep::QuickStart => div()
                 .w_full()
-                .max_w(px(1100.0))
-                .mx_auto()
                 .child(self.render_onboarding_quick_start(wide, window, cx))
                 .into_any_element(),
         };
@@ -73,28 +71,27 @@ impl WorkspaceApp {
             content
         };
 
-        modal_backdrop(rgba((theme.bg << 8) | 0x99))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        dialog_backdrop()
             .child(motion::form_enter(
                 &self.tokens,
                 "onboarding-dialog",
                 oxideterm_gpui_ui::modal_container(&self.tokens)
                     .w(px(width))
                     .h(px(height))
-                    // Onboarding copy must remain readable above the user's workspace.
-                    .bg(rgb(theme.bg_panel))
+                    // Keep an opaque primary surface over the backdrop scrim for crisp copy legibility.
+                    .bg(rgb(theme.bg))
                     .flex()
                     .flex_col()
                     .overflow_hidden()
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(self.onboarding_progress(cx))
+                    .child(self.onboarding_progress(wide, width, cx))
                     .child(
                         div()
                             .id(("onboarding-body", self.onboarding.step))
                             .flex_1()
                             .min_h(px(0.0))
-                            .px(px(if wide { 40.0 } else { 20.0 }))
-                            .py(px(24.0))
+                            .px(px(if wide { 28.0 } else { 16.0 }))
+                            .py(px(22.0))
                             .overflow_y_scroll()
                             .track_scroll(&self.onboarding.scroll_handle)
                             .vertical_scrollbar(&self.onboarding.scroll_handle)
@@ -105,26 +102,12 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }
                             }))
-                            .child(
-                                div()
-                                    .w_full()
-                                    .min_h_full()
-                                    .flex()
-                                    .flex_col()
-                                    .when(
-                                        matches!(
-                                            step,
-                                            OnboardingStep::Welcome | OnboardingStep::QuickStart
-                                        ),
-                                        |body| body.justify_center(),
-                                    )
-                                    .child(content),
-                            ),
+                            .child(div().w_full().flex().flex_col().child(content)),
                     )
                     .when(self.onboarding.save_failed, |panel| {
                         panel.child(
                             div()
-                                .px(px(24.0))
+                                .px(px(if wide { 28.0 } else { 16.0 }))
                                 .py(px(8.0))
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .text_color(rgb(theme.error))
@@ -132,6 +115,7 @@ impl WorkspaceApp {
                         )
                     })
                     .child(self.onboarding_footer(
+                        wide,
                         self.onboarding.step > 0,
                         self.onboarding.step + 1 < ONBOARDING_TOTAL_STEPS,
                         !self.onboarding.disclaimer_accepted,
@@ -149,17 +133,20 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .w_full()
-            .max_w(px(1200.0))
-            .mx_auto()
             .grid()
             .grid_cols(if wide { 2 } else { 1 })
-            .gap(px(if wide { 40.0 } else { 28.0 }))
+            .gap(px(if wide { 28.0 } else { 20.0 }))
             .child(div().min_w(px(0.0)).child(first))
             .child(div().min_w(px(0.0)).child(second))
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn onboarding_progress(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(in crate::workspace) fn onboarding_progress(
+        &self,
+        wide: bool,
+        modal_width: f32,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = self.tokens.ui;
         let mut items = Vec::new();
         for index in 0..ONBOARDING_TOTAL_STEPS {
@@ -194,11 +181,16 @@ impl WorkspaceApp {
         let previous = self
             .segmented_control_user_previous_index(ONBOARDING_STEPS_MOTION_ID, self.onboarding.step)
             .unwrap_or(self.onboarding.step);
+        let steps_width = if wide {
+            680.0
+        } else {
+            (modal_width - 108.0).max(200.0)
+        };
         let steps = segmented_control(
             &self.tokens,
             ONBOARDING_STEPS_MOTION_ID,
             SegmentedControlOptions::new(self.onboarding.step, previous, ONBOARDING_TOTAL_STEPS)
-                .underline(900.0)
+                .underline(steps_width)
                 .user_transition_active(self.segmented_control_user_transition_active(
                     ONBOARDING_STEPS_MOTION_ID,
                     self.onboarding.step,
@@ -207,30 +199,45 @@ impl WorkspaceApp {
         );
         div()
             .flex_none()
-            .px(px(24.0))
-            .py(px(16.0))
+            .px(px(if wide { 28.0 } else { 16.0 }))
+            .pt(px(12.0))
+            .pb(px(8.0))
+            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
+            .bg(rgb(theme.bg_panel))
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
             .flex()
-            .flex_col()
+            .flex_row()
             .items_center()
+            .justify_between()
             .gap(px(12.0))
+            .child(div().flex_1().min_w(px(0.0)).child(steps))
             .child(
-                div().flex().items_center().justify_center().child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(theme.text_muted))
-                        .child(format!(
-                            "{} / {}",
-                            self.onboarding.step + 1,
-                            ONBOARDING_TOTAL_STEPS
-                        )),
-                ),
+                div()
+                    .flex_none()
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .bg(rgb(theme.bg_sunken))
+                    .px(px(8.0))
+                    .py(px(3.0))
+                    .font_family(SharedString::from(
+                        FontFamily::Jetbrains.terminal_family_name(""),
+                    ))
+                    .text_size(px(self.tokens.metrics.ui_text_2xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(format!(
+                        "{} / {}",
+                        self.onboarding.step + 1,
+                        ONBOARDING_TOTAL_STEPS
+                    )),
             )
-            .child(steps)
             .into_any_element()
     }
 
     pub(in crate::workspace) fn onboarding_footer(
         &self,
+        wide: bool,
         can_go_back: bool,
         can_go_next: bool,
         next_disabled: bool,
@@ -243,16 +250,13 @@ impl WorkspaceApp {
             .flex_row()
             .items_center()
             .justify_between()
-            .px(px(32.0))
-            .py(px(16.0))
+            .px(px(if wide { 28.0 } else { 16.0 }))
+            .py(px(12.0))
             .border_t_1()
-            .border_color(rgb(theme.border))
-            .bg(rgba((theme.bg_card << 8) | ONBOARDING_CARD_ALPHA))
-            // The onboarding footer is the rounded shell's bottom painted
-            // child; keep its background clipped to the browser panel curve.
-            .rounded_b(px(oxideterm_gpui_ui::modal::rounded_shell_child_radius(
-                self.tokens.radii.md,
-            )))
+            .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+            .bg(rgb(theme.bg_panel))
+            // Keep bottom footer clipping aligned with modal_container's outer radii.lg shell.
+            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             .child(if can_go_back {
                 self.onboarding_button(
                     self.i18n.t("onboarding.back"),

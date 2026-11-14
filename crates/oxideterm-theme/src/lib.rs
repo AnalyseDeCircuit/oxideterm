@@ -174,6 +174,7 @@ pub struct UiMetrics {
     pub form_caret_width: f32,
     pub form_caret_height: f32,
     pub form_selection_padding_x: f32,
+    pub ui_text_2xs: f32,
     pub ui_text_xs: f32,
     pub ui_text_sm: f32,
     pub ui_text_base: f32,
@@ -285,34 +286,34 @@ impl UiMetrics {
             // Tauri declares the main window minimum size as 800x600.
             window_min_width: 800.0,
             window_min_height: 600.0,
-            tabbar_height: 36.0,
+            tabbar_height: 34.0,
             tabbar_leading_offset: 0.0,
             tab_min_width: 120.0,
             tab_max_width: 240.0,
             tab_padding_x: 12.0,
             tab_gap: 8.0,
             tab_title_width_ratio: 0.62,
-            tab_font_size: 14.0,
+            tab_font_size: 13.0,
             tab_icon_size: 14.0,
             tab_close_button_size: 16.0,
             tab_close_icon_size: 12.0,
             tab_active_accent_height: 2.0,
-            new_tab_button_width: 36.0,
-            new_tab_button_height: 36.0,
-            activity_bar_width: 48.0,
-            activity_icon_size: 34.0,
-            activity_icon_glyph_size: 19.0,
+            new_tab_button_width: 34.0,
+            new_tab_button_height: 34.0,
+            activity_bar_width: 42.0,
+            activity_icon_size: 30.0,
+            activity_icon_glyph_size: 16.0,
             activity_icon_gap: 4.0,
             sidebar_default_width: 300.0,
             sidebar_min_width: 200.0,
             sidebar_max_width: 600.0,
-            sidebar_header_height: 44.0,
+            sidebar_header_height: 34.0,
             sidebar_resize_handle_width: 4.0,
             sidebar_action_size: 24.0,
             sidebar_action_icon_size: 12.0,
             sidebar_collapse_icon_size: 16.0,
             sidebar_title_font_size: 12.0,
-            divider_width: 24.0,
+            divider_width: 16.0,
             divider_height: 1.0,
             split_handle_size: 5.0,
             min_pane_width: 80.0,
@@ -338,18 +339,18 @@ impl UiMetrics {
             modal_body_gap: 24.0,
             modal_section_gap: 16.0,
             modal_field_gap: 8.0,
-            modal_footer_height: 60.0,
+            modal_footer_height: 52.0,
             modal_footer_padding_x: 16.0,
-            form_input_height: 36.0,
+            form_input_height: 32.0,
             form_input_padding_x: 12.0,
-            form_button_height: 36.0,
+            form_button_height: 32.0,
             form_button_padding_x: 16.0,
-            auth_tab_height: 36.0,
+            auth_tab_height: 32.0,
             auth_tab_padding: 4.0,
             form_port_width: 108.0,
             form_host_port_gap: 16.0,
-            form_label_font_size: 14.0,
-            form_text_font_size: 14.0,
+            form_label_font_size: 13.0,
+            form_text_font_size: 13.0,
             modal_title_font_size: 14.0,
             modal_description_font_size: 14.0,
             form_checkbox_size: 16.0,
@@ -357,24 +358,25 @@ impl UiMetrics {
             form_caret_width: 1.0,
             form_caret_height: 20.0,
             form_selection_padding_x: 2.0,
+            ui_text_2xs: 11.0,
             ui_text_xs: 12.0,
             ui_text_sm: 14.0,
             ui_text_base: 16.0,
             ui_text_2xl: 24.0,
-            ui_button_sm_height: 32.0,
-            ui_button_default_height: 36.0,
+            ui_button_sm_height: 28.0,
+            ui_button_default_height: 32.0,
             ui_button_lg_height: 40.0,
-            ui_button_icon_size: 36.0,
+            ui_button_icon_size: 32.0,
             ui_button_sm_padding_x: 12.0,
             ui_button_default_padding_x: 16.0,
             ui_button_lg_padding_x: 32.0,
-            ui_control_height: 36.0,
-            ui_control_padding_x: 12.0,
+            ui_control_height: 32.0,
+            ui_control_padding_x: 10.0,
             ui_checkbox_size: 16.0,
             ui_checkbox_icon_size: 12.0,
             ui_radio_size: 16.0,
             ui_radio_dot_size: 10.0,
-            ui_tabs_list_height: 36.0,
+            ui_tabs_list_height: 32.0,
             ui_tabs_list_padding: 4.0,
             ui_tabs_trigger_padding_x: 12.0,
             ui_tabs_trigger_padding_y: 6.0,
@@ -707,6 +709,7 @@ impl ThemeTokens {
             &mut self.metrics.form_text_font_size,
             &mut self.metrics.modal_title_font_size,
             &mut self.metrics.modal_description_font_size,
+            &mut self.metrics.ui_text_2xs,
             &mut self.metrics.ui_text_xs,
             &mut self.metrics.ui_text_sm,
             &mut self.metrics.ui_text_base,
@@ -799,30 +802,62 @@ pub fn default_tokens() -> ThemeTokens {
 }
 
 pub fn derive_ui_colors_from_terminal(theme: TerminalTheme) -> AppUiColors {
-    AppUiColors {
-        bg: theme.background,
-        bg_panel: shift(theme.background, 15),
-        bg_card: shift(theme.background, 20),
-        bg_hover: shift(theme.background, 30),
-        bg_active: shift(theme.background, 40),
-        bg_secondary: shift(theme.background, 10),
-        bg_elevated: shift(theme.background, 22),
-        bg_sunken: shift(theme.background, -10),
-        text: theme.foreground,
-        text_muted: theme.bright_black,
-        text_secondary: mix(theme.foreground, theme.bright_black, 0.5),
-        text_heading: shift(theme.foreground, 8),
-        border: shift(theme.background, 30),
-        border_strong: mix(theme.cursor, theme.foreground, 0.6),
-        divider: shift(theme.background, 20),
-        accent: theme.cursor,
-        accent_hover: shift(theme.cursor, -20),
-        accent_text: mix(theme.cursor, theme.background, 0.7),
-        accent_secondary: theme.bright_black,
-        success: theme.green,
-        warning: theme.yellow,
-        error: theme.red,
-        info: theme.blue,
+    let is_light = color_relative_luminance(theme.background) >= 0.55;
+    let accent = theme.cursor;
+    if is_light {
+        // Light backgrounds saturate to white when shifted positively, so step
+        // auxiliary surfaces downward along the neutral ramp instead.
+        AppUiColors {
+            bg: theme.background,
+            bg_panel: shift(theme.background, -8),
+            bg_card: shift(theme.background, -3),
+            bg_hover: shift(theme.background, -14),
+            bg_active: shift(theme.background, -22),
+            bg_secondary: shift(theme.background, -6),
+            bg_elevated: shift(theme.background, 6),
+            bg_sunken: shift(theme.background, -12),
+            text: theme.foreground,
+            text_muted: ensure_minimum_contrast(theme.bright_black, theme.background, 4.5),
+            text_secondary: mix(theme.foreground, theme.bright_black, 0.5),
+            text_heading: shift(theme.foreground, -10),
+            border: shift(theme.background, -28),
+            border_strong: mix(accent, theme.foreground, 0.45),
+            divider: shift(theme.background, -18),
+            accent,
+            accent_hover: shift(accent, -18),
+            accent_text: highest_contrast_across([accent], [0x111111, 0xffffff]),
+            accent_secondary: theme.bright_black,
+            success: theme.green,
+            warning: theme.yellow,
+            error: theme.red,
+            info: theme.blue,
+        }
+    } else {
+        AppUiColors {
+            bg: theme.background,
+            bg_panel: shift(theme.background, 8),
+            bg_card: shift(theme.background, 13),
+            bg_hover: shift(theme.background, 20),
+            bg_active: shift(theme.background, 28),
+            bg_secondary: shift(theme.background, 6),
+            bg_elevated: shift(theme.background, 18),
+            bg_sunken: shift(theme.background, -7),
+            text: theme.foreground,
+            text_muted: ensure_minimum_contrast(theme.bright_black, theme.background, 3.2),
+            text_secondary: mix(theme.foreground, theme.bright_black, 0.55),
+            text_heading: shift(theme.foreground, 10),
+            border: mix(theme.background, theme.foreground, 0.14),
+            border_strong: mix(accent, theme.foreground, 0.45),
+            divider: mix(theme.background, theme.foreground, 0.08),
+            accent,
+            accent_hover: shift(accent, -16),
+            accent_text: highest_contrast_across([accent], [0x111111, 0xffffff]),
+            accent_secondary: theme.bright_black,
+            success: theme.green,
+            warning: theme.yellow,
+            error: theme.red,
+            info: theme.blue,
+        }
     }
 }
 
@@ -1056,5 +1091,28 @@ mod tests {
         tokens.apply_motion(UiMotionProfile::Fast);
         assert!(tokens.motion.spatial_enabled);
         assert!(tokens.motion.scaled_duration_ms(840) < 840);
+    }
+
+    #[test]
+    fn light_terminal_derivation_preserves_distinct_surface_and_border_steps() {
+        let mut terminal = DEFAULT_THEME.terminal;
+        terminal.background = 0xffffff;
+        terminal.foreground = 0x1f2328;
+        terminal.cursor = 0x0969da;
+        terminal.bright_black = 0x8c959f;
+
+        let derived = derive_ui_colors_from_terminal(terminal);
+        assert_ne!(derived.bg, derived.bg_sunken);
+        assert_ne!(derived.bg, derived.bg_panel);
+        assert_ne!(derived.bg_panel, derived.bg_hover);
+        assert_ne!(derived.bg_hover, derived.bg_active);
+        assert_ne!(derived.bg, derived.border);
+        assert!(color_contrast_ratio(derived.text_muted, derived.bg) >= 4.5);
+        assert!(color_contrast_ratio(derived.accent_text, derived.accent) >= 4.5);
+
+        let mut tokens = default_tokens();
+        let base_2xs = tokens.metrics.ui_text_2xs;
+        tokens.apply_ui_font_scale(18.0 / 14.0);
+        assert!(tokens.metrics.ui_text_2xs > base_2xs);
     }
 }

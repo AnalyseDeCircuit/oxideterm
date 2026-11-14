@@ -29,11 +29,11 @@ impl TerminalGitPathGroup {
         }
     }
 
-    fn color(self) -> Rgba {
+    fn color(self, ui: oxideterm_theme::AppUiColors) -> Rgba {
         match self {
-            Self::Conflict => rgba(0xf87171ff),
-            Self::Staged => rgba(0x86efacff),
-            Self::Worktree => rgba(0xfbbf24ff),
+            Self::Conflict => rgb(ui.error),
+            Self::Staged => rgb(ui.success),
+            Self::Worktree => rgb(ui.warning),
         }
     }
 
@@ -73,12 +73,12 @@ impl TerminalGitPathState {
         }
     }
 
-    fn color(self) -> Rgba {
+    fn color(self, ui: oxideterm_theme::AppUiColors) -> Rgba {
         match self {
-            Self::Conflict => rgba(0xf87171ff),
-            Self::Staged => rgba(0x86efacff),
-            Self::Modified => rgba(0xfbbf24ff),
-            Self::Untracked => rgba(0x67e8f9ff),
+            Self::Conflict => rgb(ui.error),
+            Self::Staged => rgb(ui.success),
+            Self::Modified => rgb(ui.warning),
+            Self::Untracked => rgb(ui.info),
         }
     }
 
@@ -885,10 +885,14 @@ impl WorkspaceApp {
             .gap(px(6.0))
             .border_b_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x40))
-            .text_size(px(11.0))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(self.tokens.ui.text))
-            .child(Self::render_lucide_icon(group.icon(), 12.0, group.color()))
+            .child(Self::render_lucide_icon(
+                group.icon(),
+                12.0,
+                group.color(self.tokens.ui),
+            ))
             .child(div().flex_1().min_w(px(0.0)).child(group_label.clone()));
         if let Some(action) = group.bulk_action() {
             header = header.child(self.render_terminal_git_repository_icon_action_button(
@@ -897,8 +901,9 @@ impl WorkspaceApp {
                 cx,
             ));
         }
-        header =
-            header.child(self.render_terminal_git_group_count(paths.len() as u32, group.color()));
+        header = header.child(
+            self.render_terminal_git_group_count(paths.len() as u32, group.color(self.tokens.ui)),
+        );
 
         // One containment level is enough: section headers own the grouping,
         // while rows stay flat and dense like a source-control sidebar.
@@ -947,7 +952,7 @@ impl WorkspaceApp {
                 },
                 12.0,
                 if matches!(state, TerminalGitPathState::Conflict) {
-                    state.color()
+                    state.color(theme)
                 } else {
                     rgb(theme.text_muted)
                 },
@@ -1019,8 +1024,8 @@ impl WorkspaceApp {
             .justify_center()
             .font_family(self.terminal_git_mono_font())
             .font_weight(gpui::FontWeight::MEDIUM)
-            .text_size(px(10.0))
-            .text_color(state.color())
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
+            .text_color(state.color(self.tokens.ui))
             .child(self.i18n.t(state.label_key()))
             .into_any_element()
     }
@@ -1590,10 +1595,10 @@ impl WorkspaceApp {
         div()
             .rounded(px(self.tokens.radii.md))
             .border_1()
-            .border_color(rgba(0xef44444d))
-            .bg(rgba(0xef44441a))
+            .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
+            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
             .p(px(8.0))
-            .text_color(rgba(0xfca5a5ff))
+            .text_color(rgb(self.tokens.ui.error))
             .child(message)
             .into_any_element()
     }

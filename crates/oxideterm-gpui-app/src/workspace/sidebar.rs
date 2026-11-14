@@ -33,7 +33,6 @@ const SESSION_FOCUS_EMPTY_ICON_ALPHA: u32 = 0x4d;
 const SESSION_FOCUS_EMPTY_TITLE_TEXT_SIZE: f32 = 14.0;
 const SESSION_FOCUS_EMPTY_SUBTITLE_TEXT_SIZE: f32 = 12.0;
 const SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA: f32 = 0.6;
-const SESSION_FOCUS_EMERALD: u32 = 0x10b981;
 // Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
 // native estimate next to the shared virtual-list call so scroll-to-index and
 // sticky-bottom behavior stay browser-like.

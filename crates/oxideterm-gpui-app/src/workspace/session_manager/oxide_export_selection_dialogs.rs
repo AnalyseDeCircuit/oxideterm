@@ -175,19 +175,19 @@ impl OxideExportConnectionRowRenderer {
                                                 .py(px(2.0))
                                                 .rounded_full()
                                                 .bg(rgba(
-                                                    (OXIDE_GREEN_500 << 8)
+                                                    (theme.success << 8)
                                                         | OXIDE_NEW_BADGE_BG_ALPHA,
                                                 ))
                                                 .flex()
                                                 .items_center()
                                                 .gap(px(2.0))
-                                                .text_size(px(10.0))
+                                                .text_size(px(self.tokens.metrics.ui_text_2xs))
                                                 .font_weight(gpui::FontWeight::SEMIBOLD)
-                                                .text_color(rgb(OXIDE_GREEN_500))
+                                                .text_color(rgb(theme.success))
                                                 .child(WorkspaceApp::render_lucide_icon(
                                                     LucideIcon::Sparkles,
                                                     10.0,
-                                                    rgb(OXIDE_GREEN_500),
+                                                    rgb(theme.success),
                                                 ))
                                                 .child(self.new_label.clone()),
                                         )

@@ -60,7 +60,7 @@ impl WorkspaceApp {
                                 |row| {
                                     row.child(
                                         div()
-                                            .text_size(px(10.0))
+                                            .text_size(px(self.tokens.metrics.ui_text_2xs))
                                             .text_color(rgb(self.tokens.ui.accent))
                                             .cursor_pointer()
                                             .child(if models_expanded {
@@ -343,7 +343,7 @@ impl WorkspaceApp {
                 div()
                     .px(px(6.0))
                     .py(px(2.0))
-                    .text_size(px(10.0))
+                    .text_size(px(self.tokens.metrics.ui_text_2xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(format!("+{hidden_count}")),
             );
@@ -361,7 +361,7 @@ impl WorkspaceApp {
             .bg(rgb(self.tokens.ui.bg))
             .px(px(6.0))
             .py(px(2.0))
-            .text_size(px(10.0))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(model)
             .into_any_element()

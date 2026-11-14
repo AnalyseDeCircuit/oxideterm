@@ -847,7 +847,7 @@ pub fn cloud_sync_check_row(
                 .flex()
                 .items_center()
                 .justify_center()
-                .text_size(px(11.0))
+                .text_size(px(tokens.metrics.ui_text_2xs))
                 .text_color(rgb(theme.bg))
                 .child(if checked { "✓" } else { "" }),
         )
@@ -1131,7 +1131,7 @@ fn cloud_sync_toggle_with_layout(
                 .when(checked, |box_el: Div| {
                     box_el.child(
                         div()
-                            .text_size(px(11.0))
+                            .text_size(px(tokens.metrics.ui_text_2xs))
                             .text_color(rgb(theme.bg))
                             .child("✓"),
                     )

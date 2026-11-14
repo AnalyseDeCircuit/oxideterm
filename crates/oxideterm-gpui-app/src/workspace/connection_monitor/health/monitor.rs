@@ -839,7 +839,7 @@ impl HostToolsEntity {
             .items_center()
             .min_w_0()
             .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-            .text_size(px(11.0))
+            .text_size(px(render.tokens.metrics.ui_text_2xs))
             .font_family(render.mono_font_family.clone())
             .child(
                 div()
@@ -894,7 +894,7 @@ impl HostToolsEntity {
                 .justify_center()
                 .gap_1()
                 .font_family(render.mono_font_family.clone())
-                .text_size(px(11.0))
+                .text_size(px(render.tokens.metrics.ui_text_2xs))
                 .child(
                     div()
                         .min_w_0()

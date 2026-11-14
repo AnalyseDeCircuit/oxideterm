@@ -679,7 +679,7 @@ impl WorkspaceApp {
                             div()
                                 .max_w(px(240.0))
                                 .truncate()
-                                .text_size(px(11.0))
+                                .text_size(px(self.tokens.metrics.ui_text_2xs))
                                 .text_color(rgb(theme.warning))
                                 .child(self.render_display_text_with_role(
                                     SelectableTextRole::PlainDocument,
@@ -722,7 +722,7 @@ impl WorkspaceApp {
             .bg(rgba((self.tokens.ui.accent << 8) | 0x33))
             .px(px(6.0))
             .py(px(1.0))
-            .text_size(px(10.0))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(self.tokens.ui.accent))
             .child(self.render_display_text_with_role(

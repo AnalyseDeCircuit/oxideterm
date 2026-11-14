@@ -365,12 +365,12 @@ fn text_input_with_content_align_and_viewport(
         .flex()
         .items_center()
         .rounded(px(tokens.radii.md))
-        .bg(rgba((theme.bg << 8) | 0x80))
+        .bg(rgba((theme.bg_sunken << 8) | 0xd9))
         .border_1()
         .border_color(if view.focused {
-            rgb(theme.accent)
+            rgba((theme.accent << 8) | 0xff)
         } else {
-            rgb(theme.border)
+            rgba((theme.border << 8) | 0x80)
         })
         .text_size(px(tokens.metrics.ui_text_sm))
         .text_color(if visually_empty {

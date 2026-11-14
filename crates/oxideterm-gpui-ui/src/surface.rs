@@ -231,7 +231,6 @@ pub fn semantic_surface(tokens: &ThemeTokens, options: SurfaceOptions) -> Div {
     // Semantic surfaces keep old Tauri shadows available, but the caller now
     // chooses by native surface kind instead of by migration history.
     match options.kind {
-        SurfaceKind::Inspector => theme_card_surface_shadow(surface, tokens),
         SurfaceKind::ElevatedPopover | SurfaceKind::TerminalOverlay => {
             theme_overlay_surface_shadow(
                 material_surface(tokens, surface, MaterialRole::Popover),
@@ -401,14 +400,13 @@ pub fn theme_card_surface(
     has_background_image: bool,
     background_alpha: u32,
 ) -> Div {
-    // New GPUI surfaces use the active palette for both fill and elevation;
-    // the legacy color-only helper remains available for migration safety.
+    // In-plane cards rely on calibrated surface stepping and subtle top-edge light rather than floating drop shadows.
     let surface = surface.bg(color_for_background(
         tokens.ui.bg_card,
         has_background_image,
         background_alpha,
     ));
-    theme_card_surface_shadow(surface, tokens).child(panel_edge_highlight(
+    surface.child(panel_edge_highlight(
         tokens,
         if has_background_image {
             background_alpha as f32 / 255.0

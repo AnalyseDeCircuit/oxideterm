@@ -119,7 +119,7 @@ impl WorkspaceApp {
             .gap(px(8.0))
             .rounded_lg()
             .border_1()
-            .border_color(rgba(0xef444459))
+            .border_color(rgba((theme.error << 8) | 0x59))
             .bg(rgba((theme.bg_elevated << 8) | 0xe6))
             .px(px(10.0))
             .py(px(6.0))
@@ -129,16 +129,16 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .text_size(px(12.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_color(rgba(0xfca5a5ff))
+                    .text_color(rgb(theme.error))
                     .child(Self::render_lucide_icon(
                         LucideIcon::Circle,
                         9.0,
                         if is_paused {
                             rgb(theme.text_muted)
                         } else {
-                            rgba(0xf87171ff)
+                            rgb(theme.error)
                         },
                     ))
                     .child(if is_paused {

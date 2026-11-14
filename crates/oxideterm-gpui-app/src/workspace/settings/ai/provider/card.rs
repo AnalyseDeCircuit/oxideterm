@@ -159,7 +159,7 @@ impl WorkspaceApp {
                             .flex_wrap()
                             .gap_x(px(16.0))
                             .gap_y(px(4.0))
-                            .text_size(px(11.0))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n_count(
                                 "settings_view.ai.provider_models_summary",

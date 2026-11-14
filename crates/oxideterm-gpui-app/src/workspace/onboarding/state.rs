@@ -3,11 +3,10 @@ use super::*;
 pub(in crate::workspace) const ONBOARDING_TOTAL_STEPS: usize = 5;
 pub(in crate::workspace) const ONBOARDING_STEPS_MOTION_ID: &str = "onboarding-steps";
 pub(in crate::workspace) const ONBOARDING_ANIMATION_MOTION_ID: &str = "onboarding-animation";
-pub(in crate::workspace) const ONBOARDING_ICON_SIZE: f32 = 16.0;
-pub(in crate::workspace) const ONBOARDING_STEP_ICON_SLOT: f32 = 28.0;
-pub(in crate::workspace) const ONBOARDING_ACCENT_SUBTLE_ALPHA: u32 = 0x0d; // Tauri accent/5.
-pub(in crate::workspace) const ONBOARDING_ACCENT_BORDER_ALPHA: u32 = 0x33; // Tauri accent/20.
-pub(in crate::workspace) const ONBOARDING_CARD_ALPHA: u32 = 0xcc; // Browser panels sit over the dialog backdrop but stay readable.
+pub(in crate::workspace) const ONBOARDING_ICON_SIZE: f32 = 15.0;
+pub(in crate::workspace) const ONBOARDING_STEP_ICON_SLOT: f32 = 26.0;
+pub(in crate::workspace) const ONBOARDING_ACCENT_SUBTLE_ALPHA: u32 = 0x0d;
+pub(in crate::workspace) const ONBOARDING_HAIRLINE_ALPHA: u32 = 0x66;
 pub(in crate::workspace) const ONBOARDING_DISABLED_OPACITY: f32 = 0.45;
 
 pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool); 4] = [

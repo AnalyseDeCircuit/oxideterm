@@ -1958,21 +1958,22 @@ impl WorkspaceApp {
         item: &SessionManagerDisplayItem,
         text: u32,
     ) -> Div {
-        let (default_background, default_foreground) = match item {
+        let ui = self.tokens.ui;
+        let semantic_color = match item {
             SessionManagerDisplayItem::Connection(_)
             | SessionManagerDisplayItem::Tunnel(_)
-            | SessionManagerDisplayItem::RemoteDesktop(_) => (0x0ea5e933, 0x7dd3fc),
-            SessionManagerDisplayItem::SshConfig(_) => (0x8b5cf633, 0xc4b5fd),
-            SessionManagerDisplayItem::Plugin(_) => (0x8b5cf633, 0xc4b5fd),
-            SessionManagerDisplayItem::Serial(_) | SessionManagerDisplayItem::Ble(_) => {
-                (0xf59e0b33, 0xfcd34d)
-            }
-            SessionManagerDisplayItem::LocalTerminal(_) => (0xf59e0b33, 0xfcd34d),
-            SessionManagerDisplayItem::Telnet(_) => (0x22c55e33, 0x86efac),
-            SessionManagerDisplayItem::Ftp(_) => (0x22c55e33, 0x86efac),
-            SessionManagerDisplayItem::Mosh(_) => (0x3b82f633, 0x93c5fd),
-            SessionManagerDisplayItem::StandaloneSftp(_) => (0x14b8a633, 0x5eead4),
+            | SessionManagerDisplayItem::RemoteDesktop(_) => ui.info,
+            SessionManagerDisplayItem::SshConfig(_)
+            | SessionManagerDisplayItem::Plugin(_) => ui.accent_secondary,
+            SessionManagerDisplayItem::Serial(_)
+            | SessionManagerDisplayItem::Ble(_)
+            | SessionManagerDisplayItem::LocalTerminal(_) => ui.warning,
+            SessionManagerDisplayItem::Telnet(_)
+            | SessionManagerDisplayItem::Ftp(_)
+            | SessionManagerDisplayItem::StandaloneSftp(_) => ui.success,
+            SessionManagerDisplayItem::Mosh(_) => ui.accent,
         };
+        let (default_background, default_foreground) = ((semantic_color << 8) | 0x26, semantic_color);
         let configured_foreground = item.icon_color().and_then(parse_hex_color);
         // Older assets used one accent for both layers; keep that appearance
         // until an explicit background is selected.

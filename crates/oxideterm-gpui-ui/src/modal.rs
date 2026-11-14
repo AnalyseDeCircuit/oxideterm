@@ -267,21 +267,23 @@ pub fn rounded_shell_child_radius(radius: f32) -> f32 {
 
 pub fn dialog_content(tokens: &ThemeTokens) -> Div {
     let theme = tokens.ui;
-    crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Dialog)
-        .w(px(tokens.metrics.modal_width))
-        .rounded(px(tokens.radii.md))
-        .overflow_hidden()
-        .border_1()
-        .border_color(rgb(theme.border))
-        .child(crate::surface::panel_edge_highlight(
-            tokens,
-            if backdrop_blur_allowed() {
-                tokens.metrics.panel_vibrancy_alpha
-            } else {
-                1.0
-            },
-            tokens.radii.md,
-        ))
+    let content =
+        crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Dialog)
+            .w(px(tokens.metrics.modal_width))
+            .rounded(px(tokens.radii.lg))
+            .overflow_hidden()
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0xb3))
+            .child(crate::surface::panel_edge_highlight(
+                tokens,
+                if backdrop_blur_allowed() {
+                    tokens.metrics.panel_vibrancy_alpha
+                } else {
+                    1.0
+                },
+                tokens.radii.lg,
+            ));
+    crate::surface::theme_overlay_surface_shadow(content, tokens)
 }
 
 pub fn modal_header(tokens: &ThemeTokens, title: String, subtitle: String) -> AnyElement {
@@ -303,10 +305,10 @@ pub fn dialog_header(tokens: &ThemeTokens) -> Div {
         // Tauri DialogContent uses rounded + overflow-hidden; GPUI edge
         // children need matching corners so painted header backgrounds cannot
         // show rectangular pixels outside the shell radius.
-        .rounded_t(px(rounded_shell_child_radius(tokens.radii.md)))
+        .rounded_t(px(rounded_shell_child_radius(tokens.radii.lg)))
         .bg(rgba((theme.bg_panel << 8) | 0x26))
         .border_b_1()
-        .border_color(rgb(theme.border))
+        .border_color(rgba((theme.border << 8) | 0x80))
 }
 
 pub fn dialog_title(tokens: &ThemeTokens, title: String) -> Div {
@@ -349,9 +351,9 @@ pub fn dialog_footer(tokens: &ThemeTokens) -> Div {
         .justify_end()
         .gap_2()
         .border_t_1()
-        .border_color(rgb(theme.border))
+        .border_color(rgba((theme.border << 8) | 0x80))
         // Mirrors browser clipping for the footer background at the bottom
         // edge of shared DialogContent surfaces.
-        .rounded_b(px(rounded_shell_child_radius(tokens.radii.md)))
+        .rounded_b(px(rounded_shell_child_radius(tokens.radii.lg)))
         .bg(rgba((theme.bg_panel << 8) | 0x26))
 }

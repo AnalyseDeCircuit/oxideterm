@@ -5,12 +5,18 @@ use oxideterm_settings::AppIconVariant;
 pub(crate) const APP_ICON_PREVIEW_SIZE: f32 = 42.0;
 
 pub(crate) fn app_icon_preview_source(variant: AppIconVariant) -> gpui::ImageSource {
+    app_icon_preview_source_sized(variant, APP_ICON_PREVIEW_SIZE)
+}
+
+pub(crate) fn app_icon_preview_source_sized(
+    variant: AppIconVariant,
+    logical_size: f32,
+) -> gpui::ImageSource {
     let path = app_icon_variant_resource_path(variant);
+    let logical_size = logical_size.max(1.0);
     gpui::ImageSource::Custom(Arc::new(move |window, cx| {
         // Minify before atlas upload: a single bilinear GPU sample misses fine icon edges.
-        let pixels = (APP_ICON_PREVIEW_SIZE * window.scale_factor())
-            .round()
-            .max(1.0) as u32;
+        let pixels = (logical_size * window.scale_factor()).round().max(1.0) as u32;
         window.use_asset::<gpui::AssetLogger<AppIconPreview>>(&(path.clone(), pixels), cx)
     }))
 }

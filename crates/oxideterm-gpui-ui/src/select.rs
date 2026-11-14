@@ -516,7 +516,7 @@ pub fn select_inline_trigger_chrome(
         } else {
             rgba((tokens.ui.border << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA)
         })
-        .bg(rgba((tokens.ui.bg << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA))
+        .bg(rgba((tokens.ui.bg_sunken << 8) | 0xd9))
         .px(px(tokens.metrics.ui_control_padding_x))
         .flex()
         .items_center()
@@ -591,7 +591,7 @@ fn select_trigger_chrome(
         .border_color(rgba(
             (tokens.ui.border << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA,
         ))
-        .bg(rgba((tokens.ui.bg << 8) | TAURI_SELECT_TRIGGER_BG_ALPHA))
+        .bg(rgba((tokens.ui.bg_sunken << 8) | 0xd9))
         .px(px(tokens.metrics.ui_control_padding_x))
         .text_size(px(tokens.metrics.ui_text_sm))
         .text_color(rgb(if placeholder {

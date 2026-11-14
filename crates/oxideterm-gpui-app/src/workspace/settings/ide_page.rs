@@ -7,9 +7,6 @@ pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_TOP_MARGIN: f32 = 6.0; // 
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_PRIVACY_BORDER_ALPHA: u8 = 0x33; // Tauri blue-500/20.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_PRIVACY_BG_ALPHA: u8 = 0x0d; // Tauri blue-500/5.
 pub(in crate::workspace) const IDE_SETTINGS_AGENT_SUBTLE_BORDER_ALPHA: u8 = 0x80; // Tauri border/50.
-pub(in crate::workspace) const IDE_SETTINGS_EMERALD_400: u32 = 0x34d399;
-pub(in crate::workspace) const IDE_SETTINGS_BLUE_400: u32 = 0x60a5fa;
-pub(in crate::workspace) const IDE_SETTINGS_BLUE_500: u32 = 0x3b82f6;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_ide_section(
@@ -285,10 +282,10 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn ide_agent_privacy_card(&self) -> AnyElement {
         self.ide_card()
             .border_color(rgba(
-                (IDE_SETTINGS_BLUE_500 << 8) | IDE_SETTINGS_AGENT_PRIVACY_BORDER_ALPHA as u32,
+                (self.tokens.ui.info << 8) | IDE_SETTINGS_AGENT_PRIVACY_BORDER_ALPHA as u32,
             ))
             .bg(rgba(
-                (IDE_SETTINGS_BLUE_500 << 8) | IDE_SETTINGS_AGENT_PRIVACY_BG_ALPHA as u32,
+                (self.tokens.ui.info << 8) | IDE_SETTINGS_AGENT_PRIVACY_BG_ALPHA as u32,
             ))
             .flex()
             .flex_col()
@@ -304,7 +301,7 @@ impl WorkspaceApp {
                     .child(Self::render_lucide_icon(
                         LucideIcon::Shield,
                         16.0,
-                        rgb(IDE_SETTINGS_BLUE_400),
+                        rgb(self.tokens.ui.info),
                     ))
                     .child(self.i18n.t("settings_view.ide.agent_transparency_title")),
             )
@@ -384,7 +381,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ide_feature_row(&self, label_key: &str) -> AnyElement {
         self.ide_dot_row(
-            IDE_SETTINGS_EMERALD_400,
+            self.tokens.ui.success,
             div().child(self.i18n.t(label_key)).into_any_element(),
         )
     }
@@ -395,7 +392,7 @@ impl WorkspaceApp {
         detail_key: &str,
     ) -> AnyElement {
         self.ide_dot_row(
-            IDE_SETTINGS_BLUE_400,
+            self.tokens.ui.info,
             div()
                 .w_full()
                 .min_w(px(0.0))

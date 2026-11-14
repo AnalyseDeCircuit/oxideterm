@@ -189,9 +189,11 @@ impl WorkspaceApp {
         let host = self.tab_host.read(cx);
         let filtered = *host.scope() != TabScope::All;
         let label = self.tab_scope_label(host.scope(), cx);
-        let visible = host.main_tabs().count().to_string();
-        let total = host.unfiltered_main_tabs().count().to_string();
-        let count = self
+        let visible_count = host.main_tabs().count();
+        let total_count = host.unfiltered_main_tabs().count();
+        let visible = visible_count.to_string();
+        let total = total_count.to_string();
+        let tooltip_count = self
             .i18n
             .t(if filtered {
                 "sidebar.tab_scope.count_filtered"
@@ -200,6 +202,13 @@ impl WorkspaceApp {
             })
             .replace("{{visible}}", &visible)
             .replace("{{total}}", &total);
+        // Hide the zero counter on the default unfiltered empty canvas so the
+        // chrome stays calm until tabs or filters actually exist.
+        let count = if !filtered && total_count == 0 {
+            String::new()
+        } else {
+            tooltip_count
+        };
         let tooltip = self
             .i18n
             .t(if filtered {

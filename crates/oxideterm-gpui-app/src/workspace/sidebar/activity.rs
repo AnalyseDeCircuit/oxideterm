@@ -111,7 +111,18 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_center();
-        for (section, icon) in top_items {
+        for (index, (section, icon)) in top_items.into_iter().enumerate() {
+            if index == 3 {
+                primary_items = primary_items.child(
+                    div()
+                        .flex_none()
+                        .w(px(self.tokens.metrics.divider_width))
+                        .h(px(self.tokens.metrics.divider_height))
+                        .mt(px(2.0))
+                        .mb(px(self.tokens.metrics.activity_icon_gap + 2.0))
+                        .bg(self.workspace_chrome_divider()),
+                );
+            }
             primary_items = primary_items.child(self.render_activity_icon(section, icon, cx));
         }
         let plugin_activity_items = self
@@ -139,8 +150,9 @@ impl WorkspaceApp {
                     .flex_none()
                     .w(px(self.tokens.metrics.divider_width))
                     .h(px(self.tokens.metrics.divider_height))
-                    .mb(px(self.tokens.metrics.activity_icon_gap))
-                    .bg(self.workspace_divider_color(theme.divider, 0xff)),
+                    .mt(px(2.0))
+                    .mb(px(self.tokens.metrics.activity_icon_gap + 2.0))
+                    .bg(self.workspace_chrome_divider()),
             );
         }
         for panel in plugin_sidebar_panels
@@ -159,12 +171,19 @@ impl WorkspaceApp {
             primary_items = primary_items.child(self.render_plugin_activity_action_icon(item, cx));
         }
 
-        let mut bottom = div().relative().flex().flex_col().items_center().child(
-            div()
-                .w(px(self.tokens.metrics.divider_width))
-                .h(px(self.tokens.metrics.divider_height))
-                .bg(self.workspace_divider_color(theme.divider, 0xff)),
-        );
+        let mut bottom = div()
+            .relative()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .child(
+                div()
+                    .w(px(self.tokens.metrics.divider_width))
+                    .h(px(self.tokens.metrics.divider_height))
+                    .mb(px(self.tokens.metrics.activity_icon_gap + 2.0))
+                    .bg(self.workspace_chrome_divider()),
+            );
         for panel in plugin_sidebar_panels
             .into_iter()
             .filter(|panel| panel.position == "bottom")
@@ -447,7 +466,7 @@ impl WorkspaceApp {
                         .rounded_full()
                         .bg(rgb(badge_color))
                         .text_color(rgb(badge_text_color))
-                        .text_size(px(9.0))
+                        .text_size(px(self.tokens.metrics.ui_text_2xs))
                         .child(if badge_count > 99 {
                             "99+".to_string()
                         } else {

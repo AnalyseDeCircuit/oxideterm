@@ -6,7 +6,6 @@ const DETACHED_TERMINAL_POPOVER_MAX_HEIGHT: f32 = 192.0; // Tauri max-h-48.
 const DETACHED_TERMINAL_POPOVER_ALPHA: u32 = 0xf2; // Tauri elevated surface.
 const DETACHED_TERMINAL_HEADER_ALPHA: u32 = 0x99; // Tauri subtle header.
 const DETACHED_TERMINAL_HOVER_ALPHA: u32 = 0x99; // Tauri hover:bg-theme-bg-hover.
-const DETACHED_TERMINAL_AMBER: u32 = 0xf59e0b; // Tailwind amber-500.
 
 impl WorkspaceApp {
     pub(super) fn detach_active_local_terminal_from_palette(
@@ -410,7 +409,7 @@ impl WorkspaceApp {
             .child(Self::render_lucide_icon(
                 LucideIcon::Square,
                 14.0,
-                rgb(DETACHED_TERMINAL_AMBER),
+                rgb(theme.warning),
             ))
             .child(
                 div()
@@ -488,8 +487,12 @@ impl WorkspaceApp {
                             .justify_center()
                             .rounded(px(self.tokens.radii.sm))
                             .cursor_pointer()
-                            .hover(|button| button.bg(rgba(0xef444433)))
-                            .child(Self::render_lucide_icon(LucideIcon::X, 12.0, rgb(0xf87171)))
+                            .hover(|button| button.bg(rgba((self.tokens.ui.error << 8) | 0x33)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                12.0,
+                                rgb(self.tokens.ui.error),
+                            ))
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(move |this, _event, _window, cx| {

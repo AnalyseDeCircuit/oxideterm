@@ -85,8 +85,9 @@ impl WorkspaceApp {
             .flex_none()
             .w(px(self.tokens.metrics.divider_width))
             .h(px(self.tokens.metrics.divider_height))
-            .mb(px(self.tokens.metrics.activity_icon_gap))
-            .bg(self.workspace_divider_color(self.tokens.ui.divider, 0xff))
+            .mt(px(2.0))
+            .mb(px(self.tokens.metrics.activity_icon_gap + 2.0))
+            .bg(self.workspace_chrome_divider())
     }
 
     fn context_tool_count(&self, window: &Window) -> usize {

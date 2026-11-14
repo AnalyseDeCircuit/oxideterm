@@ -1263,6 +1263,7 @@ impl WorkspaceApp {
                     .flex_none()
                     .size(px(6.0))
                     .rounded_full()
+                    .opacity(if count > 0 { 1.0 } else { 0.55 })
                     .bg(rgb(if count > 0 {
                         theme.success
                     } else {
@@ -1273,7 +1274,7 @@ impl WorkspaceApp {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .text_size(px(12.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(label),
             )
@@ -2029,15 +2030,15 @@ impl WorkspaceApp {
                                 .px(px(6.0))
                                 .py(px(2.0))
                                 .bg(rgba(
-                                    (SESSION_FOCUS_EMERALD << 8)
+                                    (theme.success << 8)
                                         | SESSION_FOCUS_TERMINAL_BADGE_BG_ALPHA,
                                 ))
                                 .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                                .text_color(rgb(SESSION_FOCUS_EMERALD))
+                                .text_color(rgb(theme.success))
                                 .child(Self::render_lucide_icon(
                                     LucideIcon::Terminal,
                                     12.0,
-                                    rgb(SESSION_FOCUS_EMERALD),
+                                    rgb(theme.success),
                                 ))
                                 .child(terminal_count.to_string()),
                         )
@@ -2056,15 +2057,15 @@ impl WorkspaceApp {
                                 .rounded(px(self.tokens.radii.md))
                                 .px(px(8.0))
                                 .py(px(4.0))
-                                .text_size(px(11.0))
-                                .text_color(rgb(SESSION_FOCUS_EMERALD))
+                                .text_size(px(self.tokens.metrics.ui_text_2xs))
+                                .text_color(rgb(theme.success))
                                 .bg(rgba(
-                                    (SESSION_FOCUS_EMERALD << 8)
+                                    (theme.success << 8)
                                         | SESSION_FOCUS_TERMINAL_BADGE_BG_ALPHA,
                                 ))
                                 .hover(|button| {
                                     button.bg(rgba(
-                                        (SESSION_FOCUS_EMERALD << 8)
+                                        (theme.success << 8)
                                             | SESSION_FOCUS_TERMINAL_BADGE_HOVER_ALPHA,
                                     ))
                                 })

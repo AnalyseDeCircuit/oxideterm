@@ -291,14 +291,18 @@ impl WorkspaceApp {
                 .min_w(px(0.0))
                 .flex()
                 .items_center()
-                .gap(px(8.0))
-                .child(Self::render_lucide_icon(icon, 16.0, rgb(theme.accent)))
+                .gap(px(self.tokens.spacing.two))
+                .child(Self::render_lucide_icon(
+                    icon,
+                    self.tokens.metrics.tab_icon_size,
+                    rgb(theme.text_secondary),
+                ))
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.0))
                         .truncate()
-                        .text_size(px(13.0))
+                        .text_size(px(self.tokens.metrics.titlebar_label_font_size))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(rgb(theme.text))
                         .child(self.render_display_text_with_role(
@@ -397,7 +401,7 @@ impl WorkspaceApp {
             SidebarSection::Notifications => "sidebar.panels.event_log",
             _ => "sidebar.panels.sessions",
         };
-        let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key).to_uppercase());
+        let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key));
         let mut header = div()
             // Align sidebar titles with the neighboring workspace tab bar.
             .h(px(self.tokens.metrics.tabbar_height))
@@ -410,7 +414,7 @@ impl WorkspaceApp {
             .bg(self.workspace_chrome_background(theme.bg))
             .border_b_1()
             .border_color(self.workspace_chrome_divider())
-            .px_2()
+            .px_3()
             .child(
                 self.render_window_drag_content_region(
                     "sidebar-header-title-drag-region",
@@ -419,8 +423,8 @@ impl WorkspaceApp {
                         .items_center()
                         .truncate()
                         .text_size(px(self.tokens.metrics.sidebar_title_font_size))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(theme.text_muted))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text_secondary))
                         // A title inside the native drag region must never start
                         // read-only text selection or retain pointer ownership.
                         .child(self.render_display_text_with_role(
@@ -488,10 +492,14 @@ impl WorkspaceApp {
             .child(self.workspace_tooltip_icon_button(
                 icon,
                 self.tokens.metrics.sidebar_action_icon_size,
-                rgb(theme.text),
+                rgb(if toggle_focus_active {
+                    theme.text
+                } else {
+                    theme.text_muted
+                }),
                 IconButtonOptions {
                     has_background: toggle_focus_active,
-                    background: toggle_focus_active.then_some(rgb(theme.bg_hover)),
+                    background: toggle_focus_active.then_some(rgb(theme.bg_active)),
                     hover_background: Some(rgb(theme.bg_hover)),
                     ..IconButtonOptions::opaque_toolbar(
                         self.tokens.metrics.sidebar_action_size,

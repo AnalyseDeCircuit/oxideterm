@@ -255,7 +255,6 @@ impl WorkspaceApp {
         // macOS chrome sits over the app root background. Native still needs this
         // drag area for traffic lights, so keep it visually merged with theme.bg.
         let titlebar_bg = theme.bg;
-        let titlebar_border = theme.border;
         let text_color = readable_color(titlebar_bg, theme.text_muted, theme.text);
         let button_layout = client_titlebar_button_layout(cx);
         let supported_controls = window.window_controls();
@@ -347,7 +346,7 @@ impl WorkspaceApp {
             .items_center()
             .bg(self.workspace_chrome_background(titlebar_bg))
             .border_b_1()
-            .border_color(self.workspace_divider_color(titlebar_border, 0xff))
+            .border_color(self.workspace_chrome_divider())
             .text_size(px(self.tokens.metrics.titlebar_label_font_size))
             .text_color(rgb(text_color))
             // Equal side regions keep the selector centered in the window,

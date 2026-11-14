@@ -249,7 +249,7 @@ impl WorkspaceApp {
                                             .py(px(2.0))
                                             .rounded(px(self.tokens.radii.sm))
                                             .bg(rgba((self.tokens.ui.warning << 8) | 0x1a))
-                                            .text_size(px(10.0))
+                                            .text_size(px(self.tokens.metrics.ui_text_2xs))
                                             .text_color(rgb(self.tokens.ui.warning))
                                             .child(
                                                 self.i18n
@@ -316,7 +316,7 @@ impl WorkspaceApp {
                         .py(px(2.0))
                         .rounded(px(self.tokens.radii.sm))
                         .bg(rgba((self.tokens.ui.bg_panel << 8) | AI_MCP_CODE_BG_ALPHA))
-                        .text_size(px(10.0))
+                        .text_size(px(self.tokens.metrics.ui_text_2xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(tool.name.clone()),
                 );
@@ -337,7 +337,7 @@ impl WorkspaceApp {
                             .flex()
                             .items_center()
                             .gap(px(6.0))
-                            .text_size(px(10.0))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(Self::render_lucide_icon(
                                 LucideIcon::Wrench,
@@ -466,7 +466,7 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(4.0))
-            .text_size(px(10.0))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
             .font_weight(gpui::FontWeight::MEDIUM)
             .text_color(rgb(color))
             .when(status == "connecting", |badge| {
@@ -496,7 +496,7 @@ impl WorkspaceApp {
             .py(px(2.0))
             .rounded(px(self.tokens.radii.sm))
             .bg(rgb(self.tokens.ui.bg_panel))
-            .text_size(px(10.0))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(ai_mcp_transport_label(transport).to_uppercase())
             .into_any_element()
@@ -955,7 +955,7 @@ impl WorkspaceApp {
             .when(!env, |section| {
                 section.child(
                     div()
-                        .text_size(px(11.0))
+                        .text_size(px(self.tokens.metrics.ui_text_2xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(self.i18n.t("settings_view.mcp.extra_headers_hint")),
                 )

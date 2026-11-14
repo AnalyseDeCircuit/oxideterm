@@ -78,7 +78,7 @@ impl WorkspaceApp {
         let phases_width =
             TAB_RECONNECT_PHASES.len() as f32 * 4.0 + (TAB_RECONNECT_PHASES.len() - 1) as f32 * 2.0;
         12.0 + phases_width
-            + self.tab_text_width(&tab_reconnect_phase_text(job), 10.0, window)
+            + self.tab_text_width(&tab_reconnect_phase_text(job), self.tokens.metrics.ui_text_2xs, window)
             + self.tokens.metrics.tab_close_button_size
             + 3.0 * 4.0
     }
@@ -240,6 +240,7 @@ impl WorkspaceApp {
                     self.workspace_chrome_divider()
                 })
                 .bg(self.workspace_tab_background(active))
+                .when(!active, |tab| tab.hover(|style| style.bg(rgb(theme.bg_hover))))
                 .text_color(tab_text_color)
                 .opacity(if is_being_dragged && drag_active {
                     0.5
@@ -857,7 +858,7 @@ impl WorkspaceApp {
             .flex_none()
             .items_center()
             .gap(px(4.0))
-            .text_size(px(10.0))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
             .text_color(rgb(theme.warning))
             .child(Self::render_lucide_icon(
                 LucideIcon::RefreshCw,
@@ -948,7 +949,7 @@ impl WorkspaceApp {
         available_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        const WELCOME_CONTENT_MAX_WIDTH: f32 = 920.0;
+        const WELCOME_CONTENT_MAX_WIDTH: f32 = 860.0;
 
         let theme = self.tokens.ui;
         let compact = welcome_layout_is_compact(available_width);
@@ -975,18 +976,16 @@ impl WorkspaceApp {
                             .items_center()
                             .justify_center()
                             .px(px(WELCOME_PAGE_PADDING))
-                            .pt(px(24.0))
-                            .pb(px(80.0))
+                            .pt(px(28.0))
+                            .pb(px(48.0))
                             .child(
                                 div()
                                     .w_full()
-                                    // Leave enough room for localized shortcut hints
-                                    // while retaining wrapping in genuinely narrow windows.
                                     .max_w(px(WELCOME_CONTENT_MAX_WIDTH))
                                     .flex()
                                     .flex_col()
                                     .items_start()
-                                    .gap(px(28.0))
+                                    .gap(px(22.0))
                                     .child(self.render_welcome_header())
                                     .child(self.render_welcome_workbench(compact, cx))
                                     .child(self.render_welcome_shortcuts()),
@@ -1014,8 +1013,12 @@ impl WorkspaceApp {
     }
 
     fn render_welcome_header(&self) -> AnyElement {
+        let theme = self.tokens.ui;
         div()
             .w_full()
+            .pb(px(18.0))
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | 0x66))
             .flex()
             .flex_col()
             .items_start()
@@ -1024,48 +1027,22 @@ impl WorkspaceApp {
     }
 
     fn render_welcome_brand(&self) -> AnyElement {
-        const BRAND_ICON_SIZE: f32 = 80.0;
-        const BRAND_GLOW_BG_ALPHA: u32 = 0x02;
-        const BRAND_GLOW_INNER_ALPHA: u32 = 0x12;
-        const BRAND_GLOW_OUTER_ALPHA: u32 = 0x08;
-        const BRAND_CARET_GLOW_ALPHA: u32 = 0x4d;
+        const BRAND_ICON_SIZE: f32 = 48.0;
 
         let theme = self.tokens.ui;
-        let icon_path = crate::app_icon::app_icon_variant_resource_path(
+        let icon_source = crate::app_icon::app_icon_preview_source_sized(
             self.settings_store.settings().appearance.app_icon,
+            BRAND_ICON_SIZE,
         );
-        let brand_glow = vec![
-            gpui::BoxShadow {
-                inset: false,
-                color: rgba((theme.accent << 8) | BRAND_GLOW_INNER_ALPHA).into(),
-                offset: gpui::point(px(0.0), px(0.0)),
-                blur_radius: px(40.0),
-                spread_radius: px(0.0),
-            },
-            gpui::BoxShadow {
-                inset: false,
-                color: rgba((theme.accent << 8) | BRAND_GLOW_OUTER_ALPHA).into(),
-                offset: gpui::point(px(0.0), px(0.0)),
-                blur_radius: px(80.0),
-                spread_radius: px(0.0),
-            },
-        ];
-        let caret_glow = vec![gpui::BoxShadow {
-            inset: false,
-            color: rgba((theme.accent << 8) | BRAND_CARET_GLOW_ALPHA).into(),
-            offset: gpui::point(px(0.0), px(0.0)),
-            blur_radius: px(14.0),
-            spread_radius: px(0.0),
-        }];
 
         div()
             .w_full()
             .flex()
             .items_center()
-            .gap(px(20.0))
-            // Reuse the active runtime icon variant selected in Appearance settings.
+            .gap(px(14.0))
+            // Pre-minify the active runtime icon at target DPI to avoid atlas aliasing.
             .child(
-                gpui::img(icon_path)
+                gpui::img(icon_source)
                     .size(px(BRAND_ICON_SIZE))
                     .flex_none()
                     .object_fit(ObjectFit::Contain),
@@ -1077,53 +1054,18 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .items_start()
-                    .gap(px(6.0))
+                    .gap(px(2.0))
                     .child(
                         div()
-                            .relative()
-                            .flex()
-                            .items_center()
-                            .py(px(2.0))
-                            // GPUI does not expose CSS text-shadow; a static shadowed
-                            // backing glow keeps the Tauri brand halo without drawing
-                            // a visible capsule behind the wordmark.
-                            .child(
-                                div()
-                                    .absolute()
-                                    .top(px(10.0))
-                                    .left(px(8.0))
-                                    .right(px(8.0))
-                                    .bottom(px(10.0))
-                                    .rounded(px(self.tokens.radii.lg))
-                                    .bg(rgba((theme.accent << 8) | BRAND_GLOW_BG_ALPHA))
-                                    .shadow(brand_glow),
-                            )
-                            .child(
-                                div()
-                                    .relative()
-                                    .flex()
-                                    .items_center()
-                                    // The brand must remain the strongest type in the start-page hierarchy.
-                                    .text_size(px(48.0))
-                                    .line_height(px(56.0))
-                                    .font_weight(gpui::FontWeight::EXTRA_BOLD)
-                                    .text_color(rgb(theme.text))
-                                    .child(self.i18n.t("layout.empty.title"))
-                                    .child(
-                                        div()
-                                            .w(px(2.0))
-                                            .h(px(36.0))
-                                            .ml(px(5.0))
-                                            .rounded(px(self.tokens.radii.active_indicator))
-                                            .bg(rgb(theme.accent))
-                                            .shadow(caret_glow),
-                                    ),
-                            ),
+                            .text_size(px(self.tokens.metrics.ui_text_2xl))
+                            .line_height(px(28.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text_heading))
+                            .child(self.i18n.t("layout.empty.title")),
                     )
                     .child(
                         div()
-                            .text_size(px(self.tokens.metrics.ui_text_base))
-                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
                             .child(self.i18n.t("layout.empty.subtitle")),
                     ),
@@ -1154,33 +1096,22 @@ impl WorkspaceApp {
             .i18n
             .t("layout.empty.saved_count")
             .replace("{{count}}", &saved_count.to_string());
-        let mut surface = div().flex().flex_col().gap(px(12.0)).child(
+        let mut surface = div().flex().flex_col().gap(px(10.0)).child(
             div()
                 .w_full()
+                .h(px(20.0))
                 .flex()
-                .items_start()
+                .items_center()
                 .justify_between()
-                .gap(px(16.0))
+                .gap(px(12.0))
                 .child(
                     div()
                         .min_w_0()
-                        .flex_1()
-                        .flex()
-                        .flex_col()
-                        .gap(px(3.0))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_base))
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(rgb(theme.text))
-                                .child(self.i18n.t("layout.empty.recent_connections")),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(theme.text_muted))
-                                .child(self.i18n.t("layout.empty.recent_connections_hint")),
-                        ),
+                        .truncate()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.i18n.t("layout.empty.recent_connections")),
                 )
                 .child(
                     div()
@@ -1191,16 +1122,25 @@ impl WorkspaceApp {
                 ),
         );
 
+        let container = div()
+            .w_full()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
+            .bg(self.workspace_sidebar_background(theme.bg_panel))
+            .overflow_hidden();
+
         if recent.is_empty() {
-            surface = surface.child(self.render_welcome_recent_empty(cx));
+            surface = surface.child(container.child(self.render_welcome_recent_empty(cx)));
         } else {
-            surface = surface.child(
-                div().w_full().flex().flex_col().gap(px(3.0)).children(
-                    recent
-                        .into_iter()
-                        .map(|connection| self.render_welcome_recent_row(connection, cx)),
-                ),
-            );
+            let mut list = div().w_full().flex().flex_col();
+            for (index, connection) in recent.into_iter().enumerate() {
+                if index > 0 {
+                    list = list.child(div().h(px(1.0)).bg(rgba((theme.border << 8) | 0x45)));
+                }
+                list = list.child(self.render_welcome_recent_row(connection, cx));
+            }
+            surface = surface.child(container.child(list));
         }
 
         surface
@@ -1210,7 +1150,8 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         div()
             .w_full()
-            .py(px(12.0))
+            .px(px(16.0))
+            .py(px(18.0))
             .flex()
             .flex_col()
             .items_start()
@@ -1218,7 +1159,7 @@ impl WorkspaceApp {
             .gap(px(10.0))
             .child(
                 div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(self.i18n.t("layout.empty.recent_connections_empty")),
             )
@@ -1227,14 +1168,14 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .gap(px(6.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.accent))
                     .cursor_pointer()
                     .hover(move |row| row.text_color(rgb(theme.accent_hover)))
                     .child(Self::render_lucide_icon(
                         LucideIcon::LayoutList,
-                        15.0,
+                        14.0,
                         rgb(theme.accent),
                     ))
                     .child(self.i18n.t("layout.empty.open_session_manager"))
@@ -1256,124 +1197,261 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let target = connection.target.clone();
-        oxideterm_gpui_ui::entity_list_row(
-            &self.tokens,
-            oxideterm_gpui_ui::EntityListRowOptions::new().compact(),
-            Some(
+        div()
+            .w_full()
+            .min_w_0()
+            .px(px(12.0))
+            .py(px(8.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .cursor_pointer()
+            .hover(|row| row.bg(self.workspace_sidebar_background(theme.bg_hover)))
+            .child(
                 div()
-                    .size(px(24.0))
+                    .size(px(28.0))
                     .flex_none()
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | 0x66))
+                    .bg(self.workspace_sidebar_background(theme.bg_sunken))
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(Self::render_lucide_icon(
                         self.welcome_recent_icon(connection.kind),
-                        15.0,
-                        rgb(theme.accent),
-                    ))
-                    .into_any_element(),
-            ),
-            div()
-                .min_w_0()
-                .truncate()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(theme.text))
-                .child(connection.name)
-                .into_any_element(),
-            Some(
+                        14.0,
+                        rgb(theme.text_secondary),
+                    )),
+            )
+            .child(
                 div()
                     .min_w_0()
-                    .truncate()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(theme.text_muted))
-                    .child(connection.subtitle)
-                    .into_any_element(),
-            ),
-            vec![
+                    .flex_1()
+                    .flex()
+                    .flex_col()
+                    .gap(px(1.0))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .child(connection.name),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(connection.subtitle),
+                    ),
+            )
+            .child(
                 div()
-                    .text_size(px(11.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t(self.welcome_recent_kind_label(connection.kind)))
-                    .into_any_element(),
-            ],
-            vec![Self::render_lucide_icon(
-                LucideIcon::ChevronRight,
-                14.0,
-                rgb(theme.text_muted),
-            )],
-        )
-        .px(px(0.0))
-        .cursor_pointer()
-        .on_mouse_down(
-            MouseButton::Left,
-            cx.listener(move |this, _event, window, cx| {
-                this.open_welcome_recent_target(target.clone(), window, cx);
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .rounded(px(self.tokens.radii.xs))
+                            .border_1()
+                            .border_color(rgba((theme.border << 8) | 0x66))
+                            .bg(self.workspace_sidebar_background(theme.bg_sunken))
+                            .px(px(6.0))
+                            .py(px(1.0))
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t(self.welcome_recent_kind_label(connection.kind))),
+                    )
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::ChevronRight,
+                        13.0,
+                        rgb(theme.text_muted),
+                    )),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, window, cx| {
+                    this.open_welcome_recent_target(target.clone(), window, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
     }
 
     fn render_welcome_guidance(&self, cx: &mut Context<Self>) -> gpui::Div {
         let theme = self.tokens.ui;
+        let primary_actions = [
+            (
+                LucideIcon::Plus,
+                "layout.empty.new_connection",
+                "layout.empty.new_connection_hint",
+                WelcomeToolAction::NewConnection,
+                true,
+            ),
+            (
+                LucideIcon::Terminal,
+                "layout.empty.new_local_terminal",
+                "layout.empty.new_local_terminal_hint",
+                WelcomeToolAction::LocalTerminal,
+                false,
+            ),
+        ];
+        let utility_actions = [
+            (
+                LucideIcon::Download,
+                "layout.empty.import_connections",
+                "layout.empty.import_connections_hint",
+                WelcomeToolAction::ImportConnections,
+            ),
+            (
+                LucideIcon::LayoutList,
+                "layout.empty.open_session_manager",
+                "layout.empty.open_session_manager_hint",
+                WelcomeToolAction::SessionManager,
+            ),
+            (
+                LucideIcon::Cloud,
+                "plugin.cloud_sync.panel_title",
+                "layout.empty.cloud_sync_hint",
+                WelcomeToolAction::CloudSync,
+            ),
+        ];
+
+        let mut utility_list = div()
+            .w_full()
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | 0x80))
+            .bg(self.workspace_sidebar_background(theme.bg_panel))
+            .overflow_hidden()
+            .flex()
+            .flex_col();
+        for (index, (icon, title_key, desc_key, action)) in utility_actions.into_iter().enumerate() {
+            if index > 0 {
+                utility_list =
+                    utility_list.child(div().h(px(1.0)).bg(rgba((theme.border << 8) | 0x45)));
+            }
+            utility_list = utility_list.child(self.render_welcome_utility_row(
+                icon, title_key, desc_key, action, cx,
+            ));
+        }
+
         div()
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(10.0))
             .child(
                 div()
-                    .text_size(px(self.tokens.metrics.ui_text_base))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(theme.text))
-                    .child(self.i18n.t("layout.empty.get_started")),
+                    .w_full()
+                    .h(px(20.0))
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("layout.empty.get_started")),
+                    ),
             )
             .child(
                 div()
                     .w_full()
                     .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(self.tokens.spacing.two))
-                    .child(self.render_welcome_tool_button(
-                        LucideIcon::Plus,
-                        "layout.empty.new_connection",
-                        "layout.empty.new_connection_hint",
-                        WelcomeToolAction::NewConnection,
-                        cx,
-                    ))
-                    .child(self.render_welcome_tool_button(
-                        LucideIcon::Terminal,
-                        "layout.empty.new_local_terminal",
-                        "layout.empty.new_local_terminal_hint",
-                        WelcomeToolAction::LocalTerminal,
-                        cx,
-                    ))
-                    .child(self.render_welcome_tool_button(
-                        LucideIcon::Download,
-                        "layout.empty.import_connections",
-                        "layout.empty.import_connections_hint",
-                        WelcomeToolAction::ImportConnections,
-                        cx,
-                    ))
-                    .child(self.render_welcome_tool_button(
-                        LucideIcon::LayoutList,
-                        "layout.empty.open_session_manager",
-                        "layout.empty.open_session_manager_hint",
-                        WelcomeToolAction::SessionManager,
-                        cx,
-                    ))
-                    .child(self.render_welcome_tool_button(
-                        LucideIcon::Cloud,
-                        "plugin.cloud_sync.panel_title",
-                        "layout.empty.cloud_sync_hint",
-                        WelcomeToolAction::CloudSync,
-                        cx,
-                    )),
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .grid()
+                            .grid_cols(2)
+                            .gap(px(10.0))
+                            .children(primary_actions.into_iter().map(
+                                |(icon, title_key, desc_key, action, primary)| {
+                                    self.render_welcome_primary_tile(
+                                        icon, title_key, desc_key, action, primary, cx,
+                                    )
+                                },
+                            )),
+                    )
+                    .child(utility_list),
             )
     }
 
-    fn render_welcome_tool_button(
+    fn render_welcome_primary_tile(
+        &self,
+        icon: LucideIcon,
+        title_key: &str,
+        description_key: &str,
+        action: WelcomeToolAction,
+        primary: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let card = div()
+            .w_full()
+            .min_w_0()
+            .h(px(62.0))
+            .rounded(px(self.tokens.radii.lg))
+            .border_1()
+            .border_color(if primary {
+                rgba((theme.accent << 8) | 0x80)
+            } else {
+                rgba((theme.border << 8) | 0x80)
+            })
+            .bg(self.workspace_sidebar_background(theme.bg_panel))
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .hover(|tile| tile.bg(self.workspace_sidebar_background(theme.bg_hover)))
+            .cursor_pointer()
+            .child(
+                div()
+                    .size(px(28.0))
+                    .flex_none()
+                    .rounded(px(self.tokens.radii.sm))
+                    .when(!primary, |badge| {
+                        badge
+                            .border_1()
+                            .border_color(rgba((theme.border << 8) | 0x66))
+                            .bg(self.workspace_sidebar_background(theme.bg_sunken))
+                    })
+                    .when(primary, |badge| badge.bg(rgb(theme.accent)))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(Self::render_lucide_icon(
+                        icon,
+                        15.0,
+                        rgb(if primary {
+                            theme.accent_text
+                        } else {
+                            theme.text
+                        }),
+                    )),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(theme.text))
+                    .child(self.i18n.t(title_key)),
+            );
+
+        self.bind_welcome_tool_action(card, title_key, description_key, action, cx)
+    }
+
+    fn render_welcome_utility_row(
         &self,
         icon: LucideIcon,
         title_key: &str,
@@ -1382,78 +1460,94 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let tooltip_id = format!("welcome-action-{title_key}");
-        let primary = matches!(action, WelcomeToolAction::NewConnection);
-        self.workspace_toolbar_action_button(
-            self.i18n.t(title_key),
-            Some(Self::render_lucide_icon(
+        let row = div()
+            .w_full()
+            .min_w_0()
+            .px(px(12.0))
+            .py(px(9.0))
+            .flex()
+            .items_center()
+            .gap(px(10.0))
+            .hover(|row| row.bg(self.workspace_sidebar_background(theme.bg_hover)))
+            .cursor_pointer()
+            .child(Self::render_lucide_icon(
                 icon,
-                16.0,
-                rgb(if primary {
-                    theme.accent_text
-                } else {
-                    theme.text
-                }),
-            )),
-            oxideterm_gpui_ui::button::ToolbarButtonOptions {
-                button: oxideterm_gpui_ui::button::ButtonOptions {
-                    variant: if primary {
-                        oxideterm_gpui_ui::button::ButtonVariant::Default
-                    } else {
-                        oxideterm_gpui_ui::button::ButtonVariant::Outline
-                    },
-                    size: oxideterm_gpui_ui::button::ButtonSize::Default,
-                    ..Default::default()
-                },
-                background: primary.then(|| rgb(theme.accent)),
-                text_color: primary.then(|| rgb(theme.accent_text)),
-                hover_background: primary.then(|| rgb(theme.accent_hover)),
-                ..Default::default()
-            },
-            cx.listener({
-                let tooltip_id = tooltip_id.clone();
-                move |this, _event, window, cx| {
-                    this.clear_workspace_tooltip(&tooltip_id, cx);
-                    match action {
-                        WelcomeToolAction::NewConnection => {
-                            this.open_new_connection_form(window, cx)
+                14.0,
+                rgb(theme.text_muted),
+            ))
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(theme.text))
+                    .child(self.i18n.t(title_key)),
+            )
+            .child(Self::render_lucide_icon(
+                LucideIcon::ChevronRight,
+                13.0,
+                rgb(theme.text_muted),
+            ));
+
+        self.bind_welcome_tool_action(row, title_key, description_key, action, cx)
+    }
+
+    fn bind_welcome_tool_action(
+        &self,
+        element: gpui::Div,
+        title_key: &str,
+        description_key: &str,
+        action: WelcomeToolAction,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let tooltip_id = format!("welcome-action-{title_key}");
+        element
+            .id(tooltip_id.clone())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener({
+                    let tooltip_id = tooltip_id.clone();
+                    move |this, _event, window, cx| {
+                        this.clear_workspace_tooltip(&tooltip_id, cx);
+                        match action {
+                            WelcomeToolAction::NewConnection => {
+                                this.open_new_connection_form(window, cx)
+                            }
+                            WelcomeToolAction::LocalTerminal => {
+                                let _ = this.create_local_terminal_tab(window, cx);
+                            }
+                            WelcomeToolAction::ImportConnections => {
+                                this.open_connection_importers_settings(window, cx)
+                            }
+                            WelcomeToolAction::SessionManager => {
+                                this.open_session_manager_tab(window, cx)
+                            }
+                            WelcomeToolAction::CloudSync => this.open_cloud_sync_tab(window, cx),
                         }
-                        WelcomeToolAction::LocalTerminal => {
-                            let _ = this.create_local_terminal_tab(window, cx);
-                        }
-                        WelcomeToolAction::ImportConnections => {
-                            this.open_connection_importers_settings(window, cx)
-                        }
-                        WelcomeToolAction::SessionManager => {
-                            this.open_session_manager_tab(window, cx)
-                        }
-                        WelcomeToolAction::CloudSync => this.open_cloud_sync_tab(window, cx),
+                        cx.stop_propagation();
                     }
-                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_move(cx.listener({
+                let tooltip_id = tooltip_id.clone();
+                let description = self.i18n.t(description_key);
+                move |this, event: &MouseMoveEvent, _window, cx| {
+                    this.queue_workspace_tooltip(
+                        tooltip_id.clone(),
+                        description.clone(),
+                        f32::from(event.position.x) + 12.0,
+                        f32::from(event.position.y) + 16.0,
+                        cx,
+                    );
                 }
-            }),
-        )
-        .id(tooltip_id.clone())
-        .flex_none()
-        .on_mouse_move(cx.listener({
-            let tooltip_id = tooltip_id.clone();
-            let description = self.i18n.t(description_key);
-            move |this, event: &MouseMoveEvent, _window, cx| {
-                this.queue_workspace_tooltip(
-                    tooltip_id.clone(),
-                    description.clone(),
-                    f32::from(event.position.x) + 12.0,
-                    f32::from(event.position.y) + 16.0,
-                    cx,
-                );
-            }
-        }))
-        .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-            if !*hovered {
-                this.clear_workspace_tooltip(&tooltip_id, cx);
-            }
-        }))
-        .into_any_element()
+            }))
+            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                if !*hovered {
+                    this.clear_workspace_tooltip(&tooltip_id, cx);
+                }
+            }))
+            .into_any_element()
     }
 
     fn welcome_recent_icon(&self, kind: WelcomeRecentKind) -> LucideIcon {
@@ -1504,16 +1598,19 @@ impl WorkspaceApp {
             ("app.showShortcuts", "layout.empty.keyboard_shortcuts"),
         ];
 
+        let theme = self.tokens.ui;
         let overrides = &self.settings_store.settings().keybindings.overrides;
         div()
-            .pt(px(8.0))
+            .pt(px(16.0))
             .w_full()
+            .border_t_1()
+            .border_color(rgba((theme.border << 8) | 0x55))
             .flex()
             .flex_row()
             .flex_wrap()
             .items_center()
             .justify_start()
-            .gap_x(px(20.0))
+            .gap_x(px(18.0))
             .gap_y(px(8.0))
             // Invalid registry entries are omitted instead of showing a shortcut that cannot fire.
             .children(
@@ -1544,8 +1641,14 @@ impl WorkspaceApp {
             .text_color(rgb(label_color))
             .child(
                 div()
+                    .rounded(px(self.tokens.radii.xs))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | 0x80))
+                    .bg(self.workspace_sidebar_background(theme.bg_sunken))
+                    .px(px(5.0))
+                    .py(px(1.5))
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(11.0))
+                    .text_size(px(self.tokens.metrics.ui_text_2xs))
                     .line_height(px(14.0))
                     .text_color(rgb(theme.text))
                     .child(key),
@@ -1556,15 +1659,22 @@ impl WorkspaceApp {
 }
 
 fn welcome_workbench_layout(compact: bool, recent: gpui::Div, guidance: gpui::Div) -> gpui::Div {
-    div()
+    let container = div()
         .w_full()
         .min_w_0()
-        .flex()
-        .flex_col()
+        .grid()
+        .grid_cols(if compact { 1 } else { 2 })
         .items_start()
-        .gap(px(if compact { 24.0 } else { 28.0 }))
-        .child(guidance.w_full().min_w_0().flex_none())
-        .child(recent.w_full().min_w_0().flex_none())
+        .gap(px(if compact { 22.0 } else { 28.0 }));
+    if compact {
+        container
+            .child(guidance.w_full().min_w_0())
+            .child(recent.w_full().min_w_0())
+    } else {
+        container
+            .child(recent.w_full().min_w_0())
+            .child(guidance.w_full().min_w_0())
+    }
 }
 
 #[cfg(test)]
@@ -1585,7 +1695,7 @@ mod welcome_layout_tests {
                         .child(div().h(px(120.0)))
                         .debug_selector(|| "guidance".into()),
                 )
-                .max_w(px(920.0))
+                .max_w(px(860.0))
                 .debug_selector(|| "workbench".into()),
             )
         }
@@ -1594,7 +1704,7 @@ mod welcome_layout_tests {
     #[gpui::test]
     fn welcome_sections_resize_without_stretching(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| WelcomeLayout);
-        // Exercise both density modes and reverse resizing while keeping the action row above recents.
+        // Exercise side-by-side desktop and stacked compact widths including reverse resize.
         for (width, compact) in [
             (1000.0, false),
             (900.0, false),
@@ -1612,15 +1722,26 @@ mod welcome_layout_tests {
             let guidance = cx.debug_bounds("guidance").unwrap();
             assert_eq!(recent.size.height, px(100.0), "width={width}");
             assert_eq!(guidance.size.height, px(120.0), "width={width}");
-            assert_eq!(recent.origin.x, frame.origin.x, "width={width}");
-            assert_eq!(guidance.origin.x, frame.origin.x, "width={width}");
-            assert_eq!(recent.size.width, frame.size.width, "width={width}");
-            assert_eq!(guidance.size.width, frame.size.width, "width={width}");
-            assert_eq!(
-                recent.origin.y - guidance.bottom(),
-                px(if compact { 24.0 } else { 28.0 }),
-                "width={width}"
-            );
+            if compact {
+                assert_eq!(guidance.origin.x, frame.origin.x, "width={width}");
+                assert_eq!(recent.origin.x, frame.origin.x, "width={width}");
+                assert_eq!(guidance.size.width, frame.size.width, "width={width}");
+                assert_eq!(recent.size.width, frame.size.width, "width={width}");
+                assert_eq!(
+                    recent.origin.y - guidance.bottom(),
+                    px(22.0),
+                    "width={width}"
+                );
+            } else {
+                assert_eq!(recent.origin.x, frame.origin.x, "width={width}");
+                assert_eq!(guidance.origin.y, recent.origin.y, "width={width}");
+                assert_eq!(recent.size.width, guidance.size.width, "width={width}");
+                assert_eq!(
+                    guidance.origin.x - recent.right(),
+                    px(28.0),
+                    "width={width}"
+                );
+            }
         }
     }
 }
