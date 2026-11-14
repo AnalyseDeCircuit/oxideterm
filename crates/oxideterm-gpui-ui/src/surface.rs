@@ -525,18 +525,18 @@ pub fn tauri_card_shadow(color: u32) -> Vec<BoxShadow> {
             TAURI_CARD_DARK_SHADOW_2_ALPHA,
         )
     };
-    shadows_with_alpha(near_alpha, far_alpha, 3.0, 12.0)
+    shadows_with_alpha(near_alpha, far_alpha, 3.0, 12.0, 4.0)
 }
 
 pub fn theme_card_shadow(tokens: &ThemeTokens) -> Vec<BoxShadow> {
     let elevation = theme_elevation_spec(tokens);
-    // Theme-aware cards preserve material identity while avoiding one fixed
-    // dark shadow recipe across every built-in and custom palette.
+    // Keep card elevation tight and grounded so cards do not float heavily on light canvases.
     shadows_with_alpha(
         elevation.card_near_shadow_alpha,
         elevation.card_far_shadow_alpha,
-        3.0,
-        12.0,
+        2.0,
+        6.0,
+        2.0,
     )
 }
 
@@ -548,6 +548,7 @@ pub fn theme_overlay_shadow(tokens: &ThemeTokens) -> Vec<BoxShadow> {
         elevation.overlay_far_shadow_alpha,
         5.0,
         18.0,
+        4.0,
     )
 }
 
@@ -564,6 +565,7 @@ fn shadows_with_alpha(
     far_alpha: u32,
     near_blur: f32,
     far_blur: f32,
+    far_offset_y: f32,
 ) -> Vec<BoxShadow> {
     vec![
         BoxShadow {
@@ -575,7 +577,7 @@ fn shadows_with_alpha(
         },
         BoxShadow {
             color: rgba(far_alpha).into(),
-            offset: point(px(0.0), px(4.0)),
+            offset: point(px(0.0), px(far_offset_y)),
             blur_radius: px(far_blur),
             spread_radius: px(0.0),
             inset: false,
@@ -589,20 +591,28 @@ fn theme_elevation_spec(tokens: &ThemeTokens) -> ThemeElevationSpec {
     let panel_separation = (color_luma(ui.bg_panel) - color_luma(ui.bg)).abs();
     let light = color_luma(ui.bg) >= TAURI_CARD_LIGHT_LUMA_THRESHOLD;
 
-    let (card_border_alpha, panel_border_alpha) = if card_separation < LOW_SURFACE_SEPARATION {
+    let (card_border_alpha, panel_border_alpha) = if light {
+        if card_separation < LOW_SURFACE_SEPARATION {
+            (0x59, 0x4d)
+        } else if card_separation < MEDIUM_SURFACE_SEPARATION {
+            (0x4d, 0x40)
+        } else {
+            (0x40, 0x38)
+        }
+    } else if card_separation < LOW_SURFACE_SEPARATION {
         (0xb3, 0x8f)
     } else if card_separation < MEDIUM_SURFACE_SEPARATION {
         (0x99, 0x73)
     } else {
         (0x80, 0x66)
     };
-    let panel_border_alpha = if panel_separation < LOW_SURFACE_SEPARATION {
+    let panel_border_alpha = if !light && panel_separation < LOW_SURFACE_SEPARATION {
         panel_border_alpha.max(0x80)
     } else {
         panel_border_alpha
     };
     let (card_near, card_far) = if light {
-        (0x18, 0x0f)
+        (0x0d, 0x06)
     } else if card_separation < LOW_SURFACE_SEPARATION {
         (0x52, 0x30)
     } else {

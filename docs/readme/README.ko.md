@@ -63,6 +63,12 @@ SSH 터미널, 로컬 터미널, Markdown 노트와 SFTP를 하나의 탭에 배
 
 ![SSH, 로컬 터미널, 노트와 SFTP를 조합한 4분할 작업 공간](../../docs/screenshots/mixed-workspace.png)
 
+### 세션 관리자
+
+저장된 연결을 그룹으로 정리하고 SSH 설정이나 다른 클라이언트에서 가져올 수 있습니다.
+
+![데모 연결을 그룹별로 표시하는 세션 관리자](../../docs/screenshots/session-manager.png)
+
 ### 터미널
 
 SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, SFTP, IDE, 포트 포워딩을 열 수 있습니다.
@@ -86,6 +92,12 @@ SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, S
 서버에서 수신 중인 포트를 찾아 클릭 한 번으로 포워딩합니다. Jupyter 같은 도구에는 빠른 포워딩도 사용할 수 있습니다.
 
 ![서버에서 감지한 포트가 표시된 포워딩 화면](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+
+### 원격 데스크톱
+
+작업 공간 탭에서 RDP 데스크톱을 엽니다. 하단에서 화면 크기를 조절하거나 다시 연결할 수 있습니다.
+
+![OxideTerm 작업 공간에서 열린 RDP 데스크톱](../../docs/screenshots/rdp-desktop.png)
 
 <details>
 <summary><b>자연어 요청으로 OxideSens가 터미널을 여는 모습 보기</b></summary>

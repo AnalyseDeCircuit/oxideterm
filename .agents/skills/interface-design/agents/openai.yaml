@@ -1,0 +1,6 @@
+interface:
+  display_name: "Interface Design"
+  short_description: "Craft-first product UI guidance"
+  default_prompt: "Use $interface-design to design or refine a product interface with a domain-specific visual system and image-based references when useful."
+policy:
+  allow_implicit_invocation: true

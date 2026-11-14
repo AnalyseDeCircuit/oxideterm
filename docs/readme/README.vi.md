@@ -63,6 +63,12 @@ Bộ nhớ khi rảnh trước và sau khi chuyển từ Tauri (1.x) sang GPUI g
 
 ![Không gian làm việc bốn ngăn kết hợp SSH, terminal cục bộ, ghi chú và SFTP](../../docs/screenshots/mixed-workspace.png)
 
+### Quản lý phiên
+
+Sắp xếp các kết nối đã lưu theo nhóm và nhập từ cấu hình SSH hoặc các ứng dụng khách khác.
+
+![Trình quản lý phiên với các kết nối minh họa được chia nhóm](../../docs/screenshots/session-manager.png)
+
 ### Terminal
 
 Một phiên SSH. Thanh bên liệt kê công cụ có thể mở trên máy chủ này: terminal bổ sung, SFTP, IDE và chuyển tiếp cổng.
@@ -86,6 +92,12 @@ Mở dự án từ xa và chỉnh sửa các tệp trong thẻ.
 OxideTerm liệt kê cổng đang lắng nghe trên máy chủ. Chuyển tiếp bằng một cú nhấp hoặc dùng chuyển tiếp nhanh cho công cụ như Jupyter.
 
 ![Trang chuyển tiếp liệt kê cổng phát hiện trên máy chủ](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+
+### Máy tính từ xa
+
+Mở màn hình RDP trong một thẻ. Các nút bên dưới cho phép điều chỉnh kích thước hiển thị hoặc kết nối lại.
+
+![Màn hình RDP trong không gian làm việc OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
 <details>
 <summary><b>Xem OxideSens mở terminal từ một yêu cầu bằng ngôn ngữ tự nhiên</b></summary>

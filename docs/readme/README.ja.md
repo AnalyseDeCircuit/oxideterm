@@ -63,6 +63,12 @@ SSH ターミナル、ローカルターミナル、Markdown ノート、SFTP �
 
 ![SSH、ローカルターミナル、ノート、SFTP を組み合わせた 4 ペインのワークスペース](../../docs/screenshots/mixed-workspace.png)
 
+### セッション管理
+
+保存した接続をグループで整理し、SSH 設定や他のクライアントからインポートできます。
+
+![デモ用の接続をグループで表示するセッション管理画面](../../docs/screenshots/session-manager.png)
+
 ### ターミナル
 
 SSH セッションの画面です。サイドバーから同じサーバーの追加ターミナル、SFTP、IDE、ポート転送を開けます。
@@ -86,6 +92,12 @@ SSH セッションの画面です。サイドバーから同じサーバーの�
 サーバーで待ち受け中のポートを一覧表示し、クリックで転送できます。Jupyter などにはクイック転送も使えます。
 
 ![検出したサーバーポートを表示するポート転送画面](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+
+### リモートデスクトップ
+
+ワークスペースのタブで RDP デスクトップを開けます。下部から表示サイズの調整や再接続ができます。
+
+![OxideTerm のワークスペースで開いた RDP デスクトップ](../../docs/screenshots/rdp-desktop.png)
 
 <details>
 <summary><b>自然な言葉での依頼から OxideSens がターミナルを開く様子を見る</b></summary>

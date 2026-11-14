@@ -63,6 +63,12 @@ OxideTerm 是一款适用于 macOS、Windows 和 Linux 的 SSH 客户端。你�
 
 ![组合 SSH、本地终端、笔记和 SFTP 的四窗格工作区](../../docs/screenshots/mixed-workspace.png)
 
+### 会话管理器
+
+按分组整理已保存的连接，也可以从 SSH 配置或其他客户端导入。
+
+![按分组展示演示连接的会话管理器](../../docs/screenshots/session-manager.png)
+
 ### 终端
 
 一个 SSH 会话。侧边栏列出了这台服务器上可以打开的内容：更多终端、SFTP、IDE 和端口转发。
@@ -86,6 +92,12 @@ OxideTerm 是一款适用于 macOS、Windows 和 Linux 的 SSH 客户端。你�
 OxideTerm 会列出服务器上正在监听的端口。点一下就能转发其中任意一个，也可以用快速转发打开 Jupyter 这类常用工具。
 
 ![列出服务器上已检测端口的端口转发页面](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+
+### 远程桌面
+
+在工作区标签页中打开 RDP 桌面，下方可调整显示大小或重新连接。
+
+![在 OxideTerm 工作区中打开的 RDP 远程桌面](../../docs/screenshots/rdp-desktop.png)
 
 <details>
 <summary><b>观看 OxideSens 根据一句自然语言打开终端</b></summary>

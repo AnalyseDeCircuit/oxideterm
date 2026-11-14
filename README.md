@@ -63,6 +63,12 @@ An SSH terminal, a local terminal, Markdown notes and SFTP together in one tab. 
 
 ![Four-pane workspace combining SSH, a local terminal, notes and SFTP](docs/screenshots/mixed-workspace.png)
 
+### Session manager
+
+Organize saved connections in groups and import them from SSH configuration or other clients.
+
+![Session manager with grouped demo connections](docs/screenshots/session-manager.png)
+
 ### Terminal
 
 An SSH session. The sidebar lists what you can open on this server: more terminals, SFTP, the IDE and port forwarding.
@@ -86,6 +92,12 @@ Open a remote project and edit its files in tabs.
 OxideTerm lists the ports listening on the server. Forward any of them with one click, or use a quick forward for tools like Jupyter.
 
 ![Port forwarding page listing ports detected on the server](docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+
+### Remote desktop
+
+Open an RDP desktop in a workspace tab, with display sizing and reconnect controls below.
+
+![RDP desktop inside an OxideTerm workspace](docs/screenshots/rdp-desktop.png)
 
 <details>
 <summary><b>Watch OxideSens open a terminal from a plain-language request</b></summary>

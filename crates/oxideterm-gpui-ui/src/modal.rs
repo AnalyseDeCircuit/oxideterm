@@ -6,7 +6,7 @@ use oxideterm_theme::ThemeTokens;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 const TW_BLACK: u32 = 0x000000;
-const DIALOG_BACKDROP_ALPHA: u32 = 0x99; // Tauri DialogOverlay bg-black/60.
+const DIALOG_BACKDROP_ALPHA: u32 = 0x59; // Softened modal scrim (~35% black) so underlying workspace stays legible.
 const COMMAND_PALETTE_BACKDROP_ALPHA: u32 = 0x66; // Tauri CommandPalette overlayClassName bg-black/40.
 const QUICKLOOK_BACKDROP_ALPHA: u32 = 0xcc; // Tauri QuickLook bg-black/80.
 const TRANSPARENT_BACKDROP_ALPHA: u32 = 0x00; // Radix popover outside-hit-test layer.

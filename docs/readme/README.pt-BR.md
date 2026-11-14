@@ -63,6 +63,12 @@ Um terminal SSH, um terminal local, notas Markdown e SFTP na mesma aba. Combine 
 
 ![Espaço de trabalho com quatro painéis reunindo SSH, um terminal local, notas e SFTP](../../docs/screenshots/mixed-workspace.png)
 
+### Gerenciador de sessões
+
+Organize as conexões salvas em grupos e importe-as da configuração SSH ou de outros clientes.
+
+![Gerenciador de sessões com conexões de demonstração agrupadas](../../docs/screenshots/session-manager.png)
+
 ### Terminal
 
 Uma sessão SSH. A barra lateral mostra ferramentas deste servidor: mais terminais, SFTP, IDE e encaminhamento de portas.
@@ -86,6 +92,12 @@ Abra um projeto remoto e edite seus arquivos em abas.
 OxideTerm lista as portas em escuta no servidor. Encaminhe-as com um clique ou use um encaminhamento rápido para ferramentas como Jupyter.
 
 ![Portas detectadas no servidor na página de encaminhamentos](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+
+### Área de trabalho remota
+
+Abra uma área de trabalho RDP em uma aba. Os controles abaixo permitem ajustar o tamanho da tela ou reconectar.
+
+![Área de trabalho RDP no espaço de trabalho do OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
 <details>
 <summary><b>Veja o OxideSens abrir um terminal a partir de um pedido em linguagem natural</b></summary>

@@ -63,6 +63,12 @@ Un terminal SSH, un terminal local, notas Markdown y SFTP en una sola pestaña. 
 
 ![Espacio de trabajo de cuatro paneles con SSH, un terminal local, notas y SFTP](../../docs/screenshots/mixed-workspace.png)
 
+### Gestor de sesiones
+
+Organiza las conexiones guardadas en grupos e impórtalas desde la configuración SSH u otros clientes.
+
+![Gestor de sesiones con conexiones de ejemplo agrupadas](../../docs/screenshots/session-manager.png)
+
 ### Terminal
 
 Una sesión SSH. La barra lateral muestra las herramientas del servidor: más terminales, SFTP, IDE y reenvío de puertos.
@@ -86,6 +92,12 @@ Abre un proyecto remoto y edita sus archivos en pestañas.
 OxideTerm enumera los puertos en escucha del servidor. Reenvíalos con un clic o usa un reenvío rápido para herramientas como Jupyter.
 
 ![Puertos detectados en el servidor en la página de reenvíos](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+
+### Escritorio remoto
+
+Abre un escritorio RDP en una pestaña. Los controles inferiores permiten ajustar el tamaño de la pantalla o volver a conectar.
+
+![Escritorio RDP dentro del espacio de trabajo de OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
 <details>
 <summary><b>Mira cómo OxideSens abre un terminal a partir de una petición en lenguaje natural</b></summary>
