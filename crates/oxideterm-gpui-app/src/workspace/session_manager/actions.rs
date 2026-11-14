@@ -97,6 +97,16 @@ impl WorkspaceApp {
                 })
             })
             .count();
+        let ble_count = self
+            .connection_store
+            .ble_profiles()
+            .iter()
+            .filter(|profile| {
+                profile.group.as_deref().is_some_and(|candidate| {
+                    candidate == group || candidate.starts_with(&format!("{group}/"))
+                })
+            })
+            .count();
         connection_count
             + self
                 .connection_store
@@ -124,6 +134,7 @@ impl WorkspaceApp {
             + mosh_count
             + standalone_sftp_count
             + remote_desktop_count
+            + ble_count
             + self
                 .saved_ssh_tunnels()
                 .iter()
