@@ -341,11 +341,7 @@ impl WorkspaceApp {
                     .into_any_element(),
             );
         }
-        self.settings_card(
-            "settings_view.knowledge.navigator_documents",
-            "",
-            rows,
-        )
+        self.settings_card("settings_view.knowledge.navigator_documents", "", rows)
     }
 
     pub(in crate::workspace) fn knowledge_collection_row(

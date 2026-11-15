@@ -175,8 +175,7 @@ impl OxideExportConnectionRowRenderer {
                                                 .py(px(2.0))
                                                 .rounded_full()
                                                 .bg(rgba(
-                                                    (theme.success << 8)
-                                                        | OXIDE_NEW_BADGE_BG_ALPHA,
+                                                    (theme.success << 8) | OXIDE_NEW_BADGE_BG_ALPHA,
                                                 ))
                                                 .flex()
                                                 .items_center()

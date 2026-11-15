@@ -52,6 +52,8 @@
     },
     "actions": {
       "connect": "Connetti",
+      "start_tunnel": "Avvia tunnel",
+      "stop_tunnel": "Ferma tunnel",
       "edit": "Modifica",
       "duplicate": "Duplica",
       "delete": "Elimina",

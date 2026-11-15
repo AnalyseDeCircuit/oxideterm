@@ -749,6 +749,9 @@ impl WorkspaceApp {
             context_tools_menu_scroll: ScrollHandle::new(),
             session_search_open: false,
             session_search_query: String::new(),
+            session_manager_search_open: false,
+            session_manager_sidebar_sort_open: false,
+            session_manager_handoff_to_sidebar: false,
             // Mode-specific row signatures invalidate stale measurements
             // when switching between tree and host layouts.
             active_session_sidebar_list_state: ListState::new(
@@ -962,6 +965,11 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.start_public_mcp_delivery(cx);
         workspace.sync_ssh_config_sync_service();
+        if workspace.active_sidebar_section == SidebarSection::Connections
+            && !workspace.sidebar_collapsed
+        {
+            workspace.refresh_session_manager_ssh_config_hosts(cx);
+        }
         workspace.start_audit_delivery(cx);
         workspace.restore_session_tree_snapshot();
         workspace.start_startup_ssh_tunnels(window, cx);

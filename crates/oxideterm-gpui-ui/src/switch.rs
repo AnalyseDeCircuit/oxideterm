@@ -235,10 +235,7 @@ mod tests {
                 (thumb.bounds.left().0 - track.bounds.left().0) / scale,
                 expected_left_offset
             );
-            assert_eq!(
-                (thumb.bounds.top().0 - track.bounds.top().0) / scale,
-                2.0
-            );
+            assert_eq!((thumb.bounds.top().0 - track.bounds.top().0) / scale, 2.0);
             if checked {
                 assert_eq!(track.background, rgb(tokens.ui.accent).into());
             }

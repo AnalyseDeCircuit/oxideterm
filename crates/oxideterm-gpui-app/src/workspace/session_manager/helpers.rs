@@ -69,6 +69,52 @@ pub(super) fn session_group_path_is_within(candidate: &str, group: &str) -> bool
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
+/// Maps a row-menu target onto its batch-selection counterpart so a row menu
+/// can act on the whole active selection. Group and SSH-config rows are not
+/// selectable, so they never join multi-row operations.
+pub(super) fn session_manager_row_menu_selection_target(
+    target: &SessionManagerRowActionTarget,
+) -> Option<SessionManagerSelectionTarget> {
+    match target {
+        SessionManagerRowActionTarget::Tunnel(id) => {
+            Some(SessionManagerSelectionTarget::Tunnel(id.clone()))
+        }
+        SessionManagerRowActionTarget::Plugin(id) => {
+            Some(SessionManagerSelectionTarget::Plugin(id.clone()))
+        }
+        SessionManagerRowActionTarget::Connection(id) => {
+            Some(SessionManagerSelectionTarget::Connection(id.clone()))
+        }
+        SessionManagerRowActionTarget::Serial(id) => {
+            Some(SessionManagerSelectionTarget::Serial(id.clone()))
+        }
+        SessionManagerRowActionTarget::Ble(id) => {
+            Some(SessionManagerSelectionTarget::Ble(id.clone()))
+        }
+        SessionManagerRowActionTarget::LocalTerminal(id) => {
+            Some(SessionManagerSelectionTarget::LocalTerminal(id.clone()))
+        }
+        SessionManagerRowActionTarget::Telnet(id) => {
+            Some(SessionManagerSelectionTarget::Telnet(id.clone()))
+        }
+        SessionManagerRowActionTarget::Ftp(id) => {
+            Some(SessionManagerSelectionTarget::Ftp(id.clone()))
+        }
+        SessionManagerRowActionTarget::Mosh(id) => {
+            Some(SessionManagerSelectionTarget::Mosh(id.clone()))
+        }
+        SessionManagerRowActionTarget::StandaloneSftp(id) => {
+            Some(SessionManagerSelectionTarget::StandaloneSftp(id.clone()))
+        }
+        SessionManagerRowActionTarget::RemoteDesktop(id) => {
+            Some(SessionManagerSelectionTarget::RemoteDesktop(id.clone()))
+        }
+        SessionManagerRowActionTarget::SshConfig(_)
+        | SessionManagerRowActionTarget::GroupRoot
+        | SessionManagerRowActionTarget::Group(_) => None,
+    }
+}
+
 /// Rewrites UI group state after a persisted subtree rename.
 pub(super) fn renamed_session_group_path(
     candidate: &str,

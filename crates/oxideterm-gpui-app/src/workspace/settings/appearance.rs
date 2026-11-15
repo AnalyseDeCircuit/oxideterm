@@ -798,7 +798,10 @@ impl WorkspaceApp {
                 "settings_view.terminal.bg_source_caustics",
             ),
         ];
-        let active_effect_kind = terminal.background_effect.as_ref().map(|effect| effect.kind);
+        let active_effect_kind = terminal
+            .background_effect
+            .as_ref()
+            .map(|effect| effect.kind);
         let active_effect_key = BACKGROUND_EFFECT_OPTIONS
             .iter()
             .find(|(kind, _)| *kind == active_effect_kind)

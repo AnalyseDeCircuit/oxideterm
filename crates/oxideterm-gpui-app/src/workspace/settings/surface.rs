@@ -300,11 +300,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
-        let mut inner = div()
-            .w_full()
-            .min_w(px(0.0))
-            .px(px(padding))
-            .pb(px(gap));
+        let mut inner = div().w_full().min_w(px(0.0)).px(px(padding)).pb(px(gap));
         if index == 0 {
             inner = inner.pt(px(padding));
         }
@@ -478,7 +474,9 @@ impl WorkspaceApp {
                     // Source, effect capabilities, and collapsible background sub-panels add or
                     // hide rows; paint-only adjustments keep scroll anchoring stable.
                     let settings_entity = self.settings_workspace.read(cx);
-                    settings_entity.background_effects_expanded.hash(&mut hasher);
+                    settings_entity
+                        .background_effects_expanded
+                        .hash(&mut hasher);
                     settings_entity
                         .background_interactions_expanded
                         .hash(&mut hasher);

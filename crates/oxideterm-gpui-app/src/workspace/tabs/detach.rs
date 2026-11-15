@@ -13,6 +13,7 @@ const TAB_CONTEXT_MENU_SPLIT_WIDTH: f32 = 320.0;
 const TAB_CONTEXT_MENU_HEIGHT: f32 = 136.0;
 const TAB_CONTEXT_MENU_RENAME_HEIGHT: f32 = 168.0;
 const TAB_CONTEXT_MENU_SPLIT_HEIGHT: f32 = 72.0;
+const TAB_CONTEXT_MENU_SWITCH_HEIGHT: f32 = 32.0;
 const TAB_CONTEXT_MENU_MARGIN: f32 = 8.0;
 
 const TAB_RENAME_DIALOG_WIDTH: f32 = 420.0;
@@ -1305,6 +1306,9 @@ impl WorkspaceApp {
             Vec::new()
         };
         self.tab_by_id(menu.tab_id, cx)?;
+        let is_session_manager = self
+            .tab_by_id(menu.tab_id, cx)
+            .is_some_and(|tab| matches!(tab.kind, TabKind::SessionManager));
         let viewport = window.viewport_size();
         let mut menu_height = if renamable {
             TAB_CONTEXT_MENU_RENAME_HEIGHT
@@ -1313,6 +1317,9 @@ impl WorkspaceApp {
         };
         if can_split_into_active {
             menu_height += TAB_CONTEXT_MENU_SPLIT_HEIGHT;
+        }
+        if is_session_manager {
+            menu_height += TAB_CONTEXT_MENU_SWITCH_HEIGHT;
         }
         menu_height += merge_targets.len() as f32 * TAB_CONTEXT_MENU_SPLIT_HEIGHT;
         menu_height = menu_height.min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
@@ -1468,6 +1475,37 @@ impl WorkspaceApp {
                             }),
                         ),
                     )
+                    .when(is_session_manager, |content| {
+                        content.child(
+                            context_menu_item(
+                                &self.tokens,
+                                self.i18n.t("tabbar.switch_to_sidebar"),
+                                ContextMenuItemKind::Plain,
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.close_tab_context_menu();
+                                    // Closing the tab parks the sidebar on Active
+                                    // Sessions (finish_tab_removal); mark the handoff
+                                    // so the panel stays on the session manager and
+                                    // the sidebar form takes over without a flip.
+                                    this.session_manager_handoff_to_sidebar = true;
+                                    this.request_close_tab_by_id(menu.tab_id, window, cx);
+                                    this.session_manager_handoff_to_sidebar = false;
+                                    // The panel may have been on another section when
+                                    // the handoff started; the sidebar form must be
+                                    // the visible surface afterwards.
+                                    if this.active_sidebar_section != SidebarSection::Connections {
+                                        this.set_sidebar_section(SidebarSection::Connections, cx);
+                                    }
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                        )
+                    })
                     .child(context_menu_separator(&self.tokens))
                     .child(
                         context_menu_item(

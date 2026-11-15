@@ -85,12 +85,12 @@ pub use surface::{
     theme_card_shadow, theme_card_surface, theme_card_surface_shadow,
     theme_glass_card_background_alpha, theme_overlay_shadow, theme_overlay_surface_shadow,
 };
+pub use switch::{SwitchOptions, switch, switch_with};
 pub use table::{
     TauriTableCellOptions, TauriTableCellStyle, TauriTableColors, TauriTableMetrics,
     shaped_text_width, tauri_table_cell, tauri_table_checkbox_cell, tauri_table_header,
     tauri_table_row, tauri_table_sort_header, tauri_table_spacer_cell,
 };
-pub use switch::{SwitchOptions, switch, switch_with};
 pub use tabs::{segmented_tab, segmented_tabs};
 pub use text_input::{TextInputView, text_input, text_input_anchor_probe};
 pub use tree::{TreeBranchMetrics, tree_child};

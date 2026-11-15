@@ -235,7 +235,13 @@ impl WorkspaceApp {
             })
             .when(sort_menu_open, |surface| {
                 surface.child(self.workspace_context_menu_backdrop(
-                    self.render_session_manager_sort_menu(window, has_background, cx),
+                    self.render_session_manager_sort_menu(
+                        window,
+                        has_background,
+                        SelectAnchorId::SessionManagerSort,
+                        false,
+                        cx,
+                    ),
                     cx,
                 ))
             })
@@ -336,6 +342,33 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn close_session_manager_sidebar_search(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.session_manager_search_open {
+            return;
+        }
+        self.session_manager_search_open = false;
+        self.begin_disclosure_motion("session-manager-search".into(), false, cx);
+        self.session_manager.update(cx, |manager, cx| {
+            manager.search_query.clear();
+            if manager.focused_input == Some(SessionManagerInput::Search) {
+                manager.focused_input = None;
+            }
+            cx.notify();
+        });
+        if self.selected_ime_target
+            == Some(ime::WorkspaceImeTarget::SessionManager(
+                SessionManagerInput::Search,
+            ))
+        {
+            self.selected_ime_target = None;
+            self.clear_ime_selection();
+            self.ime_marked_text = None;
+        }
+    }
+
     pub(in crate::workspace) fn handle_session_manager_key(
         &mut self,
         event: &KeyDownEvent,
@@ -354,6 +387,22 @@ impl WorkspaceApp {
                 // only clearing focus.
                 self.cancel_batch_template_name(cx);
                 self.ime_marked_text = None;
+                true
+            }
+            "escape"
+                if input == SessionManagerInput::Search
+                    && self.session_manager_search_open
+                    // The sidebar disclosure owns this keystroke only while no
+                    // Session Manager tab is the keyboard content; with the tab
+                    // active a stale sidebar flag must not steal the collapse,
+                    // which belongs to the tab's search field (generic arm).
+                    && !self
+                        .keyboard_content_tab(cx)
+                        .is_some_and(|tab| tab.kind == TabKind::SessionManager) =>
+            {
+                // Escape collapses the sidebar disclosure and drops the draft,
+                // matching the active-sessions search behavior.
+                self.close_session_manager_sidebar_search(cx);
                 true
             }
             "escape" => {
@@ -439,6 +488,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The two forms stay mutually exclusive: callers may reach here while
+        // the sidebar still shows the session-manager panel (welcome link,
+        // command palette, plugin lifecycle), so the tab owns moving the
+        // sidebar off it, mirroring finish_tab_removal's close path.
+        if self.active_sidebar_section == SidebarSection::Connections {
+            self.set_sidebar_section(SidebarSection::Sessions, cx);
+        }
         self.refresh_session_manager_ssh_config_hosts(cx);
         let tab_id = if let Some(tab) = self
             .tabs(cx)

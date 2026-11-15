@@ -96,6 +96,8 @@
       "switch_tree": "Vue arborescente",
       "switch_host": "Vue par hôte",
       "new_connection": "Nouvelle connexion",
+      "open_in_tab": "Ouvrir dans un onglet",
+      "sort": "Trier",
       "lock_app": "Verrouiller OxideTerm",
       "setup_app_lock": "Configurer le verrouillage",
       "collapse": "Réduire"

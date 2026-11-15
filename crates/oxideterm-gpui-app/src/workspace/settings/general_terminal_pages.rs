@@ -191,17 +191,14 @@ impl WorkspaceApp {
                                             .child(hint),
                                     )
                                 })
-                                .when_some(
-                                    cli.error.clone(),
-                                    |column, error| {
-                                        column.child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                .text_color(rgb(self.tokens.ui.error))
-                                                .child(error),
-                                        )
-                                    },
-                                )
+                                .when_some(cli.error.clone(), |column, error| {
+                                    column.child(
+                                        div()
+                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                            .text_color(rgb(self.tokens.ui.error))
+                                            .child(error),
+                                    )
+                                })
                                 .when(
                                     !cli_loading && cli_status.is_some() && !cli_bundled,
                                     |column| {
@@ -244,21 +241,16 @@ impl WorkspaceApp {
                                 cx,
                             ))
                         })
-                        .when(
-                            !cli_loading && cli.error.is_some(),
-                            |row| {
-                                row.child(self.cli_companion_action_button(
-                                    self.i18n.t("settings_view.help.retry"),
-                                    LucideIcon::RefreshCw,
-                                    ButtonVariant::Ghost,
-                                    false,
-                                    |this, _event, _window, cx| {
-                                        this.refresh_cli_companion_status(cx)
-                                    },
-                                    cx,
-                                ))
-                            },
-                        )
+                        .when(!cli_loading && cli.error.is_some(), |row| {
+                            row.child(self.cli_companion_action_button(
+                                self.i18n.t("settings_view.help.retry"),
+                                LucideIcon::RefreshCw,
+                                ButtonVariant::Ghost,
+                                false,
+                                |this, _event, _window, cx| this.refresh_cli_companion_status(cx),
+                                cx,
+                            ))
+                        })
                         .into_any_element(),
                 ];
                 if legacy_cli_installed {
@@ -423,31 +415,29 @@ impl WorkspaceApp {
         let loading = launch_at_login.pending;
         let enabled = launch_at_login.enabled;
         let error = launch_at_login.error;
-        let control = div()
-            .flex_none()
-            .child(
-                switch_with(
-                    &self.tokens,
-                    "launch-at-login",
-                    String::new(),
-                    enabled,
-                    SwitchOptions::default().disabled(loading),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if !this
-                            .settings_workspace
-                            .read(cx)
-                            .launch_at_login_snapshot()
-                            .pending
-                        {
-                            this.set_launch_at_login_enabled(!enabled, cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                ),
-            );
+        let control = div().flex_none().child(
+            switch_with(
+                &self.tokens,
+                "launch-at-login",
+                String::new(),
+                enabled,
+                SwitchOptions::default().disabled(loading),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    if !this
+                        .settings_workspace
+                        .read(cx)
+                        .launch_at_login_snapshot()
+                        .pending
+                    {
+                        this.set_launch_at_login_enabled(!enabled, cx);
+                    }
+                    cx.stop_propagation();
+                }),
+            ),
+        );
         let mut label = div().min_w(px(0.0)).flex().flex_col().gap(px(4.0)).child(
             div()
                 .text_size(px(self.tokens.metrics.ui_text_xs))
@@ -1030,13 +1020,15 @@ impl WorkspaceApp {
                     .into_any_element(),
                 ];
                 if self.terminal_history_store.failed() {
-                    rows.push(self.settings_callout(
-                        SettingsCalloutTone::Error,
-                        Some(LucideIcon::AlertCircle),
-                        div()
-                            .child(self.i18n.t("terminal.history.error"))
-                            .into_any_element(),
-                    ));
+                    rows.push(
+                        self.settings_callout(
+                            SettingsCalloutTone::Error,
+                            Some(LucideIcon::AlertCircle),
+                            div()
+                                .child(self.i18n.t("terminal.history.error"))
+                                .into_any_element(),
+                        ),
+                    );
                 }
                 self.settings_card(
                     "settings_view.terminal.command_bar",
@@ -1119,7 +1111,9 @@ impl WorkspaceApp {
             SettingsSectionId::TerminalAwarenessShellIntegration => {
                 self.remote_shell_integration_card(cx)
             }
-            SettingsSectionId::TerminalAwarenessTriggers => self.terminal_triggers_settings_card(cx),
+            SettingsSectionId::TerminalAwarenessTriggers => {
+                self.terminal_triggers_settings_card(cx)
+            }
             SettingsSectionId::TerminalTransferInBand => self.settings_card(
                 "settings_view.terminal.in_band_transfer.title",
                 "",
@@ -1570,22 +1564,28 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(8.0))
-            .child(self.card_subsection_header(
-                self.i18n
-                    .t("settings_view.terminal.command_bar_focus_handoff_presets"),
-                Some(self.i18n.t(
-                    "settings_view.terminal.command_bar_focus_handoff_presets_hint",
-                )),
-            ))
+            .child(
+                self.card_subsection_header(
+                    self.i18n
+                        .t("settings_view.terminal.command_bar_focus_handoff_presets"),
+                    Some(
+                        self.i18n
+                            .t("settings_view.terminal.command_bar_focus_handoff_presets_hint"),
+                    ),
+                ),
+            )
             .child(presets)
             .child(self.card_separator())
-            .child(self.card_subsection_header(
-                self.i18n
-                    .t("settings_view.terminal.command_bar_focus_handoff_advanced"),
-                Some(self.i18n.t(
-                    "settings_view.terminal.command_bar_focus_handoff_advanced_hint",
-                )),
-            ))
+            .child(
+                self.card_subsection_header(
+                    self.i18n
+                        .t("settings_view.terminal.command_bar_focus_handoff_advanced"),
+                    Some(
+                        self.i18n
+                            .t("settings_view.terminal.command_bar_focus_handoff_advanced_hint"),
+                    ),
+                ),
+            )
             .child(control)
             .into_any_element()
     }

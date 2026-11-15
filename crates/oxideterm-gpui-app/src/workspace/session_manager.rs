@@ -71,17 +71,11 @@ const MANAGER_ROW_ACTION_BUTTON: f32 = 24.0; // Tauri h-6 w-6
 const MANAGER_ROW_ACTION_ICON_SIZE: f32 = 12.0;
 const MANAGER_ROW_ACTION_GAP: f32 = 2.0;
 const MANAGER_ROW_ICON_SIZE: f32 = 40.0;
-const MANAGER_ROW_DRAG_HANDLE_SIZE: f32 = 24.0;
 const MANAGER_DRAG_PREVIEW_MAX_WIDTH: f32 = 280.0;
 const MANAGER_DRAG_PREVIEW_RADIUS: f32 = 8.0;
-const MANAGER_DRAG_GRIP_WIDTH: f32 = 6.0;
-const MANAGER_DRAG_GRIP_DOT_SIZE: f32 = 2.0;
-const MANAGER_DRAG_GRIP_DOT_COUNT: usize = 6;
-const MANAGER_DRAG_GRIP_ALPHA: u32 = 0xb8;
 const MANAGER_DRAG_ROOT_BG_ALPHA: u32 = 0x0d;
 const MANAGER_DRAG_GROUP_BG_ALPHA: u32 = 0x16;
 const MANAGER_GROUP_MANAGER_INDENT: f32 = 20.0;
-const MANAGER_SELECTION_COLUMN_WIDTH: f32 = 16.0;
 const MANAGER_LIST_LAST_USED_WIDTH: f32 = 96.0;
 const MANAGER_ROW_ACTIONS_WIDTH: f32 = 76.0; // Three compact actions and their two gaps.
 const MANAGER_RECENT_ITEM_MIN_WIDTH: f32 = 180.0;
@@ -95,10 +89,11 @@ const MANAGER_LIST_ESTIMATED_ROW_HEIGHT: f32 = 57.0;
 const MANAGER_TREE_ESTIMATED_ROW_HEIGHT: f32 = 52.0;
 const MANAGER_MAIN_VIEW_OVERSCAN: usize = 6;
 const MANAGER_ROW_ACTION_MENU_WIDTH: f32 = 176.0;
-const MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT: f32 = 120.0;
+const MANAGER_ROW_ACTION_MENU_CONNECTION_HEIGHT: f32 = 192.0;
 const MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT: f32 = 44.0;
-const MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT: f32 = 80.0;
-const MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT: f32 = 120.0;
+const MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT: f32 = 120.0;
+const MANAGER_ROW_ACTION_MENU_SSH_CONFIG_HEIGHT: f32 = 76.0;
+const MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT: f32 = 156.0;
 const MANAGER_VIEW_MODE_MENU_WIDTH: f32 = 168.0; // Tauri DropdownMenuContent min-w-[160px] plus native menu padding.
 const MANAGER_VIEW_MODE_MENU_HEIGHT: f32 = 104.0; // Three compact radio rows plus menu padding.
 const MANAGER_SORT_MENU_WIDTH: f32 = 184.0; // Sort fields reuse the compact toolbar dropdown rhythm.
@@ -239,7 +234,7 @@ impl SortDirection {
         }
     }
 
-    fn icon(self) -> LucideIcon {
+    pub(in crate::workspace) fn icon(self) -> LucideIcon {
         match self {
             Self::Asc => LucideIcon::ArrowUpAZ,
             Self::Desc => LucideIcon::ArrowDownAZ,
@@ -355,6 +350,7 @@ pub(super) enum SessionManagerRowActionTarget {
     Tunnel(String),
     Plugin(String),
     Connection(String),
+    SshConfig(String),
     Serial(String),
     Ble(String),
     LocalTerminal(String),
@@ -365,6 +361,28 @@ pub(super) enum SessionManagerRowActionTarget {
     RemoteDesktop(String),
     GroupRoot,
     Group(String),
+}
+
+impl SessionManagerRowActionTarget {
+    /// Maps a persisted row target to its open action. Group targets organize
+    /// rows instead of opening, so they intentionally have no open target.
+    pub(super) fn open_target(&self) -> Option<SessionManagerOpenTarget> {
+        match self {
+            Self::Tunnel(id) => Some(SessionManagerOpenTarget::Tunnel(id.clone())),
+            Self::Plugin(id) => Some(SessionManagerOpenTarget::Plugin(id.clone())),
+            Self::Connection(id) => Some(SessionManagerOpenTarget::Connection(id.clone())),
+            Self::SshConfig(alias) => Some(SessionManagerOpenTarget::SshConfig(alias.clone())),
+            Self::Serial(id) => Some(SessionManagerOpenTarget::Serial(id.clone())),
+            Self::Ble(id) => Some(SessionManagerOpenTarget::Ble(id.clone())),
+            Self::LocalTerminal(id) => Some(SessionManagerOpenTarget::LocalTerminal(id.clone())),
+            Self::Telnet(id) => Some(SessionManagerOpenTarget::Telnet(id.clone())),
+            Self::Ftp(id) => Some(SessionManagerOpenTarget::Ftp(id.clone())),
+            Self::Mosh(id) => Some(SessionManagerOpenTarget::Mosh(id.clone())),
+            Self::StandaloneSftp(id) => Some(SessionManagerOpenTarget::StandaloneSftp(id.clone())),
+            Self::RemoteDesktop(id) => Some(SessionManagerOpenTarget::RemoteDesktop(id.clone())),
+            Self::GroupRoot | Self::Group(_) => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -441,6 +459,11 @@ pub(super) struct SessionManagerState {
     pub(super) sort_direction: SortDirection,
     pub(super) search_query: String,
     pub(super) selected_items: HashSet<SessionManagerSelectionTarget>,
+    // The fixed endpoint of the last plain click, used by Shift+click range selection.
+    pub(super) selection_anchor: Option<SessionManagerSelectionTarget>,
+    // Selectable rows in current render order. Range selection needs visual
+    // adjacency, which `selected_items` (a HashSet) cannot provide.
+    pub(super) visible_selection_targets: Vec<SessionManagerSelectionTarget>,
     pub(super) view_mode_menu_open: bool,
     pub(super) sort_menu_open: bool,
     pub(super) row_action_menu: Option<SessionManagerRowActionMenu>,
@@ -465,6 +488,10 @@ pub(super) struct SessionManagerState {
     pub(super) main_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) main_tree_list_state: ListState,
     pub(super) main_tree_list_cache: RefCell<VirtualListSignatureCache>,
+    // Separate list state for the sidebar session-manager tree so the tab and
+    // sidebar can render simultaneously without fighting over scroll position.
+    pub(super) sidebar_tree_list_state: ListState,
+    pub(super) sidebar_tree_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) oxide_export_connection_list_state: ListState,
     pub(super) oxide_export_connection_list_cache: RefCell<VirtualListSignatureCache>,
     pub(super) oxide_import_connection_preview_list_state: ListState,
@@ -503,6 +530,8 @@ impl Default for SessionManagerState {
             sort_direction: SortDirection::Desc,
             search_query: String::new(),
             selected_items: HashSet::new(),
+            selection_anchor: None,
+            visible_selection_targets: Vec::new(),
             view_mode_menu_open: false,
             sort_menu_open: false,
             row_action_menu: None,
@@ -550,6 +579,15 @@ impl Default for SessionManagerState {
                 ),
             ),
             main_tree_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            sidebar_tree_list_state: tauri_virtual_list_state(
+                0,
+                ListAlignment::Top,
+                TauriVirtualListSpec::new(
+                    px(MANAGER_TREE_ESTIMATED_ROW_HEIGHT),
+                    MANAGER_MAIN_VIEW_OVERSCAN,
+                ),
+            ),
+            sidebar_tree_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             oxide_export_connection_list_state: ListState::new(
                 OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT,
                 ListAlignment::Top,
@@ -1108,6 +1146,7 @@ mod oxide_export_summary_dialogs;
 mod oxide_import_dialogs;
 mod oxide_import_preview_dialogs;
 mod oxide_import_result_dialogs;
+mod sidebar;
 mod surface;
 mod tree;
 mod views;

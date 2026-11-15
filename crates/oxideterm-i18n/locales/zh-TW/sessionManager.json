@@ -52,6 +52,8 @@
     },
     "actions": {
       "connect": "連線",
+      "start_tunnel": "啟動通道",
+      "stop_tunnel": "停止通道",
       "edit": "編輯",
       "duplicate": "複製",
       "delete": "刪除",

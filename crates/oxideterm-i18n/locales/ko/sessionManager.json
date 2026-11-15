@@ -52,6 +52,8 @@
     },
     "actions": {
       "connect": "연결",
+      "start_tunnel": "터널 시작",
+      "stop_tunnel": "터널 중지",
       "edit": "편집",
       "duplicate": "복제",
       "delete": "삭제",

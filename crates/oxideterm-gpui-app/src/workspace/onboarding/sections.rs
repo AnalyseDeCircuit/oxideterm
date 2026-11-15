@@ -76,8 +76,15 @@ impl WorkspaceApp {
                 div()
                     .pt(px(14.0))
                     .border_t_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
-                    .child(self.language_select_row(self.settings_store.settings().general.language, cx)),
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
+                    .child(
+                        self.language_select_row(
+                            self.settings_store.settings().general.language,
+                            cx,
+                        ),
+                    ),
             )
             .into_any_element()
     }
@@ -195,7 +202,9 @@ impl WorkspaceApp {
                     div()
                         .rounded(px(self.tokens.radii.md))
                         .border_1()
-                        .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                        .border_color(rgba(
+                            (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                        ))
                         .bg(rgb(self.tokens.ui.bg_panel))
                         .p(px(12.0))
                         .child(
@@ -203,10 +212,9 @@ impl WorkspaceApp {
                                 .id("onboarding-background-gallery")
                                 .max_h(px(152.0))
                                 .overflow_y_scroll()
-                                .child(self.appearance_background_image_slot(
-                                    &background_settings,
-                                    cx,
-                                )),
+                                .child(
+                                    self.appearance_background_image_slot(&background_settings, cx),
+                                ),
                         ),
                 )
                 .child(self.onboarding_animation_picker(cx))
@@ -543,30 +551,25 @@ impl WorkspaceApp {
                 "onboarding.features_desc",
             ))
             .child(feature_grid(&features[..6]))
-            .child(
-                div()
-                    .flex()
-                    .justify_start()
-                    .child(self.onboarding_button(
-                        self.i18n.t(if self.onboarding.features_expanded {
-                            "onboarding.less_features"
-                        } else {
-                            "onboarding.more_features"
-                        }),
-                        Some(if self.onboarding.features_expanded {
-                            LucideIcon::ArrowUp
-                        } else {
-                            LucideIcon::ChevronDown
-                        }),
-                        ButtonVariant::Outline,
-                        false,
-                        |this, _, cx| {
-                            this.onboarding.features_expanded = !this.onboarding.features_expanded;
-                            cx.notify();
-                        },
-                        cx,
-                    )),
-            )
+            .child(div().flex().justify_start().child(self.onboarding_button(
+                self.i18n.t(if self.onboarding.features_expanded {
+                    "onboarding.less_features"
+                } else {
+                    "onboarding.more_features"
+                }),
+                Some(if self.onboarding.features_expanded {
+                    LucideIcon::ArrowUp
+                } else {
+                    LucideIcon::ChevronDown
+                }),
+                ButtonVariant::Outline,
+                false,
+                |this, _, cx| {
+                    this.onboarding.features_expanded = !this.onboarding.features_expanded;
+                    cx.notify();
+                },
+                cx,
+            )))
             .child(oxideterm_gpui_ui::motion::auto_height(
                 &self.tokens,
                 "onboarding-more-features",
@@ -596,7 +599,9 @@ impl WorkspaceApp {
                 div()
                     .rounded(px(self.tokens.radii.md))
                     .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
                     .bg(rgb(self.tokens.ui.bg_panel))
                     .p(px(14.0))
                     .flex()
@@ -611,11 +616,9 @@ impl WorkspaceApp {
                             (LucideIcon::Key, "ai_tools_cap_byok"),
                         ],
                     ))
-                    .child(
-                        div()
-                            .h(px(1.0))
-                            .bg(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA)),
-                    )
+                    .child(div().h(px(1.0)).bg(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    )))
                     .child(self.onboarding_capability_list(
                         "onboarding.ai_tools_privacy",
                         &[
@@ -778,7 +781,9 @@ impl WorkspaceApp {
                 div()
                     .rounded(px(self.tokens.radii.md))
                     .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
                     .bg(rgb(self.tokens.ui.bg_panel))
                     .p(px(14.0))
                     .child(self.onboarding_capability_grid(
@@ -850,11 +855,9 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(
-                div()
-                    .h(px(1.0))
-                    .bg(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA)),
-            )
+            .child(div().h(px(1.0)).bg(rgba(
+                (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+            )))
             .child(self.onboarding_shortcut_grid(mod_key, is_mac, wide))
             .child(self.onboarding_tip(
                 "onboarding.tip_shortcuts",
@@ -935,7 +938,9 @@ impl WorkspaceApp {
             div()
                 .rounded(px(self.tokens.radii.md))
                 .border_1()
-                .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                .border_color(rgba(
+                    (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                ))
                 .bg(rgb(self.tokens.ui.bg_panel))
                 .p(px(14.0))
                 .child(grid)
@@ -1081,7 +1086,9 @@ impl WorkspaceApp {
                     .size(px(32.0))
                     .rounded(px(self.tokens.radii.sm))
                     .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
                     .bg(rgb(self.tokens.ui.bg_sunken))
                     .flex_none()
                     .flex()

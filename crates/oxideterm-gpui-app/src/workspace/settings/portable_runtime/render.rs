@@ -402,28 +402,32 @@ impl WorkspaceApp {
                     .flex_row()
                     .flex_wrap()
                     .gap(px(PORTABLE_SETTINGS_BUTTON_GAP))
-                    .child(self.portable_action_button(
-                        self.i18n
-                            .t("settings_view.general.portable_migration_export"),
-                        LucideIcon::Upload,
-                        true,
-                        false,
-                        |this, _event, _window, cx| {
-                            this.open_oxide_export_portable_migration_dialog(cx);
-                        },
-                        cx,
-                    ))
-                    .child(self.portable_action_button(
-                        self.i18n
-                            .t("settings_view.general.portable_migration_import"),
-                        LucideIcon::Download,
-                        true,
-                        false,
-                        |this, _event, _window, cx| {
-                            this.open_oxide_import_portable_migration_dialog(cx);
-                        },
-                        cx,
-                    ))
+                    .child(
+                        self.portable_action_button(
+                            self.i18n
+                                .t("settings_view.general.portable_migration_export"),
+                            LucideIcon::Upload,
+                            true,
+                            false,
+                            |this, _event, _window, cx| {
+                                this.open_oxide_export_portable_migration_dialog(cx);
+                            },
+                            cx,
+                        ),
+                    )
+                    .child(
+                        self.portable_action_button(
+                            self.i18n
+                                .t("settings_view.general.portable_migration_import"),
+                            LucideIcon::Download,
+                            true,
+                            false,
+                            |this, _event, _window, cx| {
+                                this.open_oxide_import_portable_migration_dialog(cx);
+                            },
+                            cx,
+                        ),
+                    )
                     .into_any_element(),
             ]),
         )

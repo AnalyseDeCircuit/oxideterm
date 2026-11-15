@@ -333,13 +333,11 @@ impl WorkspaceApp {
         &self,
         window: &Window,
         has_background: bool,
+        anchor_id: SelectAnchorId,
+        sidebar: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(anchor) = self
-            .select_anchors
-            .get(&SelectAnchorId::SessionManagerSort)
-            .copied()
-        else {
+        let Some(anchor) = self.select_anchors.get(&anchor_id).copied() else {
             return div().into_any_element();
         };
         let viewport = window.viewport_size();
@@ -391,7 +389,13 @@ impl WorkspaceApp {
                 has_background,
                 move |this, _event, _window, cx| {
                     this.set_session_sort_field(field, cx);
-                    this.close_session_row_menus(cx);
+                    // Sidebar uses its own open flag; the tab shares the
+                    // entity's sort_menu_open with the row action menu.
+                    if sidebar {
+                        this.session_manager_sidebar_sort_open = false;
+                    } else {
+                        this.close_session_row_menus(cx);
+                    }
                     cx.notify();
                     cx.stop_propagation();
                 },

@@ -104,10 +104,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_semantic_scheme_editor(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn close_semantic_scheme_editor(&mut self, cx: &mut Context<Self>) {
         self.semantic_scheme_editor_open = false;
         if let Some(input) = self
             .focused_settings_input
@@ -151,11 +148,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn open_new_highlight_rule_editor(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn open_new_highlight_rule_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let before_len = self
             .settings_store
             .settings()
@@ -177,10 +170,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn close_highlight_rule_editor(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn close_highlight_rule_editor(&mut self, cx: &mut Context<Self>) {
         self.highlight_rule_editor_index = None;
         if let Some(input) = self
             .focused_settings_input
@@ -244,30 +234,28 @@ impl WorkspaceApp {
                             .child(self.semantic_scheme_preview(&semantic_scheme)),
                     ),
             )
-            .child(
-                dialog_footer(&self.tokens).justify_end().child(
-                    self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.terminal.command_specs_close"),
-                        None,
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
-                            },
-                            has_background: true,
-                            height: Some(30.0),
-                            padding_x: Some(14.0),
-                            ..ToolbarButtonOptions::default()
+            .child(dialog_footer(&self.tokens).justify_end().child(
+                self.workspace_toolbar_action_button(
+                    self.i18n.t("settings_view.terminal.command_specs_close"),
+                    None,
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Default,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: false,
                         },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.close_semantic_scheme_editor(cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
+                        has_background: true,
+                        height: Some(30.0),
+                        padding_x: Some(14.0),
+                        ..ToolbarButtonOptions::default()
+                    },
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_semantic_scheme_editor(cx);
+                        cx.stop_propagation();
+                    }),
                 ),
-            );
+            ));
 
         Some(
             dismissible_dialog_backdrop()
@@ -339,30 +327,28 @@ impl WorkspaceApp {
                             .child(self.highlight_preview(std::slice::from_ref(rule))),
                     ),
             )
-            .child(
-                dialog_footer(&self.tokens).justify_end().child(
-                    self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.terminal.command_specs_close"),
-                        None,
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
-                            },
-                            has_background: true,
-                            height: Some(30.0),
-                            padding_x: Some(14.0),
-                            ..ToolbarButtonOptions::default()
+            .child(dialog_footer(&self.tokens).justify_end().child(
+                self.workspace_toolbar_action_button(
+                    self.i18n.t("settings_view.terminal.command_specs_close"),
+                    None,
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Default,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: false,
                         },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.close_highlight_rule_editor(cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
+                        has_background: true,
+                        height: Some(30.0),
+                        padding_x: Some(14.0),
+                        ..ToolbarButtonOptions::default()
+                    },
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_highlight_rule_editor(cx);
+                        cx.stop_propagation();
+                    }),
                 ),
-            );
+            ));
 
         Some(
             dismissible_dialog_backdrop()
@@ -462,46 +448,54 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                 ))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Plus,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.semantic_scheme_create"),
-                    false,
-                    cx.listener(|this, _event, window, cx| {
-                        this.create_semantic_scheme(window, cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Download,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.semantic_scheme_import"),
-                    false,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.import_semantic_scheme(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Upload,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.semantic_scheme_export"),
-                    active_custom_scheme.is_none(),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.export_semantic_scheme(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Trash2,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.semantic_scheme_delete"),
-                    active_custom_scheme.is_none(),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.delete_active_semantic_scheme(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Plus,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.semantic_scheme_create"),
+                        false,
+                        cx.listener(|this, _event, window, cx| {
+                            this.create_semantic_scheme(window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Download,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.semantic_scheme_import"),
+                        false,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.import_semantic_scheme(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Upload,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.semantic_scheme_export"),
+                        active_custom_scheme.is_none(),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.export_semantic_scheme(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Trash2,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.semantic_scheme_delete"),
+                        active_custom_scheme.is_none(),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.delete_active_semantic_scheme(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
                 .into_any_element(),
             self.card_separator(),
             self.semantic_scheme_preview(&semantic_scheme),
@@ -545,14 +539,16 @@ impl WorkspaceApp {
             .flex_row()
             .flex_wrap()
             .gap(px(8.0))
-            .child(self.settings_select_control(
-                SettingsSelect::HighlightPreset,
-                self.i18n
-                    .t("settings_view.terminal.highlight_rules.add_preset"),
-                add_disabled,
-                Some(168.0),
-                cx,
-            ))
+            .child(
+                self.settings_select_control(
+                    SettingsSelect::HighlightPreset,
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.add_preset"),
+                    add_disabled,
+                    Some(168.0),
+                    cx,
+                ),
+            )
             .child(
                 // Keep the max-rule guard at dispatch time as well as in the button
                 // state so stale UI cannot add a rule past the configured limit.
@@ -598,59 +594,69 @@ impl WorkspaceApp {
                 .flex_wrap()
                 .justify_end()
                 .gap(px(8.0))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Plus,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.rule_set_create"),
-                    settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.create_highlight_rule_set(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Download,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.rule_set_import"),
-                    settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.import_highlight_rule_set(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Upload,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.rule_set_export"),
-                    active_highlight_rule_set.is_none(),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.export_highlight_rule_set(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.semantic_scheme_action_button(
-                    LucideIcon::Trash2,
-                    self.i18n
-                        .t("settings_view.terminal.highlight_rules.rule_set_delete"),
-                    active_highlight_rule_set.is_none(),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.delete_active_highlight_rule_set(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Plus,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.rule_set_create"),
+                        settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.create_highlight_rule_set(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Download,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.rule_set_import"),
+                        settings.terminal.highlight_rule_sets.len() >= MAX_HIGHLIGHT_RULE_SETS,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.import_highlight_rule_set(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Upload,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.rule_set_export"),
+                        active_highlight_rule_set.is_none(),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.export_highlight_rule_set(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
+                .child(
+                    self.semantic_scheme_action_button(
+                        LucideIcon::Trash2,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.rule_set_delete"),
+                        active_highlight_rule_set.is_none(),
+                        cx.listener(|this, _event, _window, cx| {
+                            this.delete_active_highlight_rule_set(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                )
                 .into_any_element(),
         ];
         if let Some(rule_set) = active_highlight_rule_set {
-            rules_rows.push(self.highlight_input_block(
-                self.i18n
-                    .t("settings_view.terminal.highlight_rules.rule_set_name"),
-                SettingsInput::HighlightRuleSetName,
-                rule_set.name.clone(),
-                self.i18n
-                    .t("settings_view.terminal.highlight_rules.rule_set_default_name"),
-                320.0,
-                cx,
-            ));
+            rules_rows.push(
+                self.highlight_input_block(
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.rule_set_name"),
+                    SettingsInput::HighlightRuleSetName,
+                    rule_set.name.clone(),
+                    self.i18n
+                        .t("settings_view.terminal.highlight_rules.rule_set_default_name"),
+                    320.0,
+                    cx,
+                ),
+            );
         }
         rules_rows.push(self.card_separator());
         rules_rows.push(
@@ -1513,11 +1519,14 @@ impl WorkspaceApp {
                                 ))
                             })
                             .when_some(validation_error, |row, _| {
-                                row.child(self.text_badge(
-                                    self.i18n
-                                        .t("settings_view.terminal.highlight_rules.invalid_rule"),
-                                    self.tokens.ui.warning,
-                                ))
+                                row.child(
+                                    self.text_badge(
+                                        self.i18n.t(
+                                            "settings_view.terminal.highlight_rules.invalid_rule",
+                                        ),
+                                        self.tokens.ui.warning,
+                                    ),
+                                )
                             }),
                     )
                     .child(
@@ -1548,25 +1557,23 @@ impl WorkspaceApp {
                         move |this, cx| this.move_highlight_rule(index, 1, cx),
                         cx,
                     ))
-                    .child(
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.terminal.triggers.edit_rule"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Outline,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: false,
-                                },
-                                ..ToolbarButtonOptions::default()
+                    .child(self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.terminal.triggers.edit_rule"),
+                        None,
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Outline,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
                             },
-                            cx.listener(move |this, _event, window, cx| {
-                                this.open_highlight_rule_editor(index, window, cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    )
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(move |this, _event, window, cx| {
+                            this.open_highlight_rule_editor(index, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ))
                     .child(self.highlight_small_button(
                         self.i18n.t("settings_view.terminal.highlight_rules.delete"),
                         true,

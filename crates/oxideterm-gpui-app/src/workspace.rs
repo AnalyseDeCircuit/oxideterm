@@ -123,10 +123,9 @@ use gpui::{
 };
 use oxideterm_connection_monitor::{
     ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
-    DockerActionKind, FilesystemCommandCapability,
-    FilesystemEntrySeverity, FilesystemFilter, GpuDevice, GpuProvider, GpuSamplingTask,
-    GpuSnapshot, GpuSnapshotStatus, GpuUpdate, LogCommandCapability, LogPreset, MetricsSource,
-    MonitorValueLevel, PackageCommandCapability,
+    DockerActionKind, FilesystemCommandCapability, FilesystemEntrySeverity, FilesystemFilter,
+    GpuDevice, GpuProvider, GpuSamplingTask, GpuSnapshot, GpuSnapshotStatus, GpuUpdate,
+    LogCommandCapability, LogPreset, MetricsSource, MonitorValueLevel, PackageCommandCapability,
     PackageFilter, PortCommandCapability, PortFilter, ProcessActionKind, ProcessCommandCapability,
     ProcessFilter, ProcessSort, ProfilerRegistry, ResourceDockerContainer, ResourceDockerStatus,
     ResourceFilesystemEntry, ResourceFilesystemSnapshot, ResourceFilesystemStatus,
@@ -148,12 +147,11 @@ use oxideterm_connection_monitor::{
     build_service_follow_logs_command, build_service_logs_command, build_tmux_action_command,
     build_tmux_attach_command, build_tmux_new_session_command, build_tmux_rename_session_command,
     build_tmux_rename_window_command, build_tmux_send_pane_command, build_tmux_snapshot_command,
-    docker_action_succeeded,
-    docker_row_signature, docker_state_label_key, filesystem_attention_label_keys,
-    filesystem_entry_severity, filesystem_filter_label_key, filesystem_kind_label_key,
-    filesystem_read_only_label_key, filesystem_row_signature, format_bytes,
-    gpu_device_row_signature, log_level_label_key, log_preset_label_key, log_row_signature,
-    package_filter_label_key, package_filter_manager, package_filter_options,
+    docker_action_succeeded, docker_row_signature, docker_state_label_key,
+    filesystem_attention_label_keys, filesystem_entry_severity, filesystem_filter_label_key,
+    filesystem_kind_label_key, filesystem_read_only_label_key, filesystem_row_signature,
+    format_bytes, gpu_device_row_signature, log_level_label_key, log_preset_label_key,
+    log_row_signature, package_filter_label_key, package_filter_manager, package_filter_options,
     package_row_signature, package_status_label_key, parse_log_snapshot, parse_package_snapshot,
     parse_port_snapshot, percent_level, port_endpoint, port_filter_label_key,
     port_is_risky_exposure, port_row_signature, port_state_label_key, process_display_command,
@@ -310,7 +308,9 @@ use self::pane_tree::SplitDrag;
 pub(crate) use self::root::helpers::tokens_from_settings as portable_bootstrap_tokens_from_settings;
 use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
-use self::session_manager::{SessionManagerState, SessionManagerWorkspaceEvent};
+use self::session_manager::{
+    SessionManagerInput, SessionManagerState, SessionManagerWorkspaceEvent,
+};
 use self::sidebar::AiInlinePanelState;
 #[cfg(test)]
 use self::sidebar::AiStreamDeliveryEvent;
@@ -926,6 +926,15 @@ pub(crate) struct WorkspaceApp {
     context_tools_menu_scroll: ScrollHandle,
     session_search_open: bool,
     session_search_query: String,
+    // Session manager sidebar search disclosure and sort menu open state.
+    // These are sidebar-only flags so the tab's toolbar menus don't conflict.
+    session_manager_search_open: bool,
+    session_manager_sidebar_sort_open: bool,
+    // Set only across the tabbar's "show in sidebar" handoff: it closes the
+    // Session Manager tab and the sidebar form takes over, so
+    // finish_tab_removal must keep the panel on Connections instead of
+    // parking the sidebar on Active Sessions.
+    session_manager_handoff_to_sidebar: bool,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     knowledge_workspace_list_state: ListState,

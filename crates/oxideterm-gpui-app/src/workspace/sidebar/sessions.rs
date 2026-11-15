@@ -607,10 +607,7 @@ fn group_active_session_rows_by_host_user(
 
 /// Computes which outer guide-rail columns (`0..row.depth - 1`) have following
 /// siblings below the row at `target_index`.
-fn session_row_ancestor_rails(
-    rows: &[ActiveSessionSidebarRow],
-    target_index: usize,
-) -> Vec<bool> {
+fn session_row_ancestor_rails(rows: &[ActiveSessionSidebarRow], target_index: usize) -> Vec<bool> {
     // Index `d` tracks whether the active ancestor at depth `d` continues below
     // its subtree (`!is_last`). Index 0 is unused because roots have no outer rail.
     let mut continues_at_depth: Vec<bool> = Vec::new();
@@ -819,7 +816,10 @@ impl WorkspaceApp {
         (24.0_f32).max((self.tokens.metrics.ui_text_xs + 12.0).round())
     }
 
-    fn local_profile_session_icon(&self, local_profile_id: Option<&str>) -> super::super::session_icons::SessionIcon {
+    fn local_profile_session_icon(
+        &self,
+        local_profile_id: Option<&str>,
+    ) -> super::super::session_icons::SessionIcon {
         local_profile_id
             .and_then(|id| {
                 self.connection_store
@@ -1603,11 +1603,7 @@ impl WorkspaceApp {
         )
     }
 
-    fn render_session_segment_gap(
-        &self,
-        depth: usize,
-        ancestor_continues: &[bool],
-    ) -> AnyElement {
+    fn render_session_segment_gap(&self, depth: usize, ancestor_continues: &[bool]) -> AnyElement {
         self.render_session_tree_child_with_rails(
             depth,
             ancestor_continues,
@@ -1630,9 +1626,8 @@ impl WorkspaceApp {
         let has_terminals = !terminal_ids.is_empty();
         let has_tools = !tools.is_empty();
         let has_lifecycle = !lifecycle.is_empty();
-        let mut children = Vec::with_capacity(
-            terminal_ids.len() + tools.len() + lifecycle.len() + 2,
-        );
+        let mut children =
+            Vec::with_capacity(terminal_ids.len() + tools.len() + lifecycle.len() + 2);
 
         let terminal_count = terminal_ids.len();
         for (index, &session_id) in terminal_ids.iter().enumerate() {
@@ -2156,12 +2151,7 @@ impl WorkspaceApp {
             .w_full()
             .flex()
             .flex_col()
-            .child(self.render_session_tree_child_with_rails(
-                row.depth,
-                &[],
-                row.is_last,
-                header,
-            ));
+            .child(self.render_session_tree_child_with_rails(row.depth, &[], row.is_last, header));
         if !items.is_empty() {
             // The inner id makes the rendered option stack observable in tests
             // without depending on a private cache key.
@@ -2452,9 +2442,12 @@ impl WorkspaceApp {
             .flatten()
             .map(|action| {
                 let (debug_key, icon, key, danger) = match action {
-                    SessionNodeRowAction::Connect => {
-                        ("connect", LucideIcon::Power, "sessions.actions.connect", false)
-                    }
+                    SessionNodeRowAction::Connect => (
+                        "connect",
+                        LucideIcon::Power,
+                        "sessions.actions.connect",
+                        false,
+                    ),
                     SessionNodeRowAction::Reconnect => (
                         "reconnect",
                         LucideIcon::RefreshCw,
@@ -2611,13 +2604,14 @@ impl WorkspaceApp {
                         variant,
                         listener: Box::new(cx.listener(move |this, _, window, cx| {
                             match action {
-                                SessionNodeRowAction::Disconnect => {
-                                    this.disconnect_standalone_connection(&connection_id, window, cx)
-                                }
+                                SessionNodeRowAction::Disconnect => this
+                                    .disconnect_standalone_connection(&connection_id, window, cx),
                                 SessionNodeRowAction::Remove => {
                                     this.remove_standalone_connection(&connection_id, window, cx)
                                 }
-                                _ => this.reconnect_standalone_connection(&connection_id, window, cx),
+                                _ => {
+                                    this.reconnect_standalone_connection(&connection_id, window, cx)
+                                }
                             }
                             cx.stop_propagation();
                         })),
@@ -2655,7 +2649,10 @@ impl WorkspaceApp {
                     .justify_center()
                     .child(self.render_animated_chevron(
                         (
-                            SharedString::from(format!("standalone-chevron-{}", session.connection_id)),
+                            SharedString::from(format!(
+                                "standalone-chevron-{}",
+                                session.connection_id
+                            )),
                             expanded as usize,
                         ),
                         expanded,
@@ -2889,15 +2886,18 @@ impl WorkspaceApp {
         )
         .when(!local_group && node.port != 22, |row| {
             row.child(
-                div().ml_2().flex_none().child(oxideterm_gpui_ui::monospace_datum(
-                    &self.tokens,
-                    port_text,
-                    Some(mono_font_family.clone()),
-                    oxideterm_gpui_ui::MonospaceDatumOptions::new(
-                        oxideterm_gpui_ui::MonospaceDatumTone::Muted,
-                    )
-                    .text_size(meta_text_size),
-                )),
+                div()
+                    .ml_2()
+                    .flex_none()
+                    .child(oxideterm_gpui_ui::monospace_datum(
+                        &self.tokens,
+                        port_text,
+                        Some(mono_font_family.clone()),
+                        oxideterm_gpui_ui::MonospaceDatumOptions::new(
+                            oxideterm_gpui_ui::MonospaceDatumTone::Muted,
+                        )
+                        .text_size(meta_text_size),
+                    )),
             )
         })
         .when(terminal_count > 0, |row| {
@@ -2930,11 +2930,14 @@ impl WorkspaceApp {
         .child(self.render_session_status_dot(status))
         .when(local_profile_id.is_some(), |row| {
             row.child(
-                div().ml(px(4.0)).flex_none().child(Self::render_lucide_icon(
-                    LucideIcon::ArrowUpDown,
-                    12.0,
-                    muted_text,
-                )),
+                div()
+                    .ml(px(4.0))
+                    .flex_none()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::ArrowUpDown,
+                        12.0,
+                        muted_text,
+                    )),
             )
         })
         .on_click(cx.listener(move |this, _event, _window, cx| {
@@ -3167,7 +3170,9 @@ impl WorkspaceApp {
         let idle_icon_color = theme.text_muted;
         let (hover_bg, hover_fg) = match variant {
             SessionActionVariant::Primary => (theme.bg_hover, theme.text),
-            SessionActionVariant::Danger => (mix_rgb(theme.bg_hover, theme.error, 0.14), theme.error),
+            SessionActionVariant::Danger => {
+                (mix_rgb(theme.bg_hover, theme.error, 0.14), theme.error)
+            }
         };
         let row_selector = format!("session-action-row-{debug_key}");
         let icon_selector = format!("session-action-icon-{debug_key}");
@@ -4251,10 +4256,7 @@ mod host_view_render_tests {
         isolated_fixture_named(cx.test_function_name().unwrap(), fixture_key)
     }
 
-    fn isolated_fixture_named(
-        test_name: &str,
-        fixture_key: &str,
-    ) -> Option<std::path::PathBuf> {
+    fn isolated_fixture_named(test_name: &str, fixture_key: &str) -> Option<std::path::PathBuf> {
         let executable = std::env::current_exe().unwrap();
         if let Some(fixture_dir) = std::env::var_os(fixture_key) {
             let fixture_dir = std::path::PathBuf::from(fixture_dir);
@@ -4712,7 +4714,8 @@ mod host_view_render_tests {
         let ssh_title = cx
             .debug_bounds("session-header-title-layout-ssh")
             .expect("ssh header title bounds");
-        let standalone_selector = format!("session-header-icon-standalone-connection-{standalone_id}");
+        let standalone_selector =
+            format!("session-header-icon-standalone-connection-{standalone_id}");
         let standalone_title_selector =
             format!("session-header-title-standalone-connection-{standalone_id}");
         let standalone_icon = cx
@@ -4810,11 +4813,7 @@ mod host_view_render_tests {
 
         // 3. Hovering a sibling action must keep Disconnect neutral; hovering Disconnect
         // reveals the danger hover tint.
-        cx.simulate_mouse_move(
-            new_term_row.center(),
-            None,
-            gpui::Modifiers::default(),
-        );
+        cx.simulate_mouse_move(new_term_row.center(), None, gpui::Modifiers::default());
         draw_sidebar(cx);
         cx.update(|window, _| {
             assert!(
@@ -4826,11 +4825,7 @@ mod host_view_render_tests {
             );
         });
 
-        cx.simulate_mouse_move(
-            disconnect_row.center(),
-            None,
-            gpui::Modifiers::default(),
-        );
+        cx.simulate_mouse_move(disconnect_row.center(), None, gpui::Modifiers::default());
         draw_sidebar(cx);
         cx.update(|window, _| {
             let hovered = window
@@ -4949,11 +4944,7 @@ mod host_view_render_tests {
             ) -> anyhow::Result<gpui::Size<f32>> {
                 self.0.advance(font_id, glyph_id)
             }
-            fn glyph_for_char(
-                &self,
-                font_id: gpui::FontId,
-                ch: char,
-            ) -> Option<gpui::GlyphId> {
+            fn glyph_for_char(&self, font_id: gpui::FontId, ch: char) -> Option<gpui::GlyphId> {
                 self.0.glyph_for_char(font_id, ch)
             }
             fn glyph_raster_bounds(
@@ -4970,8 +4961,8 @@ mod host_view_render_tests {
                 _params: &gpui::RenderGlyphParams,
                 raster_bounds: Bounds<gpui::DevicePixels>,
             ) -> anyhow::Result<(gpui::Size<gpui::DevicePixels>, Vec<u8>)> {
-                let len =
-                    (raster_bounds.size.width.0.max(0) * raster_bounds.size.height.0.max(0)) as usize;
+                let len = (raster_bounds.size.width.0.max(0) * raster_bounds.size.height.0.max(0))
+                    as usize;
                 Ok((raster_bounds.size, vec![255; len]))
             }
             fn layout_line(

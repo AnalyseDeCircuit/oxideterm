@@ -1372,6 +1372,7 @@
     "copy_title": "复制标题",
     "detach_to_window": "移到新窗口",
     "return_to_main_window": "移回主窗口",
+    "switch_to_sidebar": "在侧边栏中显示",
     "split_into_active_horizontal": "并入当前标签页（左右分屏）",
     "split_into_active_vertical": "并入当前标签页（上下分屏）",
     "detached_tab_closed": "此标签页已关闭。",

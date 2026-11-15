@@ -1372,6 +1372,7 @@
     "copy_title": "Copy Title",
     "detach_to_window": "Move to New Window",
     "return_to_main_window": "Return to Main Window",
+    "switch_to_sidebar": "Show in Sidebar",
     "split_into_active_horizontal": "Merge into Active Tab (Side by Side)",
     "split_into_active_vertical": "Merge into Active Tab (Stacked)",
     "detached_tab_closed": "This tab was closed.",

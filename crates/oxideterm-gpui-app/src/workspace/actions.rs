@@ -1819,7 +1819,7 @@ impl WorkspaceApp {
             || (self.sftp_focused_surface == sftp::SftpSurfaceId::Sidebar
                 && self.focus_handle.is_focused(window)
                 && !self.sidebar_collapsed
-                && self.effective_sidebar_panel_section() == SidebarSection::Sessions
+                && self.sidebar_hosts_embedded_sftp()
                 && self.embedded_sftp_target(cx).is_some())
             || self
                 .active_content_tab(cx)

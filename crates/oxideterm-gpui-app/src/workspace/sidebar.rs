@@ -82,6 +82,8 @@ impl SidebarSection {
             // The retired saved-connections sidebar now restores the active
             // session navigator while the full manager remains a workspace tab.
             "connections" | "saved" => Self::Sessions,
+            // The session manager sidebar body persists under its own key.
+            "session_manager" => Self::Connections,
             // Embedded SFTP now shares the active-sessions panel. Preserve the
             // old persisted key as a migration path instead of reopening a
             // retired standalone sidebar.
@@ -112,9 +114,10 @@ impl SidebarSection {
     pub(super) fn as_settings_key(self) -> &'static str {
         match self {
             Self::Sessions => "sessions",
-            // Keep the activity identity stable; persistence stores the
-            // effective Sessions panel instead of this tab-only entry.
-            Self::Connections => "saved",
+            // The session manager sidebar renders the saved-connections tree
+            // inline in the sidebar body; persist under a stable key so the
+            // retired "saved"/"connections" migrations stay distinct.
+            Self::Connections => "session_manager",
             Self::Forwards => "forwards",
             Self::Runtime => "runtime",
             Self::Terminal => "connection_pool",
@@ -137,13 +140,13 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn effective_sidebar_panel_section(&self) -> SidebarSection {
         match self.active_sidebar_section {
             SidebarSection::Sessions
+            | SidebarSection::Connections
             | SidebarSection::Forwards
             | SidebarSection::Extensions
             | SidebarSection::CloudSync => self.active_sidebar_section,
             // Tauri separates activity-bar tab buttons from sidebar sections.
             // Keep tab-only entries from replacing the Sessions sidebar body.
-            SidebarSection::Connections
-            | SidebarSection::Terminal
+            SidebarSection::Terminal
             | SidebarSection::Runtime
             | SidebarSection::Network
             | SidebarSection::Knowledge
@@ -191,6 +194,7 @@ mod sidebar_persistence_tests {
     fn sidebar_sections_roundtrip_persisted_settings_keys() {
         let sections = [
             SidebarSection::Sessions,
+            SidebarSection::Connections,
             SidebarSection::Forwards,
             SidebarSection::Runtime,
             SidebarSection::Terminal,

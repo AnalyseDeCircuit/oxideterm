@@ -1,3 +1,4 @@
+use super::actions::RowSelectionMode;
 use super::*;
 use gpui::StatefulInteractiveElement;
 
@@ -114,18 +115,26 @@ pub(super) enum SessionManagerTreeRow {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SessionManagerItemPointerAction {
     None,
-    Select,
     Open,
+    SelectReplace,
+    SelectToggle,
+    SelectRange,
 }
 
 /// Keeps card and list-row pointer behavior aligned across Session Manager layouts.
+/// Double-click always opens; a single click on a selectable row replaces the
+/// selection, Ctrl toggles it, and Shift extends from the anchor to this row.
 pub(super) fn session_manager_item_pointer_action(
     click_count: usize,
     selectable: bool,
+    control: bool,
+    shift: bool,
 ) -> SessionManagerItemPointerAction {
     match click_count {
         2 => SessionManagerItemPointerAction::Open,
-        1 if selectable => SessionManagerItemPointerAction::Select,
+        1 if selectable && shift => SessionManagerItemPointerAction::SelectRange,
+        1 if selectable && control => SessionManagerItemPointerAction::SelectToggle,
+        1 if selectable => SessionManagerItemPointerAction::SelectReplace,
         _ => SessionManagerItemPointerAction::None,
     }
 }
@@ -183,7 +192,6 @@ impl SessionManagerDisplayItem {
     }
 
     pub(super) fn row_action_target(&self) -> Option<SessionManagerRowActionTarget> {
-        // SSH config discoveries are not persisted rows and therefore have no delete menu.
         match self {
             Self::Tunnel(item) => Some(SessionManagerRowActionTarget::Tunnel(
                 item.forward.id.clone(),
@@ -212,7 +220,9 @@ impl SessionManagerDisplayItem {
             Self::RemoteDesktop(profile) => Some(SessionManagerRowActionTarget::RemoteDesktop(
                 profile.id.clone(),
             )),
-            Self::SshConfig(_) => None,
+            Self::SshConfig(host) => {
+                Some(SessionManagerRowActionTarget::SshConfig(host.alias.clone()))
+            }
         }
     }
 
@@ -758,7 +768,7 @@ impl WorkspaceApp {
         )
     }
 
-    fn session_manager_tree_list_spec() -> TauriVirtualListSpec {
+    pub(super) fn session_manager_tree_list_spec() -> TauriVirtualListSpec {
         TauriVirtualListSpec::new(
             px(MANAGER_TREE_ESTIMATED_ROW_HEIGHT),
             MANAGER_MAIN_VIEW_OVERSCAN,
@@ -815,6 +825,26 @@ impl WorkspaceApp {
             &manager.main_tree_list_state,
             &mut manager.main_tree_list_cache.borrow_mut(),
             "session-manager-tree",
+            &signatures,
+            Self::session_manager_tree_list_spec(),
+        );
+    }
+
+    pub(super) fn sync_session_manager_sidebar_tree_list_state(
+        &self,
+        rows: &[SessionManagerTreeRow],
+        items: &[SessionManagerDisplayItem],
+        cx: &App,
+    ) {
+        let signatures = rows
+            .iter()
+            .map(|row| session_manager_tree_row_signature(row, items))
+            .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
+        sync_tauri_variable_list_state_by_signatures(
+            &manager.sidebar_tree_list_state,
+            &mut manager.sidebar_tree_list_cache.borrow_mut(),
+            "session-manager-sidebar-tree",
             &signatures,
             Self::session_manager_tree_list_spec(),
         );
@@ -911,6 +941,10 @@ impl WorkspaceApp {
             card_columns,
             recent_columns,
         ));
+        self.set_session_manager_visible_selection_targets(
+            session_manager_grid_visible_targets(&rows, &items),
+            cx,
+        );
         self.sync_session_manager_grid_list_state(&rows, &items, cx);
         let state = self.session_manager.read(cx).main_grid_list_state.clone();
         let workspace = cx.entity();
@@ -998,6 +1032,49 @@ impl WorkspaceApp {
         }
     }
 
+    /// Shared mousedown dispatch for the non-draggable grid surfaces (cards
+    /// and the recent strip), which keep selecting on press.
+    fn handle_session_manager_item_mousedown(
+        &mut self,
+        event: &MouseDownEvent,
+        selection_target: Option<SessionManagerSelectionTarget>,
+        open_target: SessionManagerOpenTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match session_manager_item_pointer_action(
+            event.click_count,
+            selection_target.is_some(),
+            event.modifiers.control,
+            event.modifiers.shift,
+        ) {
+            SessionManagerItemPointerAction::SelectReplace => {
+                if let Some(target) = selection_target {
+                    self.apply_session_manager_selection(target, RowSelectionMode::Replace, cx);
+                }
+            }
+            SessionManagerItemPointerAction::SelectToggle => {
+                if let Some(target) = selection_target {
+                    self.apply_session_manager_selection(target, RowSelectionMode::Toggle, cx);
+                }
+            }
+            SessionManagerItemPointerAction::SelectRange => {
+                if let Some(target) = selection_target {
+                    self.apply_session_manager_selection(target, RowSelectionMode::Range, cx);
+                }
+            }
+            SessionManagerItemPointerAction::Open => {
+                self.open_session_manager_target_with_sftp(
+                    open_target,
+                    event.modifiers.control,
+                    window,
+                    cx,
+                );
+            }
+            SessionManagerItemPointerAction::None => {}
+        }
+    }
+
     pub(super) fn render_session_manager_recent_item(
         &self,
         item: &SessionManagerDisplayItem,
@@ -1027,26 +1104,13 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    match session_manager_item_pointer_action(
-                        event.click_count,
-                        selection_target.is_some(),
-                    ) {
-                        SessionManagerItemPointerAction::Select => {
-                            if let Some(target) = selection_target.clone() {
-                                this.toggle_session_selection(target, cx);
-                                cx.notify();
-                            }
-                        }
-                        SessionManagerItemPointerAction::Open => {
-                            this.open_session_manager_target_with_sftp(
-                                open_target.clone(),
-                                event.modifiers.control,
-                                window,
-                                cx,
-                            );
-                        }
-                        SessionManagerItemPointerAction::None => {}
-                    }
+                    this.handle_session_manager_item_mousedown(
+                        event,
+                        selection_target.clone(),
+                        open_target.clone(),
+                        window,
+                        cx,
+                    );
                 }),
             )
             .child(
@@ -1177,26 +1241,13 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    match session_manager_item_pointer_action(
-                        event.click_count,
-                        selection_target.is_some(),
-                    ) {
-                        SessionManagerItemPointerAction::Select => {
-                            if let Some(target) = selection_target.clone() {
-                                this.toggle_session_selection(target, cx);
-                                cx.notify();
-                            }
-                        }
-                        SessionManagerItemPointerAction::Open => {
-                            this.open_session_manager_target_with_sftp(
-                                open_target.clone(),
-                                event.modifiers.control,
-                                window,
-                                cx,
-                            );
-                        }
-                        SessionManagerItemPointerAction::None => {}
-                    }
+                    this.handle_session_manager_item_mousedown(
+                        event,
+                        selection_target.clone(),
+                        open_target.clone(),
+                        window,
+                        cx,
+                    );
                 }),
             )
             .when_some(checkbox_target, |card, target| {
@@ -1252,6 +1303,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        self.set_session_manager_visible_selection_targets(
+            items
+                .iter()
+                .filter_map(|item| item.selection_target())
+                .collect(),
+            cx,
+        );
         self.sync_session_manager_main_list_state(&items, cx);
         let state = self.session_manager.read(cx).main_list_state.clone();
         let workspace = cx.entity();
@@ -1264,8 +1322,15 @@ impl WorkspaceApp {
                     let Some(item) = items.get(index) else {
                         return div().into_any_element();
                     };
-                    this.render_session_manager_display_item_row(item, 0, has_background, false, cx)
-                        .into_any_element()
+                    this.render_session_manager_display_item_row(
+                        item,
+                        0,
+                        has_background,
+                        false,
+                        false,
+                        cx,
+                    )
+                    .into_any_element()
                 })
             },
         );
@@ -1292,7 +1357,6 @@ impl WorkspaceApp {
                     .text_size(px(MANAGER_TABLE_HEADER_TEXT_SIZE))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(rgb(theme.text_muted))
-                    .child(div().w(px(MANAGER_SELECTION_COLUMN_WIDTH)).flex_none())
                     .child(div().w(px(MANAGER_ROW_ICON_SIZE)).flex_none())
                     .child(
                         div()
@@ -1315,7 +1379,20 @@ impl WorkspaceApp {
                             .child(self.i18n.t("sessionManager.table.actions")),
                     ),
             )
-            .child(div().flex_1().min_h(px(0.0)).child(list))
+            .child(
+                div()
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            // Clicking below the last row clears the selection;
+                            // rows stop propagation so their own handlers win.
+                            this.clear_session_manager_selection(cx);
+                        }),
+                    )
+                    .child(list),
+            )
             .into_any_element()
     }
 
@@ -1335,6 +1412,10 @@ impl WorkspaceApp {
             &expanded_groups,
         ));
         let has_rows = !rows.is_empty();
+        self.set_session_manager_visible_selection_targets(
+            session_manager_tree_visible_targets(&rows, &items),
+            cx,
+        );
         self.sync_session_manager_tree_list_state(&rows, &items, cx);
         let state = self.session_manager.read(cx).main_tree_list_state.clone();
         let workspace = cx.entity();
@@ -1348,6 +1429,7 @@ impl WorkspaceApp {
                         rows.get(index),
                         &items,
                         has_background,
+                        false,
                         cx,
                     )
                 })
@@ -1395,6 +1477,16 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, _event, _window, cx| {
+                            // Clicking empty tree space clears the selection;
+                            // rows and group headers stop propagation so their
+                            // own handlers keep ownership of the press.
+                            this.clear_session_manager_selection(cx);
+                        }),
+                    )
+                    // GPUI renamed the wheel listener from on_scroll_wheel.
                     .on_scroll(cx.listener(|this, _event, _window, cx| {
                         // Close pointer-positioned menus before the virtual rows move.
                         this.close_session_row_menus(cx);
@@ -1531,6 +1623,7 @@ impl WorkspaceApp {
         row: Option<&SessionManagerTreeRow>,
         items: &[SessionManagerDisplayItem],
         has_background: bool,
+        sidebar: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match row {
@@ -1546,6 +1639,7 @@ impl WorkspaceApp {
                     *expanded,
                     *has_children,
                     has_background,
+                    sidebar,
                     cx,
                 )
                 .into_any_element(),
@@ -1555,44 +1649,79 @@ impl WorkspaceApp {
                     let context_target = item.row_action_target();
                     let drop_group = item.group().map(ToOwned::to_owned);
                     let theme = self.tokens.ui;
-                    self.render_session_manager_display_item_row(
-                        item,
-                        *depth,
-                        has_background,
-                        true,
-                        cx,
-                    )
-                    .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
-                        // Every visible child row participates in its nearest folder's drop area.
-                        row.border_1()
-                            .border_color(rgb(theme.accent))
-                            .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
-                    })
-                    .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
-                    .on_drop(
-                        cx.listener(move |this, drag: &SessionManagerDrag, _window, cx| {
-                            this.move_dragged_sessions_to_group(
-                                &drag.targets,
-                                drop_group.as_deref(),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
-                            if let Some(target) = context_target.clone() {
-                                this.open_session_manager_context_menu(
-                                    target,
-                                    f32::from(event.position.x),
-                                    f32::from(event.position.y),
+                    let row = self
+                        .render_session_manager_display_item_row(
+                            item,
+                            *depth,
+                            has_background,
+                            true,
+                            sidebar,
+                            cx,
+                        )
+                        .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
+                            // Every visible child row participates in its nearest folder's drop area.
+                            row.border_1()
+                                .border_color(rgb(theme.accent))
+                                .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
+                        })
+                        .can_drop(|drag, _window, _cx| drag.is::<SessionManagerDrag>())
+                        .on_drop(cx.listener(
+                            move |this, drag: &SessionManagerDrag, _window, cx| {
+                                this.move_dragged_sessions_to_group(
+                                    &drag.targets,
+                                    drop_group.as_deref(),
                                     cx,
                                 );
-                            }
-                            cx.stop_propagation();
-                        }),
-                    )
+                                cx.stop_propagation();
+                            },
+                        ))
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                if let Some(target) = context_target.clone() {
+                                    this.open_session_manager_context_menu(
+                                        target,
+                                        f32::from(event.position.x),
+                                        f32::from(event.position.y),
+                                        cx,
+                                    );
+                                }
+                                cx.stop_propagation();
+                            }),
+                        );
+                    if !sidebar {
+                        return row.into_any_element();
+                    }
+                    // The sidebar drops the last-used column; surface the value
+                    // as a hover hint on the already-stateful row. The tooltip
+                    // queue key stays distinct from the element id so hover
+                    // bookkeeping cannot collide with drag state.
+                    let tooltip_id = format!(
+                        "session-manager-row-last-used-{}",
+                        session_manager_display_item_signature(item)
+                    );
+                    let hint = format!(
+                        "{}: {}",
+                        self.i18n.t("sessionManager.table.last_used"),
+                        format_last_used(item.last_used().as_deref(), &self.i18n)
+                    );
+                    let clear_id = tooltip_id.clone();
+                    row.on_mouse_move(cx.listener(
+                        move |this, event: &MouseMoveEvent, _window, cx| {
+                            this.queue_workspace_tooltip(
+                                tooltip_id.clone(),
+                                hint.clone(),
+                                f32::from(event.position.x) + 12.0,
+                                f32::from(event.position.y) + 16.0,
+                                cx,
+                            );
+                        },
+                    ))
+                    .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                        if !*hovered {
+                            this.clear_workspace_tooltip(&clear_id, cx);
+                        }
+                    }))
                     .into_any_element()
                 })
                 .unwrap_or_else(|| div().into_any_element()),
@@ -1607,6 +1736,7 @@ impl WorkspaceApp {
         expanded: bool,
         has_children: bool,
         has_background: bool,
+        sidebar: bool,
         cx: &mut Context<Self>,
     ) -> Div {
         let theme = self.tokens.ui;
@@ -1705,40 +1835,47 @@ impl WorkspaceApp {
                     .text_color(rgb(theme.text_muted))
                     .child(self.connection_count_for_group(group).to_string()),
             )
-            .child(self.workspace_tooltip_icon_button(
-                LucideIcon::FolderPlus,
-                MANAGER_ROW_ACTION_ICON_SIZE,
-                rgb(theme.text),
-                IconButtonOptions {
+            // The sidebar keeps group rows clean; the right-click menu already
+            // exposes subgroup creation and the same action list.
+            .when(!sidebar, |row| {
+                row.child(self.workspace_tooltip_icon_button(
+                    LucideIcon::FolderPlus,
+                    MANAGER_ROW_ACTION_ICON_SIZE,
+                    rgb(theme.text),
+                    IconButtonOptions {
+                        has_background,
+                        ..IconButtonOptions::opaque_toolbar(
+                            MANAGER_ROW_ACTION_BUTTON,
+                            ButtonRadius::Sm,
+                        )
+                    },
+                    subgroup_tooltip,
+                    "session-manager-new-subgroup",
+                    true,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.open_session_subgroup_creation(&subgroup_parent, cx);
+                        cx.stop_propagation();
+                    }),
+                    workspace,
+                ))
+                .child(self.render_row_icon_button(
+                    LucideIcon::MoreVertical,
+                    MANAGER_ROW_ACTION_BUTTON,
+                    MANAGER_ROW_ACTION_ICON_SIZE,
+                    rgb(theme.text),
                     has_background,
-                    ..IconButtonOptions::opaque_toolbar(MANAGER_ROW_ACTION_BUTTON, ButtonRadius::Sm)
-                },
-                subgroup_tooltip,
-                "session-manager-new-subgroup",
-                true,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.open_session_subgroup_creation(&subgroup_parent, cx);
-                    cx.stop_propagation();
-                }),
-                workspace,
-            ))
-            .child(self.render_row_icon_button(
-                LucideIcon::MoreVertical,
-                MANAGER_ROW_ACTION_BUTTON,
-                MANAGER_ROW_ACTION_ICON_SIZE,
-                rgb(theme.text),
-                has_background,
-                move |this, event, _window, cx| {
-                    this.open_session_manager_row_action_menu(
-                        SessionManagerRowActionTarget::Group(menu_group.clone()),
-                        f32::from(event.position.x),
-                        f32::from(event.position.y),
-                        cx,
-                    );
-                    cx.stop_propagation();
-                },
-                cx,
-            ))
+                    move |this, event, _window, cx| {
+                        this.open_session_manager_row_action_menu(
+                            SessionManagerRowActionTarget::Group(menu_group.clone()),
+                            f32::from(event.position.x),
+                            f32::from(event.position.y),
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
+            })
     }
 
     pub(super) fn render_session_manager_display_item_row(
@@ -1747,12 +1884,12 @@ impl WorkspaceApp {
         depth: usize,
         has_background: bool,
         allow_drag: bool,
+        sidebar: bool,
         cx: &mut Context<Self>,
-    ) -> Div {
+    ) -> gpui::Stateful<gpui::Div> {
         let theme = self.tokens.ui;
         let open_target = item.open_target();
         let selection_target = item.selection_target();
-        let checkbox_target = selection_target.clone();
         let last_used = item.last_used();
         let subtitle = if matches!(item, SessionManagerDisplayItem::SshConfig(_)) {
             format!(
@@ -1770,103 +1907,44 @@ impl WorkspaceApp {
                 .selected_items
                 .contains(target)
         });
-        let drag_handle = if allow_drag
-            && self.session_manager.read(cx).search_query.trim().is_empty()
-        {
-            selection_target.clone().map(|target| {
-                let selected_targets = &self.session_manager.read(cx).selected_items;
-                let targets = if is_selected {
-                    selected_targets.iter().cloned().collect::<Vec<_>>()
-                } else {
-                    vec![target]
-                };
-                let label = if targets.len() > 1 {
-                    selected_count_label(&self.i18n, targets.len())
-                } else {
-                    item.name().to_string()
-                };
-                let drag = SessionManagerDrag {
-                    targets,
-                    label,
-                    position: Point::default(),
-                    background: rgb(theme.bg_panel),
-                    border: rgb(theme.accent),
-                    text: rgb(theme.text),
-                };
-                let drag_workspace = cx.entity();
-                let grip_color = rgba((theme.text_muted << 8) | MANAGER_DRAG_GRIP_ALPHA);
-                div()
-                    .id(format!(
-                        "session-manager-item-drag-{}",
-                        session_manager_display_item_signature(item)
-                    ))
-                    .size(px(MANAGER_ROW_DRAG_HANDLE_SIZE))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.sm))
-                    .cursor(CursorStyle::OpenHand)
-                    .hover(move |handle| {
-                        handle.bg(theme_row_hover_bg(theme.bg_hover, has_background))
-                    })
-                    .child(
-                        // A six-dot grip distinguishes moving from opening the connection row.
-                        div()
-                            .w(px(MANAGER_DRAG_GRIP_WIDTH))
-                            .flex()
-                            .flex_wrap()
-                            .gap(px(MANAGER_DRAG_GRIP_DOT_SIZE))
-                            .children((0..MANAGER_DRAG_GRIP_DOT_COUNT).map(move |_| {
-                                div()
-                                    .size(px(MANAGER_DRAG_GRIP_DOT_SIZE))
-                                    .rounded(px(MANAGER_DRAG_GRIP_DOT_SIZE / 2.0))
-                                    .bg(grip_color)
-                            })),
-                    )
-                    .on_drag(drag, move |drag, position, _window, cx| {
-                        let dragged_targets = drag.targets.iter().cloned().collect::<HashSet<_>>();
-                        let _ = drag_workspace.update(cx, |this, cx| {
-                            this.session_manager.update(cx, |session_manager, cx| {
-                                // Row mouse-down selection is restored to the exact drag payload.
-                                if session_manager.selected_items != dragged_targets {
-                                    session_manager.selected_items = dragged_targets;
-                                    cx.notify();
-                                }
-                            });
-                        });
-                        cx.new(|_| drag.with_position(position))
-                    })
-                    .into_any_element()
-            })
-        } else {
-            None
-        };
-        let selection = if let Some(target) = checkbox_target {
-            checkbox(
-                &self.tokens,
-                format!("session-selection-{target:?}"),
-                String::new(),
-                is_selected,
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.toggle_session_selection(target.clone(), cx);
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
-        } else {
-            // Non-SSH profiles keep the selection column reserved so all
-            // identity and metadata columns remain aligned.
-            div()
-                .size(px(MANAGER_SELECTION_COLUMN_WIDTH))
-                .flex_none()
-                .into_any_element()
-        };
-        div()
+        // The whole row is the drag source. The payload is computed from the
+        // selection at render time: a selected row drags the full selection,
+        // an unselected row drags only itself. Single-click selection is
+        // applied on release (on_click below), never on press, so a re-render
+        // between press and drag-start cannot shrink the payload before the
+        // drag listener captures it.
+        let drag_payload =
+            if allow_drag && self.session_manager.read(cx).search_query.trim().is_empty() {
+                selection_target.clone().map(|target| {
+                    let selected_targets = &self.session_manager.read(cx).selected_items;
+                    let targets = if is_selected {
+                        selected_targets.iter().cloned().collect::<Vec<_>>()
+                    } else {
+                        vec![target]
+                    };
+                    let label = if targets.len() > 1 {
+                        selected_count_label(&self.i18n, targets.len())
+                    } else {
+                        item.name().to_string()
+                    };
+                    SessionManagerDrag {
+                        targets,
+                        label,
+                        position: Point::default(),
+                        background: rgb(theme.bg_panel),
+                        border: rgb(theme.accent),
+                        text: rgb(theme.text),
+                    }
+                })
+            } else {
+                None
+            };
+        let drag_workspace = cx.entity();
+        let row = div()
+            .id(SharedString::from(format!(
+                "session-manager-row-{}",
+                session_manager_display_item_signature(item)
+            )))
             .w_full()
             .min_w(px(0.0))
             .border_b_1()
@@ -1893,30 +1971,67 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
+                    // Double-click opens immediately on press; single-click
+                    // selection waits for release so the drag payload above
+                    // stays intact (see the payload comment).
+                    if event.click_count == 2 {
+                        this.open_session_manager_target_with_sftp(
+                            open_target.clone(),
+                            event.modifiers.control,
+                            window,
+                            cx,
+                        );
+                    }
+                    cx.stop_propagation();
+                }),
+            )
+            .on_click(
+                cx.listener(move |this, event: &gpui::ClickEvent, _window, cx| {
+                    // Keyboard/touch clicks carry no click_count or modifiers;
+                    // only the mouse press/release pair drives row selection.
+                    let gpui::ClickEvent::Mouse(click) = event else {
+                        return;
+                    };
                     match session_manager_item_pointer_action(
-                        event.click_count,
+                        click.down.click_count,
                         selection_target.is_some(),
+                        click.down.modifiers.control,
+                        click.down.modifiers.shift,
                     ) {
-                        SessionManagerItemPointerAction::Select => {
+                        SessionManagerItemPointerAction::SelectReplace => {
                             if let Some(target) = selection_target.clone() {
-                                this.toggle_session_selection(target, cx);
-                                cx.notify();
+                                this.apply_session_manager_selection(
+                                    target,
+                                    RowSelectionMode::Replace,
+                                    cx,
+                                );
                             }
                         }
-                        SessionManagerItemPointerAction::Open => {
-                            this.open_session_manager_target_with_sftp(
-                                open_target.clone(),
-                                event.modifiers.control,
-                                window,
-                                cx,
-                            );
+                        SessionManagerItemPointerAction::SelectToggle => {
+                            if let Some(target) = selection_target.clone() {
+                                this.apply_session_manager_selection(
+                                    target,
+                                    RowSelectionMode::Toggle,
+                                    cx,
+                                );
+                            }
                         }
-                        SessionManagerItemPointerAction::None => {}
+                        SessionManagerItemPointerAction::SelectRange => {
+                            if let Some(target) = selection_target.clone() {
+                                this.apply_session_manager_selection(
+                                    target,
+                                    RowSelectionMode::Range,
+                                    cx,
+                                );
+                            }
+                        }
+                        // Open is handled on mouse-down, and a drag consumes the
+                        // pending mouse-down so this click never fires mid-drag.
+                        SessionManagerItemPointerAction::Open
+                        | SessionManagerItemPointerAction::None => {}
                     }
                 }),
             )
-            .when_some(drag_handle, |row, handle| row.child(handle))
-            .child(selection)
             .child(self.render_session_manager_item_icon(item, theme.text))
             .child(
                 div()
@@ -1942,15 +2057,36 @@ impl WorkspaceApp {
                             .child(subtitle),
                     ),
             )
-            .child(
-                div()
-                    .w(px(MANAGER_LIST_LAST_USED_WIDTH))
-                    .flex_none()
-                    .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
-                    .text_color(rgb(theme.text_muted))
-                    .child(format_last_used(last_used.as_deref(), &self.i18n)),
-            )
-            .child(self.render_session_manager_display_item_actions(item, has_background, cx))
+            .when(!sidebar, |row| {
+                row.child(
+                    div()
+                        .w(px(MANAGER_LIST_LAST_USED_WIDTH))
+                        .flex_none()
+                        .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
+                        .text_color(rgb(theme.text_muted))
+                        .child(format_last_used(last_used.as_deref(), &self.i18n)),
+                )
+                .child(self.render_session_manager_display_item_actions(item, has_background, cx))
+            });
+        if let Some(drag) = drag_payload {
+            row.on_drag(drag, move |drag, position, _window, cx| {
+                let dragged_targets = drag.targets.iter().cloned().collect::<HashSet<_>>();
+                let _ = drag_workspace.update(cx, |this, cx| {
+                    this.session_manager.update(cx, |session_manager, cx| {
+                        // The drag payload owns the selection it previews, so
+                        // any selection change made while pressing is
+                        // reconciled to the exact payload at drag start.
+                        if session_manager.selected_items != dragged_targets {
+                            session_manager.selected_items = dragged_targets;
+                            cx.notify();
+                        }
+                    });
+                });
+                cx.new(|_| drag.with_position(position))
+            })
+        } else {
+            row
+        }
     }
 
     pub(super) fn render_session_manager_item_icon(
@@ -1963,8 +2099,9 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::Connection(_)
             | SessionManagerDisplayItem::Tunnel(_)
             | SessionManagerDisplayItem::RemoteDesktop(_) => ui.info,
-            SessionManagerDisplayItem::SshConfig(_)
-            | SessionManagerDisplayItem::Plugin(_) => ui.accent_secondary,
+            SessionManagerDisplayItem::SshConfig(_) | SessionManagerDisplayItem::Plugin(_) => {
+                ui.accent_secondary
+            }
             SessionManagerDisplayItem::Serial(_)
             | SessionManagerDisplayItem::Ble(_)
             | SessionManagerDisplayItem::LocalTerminal(_) => ui.warning,
@@ -1973,7 +2110,8 @@ impl WorkspaceApp {
             | SessionManagerDisplayItem::StandaloneSftp(_) => ui.success,
             SessionManagerDisplayItem::Mosh(_) => ui.accent,
         };
-        let (default_background, default_foreground) = ((semantic_color << 8) | 0x26, semantic_color);
+        let (default_background, default_foreground) =
+            ((semantic_color << 8) | 0x26, semantic_color);
         let configured_foreground = item.icon_color().and_then(parse_hex_color);
         // Older assets used one accent for both layers; keep that appearance
         // until an explicit background is selected.
@@ -2633,6 +2771,9 @@ impl WorkspaceApp {
             | SessionManagerRowActionTarget::RemoteDesktop(_) => {
                 MANAGER_ROW_ACTION_MENU_EDITABLE_PROFILE_HEIGHT
             }
+            SessionManagerRowActionTarget::SshConfig(_) => {
+                MANAGER_ROW_ACTION_MENU_SSH_CONFIG_HEIGHT
+            }
             SessionManagerRowActionTarget::GroupRoot => MANAGER_ROW_ACTION_MENU_PROFILE_HEIGHT,
             SessionManagerRowActionTarget::Group(_) => MANAGER_ROW_ACTION_MENU_GROUP_HEIGHT,
         };
@@ -2656,6 +2797,61 @@ impl WorkspaceApp {
             dropdown_menu_content(&self.tokens).w(px(MANAGER_ROW_ACTION_MENU_WIDTH)),
         );
 
+        // Opening is the primary row action now that the sidebar hides inline buttons.
+        if let Some(open_target) = menu.target.open_target() {
+            let tunnel_id = match &menu.target {
+                SessionManagerRowActionTarget::Tunnel(id) => Some(id.clone()),
+                _ => None,
+            };
+            let tunnel_running = tunnel_id.as_deref().is_some_and(|id| {
+                matches!(
+                    self.ssh_tunnel_status(id),
+                    oxideterm_forwarding::ForwardStatus::Active
+                        | oxideterm_forwarding::ForwardStatus::Starting
+                        | oxideterm_forwarding::ForwardStatus::Suspended
+                )
+            });
+            let open_label = if tunnel_id.is_some() {
+                self.i18n.t(if tunnel_running {
+                    "sessionManager.actions.stop_tunnel"
+                } else {
+                    "sessionManager.actions.start_tunnel"
+                })
+            } else {
+                self.i18n.t("sessionManager.actions.connect")
+            };
+            popup = popup.child(self.render_session_manager_menu_action(
+                dropdown_menu_item(
+                    &self.tokens,
+                    open_label,
+                    DropdownMenuItemKind::Plain,
+                    false,
+                    false,
+                ),
+                false,
+                false,
+                has_background,
+                move |this, _event, window, cx| {
+                    if let Some(id) = tunnel_id.as_deref() {
+                        if tunnel_running {
+                            this.stop_ssh_tunnel(id, false, cx);
+                        } else {
+                            this.open_ssh_tunnel(id, false, window, cx);
+                        }
+                    } else {
+                        this.open_session_manager_target_with_sftp(
+                            open_target.clone(),
+                            false,
+                            window,
+                            cx,
+                        );
+                    }
+                    cx.stop_propagation();
+                },
+                cx,
+            ));
+        }
+
         if matches!(&menu.target, SessionManagerRowActionTarget::GroupRoot) {
             popup = popup.child(self.render_session_manager_menu_action(
                 dropdown_menu_item(
@@ -2677,9 +2873,32 @@ impl WorkspaceApp {
         }
 
         if let SessionManagerRowActionTarget::Group(group) = &menu.target {
+            let new_connection_group = group.clone();
             let subgroup_parent = group.clone();
             let rename_group = group.clone();
             popup = popup
+                .child(self.render_session_manager_menu_action(
+                    dropdown_menu_item(
+                        &self.tokens,
+                        self.i18n.t("sessionManager.toolbar.new_connection"),
+                        DropdownMenuItemKind::Plain,
+                        false,
+                        false,
+                    ),
+                    false,
+                    false,
+                    has_background,
+                    move |this, _event, window, cx| {
+                        this.open_new_connection_form(window, cx);
+                        this.update_connection_form_state(cx, |state| {
+                            if let Some(form) = state.form.as_mut() {
+                                form.group = new_connection_group.clone();
+                            }
+                        });
+                        cx.stop_propagation();
+                    },
+                    cx,
+                ))
                 .child(self.render_session_manager_menu_action(
                     dropdown_menu_item(
                         &self.tokens,
@@ -2718,6 +2937,25 @@ impl WorkspaceApp {
         }
 
         if let SessionManagerRowActionTarget::Connection(id) = &menu.target {
+            let edit_id = id.clone();
+            popup = popup.child(self.render_session_manager_menu_action(
+                dropdown_menu_item(
+                    &self.tokens,
+                    self.i18n.t("sessionManager.actions.edit"),
+                    DropdownMenuItemKind::Plain,
+                    false,
+                    false,
+                ),
+                false,
+                false,
+                has_background,
+                move |this, _event, window, cx| {
+                    this.open_saved_connection_editor(&edit_id, None, window, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ));
+
             let test_id = id.clone();
             popup = popup.child(self.render_session_manager_menu_action(
                 dropdown_menu_item(
@@ -2757,6 +2995,27 @@ impl WorkspaceApp {
                     cx,
                 ))
                 .child(dropdown_menu_separator(&self.tokens));
+        }
+
+        if let SessionManagerRowActionTarget::SshConfig(alias) = &menu.target {
+            let import_alias = alias.clone();
+            popup = popup.child(self.render_session_manager_menu_action(
+                dropdown_menu_item(
+                    &self.tokens,
+                    self.i18n.t("settings_view.connections.ssh_config.import"),
+                    DropdownMenuItemKind::Plain,
+                    false,
+                    false,
+                ),
+                false,
+                false,
+                has_background,
+                move |this, _event, _window, cx| {
+                    this.import_session_manager_ssh_config_host(import_alias.clone(), cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ));
         }
 
         if let SessionManagerRowActionTarget::RemoteDesktop(id) = &menu.target {
@@ -2971,7 +3230,7 @@ impl WorkspaceApp {
                 ))
                 .child(dropdown_menu_separator(&self.tokens));
         }
-        let delete_action = match &menu.target {
+        let mut delete_action = match &menu.target {
             SessionManagerRowActionTarget::Tunnel(id) => {
                 Some((id.clone(), self.i18n.t("sessionManager.actions.delete")))
             }
@@ -3017,8 +3276,23 @@ impl WorkspaceApp {
                 group.clone(),
                 self.i18n.t("sessionManager.folder_tree.delete_group"),
             )),
-            SessionManagerRowActionTarget::GroupRoot => None,
+            // SSH config discoveries are transient; there is nothing to delete.
+            SessionManagerRowActionTarget::SshConfig(_)
+            | SessionManagerRowActionTarget::GroupRoot => None,
         };
+        // Right-clicking a row that is part of the active multi-selection
+        // deletes every selected item; right-clicking an unselected row
+        // keeps the single-row delete flow.
+        let batch_delete =
+            session_manager_row_menu_selection_target(&menu.target).is_some_and(|target| {
+                let selected = self.session_manager.read(cx).selected_items.clone();
+                selected.len() > 1 && selected.contains(&target)
+            });
+        if let Some((_, delete_label)) = delete_action.as_mut() {
+            if batch_delete {
+                *delete_label = self.i18n.t("sessionManager.batch.delete");
+            }
+        }
         if let Some((delete_id, delete_label)) = delete_action {
             let delete_target = menu.target;
             popup = popup.child(
@@ -3035,6 +3309,11 @@ impl WorkspaceApp {
                     false,
                     has_background,
                     move |this, _event, _window, cx| {
+                        if batch_delete {
+                            this.request_delete_selected_connections(cx);
+                            cx.stop_propagation();
+                            return;
+                        }
                         match &delete_target {
                             SessionManagerRowActionTarget::Tunnel(_) => {
                                 this.session_manager.update(cx, |state, cx| {
@@ -3088,7 +3367,8 @@ impl WorkspaceApp {
                             SessionManagerRowActionTarget::Group(_) => {
                                 this.request_delete_session_group(&delete_id, cx)
                             }
-                            SessionManagerRowActionTarget::GroupRoot => {}
+                            SessionManagerRowActionTarget::GroupRoot
+                            | SessionManagerRowActionTarget::SshConfig(_) => {}
                         }
                         cx.stop_propagation();
                     },
@@ -3369,6 +3649,38 @@ pub(super) fn session_manager_tree_rows(
     rows
 }
 
+/// Selectable tree rows in render order, used by Shift+click range selection.
+pub(super) fn session_manager_tree_visible_targets(
+    rows: &[SessionManagerTreeRow],
+    items: &[SessionManagerDisplayItem],
+) -> Vec<SessionManagerSelectionTarget> {
+    rows.iter()
+        .filter_map(|row| match row {
+            SessionManagerTreeRow::Item { item_index, .. } => items
+                .get(*item_index)
+                .and_then(|item| item.selection_target()),
+            SessionManagerTreeRow::Group { .. } => None,
+        })
+        .collect()
+}
+
+/// Selectable grid cards (and recent-strip items) in render order.
+pub(super) fn session_manager_grid_visible_targets(
+    rows: &[SessionManagerGridRow],
+    items: &[SessionManagerDisplayItem],
+) -> Vec<SessionManagerSelectionTarget> {
+    rows.iter()
+        .flat_map(|row| match row {
+            SessionManagerGridRow::SectionHeader { .. } => Vec::new(),
+            SessionManagerGridRow::RecentItems { item_indices, .. }
+            | SessionManagerGridRow::Cards { item_indices } => item_indices
+                .iter()
+                .filter_map(|index| items.get(*index).and_then(|item| item.selection_target()))
+                .collect::<Vec<_>>(),
+        })
+        .collect()
+}
+
 fn push_session_manager_tree_group_rows(
     rows: &mut Vec<SessionManagerTreeRow>,
     group: &str,
@@ -3537,22 +3849,34 @@ mod session_manager_pointer_tests {
     use super::*;
 
     #[test]
-    fn saved_connection_click_selects_and_double_click_opens() {
-        assert_eq!(
-            session_manager_item_pointer_action(1, true),
-            SessionManagerItemPointerAction::Select
-        );
-        assert_eq!(
-            session_manager_item_pointer_action(2, true),
-            SessionManagerItemPointerAction::Open
-        );
-        assert_eq!(
-            session_manager_item_pointer_action(1, false),
-            SessionManagerItemPointerAction::None
-        );
-        assert_eq!(
-            session_manager_item_pointer_action(2, false),
-            SessionManagerItemPointerAction::Open
-        );
+    fn pointer_action_maps_click_count_and_modifiers() {
+        use SessionManagerItemPointerAction as Action;
+        let cases = [
+            // Double-click always opens, even with modifiers (Ctrl opens SFTP).
+            ((2, true, true, false), Action::Open),
+            ((2, true, false, false), Action::Open),
+            ((2, false, false, false), Action::Open),
+            // Single click on a selectable row: Shift ranges, Ctrl toggles,
+            // plain click replaces the selection.
+            ((1, true, false, false), Action::SelectReplace),
+            ((1, true, true, false), Action::SelectToggle),
+            ((1, true, false, true), Action::SelectRange),
+            // Shift wins over Ctrl so a combined press stays predictable.
+            ((1, true, true, true), Action::SelectRange),
+            // Non-selectable rows (serial/telnet style) never change selection.
+            ((1, false, false, false), Action::None),
+            ((1, false, true, false), Action::None),
+            ((1, false, false, true), Action::None),
+            // Triple-click and beyond must not re-trigger selection.
+            ((3, true, false, false), Action::None),
+            ((0, true, false, false), Action::None),
+        ];
+        for ((click_count, selectable, control, shift), expected) in cases {
+            assert_eq!(
+                session_manager_item_pointer_action(click_count, selectable, control, shift),
+                expected,
+                "click_count={click_count} selectable={selectable} control={control} shift={shift}"
+            );
+        }
     }
 }

@@ -96,6 +96,8 @@
       "switch_tree": "Vista de árbol",
       "switch_host": "Vista por host",
       "new_connection": "Nueva conexión",
+      "open_in_tab": "Abrir en pestaña",
+      "sort": "Ordenar",
       "lock_app": "Bloquear OxideTerm",
       "setup_app_lock": "Configurar bloqueo",
       "collapse": "Contraer"

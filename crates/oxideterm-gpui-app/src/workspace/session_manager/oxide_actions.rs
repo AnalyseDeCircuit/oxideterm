@@ -556,13 +556,27 @@ impl WorkspaceApp {
         let session_manager_tab_active = self
             .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager);
+        // The sidebar form has no tab to own keys, so the surfaces the root
+        // mounts there gate their fields directly: the search disclosure
+        // mirrors the active-sessions search gating, and the group manager
+        // dialog is a modal whose draft field must stay active independently
+        // of the tab underneath, like the Oxide import/export dialogs.
+        let sidebar_search_active = input == SessionManagerInput::Search
+            && self.session_manager_search_open
+            && !self.session_manager_sidebar_sort_open
+            && self.session_manager_sidebar_visible();
         let session_manager = self.session_manager.read(cx);
-        session_manager_input_is_active(
-            input,
-            session_manager_tab_active,
-            session_manager.oxide_import_dialog.as_ref(),
-            session_manager.oxide_export_dialog.as_ref(),
-        )
+        let group_dialog_active = input == SessionManagerInput::GroupName
+            && session_manager.show_group_manager
+            && self.session_manager_sidebar_visible();
+        (sidebar_search_active
+            || group_dialog_active
+            || session_manager_input_is_active(
+                input,
+                session_manager_tab_active,
+                session_manager.oxide_import_dialog.as_ref(),
+                session_manager.oxide_export_dialog.as_ref(),
+            ))
         .then_some(input)
     }
 

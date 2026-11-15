@@ -52,6 +52,8 @@
     },
     "actions": {
       "connect": "Kết nối",
+      "start_tunnel": "Khởi động đường hầm",
+      "stop_tunnel": "Dừng đường hầm",
       "edit": "Sửa",
       "duplicate": "Nhân bản",
       "delete": "Xóa",

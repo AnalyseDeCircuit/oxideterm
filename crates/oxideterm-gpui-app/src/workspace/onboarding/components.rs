@@ -18,7 +18,9 @@ impl WorkspaceApp {
                     .mt(px(1.0))
                     .rounded(px(self.tokens.radii.sm))
                     .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
                     .bg(rgb(self.tokens.ui.bg_sunken))
                     .flex()
                     .items_center()
@@ -111,7 +113,9 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+            .border_color(rgba(
+                (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+            ))
             .bg(rgb(self.tokens.ui.bg_panel))
             .p(px(12.0))
             .flex()
@@ -168,7 +172,9 @@ impl WorkspaceApp {
                 div()
                     .rounded(px(self.tokens.radii.xs))
                     .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
                     .bg(rgb(self.tokens.ui.bg_sunken))
                     .px(px(5.0))
                     .py(px(1.0))
@@ -254,7 +260,9 @@ impl WorkspaceApp {
                     .flex_none()
                     .rounded_full()
                     .border_1()
-                    .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
                     .bg(rgb(self.tokens.ui.bg_sunken))
                     .flex()
                     .items_center()
@@ -342,11 +350,14 @@ impl WorkspaceApp {
             .gap(px(7.0))
             .py(px(4.0))
             .child(
-                div().pt(px(1.0)).flex_none().child(Self::render_lucide_icon(
-                    icon,
-                    13.0,
-                    rgb(self.tokens.ui.text_muted),
-                )),
+                div()
+                    .pt(px(1.0))
+                    .flex_none()
+                    .child(Self::render_lucide_icon(
+                        icon,
+                        13.0,
+                        rgb(self.tokens.ui.text_muted),
+                    )),
             )
             .child(
                 div()
@@ -462,9 +473,12 @@ impl WorkspaceApp {
             .gap(px(10.0))
             .py(px(6.0))
             .when_some(icon, |card, (icon, color)| {
-                card.child(div().pt(px(2.0)).flex_none().child(
-                    Self::render_lucide_icon(icon, 15.0, rgb(color)),
-                ))
+                card.child(
+                    div()
+                        .pt(px(2.0))
+                        .flex_none()
+                        .child(Self::render_lucide_icon(icon, 15.0, rgb(color))),
+                )
             })
             .child(
                 div()
@@ -547,13 +561,20 @@ impl WorkspaceApp {
             .py(px(9.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+            .border_color(rgba(
+                (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+            ))
             .bg(rgb(self.tokens.ui.bg_sunken))
-            .child(div().pt(px(1.0)).flex_none().child(Self::render_lucide_icon(
-                LucideIcon::Info,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-            )))
+            .child(
+                div()
+                    .pt(px(1.0))
+                    .flex_none()
+                    .child(Self::render_lucide_icon(
+                        LucideIcon::Info,
+                        14.0,
+                        rgb(self.tokens.ui.text_muted),
+                    )),
+            )
             .child(
                 div()
                     .flex_1()

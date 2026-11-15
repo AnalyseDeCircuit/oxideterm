@@ -1372,6 +1372,7 @@
     "copy_title": "Copiar título",
     "detach_to_window": "Mover a una nueva ventana",
     "return_to_main_window": "Volver a la ventana principal",
+    "switch_to_sidebar": "Mostrar en la barra lateral",
     "split_into_active_horizontal": "Combinar con la pestaña activa (lado a lado)",
     "split_into_active_vertical": "Combinar con la pestaña activa (apiladas)",
     "detached_tab_closed": "Esta pestaña se cerró.",
