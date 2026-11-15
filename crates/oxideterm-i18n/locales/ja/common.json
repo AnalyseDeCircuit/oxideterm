@@ -1346,6 +1346,7 @@
     "external_import_desc": "SSH 設定や対応するサードパーティ端末マネージャーから、プレビューと重複処理付きでホストをインポートします。"
   },
   "zen_mode": {
+    "exit": "Zen モードを終了",
     "hint": "Zen モード — {{shortcut}} で終了",
     "hint_unbound": "Zen モード — コマンドパレットから終了できます"
   },

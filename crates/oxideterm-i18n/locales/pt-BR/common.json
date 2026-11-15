@@ -1346,6 +1346,7 @@
     "continue_button": "Continuar para o OxideTerm 2"
   },
   "zen_mode": {
+    "exit": "Sair do modo Zen",
     "hint": "Modo Zen — Pressione {{shortcut}} para sair",
     "hint_unbound": "Modo Zen — Saia pela paleta de comandos"
   },

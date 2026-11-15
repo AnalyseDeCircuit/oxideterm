@@ -1224,6 +1224,10 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) {
+        if previous_settings.sidebar_ui.zen_mode != settings.sidebar_ui.zen_mode {
+            self.zen_exit.reset();
+            self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
+        }
         if previous_settings.keybindings != settings.keybindings {
             crate::keybindings::install_context_keybindings(&settings.keybindings.overrides, cx);
             #[cfg(target_os = "macos")]

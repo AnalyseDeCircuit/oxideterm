@@ -1171,6 +1171,9 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings_mut();
         let entering = !settings.sidebar_ui.zen_mode;
         settings.sidebar_ui.zen_mode = entering;
+        // The exit affordance belongs to zen mode only; both directions reset it
+        // so a pending hover hide can never resurrect it after leaving.
+        self.zen_exit.reset();
         if entering {
             // Zen mode hides chrome without changing the user's sidebar visibility choices.
             self.sidebar_motion.settle(0.0);
@@ -1210,6 +1213,71 @@ impl WorkspaceApp {
             self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
         }
         cx.notify();
+    }
+
+    /// Reveals the zen-mode exit affordance from the top hover strip.
+    fn show_zen_exit_affordance(&mut self, cx: &mut Context<Self>) {
+        let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
+        if self.zen_exit.reveal(zen_mode) {
+            // The entry toast and this affordance say the same thing; once the
+            // user finds the pointer path, the transient toast has done its job.
+            self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
+            cx.notify();
+        }
+    }
+
+    /// Hides the affordance after the pointer leaves it, unless the pointer
+    /// returns first (the generation bump in `show_zen_exit_affordance` cancels it).
+    fn schedule_zen_exit_hide(&mut self, cx: &mut Context<Self>) {
+        let Some(generation) = self.zen_exit.schedule_hide() else {
+            return;
+        };
+        let timer = cx.background_executor().timer(zen_exit::HIDE_DELAY);
+        cx.spawn(async move |weak, cx| {
+            timer.await;
+            let _ = weak.update(cx, |this, cx| {
+                if this.zen_exit.apply_hide(generation) {
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+
+    /// Tracks the pill's own hover state so a hide scheduled by the hot strip
+    /// cannot fire while the pointer sits on the pill.
+    pub(in crate::workspace) fn set_zen_exit_pill_hovered(
+        &mut self,
+        hovered: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.zen_exit.set_pill_hovered(hovered) {
+            return;
+        }
+        self.apply_zen_exit_hover_change(hovered, cx);
+    }
+
+    /// Tracks the reveal strip symmetrically with the pill so a stray pill leave
+    /// cannot retire the affordance while the pointer still owns the strip.
+    pub(in crate::workspace) fn set_zen_exit_hot_zone_hovered(
+        &mut self,
+        hovered: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.zen_exit.set_hot_zone_hovered(hovered) {
+            return;
+        }
+        self.apply_zen_exit_hover_change(hovered, cx);
+    }
+
+    /// Shared enter/leave policy for both hover regions: revealing clears the
+    /// entry toast, leaving schedules the delayed retire.
+    fn apply_zen_exit_hover_change(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        if hovered {
+            self.show_zen_exit_affordance(cx);
+        } else {
+            self.schedule_zen_exit_hide(cx);
+        }
     }
 
     pub(super) fn adjust_terminal_font_size(&mut self, delta: i64, cx: &mut Context<Self>) {

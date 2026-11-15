@@ -1,4 +1,8 @@
 use super::super::*;
+use crate::workspace::zen_exit::HOT_ZONE_HEIGHT;
+use gpui::StatefulInteractiveElement;
+
+const ZEN_EXIT_GAP: f32 = 4.0;
 
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -1225,6 +1229,13 @@ impl WorkspaceApp {
                     .absolute(),
                 )
             })
+            .when(zen_mode, |root| {
+                let top = window_shell::client_window_top_resize_inset(window);
+                root.child(self.render_zen_exit_hot_zone(top, cx))
+                    .when(self.zen_exit.visible(), |root| {
+                        root.child(self.render_zen_exit_affordance(top, cx))
+                    })
+            })
             .when(
                 self.file_manager_bookmarks_resize_active(window.window_handle().window_id(), cx)
                     || self
@@ -1578,6 +1589,93 @@ impl WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    /// Zen mode keeps the bottom bar but hides every other affordance. A thin
+    /// top strip reveals the only pointer path back out; the pill carries the
+    /// current shortcut so the affordance teaches the keyboard route.
+    fn render_zen_exit_hot_zone(&self, top: Pixels, cx: &mut Context<Self>) -> AnyElement {
+        // Once revealed, keep hovering across the visual gap without capturing clicks there.
+        let height = HOT_ZONE_HEIGHT
+            + if self.zen_exit.visible() {
+                ZEN_EXIT_GAP
+            } else {
+                0.0
+            };
+        div()
+            .id("zen-exit-hot-zone")
+            .debug_selector(|| "zen-exit-hot-zone".into())
+            .absolute()
+            .top(top)
+            .left_0()
+            .right_0()
+            .h(px(height))
+            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                // Leaving the strip without ever reaching the pill must still
+                // retire it; a hover on either region keeps `apply_hide` from
+                // firing.
+                this.set_zen_exit_hot_zone_hovered(*hovered, cx);
+            }))
+            .into_any_element()
+    }
+
+    fn render_zen_exit_affordance(&self, top: Pixels, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = &self.tokens;
+        let shortcut = crate::workspace::tabs::effective_shortcut_label(
+            "app.zenMode",
+            &self.settings_store.settings().keybindings.overrides,
+        )
+        .unwrap_or_default();
+        let label = self.i18n.t("zen_mode.exit");
+        let pill = div()
+            .id("zen-exit-affordance-pill")
+            .debug_selector(|| "zen-exit-affordance-pill".into())
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(rgb(tokens.ui.border))
+            .bg(rgba((tokens.ui.bg_elevated << 8) | 0xe6))
+            .px(px(14.0))
+            .py(px(6.0))
+            .text_size(px(13.0))
+            .line_height(px(18.0))
+            .text_color(rgb(tokens.ui.text))
+            .shadow_lg()
+            .cursor_pointer()
+            .block_mouse_except_scroll()
+            .on_click(cx.listener(|this, _, _window, cx| this.toggle_zen_mode(cx)))
+            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                this.set_zen_exit_pill_hovered(*hovered, cx);
+            }))
+            .child(label)
+            .when(!shortcut.is_empty(), |pill| {
+                pill.child(
+                    div()
+                        .rounded(px(tokens.radii.sm))
+                        .bg(rgba((tokens.ui.bg_hover << 8) | 0xff))
+                        .px(px(6.0))
+                        .py(px(1.0))
+                        .text_size(px(11.0))
+                        .text_color(rgb(tokens.ui.text_muted))
+                        .child(shortcut),
+                )
+            });
+        div()
+            .absolute()
+            .top(top + px(HOT_ZONE_HEIGHT + ZEN_EXIT_GAP))
+            .left_0()
+            .right_0()
+            .flex()
+            .justify_center()
+            .child(oxideterm_gpui_ui::motion::fade_in(
+                tokens,
+                "zen-exit-affordance",
+                pill,
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
+            ))
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn render_workspace_pointer_capture_overlay(
         &self,
         cx: &mut Context<Self>,

@@ -1,6 +1,160 @@
 mod tests {
     use super::super::super::overlay::coalesce_connection_trace_running_events;
     use super::super::super::*;
+    use std::{cell::Cell, rc::Rc};
+
+    struct ZenExitWindow {
+        shell: Entity<window_shell::WorkspaceWindowShell>,
+        pointer_presses: Rc<Cell<usize>>,
+    }
+
+    impl Render for ZenExitWindow {
+        fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+            let presses = self.pointer_presses.clone();
+            div()
+                .size_full()
+                .relative()
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .on_mouse_down(MouseButton::Left, move |_, _, _| {
+                            presses.set(presses.get() + 1)
+                        }),
+                )
+                .child(self.shell.clone())
+        }
+    }
+
+    fn zen_exit_fixture(
+        cx: &mut gpui::TestAppContext,
+    ) -> Option<(
+        Entity<WorkspaceApp>,
+        Rc<Cell<usize>>,
+        &mut gpui::VisualTestContext,
+    )> {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_ZEN_EXIT_TEST_DIR";
+        let Some(directory) = std::env::var_os(fixture_key) else {
+            // The workspace resolves its data root once per process.
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            fs::hard_link(&executable, &child).unwrap();
+            fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .args([cx.test_function_name().unwrap(), "--nocapture"])
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return None;
+        };
+        assert!(default_settings_path().starts_with(PathBuf::from(directory)));
+        let mut settings = SettingsStore::load_default().unwrap();
+        settings.settings_mut().ssh_config.auto_load_hosts = false;
+        settings.settings_mut().onboarding_completed = true;
+        settings.settings_mut().onboarding_disclaimer_accepted = true;
+        settings.save().unwrap();
+        crate::migration_snapshot::acknowledge_pre_2_0_migration_notice(&default_settings_path())
+            .unwrap();
+        cx.executor().allow_parking();
+        let pointer_presses = Rc::new(Cell::new(0));
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            workspace.update(cx, |workspace, cx| {
+                workspace.tokens.motion.enabled = false;
+                workspace.toggle_zen_mode(cx);
+            });
+            ZenExitWindow {
+                shell: cx.new(|cx| window_shell::WorkspaceWindowShell::new(workspace, window, cx)),
+                pointer_presses: pointer_presses.clone(),
+            }
+        });
+        let workspace = root.read_with(cx, |root, cx| root.shell.read(cx).session_entity());
+        cx.simulate_resize(gpui::size(px(900.0), px(700.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        Some((workspace, pointer_presses, cx))
+    }
+
+    #[gpui::test]
+    fn zen_exit_stays_visible_across_the_gap_and_only_the_button_blocks_clicks(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let Some((workspace, presses, cx)) = zen_exit_fixture(cx) else {
+            return;
+        };
+        let modifiers = gpui::Modifiers::default();
+        let strip = cx.debug_bounds("zen-exit-hot-zone").unwrap();
+        cx.simulate_mouse_move(strip.center(), None, modifiers);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let button = cx.debug_bounds("zen-exit-affordance-pill").unwrap();
+
+        let gap = gpui::point(button.center().x, button.top() - px(2.0));
+        cx.simulate_mouse_move(gap, None, modifiers);
+        cx.executor()
+            .advance_clock(zen_exit::HIDE_DELAY + Duration::from_millis(1));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("zen-exit-affordance-pill").is_some());
+        cx.simulate_click(gap, modifiers);
+        assert_eq!(
+            presses.get(),
+            1,
+            "the transparent strip must pass clicks through"
+        );
+
+        let content = gpui::point(button.center().x, button.bottom() + px(20.0));
+        cx.simulate_mouse_move(content, None, modifiers);
+        cx.executor()
+            .advance_clock(zen_exit::HIDE_DELAY + Duration::from_millis(1));
+        cx.run_until_parked();
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("zen-exit-affordance-pill").is_none());
+
+        cx.simulate_mouse_move(strip.center(), None, modifiers);
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let button = cx.debug_bounds("zen-exit-affordance-pill").unwrap();
+        cx.simulate_mouse_move(button.center(), None, modifiers);
+        cx.simulate_click(button.center(), modifiers);
+        assert!(!workspace.read_with(cx, |w, _| w.settings_store.settings().sidebar_ui.zen_mode));
+        assert_eq!(
+            presses.get(),
+            1,
+            "the visible exit button must own the press"
+        );
+    }
+
+    #[gpui::test]
+    fn zen_exit_is_hidden_when_reenabled_by_a_settings_reload(cx: &mut gpui::TestAppContext) {
+        let Some((workspace, _, cx)) = zen_exit_fixture(cx) else {
+            return;
+        };
+        let strip = cx.debug_bounds("zen-exit-hot-zone").unwrap();
+        cx.simulate_mouse_move(strip.center(), None, gpui::Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let button = cx.debug_bounds("zen-exit-affordance-pill").unwrap();
+        cx.simulate_mouse_move(button.center(), None, gpui::Modifiers::default());
+
+        for zen_mode in [false, true] {
+            workspace.update(cx, |workspace, cx| {
+                let path = workspace.settings_store.path().to_path_buf();
+                let mut store = SettingsStore::load_from_path(path).unwrap();
+                store.settings_mut().sidebar_ui.zen_mode = zen_mode;
+                store.save().unwrap();
+                workspace.reload_after_external_sync(cx).unwrap();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        }
+        assert!(cx.debug_bounds("zen-exit-hot-zone").is_some());
+        assert!(cx.debug_bounds("zen-exit-affordance-pill").is_none());
+    }
 
     fn connection_trace_event(
         status: ConnectionTraceStatus,
