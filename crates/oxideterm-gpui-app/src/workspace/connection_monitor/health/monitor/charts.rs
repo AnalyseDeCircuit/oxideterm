@@ -1,119 +1,212 @@
 use super::*;
-use gpui::{Div, PathBuilder, canvas, point};
-use oxideterm_connection_monitor::{format_rate, gpu_memory_percent, gpu_utilization_percent};
+use gpui::{PathBuilder, point};
+use oxideterm_connection_monitor::MonitorCpuCoreCell;
 
-pub(super) fn capacity_percent(used: u64, total: u64) -> Option<f64> {
-    (total > 0).then(|| (used as f64 / total as f64 * 100.0).clamp(0.0, 100.0))
-}
-
-pub(super) fn monitor_usage(
-    kind: MonitorMetricKind,
-    metrics: &ResourceMetrics,
-) -> Option<Option<f64>> {
-    let capacity = |used, total| match (used, total) {
-        (Some(used), Some(total)) => capacity_percent(used, total),
-        _ => None,
-    };
-    Some(match kind {
-        MonitorMetricKind::Cpu => metrics.cpu_percent,
-        MonitorMetricKind::Memory => metrics
-            .memory_percent
-            .or_else(|| capacity(metrics.memory_used, metrics.memory_total)),
-        MonitorMetricKind::Swap => metrics
-            .swap_percent
-            .or_else(|| capacity(metrics.swap_used, metrics.swap_total)),
-        MonitorMetricKind::Disk => metrics
-            .disk_percent
-            .or_else(|| capacity(metrics.disk_used, metrics.disk_total)),
-        MonitorMetricKind::Gpu => gpu_utilization_percent(metrics),
-        MonitorMetricKind::GpuMemory => gpu_memory_percent(metrics),
-        _ => return None,
+pub(super) fn usage_value_color(level: MonitorValueLevel, ui: &AppUiColors) -> Rgba {
+    rgb(match level {
+        MonitorValueLevel::Muted => ui.text_muted,
+        MonitorValueLevel::Normal => ui.text,
+        MonitorValueLevel::Warning => ui.warning,
+        MonitorValueLevel::Critical => ui.error,
     })
 }
 
-pub(super) fn render_usage(
-    icon: LucideIcon,
-    label: String,
-    value: String,
+fn usage_bar_fill_color(level: MonitorValueLevel, ui: &AppUiColors) -> Rgba {
+    match level {
+        MonitorValueLevel::Muted => rgba(0),
+        MonitorValueLevel::Normal => rgba((ui.accent << 8) | 0xd9),
+        MonitorValueLevel::Warning => rgb(ui.warning),
+        MonitorValueLevel::Critical => rgb(ui.error),
+    }
+}
+
+fn usage_bar_fill(percent: Option<f64>, level: MonitorValueLevel, ui: &AppUiColors) -> Div {
+    div()
+        .h_full()
+        .rounded_full()
+        .bg(usage_bar_fill_color(level, ui))
+        .w(relative(
+            (percent.unwrap_or_default() as f32 / 100.0).clamp(0.0, 1.0),
+        ))
+}
+
+pub(super) fn render_compact_usage_row(
+    kind: &MonitorUsageKind,
+    detail: Option<&str>,
     percent: Option<f64>,
+    level: MonitorValueLevel,
     render: &CompactMonitorRenderContext,
 ) -> Div {
-    let percent = percent
-        .filter(|value| value.is_finite())
-        .map(|value| value.clamp(0.0, 100.0));
-    let mut tokens = render.tokens;
-    tokens.ui.accent = match percent {
-        Some(value) if value >= 90.0 => tokens.ui.error,
-        Some(value) if value >= 70.0 => tokens.ui.warning,
-        _ => tokens.ui.accent,
+    let tokens = render.tokens;
+    let ui = tokens.ui;
+    let (label, chevron) = match kind {
+        MonitorUsageKind::Cpu {
+            core_count,
+            expandable,
+            expanded,
+        } => {
+            let cpu = render.i18n.t("profiler.panel.cpu");
+            (
+                core_count.map_or_else(|| cpu.clone(), |count| format!("{cpu} · {count}C")),
+                expandable.then_some(if *expanded {
+                    LucideIcon::ChevronDown
+                } else {
+                    LucideIcon::ChevronRight
+                }),
+            )
+        }
+        MonitorUsageKind::Memory => (render.i18n.t("profiler.panel.memory"), None),
+        MonitorUsageKind::Swap => (render.i18n.t("profiler.panel.swap"), None),
+        MonitorUsageKind::Disk => (render.i18n.t("profiler.panel.disk"), None),
+        MonitorUsageKind::Mount { mount_point } => (mount_point.clone(), None),
+        MonitorUsageKind::Gpu { label, .. } => (label.clone(), None),
     };
-    let caption = percent
-        .map(|value| format!("{value:.1}%"))
-        .unwrap_or_else(|| "—".into());
+    let label = div()
+        .min_w_0()
+        .truncate()
+        .text_size(px(tokens.metrics.ui_text_xs))
+        .text_color(rgb(ui.text))
+        .when(matches!(kind, MonitorUsageKind::Mount { .. }), |label| {
+            label.font_family(render.mono_font_family.clone())
+        })
+        .child(label);
+    let percentage = percent.map_or_else(
+        || "—".into(),
+        |value| {
+            if matches!(kind, MonitorUsageKind::Cpu { .. }) {
+                format!("{value:.1}%")
+            } else if value > 0.0 && value < 1.0 {
+                "<1%".into()
+            } else {
+                format!("{value:.0}%")
+            }
+        },
+    );
     div()
         .w_full()
         .min_w_0()
-        .h(px(86.0))
+        .h(px(COMPACT_MONITOR_USAGE_ROW_HEIGHT))
         .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-        .py(px(6.0))
+        .flex()
+        .flex_col()
+        .justify_center()
+        .gap(px(5.0))
         .child(
             div()
-                .size_full()
-                .min_w_0()
                 .flex()
-                .flex_col()
-                .justify_center()
-                .gap(px(6.0))
-                .px(px(render.tokens.spacing.two))
-                .rounded(px(render.tokens.radii.md))
-                .border_1()
-                .border_color(rgba((render.tokens.ui.border << 8) | 0x80))
-                .bg(rgba((render.tokens.ui.bg_panel << 8) | 0x40))
-                .text_size(px(render.tokens.metrics.ui_text_xs))
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .min_w_0()
                 .child(
                     div()
+                        .min_w_0()
+                        .flex_1()
                         .flex()
                         .items_center()
-                        .gap(px(6.0))
-                        .child(WorkspaceApp::render_lucide_icon(
-                            icon,
-                            13.0,
-                            rgb(render.tokens.ui.text_muted),
-                        ))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_color(rgb(render.tokens.ui.text))
-                                .child(label),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .font_family(render.mono_font_family.clone())
-                                .text_color(rgb(tokens.ui.accent))
-                                .child(caption),
-                        ),
-                )
-                .child(
-                    oxideterm_gpui_ui::progress::progress(
-                        &tokens,
-                        percent.map(|value| value as f32),
-                        false,
-                    )
-                    .h(px(5.0))
-                    .border_0()
-                    .bg(rgba((render.tokens.ui.text_muted << 8) | 0x26)),
+                        .gap_1()
+                        .child(label)
+                        .when_some(chevron, |row, icon| {
+                            row.child(div().flex_none().child(WorkspaceApp::render_lucide_icon(
+                                icon,
+                                12.0,
+                                rgb(ui.text_muted),
+                            )))
+                        }),
                 )
                 .child(
                     div()
-                        .truncate()
+                        .flex_none()
+                        .flex()
+                        .items_baseline()
+                        .gap_2()
                         .font_family(render.mono_font_family.clone())
-                        .text_color(rgb(render.tokens.ui.text_muted))
-                        .child(value),
+                        .when_some(detail, |row, detail| {
+                            row.child(
+                                div()
+                                    .text_size(px(tokens.metrics.ui_text_2xs))
+                                    .text_color(rgb(ui.text_muted))
+                                    .child(detail.to_owned()),
+                            )
+                        })
+                        .child(
+                            div()
+                                .min_w(px(36.0))
+                                .text_align(gpui::TextAlign::Right)
+                                .text_size(px(tokens.metrics.ui_text_xs))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(usage_value_color(level, &ui))
+                                .child(percentage),
+                        ),
                 ),
         )
+        .child(
+            div()
+                .w_full()
+                .h(px(4.0))
+                .rounded_full()
+                .overflow_hidden()
+                .bg(rgba((ui.text_muted << 8) | 0x38))
+                .child(usage_bar_fill(percent, level, &ui)),
+        )
+}
+
+pub(super) fn render_cpu_core_pair_row(
+    left: &MonitorCpuCoreCell,
+    right: Option<&MonitorCpuCoreCell>,
+    render: &CompactMonitorRenderContext,
+) -> Div {
+    let tokens = render.tokens;
+    let ui = tokens.ui;
+    let cell = |core: &MonitorCpuCoreCell| {
+        div()
+            .flex_1()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .font_family(render.mono_font_family.clone())
+            .text_size(px(tokens.metrics.ui_text_2xs))
+            .child(
+                div()
+                    .w(px(22.0))
+                    .flex_none()
+                    .truncate()
+                    .text_color(rgb(ui.text_muted))
+                    .child(format!("C{}", core.index)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(16.0))
+                    .h(px(3.0))
+                    .rounded_full()
+                    .overflow_hidden()
+                    .bg(rgba((ui.text_muted << 8) | 0x34))
+                    .child(usage_bar_fill(core.percent, core.level, &ui)),
+            )
+            .child(
+                div()
+                    .w(px(30.0))
+                    .flex_none()
+                    .text_align(gpui::TextAlign::Right)
+                    .text_color(usage_value_color(core.level, &ui))
+                    .child(
+                        core.percent
+                            .map_or_else(|| "—".into(), |value| format!("{value:.0}%")),
+                    ),
+            )
+    };
+    div()
+        .w_full()
+        .min_w_0()
+        .h(px(COMPACT_MONITOR_CORE_PAIR_ROW_HEIGHT))
+        .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+        .flex()
+        .items_center()
+        .gap(px(18.0))
+        .child(cell(left))
+        .child(right.map_or_else(|| div().flex_1().min_w_0(), cell))
 }
 
 // Timestamp-based coordinates preserve uneven sampling intervals. Missing samples
@@ -137,137 +230,159 @@ fn trend_points(samples: &[(u64, Option<f64>)], maximum: f64) -> Vec<Option<(f32
         .collect()
 }
 
-pub(super) fn render_trend(render: &CompactMonitorRenderContext, cpu: bool) -> Div {
-    let first: Vec<_> = render
-        .history
-        .iter()
-        .map(|sample| {
-            (
-                sample.timestamp_ms,
-                if cpu {
-                    sample.cpu_percent
-                } else {
-                    sample.rx_bytes_per_sec.map(|value| value as f64)
-                },
-            )
-        })
-        .collect();
-    let second: Vec<_> = if cpu {
-        Vec::new()
-    } else {
-        render
+pub(super) fn render_sparkline(render: &CompactMonitorRenderContext, cpu: bool) -> Div {
+    let tokens = render.tokens;
+    let ui = tokens.ui;
+    // Store `(points, base_hex, stroke_alpha, fill_alpha)` so curve and area tint share series polarity.
+    let mut series: Vec<(Vec<Option<(f32, f32)>>, u32, u32, u32)> = Vec::new();
+    let mut idle_network = false;
+    if cpu {
+        let samples: Vec<_> = render
             .history
             .iter()
-            .map(|sample| {
-                (
-                    sample.timestamp_ms,
-                    sample.tx_bytes_per_sec.map(|value| value as f64),
-                )
-            })
-            .collect()
-    };
-    let maximum = if cpu {
-        100.0
+            .map(|sample| (sample.timestamp_ms, sample.cpu_percent))
+            .collect();
+        let color_hex = match render.cpu_level {
+            MonitorValueLevel::Critical => ui.error,
+            MonitorValueLevel::Warning => ui.warning,
+            _ => ui.accent,
+        };
+        series.push((trend_points(&samples, 100.0), color_hex, 0xd8, 0x2a));
     } else {
-        first
+        let peak_rate = render
+            .history
             .iter()
-            .chain(&second)
-            .filter_map(|(_, value)| *value)
-            .fold(1.0_f64, f64::max)
-    };
-    let series = [
-        trend_points(&first, maximum),
-        trend_points(&second, maximum),
-    ];
-    let colors = [render.tokens.ui.accent, render.tokens.ui.accent_secondary];
-    let grid_color = rgba((render.tokens.ui.text_muted << 8) | 0x26);
-    let time_label = |timestamp: u64| {
-        i64::try_from(timestamp)
-            .ok()
-            .and_then(chrono::DateTime::from_timestamp_millis)
-            .map(|time| {
-                time.with_timezone(&chrono::Local)
-                    .format("%H:%M:%S")
-                    .to_string()
-            })
-            .unwrap_or_else(|| "—".into())
-    };
-    let start = render
-        .history
-        .first()
-        .map(|sample| time_label(sample.timestamp_ms))
-        .unwrap_or_else(|| "—".into());
-    let end = render
-        .history
-        .last()
-        .map(|sample| time_label(sample.timestamp_ms))
-        .unwrap_or_else(|| "—".into());
+            .flat_map(|sample| [sample.rx_bytes_per_sec, sample.tx_bytes_per_sec])
+            .flatten()
+            .max()
+            .unwrap_or_default();
+        if peak_rate == 0 {
+            idle_network = true;
+        } else {
+            for (receive, color_hex, stroke_alpha, fill_alpha) in [
+                (true, ui.accent, 0xd8, 0x28),
+                (false, ui.accent_secondary, 0xb8, 0x18),
+            ] {
+                let samples: Vec<_> = render
+                    .history
+                    .iter()
+                    .map(|sample| {
+                        let rate = if receive {
+                            sample.rx_bytes_per_sec
+                        } else {
+                            sample.tx_bytes_per_sec
+                        };
+                        (sample.timestamp_ms, rate.map(|rate| rate as f64))
+                    })
+                    .collect();
+                series.push((
+                    trend_points(&samples, peak_rate as f64),
+                    color_hex,
+                    stroke_alpha,
+                    fill_alpha,
+                ));
+            }
+        }
+    }
     div()
         .w_full()
         .min_w_0()
-        .h(px(90.0))
-        .px(px(
-            COMPACT_MONITOR_ROW_SIDE_PADDING + render.tokens.spacing.two
-        ))
-        .pb(px(6.0))
+        .h(px(COMPACT_MONITOR_SPARKLINE_ROW_HEIGHT))
+        .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+        .py(px(3.0))
         .flex()
-        .flex_col()
-        .gap(px(3.0))
-        .text_size(px(render.tokens.metrics.ui_text_xs))
-        .text_color(rgb(render.tokens.ui.text_muted))
-        .child(div().text_align(gpui::TextAlign::Right).child(if cpu {
-            "100%".into()
-        } else {
-            format_rate(maximum as u64)
-        }))
         .child(
-            canvas(
-                |_, _, _| (),
-                move |bounds, _, window, _| {
-                    let width = f32::from(bounds.size.width);
-                    let height = f32::from(bounds.size.height);
-                    let position = |x: f32, y: f32| {
-                        point(
-                            bounds.origin.x + px(x * width),
-                            bounds.origin.y + px((1.0 - y) * height),
-                        )
-                    };
-                    let mut grid = PathBuilder::stroke(px(1.0));
-                    for fraction in [0.0, 0.5, 1.0] {
-                        grid.move_to(position(0.0, fraction));
-                        grid.line_to(position(1.0, fraction));
-                    }
-                    if let Ok(path) = grid.build() {
-                        window.paint_path(path, grid_color);
-                    }
-                    for (points, color) in series.iter().zip(colors) {
-                        let mut path = PathBuilder::stroke(px(1.5));
-                        let mut connected = false;
-                        for point in points {
-                            if let Some((x, y)) = point {
-                                let point = position(*x, *y);
-                                if connected {
-                                    path.line_to(point);
-                                } else {
-                                    path.move_to(point);
-                                }
-                                connected = true;
-                            } else {
-                                connected = false;
+            div()
+                .w_full()
+                .flex_1()
+                .rounded(px(tokens.radii.sm))
+                .bg(rgba((ui.bg_sunken << 8) | 0x6b))
+                .border_1()
+                .border_color(rgba((ui.border << 8) | 0x45))
+                .overflow_hidden()
+                .px(px(2.0))
+                .py(px(2.0))
+                .flex()
+                .child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, window, _| {
+                            let width = f32::from(bounds.size.width);
+                            let usable_height = (f32::from(bounds.size.height) - 2.0).max(1.0);
+                            let position = |x: f32, y: f32| {
+                                point(
+                                    bounds.origin.x + px(x * width),
+                                    bounds.origin.y + px(1.0 + (1.0 - y) * usable_height),
+                                )
+                            };
+                            let mut midline = PathBuilder::stroke(px(1.0));
+                            midline.move_to(position(0.0, 0.5));
+                            midline.line_to(position(1.0, 0.5));
+                            if let Ok(path) = midline.build() {
+                                window.paint_path(path, rgba((ui.border << 8) | 0x45));
                             }
-                        }
-                        if let Ok(path) = path.build() {
-                            window.paint_path(path, rgb(color));
-                        }
-                    }
-                },
-            )
-            .w_full()
-            .flex_1(),
+                            if idle_network {
+                                let mut baseline = PathBuilder::stroke(px(1.0));
+                                baseline.move_to(position(0.0, 0.0));
+                                baseline.line_to(position(1.0, 0.0));
+                                if let Ok(path) = baseline.build() {
+                                    window.paint_path(path, rgba((ui.text_muted << 8) | 0x48));
+                                }
+                            }
+                            for (points, color_hex, stroke_alpha, fill_alpha) in &series {
+                                let stroke_color = rgba((*color_hex << 8) | *stroke_alpha);
+                                let fill_color = rgba((*color_hex << 8) | *fill_alpha);
+                                let mut line = PathBuilder::stroke(px(1.5));
+                                let mut segments: Vec<Vec<(f32, f32)>> = Vec::new();
+                                for maybe_point in points {
+                                    if let Some((x, y)) = *maybe_point {
+                                        if let Some(current) = segments.last_mut() {
+                                            current.push((x, y));
+                                        } else {
+                                            segments.push(vec![(x, y)]);
+                                        }
+                                    } else if segments.last().is_some_and(|seg| !seg.is_empty()) {
+                                        segments.push(Vec::new());
+                                    }
+                                }
+                                for segment in segments {
+                                    if segment.is_empty() {
+                                        continue;
+                                    }
+                                    if segment.len() >= 2 {
+                                        let mut area = PathBuilder::fill();
+                                        let first = segment[0];
+                                        let last = segment[segment.len() - 1];
+                                        area.move_to(position(first.0, 0.0));
+                                        for &(x, y) in &segment {
+                                            area.line_to(position(x, y));
+                                        }
+                                        area.line_to(position(last.0, 0.0));
+                                        area.close();
+                                        if let Ok(path) = area.build() {
+                                            window.paint_path(path, fill_color);
+                                        }
+                                    }
+                                    for (idx, &(x, y)) in segment.iter().enumerate() {
+                                        let pt = position(x, y);
+                                        if idx == 0 {
+                                            line.move_to(pt);
+                                        } else {
+                                            line.line_to(pt);
+                                        }
+                                    }
+                                }
+                                if let Ok(path) = line.build() {
+                                    window.paint_path(path, stroke_color);
+                                }
+                            }
+                        },
+                    )
+                    .w_full()
+                    .flex_1(),
+                ),
         )
-        .child(div().flex().justify_between().child(start).child(end))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -289,26 +404,6 @@ mod tests {
         assert_eq!(
             trend_points(&[(100, Some(f64::NAN)), (100, Some(10.0))], 0.0),
             vec![None, Some((0.0, 1.0))]
-        );
-        assert_eq!(capacity_percent(25, 100), Some(25.0));
-        assert_eq!(capacity_percent(0, 0), None);
-    }
-
-    #[test]
-    fn usage_preserves_reported_filesystem_percentage() {
-        let mut metrics = ResourceMetrics::empty(0, MetricsSource::Full);
-        metrics.disk_used = Some(20);
-        metrics.disk_total = Some(100);
-        // Filesystems may exclude reserved blocks when reporting utilization.
-        metrics.disk_percent = Some(25.0);
-        assert_eq!(
-            monitor_usage(MonitorMetricKind::Disk, &metrics),
-            Some(Some(25.0))
-        );
-        metrics.disk_percent = None;
-        assert_eq!(
-            monitor_usage(MonitorMetricKind::Disk, &metrics),
-            Some(Some(20.0))
         );
     }
 }

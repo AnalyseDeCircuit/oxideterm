@@ -138,20 +138,21 @@ pub(super) const HOST_PACKAGE_SNAPSHOT_MAX_OUTPUT_SIZE: usize = 512 * 1024;
 pub(super) const MONITOR_POOL_REFRESH_INTERVAL: Duration = Duration::from_millis(2000);
 // The compact sidebar must stay on GPUI List scrolling; ordinary Div overflow
 // repaints too much of the Host Tools panel during trackpad scrolling.
-pub(super) const COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT: f32 = 34.0;
+pub(super) const COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT: f32 = 38.0;
 pub(super) const COMPACT_MONITOR_LIST_OVERSCAN: usize = 8;
-pub(super) const COMPACT_MONITOR_METRIC_ROW_HEIGHT: f32 = 32.0;
-// Network rows use the extra height only when their values must stack.
-pub(super) const COMPACT_MONITOR_STACKED_ROW_HEIGHT: f32 = 52.0;
-pub(super) const COMPACT_MONITOR_SECTION_ROW_HEIGHT: f32 = 32.0;
-pub(super) const COMPACT_MONITOR_DETAIL_ROW_HEIGHT: f32 = 28.0;
-pub(super) const COMPACT_MONITOR_RETRY_ROW_HEIGHT: f32 = 44.0;
-// Compact monitoring rows use the same space-efficient inset at every width.
+pub(super) const COMPACT_MONITOR_USAGE_ROW_HEIGHT: f32 = 44.0;
+pub(super) const COMPACT_MONITOR_CORE_PAIR_ROW_HEIGHT: f32 = 24.0;
+pub(super) const COMPACT_MONITOR_SPARKLINE_ROW_HEIGHT: f32 = 36.0;
+pub(super) const COMPACT_MONITOR_METRIC_ROW_HEIGHT: f32 = 28.0;
+pub(super) const COMPACT_MONITOR_SECTION_ROW_HEIGHT: f32 = 30.0;
+pub(super) const COMPACT_MONITOR_NETWORK_SUMMARY_ROW_HEIGHT: f32 = 32.0;
+pub(super) const COMPACT_MONITOR_STACKED_ROW_HEIGHT: f32 = 46.0;
+pub(super) const COMPACT_MONITOR_INTERFACE_ROW_HEIGHT: f32 = 28.0;
+pub(super) const COMPACT_MONITOR_PROCESS_ROW_HEIGHT: f32 = 26.0;
+pub(super) const COMPACT_MONITOR_RETRY_ROW_HEIGHT: f32 = 40.0;
 pub(super) const COMPACT_MONITOR_ROW_SIDE_PADDING: f32 = 12.0;
-pub(super) const COMPACT_MONITOR_STACKED_LAYOUT_MAX_WIDTH: f32 = 360.0;
-pub(super) const COMPACT_MONITOR_VALUE_MAX_WIDTH_RATIO: f32 = 0.58;
-pub(super) const COMPACT_MONITOR_DETAIL_VALUE_MAX_WIDTH_RATIO: f32 = 0.55;
-pub(super) const COMPACT_MONITOR_DETAIL_INDENT: f32 = 22.0;
+// Only fall back to two-line bandwidth rows when the sidebar is very narrow.
+pub(super) const COMPACT_MONITOR_STACKED_LAYOUT_MAX_WIDTH: f32 = 240.0;
 pub(super) const MONITOR_BORDER_ALPHA: u32 = 0x80;
 pub(super) const MONITOR_TINT_ALPHA: u32 = 0x1a;
 pub(super) const MONITOR_EMERALD: u32 = 0x34d399;

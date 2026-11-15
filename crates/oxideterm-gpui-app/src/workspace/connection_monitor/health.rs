@@ -394,20 +394,12 @@ impl WorkspaceApp {
             .min_w_0()
             .flex_1()
             .min_h_0()
+            .flex()
+            .flex_col()
             .overflow_hidden()
             .occlude()
-            .child(
-                div()
-                    .size_full()
-                    .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .px_3()
-                    .py_3()
-                    // Host selection and sampling stay in the shared monitor panel.
-                    .child(self.render_host_monitor_panel(cx)),
-            )
+            // Host selection and sampling stay in the shared monitor panel.
+            .child(self.render_host_monitor_panel(cx))
             .into_any_element()
     }
 

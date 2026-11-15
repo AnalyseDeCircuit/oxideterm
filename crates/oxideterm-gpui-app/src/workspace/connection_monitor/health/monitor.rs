@@ -2,10 +2,20 @@
 
 use super::*;
 
-use oxideterm_connection_monitor::ProfilerState;
+use gpui::{Div, StatefulInteractiveElement};
+use oxideterm_connection_monitor::{
+    CompactMonitorOptions, CompactMonitorRow, MonitorSectionKind, MonitorSparklineKind,
+    MonitorUsageKind, ProfilerState, ResourceTrendSample, compact_monitor_row_signature,
+    compact_monitor_rows_with_options, format_boot_time, format_compact_system_parts,
+    format_compact_uptime, has_cpu_trend_series, has_network_trend_series,
+    metrics_source_label_key, rtt_level,
+};
+
 #[path = "monitor/charts.rs"]
 mod charts;
-use charts::{monitor_usage, render_trend, render_usage};
+use charts::{
+    render_compact_usage_row, render_cpu_core_pair_row, render_sparkline, usage_value_color,
+};
 
 pub(in crate::workspace::connection_monitor) struct MonitorRenderContext {
     pub(in crate::workspace::connection_monitor) tokens: ThemeTokens,
@@ -20,8 +30,9 @@ struct CompactMonitorRenderContext {
     tokens: ThemeTokens,
     i18n: I18n,
     mono_font_family: SharedString,
-    metrics: Arc<ResourceMetrics>,
-    history: Arc<[oxideterm_connection_monitor::ResourceTrendSample]>,
+    connection_id: String,
+    cpu_level: MonitorValueLevel,
+    history: Arc<[ResourceTrendSample]>,
 }
 
 impl WorkspaceApp {
@@ -64,7 +75,7 @@ impl HostToolsEntity {
             .rounded(px(render.tokens.radii.md))
             .border_1()
             .border_color(rgba((render.tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-            .text_size(px(12.0))
+            .text_size(px(render.tokens.metrics.ui_text_xs))
             .cursor_pointer()
             .hover(|button| button.bg(rgb(render.tokens.ui.bg_hover)))
             .child(Self::render_monitor_text_with_role(
@@ -100,306 +111,312 @@ impl HostToolsEntity {
         monitor_enabled: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let enable_control = self.render_monitor_enable_control(render, cx);
         let connections = self.monitor_connections();
-        if connections.is_empty() {
-            return div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .justify_center()
-                .py_8()
-                .px_4()
-                .text_align(gpui::TextAlign::Center)
-                .text_color(rgb(render.tokens.ui.text_muted))
-                .child(
-                    div()
-                        .mb_2()
-                        .opacity(0.3)
-                        .child(WorkspaceApp::render_lucide_icon(
-                            LucideIcon::WifiOff,
-                            32.0,
-                            rgb(render.tokens.ui.text_muted),
-                        )),
-                )
-                .child(
-                    div()
-                        .text_size(px(14.0))
-                        .child(Self::render_monitor_text_with_role(
-                            render,
-                            SelectableTextRole::PlainDocument,
-                            "host-monitor-empty",
-                            "no-connection",
-                            render.i18n.t("profiler.panel.no_connection"),
-                            render.tokens.ui.text_muted,
-                            cx,
-                        )),
-                )
-                .into_any_element();
-        }
-
-        let selected_connection_id = self.selected_connection_id_owned();
-        let selected_id = selected_connection_id
-            .as_deref()
-            .unwrap_or(connections[0].connection_id.as_str());
-        let active_connection = connections
-            .iter()
-            .find(|connection| connection.connection_id == selected_id)
-            .unwrap_or(&connections[0]);
-        let current = self
-            .profiler_registry()
-            .current(&active_connection.connection_id);
-        let disabled = !monitor_enabled;
-        let profiler_state = current.as_ref().map(|(_, state)| *state);
-        let failure = self
-            .profiler_registry()
-            .failure(&active_connection.connection_id);
+        let Some(active) = self
+            .selected_connection_id_owned()
+            .and_then(|id| {
+                connections
+                    .iter()
+                    .find(|connection| connection.connection_id == id)
+            })
+            .or_else(|| connections.first())
+        else {
+            return host_tools_center_state(
+                LucideIcon::WifiOff,
+                render.tokens.ui.text_muted,
+                render.i18n.t("profiler.panel.no_connection"),
+                &render.selectable_text,
+                cx,
+            );
+        };
+        let selected_id = active.connection_id.as_str();
+        let current = self.profiler_registry().current(selected_id);
+        let (metrics, profiler_state) =
+            current.as_ref().map_or((None, None), |(metrics, state)| {
+                (metrics.as_ref().filter(|_| monitor_enabled), Some(*state))
+            });
+        let failure = self.profiler_registry().failure(selected_id);
         let failure_key = failure
             .map(|failure| failure.label_key())
             .unwrap_or("profiler.panel.sampling_failed");
         let is_running = matches!(profiler_state, Some(ProfilerState::Running));
-        let metrics = current.as_ref().and_then(|(metrics, _)| metrics.as_ref());
-        let panel = div()
-            .relative()
+        let can_retry_sampling = metrics.is_some_and(|metrics| {
+            failure.is_some()
+                || matches!(profiler_state, Some(ProfilerState::Degraded))
+                || metrics.source == MetricsSource::Unsupported
+        });
+        let theme = render.tokens.ui;
+        let header = div()
+            .flex_none()
+            .w_full()
+            .min_w_0()
+            .px_3()
+            .pt_3()
+            .pb_2()
             .flex()
             .flex_col()
-            .gap_2()
-            .flex_1()
-            .min_h_0()
-            .child(self.render_monitor_panel_header(
+            .gap(px(4.0))
+            .border_b_1()
+            .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+            .child(self.render_connection_switcher(
                 &connections,
                 selected_id,
                 is_running,
-                render,
+                &render.tokens,
+                render.mono_font_family.clone(),
+                &render.selectable_text,
                 cx,
-            ));
-
-        if disabled {
-            return panel
-                .child(
+            ))
+            .when_some(metrics, |header, metrics| {
+                self.render_monitor_header_summary(header, selected_id, metrics, render, cx)
+            })
+            .when(can_retry_sampling, |header| {
+                header.child(
                     div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .py_8()
-                        .text_color(rgb(render.tokens.ui.text_muted))
-                        .child(
-                            div()
-                                .mb_3()
-                                .opacity(0.2)
-                                .child(WorkspaceApp::render_lucide_icon(
-                                    LucideIcon::Power,
-                                    32.0,
-                                    rgb(render.tokens.ui.text_muted),
-                                )),
-                        )
-                        .child(div().mb_3().text_size(px(14.0)).child(
-                            Self::render_monitor_text_with_role(
-                                render,
-                                SelectableTextRole::PlainDocument,
-                                "host-monitor-profiler",
-                                "disabled",
-                                render.i18n.t("profiler.panel.disabled"),
-                                render.tokens.ui.text_muted,
-                                cx,
-                            ),
-                        ))
-                        // Settings persistence stays in the transient workspace-owned control.
-                        .child(enable_control),
-                )
-                .into_any_element();
-        }
-
-        if !is_running && metrics.is_none() {
-            let detecting = self.remote_env_detection_running(selected_id);
-            let system_known = self
-                .connection_os_type(selected_id)
-                .is_some_and(|os| !os.eq_ignore_ascii_case("unknown"));
-            return panel
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap_3()
-                        .py_6()
-                        .px_4()
-                        .text_align(gpui::TextAlign::Center)
-                        .text_color(rgb(render.tokens.ui.text_muted))
-                        .child(div().text_size(px(12.0)).child(
-                            Self::render_monitor_text_with_role(
-                                render,
-                                SelectableTextRole::PlainDocument,
-                                "host-monitor-profiler",
-                                "environment",
-                                render.i18n.t(if detecting {
-                                    "profiler.panel.detecting_system"
-                                } else if system_known {
-                                    failure_key
-                                } else {
-                                    "profiler.panel.system_unavailable"
-                                }),
-                                render.tokens.ui.text_muted,
-                                cx,
-                            ),
-                        ))
-                        .when(!detecting, |panel| {
-                            panel.child(self.render_retry_sampling_button(
-                                selected_id.to_string(),
-                                &render.tokens,
-                                &render.i18n,
-                                cx,
-                            ))
-                        }),
-                )
-                .into_any_element();
-        }
-
-        if metrics.is_none() && is_running {
-            return panel
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .py_6()
-                        .text_color(rgb(render.tokens.ui.text_muted))
-                        .child(
-                            div()
-                                .mb_2()
-                                .opacity(0.5)
-                                .child(WorkspaceApp::render_lucide_icon(
-                                    LucideIcon::Activity,
-                                    20.0,
-                                    rgb(render.tokens.ui.text_muted),
-                                )),
-                        )
-                        .child(div().text_size(px(12.0)).child(
-                            Self::render_monitor_text_with_role(
-                                render,
-                                SelectableTextRole::PlainDocument,
-                                "host-monitor-profiler",
-                                "sampling",
-                                render.i18n.t("profiler.panel.sampling"),
-                                render.tokens.ui.text_muted,
-                                cx,
-                            ),
-                        )),
-                )
-                .into_any_element();
-        }
-
-        let Some(metrics) = metrics else {
-            return panel
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .py_6()
-                        .text_color(rgb(render.tokens.ui.text_muted))
-                        .child(div().opacity(0.6).text_size(px(12.0)).child(
-                            Self::render_monitor_text_with_role(
-                                render,
-                                SelectableTextRole::PlainDocument,
-                                "host-monitor-profiler",
-                                "no-data",
-                                render.i18n.t("profiler.panel.no_data"),
-                                render.tokens.ui.text_muted,
-                                cx,
-                            ),
-                        )),
-                )
-                .into_any_element();
-        };
-
-        let can_retry_sampling = !disabled
-            && (failure.is_some()
-                || matches!(profiler_state, Some(ProfilerState::Degraded))
-                || matches!(metrics.source, MetricsSource::Unsupported));
-        panel
-            .when(can_retry_sampling, |panel| {
-                panel.child(
-                    div()
-                        .px_4()
-                        .py_2()
-                        .text_size(px(12.0))
-                        .text_color(rgb(render.tokens.ui.text_muted))
+                        .px_1()
+                        .text_size(px(render.tokens.metrics.ui_text_2xs))
                         .child(Self::render_monitor_text_with_role(
                             render,
                             SelectableTextRole::PlainDocument,
                             "host-monitor-profiler",
                             "sampling-failed",
                             render.i18n.t(failure_key),
-                            render.tokens.ui.text_muted,
+                            theme.text_muted,
                             cx,
                         )),
                 )
-            })
-            .child(
-                div()
-                    .id("host-tools-monitor-metrics-scroll")
-                    .flex_1()
-                    .min_h_0()
-                    .child(self.render_compact_monitor_metrics(
-                        metrics,
-                        can_retry_sampling,
-                        active_connection.connection_id.clone(),
-                        render,
-                        cx,
-                    )),
+            });
+        let body = if !monitor_enabled {
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap_3()
+                .p_4()
+                .child(host_tools_center_state(
+                    LucideIcon::Power,
+                    theme.text_muted,
+                    render.i18n.t("profiler.panel.disabled"),
+                    &render.selectable_text,
+                    cx,
+                ))
+                .child(self.render_monitor_enable_control(render, cx))
+                .into_any_element()
+        } else if let Some(metrics) = metrics {
+            self.render_compact_monitor_metrics(
+                metrics,
+                can_retry_sampling,
+                selected_id,
+                render,
+                cx,
             )
-            .into_any_element()
-    }
+        } else if is_running {
+            host_tools_center_state(
+                LucideIcon::Activity,
+                theme.text_muted,
+                render.i18n.t("profiler.panel.sampling"),
+                &render.selectable_text,
+                cx,
+            )
+        } else {
+            let detecting = self.remote_env_detection_running(selected_id);
+            let system_known = self
+                .connection_os_type(selected_id)
+                .is_some_and(|os| !os.eq_ignore_ascii_case("unknown"));
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .px_3()
+                .child(host_tools_center_state(
+                    LucideIcon::Activity,
+                    theme.text_muted,
+                    render.i18n.t(if detecting {
+                        "profiler.panel.detecting_system"
+                    } else if system_known {
+                        failure_key
+                    } else {
+                        "profiler.panel.system_unavailable"
+                    }),
+                    &render.selectable_text,
+                    cx,
+                ))
+                .when(!detecting, |panel| {
+                    panel.child(self.render_retry_sampling_button(
+                        selected_id.to_owned(),
+                        &render.tokens,
+                        &render.i18n,
+                        cx,
+                    ))
+                })
+                .into_any_element()
+        };
 
-    fn render_monitor_panel_header(
-        &self,
-        connections: &[MonitorConnectionOption],
-        selected_id: &str,
-        is_running: bool,
-        render: &MonitorRenderContext,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = render.tokens.ui;
         div()
-            .min_h(px(HOST_TOOLS_CONNECTION_ROW_HEIGHT))
+            .id("host-monitor-panel")
             .w_full()
             .min_w_0()
+            .flex_1()
+            .min_h_0()
             .flex()
-            .items_start()
-            .gap_2()
-            .px_1()
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .child(self.render_connection_switcher(
-                        connections,
-                        selected_id,
-                        is_running,
-                        &render.tokens,
-                        render.mono_font_family.clone(),
-                        &render.selectable_text,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w_2()
-                    .h_2()
-                    .rounded_full()
-                    .bg(rgb(if is_running {
-                        theme.success
-                    } else {
-                        theme.text_muted
-                    }))
-                    .opacity(if is_running { 1.0 } else { 0.5 }),
-            )
+            .flex_col()
+            .overflow_hidden()
+            .child(header)
+            .child(body)
             .into_any_element()
     }
 
-    pub(super) fn render_retry_sampling_button(
+    fn render_monitor_header_summary(
+        &self,
+        header: Div,
+        selected_id: &str,
+        metrics: &ResourceMetrics,
+        render: &MonitorRenderContext,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        let tokens = render.tokens;
+        let theme = tokens.ui;
+        let info = metrics.system_info.as_ref();
+        let left = if let Some(uptime) = info.and_then(|info| info.uptime_seconds) {
+            let uptime_row = div()
+                .min_w_0()
+                .flex_1()
+                .flex()
+                .items_center()
+                .gap_1()
+                .text_color(rgb(theme.text_muted))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(render.i18n.t("profiler.panel.uptime")),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .font_family(render.mono_font_family.clone())
+                        .child(format_compact_uptime(uptime)),
+                );
+            if let Some(boot_time) = info
+                .and_then(|info| info.boot_time_ms)
+                .and_then(format_boot_time)
+            {
+                let boot_label = render.i18n.t("profiler.panel.boot_time");
+                uptime_row
+                    .id(host_tools_row_id(
+                        "host-monitor-uptime",
+                        selected_id,
+                        "uptime",
+                    ))
+                    .tooltip(move |_window, cx| {
+                        oxideterm_gpui_ui::tooltip::tooltip_view(
+                            tokens,
+                            format!("{boot_label}: {boot_time}"),
+                            None,
+                            cx,
+                        )
+                    })
+                    .into_any_element()
+            } else {
+                uptime_row.into_any_element()
+            }
+        } else {
+            div()
+                .min_w_0()
+                .flex_1()
+                .truncate()
+                .text_color(rgb(theme.text_muted))
+                .when(metrics.source != MetricsSource::Full, |row| {
+                    row.child(monitor_source_label(&render.i18n, metrics.source))
+                })
+                .into_any_element()
+        };
+        let has_left = info.and_then(|info| info.uptime_seconds).is_some()
+            || metrics.source != MetricsSource::Full;
+        let (os_label, arch_label) = info
+            .map(format_compact_system_parts)
+            .unwrap_or((None, None));
+        header
+            .when(os_label.is_some() || arch_label.is_some(), |header| {
+                header.child(
+                    div()
+                        .px_1()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .when_some(os_label, |row, os| {
+                            row.child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(tokens.metrics.ui_text_xs))
+                                    .child(Self::render_monitor_text_with_role(
+                                        render,
+                                        SelectableTextRole::PlainDocument,
+                                        "host-monitor-system",
+                                        selected_id,
+                                        os,
+                                        theme.text_secondary,
+                                        cx,
+                                    )),
+                            )
+                        })
+                        .when_some(arch_label, |row, arch| {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .font_family(render.mono_font_family.clone())
+                                    .text_size(px(tokens.metrics.ui_text_2xs))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(arch),
+                            )
+                        }),
+                )
+            })
+            .when(has_left || metrics.ssh_rtt_ms.is_some(), |header| {
+                header.child(
+                    div()
+                        .px_1()
+                        .w_full()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap_2()
+                        .text_size(px(tokens.metrics.ui_text_2xs))
+                        .child(left)
+                        .when_some(metrics.ssh_rtt_ms, |row, ms| {
+                            row.child(
+                                div()
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .child(
+                                        div()
+                                            .text_color(rgb(theme.text_muted))
+                                            .child(render.i18n.t("profiler.panel.rtt")),
+                                    )
+                                    .child(
+                                        div()
+                                            .font_family(render.mono_font_family.clone())
+                                            .text_color(usage_value_color(
+                                                rtt_level(Some(ms)),
+                                                &theme,
+                                            ))
+                                            .child(format!("{ms} ms")),
+                                    ),
+                            )
+                        }),
+                )
+            })
+    }
+
+    fn render_retry_sampling_button(
         &self,
         connection_id: String,
         tokens: &ThemeTokens,
@@ -412,7 +429,7 @@ impl HostToolsEntity {
             .rounded(px(tokens.radii.md))
             .border_1()
             .border_color(rgba((tokens.ui.border << 8) | MONITOR_BORDER_ALPHA))
-            .text_size(px(12.0))
+            .text_size(px(tokens.metrics.ui_text_xs))
             .text_color(rgb(tokens.ui.text_muted))
             .cursor_pointer()
             .hover(|button| button.bg(rgb(tokens.ui.bg_hover)))
@@ -432,48 +449,79 @@ impl HostToolsEntity {
         &self,
         metrics: &ResourceMetrics,
         can_retry_sampling: bool,
-        connection_id: String,
+        connection_id: &str,
         render: &MonitorRenderContext,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let rows = Arc::new(compact_monitor_rows(
+        let history: Arc<[ResourceTrendSample]> =
+            self.profiler_registry().trend_history(connection_id).into();
+        let options = CompactMonitorOptions {
+            cpu_cores_expanded: self.monitor_cpu_cores_expanded(connection_id),
+            show_cpu_sparkline: has_cpu_trend_series(&history),
+            show_network_sparkline: has_network_trend_series(&history),
+        };
+        let rows = compact_monitor_rows_with_options(
             metrics,
-            can_retry_sampling.then_some(connection_id.clone()),
-        ));
-        self.sync_compact_monitor_list_state(&rows, render.sidebar_width);
-        let state = self.compact_monitor_list_state();
-        let spec = self.compact_monitor_list_spec();
+            options,
+            can_retry_sampling.then(|| connection_id.to_owned()),
+        );
         let layout = compact_monitor_layout_for_width(render.sidebar_width);
-        let host_tools = cx.entity();
+        let signatures = rows
+            .iter()
+            .map(compact_monitor_row_signature)
+            .collect::<Vec<_>>();
+        self.sync_compact_monitor_list_signatures(
+            &compact_monitor_list_identity(connection_id, layout),
+            &signatures,
+        );
+        if rows.is_empty() {
+            return div()
+                .flex_1()
+                .min_h_0()
+                .p_3()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_align(gpui::TextAlign::Center)
+                .text_size(px(render.tokens.metrics.ui_text_xs))
+                .text_color(rgb(render.tokens.ui.text_muted))
+                .child(monitor_source_label(&render.i18n, metrics.source))
+                .into_any_element();
+        }
         let row_render = CompactMonitorRenderContext {
             tokens: render.tokens,
             i18n: render.i18n.clone(),
             mono_font_family: render.mono_font_family.clone(),
-            metrics: Arc::new(metrics.clone()),
-            history: self
-                .profiler_registry()
-                .trend_history(&connection_id)
-                .into(),
+            connection_id: connection_id.to_owned(),
+            cpu_level: percent_level(metrics.cpu_percent.filter(|value| value.is_finite())),
+            history,
         };
-
+        let state = self.compact_monitor_list_state();
+        let spec = TauriVirtualListSpec::new(
+            px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
+            COMPACT_MONITOR_LIST_OVERSCAN,
+        );
+        let host_tools = cx.entity();
         div()
-            .size_full()
+            .id("host-tools-monitor-metrics-scroll")
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .child(tauri_virtual_list(
                 state,
                 spec,
                 move |index, _window, cx| {
-                    let rows = rows.clone();
-                    let row_render = row_render.clone();
                     host_tools.update(cx, |host_tools, cx| {
-                        host_tools.render_compact_monitor_virtual_row(
-                            rows.get(index).cloned(),
-                            rows[..index].iter().rev().find_map(|row| match row {
-                                CompactMonitorRow::Section { kind } => Some(*kind),
-                                _ => None,
-                            }),
-                            layout,
-                            &row_render,
-                            cx,
+                        rows.get(index).map_or_else(
+                            || div().into_any_element(),
+                            |row| {
+                                host_tools.render_compact_monitor_virtual_row(
+                                    row,
+                                    layout,
+                                    &row_render,
+                                    cx,
+                                )
+                            },
                         )
                     })
                 },
@@ -481,462 +529,191 @@ impl HostToolsEntity {
             .into_any_element()
     }
 
-    pub(super) fn sync_compact_monitor_list_state(
-        &self,
-        rows: &[CompactMonitorRow],
-        sidebar_width: f32,
-    ) {
-        let signatures = rows
-            .iter()
-            .map(compact_monitor_row_signature)
-            .collect::<Vec<_>>();
-        let layout = compact_monitor_layout_for_width(sidebar_width);
-        self.sync_compact_monitor_list_signatures(
-            compact_monitor_list_identity(layout),
-            &signatures,
-        );
-    }
-
-    pub(super) fn compact_monitor_list_spec(&self) -> TauriVirtualListSpec {
-        TauriVirtualListSpec::new(
-            px(COMPACT_MONITOR_LIST_ESTIMATED_ROW_HEIGHT),
-            COMPACT_MONITOR_LIST_OVERSCAN,
-        )
-    }
-
     fn render_compact_monitor_virtual_row(
         &self,
-        row: Option<CompactMonitorRow>,
-        section: Option<MonitorSectionKind>,
+        row: &CompactMonitorRow,
         layout: CompactMonitorLayout,
         render: &CompactMonitorRenderContext,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(row) = row else {
-            return div().into_any_element();
-        };
+        let tokens = render.tokens;
+        let theme = tokens.ui;
         match row {
-            CompactMonitorRow::Metric { kind, value, level } => {
-                if let Some(percent) = monitor_usage(kind, &render.metrics) {
-                    let usage = render_usage(
-                        monitor_metric_icon(kind),
-                        self.compact_monitor_metric_label(kind, render),
-                        value,
-                        percent,
-                        render,
-                    );
-                    return if kind == MonitorMetricKind::Cpu {
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .child(usage)
-                            .child(render_trend(render, true))
-                            .into_any_element()
-                    } else {
-                        usage.into_any_element()
-                    };
-                }
-                let value = if kind == MonitorMetricKind::Source {
-                    render.i18n.t(&value)
-                } else {
-                    value
-                };
-                self.render_compact_monitor_metric_row(
-                    monitor_metric_icon(kind),
-                    self.compact_monitor_metric_label(kind, render),
-                    value,
-                    if matches!(kind, MonitorMetricKind::Rtt) {
-                        monitor_value_level_color(level, render.tokens.ui.text_muted)
-                    } else {
-                        render.tokens.ui.text
-                    },
-                    render,
-                )
-            }
-            CompactMonitorRow::Network { rx, tx } => div()
-                .w_full()
-                .flex()
-                .flex_col()
-                .child(self.render_compact_monitor_network_row(rx, tx, layout, render))
-                .child(render_trend(render, false))
-                .into_any_element(),
-            CompactMonitorRow::Section { kind } => self.render_compact_monitor_section_row(
-                monitor_section_icon(kind),
-                render.i18n.t(monitor_section_label_key(kind)),
-                render,
-            ),
-            CompactMonitorRow::Detail { name, value, level } => {
-                if section == Some(MonitorSectionKind::Mounts)
-                    && let Some(disk) = render
-                        .metrics
-                        .disks
-                        .iter()
-                        .find(|disk| disk.mount_point == name)
-                {
-                    return render_usage(
-                        LucideIcon::HardDrive,
-                        name,
-                        format!(
-                            "{} / {}",
-                            oxideterm_connection_monitor::format_bytes(disk.used),
-                            oxideterm_connection_monitor::format_bytes(disk.total)
-                        ),
-                        disk.percent
-                            .or_else(|| charts::capacity_percent(disk.used, disk.total)),
-                        render,
-                    )
-                    .into_any_element();
-                }
-                self.render_compact_monitor_detail_row(
-                    name,
-                    value,
-                    monitor_value_level_color(level, render.tokens.ui.text_muted),
-                    render,
-                )
-            }
-            CompactMonitorRow::Interface { name, rx, tx } => {
-                self.render_compact_monitor_interface_row(name, rx, tx, layout, render)
-            }
-            CompactMonitorRow::Retry { connection_id } => div()
-                .w_full()
-                .h(px(COMPACT_MONITOR_RETRY_ROW_HEIGHT))
-                .flex()
-                .items_center()
-                .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-                .child(self.render_retry_sampling_button(
-                    connection_id,
-                    &render.tokens,
-                    &render.i18n,
-                    cx,
-                ))
-                .into_any_element(),
-        }
-    }
-
-    fn render_compact_monitor_metric_row(
-        &self,
-        icon: LucideIcon,
-        label: String,
-        value: String,
-        value_color: u32,
-        render: &CompactMonitorRenderContext,
-    ) -> AnyElement {
-        let theme = render.tokens.ui;
-        // Compact metric rows stay flat so labels keep room in the narrow
-        // companion panel while the GPUI List owns the hot scroll surface.
-        div()
-            .w_full()
-            .h(px(COMPACT_MONITOR_METRIC_ROW_HEIGHT))
-            .min_w_0()
-            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .text_size(px(12.0))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(WorkspaceApp::render_lucide_icon(
-                        icon,
-                        13.0,
-                        rgb(theme.text_muted),
+            CompactMonitorRow::Usage {
+                kind,
+                detail,
+                percent,
+                level,
+            } => {
+                let row =
+                    render_compact_usage_row(kind, detail.as_deref(), *percent, *level, render);
+                if matches!(
+                    kind,
+                    MonitorUsageKind::Cpu {
+                        expandable: true,
+                        ..
+                    }
+                ) {
+                    let connection_id = render.connection_id.clone();
+                    row.id(host_tools_row_id(
+                        "host-monitor-cpu-row",
+                        &connection_id,
+                        "cpu",
                     ))
-                    .child(div().min_w_0().truncate().child(label)),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .max_w(relative(COMPACT_MONITOR_VALUE_MAX_WIDTH_RATIO))
+                    .cursor_pointer()
+                    .hover(move |row| row.bg(rgb(theme.bg_hover)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |host_tools, _event, _window, cx| {
+                            host_tools.toggle_monitor_cpu_cores(connection_id.clone(), cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .into_any_element()
+                } else {
+                    row.into_any_element()
+                }
+            }
+            CompactMonitorRow::CpuCorePair { left, right } => {
+                render_cpu_core_pair_row(left, right.as_ref(), render).into_any_element()
+            }
+            CompactMonitorRow::LoadAverage { value } => {
+                compact_row(COMPACT_MONITOR_METRIC_ROW_HEIGHT)
+                    .justify_between()
+                    .text_size(px(tokens.metrics.ui_text_xs))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(rgb(theme.text_muted))
+                            .child(render.i18n.t("profiler.panel.load_avg")),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .font_family(render.mono_font_family.clone())
+                            .text_color(rgb(theme.text_secondary))
+                            .child(value.clone()),
+                    )
+                    .into_any_element()
+            }
+            CompactMonitorRow::Sparkline { kind } => {
+                render_sparkline(render, *kind == MonitorSparklineKind::Cpu).into_any_element()
+            }
+            CompactMonitorRow::SectionHeader { kind, disk_io } => {
+                compact_row(COMPACT_MONITOR_SECTION_ROW_HEIGHT)
+                    .justify_between()
+                    .bg(rgba((theme.bg_sunken << 8) | 0x45))
+                    .border_t_1()
+                    .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+                    .child(compact_section_label(
+                        monitor_section_label_key(*kind),
+                        render,
+                    ))
+                    .when_some(disk_io.as_ref(), |row, meta| {
+                        row.child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(render.mono_font_family.clone())
+                                .text_size(px(tokens.metrics.ui_text_2xs))
+                                .text_color(rgb(if meta.active {
+                                    theme.text_secondary
+                                } else {
+                                    theme.text_muted
+                                }))
+                                .child(format!("R {} · W {}", meta.read, meta.write)),
+                        )
+                    })
+                    .into_any_element()
+            }
+            CompactMonitorRow::NetworkSummary {
+                rx,
+                tx,
+                rx_active,
+                tx_active,
+            } => {
+                let rates =
+                    render_bandwidth(rx.as_deref(), tx.as_deref(), *rx_active, *tx_active, render)
+                        .text_size(px(tokens.metrics.ui_text_xs));
+                render_bandwidth_row(
+                    compact_section_label("profiler.panel.network", render),
+                    rates,
+                    COMPACT_MONITOR_NETWORK_SUMMARY_ROW_HEIGHT,
+                    layout,
+                )
+                .bg(rgba((theme.bg_sunken << 8) | 0x45))
+                .border_t_1()
+                .border_color(rgba((theme.border << 8) | MONITOR_BORDER_ALPHA))
+                .into_any_element()
+            }
+            CompactMonitorRow::Interface {
+                name,
+                rx,
+                tx,
+                rx_active,
+                tx_active,
+            } => {
+                let label = div()
+                    .min_w_0()
                     .truncate()
                     .font_family(render.mono_font_family.clone())
-                    .text_align(gpui::TextAlign::Right)
-                    .text_color(rgb(value_color))
-                    .child(value),
-            )
-            .into_any_element()
-    }
-
-    fn compact_monitor_metric_label(
-        &self,
-        kind: MonitorMetricKind,
-        render: &CompactMonitorRenderContext,
-    ) -> String {
-        match kind {
-            MonitorMetricKind::Source => render.i18n.t("profiler.panel.source"),
-            _ => render.i18n.t(monitor_metric_label_key(kind)),
-        }
-    }
-
-    fn render_compact_monitor_network_row(
-        &self,
-        rx: String,
-        tx: String,
-        layout: CompactMonitorLayout,
-        render: &CompactMonitorRenderContext,
-    ) -> AnyElement {
-        let theme = render.tokens.ui;
-        if layout == CompactMonitorLayout::Stacked {
-            return div()
-                .w_full()
-                .h(px(COMPACT_MONITOR_STACKED_ROW_HEIGHT))
-                .min_w_0()
-                .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-                .flex()
-                .flex_col()
-                .justify_center()
-                .gap_1()
-                .text_size(px(12.0))
+                    .text_size(px(tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_secondary))
+                    .child(name.clone());
+                let rates = render_bandwidth(Some(rx), Some(tx), *rx_active, *tx_active, render)
+                    .text_size(px(tokens.metrics.ui_text_2xs));
+                render_bandwidth_row(label, rates, COMPACT_MONITOR_INTERFACE_ROW_HEIGHT, layout)
+                    .into_any_element()
+            }
+            CompactMonitorRow::Process {
+                pid,
+                command,
+                memory_percent,
+                level,
+            } => compact_row(COMPACT_MONITOR_PROCESS_ROW_HEIGHT)
+                .text_size(px(tokens.metrics.ui_text_xs))
+                .justify_between()
                 .child(
                     div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.0))
-                        .text_color(rgb(theme.text_muted))
-                        .child(WorkspaceApp::render_lucide_icon(
-                            LucideIcon::Wifi,
-                            13.0,
-                            rgb(theme.text_muted),
-                        ))
-                        .child(render.i18n.t("profiler.panel.network")),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .pl(px(COMPACT_MONITOR_DETAIL_INDENT))
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
-                        .font_family(render.mono_font_family.clone())
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_color(rgb(theme.accent))
-                                .child(format!("↓ {rx}")),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_align(gpui::TextAlign::Right)
-                                .text_color(rgb(theme.accent_secondary))
-                                .child(format!("↑ {tx}")),
-                        ),
-                )
-                .into_any_element();
-        }
-
-        div()
-            .w_full()
-            .h(px(COMPACT_MONITOR_METRIC_ROW_HEIGHT))
-            .min_w_0()
-            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_2()
-            .text_size(px(12.0))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(WorkspaceApp::render_lucide_icon(
-                        LucideIcon::Wifi,
-                        13.0,
-                        rgb(theme.text_muted),
-                    ))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .child(render.i18n.t("profiler.panel.network")),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .max_w(relative(COMPACT_MONITOR_VALUE_MAX_WIDTH_RATIO))
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap(px(8.0))
-                    .font_family(render.mono_font_family.clone())
-                    .child(
-                        div()
-                            .flex_none()
-                            .truncate()
-                            .text_color(rgb(theme.accent))
-                            .child(format!("↓ {rx}")),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .truncate()
-                            .text_color(rgb(theme.accent_secondary))
-                            .child(format!("↑ {tx}")),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_compact_monitor_section_row(
-        &self,
-        icon: LucideIcon,
-        label: String,
-        render: &CompactMonitorRenderContext,
-    ) -> AnyElement {
-        let theme = render.tokens.ui;
-        div()
-            .w_full()
-            .h(px(COMPACT_MONITOR_SECTION_ROW_HEIGHT))
-            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-            .border_t_1()
-            .border_color(rgba((theme.border << 8) | 0x60))
-            .flex()
-            .items_center()
-            .gap(px(6.0))
-            .min_w_0()
-            .text_size(px(12.0))
-            .text_color(rgb(theme.text))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .child(WorkspaceApp::render_lucide_icon(
-                icon,
-                13.0,
-                rgb(theme.text_muted),
-            ))
-            .child(div().min_w_0().truncate().child(label))
-            .into_any_element()
-    }
-
-    fn render_compact_monitor_detail_row(
-        &self,
-        name: String,
-        value: String,
-        value_color: u32,
-        render: &CompactMonitorRenderContext,
-    ) -> AnyElement {
-        let theme = render.tokens.ui;
-        // Detail rows are plain measured list items, not selectable dashboard
-        // widgets, so scroll stays owned by the GPUI List surface.
-        div()
-            .w_full()
-            .h(px(COMPACT_MONITOR_DETAIL_ROW_HEIGHT))
-            .flex()
-            .items_center()
-            .min_w_0()
-            .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-            .text_size(px(render.tokens.metrics.ui_text_2xs))
-            .font_family(render.mono_font_family.clone())
-            .child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .pl(px(COMPACT_MONITOR_DETAIL_INDENT))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap_2()
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_color(rgb(theme.text))
-                            .child(name),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .max_w(relative(COMPACT_MONITOR_DETAIL_VALUE_MAX_WIDTH_RATIO))
-                            .truncate()
-                            .text_align(gpui::TextAlign::Right)
-                            .text_color(rgb(value_color))
-                            .child(value),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_compact_monitor_interface_row(
-        &self,
-        name: String,
-        rx: String,
-        tx: String,
-        layout: CompactMonitorLayout,
-        render: &CompactMonitorRenderContext,
-    ) -> AnyElement {
-        let theme = render.tokens.ui;
-        if layout == CompactMonitorLayout::Stacked {
-            return div()
-                .w_full()
-                .h(px(COMPACT_MONITOR_STACKED_ROW_HEIGHT))
-                .min_w_0()
-                .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
-                .pl(px(
-                    COMPACT_MONITOR_ROW_SIDE_PADDING + COMPACT_MONITOR_DETAIL_INDENT
-                ))
-                .flex()
-                .flex_col()
-                .justify_center()
-                .gap_1()
-                .font_family(render.mono_font_family.clone())
-                .text_size(px(render.tokens.metrics.ui_text_2xs))
-                .child(
-                    div()
+                        .flex_1()
                         .min_w_0()
                         .truncate()
                         .text_color(rgb(theme.text))
-                        .child(name),
+                        .child(command.clone()),
                 )
                 .child(
                     div()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap_2()
+                        .w(px(62.0))
+                        .flex_none()
+                        .truncate()
+                        .text_align(gpui::TextAlign::Right)
+                        .font_family(render.mono_font_family.clone())
+                        .text_size(px(tokens.metrics.ui_text_2xs))
                         .text_color(rgb(theme.text_muted))
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_color(rgb(theme.accent))
-                                .child(format!("↓ {rx}")),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex_1()
-                                .truncate()
-                                .text_align(gpui::TextAlign::Right)
-                                .text_color(rgb(theme.accent_secondary))
-                                .child(format!("↑ {tx}")),
-                        ),
+                        .child(format!("#{pid}")),
                 )
-                .into_any_element();
+                .child(
+                    div()
+                        .w(px(40.0))
+                        .flex_none()
+                        .text_align(gpui::TextAlign::Right)
+                        .font_family(render.mono_font_family.clone())
+                        .text_color(usage_value_color(*level, &theme))
+                        .child(memory_percent.clone()),
+                )
+                .into_any_element(),
+            CompactMonitorRow::Retry { connection_id } => {
+                compact_row(COMPACT_MONITOR_RETRY_ROW_HEIGHT)
+                    .child(self.render_retry_sampling_button(
+                        connection_id.clone(),
+                        &render.tokens,
+                        &render.i18n,
+                        cx,
+                    ))
+                    .into_any_element()
+            }
         }
-
-        self.render_compact_monitor_detail_row(
-            name,
-            format!("↓ {rx} / ↑ {tx}"),
-            theme.text_muted,
-            render,
-        )
     }
 
     fn render_monitor_text_with_role(
@@ -963,54 +740,78 @@ impl HostToolsEntity {
     }
 }
 
-fn monitor_metric_icon(kind: MonitorMetricKind) -> LucideIcon {
-    match kind {
-        MonitorMetricKind::System => LucideIcon::Monitor,
-        MonitorMetricKind::SystemVersion => LucideIcon::Info,
-        MonitorMetricKind::Architecture => LucideIcon::Cpu,
-        MonitorMetricKind::BootTime | MonitorMetricKind::Uptime => LucideIcon::Clock,
-        MonitorMetricKind::Cpu | MonitorMetricKind::Gpu => LucideIcon::Cpu,
-        MonitorMetricKind::Memory | MonitorMetricKind::Swap | MonitorMetricKind::GpuMemory => {
-            LucideIcon::MemoryStick
+fn compact_row(height: f32) -> Div {
+    div()
+        .w_full()
+        .min_w_0()
+        .h(px(height))
+        .px(px(COMPACT_MONITOR_ROW_SIDE_PADDING))
+        .flex()
+        .items_center()
+        .gap_2()
+}
+
+fn compact_section_label(label: &str, render: &CompactMonitorRenderContext) -> Div {
+    div()
+        .min_w_0()
+        .truncate()
+        .text_size(px(render.tokens.metrics.ui_text_2xs))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(render.tokens.ui.text_secondary))
+        .child(render.i18n.t(label))
+}
+
+fn render_bandwidth(
+    rx: Option<&str>,
+    tx: Option<&str>,
+    rx_active: bool,
+    tx_active: bool,
+    render: &CompactMonitorRenderContext,
+) -> Div {
+    let theme = render.tokens.ui;
+    let mut values = div()
+        .min_w_0()
+        .flex()
+        .items_center()
+        .gap_2()
+        .font_family(render.mono_font_family.clone())
+        .text_color(rgb(theme.text_muted));
+    for (arrow, value, active) in [('↓', rx, rx_active), ('↑', tx, tx_active)] {
+        if let Some(value) = value {
+            values = values.child(
+                div()
+                    .min_w_0()
+                    .truncate()
+                    .text_color(rgb(if active { theme.text } else { theme.text_muted }))
+                    .child(format!("{arrow} {value}")),
+            );
         }
-        MonitorMetricKind::Disk | MonitorMetricKind::DiskRead | MonitorMetricKind::DiskWrite => {
-            LucideIcon::HardDrive
-        }
-        MonitorMetricKind::LoadAverage => LucideIcon::Gauge,
-        MonitorMetricKind::Rtt => LucideIcon::Activity,
-        MonitorMetricKind::Source => LucideIcon::Info,
+    }
+    values.when(rx.is_none() && tx.is_none(), |values| values.child("—"))
+}
+
+fn render_bandwidth_row(label: Div, rates: Div, height: f32, layout: CompactMonitorLayout) -> Div {
+    match layout {
+        CompactMonitorLayout::Inline => compact_row(height)
+            .justify_between()
+            .child(label.flex_1())
+            .child(rates),
+        CompactMonitorLayout::Stacked => compact_row(COMPACT_MONITOR_STACKED_ROW_HEIGHT)
+            .flex_col()
+            .items_start()
+            .justify_center()
+            .gap_1()
+            .child(label.w_full())
+            .child(rates.w_full()),
     }
 }
 
-fn monitor_metric_label_key(kind: MonitorMetricKind) -> &'static str {
-    match kind {
-        MonitorMetricKind::System => "profiler.panel.system",
-        MonitorMetricKind::SystemVersion => "profiler.panel.system_version",
-        MonitorMetricKind::Architecture => "profiler.panel.architecture",
-        MonitorMetricKind::BootTime => "profiler.panel.boot_time",
-        MonitorMetricKind::Uptime => "profiler.panel.uptime",
-        MonitorMetricKind::Cpu => "profiler.panel.cpu",
-        MonitorMetricKind::Memory => "profiler.panel.memory",
-        MonitorMetricKind::Swap => "profiler.panel.swap",
-        MonitorMetricKind::Disk => "profiler.panel.disk",
-        MonitorMetricKind::DiskRead => "profiler.panel.disk_read",
-        MonitorMetricKind::DiskWrite => "profiler.panel.disk_write",
-        MonitorMetricKind::Gpu => "profiler.panel.gpu",
-        MonitorMetricKind::GpuMemory => "profiler.panel.gpu_memory",
-        MonitorMetricKind::LoadAverage => "profiler.panel.load_avg",
-        MonitorMetricKind::Rtt => "profiler.panel.rtt",
-        MonitorMetricKind::Source => "profiler.panel.source",
-    }
-}
-
-fn monitor_section_icon(kind: MonitorSectionKind) -> LucideIcon {
-    match kind {
-        MonitorSectionKind::CpuCores => LucideIcon::Cpu,
-        MonitorSectionKind::Mounts => LucideIcon::HardDrive,
-        MonitorSectionKind::Gpus => LucideIcon::Cpu,
-        MonitorSectionKind::Interfaces => LucideIcon::Wifi,
-        MonitorSectionKind::TopProcesses => LucideIcon::Activity,
-    }
+fn monitor_source_label(i18n: &I18n, source: MetricsSource) -> String {
+    format!(
+        "{}: {}",
+        i18n.t("profiler.panel.source"),
+        i18n.t(metrics_source_label_key(source))
+    )
 }
 
 fn monitor_section_label_key(kind: MonitorSectionKind) -> &'static str {
@@ -1024,8 +825,6 @@ fn monitor_section_label_key(kind: MonitorSectionKind) -> &'static str {
 }
 
 fn compact_monitor_layout_for_width(sidebar_width: f32) -> CompactMonitorLayout {
-    // Stack bandwidth values before the narrow sidebar can force labels and
-    // rates to paint over each other.
     if sidebar_width <= COMPACT_MONITOR_STACKED_LAYOUT_MAX_WIDTH {
         CompactMonitorLayout::Stacked
     } else {
@@ -1033,11 +832,10 @@ fn compact_monitor_layout_for_width(sidebar_width: f32) -> CompactMonitorLayout 
     }
 }
 
-fn compact_monitor_list_identity(layout: CompactMonitorLayout) -> &'static str {
-    // Variable-height list measurements cannot be reused after rows switch
-    // between inline and stacked geometry.
-    match layout {
-        CompactMonitorLayout::Inline => "host-tools-monitor-compact-inline",
-        CompactMonitorLayout::Stacked => "host-tools-monitor-compact-stacked",
-    }
+fn compact_monitor_list_identity(connection_id: &str, layout: CompactMonitorLayout) -> String {
+    let mode = match layout {
+        CompactMonitorLayout::Inline => "inline",
+        CompactMonitorLayout::Stacked => "stacked",
+    };
+    format!("host-tools-monitor:{connection_id}:{mode}")
 }

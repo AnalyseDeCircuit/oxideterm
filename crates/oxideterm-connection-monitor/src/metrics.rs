@@ -1102,10 +1102,13 @@ mod tests {
             None
         );
         let rows = crate::compact_monitor_rows(&metrics, None);
-        assert!(rows.contains(&crate::CompactMonitorRow::Metric {
-            kind: crate::MonitorMetricKind::DiskRead,
-            value: "2.9 KB/s".into(),
-            level: crate::MonitorValueLevel::Normal,
+        assert!(rows.contains(&crate::CompactMonitorRow::SectionHeader {
+            kind: crate::MonitorSectionKind::Mounts,
+            disk_io: Some(crate::MonitorDiskIoMeta {
+                read: "2.9 KB/s".into(),
+                write: "4.9 KB/s".into(),
+                active: true,
+            }),
         }));
     }
 

@@ -107,6 +107,7 @@ pub(in crate::workspace) struct HostToolsEntity {
     pub(super) topology_menu: Option<TopologyNodeMenuState>,
     compact_monitor_list_state: ListState,
     compact_monitor_list_cache: RefCell<VirtualListSignatureCache>,
+    monitor_expanded_cpu_connections: RefCell<HashSet<String>>,
 }
 
 impl HostToolsEntity {
@@ -644,6 +645,7 @@ impl HostToolsEntity {
                 ),
             ),
             compact_monitor_list_cache: RefCell::new(VirtualListSignatureCache::default()),
+            monitor_expanded_cpu_connections: RefCell::new(HashSet::new()),
         };
         entity.schedule_sampler_delivery(
             super::delivery::HostToolsDeliveryBridges {
@@ -2121,6 +2123,27 @@ impl HostToolsEntity {
 
     pub(super) fn remove_profiler_connection(&self, connection_id: &str) {
         self.profiler_registry.remove(connection_id);
+        self.monitor_expanded_cpu_connections
+            .borrow_mut()
+            .remove(connection_id);
+    }
+
+    pub(super) fn monitor_cpu_cores_expanded(&self, connection_id: &str) -> bool {
+        self.monitor_expanded_cpu_connections
+            .borrow()
+            .contains(connection_id)
+    }
+
+    pub(super) fn toggle_monitor_cpu_cores(
+        &mut self,
+        connection_id: String,
+        cx: &mut Context<Self>,
+    ) {
+        let expanded = self.monitor_expanded_cpu_connections.get_mut();
+        if !expanded.remove(&connection_id) {
+            expanded.insert(connection_id);
+        }
+        cx.notify();
     }
 
     pub(super) fn profiler_connection_missing(&self, connection_id: &str) -> bool {

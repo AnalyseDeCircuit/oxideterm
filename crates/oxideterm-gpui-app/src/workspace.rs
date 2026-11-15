@@ -122,11 +122,11 @@ use gpui::{
     prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_connection_monitor::{
-    CompactMonitorRow, ConnectionPoolEntryState, ConnectionPoolEntrySummary,
-    ConnectionPoolMonitorStats, DockerActionKind, FilesystemCommandCapability,
+    ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
+    DockerActionKind, FilesystemCommandCapability,
     FilesystemEntrySeverity, FilesystemFilter, GpuDevice, GpuProvider, GpuSamplingTask,
     GpuSnapshot, GpuSnapshotStatus, GpuUpdate, LogCommandCapability, LogPreset, MetricsSource,
-    MonitorMetricKind, MonitorSectionKind, MonitorValueLevel, PackageCommandCapability,
+    MonitorValueLevel, PackageCommandCapability,
     PackageFilter, PortCommandCapability, PortFilter, ProcessActionKind, ProcessCommandCapability,
     ProcessFilter, ProcessSort, ProfilerRegistry, ResourceDockerContainer, ResourceDockerStatus,
     ResourceFilesystemEntry, ResourceFilesystemSnapshot, ResourceFilesystemStatus,
@@ -148,7 +148,7 @@ use oxideterm_connection_monitor::{
     build_service_follow_logs_command, build_service_logs_command, build_tmux_action_command,
     build_tmux_attach_command, build_tmux_new_session_command, build_tmux_rename_session_command,
     build_tmux_rename_window_command, build_tmux_send_pane_command, build_tmux_snapshot_command,
-    compact_monitor_row_signature, compact_monitor_rows, docker_action_succeeded,
+    docker_action_succeeded,
     docker_row_signature, docker_state_label_key, filesystem_attention_label_keys,
     filesystem_entry_severity, filesystem_filter_label_key, filesystem_kind_label_key,
     filesystem_read_only_label_key, filesystem_row_signature, format_bytes,
