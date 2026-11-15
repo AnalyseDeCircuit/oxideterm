@@ -370,7 +370,7 @@ impl WorkspaceApp {
             .flex_col()
             .min_h_0()
             .overflow_hidden()
-            .bg(self.context_sidebar_content_background(theme.bg))
+            .bg(self.context_sidebar_content_background(theme.shell_bg()))
             .text_color(rgb(theme.text))
             .child(
                 div()

@@ -95,7 +95,6 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
-      "subtitle": "원격 연결, 터미널 및 운영을 하나의 네이티브 작업 공간에서",
       "new_connection": "새 연결",
       "new_connection_hint": "원격 연결을 만들고 저장합니다",
       "new_local_terminal": "로컬 터미널",

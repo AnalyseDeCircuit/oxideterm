@@ -95,7 +95,6 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
-      "subtitle": "連線、終端與遠端維運，一處完成",
       "new_connection": "新增連線",
       "new_connection_hint": "建立並儲存新的遠端連線",
       "new_local_terminal": "本機終端",

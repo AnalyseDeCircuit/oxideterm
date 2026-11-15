@@ -95,7 +95,6 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
-      "subtitle": "连接、终端与远程运维，一处完成",
       "new_connection": "新建连接",
       "new_connection_hint": "创建并保存新的远程连接",
       "new_local_terminal": "本地终端",

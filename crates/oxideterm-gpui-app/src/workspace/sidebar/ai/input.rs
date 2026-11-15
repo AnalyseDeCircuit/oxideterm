@@ -20,7 +20,7 @@ impl WorkspaceApp {
             .pt(px(self.tokens.spacing.one))
             .border_t_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
-            .bg(self.context_sidebar_content_background(self.tokens.ui.bg))
+            .bg(self.context_sidebar_content_background(self.tokens.ui.shell_bg()))
             .child(self.render_ai_model_selector(
                 AiModelSelectorScope::Sidebar,
                 SelectAnchorId::AiModelSelector,
@@ -211,7 +211,7 @@ impl WorkspaceApp {
         );
         ai_chat_input_root_with_background(
             &self.tokens,
-            self.context_sidebar_content_background(self.tokens.ui.bg),
+            self.context_sidebar_content_background(self.tokens.ui.shell_bg()),
         )
         // The toolbar owns the spacing above the composer.
         .pt(px(0.0))

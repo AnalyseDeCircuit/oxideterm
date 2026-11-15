@@ -8,6 +8,10 @@ pub(crate) fn app_icon_preview_source(variant: AppIconVariant) -> gpui::ImageSou
     app_icon_preview_source_sized(variant, APP_ICON_PREVIEW_SIZE)
 }
 
+// macOS icon variants reserve an outer transparent Dock gutter (~8.5% per side)
+// around a 425x425 squircle inside a 512x512 canvas.
+const APP_ICON_CANVAS_TO_SQUIRCLE_SCALE: f32 = 512.0 / 425.0;
+
 pub(crate) fn app_icon_preview_source_sized(
     variant: AppIconVariant,
     logical_size: f32,
@@ -21,7 +25,20 @@ pub(crate) fn app_icon_preview_source_sized(
     }))
 }
 
+pub(crate) fn app_icon_trimmed_source_sized(
+    variant: AppIconVariant,
+    logical_size: f32,
+) -> gpui::ImageSource {
+    let path = app_icon_variant_resource_path(variant);
+    let logical_size = logical_size.max(1.0);
+    gpui::ImageSource::Custom(Arc::new(move |window, cx| {
+        let pixels = (logical_size * window.scale_factor()).round().max(1.0) as u32;
+        window.use_asset::<gpui::AssetLogger<AppIconTrimmedPreview>>(&(path.clone(), pixels), cx)
+    }))
+}
+
 enum AppIconPreview {}
+enum AppIconTrimmedPreview {}
 
 impl gpui::Asset for AppIconPreview {
     type Source = (PathBuf, u32);
@@ -53,6 +70,72 @@ impl gpui::Asset for AppIconPreview {
             ))
         }
     }
+}
+
+impl gpui::Asset for AppIconTrimmedPreview {
+    type Source = (PathBuf, u32);
+    type Output = Result<Arc<gpui::RenderImage>, gpui::ImageCacheError>;
+
+    fn load(
+        (path, pixels): Self::Source,
+        _: &mut gpui::App,
+    ) -> impl Future<Output = Self::Output> + Send + 'static {
+        async move {
+            let decode_pixels = ((pixels as f32) * APP_ICON_CANVAS_TO_SQUIRCLE_SCALE)
+                .round()
+                .max(pixels as f32) as u32;
+            let (_, mut frame) = oxideterm_background_media::decode_poster(
+                &path,
+                oxideterm_background_media::OutputParams {
+                    width: decode_pixels,
+                    height: decode_pixels,
+                    fit: oxideterm_background_media::BackgroundFit::Contain,
+                    blur: 0.0,
+                    limits: Default::default(),
+                },
+            )
+            .map_err(|error| gpui::ImageCacheError::Other(Arc::new(error.into())))?;
+            let pixels = std::mem::take(&mut frame.pixels);
+            let pixels = image::RgbaImage::from_raw(frame.width, frame.height, pixels)
+                .expect("poster decoder returns validated BGRA dimensions");
+            let trimmed = crop_to_alpha_square(&pixels);
+            Ok(Arc::new(
+                gpui::RenderImage::new(vec![image::Frame::new(trimmed)]).retaining(frame),
+            ))
+        }
+    }
+}
+
+fn crop_to_alpha_square(image: &image::RgbaImage) -> image::RgbaImage {
+    const ALPHA_THRESHOLD: u8 = 8;
+
+    let (width, height) = image.dimensions();
+    if width == 0 || height == 0 {
+        return image.clone();
+    }
+    let mut min_x = width;
+    let mut min_y = height;
+    let mut max_x = 0;
+    let mut max_y = 0;
+    for (x, y, pixel) in image.enumerate_pixels() {
+        if pixel.0[3] > ALPHA_THRESHOLD {
+            min_x = min_x.min(x);
+            min_y = min_y.min(y);
+            max_x = max_x.max(x);
+            max_y = max_y.max(y);
+        }
+    }
+    if min_x > max_x || min_y > max_y {
+        return image.clone();
+    }
+    let span_w = max_x - min_x + 1;
+    let span_h = max_y - min_y + 1;
+    let side = span_w.max(span_h).min(width.min(height));
+    let center_x = min_x + span_w / 2;
+    let center_y = min_y + span_h / 2;
+    let crop_x = center_x.saturating_sub(side / 2).min(width - side);
+    let crop_y = center_y.saturating_sub(side / 2).min(height - side);
+    image::imageops::crop_imm(image, crop_x, crop_y, side, side).to_image()
 }
 
 pub(crate) const APP_ICON_VARIANTS: &[AppIconVariant] = &[
@@ -127,6 +210,7 @@ fn app_icon_resource_roots() -> Vec<PathBuf> {
                 .join("resources")
                 .join("icons"),
         );
+        roots.push(cwd.join("resources").join("icons"));
     }
     roots
 }
@@ -269,6 +353,42 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[gpui::test]
+    fn trimmed_icon_preview_removes_transparent_dock_gutter(cx: &mut gpui::TestAppContext) {
+        for variant in [AppIconVariant::Default, AppIconVariant::FilledOrange] {
+            let path = app_icon_variant_resource_path(variant);
+            let source = (path, 84);
+            cx.update(|cx| cx.fetch_asset::<AppIconTrimmedPreview>(&source));
+            cx.run_until_parked();
+            let preview = cx
+                .update(|cx| cx.fetch_asset::<AppIconTrimmedPreview>(&source))
+                .unwrap()
+                .unwrap();
+            let size = preview.size(0);
+            let w = size.width.0 as usize;
+            let h = size.height.0 as usize;
+            assert_eq!(w, h);
+            let bytes = preview.as_bytes(0).unwrap();
+            let alpha_at = |x: usize, y: usize| bytes[(y * w + x) * 4 + 3];
+            // All four outer midpoints must sit on the anti-aliased squircle edge
+            // with solid coverage 1 device pixel inward, leaving zero Dock gutter.
+            assert!(alpha_at(0, h / 2) > 32, "{variant:?} left AA edge");
+            assert!(alpha_at(w - 1, h / 2) > 32, "{variant:?} right AA edge");
+            assert!(alpha_at(w / 2, 0) > 32, "{variant:?} top AA edge");
+            assert!(alpha_at(w / 2, h - 1) > 32, "{variant:?} bottom AA edge");
+            assert!(alpha_at(1, h / 2) >= 250, "{variant:?} left solid edge");
+            assert!(
+                alpha_at(w - 2, h / 2) >= 250,
+                "{variant:?} right solid edge"
+            );
+            assert!(alpha_at(w / 2, 1) >= 250, "{variant:?} top solid edge");
+            assert!(
+                alpha_at(w / 2, h - 2) >= 250,
+                "{variant:?} bottom solid edge"
+            );
         }
     }
 }

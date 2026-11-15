@@ -95,7 +95,6 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
-      "subtitle": "Conexões remotas, terminais e operações em um espaço de trabalho nativo",
       "new_connection": "Nova conexão",
       "new_connection_hint": "Crie e salve uma conexão remota",
       "new_local_terminal": "Terminal local",

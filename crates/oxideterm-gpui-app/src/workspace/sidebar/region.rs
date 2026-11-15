@@ -105,7 +105,7 @@ impl WorkspaceApp {
             .child(self.render_context_right_sidebar_region(cx))
             .child(oxideterm_gpui_ui::surface::panel_edge_highlight(
                 &self.tokens,
-                self.workspace_sidebar_background(self.tokens.ui.bg).a,
+                self.workspace_sidebar_background(self.tokens.ui.shell_bg()).a,
                 0.0,
             ))
             .into_any_element()
@@ -148,7 +148,7 @@ impl WorkspaceApp {
                             .px_3()
                             // Match the center tab bar's chrome opacity instead
                             // of inheriting the more transparent sidebar body.
-                            .bg(self.workspace_chrome_background(theme.bg))
+                            .bg(self.workspace_chrome_background(theme.shell_bg()))
                             // The context-sidebar titlebar is fixed chrome.
                             // Give it its own hitbox so wheel/drag events
                             // cannot fall through to a scrollable tool body.
@@ -174,7 +174,7 @@ impl WorkspaceApp {
                             .overflow_hidden()
                             // Keep the sidebar tint below the titlebar so the
                             // translucent chrome is composited exactly once.
-                            .bg(self.workspace_sidebar_background(theme.bg))
+                            .bg(self.workspace_sidebar_background(theme.shell_bg()))
                             .child({
                                 let content = match self.active_context_sidebar_panel {
                                     ContextSidebarPanel::Assistant => {
@@ -361,7 +361,7 @@ impl WorkspaceApp {
                     .flex_col()
                     // Match the activity bar and context sidebar base surface
                     // so the full-height navigation body does not read as a card.
-                    .bg(self.workspace_sidebar_background(theme.bg))
+                    .bg(self.workspace_sidebar_background(theme.shell_bg()))
                     .child(self.render_sidebar_content(window, cx)),
             )
             .when(
@@ -411,7 +411,7 @@ impl WorkspaceApp {
             .items_center()
             // Use the same image-background opacity as the adjacent tab bar
             // without stacking it over the sidebar body's translucent tint.
-            .bg(self.workspace_chrome_background(theme.bg))
+            .bg(self.workspace_chrome_background(theme.shell_bg()))
             .border_b_1()
             .border_color(self.workspace_chrome_divider())
             .px_3()

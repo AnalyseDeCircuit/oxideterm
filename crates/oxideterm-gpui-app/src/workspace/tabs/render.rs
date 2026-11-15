@@ -113,6 +113,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let has_window_background = self.window_background_preferences().is_some();
+        let strip_bg = theme.shell_bg();
         let bar = div()
             .h(px(self.tokens.metrics.tabbar_height))
             .flex()
@@ -124,11 +125,11 @@ impl WorkspaceApp {
             .border_color(self.workspace_chrome_divider())
             .bg(if has_window_background {
                 rgba(
-                    (theme.bg << 8)
+                    (strip_bg << 8)
                         | oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens),
                 )
             } else {
-                rgb(theme.bg)
+                rgb(strip_bg)
             });
 
         // Tauri's scroll container measures the full inline-flex tab row as
@@ -397,9 +398,9 @@ impl WorkspaceApp {
             rgba(0x00000000)
         } else {
             self.workspace_chrome_background(if active {
-                self.tokens.ui.bg_panel
+                self.tokens.ui.shell_active_tab_bg()
             } else {
-                self.tokens.ui.bg
+                self.tokens.ui.shell_bg()
             })
         }
     }
@@ -955,8 +956,8 @@ impl WorkspaceApp {
         let compact = welcome_layout_is_compact(available_width);
         div()
             .size_full()
-            // Match both sidebars at the top-level content layer. Fixed tab
-            // chrome keeps its stronger tint independently for readability.
+            // Keep the start page on the primary workspace canvas while light
+            // themes recess peripheral shell bars to `shell_bg()`.
             .bg(self.workspace_sidebar_background(theme.bg))
             .text_color(rgb(theme.text_muted))
             .font_family(settings_ui_font_family(
@@ -1027,12 +1028,35 @@ impl WorkspaceApp {
     }
 
     fn render_welcome_brand(&self) -> AnyElement {
-        const BRAND_ICON_SIZE: f32 = 48.0;
-
         let theme = self.tokens.ui;
-        let icon_source = crate::app_icon::app_icon_preview_source_sized(
+        let wordmark_size = self.tokens.metrics.welcome_wordmark_font_size;
+        let icon_source = crate::app_icon::app_icon_trimmed_source_sized(
             self.settings_store.settings().appearance.app_icon,
-            BRAND_ICON_SIZE,
+            WELCOME_BRAND_BADGE_SIZE,
+        );
+        // Trimmed icons start right at the squircle edge so x=0 aligns with the
+        // workbench columns below, while the subtle border and card shadow keep
+        // white squircle variants legible against light canvases.
+        let badge = oxideterm_gpui_ui::theme_card_surface_shadow(
+            div()
+                .size(px(WELCOME_BRAND_BADGE_SIZE))
+                .relative()
+                .flex_none()
+                .rounded(px(WELCOME_BRAND_BADGE_RADIUS))
+                .child(
+                    gpui::img(icon_source)
+                        .size(px(WELCOME_BRAND_BADGE_SIZE))
+                        .object_fit(ObjectFit::Contain),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(px(WELCOME_BRAND_BADGE_RADIUS))
+                        .border_1()
+                        .border_color(rgba((theme.border << 8) | 0x80)),
+                ),
+            &self.tokens,
         );
 
         div()
@@ -1040,35 +1064,16 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(14.0))
-            // Pre-minify the active runtime icon at target DPI to avoid atlas aliasing.
-            .child(
-                gpui::img(icon_source)
-                    .size(px(BRAND_ICON_SIZE))
-                    .flex_none()
-                    .object_fit(ObjectFit::Contain),
-            )
+            .child(badge)
             .child(
                 div()
                     .min_w_0()
                     .flex_1()
-                    .flex()
-                    .flex_col()
-                    .items_start()
-                    .gap(px(2.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_2xl))
-                            .line_height(px(28.0))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(theme.text_heading))
-                            .child(self.i18n.t("layout.empty.title")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("layout.empty.subtitle")),
-                    ),
+                    .text_size(px(wordmark_size))
+                    .line_height(px(wordmark_size + 4.0))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(theme.text_heading))
+                    .child(self.i18n.t("layout.empty.title")),
             )
             .into_any_element()
     }
@@ -1196,12 +1201,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let metrics = welcome_workbench_metrics(&self.tokens);
         let target = connection.target.clone();
         div()
             .w_full()
             .min_w_0()
+            .h(px(metrics.recent_row_height))
             .px(px(12.0))
-            .py(px(8.0))
             .flex()
             .items_center()
             .gap(px(10.0))
@@ -1230,12 +1236,13 @@ impl WorkspaceApp {
                     .flex_1()
                     .flex()
                     .flex_col()
-                    .gap(px(1.0))
+                    .gap(px(2.0))
                     .child(
                         div()
                             .min_w_0()
                             .truncate()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .line_height(px(metrics.sm_line_height))
                             .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(rgb(theme.text))
                             .child(connection.name),
@@ -1245,6 +1252,7 @@ impl WorkspaceApp {
                             .min_w_0()
                             .truncate()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(metrics.xs_line_height))
                             .text_color(rgb(theme.text_muted))
                             .child(connection.subtitle),
                     ),
@@ -1286,6 +1294,7 @@ impl WorkspaceApp {
 
     fn render_welcome_guidance(&self, cx: &mut Context<Self>) -> gpui::Div {
         let theme = self.tokens.ui;
+        let metrics = welcome_workbench_metrics(&self.tokens);
         let primary_actions = [
             (
                 LucideIcon::Plus,
@@ -1365,7 +1374,7 @@ impl WorkspaceApp {
                     .w_full()
                     .flex()
                     .flex_col()
-                    .gap(px(10.0))
+                    .gap(px(metrics.guidance_stack_gap))
                     .child(
                         div()
                             .w_full()
@@ -1394,10 +1403,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let metrics = welcome_workbench_metrics(&self.tokens);
         let card = div()
             .w_full()
             .min_w_0()
-            .h(px(62.0))
+            .h(px(metrics.primary_tile_height))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(if primary {
@@ -1443,6 +1453,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .truncate()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .line_height(px(metrics.sm_line_height))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text))
                     .child(self.i18n.t(title_key)),
@@ -1460,11 +1471,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let metrics = welcome_workbench_metrics(&self.tokens);
         let row = div()
             .w_full()
             .min_w_0()
+            .h(px(metrics.utility_row_height))
             .px(px(12.0))
-            .py(px(9.0))
             .flex()
             .items_center()
             .gap(px(10.0))
@@ -1481,6 +1493,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .truncate()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .line_height(px(metrics.sm_line_height))
                     .text_color(rgb(theme.text))
                     .child(self.i18n.t(title_key)),
             )
@@ -1658,6 +1671,42 @@ impl WorkspaceApp {
     }
 }
 
+const WELCOME_BRAND_BADGE_SIZE: f32 = 42.0;
+const WELCOME_BRAND_BADGE_RADIUS: f32 = 9.5;
+
+#[derive(Clone, Copy, Debug)]
+struct WelcomeWorkbenchMetrics {
+    sm_line_height: f32,
+    xs_line_height: f32,
+    recent_row_height: f32,
+    utility_row_height: f32,
+    guidance_stack_gap: f32,
+    primary_tile_height: f32,
+}
+
+fn welcome_workbench_metrics(tokens: &oxideterm_theme::ThemeTokens) -> WelcomeWorkbenchMetrics {
+    // Explicit row and line heights keep CJK and ASCII labels at identical box
+    // heights and align the full 4-row recent card bottom edge with the right
+    // guidance stack without forcing `< 4` recent rows to stretch.
+    let sm_line_height = (tokens.metrics.ui_text_sm + 5.0).round();
+    let xs_line_height = (tokens.metrics.ui_text_xs + 4.0).round();
+    let recent_row_height = (sm_line_height + 2.0 + xs_line_height + 16.0).max(48.0);
+    let utility_row_height = sm_line_height + 26.0;
+    let guidance_stack_gap = 12.0;
+    let full_recent_card_height = 4.0 * recent_row_height + 5.0;
+    let utility_card_height = 3.0 * utility_row_height + 4.0;
+    let primary_tile_height =
+        (full_recent_card_height - guidance_stack_gap - utility_card_height).max(52.0);
+    WelcomeWorkbenchMetrics {
+        sm_line_height,
+        xs_line_height,
+        recent_row_height,
+        utility_row_height,
+        guidance_stack_gap,
+        primary_tile_height,
+    }
+}
+
 fn welcome_workbench_layout(compact: bool, recent: gpui::Div, guidance: gpui::Div) -> gpui::Div {
     let container = div()
         .w_full()
@@ -1697,6 +1746,155 @@ mod welcome_layout_tests {
                 )
                 .max_w(px(860.0))
                 .debug_selector(|| "workbench".into()),
+            )
+        }
+    }
+
+    struct WelcomeFullWorkbenchFixture {
+        tokens: oxideterm_theme::ThemeTokens,
+        recent_count: usize,
+    }
+
+    impl Render for WelcomeFullWorkbenchFixture {
+        fn render(&mut self, _window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let metrics = welcome_workbench_metrics(&self.tokens);
+            let sample_rows = [
+                ("家里的主机本地", "lipsc@192.168.31.196:22"),
+                ("rdp://192.168.31.196:3389", "lipsc@192.168.31.196:3389"),
+                ("家里的主机", "lipsc@100.118.61.75:22"),
+                ("lipsc(tailscale)", "lipsc@100.118.61.75:22"),
+            ];
+            let mut recent_list = div().w_full().flex().flex_col();
+            for (index, (name, subtitle)) in
+                sample_rows.into_iter().take(self.recent_count).enumerate()
+            {
+                if index > 0 {
+                    recent_list = recent_list.child(div().h(px(1.0)));
+                }
+                recent_list = recent_list.child(
+                    div()
+                        .w_full()
+                        .h(px(metrics.recent_row_height))
+                        .px(px(12.0))
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .flex_1()
+                                .flex()
+                                .flex_col()
+                                .gap(px(2.0))
+                                .child(
+                                    div()
+                                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                                        .line_height(px(metrics.sm_line_height))
+                                        .child(name),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .line_height(px(metrics.xs_line_height))
+                                        .child(subtitle),
+                                ),
+                        ),
+                );
+            }
+            let recent_col = div()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(div().w_full().h(px(20.0)))
+                .child(
+                    div()
+                        .w_full()
+                        .rounded(px(self.tokens.radii.lg))
+                        .border_1()
+                        .overflow_hidden()
+                        .child(recent_list)
+                        .debug_selector(|| "recent-card".into()),
+                )
+                .debug_selector(|| "recent-col".into());
+
+            let mut utility_list = div()
+                .w_full()
+                .rounded(px(self.tokens.radii.lg))
+                .border_1()
+                .overflow_hidden()
+                .flex()
+                .flex_col();
+            for (index, label) in ["导入连接", "会话管理器", "Oxide 云同步"]
+                .into_iter()
+                .enumerate()
+            {
+                if index > 0 {
+                    utility_list = utility_list.child(div().h(px(1.0)));
+                }
+                utility_list = utility_list.child(
+                    div()
+                        .w_full()
+                        .h(px(metrics.utility_row_height))
+                        .px(px(12.0))
+                        .flex()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .line_height(px(metrics.sm_line_height))
+                                .child(label),
+                        ),
+                );
+            }
+            let guidance_col = div()
+                .flex()
+                .flex_col()
+                .gap(px(10.0))
+                .child(div().w_full().h(px(20.0)))
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .gap(px(metrics.guidance_stack_gap))
+                        .child(
+                            div()
+                                .w_full()
+                                .grid()
+                                .grid_cols(2)
+                                .gap(px(10.0))
+                                .child(div().w_full().h(px(metrics.primary_tile_height)).border_1())
+                                .child(
+                                    div().w_full().h(px(metrics.primary_tile_height)).border_1(),
+                                ),
+                        )
+                        .child(utility_list),
+                )
+                .debug_selector(|| "guidance-col".into());
+
+            div().size_full().px(px(WELCOME_PAGE_PADDING)).child(
+                div()
+                    .w_full()
+                    .max_w(px(860.0))
+                    .flex()
+                    .flex_col()
+                    .items_start()
+                    .gap(px(22.0))
+                    .child(
+                        div().w_full().pb(px(18.0)).border_b_1().child(
+                            div()
+                                .w_full()
+                                .flex()
+                                .items_center()
+                                .gap(px(14.0))
+                                .child(
+                                    div()
+                                        .size(px(WELCOME_BRAND_BADGE_SIZE))
+                                        .flex_none()
+                                        .debug_selector(|| "brand-badge".into()),
+                                )
+                                .child(div().child("OxideTerm")),
+                        ),
+                    )
+                    .child(welcome_workbench_layout(false, recent_col, guidance_col)),
             )
         }
     }
@@ -1743,5 +1941,54 @@ mod welcome_layout_tests {
                 );
             }
         }
+    }
+
+    #[gpui::test]
+    fn welcome_four_recent_rows_and_brand_align_across_font_scales(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| WelcomeFullWorkbenchFixture {
+            tokens: oxideterm_theme::default_tokens(),
+            recent_count: 4,
+        });
+        cx.simulate_resize(size(px(1000.0), px(800.0)));
+
+        for scale in [12.0 / 14.0, 1.0, 18.0 / 14.0] {
+            view.update(cx, |fixture, cx| {
+                let mut tokens = oxideterm_theme::default_tokens();
+                tokens.apply_ui_font_scale(scale);
+                fixture.tokens = tokens;
+                fixture.recent_count = 4;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+
+            let brand_badge = cx.debug_bounds("brand-badge").unwrap();
+            let recent_col = cx.debug_bounds("recent-col").unwrap();
+            let guidance_col = cx.debug_bounds("guidance-col").unwrap();
+            assert_eq!(
+                brand_badge.origin.x, recent_col.origin.x,
+                "brand badge left edge should align with recent column at scale={scale}"
+            );
+            assert_eq!(
+                brand_badge.size.width,
+                px(WELCOME_BRAND_BADGE_SIZE),
+                "scale={scale}"
+            );
+            assert_eq!(
+                recent_col.bottom(),
+                guidance_col.bottom(),
+                "4-row recent column and guidance column bottoms should match at scale={scale}"
+            );
+        }
+
+        // Fewer than 4 recent rows must still shrink naturally instead of stretching.
+        view.update(cx, |fixture, cx| {
+            fixture.tokens = oxideterm_theme::default_tokens();
+            fixture.recent_count = 2;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let recent_col = cx.debug_bounds("recent-col").unwrap();
+        let guidance_col = cx.debug_bounds("guidance-col").unwrap();
+        assert!(recent_col.bottom() < guidance_col.bottom());
     }
 }

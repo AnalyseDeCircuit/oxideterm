@@ -95,7 +95,6 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
-      "subtitle": "Connexions distantes, terminaux et opérations dans un espace de travail natif",
       "new_connection": "Nouvelle connexion",
       "new_connection_hint": "Créer et enregistrer une connexion distante",
       "new_local_terminal": "Terminal local",

@@ -95,7 +95,6 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
-      "subtitle": "Kết nối từ xa, terminal và vận hành trong một không gian làm việc gốc",
       "new_connection": "Kết nối mới",
       "new_connection_hint": "Tạo và lưu kết nối từ xa",
       "new_local_terminal": "Terminal cục bộ",

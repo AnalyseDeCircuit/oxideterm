@@ -54,6 +54,42 @@ pub struct AppUiColors {
 }
 
 impl AppUiColors {
+    pub fn is_light(&self) -> bool {
+        color_relative_luminance(self.bg) >= 0.55
+    }
+
+    pub fn shell_bg(&self) -> u32 {
+        if !self.is_light() {
+            return self.bg;
+        }
+        // Light themes step peripheral bars and sidebars slightly below the
+        // primary canvas so workspace chrome frames content without heavy borders.
+        if color_relative_luminance(self.bg_panel) < color_relative_luminance(self.bg) {
+            self.bg_panel
+        } else {
+            self.bg_sunken
+        }
+    }
+
+    pub fn shell_active_bg(&self) -> u32 {
+        if !self.is_light() {
+            return self.bg_panel;
+        }
+        if color_relative_luminance(self.bg_elevated) > color_relative_luminance(self.shell_bg()) {
+            self.bg_elevated
+        } else {
+            self.bg
+        }
+    }
+
+    pub fn shell_active_tab_bg(&self) -> u32 {
+        if self.is_light() {
+            self.bg
+        } else {
+            self.bg_panel
+        }
+    }
+
     pub fn interpolate(self, target: Self, progress: f32) -> Self {
         let blend = |from, to| mix(to, from, progress.clamp(0.0, 1.0));
         Self {
@@ -146,6 +182,7 @@ pub struct UiMetrics {
     pub empty_sidebar_padding_x: f32,
     pub empty_workspace_padding_x: f32,
     pub empty_workspace_padding_y: f32,
+    pub welcome_wordmark_font_size: f32,
     pub titlebar_label_extra_offset: f32,
     pub modal_width: f32,
     pub modal_max_viewport_height_ratio: f32,
@@ -293,7 +330,7 @@ impl UiMetrics {
             tab_padding_x: 12.0,
             tab_gap: 8.0,
             tab_title_width_ratio: 0.62,
-            tab_font_size: 13.0,
+            tab_font_size: 14.0,
             tab_icon_size: 14.0,
             tab_close_button_size: 16.0,
             tab_close_icon_size: 12.0,
@@ -302,7 +339,7 @@ impl UiMetrics {
             new_tab_button_height: 34.0,
             activity_bar_width: 42.0,
             activity_icon_size: 30.0,
-            activity_icon_glyph_size: 16.0,
+            activity_icon_glyph_size: 18.0,
             activity_icon_gap: 4.0,
             sidebar_default_width: 300.0,
             sidebar_min_width: 200.0,
@@ -330,6 +367,7 @@ impl UiMetrics {
             empty_sidebar_padding_x: 16.0,
             empty_workspace_padding_x: 16.0,
             empty_workspace_padding_y: 8.0,
+            welcome_wordmark_font_size: 28.0,
             titlebar_label_extra_offset: 18.0,
             modal_width: 512.0,
             modal_max_viewport_height_ratio: 0.9,
@@ -408,10 +446,10 @@ impl UiMetrics {
             settings_content_max_width: 896.0,
             settings_content_wide_max_width: 1280.0,
             settings_nav_width: 224.0,
-            settings_row_gap: 24.0,
-            settings_page_gap: 32.0,
-            settings_card_padding: 20.0,
-            settings_card_gap: 20.0,
+            settings_row_gap: 16.0,
+            settings_page_gap: 20.0,
+            settings_card_padding: 16.0,
+            settings_card_gap: 12.0,
             settings_card_title_nudge_y: -4.0,
             settings_select_width: 200.0,
             settings_select_narrow_width: 160.0,
@@ -705,6 +743,7 @@ impl ThemeTokens {
             &mut self.metrics.searchbar_font_size,
             &mut self.metrics.empty_sidebar_title_font_size,
             &mut self.metrics.empty_sidebar_subtitle_font_size,
+            &mut self.metrics.welcome_wordmark_font_size,
             &mut self.metrics.form_label_font_size,
             &mut self.metrics.form_text_font_size,
             &mut self.metrics.modal_title_font_size,
@@ -1114,5 +1153,49 @@ mod tests {
         let base_2xs = tokens.metrics.ui_text_2xs;
         tokens.apply_ui_font_scale(18.0 / 14.0);
         assert!(tokens.metrics.ui_text_2xs > base_2xs);
+    }
+
+    #[test]
+    fn builtin_themes_recess_light_shell_chrome_without_changing_dark_shells() {
+        for theme in BUILT_IN_THEMES {
+            let ui = ThemeTokens::from_builtin(*theme).ui;
+            if ui.is_light() {
+                assert!(
+                    color_relative_luminance(ui.shell_bg()) < color_relative_luminance(ui.bg),
+                    "{} light shell_bg {:06x} must step below canvas {:06x}",
+                    theme.id,
+                    ui.shell_bg(),
+                    ui.bg
+                );
+                assert!(
+                    color_relative_luminance(ui.shell_active_bg())
+                        > color_relative_luminance(ui.shell_bg()),
+                    "{} light shell_active_bg {:06x} must lift above shell_bg {:06x}",
+                    theme.id,
+                    ui.shell_active_bg(),
+                    ui.shell_bg()
+                );
+                assert_eq!(ui.shell_active_tab_bg(), ui.bg, "{} active tab", theme.id);
+                assert!(
+                    color_contrast_ratio(ui.text, ui.shell_bg()) >= 4.0,
+                    "{} text/shell_bg contrast must stay readable",
+                    theme.id
+                );
+            } else {
+                assert_eq!(ui.shell_bg(), ui.bg, "{} dark shell_bg", theme.id);
+                assert_eq!(
+                    ui.shell_active_bg(),
+                    ui.bg_panel,
+                    "{} dark shell_active_bg",
+                    theme.id
+                );
+                assert_eq!(
+                    ui.shell_active_tab_bg(),
+                    ui.bg_panel,
+                    "{} dark shell_active_tab_bg",
+                    theme.id
+                );
+            }
+        }
     }
 }

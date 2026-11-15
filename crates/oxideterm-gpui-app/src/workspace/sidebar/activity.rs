@@ -30,12 +30,7 @@ impl WorkspaceApp {
             .h_full()
             .flex()
             .flex_col()
-            .items_center()
-            .when(self.window_background_preferences().is_none(), |bar| {
-                // A transparent layout border would leave an untinted wallpaper seam.
-                bar.border_r_1()
-                    .border_color(self.workspace_divider_color(theme.border, 0x40))
-            });
+            .items_center();
 
         bar = bar.child(
             div()
@@ -48,7 +43,7 @@ impl WorkspaceApp {
                 .justify_center()
                 // Paint top chrome directly over the window background so it
                 // matches the adjacent sidebar and workspace tab bars exactly.
-                .bg(self.workspace_chrome_background(theme.bg))
+                .bg(self.workspace_chrome_background(theme.shell_bg()))
                 .border_b_1()
                 .border_color(self.workspace_chrome_divider())
                 .child(
@@ -216,7 +211,7 @@ impl WorkspaceApp {
                 .items_center()
                 // The content column keeps the lighter sidebar tint without
                 // placing another translucent layer beneath the top chrome.
-                .bg(self.workspace_sidebar_background(theme.bg))
+                .bg(self.workspace_sidebar_background(theme.shell_bg()))
                 .child(primary_items)
                 .child(bottom),
         )
@@ -243,10 +238,6 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_center()
-            .when(self.window_background_preferences().is_none(), |bar| {
-                bar.border_l_1()
-                    .border_color(self.workspace_divider_color(theme.border, 0x40))
-            })
             .child(
                 div()
                     .flex_none()
@@ -255,7 +246,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .bg(self.workspace_chrome_background(theme.bg))
+                    .bg(self.workspace_chrome_background(theme.shell_bg()))
                     .border_b_1()
                     .border_color(self.workspace_chrome_divider())
                     .child(
@@ -317,7 +308,7 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .bg(self.workspace_sidebar_background(theme.bg))
+                    .bg(self.workspace_sidebar_background(theme.shell_bg()))
                     .child(self.render_context_tool_buttons(window, cx))
                     .when(
                         self.settings_store.settings().sidebar_ui.show_app_lock_icon,
@@ -429,7 +420,8 @@ impl WorkspaceApp {
                 size: self.tokens.metrics.activity_icon_size,
                 radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
                 has_background: active,
-                background: active.then(|| self.settings_panel_background(theme.bg_panel)),
+                background: active
+                    .then(|| self.settings_panel_background(theme.shell_active_bg())),
                 border: active.then(|| rgb(theme.border)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 idle_opacity: 1.0,
@@ -597,7 +589,8 @@ impl WorkspaceApp {
                 size: self.tokens.metrics.activity_icon_size,
                 radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
                 has_background: active,
-                background: active.then(|| self.settings_panel_background(theme.bg_panel)),
+                background: active
+                    .then(|| self.settings_panel_background(theme.shell_active_bg())),
                 border: active.then(|| rgb(theme.border)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 idle_opacity: 1.0,

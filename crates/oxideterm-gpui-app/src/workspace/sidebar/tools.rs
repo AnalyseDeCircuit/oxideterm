@@ -140,7 +140,8 @@ impl WorkspaceApp {
         IconButtonOptions {
             radius: ButtonRadius::Md,
             has_background: active,
-            background: active.then(|| self.settings_panel_background(self.tokens.ui.bg_panel)),
+            background: active
+                .then(|| self.settings_panel_background(self.tokens.ui.shell_active_bg())),
             border: active.then(|| rgb(self.tokens.ui.border)),
             hover_background: Some(rgb(self.tokens.ui.bg_hover)),
             idle_opacity: 1.0,

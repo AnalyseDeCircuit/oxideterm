@@ -95,7 +95,6 @@
   "layout": {
     "empty": {
       "title": "OxideTerm",
-      "subtitle": "Remote connections, terminals, and operations in one native workspace",
       "new_connection": "New Connection",
       "new_connection_hint": "Create and save a remote connection",
       "new_local_terminal": "Local Terminal",
