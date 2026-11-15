@@ -3,8 +3,8 @@ use super::*;
 
 use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::context_menu::{
-    context_menu_content, context_menu_event_boundary, context_menu_item_with_icon,
-    context_menu_separator,
+    context_menu_content, context_menu_event_boundary, context_menu_item_height_estimate,
+    context_menu_item_with_icon, context_menu_separator, context_menu_separator_height_estimate,
 };
 use oxideterm_gpui_ui::modal::overlay_content_boundary;
 
@@ -44,6 +44,12 @@ struct TabWindowHandoffRect {
     top: f32,
     width: f32,
     height: f32,
+}
+
+/// SSH node context injected into the tab context menu.
+struct SshTabNodeMenu {
+    node_id: NodeId,
+    terminals: Vec<TerminalSessionId>,
 }
 
 fn tab_handoff_preview_width(tab_width: f32) -> f32 {
@@ -167,6 +173,38 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn close_tab_context_menu(&mut self) -> bool {
         self.main_window_tabs.context_menu.take().is_some()
+    }
+
+    /// Resolves the SSH node actions offered by the tab context menu: the node
+    /// that owns the menu tab's active session and its terminal sessions in
+    /// sidebar order. Returns None for non-SSH tabs and whenever the node
+    /// cannot host node-scoped actions, mirroring the Active Sessions sidebar
+    /// gating so both surfaces never disagree about availability.
+    fn ssh_node_menu_for_tab(&self, tab_id: TabId, cx: &App) -> Option<SshTabNodeMenu> {
+        let tab = self.tab_by_id(tab_id, cx)?;
+        if !matches!(tab.kind, TabKind::SshTerminal) {
+            return None;
+        }
+        // Mirror active_terminal_session_id: the tab's active pane carries the
+        // session that identifies the owning SSH node.
+        let pane_id = tab.active_pane_id?;
+        let session_id = tab.root_pane.as_ref()?.session_id_for_pane(pane_id)?;
+        let node_id = self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)?;
+        let node = self.ssh_nodes.get(&node_id)?;
+        // Node-scoped actions only make sense while the transport is up; the
+        // reconnect flow owns the node until its job finishes.
+        if !matches!(node.readiness, NodeReadiness::Ready)
+            || self.has_active_reconnect_job(&node_id, cx)
+        {
+            return None;
+        }
+        Some(SshTabNodeMenu {
+            node_id,
+            terminals: node.terminal_ids.clone(),
+        })
     }
 
     fn can_combine_tabs(&self, source: TabId, target: TabId, cx: &App) -> bool {
@@ -1322,6 +1360,15 @@ impl WorkspaceApp {
             menu_height += TAB_CONTEXT_MENU_SWITCH_HEIGHT;
         }
         menu_height += merge_targets.len() as f32 * TAB_CONTEXT_MENU_SPLIT_HEIGHT;
+        let ssh_node_menu = self.ssh_node_menu_for_tab(menu.tab_id, cx);
+        if let Some(ssh) = &ssh_node_menu {
+            // Terminal rows plus the fixed tool rows and the disconnect row;
+            // terminals, tools, and disconnect each sit behind a separator.
+            let ssh_rows = ssh.terminals.len() + 6;
+            let ssh_separators = if ssh.terminals.is_empty() { 3 } else { 4 };
+            menu_height += ssh_rows as f32 * context_menu_item_height_estimate(&self.tokens)
+                + ssh_separators as f32 * context_menu_separator_height_estimate(&self.tokens);
+        }
         menu_height = menu_height.min(f32::from(viewport.height) - TAB_CONTEXT_MENU_MARGIN * 2.0);
         let menu_width = if can_split_into_active || !merge_targets.is_empty() {
             TAB_CONTEXT_MENU_SPLIT_WIDTH
@@ -1485,6 +1532,173 @@ impl WorkspaceApp {
                             }),
                         ),
                     )
+                    .when_some(ssh_node_menu, |content, ssh| {
+                        let node_id = ssh.node_id;
+                        let active_session = self.active_terminal_session_id(cx);
+                        let mut content = content.child(context_menu_separator(&self.tokens));
+                        for (index, terminal_session_id) in ssh.terminals.iter().enumerate() {
+                            let session_id = *terminal_session_id;
+                            let active = active_session == Some(session_id);
+                            let item = context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/terminal.svg",
+                                self.i18n_replace(
+                                    "sessions.tree.terminal",
+                                    &[("number", (index + 1).to_string())],
+                                ),
+                                false,
+                                false,
+                            );
+                            // Highlight the focused terminal like the sidebar tree does.
+                            let item = if active {
+                                item.text_color(rgb(self.tokens.ui.accent))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                            } else {
+                                item
+                            };
+                            content = content.child(item.on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.close_tab_context_menu();
+                                    this.focus_terminal_session(session_id, window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ));
+                        }
+                        if !ssh.terminals.is_empty() {
+                            content = content.child(context_menu_separator(&self.tokens));
+                        }
+                        content = content.child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/plus.svg",
+                                self.i18n.t("sessions.tree.actions.new_terminal"),
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener({
+                                    let node_id = node_id.clone();
+                                    move |this, event: &MouseDownEvent, window, cx| {
+                                        this.close_tab_context_menu();
+                                        let _ = this
+                                            .queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
+                                                node_id.clone(),
+                                                event.modifiers.control,
+                                                window,
+                                                cx,
+                                            );
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ),
+                        );
+                        content = content.child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/folder-open.svg",
+                                self.i18n.t("sessions.tree.actions.sftp"),
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener({
+                                    let node_id = node_id.clone();
+                                    move |this, _event, window, cx| {
+                                        this.close_tab_context_menu();
+                                        this.open_sftp_tab(node_id.clone(), window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ),
+                        );
+                        content = content.child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/code-2.svg",
+                                "IDE",
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener({
+                                    let node_id = node_id.clone();
+                                    move |this, _event, window, cx| {
+                                        this.close_tab_context_menu();
+                                        this.open_ide_folder_picker_tab(
+                                            node_id.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ),
+                        );
+                        content = content.child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/arrow-left-right.svg",
+                                self.i18n.t("sessions.tree.actions.port_forwarding"),
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener({
+                                    let node_id = node_id.clone();
+                                    move |this, _event, window, cx| {
+                                        this.close_tab_context_menu();
+                                        this.open_forwards_tab(node_id.clone(), window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ),
+                        );
+                        content = content.child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/arrow-down-right.svg",
+                                self.i18n.t("sessions.tree.actions.drill_in"),
+                                false,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener({
+                                    let node_id = node_id.clone();
+                                    move |this, _event, window, cx| {
+                                        this.close_tab_context_menu();
+                                        this.open_drill_down_form(node_id.clone(), window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ),
+                        );
+                        content.child(context_menu_separator(&self.tokens)).child(
+                            context_menu_item_with_icon(
+                                &self.tokens,
+                                "lucide/wifi-off.svg",
+                                self.i18n.t("sessions.tree.actions.disconnect"),
+                                true,
+                                false,
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener({
+                                    let node_id = node_id.clone();
+                                    move |this, _event, window, cx| {
+                                        this.close_tab_context_menu();
+                                        this.request_disconnect_ssh_node(&node_id, window, cx);
+                                        cx.stop_propagation();
+                                    }
+                                }),
+                            ),
+                        )
+                    })
                     .when(is_session_manager, |content| {
                         content.child(
                             context_menu_item_with_icon(
