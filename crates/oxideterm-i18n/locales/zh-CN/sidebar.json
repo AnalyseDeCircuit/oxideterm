@@ -94,7 +94,6 @@
       "settings": "设置",
       "ai_hint": "OxideSens",
       "switch_tree": "切换到树形视图",
-      "switch_focus": "切换到聚焦视图",
       "switch_host": "切换到主机视图",
       "new_connection": "新建连接",
       "lock_app": "锁定 OxideTerm",
@@ -886,6 +885,7 @@
   },
   "sessions": {
     "tree": {
+      "terminal": "终端 #{{number}}",
       "no_sessions": "暂无会话",
       "click_to_add": "点击 + 添加新连接",
       "actions": {
@@ -903,17 +903,6 @@
         "connect": "连接",
         "save_as_connection": "保存为连接..."
       }
-    },
-    "focused_list": {
-      "all_servers": "全部服务器",
-      "child": "子节点",
-      "children": "子节点",
-      "no_child_nodes": "此节点没有子节点",
-      "no_servers": "暂无服务器",
-      "add_by_drilling": "您可以通过钻取添加子节点",
-      "click_to_add": "点击 + 添加新连接",
-      "terminal": "终端 #{{number}}",
-      "close_terminal": "关闭终端"
     },
     "actions": {
       "connect": "连接",
@@ -936,10 +925,6 @@
       "not_found": "未找到该已保存连接。",
       "missing_credentials": "此已保存连接缺少连接所需的凭据。",
       "materialize_failed": "无法将该已保存连接添加到会话树。"
-    },
-    "breadcrumb": {
-      "back_to_root": "返回根视图",
-      "all_servers": "全部服务器"
     }
   }
 }

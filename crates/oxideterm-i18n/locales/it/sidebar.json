@@ -94,7 +94,6 @@
       "settings": "Impostazioni",
       "ai_hint": "OxideSens",
       "switch_tree": "Vista ad albero",
-      "switch_focus": "Vista focus",
       "switch_host": "Vista per host",
       "new_connection": "Nuova connessione",
       "lock_app": "Blocca OxideTerm",
@@ -886,6 +885,7 @@
   },
   "sessions": {
     "tree": {
+      "terminal": "Terminale #{{number}}",
       "no_sessions": "Nessuna sessione",
       "click_to_add": "Clicca + per aggiungere una connessione",
       "actions": {
@@ -903,17 +903,6 @@
         "connect": "Connetti",
         "save_as_connection": "Salva come connessione..."
       }
-    },
-    "focused_list": {
-      "all_servers": "Tutti i Server",
-      "child": "figlio",
-      "children": "figli",
-      "no_child_nodes": "Questo nodo non ha nodi figli",
-      "no_servers": "Nessun server ancora",
-      "add_by_drilling": "Puoi aggiungere nodi figli tramite drill down",
-      "click_to_add": "Clicca + per aggiungere una nuova connessione",
-      "terminal": "Terminale #{{number}}",
-      "close_terminal": "Chiudi terminale"
     },
     "actions": {
       "connect": "Connetti",
@@ -936,10 +925,6 @@
       "not_found": "Connessione salvata non trovata.",
       "missing_credentials": "Questa connessione salvata non contiene le credenziali necessarie.",
       "materialize_failed": "Impossibile aggiungere la connessione salvata all'albero delle sessioni."
-    },
-    "breadcrumb": {
-      "back_to_root": "Torna alla vista radice",
-      "all_servers": "Tutti i Server"
     }
   }
 }

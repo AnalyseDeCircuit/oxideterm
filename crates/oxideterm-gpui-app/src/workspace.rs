@@ -406,7 +406,6 @@ const DETACHED_LOCAL_TERMINAL_LIST_OVERSCAN: usize = 4;
 const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 40.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
-const ACTIVE_SESSION_FOCUS_LIST_ESTIMATED_HEIGHT: f32 = 76.0;
 const OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT: f32 = 58.0;
 const OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN: usize = 8;
@@ -927,7 +926,6 @@ pub(crate) struct WorkspaceApp {
     context_tools_menu_scroll: ScrollHandle,
     session_search_open: bool,
     session_search_query: String,
-    active_session_sidebar_focused_node_id: Option<NodeId>,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     knowledge_workspace_list_state: ListState,

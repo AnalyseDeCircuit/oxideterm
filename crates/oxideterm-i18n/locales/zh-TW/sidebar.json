@@ -94,7 +94,6 @@
       "settings": "設定",
       "ai_hint": "OxideSens",
       "switch_tree": "切換到樹形視圖",
-      "switch_focus": "切換到聚焦視圖",
       "switch_host": "切換到主機視圖",
       "new_connection": "新建連線",
       "lock_app": "鎖定 OxideTerm",
@@ -886,6 +885,7 @@
   },
   "sessions": {
     "tree": {
+      "terminal": "終端機 #{{number}}",
       "no_sessions": "無工作階段",
       "click_to_add": "按 + 新增連線",
       "actions": {
@@ -903,17 +903,6 @@
         "connect": "連線",
         "save_as_connection": "儲存為連線..."
       }
-    },
-    "focused_list": {
-      "all_servers": "所有伺服器",
-      "child": "子節點",
-      "children": "子節點",
-      "no_child_nodes": "此節點沒有子節點",
-      "no_servers": "尚無伺服器",
-      "add_by_drilling": "您可以透過深入連線來新增子節點",
-      "click_to_add": "點擊 + 新增連線",
-      "terminal": "終端機 #{{number}}",
-      "close_terminal": "關閉終端機"
     },
     "actions": {
       "connect": "連線",
@@ -936,10 +925,6 @@
       "not_found": "找不到該已儲存連線。",
       "missing_credentials": "此已儲存連線缺少連線所需的憑證。",
       "materialize_failed": "無法將該已儲存連線加入工作階段樹。"
-    },
-    "breadcrumb": {
-      "back_to_root": "返回根檢視",
-      "all_servers": "所有伺服器"
     }
   }
 }

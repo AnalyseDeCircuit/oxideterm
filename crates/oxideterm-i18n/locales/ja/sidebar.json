@@ -94,7 +94,6 @@
       "settings": "設定",
       "ai_hint": "OxideSens",
       "switch_tree": "ツリービューに切替",
-      "switch_focus": "フォーカスビューに切替",
       "switch_host": "ホストビューに切り替え",
       "new_connection": "新規接続",
       "lock_app": "OxideTerm をロック",
@@ -886,6 +885,7 @@
   },
   "sessions": {
     "tree": {
+      "terminal": "ターミナル #{{number}}",
       "no_sessions": "セッションなし",
       "click_to_add": "+ をクリックして新しい接続を追加",
       "actions": {
@@ -903,17 +903,6 @@
         "connect": "接続",
         "save_as_connection": "接続として保存..."
       }
-    },
-    "focused_list": {
-      "all_servers": "すべてのサーバー",
-      "child": "子",
-      "children": "子",
-      "no_child_nodes": "このノードには子ノードがありません",
-      "no_servers": "サーバーがまだありません",
-      "add_by_drilling": "ドリルダウンして子ノードを追加できます",
-      "click_to_add": "+をクリックして新しい接続を追加",
-      "terminal": "ターミナル #{{number}}",
-      "close_terminal": "ターミナルを閉じる"
     },
     "actions": {
       "connect": "接続",
@@ -936,10 +925,6 @@
       "not_found": "保存済み接続が見つかりません。",
       "missing_credentials": "この保存済み接続には接続に必要な認証情報がありません。",
       "materialize_failed": "保存済み接続をセッションツリーに追加できませんでした。"
-    },
-    "breadcrumb": {
-      "back_to_root": "ルートビューに戻る",
-      "all_servers": "すべてのサーバー"
     }
   }
 }

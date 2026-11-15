@@ -94,7 +94,6 @@
       "settings": "Settings",
       "ai_hint": "OxideSens",
       "switch_tree": "Switch to Tree View",
-      "switch_focus": "Switch to Focus View",
       "switch_host": "Switch to Host View",
       "new_connection": "New Connection",
       "lock_app": "Lock OxideTerm",
@@ -886,6 +885,7 @@
   },
   "sessions": {
     "tree": {
+      "terminal": "Terminal #{{number}}",
       "no_sessions": "No Sessions",
       "click_to_add": "Click + to add a new connection",
       "actions": {
@@ -903,17 +903,6 @@
         "connect": "Connect",
         "save_as_connection": "Save as Connection..."
       }
-    },
-    "focused_list": {
-      "all_servers": "All Servers",
-      "child": "child",
-      "children": "children",
-      "no_child_nodes": "This node has no child nodes",
-      "no_servers": "No servers yet",
-      "add_by_drilling": "You can add child nodes by drilling down",
-      "click_to_add": "Click + to add a new connection",
-      "terminal": "Terminal #{{number}}",
-      "close_terminal": "Close terminal"
     },
     "actions": {
       "connect": "Connect",
@@ -936,10 +925,6 @@
       "not_found": "Saved connection was not found.",
       "missing_credentials": "This saved connection is missing credentials needed to connect.",
       "materialize_failed": "Could not add the saved connection to the session tree."
-    },
-    "breadcrumb": {
-      "back_to_root": "Back to root view",
-      "all_servers": "All Servers"
     }
   }
 }

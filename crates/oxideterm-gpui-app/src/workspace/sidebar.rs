@@ -1,38 +1,16 @@
 use super::*;
+use oxideterm_gpui_ui::IconButtonOptions;
 use oxideterm_gpui_ui::button::ButtonRadius;
-use oxideterm_gpui_ui::{IconButtonOptions, TreeBranchMetrics, tree_child};
+use oxideterm_gpui_ui::tree::{TreeGuideMetrics, tree_guide_child};
 
-// Active sessions are a high-frequency navigator, so keep its density closer
-// to a compact desktop connection list than to a settings or form surface.
-const SESSION_TREE_NODE_HEIGHT: f32 = 28.0;
-const SESSION_TREE_ITEM_HEIGHT: f32 = 24.0;
-const SESSION_TREE_TEXT_SIZE: f32 = 12.0;
-const SESSION_TREE_META_TEXT_SIZE: f32 = 10.0;
+// Active sessions are a high-frequency navigator, so keep its icon scale compact
+// while deriving row heights and typography from ThemeTokens.metrics.
 const SESSION_TREE_ICON_SIZE: f32 = 14.0;
 const SESSION_TREE_CHILD_ICON_SIZE: f32 = 12.0;
 // Primary sidebar content needs a small inset below the header divider so the
 // first interactive surface does not visually merge with workspace chrome.
 const PRIMARY_SIDEBAR_CONTENT_TOP_INSET: f32 = 4.0;
-// Tauri FocusedNodeList uses accent/emerald alpha utility classes such as
-// `bg-oxide-accent/5`, `border-oxide-accent/50`, and `bg-emerald-500/20`.
-// Keep the translated alpha roles named so this card view does not drift into
-// feature-local magic colors.
-const SESSION_FOCUS_CARD_SELECTED_BG_ALPHA: u32 = 0x0d;
-const SESSION_FOCUS_CARD_SELECTED_BORDER_ALPHA: u32 = 0x80;
-const SESSION_FOCUS_CARD_BORDER_ALPHA: u32 = 0x80;
-const SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA: u32 = 0x1a;
-const SESSION_FOCUS_TERMINAL_BADGE_BG_ALPHA: u32 = 0x33;
-const SESSION_FOCUS_TERMINAL_BADGE_HOVER_ALPHA: u32 = 0x4d;
-const SESSION_FOCUS_ACTION_BG_ALPHA: u32 = 0x1a;
-const SESSION_FOCUS_ACTION_HOVER_ALPHA: u32 = 0x26;
-const SESSION_FOCUS_DIVIDER_ALPHA: u32 = 0x4d;
-// Tauri FocusedNodeList empty state uses `w-8 h-8 opacity-30`,
-// `text-sm`, `text-xs`, and `opacity-60` for the helper text.
-const SESSION_FOCUS_EMPTY_ICON_SIZE: f32 = 32.0;
-const SESSION_FOCUS_EMPTY_ICON_ALPHA: u32 = 0x4d;
-const SESSION_FOCUS_EMPTY_TITLE_TEXT_SIZE: f32 = 14.0;
-const SESSION_FOCUS_EMPTY_SUBTITLE_TEXT_SIZE: f32 = 12.0;
-const SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA: f32 = 0.6;
+const SESSION_ROW_SELECTED_BG_ALPHA: u32 = 0x1a;
 // Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
 // native estimate next to the shared virtual-list call so scroll-to-index and
 // sticky-bottom behavior stay browser-like.
@@ -83,9 +61,7 @@ pub(super) enum ContextSidebarTool {
 #[derive(Clone, Copy)]
 pub(in crate::workspace) struct SessionStatusStyle {
     icon: LucideIcon,
-    text_color: u32,
     dot_color: u32,
-    ring: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -97,7 +73,6 @@ pub(in crate::workspace) enum SessionActionVariant {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum ActiveSessionSidebarViewMode {
     Tree,
-    Focus,
     Host,
 }
 

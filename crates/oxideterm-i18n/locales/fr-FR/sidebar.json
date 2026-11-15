@@ -94,7 +94,6 @@
       "settings": "Paramètres",
       "ai_hint": "OxideSens",
       "switch_tree": "Vue arborescente",
-      "switch_focus": "Vue focus",
       "switch_host": "Vue par hôte",
       "new_connection": "Nouvelle connexion",
       "lock_app": "Verrouiller OxideTerm",
@@ -886,6 +885,7 @@
   },
   "sessions": {
     "tree": {
+      "terminal": "Terminal #{{number}}",
       "no_sessions": "Aucune session",
       "click_to_add": "Cliquez sur + pour ajouter une connexion",
       "actions": {
@@ -903,17 +903,6 @@
         "connect": "Connecter",
         "save_as_connection": "Enregistrer comme connexion..."
       }
-    },
-    "focused_list": {
-      "all_servers": "Tous les serveurs",
-      "child": "enfant",
-      "children": "enfants",
-      "no_child_nodes": "Ce nœud n'a pas de nœuds enfants",
-      "no_servers": "Aucun serveur pour l’instant",
-      "add_by_drilling": "Vous pouvez ajouter des nœuds enfants en effectuant un drill-down",
-      "click_to_add": "Cliquez sur + pour ajouter une nouvelle connexion",
-      "terminal": "Terminal #{{number}}",
-      "close_terminal": "Fermer le terminal"
     },
     "actions": {
       "connect": "Connecter",
@@ -936,10 +925,6 @@
       "not_found": "Connexion enregistrée introuvable.",
       "missing_credentials": "Cette connexion enregistrée ne contient pas les identifiants nécessaires.",
       "materialize_failed": "Impossible d'ajouter la connexion enregistrée à l'arbre de sessions."
-    },
-    "breadcrumb": {
-      "back_to_root": "Retour à la vue racine",
-      "all_servers": "Tous les serveurs"
     }
   }
 }

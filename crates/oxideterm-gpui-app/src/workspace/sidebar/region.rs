@@ -440,21 +440,18 @@ impl WorkspaceApp {
                 ),
             );
         if panel_section == SidebarSection::Sessions {
-            let (view_icon, view_action) = match self.active_session_sidebar_view_mode {
-                ActiveSessionSidebarViewMode::Tree => {
-                    (LucideIcon::Folder, SidebarActionKind::ToggleSessionView)
-                }
-                ActiveSessionSidebarViewMode::Focus => {
-                    (LucideIcon::ListChecks, SidebarActionKind::ToggleSessionView)
-                }
-                ActiveSessionSidebarViewMode::Host => {
-                    (LucideIcon::Server, SidebarActionKind::ToggleSessionView)
-                }
+            let view_icon = match self.active_session_sidebar_view_mode {
+                ActiveSessionSidebarViewMode::Tree => LucideIcon::Folder,
+                ActiveSessionSidebarViewMode::Host => LucideIcon::Server,
             };
             header = header
                 .child(self.render_session_search_button(cx))
                 .child(self.render_session_sort_button(cx))
-                .child(self.render_sidebar_action(view_icon, view_action, cx))
+                .child(self.render_sidebar_action(
+                    view_icon,
+                    SidebarActionKind::ToggleSessionView,
+                    cx,
+                ))
                 .child(self.render_sidebar_action(
                     LucideIcon::Plus,
                     SidebarActionKind::NewConnection,
@@ -473,33 +470,28 @@ impl WorkspaceApp {
         let theme = self.tokens.ui;
         let label = match action {
             SidebarActionKind::ToggleSessionView => match self.active_session_sidebar_view_mode {
-                ActiveSessionSidebarViewMode::Tree => self.i18n.t("sidebar.tooltips.switch_focus"),
-                ActiveSessionSidebarViewMode::Focus => self.i18n.t("sidebar.tooltips.switch_host"),
+                ActiveSessionSidebarViewMode::Tree => self.i18n.t("sidebar.tooltips.switch_host"),
                 ActiveSessionSidebarViewMode::Host => self.i18n.t("sidebar.tooltips.switch_tree"),
             },
             SidebarActionKind::NewConnection => self.i18n.t("sidebar.tooltips.new_connection"),
         };
 
-        let toggle_focus_active = action == SidebarActionKind::ToggleSessionView
-            && self.active_session_sidebar_view_mode != ActiveSessionSidebarViewMode::Tree;
+        let host_view_active = action == SidebarActionKind::ToggleSessionView
+            && self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Host;
 
-        // Tauri sidebar header actions are icon buttons with title tooltips.
-        // The view-mode action is the old Folder/ListChecks toggle from
-        // Sidebar.tsx; keep its active "secondary" chrome for every non-default
-        // view mode so the header shows that a mode is engaged.
         div()
             .ml_1()
             .child(self.workspace_tooltip_icon_button(
                 icon,
                 self.tokens.metrics.sidebar_action_icon_size,
-                rgb(if toggle_focus_active {
+                rgb(if host_view_active {
                     theme.text
                 } else {
                     theme.text_muted
                 }),
                 IconButtonOptions {
-                    has_background: toggle_focus_active,
-                    background: toggle_focus_active.then_some(rgb(theme.bg_active)),
+                    has_background: host_view_active,
+                    background: host_view_active.then_some(rgb(theme.bg_active)),
                     hover_background: Some(rgb(theme.bg_hover)),
                     ..IconButtonOptions::opaque_toolbar(
                         self.tokens.metrics.sidebar_action_size,

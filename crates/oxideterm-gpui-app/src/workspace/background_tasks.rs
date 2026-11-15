@@ -113,8 +113,7 @@ impl WorkspaceApp {
             BackgroundTaskTarget::Reconnect(node_id) => {
                 if self.ssh_nodes.contains_key(&node_id) {
                     self.active_ssh_node_id = Some(node_id.clone());
-                    self.expanded_ssh_nodes.insert(node_id.clone());
-                    self.active_session_sidebar_focused_node_id = Some(node_id);
+                    self.expanded_ssh_nodes.insert(node_id);
                     self.set_sidebar_section(SidebarSection::Sessions, cx);
                     cx.notify();
                 }

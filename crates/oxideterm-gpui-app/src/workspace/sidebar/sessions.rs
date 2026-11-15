@@ -605,20 +605,38 @@ fn group_active_session_rows_by_host_user(
     output
 }
 
-impl WorkspaceApp {
-    fn first_running_local_terminal(
-        &self,
-        terminal_ids: &[TerminalSessionId],
-        cx: &App,
-    ) -> Option<TerminalSessionId> {
-        let host = self.tab_host.read(cx);
-        terminal_ids.iter().copied().find(|id| {
-            host.terminal_location(*id)
-                .and_then(|location| host.panes().get(&location.pane_id))
-                .is_some_and(|pane| pane.read(cx).lifecycle() == TerminalLifecycle::Running)
-        })
+/// Computes which outer guide-rail columns (`0..row.depth - 1`) have following
+/// siblings below the row at `target_index`.
+fn session_row_ancestor_rails(
+    rows: &[ActiveSessionSidebarRow],
+    target_index: usize,
+) -> Vec<bool> {
+    // Index `d` tracks whether the active ancestor at depth `d` continues below
+    // its subtree (`!is_last`). Index 0 is unused because roots have no outer rail.
+    let mut continues_at_depth: Vec<bool> = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        continues_at_depth.resize(row.depth, false);
+        if index == target_index {
+            return if row.depth > 1 {
+                continues_at_depth[1..row.depth].to_vec()
+            } else {
+                Vec::new()
+            };
+        }
+        continues_at_depth.push(row.depth > 0 && !row.is_last);
     }
+    Vec::new()
+}
 
+struct SessionActionSpec {
+    debug_key: &'static str,
+    icon: LucideIcon,
+    label: String,
+    variant: SessionActionVariant,
+    listener: Box<dyn Fn(&MouseDownEvent, &mut Window, &mut App) + 'static>,
+}
+
+impl WorkspaceApp {
     pub(in crate::workspace) fn render_session_search_button(
         &self,
         cx: &mut Context<Self>,
@@ -665,7 +683,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.sidebar_search_row(self.workspace_sidebar_background(self.tokens.ui.bg))
+        self.sidebar_search_row(self.workspace_sidebar_background(self.tokens.ui.shell_bg()))
             .child(self.render_overlay_query_input(
                 ime::WorkspaceImeTarget::ActiveSessionSearch,
                 self.session_search_query.clone(),
@@ -793,23 +811,26 @@ impl WorkspaceApp {
         )
     }
 
-    /// Keeps clickable session labels from competing with their control's pointer interaction.
-    fn render_session_control_label(
-        &self,
-        scope: &str,
-        key: impl Hash,
-        text: impl Into<String>,
-        color: u32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.render_display_text_with_role(
-            SelectableTextRole::NonSelectable,
-            scope,
-            key,
-            text,
-            color,
-            cx,
-        )
+    fn session_tree_node_height(&self) -> f32 {
+        (28.0_f32).max((self.tokens.metrics.ui_text_xs + 16.0).round())
+    }
+
+    fn session_tree_item_height(&self) -> f32 {
+        (24.0_f32).max((self.tokens.metrics.ui_text_xs + 12.0).round())
+    }
+
+    fn local_profile_session_icon(&self, local_profile_id: Option<&str>) -> super::super::session_icons::SessionIcon {
+        local_profile_id
+            .and_then(|id| {
+                self.connection_store
+                    .local_terminal_profiles()
+                    .iter()
+                    .find(|profile| profile.id == id)
+            })
+            .and_then(|profile| {
+                super::super::session_icons::session_icon_from_id(profile.icon.as_deref())
+            })
+            .unwrap_or(LucideIcon::Terminal.into())
     }
 
     pub(in crate::workspace) fn queue_ssh_terminal_tab_for_sidebar_node(
@@ -887,12 +908,6 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Focus
-            && self.session_search_query.trim().is_empty()
-        {
-            return self.render_active_sessions_focus_sidebar_content(cx);
-        }
-
         // Node churn can outlive the groups that owned a disclosure entry.
         self.prune_session_group_expanded();
         let rows = self.active_session_sidebar_display_rows(cx);
@@ -908,15 +923,10 @@ impl WorkspaceApp {
             return self.render_empty_sessions_sidebar_content(cx);
         }
 
-        let list_mode =
-            if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Host {
-                ActiveSessionSidebarViewMode::Host
-            } else {
-                ActiveSessionSidebarViewMode::Tree
-            };
+        let list_mode = self.active_session_sidebar_view_mode;
         self.sync_active_session_sidebar_list_state(&rows, list_mode, cx);
         let state = self.active_session_sidebar_list_state.clone();
-        let spec = self.active_session_sidebar_list_spec(list_mode);
+        let spec = self.active_session_sidebar_list_spec();
         let workspace = cx.entity();
         div()
             .id("active-sessions-sidebar-scroll")
@@ -933,59 +943,6 @@ impl WorkspaceApp {
                     })
                 },
             ))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_active_sessions_focus_sidebar_content(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let rows = self.active_session_sidebar_rows(cx);
-        let focused_node_id = self.effective_active_session_focus_node_id(&rows);
-        self.active_session_sidebar_focused_node_id = focused_node_id.clone();
-        let visible_rows = self.active_session_focus_rows(&rows, focused_node_id.as_ref());
-        self.sync_active_session_sidebar_list_state(
-            &visible_rows,
-            ActiveSessionSidebarViewMode::Focus,
-            cx,
-        );
-
-        let state = self.active_session_sidebar_list_state.clone();
-        let spec = self.active_session_sidebar_list_spec(ActiveSessionSidebarViewMode::Focus);
-        let workspace = cx.entity();
-        div()
-            .id("active-sessions-focus-sidebar")
-            .flex_1()
-            .min_h(px(0.0))
-            .w_full()
-            .pt(px(PRIMARY_SIDEBAR_CONTENT_TOP_INSET))
-            .flex()
-            .flex_col()
-            .child(self.render_active_session_focus_breadcrumb(&rows, focused_node_id.as_ref(), cx))
-            .child(self.render_active_session_focus_location_header(
-                &rows,
-                focused_node_id.as_ref(),
-                visible_rows.len(),
-                cx,
-            ))
-            .child(
-                div()
-                    .id("active-sessions-focus-list")
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .w_full()
-                    .py_2()
-                    .child(if visible_rows.is_empty() {
-                        self.render_active_session_focus_empty(focused_node_id.as_ref(), cx)
-                    } else {
-                        tauri_virtual_list(state, spec, move |index, _window, cx| {
-                            workspace.update(cx, |this, cx| {
-                                this.render_active_session_focus_list_item(index, cx)
-                            })
-                        })
-                        .into_any_element()
-                    }),
-            )
             .into_any_element()
     }
 
@@ -1257,7 +1214,7 @@ impl WorkspaceApp {
             .gap(px(self.tokens.spacing.two))
             .border_t_1()
             .border_color(self.workspace_chrome_divider())
-            .bg(self.workspace_sidebar_background(theme.bg))
+            .bg(self.workspace_sidebar_background(theme.shell_bg()))
             .child(
                 div()
                     .flex_none()
@@ -1423,21 +1380,15 @@ impl WorkspaceApp {
             &mut self.active_session_sidebar_list_cache.borrow_mut(),
             "active-sessions-sidebar",
             &signatures,
-            self.active_session_sidebar_list_spec(view_mode),
+            self.active_session_sidebar_list_spec(),
         );
     }
 
-    pub(in crate::workspace) fn active_session_sidebar_list_spec(
-        &self,
-        view_mode: ActiveSessionSidebarViewMode,
-    ) -> TauriVirtualListSpec {
-        let estimated_height = match view_mode {
-            ActiveSessionSidebarViewMode::Tree | ActiveSessionSidebarViewMode::Host => {
-                ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT
-            }
-            ActiveSessionSidebarViewMode::Focus => ACTIVE_SESSION_FOCUS_LIST_ESTIMATED_HEIGHT,
-        };
-        TauriVirtualListSpec::new(px(estimated_height), ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN)
+    fn active_session_sidebar_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT),
+            ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN,
+        )
     }
 
     pub(in crate::workspace) fn render_active_session_sidebar_list_item(
@@ -1445,16 +1396,14 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(row) = self
-            .active_session_sidebar_display_rows(cx)
-            .into_iter()
-            .nth(index)
-        else {
+        let rows = self.active_session_sidebar_display_rows(cx);
+        let Some(row) = rows.get(index).cloned() else {
             return div().into_any_element();
         };
+        let ancestor_rails = session_row_ancestor_rails(&rows, index);
         div()
             .px_1()
-            .child(self.render_active_session_node(row, cx))
+            .child(self.render_active_session_node_with_rails(row, &ancestor_rails, cx))
             .into_any_element()
     }
 
@@ -1468,6 +1417,7 @@ impl WorkspaceApp {
         // This virtual row owns the node header plus expanded action/terminal
         // children. Hash all state that can change its visible height or labels.
         view_mode.hash(&mut hasher);
+        self.tokens.metrics.ui_text_xs.to_bits().hash(&mut hasher);
         row.node_id.hash(&mut hasher);
         row.parent_id.hash(&mut hasher);
         row.title.hash(&mut hasher);
@@ -1533,603 +1483,15 @@ impl WorkspaceApp {
         hasher.finish()
     }
 
-    pub(in crate::workspace) fn effective_active_session_focus_node_id(
-        &self,
-        rows: &[ActiveSessionSidebarRow],
-    ) -> Option<NodeId> {
-        let focused_node_id = self.active_session_sidebar_focused_node_id.as_ref()?;
-        rows.iter()
-            .any(|row| row.node_id == *focused_node_id)
-            .then(|| focused_node_id.clone())
-    }
-
-    pub(in crate::workspace) fn active_session_focus_rows(
-        &self,
-        rows: &[ActiveSessionSidebarRow],
-        focused_node_id: Option<&NodeId>,
-    ) -> Vec<ActiveSessionSidebarRow> {
-        rows.iter()
-            .filter(|row| match focused_node_id {
-                Some(focused_node_id) => row.parent_id.as_ref() == Some(focused_node_id),
-                None => row.parent_id.is_none(),
-            })
-            .cloned()
-            .collect()
-    }
-
-    pub(in crate::workspace) fn active_session_breadcrumb_rows(
-        &self,
-        rows: &[ActiveSessionSidebarRow],
-        focused_node_id: Option<&NodeId>,
-    ) -> Vec<ActiveSessionSidebarRow> {
-        let row_by_id = rows
-            .iter()
-            .map(|row| (row.node_id.clone(), row.clone()))
-            .collect::<HashMap<_, _>>();
-        let mut path = Vec::new();
-        let mut current_id = focused_node_id.cloned();
-        while let Some(node_id) = current_id {
-            let Some(row) = row_by_id.get(&node_id) else {
-                break;
-            };
-            path.push(row.clone());
-            current_id = row.parent_id.clone();
-        }
-        path.reverse();
-        path
-    }
-
     pub(in crate::workspace) fn toggle_active_session_sidebar_view(
         &mut self,
         cx: &mut Context<Self>,
     ) {
         self.active_session_sidebar_view_mode = match self.active_session_sidebar_view_mode {
-            ActiveSessionSidebarViewMode::Tree => ActiveSessionSidebarViewMode::Focus,
-            ActiveSessionSidebarViewMode::Focus => ActiveSessionSidebarViewMode::Host,
+            ActiveSessionSidebarViewMode::Tree => ActiveSessionSidebarViewMode::Host,
             ActiveSessionSidebarViewMode::Host => ActiveSessionSidebarViewMode::Tree,
         };
-        // Tauri stores the focus node separately from expansion. Keep native's
-        // selected node visible when entering focus mode, but fall back to root
-        // if the selected node is stale or has disappeared.
-        if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Focus {
-            let rows = self.active_session_sidebar_rows(cx);
-            let selected = self
-                .active_ssh_node_id
-                .as_ref()
-                .filter(|node_id| rows.iter().any(|row| row.node_id == **node_id))
-                .cloned();
-            self.active_session_sidebar_focused_node_id = selected;
-        }
         cx.notify();
-    }
-
-    pub(in crate::workspace) fn render_active_session_focus_breadcrumb(
-        &self,
-        rows: &[ActiveSessionSidebarRow],
-        focused_node_id: Option<&NodeId>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let path_rows = self.active_session_breadcrumb_rows(rows, focused_node_id);
-        let root_active = focused_node_id.is_none();
-        let root_color = if root_active {
-            theme.accent
-        } else {
-            theme.text_muted
-        };
-
-        let mut breadcrumb = div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(4.0))
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(rgb(theme.border))
-            // The sidebar body already owns the background tint.
-            .overflow_hidden();
-
-        breadcrumb = breadcrumb.child(
-            div()
-                .h(px(22.0))
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(px(4.0))
-                .rounded(px(self.tokens.radii.md))
-                .px(px(6.0))
-                .text_size(px(12.0))
-                .font_weight(if root_active {
-                    gpui::FontWeight::MEDIUM
-                } else {
-                    gpui::FontWeight::NORMAL
-                })
-                .text_color(rgb(root_color))
-                .cursor_pointer()
-                .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                .child(Self::render_lucide_icon(
-                    LucideIcon::Home,
-                    14.0,
-                    rgb(root_color),
-                ))
-                .when(root_active, |button| {
-                    button.child(self.render_session_control_label(
-                        "session-focus-breadcrumb-root",
-                        "sessions.breadcrumb.all_servers",
-                        self.i18n.t("sessions.breadcrumb.all_servers"),
-                        root_color,
-                        cx,
-                    ))
-                })
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.active_session_sidebar_focused_node_id = None;
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ),
-        );
-
-        let path_len = path_rows.len();
-        for (index, row) in path_rows.into_iter().enumerate() {
-            let is_last = index + 1 == path_len;
-            let text_color = if is_last {
-                theme.accent
-            } else {
-                theme.text_muted
-            };
-            let node_id = row.node_id.clone();
-            let title = row.node_view.title.clone();
-            breadcrumb = breadcrumb
-                .child(Self::render_lucide_icon(
-                    LucideIcon::ChevronRight,
-                    12.0,
-                    rgb(theme.text_muted),
-                ))
-                .child(
-                    div()
-                        .max_w(px(120.0))
-                        .h(px(22.0))
-                        .flex()
-                        .items_center()
-                        .rounded(px(self.tokens.radii.md))
-                        .px(px(6.0))
-                        .truncate()
-                        .text_size(px(12.0))
-                        .font_weight(if is_last {
-                            gpui::FontWeight::MEDIUM
-                        } else {
-                            gpui::FontWeight::NORMAL
-                        })
-                        .text_color(rgb(text_color))
-                        .cursor_pointer()
-                        .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                        .child(self.render_session_control_label(
-                            "session-focus-breadcrumb",
-                            &node_id,
-                            title,
-                            text_color,
-                            cx,
-                        ))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.active_session_sidebar_focused_node_id = Some(node_id.clone());
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        ),
-                );
-        }
-
-        breadcrumb.into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_active_session_focus_location_header(
-        &self,
-        rows: &[ActiveSessionSidebarRow],
-        focused_node_id: Option<&NodeId>,
-        visible_count: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let focused_row =
-            focused_node_id.and_then(|node_id| rows.iter().find(|row| row.node_id == *node_id));
-        let title = focused_row
-            .map(|row| row.node_view.title.clone())
-            .unwrap_or_else(|| self.i18n.t("sessions.focused_list.all_servers"));
-        let title = title.to_uppercase();
-        let count_label_key = if visible_count == 1 {
-            "sessions.focused_list.child"
-        } else {
-            "sessions.focused_list.children"
-        };
-        let count_text = if focused_node_id.is_some() {
-            format!("({} {})", visible_count, self.i18n.t(count_label_key))
-        } else {
-            format!("({})", visible_count)
-        }
-        .to_uppercase();
-
-        // Tauri FocusedNodeList renders this compact location strip below the
-        // breadcrumb (`🏠 All Servers (n)` or `📍 node (n children)`), separate
-        // from the sidebar section title above the scroll area.
-        div()
-            .px_3()
-            .py_2()
-            .border_b_1()
-            .border_color(rgba((theme.border << 8) | SESSION_FOCUS_DIVIDER_ALPHA))
-            .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-            .text_color(rgb(theme.text_muted))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.0))
-            .child(if focused_node_id.is_some() {
-                "📍"
-            } else {
-                "🏠"
-            })
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
-                        "session-focus-location-title",
-                        if focused_node_id.is_some() {
-                            "session-focus-location-node"
-                        } else {
-                            "sessions.focused_list.all_servers"
-                        },
-                        title,
-                        theme.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .text_color(rgba((theme.text_muted << 8) | 0x80))
-                    .child(count_text),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_active_session_focus_empty(
-        &self,
-        focused_node_id: Option<&NodeId>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let title_key = if focused_node_id.is_some() {
-            "sessions.focused_list.no_child_nodes"
-        } else {
-            "sessions.focused_list.no_servers"
-        };
-        let subtitle_key = if focused_node_id.is_some() {
-            "sessions.focused_list.add_by_drilling"
-        } else {
-            "sessions.focused_list.click_to_add"
-        };
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .py(px(32.0))
-            .px_4()
-            .text_center()
-            .text_color(rgb(theme.text_muted))
-            .child(div().mb_2().child(Self::render_lucide_icon(
-                LucideIcon::Server,
-                SESSION_FOCUS_EMPTY_ICON_SIZE,
-                rgba((theme.text_muted << 8) | SESSION_FOCUS_EMPTY_ICON_ALPHA),
-            )))
-            .child(
-                div()
-                    .text_size(px(SESSION_FOCUS_EMPTY_TITLE_TEXT_SIZE))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "session-focus-empty-title",
-                        title_key,
-                        self.i18n.t(title_key),
-                        theme.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .mt_1()
-                    .text_size(px(SESSION_FOCUS_EMPTY_SUBTITLE_TEXT_SIZE))
-                    .text_color(rgba(
-                        (theme.text_muted << 8)
-                            | (SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA * 255.0).round() as u32,
-                    ))
-                    .child(self.render_display_text_with_role_and_alpha(
-                        SelectableTextRole::NonSelectable,
-                        "session-focus-empty-subtitle",
-                        subtitle_key,
-                        self.i18n.t(subtitle_key),
-                        theme.text_muted,
-                        SESSION_FOCUS_EMPTY_SUBTITLE_ALPHA,
-                        cx,
-                    )),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_active_session_focus_list_item(
-        &self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let rows = self.active_session_sidebar_rows(cx);
-        let focused_node_id = self.effective_active_session_focus_node_id(&rows);
-        let Some(row) = self
-            .active_session_focus_rows(&rows, focused_node_id.as_ref())
-            .into_iter()
-            .nth(index)
-        else {
-            return div().into_any_element();
-        };
-        self.render_active_session_focus_node(row, cx)
-    }
-
-    pub(in crate::workspace) fn render_active_session_focus_node(
-        &self,
-        row: ActiveSessionSidebarRow,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        if row.standalone_session.is_some() {
-            return self.render_standalone_session_sidebar_row(row, cx);
-        }
-        let theme = self.tokens.ui;
-        let local_group = row.local_group;
-        let selected = if local_group {
-            self.active_terminal_session_id(cx)
-                .is_some_and(|id| row.node_view.terminal_ids.contains(&id))
-        } else {
-            self.active_ssh_node_id.as_ref() == Some(&row.node_id)
-        };
-        let status = self.session_node_status(row.node_view.status());
-        let connected = matches!(
-            row.node_view.status(),
-            ActiveSessionStatus::Active | ActiveSessionStatus::Connected
-        );
-        let connecting = matches!(row.node_view.status(), ActiveSessionStatus::Connecting);
-        let subtitle = format!("{}@{}:{}", row.username, row.host, row.port);
-        let terminal_count = row.node_view.terminal_ids.len();
-        let has_children = row.has_children;
-        let action_label = self.i18n.t("sessions.actions.connect");
-        let border_color = if selected {
-            rgba((theme.accent << 8) | SESSION_FOCUS_CARD_SELECTED_BORDER_ALPHA)
-        } else {
-            rgba((theme.border << 8) | SESSION_FOCUS_CARD_BORDER_ALPHA)
-        };
-        let node_id = row.node_id.clone();
-        let local_terminal = if row.local_profile_id.is_some() {
-            self.first_running_local_terminal(&row.node_view.terminal_ids, cx)
-        } else {
-            row.node_view.terminal_ids.first().copied()
-        };
-        let local_profile_id = row.local_profile_id.clone();
-        let mut card = session_item_surface(theme, selected, SESSION_FOCUS_CARD_SELECTED_BG_ALPHA)
-            .mx_2()
-            .mb_2()
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(border_color)
-            .cursor_pointer()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    if local_group {
-                        if !selected && let Some(id) = local_terminal {
-                            this.focus_terminal_session(id, window, cx);
-                        } else if local_terminal.is_none()
-                            && let Some(profile_id) = local_profile_id.as_deref()
-                        {
-                            this.open_saved_local_terminal_profile(profile_id, window, cx);
-                        }
-                    } else {
-                        this.active_ssh_node_id = Some(node_id.clone());
-                        if event.click_count >= 2 && has_children {
-                            this.active_session_sidebar_focused_node_id = Some(node_id.clone());
-                        }
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.render_session_status_dot(status))
-                    .child(if matches!(status.icon, LucideIcon::LoaderCircle) {
-                        self.render_connecting_session_icon(
-                            (
-                                gpui::SharedString::from(format!(
-                                    "session-focus-connecting-{:?}",
-                                    row.node_id
-                                )),
-                                0usize,
-                            ),
-                            SESSION_TREE_ICON_SIZE,
-                            rgb(status.text_color),
-                            cx,
-                        )
-                    } else if local_group {
-                        Self::render_lucide_icon(
-                            LucideIcon::Terminal,
-                            SESSION_TREE_ICON_SIZE,
-                            rgb(status.text_color),
-                        )
-                    } else {
-                        self.node_session_icon(&row.node_id)
-                            .render(SESSION_TREE_ICON_SIZE, rgb(status.text_color))
-                    })
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .min_w(px(0.0))
-                                    .truncate()
-                                    .text_size(px(SESSION_TREE_TEXT_SIZE))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(status.text_color))
-                                    .child(self.render_session_control_label(
-                                        "session-focus-card-cell",
-                                        "title",
-                                        row.node_view.title.clone(),
-                                        status.text_color,
-                                        cx,
-                                    )),
-                            )
-                            .when(!local_group, |label| {
-                                label.child(
-                                    div()
-                                        .min_w(px(0.0))
-                                        .truncate()
-                                        .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                                        .text_color(rgb(theme.text_muted))
-                                        .child(self.render_session_control_label(
-                                            "session-focus-card-cell",
-                                            "subtitle",
-                                            subtitle,
-                                            theme.text_muted,
-                                            cx,
-                                        )),
-                                )
-                            }),
-                    )
-                    .when(terminal_count > 0, |row_el| {
-                        row_el.child(
-                            div()
-                                .flex()
-                                .flex_row()
-                                .items_center()
-                                .gap(px(4.0))
-                                .rounded(px(self.tokens.radii.md))
-                                .px(px(6.0))
-                                .py(px(2.0))
-                                .bg(rgba(
-                                    (theme.success << 8)
-                                        | SESSION_FOCUS_TERMINAL_BADGE_BG_ALPHA,
-                                ))
-                                .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                                .text_color(rgb(theme.success))
-                                .child(Self::render_lucide_icon(
-                                    LucideIcon::Terminal,
-                                    12.0,
-                                    rgb(theme.success),
-                                ))
-                                .child(terminal_count.to_string()),
-                        )
-                    })
-                    .when(has_children, |row_el| {
-                        row_el.child(Self::render_lucide_icon(
-                            LucideIcon::ChevronRight,
-                            16.0,
-                            rgb(theme.text_muted),
-                        ))
-                    })
-                    .when(!local_group && !connected && !connecting, |row_el| {
-                        let node_id = row.node_id.clone();
-                        row_el.child(
-                            div()
-                                .rounded(px(self.tokens.radii.md))
-                                .px(px(8.0))
-                                .py(px(4.0))
-                                .text_size(px(self.tokens.metrics.ui_text_2xs))
-                                .text_color(rgb(theme.success))
-                                .bg(rgba(
-                                    (theme.success << 8)
-                                        | SESSION_FOCUS_TERMINAL_BADGE_BG_ALPHA,
-                                ))
-                                .hover(|button| {
-                                    button.bg(rgba(
-                                        (theme.success << 8)
-                                            | SESSION_FOCUS_TERMINAL_BADGE_HOVER_ALPHA,
-                                    ))
-                                })
-                                .child(action_label)
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                        let _ = this
-                                            .queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
-                                                node_id.clone(),
-                                                event.modifiers.control,
-                                                window,
-                                                cx,
-                                            );
-                                        cx.stop_propagation();
-                                    }),
-                                ),
-                        )
-                    }),
-            );
-
-        if selected && terminal_count > 0 {
-            card = card.child(
-                div()
-                    .mt_1()
-                    .pt_2()
-                    .border_t_1()
-                    .border_color(rgba((theme.border << 8) | SESSION_FOCUS_DIVIDER_ALPHA))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .children(row.node_view.terminal_ids.iter().enumerate().map(
-                        |(index, session_id)| {
-                            self.render_active_session_focus_terminal(*session_id, index + 1, cx)
-                        },
-                    )),
-            );
-        }
-
-        if (selected && connected) || local_group {
-            card = card.child(
-                div()
-                    .flex()
-                    .flex_row()
-                    // Sidebar width is user-controlled, so actions must form
-                    // additional rows instead of extending beyond the card.
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(6.0))
-                    .children(self.render_active_session_focus_actions(&row, cx)),
-            );
-        }
-
-        if selected && !local_group {
-            card = card.children(self.render_session_node_lifecycle_items(
-                &row.node_id,
-                row.node_view.status(),
-                0,
-                true,
-                cx,
-            ));
-        }
-
-        card.into_any_element()
     }
 
     fn render_local_session_sidebar_row(
@@ -2149,46 +1511,44 @@ impl WorkspaceApp {
         let motion_key = format!("session:{}:children", row.node_id.0);
         let mut children = Vec::new();
         if self.disclosure_motions.retained(&motion_key, expanded) {
-            children.extend(
-                row.node_view
-                    .terminal_ids
-                    .iter()
-                    .enumerate()
-                    .map(|(index, id)| {
-                        self.render_session_terminal_item(1, false, *id, index + 1, cx)
-                    }),
-            );
             let profile_id = row.local_profile_id.clone();
-            children.push(self.render_session_action_item(
-                1,
-                row.local_profile_id.is_none(),
-                LucideIcon::Plus,
-                self.i18n.t("sessions.tree.actions.new_terminal"),
-                SessionActionVariant::Primary,
-                cx.listener(move |this, _, window, cx| {
+            let tools = vec![SessionActionSpec {
+                debug_key: "new-terminal",
+                icon: LucideIcon::Plus,
+                label: self.i18n.t("sessions.tree.actions.new_terminal"),
+                variant: SessionActionVariant::Primary,
+                listener: Box::new(cx.listener(move |this, _, window, cx| {
                     if let Some(profile_id) = profile_id.as_deref() {
                         this.open_saved_local_terminal_profile(profile_id, window, cx);
                     } else {
                         this.open_local_shell_launcher(cx);
                     }
                     cx.stop_propagation();
-                }),
-                cx,
-            ));
+                })),
+            }];
+            let mut lifecycle = Vec::new();
             if let Some(profile_id) = row.local_profile_id.clone() {
-                children.push(self.render_session_action_item(
-                    1,
-                    true,
-                    LucideIcon::Trash2,
-                    self.i18n.t("sessions.tree.actions.remove_session"),
-                    SessionActionVariant::Danger,
-                    cx.listener(move |this, _, window, cx| {
+                lifecycle.push(SessionActionSpec {
+                    debug_key: "remove",
+                    icon: LucideIcon::Trash2,
+                    label: self.i18n.t("sessions.tree.actions.remove_session"),
+                    variant: SessionActionVariant::Danger,
+                    listener: Box::new(cx.listener(move |this, _, window, cx| {
                         this.remove_local_profile_session(&profile_id, window, cx);
                         cx.stop_propagation();
-                    }),
-                    cx,
-                ));
+                    })),
+                });
             }
+            children = self.render_session_child_segments(
+                &row.node_id.0,
+                1,
+                &[],
+                false,
+                &row.node_view.terminal_ids,
+                tools,
+                lifecycle,
+                cx,
+            );
         }
         let header = self.render_session_node_header(
             row.node_id,
@@ -2217,197 +1577,125 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_active_session_focus_terminal(
+    fn render_session_segment_separator(
         &self,
-        session_id: TerminalSessionId,
-        index: usize,
-        cx: &mut Context<Self>,
+        depth: usize,
+        ancestor_continues: &[bool],
     ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let active = self.active_terminal_session_id(cx) == Some(session_id);
-        let text_color = if active {
-            theme.accent
-        } else {
-            theme.text_muted
-        };
-        let (text, icon) = self.session_terminal_label_icon(session_id, index, cx);
-
-        session_item_surface(theme, active, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
-            .h(px(24.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(6.0))
-            .rounded(px(self.tokens.radii.md))
-            .px_2()
-            .text_color(rgb(text_color))
-            .child(icon.render(12.0, rgb(text_color)))
-            .child(
-                div()
-                    .flex_1()
-                    .truncate()
-                    .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                    .child(self.render_session_control_label(
-                        "session-focus-terminal-cell",
-                        "label",
-                        text,
-                        text_color,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .size(px(18.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.md))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::X,
-                        12.0,
-                        rgb(text_color),
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.close_terminal_session(session_id, window, cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    this.focus_terminal_session(session_id, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element()
+        self.render_session_tree_child_with_rails(
+            depth,
+            ancestor_continues,
+            false,
+            div()
+                .w_full()
+                .h(px(7.0))
+                .pl(px(6.0))
+                .pr(px(8.0))
+                .flex()
+                .items_center()
+                .child(
+                    div()
+                        .w_full()
+                        .h(px(1.0))
+                        .bg(rgba((self.tokens.ui.border << 8) | 0x38)),
+                )
+                .into_any_element(),
+        )
     }
 
-    pub(in crate::workspace) fn render_active_session_focus_actions(
+    fn render_session_segment_gap(
         &self,
-        row: &ActiveSessionSidebarRow,
+        depth: usize,
+        ancestor_continues: &[bool],
+    ) -> AnyElement {
+        self.render_session_tree_child_with_rails(
+            depth,
+            ancestor_continues,
+            false,
+            div().w_full().h(px(2.0)).into_any_element(),
+        )
+    }
+
+    fn render_session_child_segments(
+        &self,
+        owner_key: &str,
+        depth: usize,
+        ancestor_continues: &[bool],
+        innermost_continues_below: bool,
+        terminal_ids: &[TerminalSessionId],
+        tools: Vec<SessionActionSpec>,
+        lifecycle: Vec<SessionActionSpec>,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        if row.local_group {
-            let profile_id = row.local_profile_id.clone();
-            let mut actions = vec![self.render_active_session_focus_action_chip(
-                LucideIcon::Plus,
-                self.i18n.t("sessions.tree.actions.new_terminal"),
-                SessionActionVariant::Primary,
-                cx.listener(move |this, _, window, cx| {
-                    if let Some(profile_id) = profile_id.as_deref() {
-                        this.open_saved_local_terminal_profile(profile_id, window, cx);
-                    } else {
-                        this.open_local_shell_launcher(cx);
-                    }
-                    cx.stop_propagation();
-                }),
-                cx,
-            )];
-            if let Some(profile_id) = row.local_profile_id.clone() {
-                actions.push(self.render_active_session_focus_action_chip(
-                    LucideIcon::Trash2,
-                    self.i18n.t("sessions.tree.actions.remove_session"),
-                    SessionActionVariant::Danger,
-                    cx.listener(move |this, _, window, cx| {
-                        this.remove_local_profile_session(&profile_id, window, cx);
-                        cx.stop_propagation();
-                    }),
-                    cx,
-                ));
-            }
-            return actions;
-        }
-        let node_id = row.node_id.clone();
-        vec![
-            self.render_active_session_focus_action_chip(
-                LucideIcon::Plus,
-                self.i18n.t("sessions.tree.actions.new_terminal"),
-                SessionActionVariant::Primary,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    let _ = this.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
-                        node_id.clone(),
-                        event.modifiers.control,
-                        window,
-                        cx,
-                    );
-                    cx.stop_propagation();
-                }),
-                cx,
-            ),
-            {
-                let node_id = row.node_id.clone();
-                self.render_active_session_focus_action_chip(
-                    LucideIcon::FolderOpen,
-                    self.i18n.t("sessions.tree.actions.sftp"),
-                    SessionActionVariant::Primary,
-                    cx.listener(move |this, _event, window, cx| {
-                        this.open_sftp_tab(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }),
-                    cx,
-                )
-            },
-            {
-                let node_id = row.node_id.clone();
-                self.render_active_session_focus_action_chip(
-                    LucideIcon::ArrowLeftRight,
-                    self.i18n.t("sessions.tree.actions.port_forwarding"),
-                    SessionActionVariant::Primary,
-                    cx.listener(move |this, _event, window, cx| {
-                        this.open_forwards_tab(node_id.clone(), window, cx);
-                        cx.stop_propagation();
-                    }),
-                    cx,
-                )
-            },
-        ]
-    }
+        let has_terminals = !terminal_ids.is_empty();
+        let has_tools = !tools.is_empty();
+        let has_lifecycle = !lifecycle.is_empty();
+        let mut children = Vec::with_capacity(
+            terminal_ids.len() + tools.len() + lifecycle.len() + 2,
+        );
 
-    pub(in crate::workspace) fn render_active_session_focus_action_chip(
-        &self,
-        icon: LucideIcon,
-        label: String,
-        variant: SessionActionVariant,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let (text_color, background, hover_background) = match variant {
-            SessionActionVariant::Primary => (
-                theme.accent,
-                rgba((theme.accent << 8) | SESSION_FOCUS_ACTION_BG_ALPHA),
-                rgba((theme.accent << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA),
-            ),
-            SessionActionVariant::Danger => (
-                theme.error,
-                rgba((theme.error << 8) | SESSION_FOCUS_ACTION_BG_ALPHA),
-                rgba((theme.error << 8) | SESSION_FOCUS_ACTION_HOVER_ALPHA),
-            ),
-        };
-        div()
-            .h(px(24.0))
-            .max_w_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(4.0))
-            .rounded(px(self.tokens.radii.md))
-            .px(px(7.0))
-            .text_size(px(11.0))
-            .text_color(rgb(text_color))
-            .bg(background)
-            .hover(move |chip| chip.bg(hover_background))
-            .child(Self::render_lucide_icon(icon, 12.0, rgb(text_color)))
-            .child(
-                // Long localized labels stay inside the chip at the narrowest
-                // supported sidebar widths.
-                div().min_w(px(0.0)).truncate().child(label),
-            )
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+        let terminal_count = terminal_ids.len();
+        for (index, &session_id) in terminal_ids.iter().enumerate() {
+            let line_stops_here = !innermost_continues_below
+                && !has_tools
+                && !has_lifecycle
+                && index + 1 == terminal_count;
+            children.push(self.render_session_terminal_item_with_rails(
+                depth,
+                ancestor_continues,
+                line_stops_here,
+                session_id,
+                index + 1,
+                cx,
+            ));
+        }
+
+        if has_terminals && (has_tools || has_lifecycle) {
+            children.push(self.render_session_segment_separator(depth, ancestor_continues));
+        }
+
+        let tool_count = tools.len();
+        for (index, action) in tools.into_iter().enumerate() {
+            let line_stops_here =
+                !innermost_continues_below && !has_lifecycle && index + 1 == tool_count;
+            let listener = action.listener;
+            children.push(self.render_session_action_item_with_rails(
+                owner_key,
+                depth,
+                ancestor_continues,
+                line_stops_here,
+                action.debug_key,
+                action.icon,
+                action.label,
+                action.variant,
+                move |event, window, cx| listener(event, window, cx),
+                cx,
+            ));
+        }
+
+        if has_tools && has_lifecycle {
+            children.push(self.render_session_segment_gap(depth, ancestor_continues));
+        }
+
+        let lifecycle_count = lifecycle.len();
+        for (index, action) in lifecycle.into_iter().enumerate() {
+            let line_stops_here = !innermost_continues_below && index + 1 == lifecycle_count;
+            let listener = action.listener;
+            children.push(self.render_session_action_item_with_rails(
+                owner_key,
+                depth,
+                ancestor_continues,
+                line_stops_here,
+                action.debug_key,
+                action.icon,
+                action.label,
+                action.variant,
+                move |event, window, cx| listener(event, window, cx),
+                cx,
+            ));
+        }
+
+        children
     }
 
     /// Renders the children a node shows when expanded. Host view stacks this
@@ -2419,16 +1707,19 @@ impl WorkspaceApp {
         node_view: &ActiveSessionNode,
         saved_connection_id: Option<&str>,
         depth: usize,
-        is_last: bool,
+        ancestor_continues: &[bool],
+        innermost_continues_below: bool,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let mut children = Vec::new();
+        let mut terminals: &[TerminalSessionId] = &[];
+        let mut tools = Vec::new();
 
         if !self.has_active_reconnect_job(node_id, cx) {
             if matches!(
                 node_view.status(),
                 ActiveSessionStatus::Active | ActiveSessionStatus::Connected
             ) {
+                terminals = &node_view.terminal_ids;
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     move |this, event: &MouseDownEvent, window, cx| {
@@ -2441,15 +1732,13 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 });
-                children.push(self.render_session_action_item(
-                    depth,
-                    false,
-                    LucideIcon::Plus,
-                    self.i18n.t("sessions.tree.actions.new_terminal"),
-                    SessionActionVariant::Primary,
-                    listener,
-                    cx,
-                ));
+                tools.push(SessionActionSpec {
+                    debug_key: "new-terminal",
+                    icon: LucideIcon::Plus,
+                    label: self.i18n.t("sessions.tree.actions.new_terminal"),
+                    variant: SessionActionVariant::Primary,
+                    listener: Box::new(listener),
+                });
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     move |this, _event, window, cx| {
@@ -2457,15 +1746,13 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 });
-                children.push(self.render_session_action_item(
-                    depth,
-                    false,
-                    LucideIcon::FolderOpen,
-                    self.i18n.t("sessions.tree.actions.sftp"),
-                    SessionActionVariant::Primary,
-                    listener,
-                    cx,
-                ));
+                tools.push(SessionActionSpec {
+                    debug_key: "sftp",
+                    icon: LucideIcon::FolderOpen,
+                    label: self.i18n.t("sessions.tree.actions.sftp"),
+                    variant: SessionActionVariant::Primary,
+                    listener: Box::new(listener),
+                });
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     move |this, _event, window, cx| {
@@ -2473,15 +1760,13 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 });
-                children.push(self.render_session_action_item(
-                    depth,
-                    false,
-                    LucideIcon::Code2,
-                    "IDE".to_string(),
-                    SessionActionVariant::Primary,
-                    listener,
-                    cx,
-                ));
+                tools.push(SessionActionSpec {
+                    debug_key: "ide",
+                    icon: LucideIcon::Code2,
+                    label: "IDE".to_string(),
+                    variant: SessionActionVariant::Primary,
+                    listener: Box::new(listener),
+                });
                 let listener = cx.listener({
                     let node_id = node_id.clone();
                     move |this, _event, window, cx| {
@@ -2489,15 +1774,13 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 });
-                children.push(self.render_session_action_item(
-                    depth,
-                    false,
-                    LucideIcon::ArrowLeftRight,
-                    self.i18n.t("sessions.tree.actions.port_forwarding"),
-                    SessionActionVariant::Primary,
-                    listener,
-                    cx,
-                ));
+                tools.push(SessionActionSpec {
+                    debug_key: "port-forwarding",
+                    icon: LucideIcon::ArrowLeftRight,
+                    label: self.i18n.t("sessions.tree.actions.port_forwarding"),
+                    variant: SessionActionVariant::Primary,
+                    listener: Box::new(listener),
+                });
                 if self.can_save_runtime_node_as_connection(node_id, saved_connection_id) {
                     let listener = cx.listener({
                         let node_id = node_id.clone();
@@ -2506,24 +1789,13 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }
                     });
-                    children.push(self.render_session_action_item(
-                        depth,
-                        false,
-                        LucideIcon::Save,
-                        self.i18n.t("sessions.tree.actions.save_as_connection"),
-                        SessionActionVariant::Primary,
-                        listener,
-                        cx,
-                    ));
-                }
-                for (index, session_id) in node_view.terminal_ids.iter().copied().enumerate() {
-                    children.push(self.render_session_terminal_item(
-                        depth,
-                        false,
-                        session_id,
-                        index + 1,
-                        cx,
-                    ));
+                    tools.push(SessionActionSpec {
+                        debug_key: "save-connection",
+                        icon: LucideIcon::Save,
+                        label: self.i18n.t("sessions.tree.actions.save_as_connection"),
+                        variant: SessionActionVariant::Primary,
+                        listener: Box::new(listener),
+                    });
                 }
                 let listener = cx.listener({
                     let node_id = node_id.clone();
@@ -2532,15 +1804,13 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 });
-                children.push(self.render_session_action_item(
-                    depth,
-                    false,
-                    LucideIcon::ArrowDownRight,
-                    self.i18n.t("sessions.tree.actions.drill_in"),
-                    SessionActionVariant::Primary,
-                    listener,
-                    cx,
-                ));
+                tools.push(SessionActionSpec {
+                    debug_key: "drill-in",
+                    icon: LucideIcon::ArrowDownRight,
+                    label: self.i18n.t("sessions.tree.actions.drill_in"),
+                    variant: SessionActionVariant::Primary,
+                    listener: Box::new(listener),
+                });
             } else if matches!(node_view.status(), ActiveSessionStatus::Error) {
                 let listener = cx.listener({
                     let node_id = node_id.clone();
@@ -2559,15 +1829,13 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }
                 });
-                children.push(self.render_session_action_item(
-                    depth,
-                    false,
-                    LucideIcon::Pencil,
-                    self.i18n.t("sessions.tree.actions.edit_and_reconnect"),
-                    SessionActionVariant::Primary,
-                    listener,
-                    cx,
-                ));
+                tools.push(SessionActionSpec {
+                    debug_key: "edit-reconnect",
+                    icon: LucideIcon::Pencil,
+                    label: self.i18n.t("sessions.tree.actions.edit_and_reconnect"),
+                    variant: SessionActionVariant::Primary,
+                    listener: Box::new(listener),
+                });
             }
         }
 
@@ -2578,28 +1846,29 @@ impl WorkspaceApp {
             )
         {
             let forward_node = node_id.clone();
-            children.push(self.render_session_action_item(
-                depth,
-                false,
-                LucideIcon::ArrowLeftRight,
-                self.i18n.t("sessions.tree.actions.port_forwarding"),
-                SessionActionVariant::Primary,
-                cx.listener(move |this, _, window, cx| {
+            tools.push(SessionActionSpec {
+                debug_key: "port-forwarding",
+                icon: LucideIcon::ArrowLeftRight,
+                label: self.i18n.t("sessions.tree.actions.port_forwarding"),
+                variant: SessionActionVariant::Primary,
+                listener: Box::new(cx.listener(move |this, _, window, cx| {
                     this.open_forwards_tab(forward_node.clone(), window, cx);
                     cx.stop_propagation();
-                }),
-                cx,
-            ));
+                })),
+            });
         }
 
-        children.extend(self.render_session_node_lifecycle_items(
-            node_id,
-            node_view.status(),
+        let lifecycle = self.session_node_lifecycle_specs(node_id, node_view.status(), cx);
+        self.render_session_child_segments(
+            &node_id.0,
             depth,
-            is_last,
+            ancestor_continues,
+            innermost_continues_below,
+            terminals,
+            tools,
+            lifecycle,
             cx,
-        ));
-        children
+        )
     }
 
     fn session_group_row_expanded(&self, row: &ActiveSessionSidebarRow) -> bool {
@@ -2730,6 +1999,9 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let theme = self.tokens.ui;
+        let node_height = self.session_tree_node_height();
+        let text_size = self.tokens.metrics.ui_text_xs;
+        let meta_text_size = self.tokens.metrics.ui_text_2xs;
         let expanded = self.session_group_row_expanded(row);
         let chevron_label = self.i18n.t(if expanded {
             "settings_view.tool_use_collapse"
@@ -2739,10 +2011,12 @@ impl WorkspaceApp {
         let node_id = row.node_id.clone();
         let motion_key = format!("session-group:{}:children", node_id.0);
         let default_expanded = !group.user_level;
-        // Both levels share one row shape: chevron, level icon, label. Only the
-        // icon color and trailing affordances differ.
+        let icon_selector = format!("session-header-icon-{}", node_id.0);
+        let title_selector = format!("session-header-title-{}", node_id.0);
+        // Both levels share the unified header geometry: 12px chevron, 6px gap,
+        // 14px centered icon slot, 6px gap, and medium-weight title.
         let header = self
-            .session_sidebar_row(false, SESSION_TREE_NODE_HEIGHT)
+            .session_sidebar_row(false, node_height)
             .id(SharedString::from(format!(
                 "session-group-header-{}",
                 node_id.0
@@ -2753,22 +2027,38 @@ impl WorkspaceApp {
                 default_expanded,
                 chevron_label.clone(),
                 cx,
-            ));
+            ))
+            .child(
+                div()
+                    .ml(px(6.0))
+                    .w(px(14.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .debug_selector(move || icon_selector.clone())
+                    .child(Self::render_lucide_icon(
+                        if group.user_level {
+                            LucideIcon::UserRound
+                        } else {
+                            LucideIcon::Server
+                        },
+                        SESSION_TREE_ICON_SIZE,
+                        rgb(theme.text_muted),
+                    )),
+            );
         let header = if group.user_level {
             header
-                .child(Self::render_lucide_icon(
-                    LucideIcon::UserRound,
-                    SESSION_TREE_CHILD_ICON_SIZE,
-                    rgb(theme.text_muted),
-                ))
                 .child(
                     div()
                         .ml(px(6.0))
                         .min_w(px(0.0))
                         .flex_1()
                         .truncate()
-                        .text_size(px(SESSION_TREE_TEXT_SIZE))
+                        .text_size(px(text_size))
+                        .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(rgb(theme.text))
+                        .debug_selector(move || title_selector.clone())
                         .child(group.label.clone()),
                 )
                 .when_some(group.connection_name.as_ref(), |header, connection_name| {
@@ -2777,29 +2067,26 @@ impl WorkspaceApp {
                             .ml(px(6.0))
                             .min_w(px(0.0))
                             .truncate()
-                            .text_size(px(SESSION_TREE_META_TEXT_SIZE))
+                            .text_size(px(meta_text_size))
                             .text_color(rgb(theme.text_muted))
                             .debug_selector(|| "session-group-connection-name".to_string())
                             .child(connection_name.clone()),
                     )
                 })
         } else {
-            header
-                .child(Self::render_lucide_icon(
-                    LucideIcon::Server,
-                    SESSION_TREE_CHILD_ICON_SIZE,
-                    rgb(theme.text_muted),
-                ))
-                .child(
-                    div()
-                        .ml(px(6.0))
-                        .min_w(px(0.0))
-                        .flex_1()
-                        .truncate()
-                        .text_size(px(self.tokens.metrics.sidebar_title_font_size))
-                        .text_color(rgb(theme.text_muted))
-                        .child(group.label.clone()),
-                )
+            let host_color = mix_rgb(theme.text, theme.text_muted, 0.2);
+            header.child(
+                div()
+                    .ml(px(6.0))
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(text_size))
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(rgb(host_color))
+                    .debug_selector(move || title_selector.clone())
+                    .child(group.label.clone()),
+            )
         };
         let toggle_id = node_id.clone();
         let expanded_target = !expanded;
@@ -2826,30 +2113,42 @@ impl WorkspaceApp {
 
         let mut items = Vec::new();
         if self.disclosure_motions.retained(&motion_key, expanded) {
+            let user_outer_rails = [!row.is_last];
             let member_count = group.members.len();
             let multi_member = member_count > 1;
             for (index, member) in group.members.iter().enumerate() {
                 let member_is_last = index + 1 == member_count;
-                let member_is_last_row = row.is_last && member_is_last;
-                let member_items = self.session_node_option_items(
-                    &member.node_id,
-                    &member.node_view,
-                    member.saved_connection_id.as_deref(),
-                    if multi_member { 3 } else { 2 },
-                    member_is_last_row,
-                    cx,
-                );
                 if multi_member {
                     // Two nodes on the same host and user would otherwise render
                     // two identical option stacks, so label which node owns them.
-                    // The rail stops at the label when nothing follows it.
-                    items.push(self.render_session_tree_child(
+                    // The user-level rail stops at the last member label.
+                    items.push(self.render_session_tree_child_with_rails(
                         2,
-                        member_is_last_row && member_items.is_empty(),
+                        &user_outer_rails,
+                        member_is_last,
                         self.render_session_group_member_label(member, cx),
                     ));
+                    let member_rails = [!row.is_last, !member_is_last];
+                    items.extend(self.session_node_option_items(
+                        &member.node_id,
+                        &member.node_view,
+                        member.saved_connection_id.as_deref(),
+                        3,
+                        &member_rails,
+                        false,
+                        cx,
+                    ));
+                } else {
+                    items.extend(self.session_node_option_items(
+                        &member.node_id,
+                        &member.node_view,
+                        member.saved_connection_id.as_deref(),
+                        2,
+                        &user_outer_rails,
+                        false,
+                        cx,
+                    ));
                 }
-                items.extend(member_items);
             }
         }
 
@@ -2857,9 +2156,10 @@ impl WorkspaceApp {
             .w_full()
             .flex()
             .flex_col()
-            .child(self.render_session_tree_child(
+            .child(self.render_session_tree_child_with_rails(
                 row.depth,
-                row.is_last && items.is_empty(),
+                &[],
+                row.is_last,
                 header,
             ));
         if !items.is_empty() {
@@ -2914,6 +2214,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let item_height = self.session_tree_item_height();
+        let text_size = self.tokens.metrics.ui_text_xs;
+        let meta_text_size = self.tokens.metrics.ui_text_2xs;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         let route = self.session_group_member_route(member);
         let endpoint = session_endpoint_label(&member.username, &member.host, member.port);
         let tooltip = format!(
@@ -2923,36 +2227,68 @@ impl WorkspaceApp {
         );
         let tooltip_id = format!("session-group-member-{}", member.node_id.0);
         let leave_id = tooltip_id.clone();
+        let icon_selector = format!("session-group-member-icon-{}", member.node_id.0);
+        let title_selector = format!("session-group-member-title-{}", member.node_id.0);
         let port_selector = format!("session-group-member-port-{}", member.node_id.0);
         let route_selector = format!("session-group-member-route-{}", member.node_id.0);
+        let lead_icon = if route.is_some() {
+            LucideIcon::Network
+        } else {
+            LucideIcon::Server
+        };
         div()
             .id(SharedString::from(tooltip_id.clone()))
+            .w_full()
             .min_w_0()
-            .ml_1()
-            .px_2()
+            .pl(px(6.0))
+            .pr(px(8.0))
             .flex()
             .flex_col()
-            .text_size(px(SESSION_TREE_TEXT_SIZE))
-            .text_color(rgb(theme.text_muted))
             .child(
                 div()
-                    .h(px(SESSION_TREE_ITEM_HEIGHT))
+                    .h(px(item_height))
                     .w_full()
                     .flex()
                     .items_center()
                     .gap(px(6.0))
                     .child(
                         div()
+                            .w(px(14.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .debug_selector(move || icon_selector.clone())
+                            .child(Self::render_lucide_icon(
+                                lead_icon,
+                                SESSION_TREE_CHILD_ICON_SIZE,
+                                rgb(theme.text_muted),
+                            )),
+                    )
+                    .child(
+                        div()
                             .min_w_0()
                             .flex_1()
                             .truncate()
+                            .text_size(px(text_size))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(rgb(theme.text))
+                            .debug_selector(move || title_selector.clone())
                             .child(member.title.clone()),
                     )
                     .child(
                         div()
                             .flex_none()
                             .debug_selector(move || port_selector.clone())
-                            .child(format!(":{}", member.port)),
+                            .child(oxideterm_gpui_ui::monospace_datum(
+                                &self.tokens,
+                                format!(":{}", member.port),
+                                Some(mono_font_family),
+                                oxideterm_gpui_ui::MonospaceDatumOptions::new(
+                                    oxideterm_gpui_ui::MonospaceDatumTone::Muted,
+                                )
+                                .text_size(meta_text_size),
+                            )),
                     )
                     .child(self.render_session_status_dot(
                         self.session_node_status(member.node_view.status()),
@@ -2961,22 +2297,32 @@ impl WorkspaceApp {
             .when_some(route, |row, route| {
                 row.child(
                     div()
-                        .h(px(SESSION_TREE_ITEM_HEIGHT))
+                        .h(px(item_height))
                         .w_full()
                         .min_w_0()
                         .flex()
                         .items_center()
                         .gap(px(6.0))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::ArrowDownRight,
-                            SESSION_TREE_CHILD_ICON_SIZE,
-                            rgb(theme.text_muted),
-                        ))
+                        .child(
+                            div()
+                                .w(px(14.0))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .child(Self::render_lucide_icon(
+                                    LucideIcon::ArrowDownRight,
+                                    SESSION_TREE_CHILD_ICON_SIZE,
+                                    rgb(theme.text_muted),
+                                )),
+                        )
                         .child(
                             div()
                                 .min_w_0()
                                 .flex_1()
                                 .truncate()
+                                .text_size(px(meta_text_size))
+                                .text_color(rgb(theme.text_muted))
                                 .debug_selector(move || route_selector.clone())
                                 .child(route),
                         ),
@@ -2999,9 +2345,10 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_active_session_node(
+    pub(in crate::workspace) fn render_active_session_node_with_rails(
         &self,
         row: ActiveSessionSidebarRow,
+        ancestor_rails: &[bool],
         cx: &mut Context<Self>,
     ) -> AnyElement {
         if row.group.is_some() {
@@ -3017,6 +2364,7 @@ impl WorkspaceApp {
         let node_view = row.node_view;
         let node_depth = row.depth;
         let is_last = row.is_last;
+        let has_children = row.has_children;
         let expanded = self.expanded_ssh_nodes.contains(&node_id);
         let motion_key = format!("session:{}:children", node_id.0);
         let selected = self.active_ssh_node_id.as_ref() == Some(&node_id);
@@ -3024,6 +2372,10 @@ impl WorkspaceApp {
         let mut children = Vec::new();
 
         if self.disclosure_motions.retained(&motion_key, expanded) {
+            let mut child_ancestor_rails = ancestor_rails.to_vec();
+            if node_depth > 0 {
+                child_ancestor_rails.push(!is_last);
+            }
             // Host view stacks the same option block under a user row, so the
             // block is shared instead of duplicated per view mode.
             children.extend(self.session_node_option_items(
@@ -3031,7 +2383,8 @@ impl WorkspaceApp {
                 &node_view,
                 row.saved_connection_id.as_deref(),
                 node_depth + 1,
-                is_last,
+                &child_ancestor_rails,
+                has_children,
                 cx,
             ));
         }
@@ -3042,7 +2395,7 @@ impl WorkspaceApp {
         let header = if node_depth == 0 {
             header
         } else {
-            self.render_session_tree_child(node_depth, is_last && children.is_empty(), header)
+            self.render_session_tree_child_with_rails(node_depth, ancestor_rails, is_last, header)
         };
 
         div()
@@ -3063,7 +2416,7 @@ impl WorkspaceApp {
 
     fn session_sidebar_row(&self, selected: bool, height: f32) -> gpui::Div {
         let theme = self.tokens.ui;
-        session_item_surface(theme, selected, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
+        session_item_surface(theme, selected, SESSION_ROW_SELECTED_BG_ALPHA)
             .relative()
             .w_full()
             .min_w_0()
@@ -3071,94 +2424,97 @@ impl WorkspaceApp {
             .px_2()
             .flex()
             .items_center()
-            .rounded_none()
+            .rounded(px(self.tokens.radii.sm))
             .cursor_pointer()
             .when(selected, |row| {
                 row.child(
                     div()
                         .absolute()
                         .left_0()
-                        .top(px(4.0))
-                        .bottom(px(4.0))
+                        .top(px(5.0))
+                        .bottom(px(5.0))
                         .w(px(2.0))
+                        .rounded_full()
                         .bg(rgb(theme.accent)),
                 )
             })
     }
 
-    fn render_session_node_lifecycle_items(
+    fn session_node_lifecycle_specs(
         &self,
         node_id: &NodeId,
         status: ActiveSessionStatus,
-        depth: usize,
-        is_last: bool,
         cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    ) -> Vec<SessionActionSpec> {
         let actions = session_node_row_actions(status, self.has_active_reconnect_job(node_id, cx));
-        let last = actions.iter().rposition(Option::is_some);
         actions
             .into_iter()
-            .enumerate()
-            .filter_map(|(index, action)| {
-                let action = action?;
-                let (icon, key, danger) = match action {
+            .flatten()
+            .map(|action| {
+                let (debug_key, icon, key, danger) = match action {
                     SessionNodeRowAction::Connect => {
-                        (LucideIcon::Power, "sessions.actions.connect", false)
+                        ("connect", LucideIcon::Power, "sessions.actions.connect", false)
                     }
-                    SessionNodeRowAction::Reconnect => {
-                        (LucideIcon::RefreshCw, "sessions.actions.reconnect", false)
-                    }
+                    SessionNodeRowAction::Reconnect => (
+                        "reconnect",
+                        LucideIcon::RefreshCw,
+                        "sessions.actions.reconnect",
+                        false,
+                    ),
                     SessionNodeRowAction::Disconnect => (
+                        "disconnect",
                         LucideIcon::WifiOff,
                         "sessions.tree.actions.disconnect",
                         true,
                     ),
                     SessionNodeRowAction::CancelReconnect => (
+                        "cancel-reconnect",
                         LucideIcon::X,
                         "sessions.tree.actions.cancel_reconnect",
                         false,
                     ),
                     SessionNodeRowAction::Remove => (
+                        "remove",
                         LucideIcon::Trash2,
                         "sessions.tree.actions.remove_session",
                         true,
                     ),
                 };
                 let id = node_id.clone();
-                Some(self.render_session_action_item(
-                    depth,
-                    is_last && last == Some(index),
+                SessionActionSpec {
+                    debug_key,
                     icon,
-                    self.i18n.t(key),
-                    if danger {
+                    label: self.i18n.t(key),
+                    variant: if danger {
                         SessionActionVariant::Danger
                     } else {
                         SessionActionVariant::Primary
                     },
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        match action {
-                            SessionNodeRowAction::Remove => {
-                                this.remove_inactive_session_tree_node(&id, window, cx)
+                    listener: Box::new(cx.listener(
+                        move |this, event: &MouseDownEvent, window, cx| {
+                            match action {
+                                SessionNodeRowAction::Remove => {
+                                    this.remove_inactive_session_tree_node(&id, window, cx)
+                                }
+                                SessionNodeRowAction::CancelReconnect => {
+                                    this.cancel_reconnect_for_node(&id, cx)
+                                }
+                                SessionNodeRowAction::Disconnect => {
+                                    this.request_disconnect_ssh_node(&id, window, cx)
+                                }
+                                SessionNodeRowAction::Connect | SessionNodeRowAction::Reconnect => {
+                                    let _ = this.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
+                                        id.clone(),
+                                        event.modifiers.control,
+                                        window,
+                                        cx,
+                                    );
+                                }
                             }
-                            SessionNodeRowAction::CancelReconnect => {
-                                this.cancel_reconnect_for_node(&id, cx)
-                            }
-                            SessionNodeRowAction::Disconnect => {
-                                this.request_disconnect_ssh_node(&id, window, cx)
-                            }
-                            SessionNodeRowAction::Connect | SessionNodeRowAction::Reconnect => {
-                                let _ = this.queue_ssh_terminal_tab_for_sidebar_node_with_sftp(
-                                    id.clone(),
-                                    event.modifiers.control,
-                                    window,
-                                    cx,
-                                );
-                            }
-                        }
-                        cx.stop_propagation();
-                    }),
-                    cx,
-                ))
+                            cx.stop_propagation();
+                        },
+                    )),
+                }
             })
             .collect()
     }
@@ -3182,6 +2538,9 @@ impl WorkspaceApp {
                 _ => None,
             });
         let theme = self.tokens.ui;
+        let node_height = self.session_tree_node_height();
+        let text_size = self.tokens.metrics.ui_text_xs;
+        let meta_text_size = self.tokens.metrics.ui_text_2xs;
         let active = match session.target {
             Some(standalone_connections::StandaloneConnectionSurface::Terminal(session_id)) => {
                 self.active_terminal_session_id(cx) == Some(session_id)
@@ -3200,107 +2559,140 @@ impl WorkspaceApp {
         let expand_motion_key = motion_key.clone();
         let mut children = Vec::new();
         if self.disclosure_motions.retained(&motion_key, expanded) {
+            let mut terminal_ids = Vec::new();
+            let mut tools = Vec::new();
             match session.target {
                 Some(standalone_connections::StandaloneConnectionSurface::Terminal(id)) => {
-                    children.push(self.render_session_terminal_item(1, false, id, 1, cx));
+                    terminal_ids.push(id);
                 }
                 Some(standalone_connections::StandaloneConnectionSurface::RemoteDesktop(id)) => {
-                    children.push(self.render_session_action_item(
-                        1,
-                        false,
-                        session.kind.icon(),
-                        self.i18n.t("sessions.tree.actions.open_session"),
-                        SessionActionVariant::Primary,
-                        cx.listener(move |this, _, window, cx| {
+                    tools.push(SessionActionSpec {
+                        debug_key: "open-session",
+                        icon: session.kind.icon(),
+                        label: self.i18n.t("sessions.tree.actions.open_session"),
+                        variant: SessionActionVariant::Primary,
+                        listener: Box::new(cx.listener(move |this, _, window, cx| {
                             this.set_active_tab(id, window, cx);
                             cx.stop_propagation();
-                        }),
-                        cx,
-                    ));
+                        })),
+                    });
                 }
                 None => {}
             }
-            let actions = standalone_session_actions(row.node_view.status());
-            let last = actions.iter().rposition(Option::is_some);
-            for (index, action) in actions.into_iter().enumerate() {
-                let Some(action) = action else {
-                    continue;
-                };
-                let connection_id = session.connection_id.clone();
-                let (icon, key, variant) = match action {
-                    SessionNodeRowAction::Disconnect => (
-                        LucideIcon::WifiOff,
-                        "sessions.tree.actions.disconnect",
-                        SessionActionVariant::Danger,
-                    ),
-                    SessionNodeRowAction::Remove => (
-                        LucideIcon::Trash2,
-                        "sessions.tree.actions.remove_session",
-                        SessionActionVariant::Danger,
-                    ),
-                    _ => (
-                        LucideIcon::RefreshCw,
-                        "sessions.actions.reconnect",
-                        SessionActionVariant::Primary,
-                    ),
-                };
-                children.push(self.render_session_action_item(
-                    1,
-                    last == Some(index),
-                    icon,
-                    self.i18n.t(key),
-                    variant,
-                    cx.listener(move |this, _, window, cx| {
-                        match action {
-                            SessionNodeRowAction::Disconnect => {
-                                this.disconnect_standalone_connection(&connection_id, window, cx)
+            let lifecycle = standalone_session_actions(row.node_view.status())
+                .into_iter()
+                .flatten()
+                .map(|action| {
+                    let connection_id = session.connection_id.clone();
+                    let (debug_key, icon, key, variant) = match action {
+                        SessionNodeRowAction::Disconnect => (
+                            "disconnect",
+                            LucideIcon::WifiOff,
+                            "sessions.tree.actions.disconnect",
+                            SessionActionVariant::Danger,
+                        ),
+                        SessionNodeRowAction::Remove => (
+                            "remove",
+                            LucideIcon::Trash2,
+                            "sessions.tree.actions.remove_session",
+                            SessionActionVariant::Danger,
+                        ),
+                        _ => (
+                            "reconnect",
+                            LucideIcon::RefreshCw,
+                            "sessions.actions.reconnect",
+                            SessionActionVariant::Primary,
+                        ),
+                    };
+                    SessionActionSpec {
+                        debug_key,
+                        icon,
+                        label: self.i18n.t(key),
+                        variant,
+                        listener: Box::new(cx.listener(move |this, _, window, cx| {
+                            match action {
+                                SessionNodeRowAction::Disconnect => {
+                                    this.disconnect_standalone_connection(&connection_id, window, cx)
+                                }
+                                SessionNodeRowAction::Remove => {
+                                    this.remove_standalone_connection(&connection_id, window, cx)
+                                }
+                                _ => this.reconnect_standalone_connection(&connection_id, window, cx),
                             }
-                            SessionNodeRowAction::Remove => {
-                                this.remove_standalone_connection(&connection_id, window, cx)
-                            }
-                            _ => this.reconnect_standalone_connection(&connection_id, window, cx),
-                        }
-                        cx.stop_propagation();
-                    }),
-                    cx,
-                ));
-            }
+                            cx.stop_propagation();
+                        })),
+                    }
+                })
+                .collect();
+            children = self.render_session_child_segments(
+                &row.node_id.0,
+                1,
+                &[],
+                false,
+                &terminal_ids,
+                tools,
+                lifecycle,
+                cx,
+            );
         }
+        let icon_selector = format!("session-header-icon-{}", row.node_id.0);
+        let title_selector = format!("session-header-title-{}", row.node_id.0);
         let header = self
             .reorderable_session_row(
-                self.session_sidebar_row(active, SESSION_TREE_NODE_HEIGHT),
+                self.session_sidebar_row(active, node_height),
                 row.node_id.clone(),
                 None,
                 row.title.clone(),
                 cx,
             )
-            .gap(px(6.0))
-            .child(self.render_animated_chevron(
-                (
-                    SharedString::from(format!("standalone-chevron-{}", session.connection_id)),
-                    expanded as usize,
-                ),
-                expanded,
-                12.0,
-                rgb(theme.text_muted),
-            ))
-            .child(Self::render_lucide_icon(
-                session.kind.icon(),
-                SESSION_TREE_ICON_SIZE,
-                rgb(theme.text_muted),
-            ))
             .child(
                 div()
+                    .w(px(12.0))
+                    .h(px(20.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(self.render_animated_chevron(
+                        (
+                            SharedString::from(format!("standalone-chevron-{}", session.connection_id)),
+                            expanded as usize,
+                        ),
+                        expanded,
+                        12.0,
+                        rgb(theme.text_muted),
+                    )),
+            )
+            .child(
+                div()
+                    .ml(px(6.0))
+                    .w(px(14.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .debug_selector(move || icon_selector.clone())
+                    .child(Self::render_lucide_icon(
+                        session.kind.icon(),
+                        SESSION_TREE_ICON_SIZE,
+                        rgb(theme.text_muted),
+                    )),
+            )
+            .child(
+                div()
+                    .ml(px(6.0))
                     .min_w(px(0.0))
                     .flex_1()
                     .flex()
                     .flex_col()
+                    .debug_selector(move || title_selector.clone())
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(SESSION_TREE_TEXT_SIZE))
+                            .text_size(px(text_size))
+                            .font_weight(gpui::FontWeight::MEDIUM)
                             .when(serial_details.is_some(), |title| {
-                                title.line_height(px(SESSION_TREE_NODE_HEIGHT / 2.0))
+                                title.line_height(px(node_height / 2.0))
                             })
                             .text_color(rgb(theme.text))
                             .child(row.title),
@@ -3309,8 +2701,8 @@ impl WorkspaceApp {
                         label.child(
                             div()
                                 .truncate()
-                                .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                                .line_height(px(SESSION_TREE_NODE_HEIGHT / 2.0))
+                                .text_size(px(meta_text_size))
+                                .line_height(px(node_height / 2.0))
                                 .text_color(rgb(theme.text_muted))
                                 .child(details),
                         )
@@ -3380,6 +2772,10 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let node_height = self.session_tree_node_height();
+        let text_size = self.tokens.metrics.ui_text_xs;
+        let meta_text_size = self.tokens.metrics.ui_text_2xs;
+        let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         let muted_text = rgb(theme.text_muted);
         let row_text = rgb(theme.text);
         let port_text = format!(":{}", node.port);
@@ -3391,8 +2787,27 @@ impl WorkspaceApp {
         } else {
             "settings_view.tool_use_expand"
         });
+        let icon_selector = format!("session-header-icon-{}", node_id.0);
+        let title_selector = format!("session-header-title-{}", node_id.0);
+        let leading_icon = if matches!(status.icon, LucideIcon::LoaderCircle) {
+            self.render_connecting_session_icon(
+                (
+                    gpui::SharedString::from(format!("session-connecting-{node_id:?}")),
+                    0usize,
+                ),
+                SESSION_TREE_ICON_SIZE,
+                row_text,
+                cx,
+            )
+        } else if local_group {
+            self.local_profile_session_icon(local_profile_id.as_deref())
+                .render(SESSION_TREE_ICON_SIZE, muted_text)
+        } else {
+            self.node_session_icon(&node_id)
+                .render(SESSION_TREE_ICON_SIZE, muted_text)
+        };
         self.reorderable_session_row(
-            self.session_sidebar_row(selected, SESSION_TREE_NODE_HEIGHT),
+            self.session_sidebar_row(selected, node_height),
             node_id.clone(),
             self.node_router
                 .node_metadata(&node_id)
@@ -3449,95 +2864,78 @@ impl WorkspaceApp {
                     cx.notify();
                 })),
         )
-        .when(
-            !local_group || matches!(status.icon, LucideIcon::LoaderCircle),
-            |row| {
-                row.child(div().ml(px(6.0)).mr(px(6.0)).child(
-                    if matches!(status.icon, LucideIcon::LoaderCircle) {
-                        self.render_connecting_session_icon(
-                            (
-                                gpui::SharedString::from(format!("session-connecting-{node_id:?}")),
-                                0usize,
-                            ),
-                            SESSION_TREE_ICON_SIZE,
-                            row_text,
-                            cx,
-                        )
-                    } else {
-                        self.node_session_icon(&node_id)
-                            .render(SESSION_TREE_ICON_SIZE, muted_text)
-                    },
-                ))
-            },
+        .child(
+            div()
+                .ml(px(6.0))
+                .w(px(14.0))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .debug_selector(move || icon_selector.clone())
+                .child(leading_icon),
         )
         .child(
             div()
+                .ml(px(6.0))
                 .min_w(px(0.0))
                 .flex_1()
                 .truncate()
-                .text_size(px(SESSION_TREE_TEXT_SIZE))
-                .font_weight(if selected {
-                    gpui::FontWeight::MEDIUM
-                } else {
-                    gpui::FontWeight::NORMAL
-                })
+                .text_size(px(text_size))
+                .font_weight(gpui::FontWeight::MEDIUM)
                 .text_color(row_text)
-                .child(self.render_session_control_label(
-                    "session-sidebar-node-cell",
-                    "title",
-                    node.title,
-                    theme.text,
-                    cx,
-                )),
+                .debug_selector(move || title_selector.clone())
+                .child(node.title),
         )
         .when(!local_group && node.port != 22, |row| {
             row.child(
-                div()
-                    .ml_2()
-                    .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                    .text_color(muted_text)
-                    .child(self.render_session_control_label(
-                        "session-sidebar-node-cell",
-                        "port",
-                        port_text,
-                        theme.text_muted,
-                        cx,
-                    )),
+                div().ml_2().flex_none().child(oxideterm_gpui_ui::monospace_datum(
+                    &self.tokens,
+                    port_text,
+                    Some(mono_font_family.clone()),
+                    oxideterm_gpui_ui::MonospaceDatumOptions::new(
+                        oxideterm_gpui_ui::MonospaceDatumTone::Muted,
+                    )
+                    .text_size(meta_text_size),
+                )),
             )
         })
         .when(terminal_count > 0, |row| {
             row.child(
                 div()
                     .ml_2()
+                    .flex_none()
                     .flex()
                     .flex_row()
                     .items_center()
-                    .gap(px(2.0))
-                    .text_size(px(SESSION_TREE_META_TEXT_SIZE))
-                    .text_color(muted_text)
+                    .gap(px(3.0))
                     .when(!local_group, |count| {
                         count.child(Self::render_lucide_icon(
                             LucideIcon::Terminal,
-                            12.0,
+                            SESSION_TREE_CHILD_ICON_SIZE,
                             muted_text,
                         ))
                     })
-                    .child(self.render_session_control_label(
-                        "session-sidebar-node-cell",
-                        "terminal-count",
+                    .child(oxideterm_gpui_ui::monospace_datum(
+                        &self.tokens,
                         terminal_count.to_string(),
-                        theme.text_muted,
-                        cx,
+                        Some(mono_font_family),
+                        oxideterm_gpui_ui::MonospaceDatumOptions::new(
+                            oxideterm_gpui_ui::MonospaceDatumTone::Muted,
+                        )
+                        .text_size(meta_text_size),
                     )),
             )
         })
         .child(self.render_session_status_dot(status))
         .when(local_profile_id.is_some(), |row| {
-            row.child(Self::render_lucide_icon(
-                LucideIcon::ArrowUpDown,
-                12.0,
-                muted_text,
-            ))
+            row.child(
+                div().ml(px(4.0)).flex_none().child(Self::render_lucide_icon(
+                    LucideIcon::ArrowUpDown,
+                    12.0,
+                    muted_text,
+                )),
+            )
         })
         .on_click(cx.listener(move |this, _event, _window, cx| {
             let expanded = if local_profile_id.is_some() {
@@ -3587,18 +2985,10 @@ impl WorkspaceApp {
     ) -> AnyElement {
         div()
             .ml(px(6.0))
-            .size(px(12.0))
+            .size(px(6.0))
             .flex_none()
-            .flex()
-            .items_center()
-            .justify_center()
             .rounded_full()
-            .bg(if status.ring {
-                rgba((status.dot_color << 8) | 0x33)
-            } else {
-                rgba(status.dot_color << 8)
-            })
-            .child(div().size(px(8.0)).rounded_full().bg(rgb(status.dot_color)))
+            .bg(rgb(status.dot_color))
             .into_any_element()
     }
 
@@ -3619,7 +3009,7 @@ impl WorkspaceApp {
             .map(|(title, _)| format!("{title} #{}", session_id.0))
             .unwrap_or_else(|| {
                 self.i18n
-                    .t("sessions.focused_list.terminal")
+                    .t("sessions.tree.terminal")
                     .replace("{{number}}", &index.to_string())
             });
         let icon = local_instance
@@ -3638,86 +3028,106 @@ impl WorkspaceApp {
         (text, icon)
     }
 
-    pub(in crate::workspace) fn render_session_terminal_item(
+    pub(in crate::workspace) fn render_session_terminal_item_with_rails(
         &self,
         depth: usize,
+        ancestor_continues: &[bool],
         line_stops_here: bool,
         session_id: TerminalSessionId,
         index: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let item_height = self.session_tree_item_height();
+        let text_size = self.tokens.metrics.ui_text_xs;
         let active = self.active_terminal_session_id(cx) == Some(session_id);
         let (text, icon) = self.session_terminal_label_icon(session_id, index, cx);
-        let text_color = if active {
+        let icon_color = if active {
             rgb(theme.accent)
         } else {
             rgb(theme.text_muted)
         };
+        let icon_selector = format!("session-terminal-icon-{}", session_id.0);
+        let label_selector = format!("session-terminal-label-{}", session_id.0);
 
-        self.render_session_tree_child(
+        self.render_session_tree_child_with_rails(
             depth,
+            ancestor_continues,
             line_stops_here,
-            session_item_surface(theme, active, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
+            session_item_surface(theme, active, SESSION_ROW_SELECTED_BG_ALPHA)
+                .id(SharedString::from(format!(
+                    "session-terminal-row-{}",
+                    session_id.0
+                )))
+                .group("session-terminal-item")
                 .relative()
-                .h(px(SESSION_TREE_ITEM_HEIGHT))
-                // Auto width includes the left margin within the tree's available row width.
-                .ml_1()
+                .w_full()
+                .h(px(item_height))
+                .pl(px(6.0))
+                .pr(px(8.0))
+                .gap(px(6.0))
                 .flex()
                 .flex_row()
                 .items_center()
-                .rounded_none()
-                .px_2()
+                .rounded(px(self.tokens.radii.sm))
                 .cursor_pointer()
                 .when(active, |row| {
                     row.child(
                         div()
                             .absolute()
                             .left_0()
-                            .top(px(4.0))
-                            .bottom(px(4.0))
+                            .top(px(5.0))
+                            .bottom(px(5.0))
                             .w(px(2.0))
                             .rounded_full()
                             .bg(rgb(theme.accent)),
                     )
-                    .pl(px(6.0))
                 })
-                .child(icon.render(SESSION_TREE_CHILD_ICON_SIZE, text_color))
                 .child(
                     div()
-                        .ml(px(6.0))
+                        .w(px(14.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .debug_selector(move || icon_selector.clone())
+                        .child(icon.render(SESSION_TREE_CHILD_ICON_SIZE, icon_color)),
+                )
+                .child(
+                    div()
                         .min_w(px(0.0))
                         .flex_1()
                         .truncate()
-                        .text_size(px(SESSION_TREE_TEXT_SIZE))
+                        .text_size(px(text_size))
                         .font_weight(if active {
                             gpui::FontWeight::MEDIUM
                         } else {
                             gpui::FontWeight::NORMAL
                         })
-                        .text_color(text_color)
-                        .child(self.render_session_control_label(
-                            "session-sidebar-terminal-cell",
-                            "label",
-                            text,
-                            if active {
-                                theme.accent
-                            } else {
-                                theme.text_muted
-                            },
-                            cx,
-                        )),
+                        .text_color(rgb(theme.text))
+                        .debug_selector(move || label_selector.clone())
+                        .child(text),
                 )
                 .child(
                     div()
+                        .id(SharedString::from(format!(
+                            "session-terminal-close-{}",
+                            session_id.0
+                        )))
                         .size(px(20.0))
+                        .flex_none()
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded_none()
+                        .rounded(px(self.tokens.radii.sm))
                         .opacity(0.0)
-                        .hover(|button| button.opacity(1.0))
-                        .child(Self::render_lucide_icon(LucideIcon::X, 12.0, text_color))
+                        .group_hover("session-terminal-item", |button| button.opacity(0.75))
+                        .hover(move |button| button.opacity(1.0).bg(rgb(theme.bg_hover)))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::X,
+                            12.0,
+                            rgb(theme.text_muted),
+                        ))
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _event, window, cx| {
@@ -3737,66 +3147,100 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn render_session_action_item(
+    pub(in crate::workspace) fn render_session_action_item_with_rails(
         &self,
+        owner_key: &str,
         depth: usize,
+        ancestor_continues: &[bool],
         line_stops_here: bool,
+        debug_key: &'static str,
         icon: LucideIcon,
         label: String,
         variant: SessionActionVariant,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        cx: &mut Context<Self>,
+        _cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let (text_color, hover_bg) = match variant {
-            SessionActionVariant::Primary => (theme.accent, theme.bg_hover),
-            SessionActionVariant::Danger => {
-                (theme.error, mix_rgb(theme.bg_hover, theme.error, 0.10))
-            }
+        let item_height = self.session_tree_item_height();
+        let text_size = self.tokens.metrics.ui_text_xs;
+        let idle_label_color = mix_rgb(theme.text, theme.text_muted, 0.42);
+        let idle_icon_color = theme.text_muted;
+        let (hover_bg, hover_fg) = match variant {
+            SessionActionVariant::Primary => (theme.bg_hover, theme.text),
+            SessionActionVariant::Danger => (mix_rgb(theme.bg_hover, theme.error, 0.14), theme.error),
         };
-        self.render_session_tree_child(
+        let row_selector = format!("session-action-row-{debug_key}");
+        let icon_selector = format!("session-action-icon-{debug_key}");
+        let label_selector = format!("session-action-label-{debug_key}");
+
+        self.render_session_tree_child_with_rails(
             depth,
+            ancestor_continues,
             line_stops_here,
             div()
-                .h(px(SESSION_TREE_ITEM_HEIGHT))
+                // Stateful id + row text_color ensures GPUI resolves hovered label
+                // colors during request_layout, before GroupHitboxes::push runs in paint.
+                .id(SharedString::from(format!(
+                    "session-action-{owner_key}-{debug_key}"
+                )))
+                .group("session-action-row")
+                .h(px(item_height))
                 .w_full()
+                .pl(px(6.0))
+                .pr(px(8.0))
+                .gap(px(6.0))
                 .flex()
                 .flex_row()
                 .items_center()
-                .gap(px(6.0))
-                .rounded_none()
-                .px_2()
-                .text_size(px(SESSION_TREE_TEXT_SIZE))
-                .text_color(rgb(text_color))
+                .rounded(px(self.tokens.radii.sm))
+                .text_size(px(text_size))
+                .text_color(rgb(idle_label_color))
                 .cursor_pointer()
-                .hover(move |row| row.bg(rgb(hover_bg)))
-                .child(Self::render_lucide_icon(
-                    icon,
-                    SESSION_TREE_CHILD_ICON_SIZE,
-                    rgb(text_color),
-                ))
-                .child(div().truncate().child(self.render_session_control_label(
-                    "session-sidebar-action-cell",
-                    "label",
-                    label,
-                    text_color,
-                    cx,
-                )))
+                .hover(move |row| row.bg(rgb(hover_bg)).text_color(rgb(hover_fg)))
+                .debug_selector(move || row_selector.clone())
+                .child(
+                    div()
+                        .w(px(14.0))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .debug_selector(move || icon_selector.clone())
+                        .child(
+                            svg()
+                                .path(icon.path())
+                                .size(px(SESSION_TREE_CHILD_ICON_SIZE))
+                                .text_color(rgb(idle_icon_color))
+                                .group_hover("session-action-row", move |icon| {
+                                    icon.text_color(rgb(hover_fg))
+                                }),
+                        ),
+                )
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .flex_1()
+                        .truncate()
+                        .debug_selector(move || label_selector.clone())
+                        .child(label),
+                )
                 .on_mouse_down(MouseButton::Left, listener)
                 .into_any_element(),
         )
     }
 
-    pub(in crate::workspace) fn render_session_tree_child(
+    pub(in crate::workspace) fn render_session_tree_child_with_rails(
         &self,
         depth: usize,
+        ancestor_continues: &[bool],
         line_stops_here: bool,
         child: AnyElement,
     ) -> AnyElement {
-        tree_child(
+        tree_guide_child(
             &self.tokens,
-            TreeBranchMetrics::tauri_session_tree(),
+            TreeGuideMetrics::session_tree(),
             depth,
+            ancestor_continues,
             line_stops_here,
             child,
         )
@@ -3809,33 +3253,19 @@ impl WorkspaceApp {
         match status {
             ActiveSessionStatus::Connecting => SessionStatusStyle {
                 icon: LucideIcon::LoaderCircle,
-                text_color: self.tokens.ui.info,
                 dot_color: self.tokens.ui.info,
-                ring: false,
             },
-            ActiveSessionStatus::Active => SessionStatusStyle {
+            ActiveSessionStatus::Active | ActiveSessionStatus::Connected => SessionStatusStyle {
                 icon: LucideIcon::Server,
-                text_color: self.tokens.ui.success,
                 dot_color: self.tokens.ui.success,
-                ring: true,
-            },
-            ActiveSessionStatus::Connected => SessionStatusStyle {
-                icon: LucideIcon::Server,
-                text_color: self.tokens.ui.success,
-                dot_color: self.tokens.ui.success,
-                ring: true,
             },
             ActiveSessionStatus::Error => SessionStatusStyle {
                 icon: LucideIcon::WifiOff,
-                text_color: self.tokens.ui.error,
                 dot_color: self.tokens.ui.error,
-                ring: false,
             },
             ActiveSessionStatus::Idle => SessionStatusStyle {
                 icon: LucideIcon::Server,
-                text_color: self.tokens.ui.text_muted,
                 dot_color: self.tokens.ui.text_muted,
-                ring: false,
             },
         }
     }
@@ -4272,7 +3702,7 @@ impl Render for ActiveSessionDrag {
             .rounded(px(self.tokens.radii.sm))
             .bg(rgb(self.tokens.ui.bg_elevated))
             .text_color(rgb(self.tokens.ui.text))
-            .text_size(px(12.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
             .child(self.title.clone())
     }
 }
@@ -4792,7 +4222,7 @@ mod host_view_render_tests {
         impl gpui::Render for Rows {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
                 let rows = [true, false].map(|selected| {
-                    session_item_surface(self.0, selected, SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA)
+                    session_item_surface(self.0, selected, SESSION_ROW_SELECTED_BG_ALPHA)
                         .w(px(100.0))
                         .h(px(24.0))
                 });
@@ -4803,7 +4233,7 @@ mod host_view_render_tests {
         let theme = ThemeTokens::from_builtin(oxideterm_theme::theme_by_id("default")).ui;
         let (_, cx) = cx.add_window_view(|_, _| Rows(theme));
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        let accent = rgba((theme.accent << 8) | SESSION_FOCUS_TERMINAL_ACTIVE_BG_ALPHA).into();
+        let accent = rgba((theme.accent << 8) | SESSION_ROW_SELECTED_BG_ALPHA).into();
         let hover = rgb(theme.bg_hover).into();
         for (y, expect_hover) in [(36.0, true), (12.0, false)] {
             cx.simulate_mouse_move(point(px(50.0), px(y)), None, gpui::Modifiers::default());
@@ -4818,6 +4248,13 @@ mod host_view_render_tests {
     }
 
     fn isolated_fixture(cx: &mut TestAppContext, fixture_key: &str) -> Option<std::path::PathBuf> {
+        isolated_fixture_named(cx.test_function_name().unwrap(), fixture_key)
+    }
+
+    fn isolated_fixture_named(
+        test_name: &str,
+        fixture_key: &str,
+    ) -> Option<std::path::PathBuf> {
         let executable = std::env::current_exe().unwrap();
         if let Some(fixture_dir) = std::env::var_os(fixture_key) {
             let fixture_dir = std::path::PathBuf::from(fixture_dir);
@@ -4829,7 +4266,7 @@ mod host_view_render_tests {
         std::fs::hard_link(&executable, &child).unwrap();
         std::fs::write(directory.path().join("portable"), []).unwrap();
         let output = std::process::Command::new(child)
-            .arg(cx.test_function_name().unwrap())
+            .arg(test_name)
             .arg("--nocapture")
             .env(fixture_key, directory.path())
             .env_remove("APPIMAGE")
@@ -4864,7 +4301,7 @@ mod host_view_render_tests {
         let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
         cx.run_until_parked();
 
-        workspace.update(cx, |workspace, _cx| {
+        workspace.update(cx, |workspace, cx| {
             for (id, username, port, saved_connection_id, title) in [
                 ("smoke-root", "root", 22, Some("smoke-conn"), "Smoke Prod"),
                 (
@@ -4897,7 +4334,7 @@ mod host_view_render_tests {
                     ),
                 );
             }
-            workspace.active_session_sidebar_view_mode = ActiveSessionSidebarViewMode::Host;
+            workspace.toggle_active_session_sidebar_view(cx);
         });
 
         let rows = workspace.read_with(cx, |workspace, cx| {
@@ -5026,6 +4463,26 @@ mod host_view_render_tests {
             options_bounds(cx).is_none(),
             "collapsing the user row removes its option stack"
         );
+
+        // The view action must take one click in either direction, regardless
+        // of the host disclosure state.
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_active_session_sidebar_view(cx)
+        });
+        draw_sidebar(cx);
+        assert!(cx.debug_bounds("session-group-connection-name").is_none());
+        workspace.read_with(cx, |workspace, cx| {
+            let mut ids = workspace
+                .active_session_sidebar_display_rows(cx)
+                .into_iter()
+                .map(|row| row.node_id.0)
+                .collect::<Vec<_>>();
+            ids.sort_unstable();
+            assert_eq!(ids, ["smoke-admin", "smoke-alt", "smoke-root"]);
+        });
+        workspace.update(cx, |workspace, cx| {
+            workspace.toggle_active_session_sidebar_view(cx)
+        });
 
         // The final jump endpoint is identical in both private networks. Only the
         // complete ancestry distinguishes these targets from each other and from direct SSH.
@@ -5172,5 +4629,593 @@ mod host_view_render_tests {
                 before_signature
             );
         });
+    }
+
+    #[gpui::test]
+    fn tree_and_host_views_align_columns_segment_items_and_hover_disconnect(
+        cx: &mut TestAppContext,
+    ) {
+        let Some(_fixture_dir) = isolated_fixture(cx, "OXIDETERM_SESSION_LAYOUT_TEST_DIR") else {
+            return;
+        };
+        let settings_path = default_settings_path();
+        let mut store = SettingsStore::load_from_path(settings_path).unwrap();
+        store.settings_mut().ssh_config.auto_load_hosts = false;
+        store.settings_mut().onboarding_completed = true;
+        store.settings_mut().general.language = oxideterm_settings::Language::En;
+        store.save().unwrap();
+        cx.executor().allow_parking();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        cx.run_until_parked();
+
+        let standalone_id = workspace.update(cx, |workspace, _| {
+            let ssh_config = SshConfig {
+                host: "layout-prod.invalid".into(),
+                port: 22,
+                username: "ops".into(),
+                ..Default::default()
+            };
+            let ssh_id = NodeId::new("layout-ssh");
+            workspace
+                .node_router
+                .upsert_node(ssh_id.clone(), ssh_config.clone());
+            workspace.ssh_nodes.insert(
+                ssh_id.clone(),
+                WorkspaceSshNode::new(
+                    None,
+                    &ssh_config,
+                    "Layout SSH".into(),
+                    vec![TerminalSessionId(9001)],
+                    NodeReadiness::Ready,
+                ),
+            );
+            workspace.expanded_ssh_nodes.insert(ssh_id);
+
+            let standalone_id = workspace.standalone_connections.insert_pending(
+                standalone_connections::StandaloneConnectionKind::Rdp,
+                "Layout RDP".into(),
+                standalone_connections::StandaloneConnectionLaunch::SavedRemoteDesktop {
+                    profile_id: "rdp-profile-1".into(),
+                },
+            );
+            workspace
+                .connection_store
+                .upsert_local_terminal_profile(
+                    oxideterm_connections::SaveLocalTerminalProfileRequest {
+                        id: Some("local-layout".into()),
+                        name: "Layout Zsh".into(),
+                        group: None,
+                        icon: None,
+                        color: None,
+                        icon_background_color: None,
+                        shell_id: None,
+                        cwd: None,
+                    },
+                )
+                .unwrap();
+            standalone_id
+        });
+
+        let draw_sidebar = |cx: &mut gpui::VisualTestContext| {
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+        };
+        draw_sidebar(cx);
+
+        // 1. Tree view: SSH, Standalone, and Local headers align on both icon X and title X.
+        let ssh_icon = cx
+            .debug_bounds("session-header-icon-layout-ssh")
+            .expect("ssh header icon bounds");
+        let ssh_title = cx
+            .debug_bounds("session-header-title-layout-ssh")
+            .expect("ssh header title bounds");
+        let standalone_selector = format!("session-header-icon-standalone-connection-{standalone_id}");
+        let standalone_title_selector =
+            format!("session-header-title-standalone-connection-{standalone_id}");
+        let standalone_icon = cx
+            .debug_bounds(Box::leak(standalone_selector.into_boxed_str()))
+            .expect("standalone header icon bounds");
+        let standalone_title = cx
+            .debug_bounds(Box::leak(standalone_title_selector.into_boxed_str()))
+            .expect("standalone header title bounds");
+        let local_icon = cx
+            .debug_bounds("session-header-icon-local-profile-local-layout")
+            .expect("local header icon bounds");
+        let local_title = cx
+            .debug_bounds("session-header-title-local-profile-local-layout")
+            .expect("local header title bounds");
+
+        assert_eq!(ssh_icon.origin.x, standalone_icon.origin.x);
+        assert_eq!(ssh_icon.origin.x, local_icon.origin.x);
+        assert_eq!(ssh_title.origin.x, standalone_title.origin.x);
+        assert_eq!(ssh_title.origin.x, local_title.origin.x);
+
+        // 2. Expanded SSH node puts terminals above tools, Disconnect at the bottom,
+        //    and aligns child icons & labels identically with the parent title.
+        let term_icon = cx
+            .debug_bounds("session-terminal-icon-9001")
+            .expect("terminal icon bounds");
+        let term_label = cx
+            .debug_bounds("session-terminal-label-9001")
+            .expect("terminal label bounds");
+        let new_term_row = cx
+            .debug_bounds("session-action-row-new-terminal")
+            .expect("new terminal row bounds");
+        let new_term_icon = cx
+            .debug_bounds("session-action-icon-new-terminal")
+            .expect("new terminal icon bounds");
+        let new_term_label = cx
+            .debug_bounds("session-action-label-new-terminal")
+            .expect("new terminal label bounds");
+        let disconnect_row = cx
+            .debug_bounds("session-action-row-disconnect")
+            .expect("disconnect row bounds");
+        let disconnect_label = cx
+            .debug_bounds("session-action-label-disconnect")
+            .expect("disconnect label bounds");
+
+        assert_eq!(term_icon.origin.x, new_term_icon.origin.x);
+        assert_eq!(term_label.origin.x, new_term_label.origin.x);
+        assert_eq!(term_label.origin.x, ssh_title.origin.x);
+        assert_eq!(disconnect_label.origin.x, new_term_label.origin.x);
+        assert!(term_label.origin.y < new_term_label.origin.y);
+        assert!(new_term_label.origin.y < disconnect_label.origin.y);
+
+        // Non-last root SSH node with !has_children must not dangle a rail past Disconnect
+        // into the standalone header below it.
+        let (rail_color, hover_danger_bg) = workspace.read_with(cx, |workspace, _| {
+            let ui = workspace.tokens.ui;
+            (
+                rgba((ui.text_muted << 8) | 0x28),
+                rgb(mix_rgb(ui.bg_hover, ui.error, 0.14)),
+            )
+        });
+
+        cx.update(|window, _| {
+            let scale = window.scale_factor();
+            let quads = window.painted_quads();
+            assert!(
+                !quads
+                    .iter()
+                    .any(|q| q.background.as_solid() == Some(hover_danger_bg.into())),
+                "Disconnect must stay neutral at rest"
+            );
+            let rail_quads: Vec<_> = quads
+                .iter()
+                .filter(|q| {
+                    q.background.as_solid() == Some(rail_color.into())
+                        && q.bounds.size.width == px(1.0).scale(scale)
+                })
+                .collect();
+            assert!(
+                !rail_quads.is_empty(),
+                "guide rail must render for expanded SSH children"
+            );
+            for rail in rail_quads {
+                assert!(
+                    rail.bounds.bottom() <= disconnect_row.bottom().scale(scale),
+                    "guide rail must terminate by Disconnect bottom ({:?} <= {:?})",
+                    rail.bounds.bottom(),
+                    disconnect_row.bottom().scale(scale)
+                );
+                assert!(
+                    rail.bounds.bottom() <= standalone_icon.top().scale(scale),
+                    "guide rail must not extend into the next root header"
+                );
+            }
+        });
+
+        // 3. Hovering a sibling action must keep Disconnect neutral; hovering Disconnect
+        // reveals the danger hover tint.
+        cx.simulate_mouse_move(
+            new_term_row.center(),
+            None,
+            gpui::Modifiers::default(),
+        );
+        draw_sidebar(cx);
+        cx.update(|window, _| {
+            assert!(
+                !window
+                    .painted_quads()
+                    .iter()
+                    .any(|q| q.background.as_solid() == Some(hover_danger_bg.into())),
+                "hovering sibling action must not paint Disconnect danger tint"
+            );
+        });
+
+        cx.simulate_mouse_move(
+            disconnect_row.center(),
+            None,
+            gpui::Modifiers::default(),
+        );
+        draw_sidebar(cx);
+        cx.update(|window, _| {
+            let hovered = window
+                .painted_quads()
+                .iter()
+                .any(|q| q.background.as_solid() == Some(hover_danger_bg.into()));
+            assert!(hovered, "hovering Disconnect must paint danger hover tint");
+        });
+
+        // 4. Host view: single-member & multi-member user rows align children and preserve selectors.
+        workspace.update(cx, |workspace, cx| {
+            let second_config = SshConfig {
+                host: "layout-prod.invalid".into(),
+                port: 2222,
+                username: "ops".into(),
+                ..Default::default()
+            };
+            let second_id = NodeId::new("layout-ssh-2");
+            workspace
+                .node_router
+                .upsert_node(second_id.clone(), second_config.clone());
+            workspace.ssh_nodes.insert(
+                second_id,
+                WorkspaceSshNode::new(
+                    None,
+                    &second_config,
+                    "Layout SSH Alt".into(),
+                    vec![TerminalSessionId(9002)],
+                    NodeReadiness::Ready,
+                ),
+            );
+            workspace.toggle_active_session_sidebar_view(cx);
+            workspace.set_session_group_expanded(
+                NodeId::new("session-host-group:layout-prod.invalid\u{1}ops"),
+                true,
+                false,
+            );
+        });
+        draw_sidebar(cx);
+
+        let host_icon = cx
+            .debug_bounds("session-header-icon-session-host-group:layout-prod.invalid")
+            .expect("host header icon bounds");
+        let user_icon = cx
+            .debug_bounds("session-header-icon-session-host-group:layout-prod.invalid\u{1}ops")
+            .expect("user header icon bounds");
+        let user_title = cx
+            .debug_bounds("session-header-title-session-host-group:layout-prod.invalid\u{1}ops")
+            .expect("user header title bounds");
+        let member_port = cx
+            .debug_bounds("session-group-member-port-layout-ssh-2")
+            .expect("member port bounds");
+        let member_title = cx
+            .debug_bounds("session-group-member-title-layout-ssh-2")
+            .expect("member title bounds");
+        let host_term_label = cx
+            .debug_bounds("session-terminal-label-9002")
+            .expect("host view terminal label bounds");
+        let host_action_label = cx
+            .debug_bounds("session-action-label-new-terminal")
+            .expect("host view action label bounds");
+
+        assert_eq!(user_icon.origin.x - host_icon.origin.x, px(20.0));
+        assert_eq!(member_title.origin.x, user_title.origin.x);
+        assert_eq!(host_term_label.origin.x - member_title.origin.x, px(20.0));
+        assert_eq!(host_term_label.origin.x, host_action_label.origin.x);
+        assert!(host_term_label.origin.y < host_action_label.origin.y);
+        assert!(member_port.size.width > px(0.0));
+    }
+
+    #[test]
+    fn action_row_hover_changes_label_glyph_color() {
+        use std::borrow::Cow;
+        use std::cell::RefCell;
+        use std::rc::Rc;
+        use std::sync::Arc;
+
+        let Some(_fixture_dir) = isolated_fixture_named(
+            "action_row_hover_changes_label_glyph_color",
+            "OXIDETERM_ACTION_HOVER_TEST_DIR",
+        ) else {
+            return;
+        };
+        let mut store = SettingsStore::load_from_path(default_settings_path()).unwrap();
+        store.settings_mut().ssh_config.auto_load_hosts = false;
+        store.settings_mut().onboarding_completed = true;
+        store.settings_mut().general.language = oxideterm_settings::Language::En;
+        store.save().unwrap();
+
+        struct GlyphTestTextSystem(gpui::NoopTextSystem);
+
+        impl gpui::PlatformTextSystem for GlyphTestTextSystem {
+            fn add_fonts(&self, fonts: Vec<Cow<'static, [u8]>>) -> anyhow::Result<()> {
+                self.0.add_fonts(fonts)
+            }
+            fn all_font_names(&self) -> Vec<String> {
+                self.0.all_font_names()
+            }
+            fn font_id(&self, descriptor: &gpui::Font) -> anyhow::Result<gpui::FontId> {
+                self.0.font_id(descriptor)
+            }
+            fn font_metrics(&self, font_id: gpui::FontId) -> gpui::FontMetrics {
+                self.0.font_metrics(font_id)
+            }
+            fn typographic_bounds(
+                &self,
+                font_id: gpui::FontId,
+                glyph_id: gpui::GlyphId,
+            ) -> anyhow::Result<Bounds<f32>> {
+                self.0.typographic_bounds(font_id, glyph_id)
+            }
+            fn advance(
+                &self,
+                font_id: gpui::FontId,
+                glyph_id: gpui::GlyphId,
+            ) -> anyhow::Result<gpui::Size<f32>> {
+                self.0.advance(font_id, glyph_id)
+            }
+            fn glyph_for_char(
+                &self,
+                font_id: gpui::FontId,
+                ch: char,
+            ) -> Option<gpui::GlyphId> {
+                self.0.glyph_for_char(font_id, ch)
+            }
+            fn glyph_raster_bounds(
+                &self,
+                _params: &gpui::RenderGlyphParams,
+            ) -> anyhow::Result<Bounds<gpui::DevicePixels>> {
+                Ok(Bounds {
+                    origin: point(gpui::DevicePixels(0), gpui::DevicePixels(0)),
+                    size: gpui::size(gpui::DevicePixels(8), gpui::DevicePixels(10)),
+                })
+            }
+            fn rasterize_glyph(
+                &self,
+                _params: &gpui::RenderGlyphParams,
+                raster_bounds: Bounds<gpui::DevicePixels>,
+            ) -> anyhow::Result<(gpui::Size<gpui::DevicePixels>, Vec<u8>)> {
+                let len =
+                    (raster_bounds.size.width.0.max(0) * raster_bounds.size.height.0.max(0)) as usize;
+                Ok((raster_bounds.size, vec![255; len]))
+            }
+            fn layout_line(
+                &self,
+                text: &str,
+                font_size: Pixels,
+                runs: &[gpui::FontRun],
+            ) -> gpui::LineLayout {
+                self.0.layout_line(text, font_size, runs)
+            }
+            fn recommended_rendering_mode(
+                &self,
+                font_id: gpui::FontId,
+                font_size: Pixels,
+            ) -> gpui::TextRenderingMode {
+                self.0.recommended_rendering_mode(font_id, font_size)
+            }
+        }
+
+        struct CapturedScene {
+            quads: Vec<gpui::Quad>,
+            monochrome_sprites: Vec<gpui::MonochromeSprite>,
+            subpixel_sprites: Vec<gpui::SubpixelSprite>,
+        }
+
+        struct SceneRecorder {
+            atlas: Arc<gpui::HeadlessAtlas>,
+            captured: Rc<RefCell<Option<CapturedScene>>>,
+        }
+
+        impl gpui::PlatformHeadlessRenderer for SceneRecorder {
+            fn render_scene(
+                &mut self,
+                scene: &gpui::Scene,
+                _: gpui::Size<gpui::DevicePixels>,
+            ) -> anyhow::Result<()> {
+                *self.captured.borrow_mut() = Some(CapturedScene {
+                    quads: scene.quads.clone(),
+                    monochrome_sprites: scene.monochrome_sprites.clone(),
+                    subpixel_sprites: scene.subpixel_sprites.clone(),
+                });
+                Ok(())
+            }
+            fn render_scene_to_image(
+                &mut self,
+                scene: &gpui::Scene,
+                size: gpui::Size<gpui::DevicePixels>,
+            ) -> anyhow::Result<image::RgbaImage> {
+                self.render_scene(scene, size)?;
+                Ok(image::RgbaImage::new(0, 0))
+            }
+            fn sprite_atlas(&self) -> Arc<dyn gpui::PlatformAtlas> {
+                self.atlas.clone()
+            }
+        }
+
+        struct ActionHoverHarness {
+            workspace: Entity<WorkspaceApp>,
+        }
+
+        impl gpui::Render for ActionHoverHarness {
+            fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+                let (new_term, disconnect) = self.workspace.update(cx, |workspace, cx| {
+                    let new_term = workspace.render_session_action_item_with_rails(
+                        "hover-test",
+                        1,
+                        &[],
+                        false,
+                        "new-terminal",
+                        LucideIcon::Plus,
+                        "New Terminal".to_string(),
+                        SessionActionVariant::Primary,
+                        |_, _, _| {},
+                        cx,
+                    );
+                    let disconnect = workspace.render_session_action_item_with_rails(
+                        "hover-test",
+                        1,
+                        &[],
+                        true,
+                        "disconnect",
+                        LucideIcon::WifiOff,
+                        "Disconnect".to_string(),
+                        SessionActionVariant::Danger,
+                        |_, _, _| {},
+                        cx,
+                    );
+                    (new_term, disconnect)
+                });
+                div()
+                    .w(px(240.0))
+                    .flex()
+                    .flex_col()
+                    .child(new_term)
+                    .child(disconnect)
+            }
+        }
+
+        let captured = Rc::new(RefCell::new(None));
+        let atlas = Arc::new(gpui::HeadlessAtlas::default());
+        let mut cx = gpui::HeadlessAppContext::with_platform(
+            Arc::new(GlyphTestTextSystem(gpui::NoopTextSystem)),
+            Arc::new(()),
+            {
+                let captured = captured.clone();
+                let atlas = atlas.clone();
+                move || {
+                    Ok(Some(Box::new(SceneRecorder {
+                        atlas: atlas.clone(),
+                        captured: captured.clone(),
+                    })))
+                }
+            },
+        );
+        cx.allow_parking();
+
+        let window = cx
+            .open_window(gpui::size(px(260.0), px(120.0)), |window, cx| {
+                let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+                cx.new(|_| ActionHoverHarness { workspace })
+            })
+            .unwrap();
+        cx.run_until_parked();
+
+        let (item_height, ui) = cx.update(|app| {
+            let workspace = window.read(app).unwrap().workspace.read(app);
+            (workspace.session_tree_item_height(), workspace.tokens.ui)
+        });
+        let idle_label_hsla: gpui::SceneHsla =
+            gpui::Hsla::from(rgb(mix_rgb(ui.text, ui.text_muted, 0.42))).into();
+        let primary_hover_hsla: gpui::SceneHsla = gpui::Hsla::from(rgb(ui.text)).into();
+        let error_label_hsla: gpui::SceneHsla = gpui::Hsla::from(rgb(ui.error)).into();
+        let hover_primary_bg = rgb(ui.bg_hover);
+        let hover_danger_bg = rgb(mix_rgb(ui.bg_hover, ui.error, 0.14));
+
+        let capture_at = |cx: &mut gpui::HeadlessAppContext,
+                          hover_pos: Option<gpui::Point<Pixels>>|
+         -> CapturedScene {
+            if let Some(pos) = hover_pos {
+                cx.update_window(window.into(), |_, window, cx| {
+                    window.simulate_mouse_move(pos, cx);
+                })
+                .unwrap();
+                cx.run_until_parked();
+            }
+            cx.update_window(window.into(), |_, window, cx| {
+                window.draw(cx).clear(cx);
+            })
+            .unwrap();
+            cx.capture_screenshot(window.into()).unwrap();
+            captured.borrow_mut().take().expect("captured scene")
+        };
+
+        let row_label_glyph_colors = |scene: &CapturedScene, row_index: usize| {
+            let y_top = gpui::ScaledPixels::from(item_height * row_index as f32);
+            let y_bottom = gpui::ScaledPixels::from(item_height * (row_index + 1) as f32);
+            let label_left = gpui::ScaledPixels::from(40.0_f32);
+            let mut colors: Vec<gpui::SceneHsla> = scene
+                .monochrome_sprites
+                .iter()
+                .filter(|sprite| {
+                    sprite.bounds.origin.x >= label_left
+                        && sprite.bounds.origin.y >= y_top
+                        && sprite.bounds.origin.y < y_bottom
+                })
+                .map(|sprite| sprite.color)
+                .collect();
+            if colors.is_empty() {
+                colors = scene
+                    .subpixel_sprites
+                    .iter()
+                    .filter(|sprite| {
+                        sprite.bounds.origin.x >= label_left
+                            && sprite.bounds.origin.y >= y_top
+                            && sprite.bounds.origin.y < y_bottom
+                    })
+                    .map(|sprite| sprite.color)
+                    .collect();
+            }
+            colors
+        };
+
+        // 1. At rest: Disconnect label uses idle neutral ink and no danger hover tint.
+        let rest_scene = capture_at(&mut cx, None);
+        assert!(
+            !rest_scene
+                .quads
+                .iter()
+                .any(|q| q.background.as_solid() == Some(hover_danger_bg.into())),
+            "Disconnect must stay neutral at rest"
+        );
+        let rest_disconnect = row_label_glyph_colors(&rest_scene, 1);
+        assert!(
+            !rest_disconnect.is_empty()
+                && rest_disconnect.iter().all(|&c| c == idle_label_hsla)
+                && !rest_disconnect.iter().any(|&c| c == error_label_hsla),
+            "Disconnect label must use idle neutral ink at rest"
+        );
+
+        // 2. Hovering sibling New Terminal changes New Terminal to primary hover ink
+        // while keeping Disconnect neutral.
+        let sibling_scene = capture_at(&mut cx, Some(point(px(80.0), px(item_height * 0.5))));
+        assert!(
+            sibling_scene
+                .quads
+                .iter()
+                .any(|q| q.background.as_solid() == Some(hover_primary_bg.into())),
+            "hovering New Terminal must paint primary hover background"
+        );
+        assert!(
+            !sibling_scene
+                .quads
+                .iter()
+                .any(|q| q.background.as_solid() == Some(hover_danger_bg.into())),
+            "hovering New Terminal must not paint Disconnect danger tint"
+        );
+        let sibling_new_term = row_label_glyph_colors(&sibling_scene, 0);
+        assert!(
+            !sibling_new_term.is_empty()
+                && sibling_new_term.iter().all(|&c| c == primary_hover_hsla),
+            "hovering New Terminal must paint New Terminal label glyphs in primary text ink"
+        );
+        let sibling_disconnect = row_label_glyph_colors(&sibling_scene, 1);
+        assert!(
+            !sibling_disconnect.is_empty()
+                && sibling_disconnect.iter().all(|&c| c == idle_label_hsla),
+            "hovering New Terminal must keep Disconnect label neutral"
+        );
+
+        // 3. Hovering Disconnect paints danger hover tint and switches Disconnect
+        // label glyph sprites to error ink.
+        let danger_scene = capture_at(&mut cx, Some(point(px(80.0), px(item_height * 1.5))));
+        assert!(
+            danger_scene
+                .quads
+                .iter()
+                .any(|q| q.background.as_solid() == Some(hover_danger_bg.into())),
+            "hovering Disconnect must paint danger hover tint"
+        );
+        let hovered_disconnect = row_label_glyph_colors(&danger_scene, 1);
+        assert!(
+            !hovered_disconnect.is_empty()
+                && hovered_disconnect.iter().all(|&c| c == error_label_hsla),
+            "hovering Disconnect must paint Disconnect label glyphs in error ink"
+        );
     }
 }
