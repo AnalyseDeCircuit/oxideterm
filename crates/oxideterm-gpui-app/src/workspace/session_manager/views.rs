@@ -112,6 +112,55 @@ pub(super) enum SessionManagerTreeRow {
     },
 }
 
+impl SessionManagerTreeRow {
+    pub(super) fn depth(&self) -> usize {
+        match self {
+            Self::Group { depth, .. } | Self::Item { depth, .. } => *depth,
+        }
+    }
+}
+
+fn session_manager_tree_row_is_last(rows: &[SessionManagerTreeRow], index: usize) -> bool {
+    let Some(row) = rows.get(index) else {
+        return true;
+    };
+    let target_depth = row.depth();
+    for next in rows.iter().skip(index + 1) {
+        let next_depth = next.depth();
+        if next_depth < target_depth {
+            return true;
+        }
+        if next_depth == target_depth {
+            return false;
+        }
+    }
+    true
+}
+
+/// Computes which outer guide-rail columns (`0..depth - 1`) continue past the
+/// row at `target_index`, and whether the row itself ends its parent's rail.
+pub(super) fn session_manager_tree_row_rails(
+    rows: &[SessionManagerTreeRow],
+    target_index: usize,
+) -> (Vec<bool>, bool) {
+    let mut continues_at_depth: Vec<bool> = Vec::new();
+    for (index, row) in rows.iter().enumerate() {
+        let depth = row.depth();
+        continues_at_depth.resize(depth, false);
+        let is_last = session_manager_tree_row_is_last(rows, index);
+        if index == target_index {
+            let outer_rails = if depth > 1 {
+                continues_at_depth[1..depth].to_vec()
+            } else {
+                Vec::new()
+            };
+            return (outer_rails, is_last);
+        }
+        continues_at_depth.push(depth > 0 && !is_last);
+    }
+    (Vec::new(), true)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SessionManagerItemPointerAction {
     None,
@@ -775,6 +824,13 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn session_manager_sidebar_tree_list_spec() -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(MANAGER_SIDEBAR_TREE_ESTIMATED_ROW_HEIGHT),
+            MANAGER_MAIN_VIEW_OVERSCAN,
+        )
+    }
+
     fn sync_session_manager_grid_list_state(
         &self,
         rows: &[SessionManagerGridRow],
@@ -846,7 +902,7 @@ impl WorkspaceApp {
             &mut manager.sidebar_tree_list_cache.borrow_mut(),
             "session-manager-sidebar-tree",
             &signatures,
-            Self::session_manager_tree_list_spec(),
+            Self::session_manager_sidebar_tree_list_spec(),
         );
     }
 
@@ -1618,6 +1674,27 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn render_session_manager_sidebar_tree_row(
+        &self,
+        rows: &[SessionManagerTreeRow],
+        index: usize,
+        items: &[SessionManagerDisplayItem],
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(row) = rows.get(index) else {
+            return div().into_any_element();
+        };
+        let row_element = self.render_session_manager_tree_row(Some(row), items, false, true, cx);
+        let (ancestor_rails, is_last) = session_manager_tree_row_rails(rows, index);
+        let depth = row.depth();
+        let guided = if depth == 0 {
+            row_element
+        } else {
+            self.render_session_tree_child_with_rails(depth, &ancestor_rails, is_last, row_element)
+        };
+        div().px_1().child(guided).into_any_element()
+    }
+
     pub(super) fn render_session_manager_tree_row(
         &self,
         row: Option<&SessionManagerTreeRow>,
@@ -1649,6 +1726,7 @@ impl WorkspaceApp {
                     let context_target = item.row_action_target();
                     let drop_group = item.group().map(ToOwned::to_owned);
                     let theme = self.tokens.ui;
+                    let radius = self.tokens.radii.sm;
                     let row = self
                         .render_session_manager_display_item_row(
                             item,
@@ -1660,6 +1738,7 @@ impl WorkspaceApp {
                         )
                         .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
                             // Every visible child row participates in its nearest folder's drop area.
+                            let row = if sidebar { row.rounded(px(radius)) } else { row };
                             row.border_1()
                                 .border_color(rgb(theme.accent))
                                 .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
@@ -1750,20 +1829,55 @@ impl WorkspaceApp {
             "{} — {group}",
             self.i18n.t("sessionManager.folder_tree.new_subgroup")
         );
+        let group_count = self.connection_count_for_group(group).to_string();
         let workspace = cx.entity();
+        let radius = self.tokens.radii.sm;
+        let chevron = self.render_animated_chevron(
+            (
+                gpui::SharedString::from(format!("session-group-chevron-{group}")),
+                expanded as usize,
+            ),
+            expanded,
+            if sidebar { 12.0 } else { 16.0 },
+            rgb(theme.text_muted),
+        );
+        let folder_icon = Self::render_lucide_icon(
+            if expanded {
+                LucideIcon::FolderOpen
+            } else {
+                LucideIcon::Folder
+            },
+            if sidebar {
+                crate::workspace::sidebar::SESSION_TREE_ICON_SIZE
+            } else {
+                16.0
+            },
+            rgb(theme.warning),
+        );
         div()
             .w_full()
             .min_w(px(0.0))
-            .border_b_1()
-            .border_color(self.workspace_chrome_divider())
-            .px_3()
-            .py_2()
-            .pl(px(depth as f32 * 24.0 + 12.0))
+            .when(sidebar, |row| {
+                row.h(px(self.session_tree_node_height()))
+                    .px_2()
+                    .rounded(px(radius))
+                    .cursor_pointer()
+                    .gap(px(6.0))
+                    .hover(move |row| row.bg(rgb(theme.bg_hover)))
+            })
+            .when(!sidebar, |row| {
+                row.border_b_1()
+                    .border_color(self.workspace_chrome_divider())
+                    .px_3()
+                    .py_2()
+                    .pl(px(depth as f32 * 24.0 + 12.0))
+                    .gap(px(self.tokens.spacing.two))
+                    .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
+            })
             .flex()
             .items_center()
-            .gap(px(self.tokens.spacing.two))
-            .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
             .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
+                let row = if sidebar { row.rounded(px(radius)) } else { row };
                 row.border_1()
                     .border_color(rgb(theme.accent))
                     .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
@@ -1797,35 +1911,52 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
-            .child(self.render_animated_chevron(
-                (
-                    gpui::SharedString::from(format!("session-group-chevron-{group}")),
-                    expanded as usize,
-                ),
-                expanded,
-                16.0,
-                rgb(theme.text_muted),
-            ))
-            .child(Self::render_lucide_icon(
-                if expanded {
-                    LucideIcon::FolderOpen
-                } else {
-                    LucideIcon::Folder
-                },
-                16.0,
-                rgb(theme.warning),
-            ))
+            .child(if sidebar {
+                div()
+                    .w(px(12.0))
+                    .h(px(20.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(chevron)
+                    .into_any_element()
+            } else {
+                chevron.into_any_element()
+            })
+            .child(if sidebar {
+                div()
+                    .w(px(14.0))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(folder_icon)
+                    .into_any_element()
+            } else {
+                folder_icon.into_any_element()
+            })
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.0))
                     .truncate()
-                    .text_size(px(MANAGER_ROW_TEXT_SIZE))
+                    .text_size(px(if sidebar {
+                        self.tokens.metrics.ui_text_xs
+                    } else {
+                        MANAGER_ROW_TEXT_SIZE
+                    }))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(theme.text))
                     .child(group_name),
             )
-            .child(
+            .child(if sidebar {
+                div()
+                    .flex_none()
+                    .text_size(px(self.tokens.metrics.ui_text_2xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(group_count)
+            } else {
                 div()
                     .rounded(px(self.tokens.radii.sm))
                     .bg(theme_input_bg(theme.bg, has_background))
@@ -1833,8 +1964,8 @@ impl WorkspaceApp {
                     .py(px(1.0))
                     .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.connection_count_for_group(group).to_string()),
-            )
+                    .child(group_count)
+            })
             // The sidebar keeps group rows clean; the right-click menu already
             // exposes subgroup creation and the same action list.
             .when(!sidebar, |row| {
@@ -1947,27 +2078,55 @@ impl WorkspaceApp {
             )))
             .w_full()
             .min_w(px(0.0))
-            .border_b_1()
-            .border_color(self.workspace_chrome_divider())
-            .px_3()
-            .py_2()
-            .pl(px(depth as f32 * 24.0 + 12.0))
             .flex()
             .items_center()
-            .gap(px(self.tokens.spacing.three))
             .relative()
-            .when(is_selected, |row| {
-                row.bg(rgba((theme.accent << 8) | 0x12)).child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .top_0()
-                        .bottom_0()
-                        .w(px(2.0))
-                        .bg(rgb(theme.accent)),
-                )
+            .when(sidebar, |row| {
+                row.px_2()
+                    .py(px(5.0))
+                    .gap(px(self.tokens.spacing.two))
+                    .rounded(px(self.tokens.radii.sm))
+                    .cursor_pointer()
+                    .when(is_selected, |row| {
+                        row.bg(rgba(
+                            (theme.accent << 8)
+                                | crate::workspace::sidebar::SESSION_ROW_SELECTED_BG_ALPHA,
+                        ))
+                        .child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top(px(5.0))
+                                .bottom(px(5.0))
+                                .w(px(2.0))
+                                .rounded_full()
+                                .bg(rgb(theme.accent)),
+                        )
+                    })
+                    .when(!is_selected, |row| {
+                        row.hover(move |row| row.bg(rgb(theme.bg_hover)))
+                    })
             })
-            .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
+            .when(!sidebar, |row| {
+                row.border_b_1()
+                    .border_color(self.workspace_chrome_divider())
+                    .px_3()
+                    .py_2()
+                    .pl(px(depth as f32 * 24.0 + 12.0))
+                    .gap(px(self.tokens.spacing.three))
+                    .when(is_selected, |row| {
+                        row.bg(rgba((theme.accent << 8) | 0x12)).child(
+                            div()
+                                .absolute()
+                                .left_0()
+                                .top_0()
+                                .bottom_0()
+                                .w(px(2.0))
+                                .bg(rgb(theme.accent)),
+                        )
+                    })
+                    .hover(|row| row.bg(theme_row_hover_bg(theme.bg_hover, has_background)))
+            })
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
@@ -2032,7 +2191,17 @@ impl WorkspaceApp {
                     }
                 }),
             )
-            .child(self.render_session_manager_item_icon(item, theme.text))
+            .child(if sidebar {
+                self.render_session_manager_item_icon_sized(
+                    item,
+                    theme.text,
+                    MANAGER_SIDEBAR_ROW_ICON_SIZE,
+                    MANAGER_SIDEBAR_ROW_ICON_GLYPH_SIZE,
+                    self.tokens.radii.sm,
+                )
+            } else {
+                self.render_session_manager_item_icon(item, theme.text)
+            })
             .child(
                 div()
                     .min_w(px(0.0))
@@ -2040,9 +2209,13 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(MANAGER_ROW_TEXT_SIZE))
+                            .text_size(px(if sidebar {
+                                self.tokens.metrics.ui_text_xs
+                            } else {
+                                MANAGER_ROW_TEXT_SIZE
+                            }))
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(if is_selected {
+                            .text_color(rgb(if is_selected && !sidebar {
                                 theme.accent
                             } else {
                                 theme.text
@@ -2052,7 +2225,11 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .truncate()
-                            .text_size(px(MANAGER_ROW_META_TEXT_SIZE))
+                            .text_size(px(if sidebar {
+                                self.tokens.metrics.ui_text_2xs
+                            } else {
+                                MANAGER_ROW_META_TEXT_SIZE
+                            }))
                             .text_color(rgb(theme.text_muted))
                             .child(subtitle),
                     ),
@@ -2094,6 +2271,23 @@ impl WorkspaceApp {
         item: &SessionManagerDisplayItem,
         text: u32,
     ) -> Div {
+        self.render_session_manager_item_icon_sized(
+            item,
+            text,
+            MANAGER_ROW_ICON_SIZE,
+            20.0,
+            self.tokens.radii.lg,
+        )
+    }
+
+    pub(super) fn render_session_manager_item_icon_sized(
+        &self,
+        item: &SessionManagerDisplayItem,
+        text: u32,
+        box_size: f32,
+        glyph_size: f32,
+        radius: f32,
+    ) -> Div {
         let ui = self.tokens.ui;
         let semantic_color = match item {
             SessionManagerDisplayItem::Connection(_)
@@ -2125,15 +2319,15 @@ impl WorkspaceApp {
             .map(rgb)
             .unwrap_or_else(|| rgb(default_foreground));
         div()
-            .w(px(MANAGER_ROW_ICON_SIZE))
-            .h(px(MANAGER_ROW_ICON_SIZE))
+            .w(px(box_size))
+            .h(px(box_size))
             .flex_none()
-            .rounded(px(self.tokens.radii.lg))
+            .rounded(px(radius))
             .flex()
             .items_center()
             .justify_center()
             .bg(bg)
-            .child(item.icon().render(20.0, fg))
+            .child(item.icon().render(glyph_size, fg))
             .when(
                 matches!(item, SessionManagerDisplayItem::Connection(_)),
                 |icon| icon.border_1().border_color(rgba((text << 8) | 0x1a)),
@@ -2820,11 +3014,16 @@ impl WorkspaceApp {
             } else {
                 self.i18n.t("sessionManager.actions.connect")
             };
+            let open_icon = if tunnel_id.is_some() && tunnel_running {
+                "lucide/circle-stop.svg"
+            } else {
+                "lucide/play.svg"
+            };
             popup = popup.child(self.render_session_manager_menu_action(
-                dropdown_menu_item(
+                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                     &self.tokens,
+                    open_icon,
                     open_label,
-                    DropdownMenuItemKind::Plain,
                     false,
                     false,
                 ),
@@ -2854,10 +3053,10 @@ impl WorkspaceApp {
 
         if matches!(&menu.target, SessionManagerRowActionTarget::GroupRoot) {
             popup = popup.child(self.render_session_manager_menu_action(
-                dropdown_menu_item(
+                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                     &self.tokens,
+                    "lucide/folder-plus.svg",
                     self.i18n.t("sessionManager.folder_tree.new_group"),
-                    DropdownMenuItemKind::Plain,
                     false,
                     false,
                 ),
@@ -2878,10 +3077,10 @@ impl WorkspaceApp {
             let rename_group = group.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/plus.svg",
                         self.i18n.t("sessionManager.toolbar.new_connection"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -2900,10 +3099,10 @@ impl WorkspaceApp {
                     cx,
                 ))
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/folder-plus.svg",
                         self.i18n.t("sessionManager.folder_tree.new_subgroup"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -2917,10 +3116,10 @@ impl WorkspaceApp {
                     cx,
                 ))
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.folder_tree.rename_group"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -2939,10 +3138,10 @@ impl WorkspaceApp {
         if let SessionManagerRowActionTarget::Connection(id) = &menu.target {
             let edit_id = id.clone();
             popup = popup.child(self.render_session_manager_menu_action(
-                dropdown_menu_item(
+                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                     &self.tokens,
+                    "lucide/pencil.svg",
                     self.i18n.t("sessionManager.actions.edit"),
-                    DropdownMenuItemKind::Plain,
                     false,
                     false,
                 ),
@@ -2958,10 +3157,10 @@ impl WorkspaceApp {
 
             let test_id = id.clone();
             popup = popup.child(self.render_session_manager_menu_action(
-                dropdown_menu_item(
+                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                     &self.tokens,
+                    "lucide/wifi.svg",
                     self.i18n.t("sessionManager.actions.test_connection"),
-                    DropdownMenuItemKind::Plain,
                     false,
                     false,
                 ),
@@ -2978,10 +3177,10 @@ impl WorkspaceApp {
             let duplicate_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/copy.svg",
                         self.i18n.t("sessionManager.actions.duplicate"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3000,10 +3199,10 @@ impl WorkspaceApp {
         if let SessionManagerRowActionTarget::SshConfig(alias) = &menu.target {
             let import_alias = alias.clone();
             popup = popup.child(self.render_session_manager_menu_action(
-                dropdown_menu_item(
+                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                     &self.tokens,
+                    "lucide/download.svg",
                     self.i18n.t("settings_view.connections.ssh_config.import"),
-                    DropdownMenuItemKind::Plain,
                     false,
                     false,
                 ),
@@ -3022,10 +3221,10 @@ impl WorkspaceApp {
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3045,10 +3244,10 @@ impl WorkspaceApp {
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3068,10 +3267,10 @@ impl WorkspaceApp {
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3091,10 +3290,10 @@ impl WorkspaceApp {
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3114,10 +3313,10 @@ impl WorkspaceApp {
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3137,10 +3336,10 @@ impl WorkspaceApp {
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3163,10 +3362,10 @@ impl WorkspaceApp {
             let edit_id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3190,10 +3389,10 @@ impl WorkspaceApp {
             let id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3212,10 +3411,10 @@ impl WorkspaceApp {
             let id = id.clone();
             popup = popup
                 .child(self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/pencil.svg",
                         self.i18n.t("sessionManager.actions.edit"),
-                        DropdownMenuItemKind::Plain,
                         false,
                         false,
                     ),
@@ -3296,19 +3495,23 @@ impl WorkspaceApp {
         if let Some((delete_id, delete_label)) = delete_action {
             let delete_target = menu.target;
             popup = popup.child(
-                self.render_session_manager_menu_action(
-                    dropdown_menu_item(
+                self.workspace_context_menu_styled_action(
+                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
                         &self.tokens,
+                        "lucide/trash-2.svg",
                         delete_label,
-                        DropdownMenuItemKind::Plain,
+                        true,
                         false,
-                        false,
-                    )
-                    .text_color(rgb(self.tokens.ui.error)),
+                    ),
                     false,
                     false,
-                    has_background,
+                    ContextMenuActionableStyle {
+                        hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1f)),
+                        hover_text_color: None,
+                    },
+                    |_| {},
                     move |this, _event, _window, cx| {
+                        this.close_session_row_menus(cx);
                         if batch_delete {
                             this.request_delete_selected_connections(cx);
                             cx.stop_propagation();

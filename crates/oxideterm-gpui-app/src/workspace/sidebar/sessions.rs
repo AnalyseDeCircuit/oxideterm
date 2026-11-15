@@ -638,16 +638,16 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let open = self.session_search_open;
+        let theme = self.tokens.ui;
         self.workspace_tooltip_icon_button(
             LucideIcon::Search,
             self.tokens.metrics.sidebar_action_icon_size,
-            rgb(self.tokens.ui.text),
+            rgb(if open { theme.text } else { theme.text_muted }),
             IconButtonOptions {
-                has_background: self.session_search_open,
-                background: self
-                    .session_search_open
-                    .then_some(rgb(self.tokens.ui.bg_hover)),
-                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                has_background: open,
+                background: open.then_some(rgb(theme.bg_active)),
+                hover_background: Some(rgb(theme.bg_hover)),
                 ..IconButtonOptions::opaque_toolbar(
                     self.tokens.metrics.sidebar_action_size,
                     ButtonRadius::Md,
@@ -696,16 +696,16 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let open = self.session_sort_menu_open;
+        let theme = self.tokens.ui;
         let button = self.workspace_tooltip_icon_button(
             LucideIcon::ArrowDownAZ,
             self.tokens.metrics.sidebar_action_icon_size,
-            rgb(self.tokens.ui.text),
+            rgb(if open { theme.text } else { theme.text_muted }),
             IconButtonOptions {
-                has_background: self.session_sort_menu_open,
-                background: self
-                    .session_sort_menu_open
-                    .then_some(rgb(self.tokens.ui.bg_hover)),
-                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
+                has_background: open,
+                background: open.then_some(rgb(theme.bg_active)),
+                hover_background: Some(rgb(theme.bg_hover)),
                 ..IconButtonOptions::opaque_toolbar(
                     self.tokens.metrics.sidebar_action_size,
                     ButtonRadius::Md,
@@ -808,7 +808,7 @@ impl WorkspaceApp {
         )
     }
 
-    fn session_tree_node_height(&self) -> f32 {
+    pub(in crate::workspace) fn session_tree_node_height(&self) -> f32 {
         (28.0_f32).max((self.tokens.metrics.ui_text_xs + 16.0).round())
     }
 
@@ -5091,6 +5091,9 @@ mod host_view_render_tests {
             let workspace = window.read(app).unwrap().workspace.read(app);
             (workspace.session_tree_item_height(), workspace.tokens.ui)
         });
+        let scale = cx
+            .update_window(window.into(), |_, window, _| window.scale_factor())
+            .unwrap();
         let idle_label_hsla: gpui::SceneHsla =
             gpui::Hsla::from(rgb(mix_rgb(ui.text, ui.text_muted, 0.42))).into();
         let primary_hover_hsla: gpui::SceneHsla = gpui::Hsla::from(rgb(ui.text)).into();
@@ -5117,9 +5120,10 @@ mod host_view_render_tests {
         };
 
         let row_label_glyph_colors = |scene: &CapturedScene, row_index: usize| {
-            let y_top = gpui::ScaledPixels::from(item_height * row_index as f32);
-            let y_bottom = gpui::ScaledPixels::from(item_height * (row_index + 1) as f32);
-            let label_left = gpui::ScaledPixels::from(40.0_f32);
+            // The scene stores device-scaled bounds; input and layout use logical pixels.
+            let y_top = px(item_height * row_index as f32).scale(scale);
+            let y_bottom = px(item_height * (row_index + 1) as f32).scale(scale);
+            let label_left = px(40.0).scale(scale);
             let mut colors: Vec<gpui::SceneHsla> = scene
                 .monochrome_sprites
                 .iter()
@@ -5183,7 +5187,7 @@ mod host_view_render_tests {
         assert!(
             !sibling_new_term.is_empty()
                 && sibling_new_term.iter().all(|&c| c == primary_hover_hsla),
-            "hovering New Terminal must paint New Terminal label glyphs in primary text ink"
+            "hovering New Terminal must paint the label in {primary_hover_hsla:?}, got {sibling_new_term:?}"
         );
         let sibling_disconnect = row_label_glyph_colors(&sibling_scene, 1);
         assert!(

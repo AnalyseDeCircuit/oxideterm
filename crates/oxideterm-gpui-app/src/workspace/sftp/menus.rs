@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_gpui_ui::context_menu::{context_menu_content, context_menu_separator};
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 
 impl WorkspaceApp {
@@ -61,14 +62,12 @@ impl WorkspaceApp {
             self.i18n.t("sftp.context.download")
         };
         let popup = context_menu_event_boundary(
-            div()
+            context_menu_content(&self.tokens)
                 .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
-                .p(px(SFTP_CONTEXT_MENU_PADDING))
-                .rounded(px(self.tokens.radii.sm))
-                .border_1()
-                .border_color(sftp_border(theme.border, has_background))
-                .bg(sftp_panel_bg(theme.bg_elevated, has_background, 0xf2))
-                .shadow_lg(),
+                .min_w_0()
+                .when(has_background, |surface| {
+                    surface.border_color(sftp_border(theme.border, has_background))
+                }),
         )
         .when(selected_count > 0, |menu_el| {
             menu_el.child(self.render_sftp_context_menu_guarded_item(
@@ -218,12 +217,7 @@ impl WorkspaceApp {
                 cx,
             ))
         })
-        .child(
-            div()
-                .h(px(1.0))
-                .my(px(SFTP_CONTEXT_MENU_PADDING))
-                .bg(sftp_border(theme.border, has_background)),
-        )
+        .child(context_menu_separator(&self.tokens))
         .child(self.render_sftp_context_menu_guarded_item(
             LucideIcon::FolderOpen,
             self.i18n.t("sftp.context.new_folder"),
@@ -277,17 +271,21 @@ impl WorkspaceApp {
             .flex_row()
             .items_center()
             .gap(px(8.0))
-            .px(px(12.0))
-            .py(px(6.0))
-            .rounded(px(self.tokens.radii.xs))
+            .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+            .py(px(5.0))
+            .rounded(px(self.tokens.radii.md))
             .text_size(px(ui.text_xs))
             .text_color(rgb(color))
             .child(Self::render_lucide_icon(
                 icon,
                 ui.size(SFTP_ICON_SM),
-                rgb(color),
+                if danger {
+                    rgb(color).into()
+                } else {
+                    rgba((color << 8) | 0xd9)
+                },
             ))
-            .child(div().truncate().child(self.render_display_text_with_role(
+            .child(div().flex_1().min_w_0().truncate().child(self.render_display_text_with_role(
                 SelectableTextRole::NonSelectable,
                 "sftp-context-menu",
                 label.clone(),
@@ -295,6 +293,11 @@ impl WorkspaceApp {
                 color,
                 cx,
             )));
+        let hover_bg = if danger {
+            rgba((SFTP_RED << 8) | 0x1f)
+        } else {
+            sftp_hover_bg(theme.bg_hover, has_background)
+        };
         // SFTP remote refresh/transfer can leave a context menu visible while
         // the backing pane is loading. Route those rows through the shared menu
         // guard so the UI cannot dispatch stale actions.
@@ -303,7 +306,7 @@ impl WorkspaceApp {
             disabled,
             loading,
             ContextMenuActionableStyle {
-                hover_background: Some(sftp_hover_bg(theme.bg_hover, has_background)),
+                hover_background: Some(hover_bg),
                 hover_text_color: None,
             },
             |_| {},
@@ -367,9 +370,9 @@ impl WorkspaceApp {
                 .flex_row()
                 .items_center()
                 .gap(px(8.0))
-                .px(px(12.0))
-                .py(px(6.0))
-                .rounded(px(self.tokens.radii.xs))
+                .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+                .py(px(5.0))
+                .rounded(px(self.tokens.radii.md))
                 .text_size(px(ui.text_xs))
                 .text_color(rgb(if can_save {
                     theme.text
@@ -379,10 +382,12 @@ impl WorkspaceApp {
                 .child(Self::render_lucide_icon(
                     LucideIcon::Star,
                     ui.size(SFTP_ICON_SM),
-                    rgb(theme.text),
+                    rgba((theme.text << 8) | 0xd9),
                 ))
                 .child(
                     div()
+                        .flex_1()
+                        .min_w_0()
                         .truncate()
                         .child(self.i18n.t("sftp.bookmarks.save_current")),
                 );
@@ -451,15 +456,13 @@ impl WorkspaceApp {
         };
 
         let popup = context_menu_event_boundary(
-            div()
+            context_menu_content(&self.tokens)
                 .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
+                .min_w_0()
                 .max_h(px(ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT)))
-                .p(px(SFTP_CONTEXT_MENU_PADDING))
-                .rounded(px(self.tokens.radii.sm))
-                .border_1()
-                .border_color(sftp_border(theme.border, has_background))
-                .bg(sftp_panel_bg(theme.bg_elevated, has_background, 0xf2))
-                .shadow_lg()
+                .when(has_background, |surface| {
+                    surface.border_color(sftp_border(theme.border, has_background))
+                })
                 .flex()
                 .flex_col()
                 .child(save_item)
@@ -529,7 +532,7 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(self.tokens.radii.xs))
+            .rounded(px(self.tokens.radii.sm))
             .cursor_pointer()
             .hover(|row| row.bg(sftp_hover_bg(theme.bg_hover, has_background)))
             .on_mouse_down(
@@ -560,9 +563,9 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(px(self.tokens.radii.xs))
+            .rounded(px(self.tokens.radii.sm))
             .cursor_pointer()
-            .hover(|row| row.bg(sftp_hover_bg(theme.bg_hover, has_background)))
+            .hover(|row| row.bg(rgba((SFTP_RED << 8) | 0x1f)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
@@ -589,9 +592,9 @@ impl WorkspaceApp {
             .flex_row()
             .items_center()
             .gap(px(8.0))
-            .px(px(12.0))
-            .py(px(6.0))
-            .rounded(px(self.tokens.radii.xs))
+            .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+            .py(px(5.0))
+            .rounded(px(self.tokens.radii.md))
             .text_size(px(ui.text_xs))
             .text_color(rgb(theme.text))
             .child(Self::render_lucide_icon(

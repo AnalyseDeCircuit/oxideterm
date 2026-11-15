@@ -10,12 +10,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let has_background = self.window_background_preferences().is_some();
         let items = self.session_manager_display_items(cx);
         let body = self.render_session_manager_sidebar_tree(items, cx);
         let row_action_menu = self.session_manager.read(cx).row_action_menu.clone();
         let sort_menu_open = self.session_manager_sidebar_sort_open;
-        // Operation output shares the tab's status field; the sidebar has no
-        // bottom chrome, so mirror the tab's status strip here.
+        // Operation output shares the tab's status field; mirror the compact
+        // sidebar footer chrome so status feedback matches Active Sessions.
         let status = self.session_manager.read(cx).status.clone();
         div()
             .relative()
@@ -27,15 +28,19 @@ impl WorkspaceApp {
             .when_some(status, |surface, status| {
                 surface.child(
                     div()
-                        .h(px(32.0))
+                        .w_full()
+                        .min_w_0()
+                        .h(px(
+                            crate::workspace::terminal_command_bar::TERMINAL_SENDER_COMPACT_HEIGHT,
+                        ))
                         .flex_none()
                         .flex()
                         .items_center()
-                        .px_2()
+                        .px(px(self.tokens.spacing.three))
                         .border_t_1()
-                        .border_color(theme_border(theme.border, false))
-                        .bg(theme_bg(theme.bg, false))
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .border_color(self.workspace_chrome_divider())
+                        .bg(self.workspace_sidebar_background(theme.shell_bg()))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(theme.accent))
                         .child(status),
                 )
@@ -49,7 +54,7 @@ impl WorkspaceApp {
                         this.child(self.workspace_context_menu_backdrop(
                             self.render_session_manager_sort_menu(
                                 window,
-                                false,
+                                has_background,
                                 SelectAnchorId::SessionManagerSidebarSort,
                                 true,
                                 cx,
@@ -59,7 +64,12 @@ impl WorkspaceApp {
                     })
                     .when_some(row_action_menu, |this, menu| {
                         this.child(self.workspace_context_menu_backdrop(
-                            self.render_session_manager_row_action_menu(menu, window, false, cx),
+                            self.render_session_manager_row_action_menu(
+                                menu,
+                                window,
+                                has_background,
+                                cx,
+                            ),
                             cx,
                         ))
                     }),
@@ -74,7 +84,13 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let (roots, children) = self.session_group_tree();
-        let expanded_groups = self.session_manager.read(cx).expanded_groups.clone();
+        let (expanded_groups, has_search_query) = {
+            let manager = self.session_manager.read(cx);
+            (
+                manager.expanded_groups.clone(),
+                !manager.search_query.trim().is_empty(),
+            )
+        };
         let rows = Arc::<[SessionManagerTreeRow]>::from(session_manager_tree_rows(
             &items,
             &roots,
@@ -96,10 +112,10 @@ impl WorkspaceApp {
         let items = Arc::<[SessionManagerDisplayItem]>::from(items);
         let list = tauri_virtual_list(
             state,
-            Self::session_manager_tree_list_spec(),
+            Self::session_manager_sidebar_tree_list_spec(),
             move |index, _window, cx| {
                 workspace.update(cx, |this, cx| {
-                    this.render_session_manager_tree_row(rows.get(index), &items, false, true, cx)
+                    this.render_session_manager_sidebar_tree_row(&rows, index, &items, cx)
                 })
             },
         );
@@ -108,12 +124,13 @@ impl WorkspaceApp {
             .size_full()
             .flex()
             .flex_col()
-            .bg(rgb(theme.bg))
             .child(
                 div()
                     .id("session-manager-sidebar-tree-drop-target")
                     .flex_1()
                     .min_h(px(0.0))
+                    .flex()
+                    .flex_col()
                     .drag_over::<SessionManagerDrag>(move |target, _drag, _window, _cx| {
                         target
                             .border_1()
@@ -152,10 +169,28 @@ impl WorkspaceApp {
                         this.close_session_row_menus(cx);
                     }))
                     .child(if has_rows {
-                        list.into_any_element()
-                    } else {
-                        self.render_session_manager_empty_view(false, cx)
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .w_full()
+                            .pt(px(crate::workspace::sidebar::PRIMARY_SIDEBAR_CONTENT_TOP_INSET))
+                            .child(list)
                             .into_any_element()
+                    } else if has_search_query {
+                        div()
+                            .p_4()
+                            .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+                            .text_color(rgb(theme.text_muted))
+                            .child(self.i18n.t("sessionManager.table.no_search_results"))
+                            .into_any_element()
+                    } else {
+                        self.render_sidebar_empty_state(
+                            LucideIcon::Server,
+                            "session-manager-sidebar-empty-title",
+                            self.i18n.t("sessionManager.table.no_connections"),
+                            None,
+                            cx,
+                        )
                     }),
             )
             .into_any_element()

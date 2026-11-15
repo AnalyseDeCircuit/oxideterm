@@ -5,19 +5,22 @@ use gpui::{
 use oxideterm_theme::ThemeTokens;
 
 use crate::{
-    menu::{menu_item_chrome, menu_surface_chrome},
+    menu::{
+        menu_indicator_icon, menu_item_chrome, menu_item_hover_bg, menu_item_with_icon,
+        menu_separator, menu_shortcut, menu_submenu_chevron, menu_surface_chrome,
+    },
     modal::popover_backdrop,
 };
 
 const CONTEXT_MENU_DISABLED_OPACITY: f32 = 0.5;
-const CONTEXT_MENU_RADIO_DOT_SIZE: f32 = 8.0;
-const CONTEXT_MENU_LINE_HEIGHT_RATIO: f32 = 1.35;
+const CONTEXT_MENU_RADIO_DOT_SIZE: f32 = 6.0;
+const CONTEXT_MENU_LINE_HEIGHT_RATIO: f32 = 1.4;
 
 pub fn context_menu_line_height(tokens: &ThemeTokens) -> f32 {
     // Menu overlays can be mounted under terminal/editor roots that set their
     // own text metrics. Normalize the line box so rows do not inherit those
     // larger surface-specific line heights.
-    tokens.metrics.ui_text_sm * CONTEXT_MENU_LINE_HEIGHT_RATIO
+    tokens.metrics.ui_text_xs * CONTEXT_MENU_LINE_HEIGHT_RATIO
 }
 
 pub fn context_menu_item_height_estimate(tokens: &ThemeTokens) -> f32 {
@@ -75,17 +78,19 @@ pub fn context_menu_actionable_row(
     // Radix keeps disabled/loading menu rows visible but inert. Centralizing the
     // row state prevents feature menus from drifting on cursor, hover, or opacity.
     if context_menu_item_is_actionable(disabled, loading) {
-        item.cursor_pointer().hover(move |item| {
-            let item = if let Some(background) = style.hover_background {
-                item.bg(background)
-            } else {
-                item
-            };
-            if let Some(text_color) = style.hover_text_color {
-                item.text_color(text_color)
-            } else {
-                item
+        let item = item.cursor_pointer();
+        if style == ContextMenuActionableStyle::default() {
+            return item;
+        }
+        item.update_hover_style(move |hover| {
+            let mut hover = hover.unwrap_or_default();
+            if let Some(background) = style.hover_background {
+                hover = hover.bg(background);
             }
+            if let Some(color) = style.hover_text_color {
+                hover = hover.text_color(color);
+            }
+            Some(hover)
         })
     } else {
         // Loading rows are semantically inert like disabled Radix menu items.
@@ -93,6 +98,7 @@ pub fn context_menu_actionable_row(
         // `disabled = false` and rely on this shared action guard for loading.
         item.opacity(CONTEXT_MENU_DISABLED_OPACITY)
             .cursor(context_menu_action_cursor(disabled, loading))
+            .update_hover_style(|_| None)
     }
 }
 
@@ -148,10 +154,33 @@ pub fn context_menu_item(
 ) -> Div {
     context_menu_item_row(tokens, kind, inset, disabled)
         .child(context_menu_builtin_indicator(tokens, kind))
-        .child(label.into())
+        .child(div().flex_1().min_w_0().truncate().child(label.into()))
         .when(kind == ContextMenuItemKind::Submenu, |item| {
-            item.child(context_menu_chevron(tokens, "›"))
+            item.child(menu_submenu_chevron(tokens))
         })
+}
+
+pub fn context_menu_item_with_icon(
+    tokens: &ThemeTokens,
+    icon_path: &'static str,
+    label: impl Into<String>,
+    danger: bool,
+    disabled: bool,
+) -> Div {
+    menu_item_with_icon(tokens, icon_path, label, danger, disabled)
+        .line_height(px(context_menu_line_height(tokens)))
+}
+
+pub fn context_menu_item_with_icon_and_shortcut(
+    tokens: &ThemeTokens,
+    icon_path: &'static str,
+    label: impl Into<String>,
+    shortcut: impl IntoElement,
+    danger: bool,
+    disabled: bool,
+) -> Div {
+    context_menu_item_with_icon(tokens, icon_path, label, danger, disabled)
+        .child(context_menu_trailing_slot().child(shortcut))
 }
 
 pub fn context_menu_item_with_trailing(
@@ -164,7 +193,7 @@ pub fn context_menu_item_with_trailing(
 ) -> Div {
     context_menu_item_row(tokens, kind, inset, disabled)
         .child(context_menu_builtin_indicator(tokens, kind))
-        .child(label.into())
+        .child(div().flex_1().min_w_0().truncate().child(label.into()))
         .child(context_menu_trailing_slot().child(trailing))
 }
 
@@ -194,8 +223,8 @@ pub fn context_menu_sub_trigger(
             tokens,
             ContextMenuItemKind::Submenu,
         ))
-        .child(label.into())
-        .child(context_menu_chevron(tokens, "›"))
+        .child(div().flex_1().min_w_0().truncate().child(label.into()))
+        .child(menu_submenu_chevron(tokens))
 }
 
 pub fn context_menu_checkbox_item(
@@ -212,7 +241,7 @@ pub fn context_menu_checkbox_item(
         disabled,
     )
     .child(context_menu_indicator_slot(tokens).when(checked, |slot| slot.child(check_icon)))
-    .child(label.into())
+    .child(div().flex_1().min_w_0().truncate().child(label.into()))
 }
 
 pub fn context_menu_radio_item(
@@ -227,10 +256,10 @@ pub fn context_menu_radio_item(
                 div()
                     .size(px(CONTEXT_MENU_RADIO_DOT_SIZE))
                     .rounded_full()
-                    .bg(rgb(tokens.ui.text)),
+                    .bg(rgb(tokens.ui.accent)),
             )
         }))
-        .child(label.into())
+        .child(div().flex_1().min_w_0().truncate().child(label.into()))
 }
 
 pub fn context_menu_label(tokens: &ThemeTokens, label: impl Into<String>, inset: bool) -> Div {
@@ -242,7 +271,7 @@ pub fn context_menu_label(tokens: &ThemeTokens, label: impl Into<String>, inset:
             tokens.metrics.ui_menu_item_padding_x
         }))
         .py(px(tokens.metrics.ui_menu_item_padding_y))
-        .text_size(px(tokens.metrics.ui_text_sm))
+        .text_size(px(tokens.metrics.ui_text_2xs))
         .line_height(px(context_menu_line_height(tokens)))
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(rgb(tokens.ui.text_muted))
@@ -250,20 +279,11 @@ pub fn context_menu_label(tokens: &ThemeTokens, label: impl Into<String>, inset:
 }
 
 pub fn context_menu_separator(tokens: &ThemeTokens) -> Div {
-    div()
-        .mx(px(-tokens.metrics.ui_menu_padding))
-        .my(px(tokens.metrics.ui_menu_padding))
-        .h(px(1.0))
-        .bg(rgb(tokens.ui.border))
+    menu_separator(tokens)
 }
 
 pub fn context_menu_shortcut(tokens: &ThemeTokens, shortcut: impl Into<String>) -> Div {
-    div()
-        .ml_auto()
-        .flex_none()
-        .text_size(px(tokens.metrics.ui_text_xs))
-        .text_color(rgb(tokens.ui.text_muted))
-        .child(shortcut.into())
+    menu_shortcut(tokens, shortcut)
 }
 
 pub fn context_menu_item_row(
@@ -281,7 +301,7 @@ pub fn context_menu_item_row(
     } else {
         tokens.metrics.ui_menu_item_padding_x
     };
-    let hover_bg = rgb(tokens.ui.bg_hover);
+    let hover_bg = menu_item_hover_bg(tokens, false);
 
     let item = menu_item_chrome(tokens, left_padding, tokens.metrics.ui_menu_item_padding_x)
         .line_height(px(context_menu_line_height(tokens)))
@@ -317,33 +337,20 @@ pub fn context_menu_trailing_slot() -> Div {
 }
 
 fn context_menu_builtin_indicator(tokens: &ThemeTokens, kind: ContextMenuItemKind) -> Div {
-    context_menu_indicator_slot(tokens).when(
+    menu_indicator_icon(
+        tokens,
         matches!(
             kind,
             ContextMenuItemKind::Checkbox(true) | ContextMenuItemKind::Radio(true)
         ),
-        |slot| {
-            slot.child(if matches!(kind, ContextMenuItemKind::Radio(true)) {
-                "●"
-            } else {
-                "✓"
-            })
-        },
+        matches!(kind, ContextMenuItemKind::Radio(true)),
     )
-}
-
-fn context_menu_chevron(tokens: &ThemeTokens, chevron: impl Into<String>) -> Div {
-    div()
-        .ml_auto()
-        .flex_none()
-        .text_size(px(tokens.metrics.ui_menu_icon_size))
-        .text_color(rgb(tokens.ui.text_muted))
-        .child(chevron.into())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::context_menu_item_is_actionable;
+    use super::*;
+    use crate::dropdown_menu::{DropdownMenuItemKind, dropdown_menu_item};
 
     #[test]
     fn context_menu_action_guard_blocks_disabled_or_loading_items() {
@@ -351,5 +358,83 @@ mod tests {
         assert!(!context_menu_item_is_actionable(true, false));
         assert!(!context_menu_item_is_actionable(false, true));
         assert!(!context_menu_item_is_actionable(true, true));
+    }
+
+    #[gpui::test]
+    fn dropdown_actions_compose_hover_and_keep_loading_rows_inert(cx: &mut gpui::TestAppContext) {
+        struct Menu {
+            clicked: Option<usize>,
+        }
+
+        const HEIGHT: f32 = 30.0;
+        const OVERRIDE_BG: u32 = 0x3155a4;
+        impl gpui::Render for Menu {
+            fn render(
+                &mut self,
+                _window: &mut Window,
+                cx: &mut gpui::Context<Self>,
+            ) -> impl IntoElement {
+                let tokens = oxideterm_theme::default_tokens();
+                div().w(px(180.0)).flex().flex_col().children(
+                    [Some(rgb(OVERRIDE_BG)), None, None]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, hover_background)| {
+                            let loading = index == 2;
+                            let item = dropdown_menu_item(
+                                &tokens,
+                                "Name",
+                                DropdownMenuItemKind::Radio(false),
+                                false,
+                                false,
+                            )
+                            .h(px(HEIGHT));
+                            let item = context_menu_actionable_row(
+                                item,
+                                false,
+                                loading,
+                                ContextMenuActionableStyle {
+                                    hover_background,
+                                    hover_text_color: None,
+                                },
+                            );
+                            context_menu_action(
+                                item,
+                                false,
+                                loading,
+                                cx.listener(move |this, _, _, _| this.clicked = Some(index)),
+                            )
+                        }),
+                )
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|_, _| Menu { clicked: None });
+        let default_bg = menu_item_hover_bg(&oxideterm_theme::default_tokens(), false);
+        let modifiers = gpui::Modifiers::default();
+        for (index, expected) in [Some(rgb(OVERRIDE_BG)), Some(default_bg), None]
+            .into_iter()
+            .enumerate()
+        {
+            let pointer = gpui::point(px(90.0), px(HEIGHT * (index as f32 + 0.5)));
+            cx.simulate_mouse_move(pointer, None, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            cx.update(|window, _| {
+                let backgrounds = window
+                    .painted_quads()
+                    .into_iter()
+                    .filter_map(|quad| quad.background.as_solid())
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    backgrounds,
+                    expected.map(Into::into).into_iter().collect::<Vec<_>>()
+                );
+            });
+            cx.simulate_click(pointer, modifiers);
+            assert_eq!(
+                view.read_with(cx, |view, _| view.clicked),
+                Some(index.min(1))
+            );
+        }
     }
 }

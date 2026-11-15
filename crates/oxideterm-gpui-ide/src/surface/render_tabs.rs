@@ -267,45 +267,37 @@ impl IdeSurface {
             .map(|tab| tab.is_pinned)
             .unwrap_or(false);
 
-        // Tauri `IdeEditorTabs.tsx` uses a fixed z-50 elevated menu with
-        // min-w-[140px], rounded-md, py-1, and two text-xs actions.
-        let popup = div()
-            .w(px(IDE_TAB_CONTEXT_MENU_WIDTH))
-            .py(px(IDE_TAB_CONTEXT_MENU_PADDING_Y))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg_elevated))
-            .shadow_lg()
-            .child(self.render_tab_context_menu_item(
-                "lucide/pin.svg",
-                if pinned {
-                    self.labels.unpin_tab.clone()
-                } else {
-                    self.labels.pin_tab.clone()
-                },
-                cx.listener(move |this, _event, _window, cx| {
-                    this.toggle_tab_pin(menu.tab_id, cx);
-                    this.tab_context_menu = None;
-                    cx.stop_propagation();
-                }),
-            ))
-            .child(self.render_tab_context_menu_item(
-                "lucide/x.svg",
-                self.labels.close_tab.clone(),
-                cx.listener(move |this, _event, _window, cx| {
-                    this.close_tab(menu.tab_id, cx);
-                    this.tab_context_menu = None;
-                    cx.stop_propagation();
-                }),
-            ))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|_this, _event, _window, cx| {
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element();
+        let popup = context_menu_event_boundary(
+            context_menu_content(&self.tokens)
+                .w(px(IDE_TAB_CONTEXT_MENU_WIDTH))
+                .min_w_0()
+                .child(self.render_tab_context_menu_item(
+                    "lucide/pin.svg",
+                    if pinned {
+                        self.labels.unpin_tab.clone()
+                    } else {
+                        self.labels.pin_tab.clone()
+                    },
+                    false,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.toggle_tab_pin(menu.tab_id, cx);
+                        this.tab_context_menu = None;
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(context_menu_separator(&self.tokens))
+                .child(self.render_tab_context_menu_item(
+                    "lucide/x.svg",
+                    self.labels.close_tab.clone(),
+                    true,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.close_tab(menu.tab_id, cx);
+                        this.tab_context_menu = None;
+                        cx.stop_propagation();
+                    }),
+                )),
+        )
+        .into_any_element();
 
         popover_backdrop()
             .on_mouse_down(
@@ -341,23 +333,16 @@ impl IdeSurface {
         &self,
         icon: &'static str,
         label: String,
+        danger: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
-        div()
-            .h(px(IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap_2()
-            .px_3()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .child(self.icon(icon, 12.0, self.tokens.ui.text))
-            .child(div().truncate().child(label))
-            .on_mouse_down(MouseButton::Left, listener)
-            .into_any_element()
+        context_menu_action(
+            context_menu_item_with_icon(&self.tokens, icon, label, danger, false).w_full(),
+            false,
+            false,
+            listener,
+        )
+        .into_any_element()
     }
 
     fn open_tree_context_menu(
@@ -401,14 +386,11 @@ impl IdeSurface {
         let multiple = self.workspace.file_tree().selection().len() > 1;
         let paste_disabled = remote_disabled || self.tree_clipboard.is_none();
 
-        let popup = div()
-            .w(px(IDE_TREE_CONTEXT_MENU_WIDTH))
-            .py(px(IDE_TREE_CONTEXT_MENU_PADDING_Y))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(rgb(self.tokens.ui.bg))
-            .shadow_lg()
+        let popup = context_menu_event_boundary(
+            context_menu_content(&self.tokens)
+                .w(px(IDE_TREE_CONTEXT_MENU_WIDTH))
+                .min_w_0(),
+        )
             .child(self.render_tree_context_menu_item(
                 "lucide/file-plus.svg",
                 self.labels.context_new_file.clone(),
@@ -542,7 +524,7 @@ impl IdeSurface {
                 }),
             ))
             .child(self.render_tree_context_menu_item(
-                "lucide/clipboard-paste.svg",
+                "lucide/file-text.svg",
                 self.labels.context_paste.clone(),
                 None,
                 false,
@@ -582,8 +564,6 @@ impl IdeSurface {
                     }
                 }),
             ))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .into_any_element();
 
         popover_backdrop()
@@ -625,57 +605,24 @@ impl IdeSurface {
         disabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> AnyElement {
-        let text_color = if danger {
-            TAILWIND_RED_400
-        } else {
-            self.tokens.ui.text
-        };
-        let hover_bg = if danger {
-            rgba((TAILWIND_RED_500 << 8) | IDE_TREE_CONTEXT_MENU_DANGER_BG_ALPHA)
-        } else {
-            rgb(self.tokens.ui.bg_hover)
-        };
-        div()
-            .h(px(IDE_TREE_CONTEXT_MENU_ITEM_HEIGHT))
-            .w_full()
-            .flex()
-            .items_center()
-            .px_3()
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(text_color))
-            .opacity(if disabled { 0.5 } else { 1.0 })
-            .when(!disabled, |this| {
-                this.cursor_pointer().hover(move |style| style.bg(hover_bg))
-            })
-            .child(
-                svg()
-                    .path(icon)
-                    .size(px(12.0))
-                    .text_color(rgba((text_color << 8) | IDE_TREE_CONTEXT_MENU_ICON_ALPHA)),
+        let row = if let Some(shortcut) = shortcut {
+            context_menu_item_with_icon_and_shortcut(
+                &self.tokens,
+                icon,
+                label,
+                context_menu_shortcut(&self.tokens, shortcut),
+                danger,
+                disabled,
             )
-            .child(div().w(px(8.0)))
-            .child(div().flex_1().min_w_0().truncate().child(label))
-            .when_some(shortcut, |this, shortcut| {
-                this.child(
-                    div()
-                        .ml_4()
-                        .text_size(px(IDE_TREE_CONTEXT_MENU_SHORTCUT_SIZE))
-                        .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
-                        .child(shortcut),
-                )
-            })
-            .when(!disabled, |this| {
-                this.on_mouse_down(MouseButton::Left, listener)
-            })
-            .into_any_element()
+        } else {
+            context_menu_item_with_icon(&self.tokens, icon, label, danger, disabled)
+        }
+        .w_full();
+        context_menu_action(row, disabled, false, listener).into_any_element()
     }
 
     fn render_tree_context_menu_divider(&self) -> AnyElement {
-        div()
-            .h(px(1.0))
-            .my(px(IDE_TREE_CONTEXT_MENU_PADDING_Y))
-            .bg(rgb(self.tokens.ui.border))
-            .into_any_element()
+        context_menu_separator(&self.tokens).into_any_element()
     }
 
     fn render_empty_editor(&self, _cx: &mut Context<Self>) -> AnyElement {

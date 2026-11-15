@@ -7,7 +7,7 @@ use gpui::{
     Anchor, AnchoredPositionMode, AnyElement, App, AppContext, Context, CursorStyle, Div,
     EmptyView, Entity, InteractiveElement, IntoElement, MouseButton, MouseDownEvent, ParentElement,
     Render, ScrollEvent, SharedString, StatefulInteractiveElement, Styled, Window, anchored,
-    deferred, div, prelude::FluentBuilder, px, rgb, rgba,
+    deferred, div, prelude::FluentBuilder, px, rgb, rgba, svg,
 };
 use oxideterm_editor_core::{BufferOffset, Selection};
 use oxideterm_editor_syntax::{BracketPair, SyntaxScope};
@@ -41,9 +41,9 @@ const CM_SELECTION_RADIUS: f32 = 2.0;
 const CM_CURSOR_WIDTH: f32 = 2.0;
 const CM_INDENT_GUIDE_WIDTH: f32 = 1.0;
 const CM_FOLD_ICON_WIDTH: f32 = 14.0;
-const CM_CONTEXT_MENU_WIDTH: f32 = 160.0;
+const CM_CONTEXT_MENU_WIDTH: f32 = 168.0;
 const CM_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
-const CM_CONTEXT_MENU_PADDING_Y: f32 = 4.0;
+const CM_CONTEXT_MENU_PADDING: f32 = 4.0;
 const CM_CONTEXT_MENU_Z: usize = 60;
 const CM_SCROLLBAR_TRACK_WIDTH: f32 = 10.0;
 const CM_SCROLLBAR_THUMB_WIDTH: f32 = 5.0;
@@ -1030,7 +1030,7 @@ impl TextEditorView {
             .min(
                 f32::from(viewport.height)
                     - CM_CONTEXT_MENU_ITEM_HEIGHT * 4.0
-                    - CM_CONTEXT_MENU_PADDING_Y * 2.0
+                    - CM_CONTEXT_MENU_PADDING * 2.0
                     - 8.0,
             )
             .max(8.0);
@@ -1038,13 +1038,15 @@ impl TextEditorView {
         let can_edit = !self.read_only;
         let popup = div()
             .w(px(CM_CONTEXT_MENU_WIDTH))
-            .py(px(CM_CONTEXT_MENU_PADDING_Y))
-            .rounded(px(6.0))
+            .p(px(CM_CONTEXT_MENU_PADDING))
+            .rounded(px(10.0))
             .border_1()
-            .border_color(rgb(self.appearance.border_hex))
-            .bg(rgb(self.appearance.gutter_background_hex))
+            .border_color(rgba((self.appearance.border_hex << 8) | 0x99))
+            .bg(rgba((self.appearance.gutter_background_hex << 8) | 0xf2))
+            .font_family(oxideterm_gpui_ui::tauri_ui_font_family(""))
             .shadow_lg()
             .child(self.render_context_menu_item(
+                "lucide/copy.svg",
                 self.context_menu_labels.copy.clone(),
                 has_selection,
                 cx.listener(|this, _event, _window, cx| {
@@ -1055,6 +1057,7 @@ impl TextEditorView {
                 }),
             ))
             .child(self.render_context_menu_item(
+                "lucide/scissors.svg",
                 self.context_menu_labels.cut.clone(),
                 has_selection && can_edit,
                 cx.listener(|this, _event, _window, cx| {
@@ -1064,6 +1067,7 @@ impl TextEditorView {
                 }),
             ))
             .child(self.render_context_menu_item(
+                "lucide/file-text.svg",
                 self.context_menu_labels.paste.clone(),
                 can_edit,
                 cx.listener(|this, _event, _window, cx| {
@@ -1074,6 +1078,7 @@ impl TextEditorView {
                 }),
             ))
             .child(self.render_context_menu_item(
+                "lucide/check-square.svg",
                 self.context_menu_labels.select_all.clone(),
                 !self.buffer.is_empty(),
                 cx.listener(|this, _event, _window, cx| {
@@ -1119,25 +1124,36 @@ impl TextEditorView {
 
     fn render_context_menu_item(
         &self,
+        icon_path: &'static str,
         label: String,
         enabled: bool,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> Div {
+        let text_hex = self.appearance.text_hex;
         div()
             .h(px(CM_CONTEXT_MENU_ITEM_HEIGHT))
             .w_full()
             .flex()
             .items_center()
-            .px_3()
+            .gap(px(8.0))
+            .px(px(8.0))
+            .rounded(px(6.0))
             .text_size(px(12.0))
-            .text_color(rgb(self.appearance.text_hex))
+            .text_color(rgb(text_hex))
             .opacity(if enabled { 1.0 } else { 0.45 })
             .when(enabled, |this| {
                 this.cursor_pointer()
-                    .hover(|style| style.bg(rgb(self.appearance.selection_hex)))
+                    .hover(|style| style.bg(rgba((self.appearance.selection_hex << 8) | 0xb3)))
                     .on_mouse_down(MouseButton::Left, listener)
             })
-            .child(div().truncate().child(label))
+            .child(
+                svg()
+                    .path(icon_path)
+                    .size(px(13.0))
+                    .flex_none()
+                    .text_color(rgba((text_hex << 8) | 0xd9)),
+            )
+            .child(div().flex_1().min_w_0().truncate().child(label))
     }
 
     fn render_line_text(

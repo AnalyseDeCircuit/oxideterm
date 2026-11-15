@@ -28,6 +28,11 @@ use oxideterm_gpui_ui::{
         ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions, button_with,
         toolbar_button,
     },
+    context_menu::{
+        context_menu_action, context_menu_content, context_menu_event_boundary,
+        context_menu_item_with_icon, context_menu_item_with_icon_and_shortcut,
+        context_menu_separator, context_menu_shortcut,
+    },
     modal::{
         dialog_backdrop, dialog_content, dialog_description, dialog_footer, dialog_header,
         dialog_title, modal_body, popover_backdrop,
@@ -94,19 +99,13 @@ const IDE_FOLDER_DIALOG_ROW_PADDING_Y: f32 = 6.0;
 const IDE_FOLDER_DIALOG_ICON_SIZE: f32 = 16.0;
 const IDE_FOLDER_DIALOG_SELECTED_ALPHA: u32 = 0x33;
 const IDE_FOLDER_PATH_INPUT_ANCHOR_ID: TextInputAnchorId = TextInputAnchorId(1);
-const IDE_TAB_CONTEXT_MENU_WIDTH: f32 = 140.0;
-const IDE_TAB_CONTEXT_MENU_PADDING_Y: f32 = 4.0;
+const IDE_TAB_CONTEXT_MENU_WIDTH: f32 = 156.0;
 const IDE_TAB_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
 const IDE_TAB_CONTEXT_MENU_Z: usize = 50;
 const IDE_TAB_REORDER_ACTIVATION_PX: f32 = 5.0;
-const IDE_TREE_CONTEXT_MENU_WIDTH: f32 = 180.0;
+const IDE_TREE_CONTEXT_MENU_WIDTH: f32 = 196.0;
 const IDE_TREE_CONTEXT_MENU_MAX_HEIGHT: f32 = 280.0;
-const IDE_TREE_CONTEXT_MENU_PADDING_Y: f32 = 4.0;
-const IDE_TREE_CONTEXT_MENU_ITEM_HEIGHT: f32 = 28.0;
 const IDE_TREE_CONTEXT_MENU_Z: usize = 100;
-const IDE_TREE_CONTEXT_MENU_SHORTCUT_SIZE: f32 = 10.0;
-const IDE_TREE_CONTEXT_MENU_ICON_ALPHA: u32 = 0xb3;
-const IDE_TREE_CONTEXT_MENU_DANGER_BG_ALPHA: u32 = 0x1a;
 const IDE_AGENT_MENU_WIDTH: f32 = 180.0;
 const IDE_AGENT_MENU_MANUAL_WIDTH: f32 = 300.0;
 const IDE_AGENT_MENU_PADDING_Y: f32 = 4.0;

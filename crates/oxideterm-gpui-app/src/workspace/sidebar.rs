@@ -5,12 +5,12 @@ use oxideterm_gpui_ui::tree::{TreeGuideMetrics, tree_guide_child};
 
 // Active sessions are a high-frequency navigator, so keep its icon scale compact
 // while deriving row heights and typography from ThemeTokens.metrics.
-const SESSION_TREE_ICON_SIZE: f32 = 14.0;
+pub(super) const SESSION_TREE_ICON_SIZE: f32 = 14.0;
 const SESSION_TREE_CHILD_ICON_SIZE: f32 = 12.0;
 // Primary sidebar content needs a small inset below the header divider so the
 // first interactive surface does not visually merge with workspace chrome.
-const PRIMARY_SIDEBAR_CONTENT_TOP_INSET: f32 = 4.0;
-const SESSION_ROW_SELECTED_BG_ALPHA: u32 = 0x1a;
+pub(super) const PRIMARY_SIDEBAR_CONTENT_TOP_INSET: f32 = 4.0;
+pub(super) const SESSION_ROW_SELECTED_BG_ALPHA: u32 = 0x1a;
 // Tauri EventLogPanel rows use `min-h-[24px]` with `px-3 py-1`; keep the
 // native estimate next to the shared virtual-list call so scroll-to-index and
 // sticky-bottom behavior stay browser-like.

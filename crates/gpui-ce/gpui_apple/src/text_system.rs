@@ -3,7 +3,7 @@ use collections::{HashMap, HashSet};
 use core_foundation::{
     array::{CFArray, CFArrayRef},
     attributed_string::CFMutableAttributedString,
-    base::{CFRange, TCFType},
+    base::{CFEqual, CFHash, CFRange, TCFType},
     number::CFNumber,
     string::CFString,
 };
@@ -11,6 +11,7 @@ use core_graphics::{
     base::{CGFloat, CGGlyph, kCGImageAlphaPremultipliedLast},
     color_space::CGColorSpace,
     context::{CGContext, CGTextDrawingMode},
+    font::CGFont,
     geometry::CGPoint,
 };
 use core_text::{
@@ -32,6 +33,7 @@ use font_kit::{
     source::SystemSource,
     sources::mem::MemSource,
 };
+use foreign_types::ForeignType;
 use gpui::{
     Bounds, DevicePixels, Font, FontFallbacks, FontFeatures, FontId, FontMetrics, FontRun,
     FontStyle, FontWeight, GlyphId, LineLayout, Pixels, PlatformTextSystem, RenderGlyphParams,
@@ -45,7 +47,13 @@ use pathfinder_geometry::{
     vector::Vector2F,
 };
 use smallvec::SmallVec;
-use std::{borrow::Cow, char, convert::TryFrom, sync::Arc};
+use std::{
+    borrow::Cow,
+    char,
+    convert::TryFrom,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 #[cfg(target_os = "macos")]
 use {
@@ -69,12 +77,32 @@ struct FontKey {
     font_fallbacks: Option<FontFallbacks>,
 }
 
+// OxideTerm: Glyph IDs belong to the face selected by CoreText, not its name.
+// CGFont identity excludes the layout size, so resizing can reuse the raster font.
+struct RasterFace(CGFont);
+
+impl PartialEq for RasterFace {
+    fn eq(&self, other: &Self) -> bool {
+        // Both CGFont handles are live Core Foundation objects.
+        unsafe { CFEqual(self.0.as_ptr().cast(), other.0.as_ptr().cast()) != 0 }
+    }
+}
+
+impl Eq for RasterFace {}
+
+impl Hash for RasterFace {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // Use Core Foundation's hash to agree with its equality semantics.
+        unsafe { CFHash(self.0.as_ptr().cast()) }.hash(state);
+    }
+}
+
 struct AppleTextSystemState {
     memory_source: MemSource,
     system_source: SystemSource,
     fonts: Vec<FontKitFont>,
     font_selections: HashMap<Font, FontId>,
-    font_ids_by_postscript_name: HashMap<String, FontId>,
+    font_ids_by_raster_face: HashMap<RasterFace, FontId>,
     font_ids_by_font_key: HashMap<FontKey, SmallVec<[FontId; 4]>>,
     postscript_names_by_font_id: HashMap<FontId, String>,
 }
@@ -87,7 +115,7 @@ impl AppleTextSystem {
             system_source: SystemSource::new(),
             fonts: Vec::new(),
             font_selections: HashMap::default(),
-            font_ids_by_postscript_name: HashMap::default(),
+            font_ids_by_raster_face: HashMap::default(),
             font_ids_by_font_key: HashMap::default(),
             postscript_names_by_font_id: HashMap::default(),
         }))
@@ -366,9 +394,7 @@ impl AppleTextSystemState {
             };
             // Dedup is scoped to this single `load_family` call (issue #55472).
             // The same family can be reloaded later under a different `FontKey`
-            // (different features/fallbacks); a global check against
-            // `font_ids_by_postscript_name` would skip every already-registered
-            // font and leave the second call's `font_ids` empty.
+            // (different features/fallbacks) even if its raster face is already cached.
             if !postscript_names_seen.insert(postscript_name.clone()) {
                 log::debug!(
                     "skipping duplicate font {:?} with PostScript name {:?} \
@@ -381,8 +407,8 @@ impl AppleTextSystemState {
             }
             let font_id = FontId(self.fonts.len());
             font_ids.push(font_id);
-            self.font_ids_by_postscript_name
-                .insert(postscript_name.clone(), font_id);
+            self.font_ids_by_raster_face
+                .insert(RasterFace(font.native_font().copy_to_CGFont()), font_id);
             self.postscript_names_by_font_id
                 .insert(font_id, postscript_name);
             self.fonts.push(font);
@@ -401,19 +427,16 @@ impl AppleTextSystemState {
     }
 
     fn id_for_native_font(&mut self, requested_font: CTFont) -> FontId {
-        let postscript_name = requested_font.postscript_name();
-        if let Some(font_id) = self.font_ids_by_postscript_name.get(&postscript_name) {
+        let face = RasterFace(requested_font.copy_to_CGFont());
+        if let Some(font_id) = self.font_ids_by_raster_face.get(&face) {
             *font_id
         } else {
             let font_id = FontId(self.fonts.len());
-            self.font_ids_by_postscript_name
-                .insert(postscript_name.clone(), font_id);
             self.postscript_names_by_font_id
-                .insert(font_id, postscript_name);
+                .insert(font_id, requested_font.postscript_name());
             self.fonts
-                .push(font_kit::font::Font::from_core_graphics_font(
-                    requested_font.copy_to_CGFont(),
-                ));
+                .push(FontKitFont::from_core_graphics_font(face.0.clone()));
+            self.font_ids_by_raster_face.insert(face, font_id);
             font_id
         }
     }
@@ -793,6 +816,89 @@ mod tests {
         FontFallbacks, FontFeatures, FontId, FontRun, GlyphId, PlatformTextSystem, font, px,
     };
     use std::sync::Arc;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn same_name_fallback_keeps_the_face_that_shaped_the_glyph() {
+        use core_foundation::{
+            array::CFArray, base::TCFType, dictionary::CFDictionary, string::CFString,
+        };
+        use core_text::{
+            font,
+            font_descriptor::{
+                CTFontDescriptor, CTFontDescriptorCreateWithAttributes,
+                kCTFontCascadeListAttribute, kCTFontNameAttribute,
+            },
+            font_manager::create_font_descriptor,
+        };
+        use font_kit::font::Font as FontKitFont;
+
+        // Both fixtures have the same name and glyph count but swap two CJK glyph IDs.
+        let fonts = AppleTextSystem::new();
+        fonts
+            .add_fonts(vec![
+                include_bytes!("text_system/fixtures/same-name-first.ttf")
+                    .as_slice()
+                    .into(),
+            ])
+            .unwrap();
+        let first = fonts
+            .font_id(&gpui::font("OxideTerm Font Collision Fixture"))
+            .unwrap();
+        assert_eq!(fonts.glyph_for_char(first, '扩'), Some(GlyphId(3)));
+
+        // A data-backed cascade descriptor avoids any dependence on installed fonts.
+        let fallback =
+            create_font_descriptor(include_bytes!("text_system/fixtures/same-name-second.ttf"))
+                .unwrap();
+        let cascade = CFArray::from_CFTypes(&[fallback]);
+        let descriptor = unsafe {
+            let attrs = CFDictionary::from_CFType_pairs(&[
+                (
+                    CFString::wrap_under_get_rule(kCTFontNameAttribute),
+                    CFString::new("Helvetica").as_CFType(),
+                ),
+                (
+                    CFString::wrap_under_get_rule(kCTFontCascadeListAttribute),
+                    cascade.as_CFType(),
+                ),
+            ]);
+            CTFontDescriptor::wrap_under_create_rule(CTFontDescriptorCreateWithAttributes(
+                attrs.as_concrete_TypeRef(),
+            ))
+        };
+        let primary = {
+            let mut state = fonts.0.write();
+            let id = FontId(state.fonts.len());
+            let native_font = font::new_from_descriptor(&descriptor, 16.0);
+            // FontKit takes ownership of this CoreText font with its cascade intact.
+            let primary = unsafe { FontKitFont::from_core_text_font_no_path(native_font) };
+            state.fonts.push(primary);
+            id
+        };
+        let shape = |size| {
+            let layout = fonts.layout_line(
+                "扩",
+                px(size),
+                &[FontRun {
+                    font_id: primary,
+                    len: "扩".len(),
+                    letter_spacing: None,
+                }],
+            );
+            let [run] = layout.runs.as_slice() else {
+                panic!("expected exactly one fallback run");
+            };
+            assert_eq!(run.glyphs.len(), 1);
+            assert_eq!(run.glyphs[0].id, GlyphId(2));
+            assert_eq!(fonts.glyph_for_char(run.font_id, '扩'), Some(GlyphId(2)));
+            run.font_id
+        };
+        let second = shape(16.0);
+        assert_ne!(second, first);
+        assert_eq!(shape(22.0), second);
+        assert_eq!(fonts.glyph_for_char(first, '扩'), Some(GlyphId(3)));
+    }
 
     #[test]
     fn test_reload_family_with_features_and_fallbacks() {

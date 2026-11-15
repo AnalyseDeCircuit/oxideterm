@@ -3,7 +3,7 @@ use super::*;
 
 use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::context_menu::{
-    ContextMenuItemKind, context_menu_content, context_menu_event_boundary, context_menu_item,
+    context_menu_content, context_menu_event_boundary, context_menu_item_with_icon,
     context_menu_separator,
 };
 use oxideterm_gpui_ui::modal::overlay_content_boundary;
@@ -1347,10 +1347,10 @@ impl WorkspaceApp {
                     .overflow_y_scroll()
                     .when(renamable, |content| {
                         content.child(
-                            context_menu_item(
+                            context_menu_item_with_icon(
                                 &self.tokens,
+                                "lucide/pencil.svg",
                                 self.i18n.t("tabbar.rename_tab"),
-                                ContextMenuItemKind::Plain,
                                 false,
                                 false,
                             )
@@ -1367,10 +1367,10 @@ impl WorkspaceApp {
                         content
                             .child(context_menu_separator(&self.tokens))
                             .child(
-                                context_menu_item(
+                                context_menu_item_with_icon(
                                     &self.tokens,
+                                    "lucide/square-split-horizontal.svg",
                                     self.i18n.t("tabbar.split_into_active_horizontal"),
-                                    ContextMenuItemKind::Plain,
                                     false,
                                     false,
                                 )
@@ -1388,10 +1388,10 @@ impl WorkspaceApp {
                                 ),
                             )
                             .child(
-                                context_menu_item(
+                                context_menu_item_with_icon(
                                     &self.tokens,
+                                    "lucide/square-split-vertical.svg",
                                     self.i18n.t("tabbar.split_into_active_vertical"),
-                                    ContextMenuItemKind::Plain,
                                     false,
                                     false,
                                 )
@@ -1418,8 +1418,15 @@ impl WorkspaceApp {
                                     .map(move |direction| (target, title.clone(), direction))
                             })
                             .map(|(target, title, direction)| {
-                                context_menu_item(
+                                let icon_path = match direction {
+                                    SplitDirection::Horizontal => {
+                                        "lucide/square-split-horizontal.svg"
+                                    }
+                                    SplitDirection::Vertical => "lucide/square-split-vertical.svg",
+                                };
+                                context_menu_item_with_icon(
                                     &self.tokens,
+                                    icon_path,
                                     self.i18n_replace(
                                         match direction {
                                             SplitDirection::Horizontal => {
@@ -1431,7 +1438,6 @@ impl WorkspaceApp {
                                         },
                                         &[("title", title)],
                                     ),
-                                    ContextMenuItemKind::Plain,
                                     false,
                                     false,
                                 )
@@ -1451,14 +1457,18 @@ impl WorkspaceApp {
                             }),
                     )
                     .child(
-                        context_menu_item(
+                        context_menu_item_with_icon(
                             &self.tokens,
+                            if detached {
+                                "lucide/arrow-left-right.svg"
+                            } else {
+                                "lucide/external-link.svg"
+                            },
                             if detached {
                                 self.i18n.t("tabbar.return_to_main_window")
                             } else {
                                 self.i18n.t("tabbar.detach_to_window")
                             },
-                            ContextMenuItemKind::Plain,
                             false,
                             false,
                         )
@@ -1477,10 +1487,10 @@ impl WorkspaceApp {
                     )
                     .when(is_session_manager, |content| {
                         content.child(
-                            context_menu_item(
+                            context_menu_item_with_icon(
                                 &self.tokens,
+                                "lucide/panel-left.svg",
                                 self.i18n.t("tabbar.switch_to_sidebar"),
-                                ContextMenuItemKind::Plain,
                                 false,
                                 false,
                             )
@@ -1508,11 +1518,11 @@ impl WorkspaceApp {
                     })
                     .child(context_menu_separator(&self.tokens))
                     .child(
-                        context_menu_item(
+                        context_menu_item_with_icon(
                             &self.tokens,
+                            "lucide/x.svg",
                             self.i18n.t("tabbar.close_tab"),
-                            ContextMenuItemKind::Plain,
-                            false,
+                            true,
                             false,
                         )
                         .on_mouse_down(

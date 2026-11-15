@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_gpui_ui::context_menu::{context_menu_content, context_menu_separator};
 
 mod preview;
 
@@ -52,15 +53,13 @@ impl WorkspaceApp {
             )
         };
         let popup = context_menu_event_boundary(
-            material_surface(&self.tokens, div(), MaterialRole::Popover)
+            context_menu_content(&self.tokens)
                 .w(px(FILE_MANAGER_CONTEXT_MENU_WIDTH))
+                .min_w_0()
                 .max_h(px(max_height))
-                .overflow_hidden()
-                .p(px(FILE_MANAGER_CONTEXT_MENU_PADDING))
-                .rounded(px(self.tokens.radii.sm))
-                .border_1()
-                .border_color(file_manager_border(theme.border, has_background))
-                .shadow_lg(),
+                .when(has_background, |surface| {
+                    surface.border_color(file_manager_border(theme.border, has_background))
+                }),
         )
         .when_some(menu.file.clone(), |menu_el, file| {
             if file.file_type == LocalFileType::Directory {
@@ -409,17 +408,21 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(8.0))
-            .px(px(12.0))
-            .py(px(6.0))
-            .rounded(px(self.tokens.radii.xs))
+            .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+            .py(px(5.0))
+            .rounded(px(self.tokens.radii.md))
             .text_size(px(FILE_MANAGER_TEXT_XS))
             .text_color(rgb(color))
             .child(Self::render_lucide_icon(
                 icon,
                 FILE_MANAGER_ICON_SM,
-                rgb(color),
+                if danger {
+                    rgb(color).into()
+                } else {
+                    rgba((color << 8) | 0xd9)
+                },
             ))
-            .child(div().truncate().child(self.render_display_text_with_role(
+            .child(div().flex_1().min_w_0().truncate().child(self.render_display_text_with_role(
                 SelectableTextRole::NonSelectable,
                 "file-manager-context-menu",
                 label.clone(),
@@ -427,6 +430,11 @@ impl WorkspaceApp {
                 color,
                 cx,
             )));
+        let hover_bg = if danger {
+            rgba((FILE_MANAGER_RED << 8) | 0x1f)
+        } else {
+            file_manager_hover_bg(theme.bg_hover, has_background)
+        };
         // File manager uses conditional rendering for most unavailable items,
         // but long-running local operations should leave visible menu rows inert
         // like disabled browser/Radix menu items.
@@ -445,7 +453,7 @@ impl WorkspaceApp {
             disabled,
             loading,
             ContextMenuActionableStyle {
-                hover_background: Some(file_manager_hover_bg(theme.bg_hover, has_background)),
+                hover_background: Some(hover_bg),
                 hover_text_color: None,
             },
             |_| {},
@@ -455,12 +463,8 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_file_manager_separator(&self, has_background: bool) -> AnyElement {
-        div()
-            .h(px(1.0))
-            .my(px(FILE_MANAGER_CONTEXT_MENU_PADDING))
-            .bg(file_manager_border(self.tokens.ui.border, has_background))
-            .into_any_element()
+    fn render_file_manager_separator(&self, _has_background: bool) -> AnyElement {
+        context_menu_separator(&self.tokens).into_any_element()
     }
 
     pub(in crate::workspace) fn render_file_manager_dialog(

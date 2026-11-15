@@ -621,20 +621,26 @@ impl WorkspaceApp {
         let algorithms = preference_algorithms(&form.ssh_algorithms, category);
         let index = algorithms.iter().position(|algorithm| algorithm == &name)?;
         let mut menu = context_menu_content(&self.tokens);
-        for (offset, key, disabled) in [
-            (-1, "ssh.form.ssh_algorithms_move_up", index == 0),
+        for (offset, icon_path, key, disabled) in [
+            (
+                -1,
+                "lucide/arrow-up.svg",
+                "ssh.form.ssh_algorithms_move_up",
+                index == 0,
+            ),
             (
                 1,
+                "lucide/arrow-down.svg",
                 "ssh.form.ssh_algorithms_move_down",
                 index + 1 == algorithms.len(),
             ),
         ] {
             let name = name.clone();
             menu = menu.child(context_menu_action(
-                context_menu_item(
+                context_menu_item_with_icon(
                     &self.tokens,
+                    icon_path,
                     self.i18n.t(key),
-                    ContextMenuItemKind::Plain,
                     false,
                     disabled,
                 ),
@@ -657,6 +663,18 @@ impl WorkspaceApp {
                 context_menu_backdrop()
                     .on_mouse_down(
                         MouseButton::Left,
+                        cx.listener(|this, _, _, cx| {
+                            this.update_connection_form_state(cx, |state| {
+                                if let Some(form) = state.form.as_mut() {
+                                    form.ssh_algorithm_menu = None;
+                                }
+                            });
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Right,
                         cx.listener(|this, _, _, cx| {
                             this.update_connection_form_state(cx, |state| {
                                 if let Some(form) = state.form.as_mut() {

@@ -430,6 +430,10 @@ in their mouse listener and notify the owning view on transitions. Session Manag
 these elements without IDs. The regression checks their painted backgrounds when entering,
 moving between, and leaving rows, including repeated movement without extra redraws inside a row.
 
+`InteractiveElement::update_hover_style` lets menu action decorators refine or clear an
+existing hover style. Keep the duplicate registration assertion on `hover` for callers that
+do not explicitly compose styles.
+
 ### Nested scroll ownership
 
 OxideTerm contains nested ordinary overflow regions and virtual lists. Preserve the event
@@ -464,6 +468,17 @@ warnings remain visible.
 `crates/gpui-ce/gpui_apple/src/text_system.rs` logs successful PostScript-name
 deduplication at debug level. Invalid-font and missing-required-glyph diagnostics
 remain warnings.
+
+### Apple CoreText fallback face identity
+
+`gpui_apple/src/text_system.rs` indexes raster fonts by their retained Core
+Graphics face, not their PostScript name or CoreText point size. A system font
+and a bundled subset can share a name while assigning different IDs to the
+same glyphs. The cache keeps the face CoreText selected so bounds and
+rasterization interpret those IDs against the correct glyph table. Family
+selection, fallback ordering, and OpenType shaping options are unchanged.
+The macOS regression shapes through a data-backed fallback with two synthetic
+same-name faces that swap glyph IDs. It also checks reuse at different sizes.
 
 ### Zero-area SVG paint semantics
 

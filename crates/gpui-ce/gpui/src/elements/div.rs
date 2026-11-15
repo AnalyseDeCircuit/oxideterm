@@ -898,6 +898,16 @@ pub trait InteractiveElement: Sized {
         self
     }
 
+    /// Refine or clear the hover style on an element supplied by another component.
+    fn update_hover_style(
+        mut self,
+        update: impl FnOnce(Option<StyleRefinement>) -> Option<StyleRefinement>,
+    ) -> Self {
+        let hover_style = &mut self.interactivity().hover_style;
+        *hover_style = update(hover_style.take().map(|style| *style)).map(Box::new);
+        self
+    }
+
     /// Animate solid hover background colors on elements with stable IDs.
     /// Geometry, focus, active styles and event dispatch remain immediate.
     fn hover_background_transition(mut self, duration: Duration) -> Self {

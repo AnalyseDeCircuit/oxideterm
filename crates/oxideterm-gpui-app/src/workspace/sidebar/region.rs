@@ -597,10 +597,10 @@ impl WorkspaceApp {
         self.workspace_tooltip_icon_button(
             LucideIcon::Search,
             self.tokens.metrics.sidebar_action_icon_size,
-            rgb(theme.text),
+            rgb(if open { theme.text } else { theme.text_muted }),
             IconButtonOptions {
                 has_background: open,
-                background: open.then_some(rgb(theme.bg_hover)),
+                background: open.then_some(rgb(theme.bg_active)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 ..IconButtonOptions::opaque_toolbar(
                     self.tokens.metrics.sidebar_action_size,
@@ -640,13 +640,50 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let query = self.session_manager.read(cx).search_query.clone();
-        self.render_session_text_input(
-            SessionManagerInput::Search,
-            &query,
-            self.i18n.t("sessionManager.toolbar.search_placeholder"),
-            cx,
-        )
+        let (query, active) = {
+            let manager = self.session_manager.read(cx);
+            (
+                manager.search_query.clone(),
+                manager.focused_input() == Some(SessionManagerInput::Search),
+            )
+        };
+        let target = ime::WorkspaceImeTarget::SessionManager(SessionManagerInput::Search);
+        let marked = self.marked_text_for_target(target, cx);
+        self.sidebar_search_row(self.workspace_sidebar_background(self.tokens.ui.shell_bg()))
+            .child(
+                self.text_input_with_workspace_ime(
+                    target,
+                    self.workspace_text_input(
+                        target,
+                        oxideterm_gpui_ui::text_input::TextInputView {
+                            value: &query,
+                            placeholder: self.i18n.t("sessionManager.toolbar.search_placeholder"),
+                            focused: active,
+                            caret_visible: self.input_caret.visible(),
+                            secret: false,
+                            selected_all: false,
+                            selected_range: self.ime_selected_range_for_target(target, cx),
+                            marked_text: marked,
+                        },
+                    )
+                    .flex_1()
+                    .min_w_0()
+                    .border_0()
+                    .bg(rgba(0x00000000))
+                    .px(px(0.0))
+                    .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+                    .line_height(px(20.0)),
+                    move |this, cx| {
+                        this.session_manager.update(cx, |manager, cx| {
+                            manager.focused_input = Some(SessionManagerInput::Search);
+                            cx.notify();
+                        });
+                        this.needs_active_pane_focus = false;
+                    },
+                    cx,
+                ),
+            )
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn render_sidebar_content(
@@ -1178,8 +1215,12 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_empty_sessions_sidebar_content(
+    pub(in crate::workspace) fn render_sidebar_empty_state(
         &self,
+        icon: LucideIcon,
+        title_id: &'static str,
+        title: String,
+        subtitle: Option<(&'static str, String)>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
@@ -1200,7 +1241,7 @@ impl WorkspaceApp {
                     .items_center()
                     .justify_center()
                     .child(div().mb_3().child(Self::render_lucide_icon(
-                        LucideIcon::Server,
+                        icon,
                         self.tokens.metrics.empty_sidebar_icon_size,
                         rgba((theme.text_muted << 8) | 0x4d),
                     )))
@@ -1214,31 +1255,49 @@ impl WorkspaceApp {
                             // user data that should start a text selection.
                             .child(self.render_display_text_with_role(
                                 SelectableTextRole::NonSelectable,
-                                "sessions-sidebar-empty-title",
+                                title_id,
                                 (),
-                                self.i18n.t("sessions.tree.no_sessions"),
+                                title,
                                 theme.text_muted,
                                 cx,
                             )),
                     )
-                    .child(
-                        div()
-                            .mt_1()
-                            .w_full()
-                            .text_center()
-                            .text_size(px(self.tokens.metrics.empty_sidebar_subtitle_font_size))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::NonSelectable,
-                                "sessions-sidebar-empty-subtitle",
-                                (),
-                                self.i18n.t("sessions.tree.click_to_add"),
-                                theme.text_muted,
-                                cx,
-                            )),
-                    ),
+                    .when_some(subtitle, |empty, (subtitle_id, subtitle)| {
+                        empty.child(
+                            div()
+                                .mt_1()
+                                .w_full()
+                                .text_center()
+                                .text_size(px(self.tokens.metrics.empty_sidebar_subtitle_font_size))
+                                .text_color(rgb(theme.text_muted))
+                                .child(self.render_display_text_with_role(
+                                    SelectableTextRole::NonSelectable,
+                                    subtitle_id,
+                                    (),
+                                    subtitle,
+                                    theme.text_muted,
+                                    cx,
+                                )),
+                        )
+                    }),
             )
             .into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_empty_sessions_sidebar_content(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.render_sidebar_empty_state(
+            LucideIcon::Server,
+            "sessions-sidebar-empty-title",
+            self.i18n.t("sessions.tree.no_sessions"),
+            Some((
+                "sessions-sidebar-empty-subtitle",
+                self.i18n.t("sessions.tree.click_to_add"),
+            )),
+            cx,
+        )
     }
 }
 

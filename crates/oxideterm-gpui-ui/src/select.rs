@@ -9,7 +9,7 @@ use oxideterm_theme::ThemeTokens;
 
 use crate::{
     button::tauri_focus_visible_ring,
-    menu::{menu_item_chrome, menu_surface_chrome},
+    menu::{menu_item_chrome, menu_separator, menu_surface_chrome},
 };
 
 const TAURI_SELECT_TRIGGER_BG_ALPHA: u32 = 0x80;
@@ -764,7 +764,7 @@ fn select_item_with_state(
         .absolute()
         .inset_0()
         .m(px(surface_inset))
-        .rounded(px(tokens.radii.xs))
+        .rounded(px(tokens.radii.md))
         .bg(if highlighted && !selected {
             rgba((tokens.ui.bg_hover << 8) | TAURI_INLINE_SELECT_HIGHLIGHT_BG_ALPHA)
         } else if selected {
@@ -787,6 +787,7 @@ fn select_item_with_state(
     .w_full()
     .h(px(tokens.metrics.ui_control_height))
     .min_w(px(0.0))
+    .text_size(px(tokens.metrics.ui_text_sm))
     .overflow_hidden()
     .child(option_surface)
     .child(
@@ -797,7 +798,14 @@ fn select_item_with_state(
             .flex()
             .items_center()
             .justify_center()
-            .child(if selected { "✓" } else { "" }),
+            .when(selected, |slot| {
+                slot.child(
+                    svg()
+                        .path("lucide/check.svg")
+                        .size(px(tokens.metrics.ui_select_check_size - 1.0))
+                        .text_color(rgb(tokens.ui.accent)),
+                )
+            }),
     )
     .child(label.into())
 }
@@ -814,11 +822,7 @@ pub fn select_label(tokens: &ThemeTokens, label: impl Into<String>) -> Div {
 }
 
 pub fn select_separator(tokens: &ThemeTokens) -> Div {
-    div()
-        .mx(px(-tokens.metrics.ui_menu_padding))
-        .my(px(tokens.metrics.ui_menu_padding))
-        .h(px(1.0))
-        .bg(rgb(tokens.ui.border))
+    menu_separator(tokens)
 }
 
 #[cfg(test)]

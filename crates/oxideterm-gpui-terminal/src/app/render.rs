@@ -10,9 +10,9 @@ use oxideterm_gpui_ui::button::{
 };
 use oxideterm_gpui_ui::confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog};
 use oxideterm_gpui_ui::context_menu::{
-    ContextMenuItemKind, context_menu_action, context_menu_backdrop, context_menu_content,
-    context_menu_event_boundary, context_menu_item, context_menu_item_with_shortcut,
-    context_menu_separator,
+    context_menu_action, context_menu_backdrop, context_menu_content, context_menu_event_boundary,
+    context_menu_item_with_icon, context_menu_item_with_icon_and_shortcut,
+    context_menu_separator, context_menu_shortcut,
 };
 use oxideterm_gpui_ui::menu::menu_content;
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};
@@ -39,7 +39,7 @@ use crate::terminal_view::*;
 // Bound stale frames under continuous output when the parser repeatedly wins the lock.
 const MAX_SNAPSHOT_DEFER_DURATION: std::time::Duration = std::time::Duration::from_millis(32);
 
-const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 220.0;
+const TERMINAL_CONTEXT_MENU_WIDTH: f32 = 228.0;
 const TERMINAL_CONTROL_ROW_HEIGHT: f32 = 34.0;
 const SERIAL_CONTROL_BUTTON_RADIUS: f32 = 999.0;
 // Keep diagnostic chrome away from the prompt and command text at the left edge.
@@ -2295,6 +2295,7 @@ impl TerminalPane {
                     .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
                     .children(trigger.labels.iter().enumerate().map(|(index, label)| {
                         self.render_terminal_context_menu_item(
+                            "lucide/zap.svg",
                             label.to_string(),
                             !menu_visible,
                             move |this, _, _, cx| {
@@ -2312,6 +2313,7 @@ impl TerminalPane {
                     .w(px(TERMINAL_CONTEXT_MENU_WIDTH))
                     .children(self.plugin_text_actions.iter().cloned().map(|action| {
                         self.render_terminal_context_menu_item(
+                            "lucide/puzzle.svg",
                             action.label.clone(),
                             !menu.has_selection,
                             move |this, _, _, cx| {
@@ -2322,6 +2324,7 @@ impl TerminalPane {
                     }))
                     .when(self.session_kind == TerminalSessionKind::SshPty, |menu| {
                         menu.child(self.render_terminal_context_menu_item(
+                            "lucide/code-2.svg",
                             self.preferences.command_selection_labels.shell_ide.clone(),
                             self.terminal_exited,
                             |this, _, _, cx| {
@@ -2335,6 +2338,7 @@ impl TerminalPane {
                         ))
                     })
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/copy.svg",
                         copy_label,
                         !menu.has_selection,
                         |this, _event, _window, cx| {
@@ -2343,6 +2347,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/terminal.svg",
                         copy_command_label,
                         !has_command_text,
                         move |this, _event, _window, cx| {
@@ -2355,6 +2360,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/file-text.svg",
                         paste_label,
                         false,
                         |this, _event, _window, cx| {
@@ -2364,6 +2370,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/pencil.svg",
                         self.preferences.paste_labels.edit_title.clone(),
                         false,
                         |this, _, _, cx| this.edit_clipboard_paste(cx),
@@ -2372,6 +2379,7 @@ impl TerminalPane {
                     .when(self.kitty_file_transmission.is_some(), |menu| {
                         menu.child(
                             self.render_terminal_context_menu_item(
+                                "lucide/upload.svg",
                                 self.preferences
                                     .kitty_file_transmission_labels
                                     .title
@@ -2387,6 +2395,7 @@ impl TerminalPane {
                         )
                     })
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/corner-down-left.svg",
                         insert_selection_label,
                         !free_type_insert_selection_available,
                         move |this, _event, _window, cx| {
@@ -2400,6 +2409,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/refresh-cw.svg",
                         replace_command_label,
                         !free_type_replace_command_available,
                         move |this, _event, _window, cx| {
@@ -2414,6 +2424,7 @@ impl TerminalPane {
                     ))
                     .child(context_menu_separator(tokens))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/sparkles.svg",
                         send_to_ai_label,
                         !menu.has_selection,
                         |this, _event, _window, cx| {
@@ -2426,6 +2437,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/terminal.svg",
                         fill_command_bar_label,
                         !menu.has_selection,
                         |this, _event, _window, cx| {
@@ -2438,6 +2450,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/search.svg",
                         find_label,
                         false,
                         |this, _event, _window, cx| {
@@ -2450,6 +2463,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/zap.svg",
                         manage_triggers_label,
                         false,
                         |this, _event, _window, cx| {
@@ -2463,6 +2477,7 @@ impl TerminalPane {
                     ))
                     .child(context_menu_separator(tokens))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/check-square.svg",
                         select_command_label,
                         !has_command_mark,
                         move |this, _event, _window, cx| {
@@ -2473,6 +2488,7 @@ impl TerminalPane {
                     ))
                     .when_some(fold_action, |menu, (id, label)| {
                         menu.child(self.render_terminal_context_menu_item(
+                            "lucide/layers.svg",
                             label,
                             false,
                             move |this, _, _, cx| {
@@ -2483,6 +2499,7 @@ impl TerminalPane {
                         ))
                     })
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/arrow-up.svg",
                         previous_command_label,
                         !menu.has_previous_command,
                         move |this, _event, _window, cx| {
@@ -2496,6 +2513,7 @@ impl TerminalPane {
                         cx,
                     ))
                     .child(self.render_terminal_context_menu_item(
+                        "lucide/arrow-down.svg",
                         next_command_label,
                         !menu.has_next_command,
                         move |this, _event, _window, cx| {
@@ -2510,6 +2528,7 @@ impl TerminalPane {
                     ))
                     .child(context_menu_separator(tokens))
                     .child(self.render_terminal_context_menu_item_with_shortcut(
+                        "lucide/rotate-ccw.svg",
                         clear_screen_label,
                         clear_screen_shortcut,
                         false,
@@ -2529,6 +2548,7 @@ impl TerminalPane {
                             .into_iter()
                             .map(|(output, label, value)| {
                                 self.render_terminal_context_menu_item(
+                                    "lucide/corner-down-left.svg",
                                     format!(
                                         "{}: {}",
                                         label,
@@ -2717,6 +2737,7 @@ impl TerminalPane {
 
     fn render_terminal_context_menu_item_with_shortcut(
         &self,
+        icon_path: &'static str,
         label: String,
         shortcut: Option<String>,
         disabled: bool,
@@ -2726,22 +2747,16 @@ impl TerminalPane {
         let disabled = disabled
             || self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let item = if let Some(shortcut) = shortcut {
-            context_menu_item_with_shortcut(
+            context_menu_item_with_icon_and_shortcut(
                 &self.theme.tokens,
+                icon_path,
                 label,
-                div()
-                    .text_size(px(self.theme.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.theme.tokens.ui.text_muted))
-                    .child(shortcut),
-            )
-        } else {
-            context_menu_item(
-                &self.theme.tokens,
-                label,
-                ContextMenuItemKind::Plain,
+                context_menu_shortcut(&self.theme.tokens, shortcut),
                 false,
                 disabled,
             )
+        } else {
+            context_menu_item_with_icon(&self.theme.tokens, icon_path, label, false, disabled)
         }
         .w_full();
 
@@ -2761,6 +2776,7 @@ impl TerminalPane {
 
     fn render_terminal_context_menu_item(
         &self,
+        icon_path: &'static str,
         label: String,
         disabled: bool,
         listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
@@ -2768,14 +2784,9 @@ impl TerminalPane {
     ) -> AnyElement {
         let disabled = disabled
             || self.context_menu_presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
-        let item = context_menu_item(
-            &self.theme.tokens,
-            label,
-            ContextMenuItemKind::Plain,
-            false,
-            disabled,
-        )
-        .w_full();
+        let item =
+            context_menu_item_with_icon(&self.theme.tokens, icon_path, label, false, disabled)
+                .w_full();
 
         context_menu_action(
             item,
@@ -2798,7 +2809,12 @@ impl TerminalPane {
         direction: ModemTransferDirection,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let icon_path = match direction {
+            ModemTransferDirection::Upload => "lucide/upload.svg",
+            ModemTransferDirection::Download => "lucide/download.svg",
+        };
         self.render_terminal_context_menu_item(
+            icon_path,
             label,
             false,
             move |this, _event, _window, cx| {
