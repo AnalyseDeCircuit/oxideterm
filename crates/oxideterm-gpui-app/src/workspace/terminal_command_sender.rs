@@ -101,11 +101,8 @@ impl TerminalCommandSenderLayout {
     }
 
     fn editor_presentation(self) -> EditorPresentation {
-        if self == Self::Expanded {
-            EditorPresentation::Document
-        } else {
-            EditorPresentation::Inline
-        }
+        let _ = self;
+        EditorPresentation::Inline
     }
 }
 
