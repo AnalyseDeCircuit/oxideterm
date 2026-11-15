@@ -78,15 +78,17 @@ impl WorkspaceApp {
             ),
         ];
         if settings.local_terminal.oh_my_posh_enabled {
-            rows.push(self.settings_callout(
-                SettingsCalloutTone::Info,
-                Some(LucideIcon::Info),
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.info))
-                    .child(self.i18n.t("settings_view.local_terminal.oh_my_posh_note"))
-                    .into_any_element(),
-            ));
+            rows.push(
+                self.settings_callout(
+                    SettingsCalloutTone::Info,
+                    Some(LucideIcon::Info),
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.info))
+                        .child(self.i18n.t("settings_view.local_terminal.oh_my_posh_note"))
+                        .into_any_element(),
+                ),
+            );
             rows.push(self.card_separator());
             rows.push(
                 self.setting_row(
@@ -201,10 +203,9 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.metrics.settings_card_gap))
             .opacity(if reconnect_enabled { 1.0 } else { 0.4 })
-            .child(self.card_subsection_header(
-                self.i18n.t("settings_view.reconnect.strategy"),
-                None,
-            ))
+            .child(
+                self.card_subsection_header(self.i18n.t("settings_view.reconnect.strategy"), None),
+            )
             .child(
                 div()
                     .w_full()

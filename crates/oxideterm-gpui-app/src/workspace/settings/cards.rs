@@ -195,21 +195,20 @@ impl WorkspaceApp {
         rows: Vec<AnyElement>,
     ) -> AnyElement {
         let description = (!description_key.is_empty()).then(|| self.i18n.t(description_key));
-        let has_header = !title_key.is_empty()
-            || description.is_some()
-            || icon.is_some()
-            || actions.is_some();
+        let has_header =
+            !title_key.is_empty() || description.is_some() || icon.is_some() || actions.is_some();
         if !has_header {
             return self.settings_card_frame(rows);
         }
-        let header = self.settings_card_header_text(
-            self.i18n.t(title_key),
-            description,
-            icon,
-            actions,
-        );
+        let header =
+            self.settings_card_header_text(self.i18n.t(title_key), description, icon, actions);
         if rows.is_empty() {
-            return div().w_full().min_w(px(0.0)).px(px(2.0)).child(header).into_any_element();
+            return div()
+                .w_full()
+                .min_w(px(0.0))
+                .px(px(2.0))
+                .child(header)
+                .into_any_element();
         }
         div()
             .w_full()

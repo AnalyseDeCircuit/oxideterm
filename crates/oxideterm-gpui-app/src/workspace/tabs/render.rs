@@ -78,7 +78,11 @@ impl WorkspaceApp {
         let phases_width =
             TAB_RECONNECT_PHASES.len() as f32 * 4.0 + (TAB_RECONNECT_PHASES.len() - 1) as f32 * 2.0;
         12.0 + phases_width
-            + self.tab_text_width(&tab_reconnect_phase_text(job), self.tokens.metrics.ui_text_2xs, window)
+            + self.tab_text_width(
+                &tab_reconnect_phase_text(job),
+                self.tokens.metrics.ui_text_2xs,
+                window,
+            )
             + self.tokens.metrics.tab_close_button_size
             + 3.0 * 4.0
     }
@@ -241,7 +245,9 @@ impl WorkspaceApp {
                     self.workspace_chrome_divider()
                 })
                 .bg(self.workspace_tab_background(active))
-                .when(!active, |tab| tab.hover(|style| style.bg(rgb(theme.bg_hover))))
+                .when(!active, |tab| {
+                    tab.hover(|style| style.bg(rgb(theme.bg_hover)))
+                })
                 .text_color(tab_text_color)
                 .opacity(if is_being_dragged && drag_active {
                     0.5
@@ -1341,14 +1347,14 @@ impl WorkspaceApp {
             .overflow_hidden()
             .flex()
             .flex_col();
-        for (index, (icon, title_key, desc_key, action)) in utility_actions.into_iter().enumerate() {
+        for (index, (icon, title_key, desc_key, action)) in utility_actions.into_iter().enumerate()
+        {
             if index > 0 {
                 utility_list =
                     utility_list.child(div().h(px(1.0)).bg(rgba((theme.border << 8) | 0x45)));
             }
-            utility_list = utility_list.child(self.render_welcome_utility_row(
-                icon, title_key, desc_key, action, cx,
-            ));
+            utility_list = utility_list
+                .child(self.render_welcome_utility_row(icon, title_key, desc_key, action, cx));
         }
 
         div()
@@ -1356,18 +1362,13 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(10.0))
             .child(
-                div()
-                    .w_full()
-                    .h(px(20.0))
-                    .flex()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("layout.empty.get_started")),
-                    ),
+                div().w_full().h(px(20.0)).flex().items_center().child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.i18n.t("layout.empty.get_started")),
+                ),
             )
             .child(
                 div()
@@ -1375,20 +1376,15 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .gap(px(metrics.guidance_stack_gap))
-                    .child(
-                        div()
-                            .w_full()
-                            .grid()
-                            .grid_cols(2)
-                            .gap(px(10.0))
-                            .children(primary_actions.into_iter().map(
-                                |(icon, title_key, desc_key, action, primary)| {
-                                    self.render_welcome_primary_tile(
-                                        icon, title_key, desc_key, action, primary, cx,
-                                    )
-                                },
-                            )),
-                    )
+                    .child(div().w_full().grid().grid_cols(2).gap(px(10.0)).children(
+                        primary_actions.into_iter().map(
+                            |(icon, title_key, desc_key, action, primary)| {
+                                self.render_welcome_primary_tile(
+                                    icon, title_key, desc_key, action, primary, cx,
+                                )
+                            },
+                        ),
+                    ))
                     .child(utility_list),
             )
     }
@@ -1482,11 +1478,7 @@ impl WorkspaceApp {
             .gap(px(10.0))
             .hover(|row| row.bg(self.workspace_sidebar_background(theme.bg_hover)))
             .cursor_pointer()
-            .child(Self::render_lucide_icon(
-                icon,
-                14.0,
-                rgb(theme.text_muted),
-            ))
+            .child(Self::render_lucide_icon(icon, 14.0, rgb(theme.text_muted)))
             .child(
                 div()
                     .min_w_0()

@@ -455,7 +455,9 @@ pub fn settings_tab_section_at(
     section_index: usize,
     dynamic: SettingsDynamicSectionCounts,
 ) -> Option<SettingsSectionId> {
-    settings_tab_sections(tab, dynamic).get(section_index).copied()
+    settings_tab_sections(tab, dynamic)
+        .get(section_index)
+        .copied()
 }
 
 pub fn settings_section_index(
@@ -639,7 +641,11 @@ mod tests {
                         for tab in SettingsTab::all() {
                             let sections = settings_tab_sections(*tab, dynamic);
                             let unique = sections.iter().copied().collect::<HashSet<_>>();
-                            assert_eq!(unique.len(), sections.len(), "duplicate section in {tab:?}");
+                            assert_eq!(
+                                unique.len(),
+                                sections.len(),
+                                "duplicate section in {tab:?}"
+                            );
                             assert_eq!(
                                 settings_tab_section_count(*tab, dynamic),
                                 sections.len(),

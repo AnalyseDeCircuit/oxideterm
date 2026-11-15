@@ -420,8 +420,7 @@ impl WorkspaceApp {
                 size: self.tokens.metrics.activity_icon_size,
                 radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
                 has_background: active,
-                background: active
-                    .then(|| self.settings_panel_background(theme.shell_active_bg())),
+                background: active.then(|| self.settings_panel_background(theme.shell_active_bg())),
                 border: active.then(|| rgb(theme.border)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 idle_opacity: 1.0,
@@ -599,8 +598,7 @@ impl WorkspaceApp {
                 size: self.tokens.metrics.activity_icon_size,
                 radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
                 has_background: active,
-                background: active
-                    .then(|| self.settings_panel_background(theme.shell_active_bg())),
+                background: active.then(|| self.settings_panel_background(theme.shell_active_bg())),
                 border: active.then(|| rgb(theme.border)),
                 hover_background: Some(rgb(theme.bg_hover)),
                 idle_opacity: 1.0,

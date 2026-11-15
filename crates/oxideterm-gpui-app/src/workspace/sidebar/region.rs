@@ -105,7 +105,8 @@ impl WorkspaceApp {
             .child(self.render_context_right_sidebar_region(cx))
             .child(oxideterm_gpui_ui::surface::panel_edge_highlight(
                 &self.tokens,
-                self.workspace_sidebar_background(self.tokens.ui.shell_bg()).a,
+                self.workspace_sidebar_background(self.tokens.ui.shell_bg())
+                    .a,
                 0.0,
             ))
             .into_any_element()
@@ -545,11 +546,7 @@ impl WorkspaceApp {
             .child(self.workspace_tooltip_icon_button(
                 icon,
                 self.tokens.metrics.sidebar_action_icon_size,
-                rgb(if active {
-                    theme.text
-                } else {
-                    theme.text_muted
-                }),
+                rgb(if active { theme.text } else { theme.text_muted }),
                 IconButtonOptions {
                     has_background: active,
                     background: active.then_some(rgb(theme.bg_active)),

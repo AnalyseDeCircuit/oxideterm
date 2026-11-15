@@ -82,12 +82,14 @@ impl WorkspaceApp {
         self.settings_card(
             "settings_view.ai.privacy_notice",
             "",
-            vec![div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .line_height(px(18.0))
-                .child(self.i18n.t("settings_view.ai.privacy_text"))
-                .into_any_element()],
+            vec![
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .line_height(px(18.0))
+                    .child(self.i18n.t("settings_view.ai.privacy_text"))
+                    .into_any_element(),
+            ],
         )
     }
 

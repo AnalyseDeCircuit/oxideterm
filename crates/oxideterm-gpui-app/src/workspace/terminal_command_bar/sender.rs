@@ -572,29 +572,24 @@ impl WorkspaceApp {
             );
         }
         // Keep the add-task action right beside the final tab instead of isolating it on the far right.
-        tab_row = tab_row.child(
-            div()
-                .flex_none()
-                .pl(px(4.0))
-                .flex()
-                .items_center()
-                .child(self.terminal_command_action_button(
-                    LucideIcon::Plus,
-                    rgb(theme.text_muted),
-                    false,
-                    None,
-                    "terminal-command-sender-add",
-                    self.i18n.t("terminal.sender.add_task"),
-                    |this, _event, window, cx| {
-                        let sender_id = this
-                            .terminal_command_sender
-                            .update(cx, |sender, cx| sender.add_document(cx));
-                        this.focus_terminal_command_sender_editor(sender_id, window, cx);
-                        cx.stop_propagation();
-                    },
-                    cx,
-                )),
-        );
+        tab_row = tab_row.child(div().flex_none().pl(px(4.0)).flex().items_center().child(
+            self.terminal_command_action_button(
+                LucideIcon::Plus,
+                rgb(theme.text_muted),
+                false,
+                None,
+                "terminal-command-sender-add",
+                self.i18n.t("terminal.sender.add_task"),
+                |this, _event, window, cx| {
+                    let sender_id = this
+                        .terminal_command_sender
+                        .update(cx, |sender, cx| sender.add_document(cx));
+                    this.focus_terminal_command_sender_editor(sender_id, window, cx);
+                    cx.stop_propagation();
+                },
+                cx,
+            ),
+        ));
         // Scrollable moves the viewport's own style onto an outer wrapper.
         // Keep the tab flex row as a child so its horizontal layout survives
         // that transfer and additional tasks cannot stack behind the editor.

@@ -1501,15 +1501,18 @@ impl WorkspaceApp {
             .when(self.terminal_triggers.editor_open, |root| {
                 root.child(self.render_terminal_trigger_editor_modal(cx))
             })
-            .when_some(self.render_semantic_scheme_editor_modal(cx), |root, modal| {
-                root.child(modal)
-            })
-            .when_some(self.render_highlight_rule_editor_modal(cx), |root, modal| {
-                root.child(modal)
-            })
-            .when_some(self.render_public_mcp_client_editor_modal(cx), |root, modal| {
-                root.child(modal)
-            })
+            .when_some(
+                self.render_semantic_scheme_editor_modal(cx),
+                |root, modal| root.child(modal),
+            )
+            .when_some(
+                self.render_highlight_rule_editor_modal(cx),
+                |root, modal| root.child(modal),
+            )
+            .when_some(
+                self.render_public_mcp_client_editor_modal(cx),
+                |root, modal| root.child(modal),
+            )
             .when(
                 self.terminal.read(cx).quick_commands.manager_open(),
                 |root| {

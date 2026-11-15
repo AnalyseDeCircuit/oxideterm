@@ -2099,8 +2099,9 @@ impl WorkspaceApp {
             SessionManagerDisplayItem::Connection(_)
             | SessionManagerDisplayItem::Tunnel(_)
             | SessionManagerDisplayItem::RemoteDesktop(_) => ui.info,
-            SessionManagerDisplayItem::SshConfig(_)
-            | SessionManagerDisplayItem::Plugin(_) => ui.accent_secondary,
+            SessionManagerDisplayItem::SshConfig(_) | SessionManagerDisplayItem::Plugin(_) => {
+                ui.accent_secondary
+            }
             SessionManagerDisplayItem::Serial(_)
             | SessionManagerDisplayItem::Ble(_)
             | SessionManagerDisplayItem::LocalTerminal(_) => ui.warning,
@@ -2109,7 +2110,8 @@ impl WorkspaceApp {
             | SessionManagerDisplayItem::StandaloneSftp(_) => ui.success,
             SessionManagerDisplayItem::Mosh(_) => ui.accent,
         };
-        let (default_background, default_foreground) = ((semantic_color << 8) | 0x26, semantic_color);
+        let (default_background, default_foreground) =
+            ((semantic_color << 8) | 0x26, semantic_color);
         let configured_foreground = item.icon_color().and_then(parse_hex_color);
         // Older assets used one accent for both layers; keep that appearance
         // until an explicit background is selected.

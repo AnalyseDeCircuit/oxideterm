@@ -50,20 +50,26 @@ impl WorkspaceApp {
                 .cjk_font_family
                 .as_deref()
                 .is_some_and(cjk_font_is_custom);
-        let mut font_group = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(12.0)).child(
-            self.select_setting_row(
-                "settings_view.ide.font_family",
-                "settings_view.ide.font_family_hint",
-                SettingsSelect::IdeFontFamily,
-                settings
-                    .ide
-                    .font_family
-                    .map(font_family_label)
-                    .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal")),
-                self.tokens.metrics.settings_select_width,
-                cx,
-            ),
-        );
+        let mut font_group = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(
+                self.select_setting_row(
+                    "settings_view.ide.font_family",
+                    "settings_view.ide.font_family_hint",
+                    SettingsSelect::IdeFontFamily,
+                    settings
+                        .ide
+                        .font_family
+                        .map(font_family_label)
+                        .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal")),
+                    self.tokens.metrics.settings_select_width,
+                    cx,
+                ),
+            );
         if settings.ide.font_family == Some(oxideterm_settings::FontFamily::Custom) {
             font_group = font_group.child(self.setting_row(
                 "settings_view.terminal.custom_font_stack",
@@ -79,8 +85,13 @@ impl WorkspaceApp {
             ));
         }
 
-        let mut cjk_group = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(12.0)).child(
-            self.select_setting_row(
+        let mut cjk_group = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0))
+            .child(self.select_setting_row(
                 "settings_view.ide.cjk_font_family",
                 "settings_view.ide.cjk_font_family_hint",
                 SettingsSelect::IdeCjkFontFamily,
@@ -96,8 +107,7 @@ impl WorkspaceApp {
                 },
                 self.tokens.metrics.settings_select_width,
                 cx,
-            ),
-        );
+            ));
         if custom_cjk {
             cjk_group = cjk_group.child(self.setting_row(
                 "settings_view.terminal.custom_cjk_font",
@@ -254,31 +264,33 @@ impl WorkspaceApp {
                 rgb(self.tokens.ui.info),
             )),
             None,
-            vec![self.settings_callout(
-                SettingsCalloutTone::Info,
-                None,
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .children([
-                        self.ide_privacy_row(
-                            "settings_view.ide.agent_path_label",
-                            "settings_view.ide.agent_path_detail",
-                        ),
-                        self.ide_privacy_row(
-                            "settings_view.ide.agent_lifecycle_label",
-                            "settings_view.ide.agent_lifecycle_detail",
-                        ),
-                        self.ide_privacy_row(
-                            "settings_view.ide.agent_privacy_label",
-                            "settings_view.ide.agent_privacy_detail",
-                        ),
-                    ])
-                    .into_any_element(),
-            )],
+            vec![
+                self.settings_callout(
+                    SettingsCalloutTone::Info,
+                    None,
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(10.0))
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .children([
+                            self.ide_privacy_row(
+                                "settings_view.ide.agent_path_label",
+                                "settings_view.ide.agent_path_detail",
+                            ),
+                            self.ide_privacy_row(
+                                "settings_view.ide.agent_lifecycle_label",
+                                "settings_view.ide.agent_lifecycle_detail",
+                            ),
+                            self.ide_privacy_row(
+                                "settings_view.ide.agent_privacy_label",
+                                "settings_view.ide.agent_privacy_detail",
+                            ),
+                        ])
+                        .into_any_element(),
+                ),
+            ],
         )
     }
 

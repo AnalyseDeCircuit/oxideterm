@@ -714,11 +714,7 @@ impl WorkspaceApp {
         self.terminal_trigger_global_card(cx)
     }
 
-    fn open_new_terminal_trigger_editor(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn open_new_terminal_trigger_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.prepare_modal_interaction_boundary(cx);
         self.clear_terminal_trigger_input_focus();
         self.terminal_triggers.new_rule();
@@ -754,10 +750,7 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_terminal_trigger_editor(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::workspace) fn close_terminal_trigger_editor(&mut self, cx: &mut Context<Self>) {
         self.clear_terminal_trigger_input_focus();
         self.terminal_triggers.cancel_edit();
         self.ime_marked_text = None;
@@ -804,7 +797,12 @@ impl WorkspaceApp {
         } else {
             trigger.name.clone()
         };
-        let mut body_content = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(12.0));
+        let mut body_content = div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(12.0));
         if self.terminal_triggers.scope_picker_open {
             body_content = body_content.child(self.terminal_trigger_scope_picker(cx));
         } else {
@@ -820,9 +818,8 @@ impl WorkspaceApp {
         }
 
         let footer = if self.terminal_triggers.scope_picker_open {
-            dialog_footer(&self.tokens)
-                .justify_end()
-                .child(self.terminal_trigger_button(
+            dialog_footer(&self.tokens).justify_end().child(
+                self.terminal_trigger_button(
                     self.i18n
                         .t("settings_view.terminal.triggers.scope_picker_done"),
                     ButtonVariant::Default,
@@ -831,7 +828,8 @@ impl WorkspaceApp {
                         this.clear_terminal_trigger_input_focus();
                         cx.notify();
                     }),
-                ))
+                ),
+            )
         } else {
             dialog_footer(&self.tokens)
                 .justify_end()
@@ -1265,20 +1263,22 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     ))
-                    .child(self.terminal_trigger_button(
-                        self.i18n
-                            .t("settings_view.terminal.triggers.duplicate_rule"),
-                        ButtonVariant::Outline,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.open_duplicate_terminal_trigger_editor(
-                                &duplicate_id,
-                                &copy_suffix,
-                                window,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ))
+                    .child(
+                        self.terminal_trigger_button(
+                            self.i18n
+                                .t("settings_view.terminal.triggers.duplicate_rule"),
+                            ButtonVariant::Outline,
+                            cx.listener(move |this, _event, window, cx| {
+                                this.open_duplicate_terminal_trigger_editor(
+                                    &duplicate_id,
+                                    &copy_suffix,
+                                    window,
+                                    cx,
+                                );
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    )
                     .child(self.terminal_trigger_button(
                         self.i18n.t("settings_view.terminal.triggers.delete_rule"),
                         ButtonVariant::Ghost,
@@ -1471,20 +1471,22 @@ impl WorkspaceApp {
             editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item)
         {
             let shell_mode = matches!(process, LocalProcessSpec::ExplicitShell { .. });
-            action_header = action_header.child(self.terminal_trigger_compact_field(
-                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                self.terminal_trigger_select_field(
-                    self.i18n
-                        .t("settings_view.terminal.triggers.action_local_process"),
-                    self.i18n.t(if shell_mode {
-                        "settings_view.terminal.triggers.explicit_shell"
-                    } else {
-                        "settings_view.terminal.triggers.direct_program"
-                    }),
-                    SettingsSelect::TerminalTriggerProcessMode,
-                    cx,
+            action_header = action_header.child(
+                self.terminal_trigger_compact_field(
+                    TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
+                    self.terminal_trigger_select_field(
+                        self.i18n
+                            .t("settings_view.terminal.triggers.action_local_process"),
+                        self.i18n.t(if shell_mode {
+                            "settings_view.terminal.triggers.explicit_shell"
+                        } else {
+                            "settings_view.terminal.triggers.direct_program"
+                        }),
+                        SettingsSelect::TerminalTriggerProcessMode,
+                        cx,
+                    ),
                 ),
-            ));
+            );
         }
 
         let mut action_fields = div()
@@ -1539,8 +1541,7 @@ impl WorkspaceApp {
                                 cx.listener(|this, _event, _window, cx| {
                                     if let Some(trigger) = this.terminal_triggers.editor.as_mut()
                                         && let TerminalTriggerAction::SendText {
-                                            append_enter,
-                                            ..
+                                            append_enter, ..
                                         } = editable_trigger_action_mut(
                                             &mut trigger.action,
                                             this.terminal_triggers.menu_item,

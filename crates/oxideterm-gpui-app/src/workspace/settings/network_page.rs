@@ -930,7 +930,10 @@ impl WorkspaceApp {
                                             self.i18n.t(mode_key),
                                             self.i18n
                                                 .t("settings_view.network.mcp_permission_count")
-                                                .replace("{{count}}", &permission_count.to_string())
+                                                .replace(
+                                                    "{{count}}",
+                                                    &permission_count.to_string()
+                                                )
                                         )),
                                 ),
                         )
