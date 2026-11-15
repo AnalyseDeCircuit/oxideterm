@@ -1138,7 +1138,7 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(self.workspace_sidebar_background(theme.bg_panel))
+            .bg(self.workspace_sidebar_background(welcome_card_background(theme)))
             .overflow_hidden();
 
         if recent.is_empty() {
@@ -1343,7 +1343,7 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.lg))
             .border_1()
             .border_color(rgba((theme.border << 8) | 0x80))
-            .bg(self.workspace_sidebar_background(theme.bg_panel))
+            .bg(self.workspace_sidebar_background(welcome_card_background(theme)))
             .overflow_hidden()
             .flex()
             .flex_col();
@@ -1411,7 +1411,7 @@ impl WorkspaceApp {
             } else {
                 rgba((theme.border << 8) | 0x80)
             })
-            .bg(self.workspace_sidebar_background(theme.bg_panel))
+            .bg(self.workspace_sidebar_background(welcome_card_background(theme)))
             .px(px(12.0))
             .flex()
             .items_center()
@@ -1649,7 +1649,7 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.xs))
                     .border_1()
                     .border_color(rgba((theme.border << 8) | 0x80))
-                    .bg(self.workspace_sidebar_background(theme.bg_sunken))
+                    .bg(self.workspace_sidebar_background(welcome_keycap_background(theme)))
                     .px(px(5.0))
                     .py(px(1.5))
                     .font_family(settings_mono_font_family(self.settings_store.settings()))
@@ -1665,6 +1665,22 @@ impl WorkspaceApp {
 
 const WELCOME_BRAND_BADGE_SIZE: f32 = 42.0;
 const WELCOME_BRAND_BADGE_RADIUS: f32 = 9.5;
+
+fn welcome_card_background(theme: oxideterm_theme::AppUiColors) -> u32 {
+    if theme.is_light() {
+        theme.bg_panel
+    } else {
+        theme.bg_card
+    }
+}
+
+fn welcome_keycap_background(theme: oxideterm_theme::AppUiColors) -> u32 {
+    if theme.is_light() {
+        theme.bg_sunken
+    } else {
+        theme.bg_card
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 struct WelcomeWorkbenchMetrics {

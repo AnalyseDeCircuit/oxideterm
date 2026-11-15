@@ -204,9 +204,9 @@ pub(crate) fn apply_builtin_ui_overrides(theme_id: &str, mut ui: AppUiColors) ->
         "one-dark" => {
             ui.bg = 0x282c34;
             ui.bg_panel = 0x21252b;
-            ui.bg_card = 0x2a2f38;
-            ui.bg_hover = 0x2c313a;
-            ui.bg_elevated = 0x2e3440;
+            ui.bg_card = 0x2f343e;
+            ui.bg_hover = 0x363c48;
+            ui.bg_elevated = 0x323844;
             ui.bg_sunken = 0x1d2026;
             ui.border = 0x3e4451;
             ui.border_strong = 0x565c64;

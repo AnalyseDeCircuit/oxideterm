@@ -30,7 +30,14 @@ impl WorkspaceApp {
             .h_full()
             .flex()
             .flex_col()
-            .items_center();
+            .items_center()
+            .when(
+                self.sidebar_collapsed && self.window_background_preferences().is_none(),
+                |bar| {
+                    bar.border_r_1()
+                        .border_color(self.workspace_divider_color(theme.border, 0x40))
+                },
+            );
 
         bar = bar.child(
             div()
@@ -238,6 +245,13 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .items_center()
+            .when(
+                !panel_visible && self.window_background_preferences().is_none(),
+                |bar| {
+                    bar.border_l_1()
+                        .border_color(self.workspace_divider_color(theme.border, 0x40))
+                },
+            )
             .child(
                 div()
                     .flex_none()

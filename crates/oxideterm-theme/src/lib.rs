@@ -60,7 +60,13 @@ impl AppUiColors {
 
     pub fn shell_bg(&self) -> u32 {
         if !self.is_light() {
-            return self.bg;
+            // Dark themes keep shell chrome distinct from the terminal/workspace canvas
+            // via their panel surface, avoiding near-black-on-black collapse.
+            return if self.bg_panel != self.bg {
+                self.bg_panel
+            } else {
+                self.bg_sunken
+            };
         }
         // Light themes step peripheral bars and sidebars slightly below the
         // primary canvas so workspace chrome frames content without heavy borders.
@@ -72,22 +78,18 @@ impl AppUiColors {
     }
 
     pub fn shell_active_bg(&self) -> u32 {
-        if !self.is_light() {
-            return self.bg_panel;
-        }
-        if color_relative_luminance(self.bg_elevated) > color_relative_luminance(self.shell_bg()) {
+        let shell_bg = self.shell_bg();
+        if color_relative_luminance(self.bg_elevated) > color_relative_luminance(shell_bg) {
             self.bg_elevated
-        } else {
+        } else if self.bg != shell_bg {
             self.bg
+        } else {
+            self.bg_hover
         }
     }
 
     pub fn shell_active_tab_bg(&self) -> u32 {
-        if self.is_light() {
-            self.bg
-        } else {
-            self.bg_panel
-        }
+        self.bg
     }
 
     pub fn interpolate(self, target: Self, progress: f32) -> Self {
@@ -1156,9 +1158,37 @@ mod tests {
     }
 
     #[test]
-    fn builtin_themes_recess_light_shell_chrome_without_changing_dark_shells() {
+    fn builtin_themes_separate_shell_chrome_from_workspace_canvas() {
         for theme in BUILT_IN_THEMES {
             let ui = ThemeTokens::from_builtin(*theme).ui;
+            assert_ne!(
+                ui.shell_bg(),
+                ui.bg,
+                "{} shell_bg {:06x} must step away from canvas {:06x}",
+                theme.id,
+                ui.shell_bg(),
+                ui.bg
+            );
+            assert!(
+                color_relative_luminance(ui.shell_active_bg())
+                    > color_relative_luminance(ui.shell_bg()),
+                "{} shell_active_bg {:06x} must lift above shell_bg {:06x}",
+                theme.id,
+                ui.shell_active_bg(),
+                ui.shell_bg()
+            );
+            assert_eq!(ui.shell_active_tab_bg(), ui.bg, "{} active tab", theme.id);
+            assert_ne!(
+                ui.shell_active_tab_bg(),
+                ui.shell_bg(),
+                "{} active tab must stay distinct from tab strip",
+                theme.id
+            );
+            assert!(
+                color_contrast_ratio(ui.text, ui.shell_bg()) >= 4.0,
+                "{} text/shell_bg contrast must stay readable",
+                theme.id
+            );
             if ui.is_light() {
                 assert!(
                     color_relative_luminance(ui.shell_bg()) < color_relative_luminance(ui.bg),
@@ -1166,34 +1196,6 @@ mod tests {
                     theme.id,
                     ui.shell_bg(),
                     ui.bg
-                );
-                assert!(
-                    color_relative_luminance(ui.shell_active_bg())
-                        > color_relative_luminance(ui.shell_bg()),
-                    "{} light shell_active_bg {:06x} must lift above shell_bg {:06x}",
-                    theme.id,
-                    ui.shell_active_bg(),
-                    ui.shell_bg()
-                );
-                assert_eq!(ui.shell_active_tab_bg(), ui.bg, "{} active tab", theme.id);
-                assert!(
-                    color_contrast_ratio(ui.text, ui.shell_bg()) >= 4.0,
-                    "{} text/shell_bg contrast must stay readable",
-                    theme.id
-                );
-            } else {
-                assert_eq!(ui.shell_bg(), ui.bg, "{} dark shell_bg", theme.id);
-                assert_eq!(
-                    ui.shell_active_bg(),
-                    ui.bg_panel,
-                    "{} dark shell_active_bg",
-                    theme.id
-                );
-                assert_eq!(
-                    ui.shell_active_tab_bg(),
-                    ui.bg_panel,
-                    "{} dark shell_active_tab_bg",
-                    theme.id
                 );
             }
         }
