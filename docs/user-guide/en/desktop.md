@@ -162,10 +162,10 @@ Settings → Terminal also lets you choose the sequences sent by the physical Ba
 
 ### Edit before pasting
 
-1. Copy the text, then right-click the destination terminal and choose **Edit before pasting**. A multiline paste confirmation also offers **Edit**.
-2. Edit the text in the dialog. You can add or remove lines and use **Undo** and **Redo**.
+1. With paste protection enabled, paste multiline text into the destination terminal to open the editor. To open it for any copied text, right-click the terminal and choose **Edit before pasting**.
+2. Edit the text in the dialog. **Enter** inserts a newline. You can also use **Undo** and **Redo**.
 3. If you copied a Markdown code block, choose **Remove code block markers** to remove its surrounding fence. This is an explicit action; ordinary paste keeps the text as copied.
-4. Review the destination and the final text, then click **Paste**. **Cancel** closes the dialog without sending the draft.
+4. Click **Paste** to send the text, or press **Esc** to discard the draft. If you made no changes, OxideTerm passes the original text to the terminal's normal paste handling.
 
 Newlines are sent with the pasted text and may cause the receiving shell to execute commands. The dialog keeps edits locally until you choose Paste.
 

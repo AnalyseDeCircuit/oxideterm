@@ -131,20 +131,6 @@ impl TerminalPane {
             self.request_context_action(TerminalContextAction::Reconnect, false, cx);
             return true;
         }
-        if self.pending_paste.is_some() && !modifiers.platform && !modifiers.control {
-            match key {
-                "enter" => {
-                    self.confirm_pending_paste(cx);
-                    return true;
-                }
-                "escape" => {
-                    self.cancel_pending_paste(cx);
-                    return true;
-                }
-                _ => {}
-            }
-        }
-
         if self.kitty_file_transmission_confirm_open
             && !modifiers.platform
             && !modifiers.control

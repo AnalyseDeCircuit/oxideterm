@@ -11,6 +11,8 @@ use oxideterm_gpui_ui::{
 };
 
 pub(super) struct PasteEditor {
+    original: Zeroizing<String>,
+    prefix: Zeroizing<Vec<u8>>,
     editor: Entity<TextEditorView>,
     _observation: Subscription,
 }
@@ -22,7 +24,7 @@ impl TerminalPane {
             .is_some_and(|draft| draft.editor.focus_handle(cx).contains_focused(window, cx))
     }
 
-    pub(super) fn edit_clipboard_paste(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn edit_clipboard_paste(&mut self, cx: &mut Context<Self>) {
         if !self.terminal_accepts_input() {
             return;
         }
@@ -33,15 +35,18 @@ impl TerminalPane {
         else {
             return;
         };
-        self.pending_paste = Some(Zeroizing::new(text));
-        self.pending_paste_prefix = None;
-        self.open_paste_editor(window, cx);
+        self.open_paste_editor(Zeroizing::new(text), &[], cx);
     }
 
-    fn open_paste_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(text) = self.pending_paste.as_ref() else {
+    pub(super) fn open_paste_editor(
+        &mut self,
+        text: Zeroizing<String>,
+        prefix: &[u8],
+        cx: &mut Context<Self>,
+    ) {
+        if self.paste_editor.is_some() {
             return;
-        };
+        }
         let tokens = self.theme.tokens;
         // This pane owns the transient editor and its undo history. Neither is persisted;
         // submission or cancellation drops the entity and all draft UI state.
@@ -59,14 +64,30 @@ impl TerminalPane {
             );
             editor
         });
+        let editor_id = editor.entity_id();
         let observation = cx.observe(&editor, |_, _, cx| cx.notify());
         self.paste_editor = Some(PasteEditor {
-            editor: editor.clone(),
+            original: text,
+            prefix: Zeroizing::new(prefix.to_vec()),
+            editor,
             _observation: observation,
         });
         self.refresh_paste_editor(cx);
         self.dismiss_terminal_context_menu(cx);
-        window.focus(&editor.focus_handle(cx), cx);
+        // Clipboard routing also runs without a Window. Focus the draft in
+        // the pane's current window once the dispatch stack has unwound.
+        let pane = cx.weak_entity();
+        cx.defer(move |app| {
+            let _ = app.with_window(pane.entity_id(), |window, app| {
+                let focus = pane.upgrade().and_then(|pane| {
+                    let draft = pane.read(app).paste_editor.as_ref()?;
+                    (draft.editor.entity_id() == editor_id).then(|| draft.editor.focus_handle(app))
+                });
+                if let Some(focus) = focus {
+                    window.focus(&focus, app);
+                }
+            });
+        });
         cx.notify();
     }
 
@@ -91,8 +112,8 @@ impl TerminalPane {
     }
 
     fn edited_paste_text(&self, cx: &App) -> Option<Zeroizing<String>> {
-        let original = self.pending_paste.as_ref()?;
         let draft = self.paste_editor.as_ref()?;
+        let original = &draft.original;
         let edited = Zeroizing::new(draft.editor.read(cx).buffer().text());
         let normalized = Zeroizing::new(original.replace("\r\n", "\n").replace('\r', "\n"));
         // Opening the editor or undoing all edits must preserve the original bytes,
@@ -110,16 +131,20 @@ impl TerminalPane {
         let Some(text) = self.edited_paste_text(cx).filter(|text| !text.is_empty()) else {
             return;
         };
-        self.paste_editor = None;
-        self.pending_paste = Some(text);
-        self.confirm_pending_paste(cx);
+        if let Some(draft) = self.paste_editor.take() {
+            if !draft.prefix.is_empty() {
+                self.send_user_protocol_bytes(&draft.prefix, cx);
+            }
+            self.paste_text(&text, cx);
+        }
         window.focus(&self.focus_handle, cx);
+        cx.notify();
     }
 
     fn close_paste_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.paste_editor = None;
-        self.cancel_pending_paste(cx);
         window.focus(&self.focus_handle, cx);
+        cx.notify();
     }
 
     fn strip_paste_fence(&mut self, cx: &mut Context<Self>) {
@@ -138,195 +163,134 @@ impl TerminalPane {
         &self,
         window: &Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Option<AnyElement> {
+        let draft = self.paste_editor.as_ref()?;
         let tokens = self.theme.tokens;
         let labels = &self.preferences.paste_labels;
-        let editing = self.paste_editor.is_some();
         let width = (f32::from(window.viewport_size().width) - 32.0)
             .max(0.0)
-            .min(if editing { 760.0 } else { 480.0 });
+            .min(760.0);
         let height = (f32::from(window.viewport_size().height) - 32.0).clamp(0.0, 520.0);
         let options = ButtonOptions {
             size: ButtonSize::Sm,
             ..Default::default()
         };
-        let text = self
-            .pending_paste
-            .as_deref()
-            .map(String::as_str)
-            .unwrap_or_default();
-        let title = if editing {
-            labels.edit_title.clone()
-        } else {
-            labels
-                .title_template
-                .replace("{{count}}", &text.split('\n').count().to_string())
+        let text = Zeroizing::new(draft.editor.read(cx).buffer().text());
+        let empty = text.is_empty();
+        let tool_options = ButtonOptions {
+            variant: ButtonVariant::Ghost,
+            ..options
         };
-        let mut content = dialog_content(&tokens)
+        let content = dialog_content(&tokens)
             .debug_selector(|| "paste-dialog".into())
             .w(px(width))
-            .max_h(px(height))
-            .when(editing, |dialog| dialog.h(px(height)))
+            .h(px(height))
             .bg(rgb(tokens.ui.bg_panel))
             .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&tokens))
             .flex()
             .flex_col()
             .font_family(tokens.metrics.font_family)
             .text_color(rgb(tokens.ui.text))
-            .child(dialog_header(&tokens).child(dialog_title(&tokens, title)));
-        if let Some(draft) = &self.paste_editor {
-            let text = Zeroizing::new(draft.editor.read(cx).buffer().text());
-            let tool_options = ButtonOptions {
-                variant: ButtonVariant::Ghost,
-                ..options
-            };
-            content = content
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .flex_wrap()
-                        .flex_none()
-                        .px(px(tokens.spacing.two))
-                        .py(px(tokens.spacing.one))
-                        .border_b_1()
-                        .border_color(rgb(tokens.ui.border))
-                        .child(
-                            button_with(&tokens, labels.undo.clone(), tool_options)
-                                .id("paste-undo")
-                                .debug_selector(|| "paste-undo".into())
-                                .on_click(cx.listener(|pane, _, _, cx| {
-                                    if let Some(draft) = &pane.paste_editor {
-                                        draft
-                                            .editor
-                                            .update(cx, |editor, cx| editor.undo_external(cx));
-                                    }
-                                })),
-                        )
-                        .child(
-                            button_with(&tokens, labels.redo.clone(), tool_options)
-                                .id("paste-redo")
-                                .on_click(cx.listener(|pane, _, _, cx| {
-                                    if let Some(draft) = &pane.paste_editor {
-                                        draft
-                                            .editor
-                                            .update(cx, |editor, cx| editor.redo_external(cx));
-                                    }
-                                })),
-                        )
-                        .child(
-                            separator(&tokens, SeparatorOrientation::Vertical)
-                                .h(px(tokens.metrics.ui_text_sm))
-                                .mx(px(tokens.spacing.one)),
-                        )
-                        .child(
-                            button_with(
-                                &tokens,
-                                labels.strip_fence.clone(),
-                                ButtonOptions {
-                                    disabled: fenced_body(&text).is_none(),
-                                    ..tool_options
-                                },
-                            )
-                            .id("paste-strip-fence")
-                            .debug_selector(|| "paste-strip-fence".into())
-                            .on_click(cx.listener(|pane, _, _, cx| pane.strip_paste_fence(cx))),
-                        ),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .overflow_hidden()
-                        .debug_selector(|| "paste-editor".into())
-                        .child(draft.editor.clone()),
-                );
-        } else {
-            let mut preview = div()
-                .p(px(tokens.metrics.modal_body_padding))
-                .min_h_0()
-                .overflow_hidden()
-                .flex()
-                .flex_col()
-                .font_family(self.preferences.font_family.clone())
-                .text_size(px(tokens.metrics.ui_text_sm));
-            for line in text.split('\n').take(5) {
-                preview = preview.child(
-                    div()
-                        .overflow_hidden()
-                        .child(if line.is_empty() { " " } else { line }.to_string()),
-                );
-            }
-            let remaining = text.split('\n').count().saturating_sub(5);
-            if remaining > 0 {
-                preview = preview.child(
-                    div().text_color(rgb(tokens.ui.text_muted)).child(
-                        labels
-                            .more_lines_template
-                            .replace("{{count}}", &remaining.to_string()),
-                    ),
-                );
-            }
-            content = content.child(preview);
-        }
-        let empty = self
-            .paste_editor
-            .as_ref()
-            .is_some_and(|draft| draft.editor.read(cx).buffer().is_empty());
-        content = content.child(
-            dialog_footer(&tokens)
-                .h_auto()
-                .flex_none()
-                .min_h(px(tokens.metrics.modal_footer_height))
-                .py(px(tokens.spacing.two))
-                .flex_wrap()
-                .child(
-                    button_with(
-                        &tokens,
-                        labels.cancel.clone(),
-                        ButtonOptions {
-                            variant: ButtonVariant::Ghost,
-                            ..options
-                        },
-                    )
-                    .id("paste-cancel")
-                    .debug_selector(|| "paste-cancel".into())
-                    .on_click(
-                        cx.listener(|pane, _, window, cx| pane.close_paste_editor(window, cx)),
-                    ),
-                )
-                .when(!editing, |footer| {
-                    footer.child(
-                        button_with(&tokens, labels.edit.clone(), options)
-                            .id("paste-edit")
-                            .debug_selector(|| "paste-edit".into())
-                            .on_click(cx.listener(|pane, _, window, cx| {
-                                pane.open_paste_editor(window, cx)
+            .child(dialog_header(&tokens).child(dialog_title(&tokens, labels.edit_title.clone())))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .flex_wrap()
+                    .flex_none()
+                    .px(px(tokens.spacing.two))
+                    .py(px(tokens.spacing.one))
+                    .border_b_1()
+                    .border_color(rgb(tokens.ui.border))
+                    .child(
+                        button_with(&tokens, labels.undo.clone(), tool_options)
+                            .id("paste-undo")
+                            .debug_selector(|| "paste-undo".into())
+                            .on_click(cx.listener(|pane, _, _, cx| {
+                                if let Some(draft) = &pane.paste_editor {
+                                    draft
+                                        .editor
+                                        .update(cx, |editor, cx| editor.undo_external(cx));
+                                }
                             })),
                     )
-                })
-                .child(
-                    button_with(
-                        &tokens,
-                        labels.paste.clone(),
-                        ButtonOptions {
-                            variant: ButtonVariant::Default,
-                            disabled: empty,
-                            ..options
-                        },
+                    .child(
+                        button_with(&tokens, labels.redo.clone(), tool_options)
+                            .id("paste-redo")
+                            .on_click(cx.listener(|pane, _, _, cx| {
+                                if let Some(draft) = &pane.paste_editor {
+                                    draft
+                                        .editor
+                                        .update(cx, |editor, cx| editor.redo_external(cx));
+                                }
+                            })),
                     )
-                    .id("paste-submit")
-                    .debug_selector(|| "paste-submit".into())
-                    .on_click(cx.listener(move |pane, _, window, cx| {
-                        if editing {
+                    .child(
+                        separator(&tokens, SeparatorOrientation::Vertical)
+                            .h(px(tokens.metrics.ui_text_sm))
+                            .mx(px(tokens.spacing.one)),
+                    )
+                    .child(
+                        button_with(
+                            &tokens,
+                            labels.strip_fence.clone(),
+                            ButtonOptions {
+                                disabled: fenced_body(&text).is_none(),
+                                ..tool_options
+                            },
+                        )
+                        .id("paste-strip-fence")
+                        .debug_selector(|| "paste-strip-fence".into())
+                        .on_click(cx.listener(|pane, _, _, cx| pane.strip_paste_fence(cx))),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_hidden()
+                    .debug_selector(|| "paste-editor".into())
+                    .child(draft.editor.clone()),
+            )
+            .child(
+                dialog_footer(&tokens)
+                    .h_auto()
+                    .flex_none()
+                    .min_h(px(tokens.metrics.modal_footer_height))
+                    .py(px(tokens.spacing.two))
+                    .flex_wrap()
+                    .child(
+                        button_with(
+                            &tokens,
+                            labels.cancel.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Ghost,
+                                ..options
+                            },
+                        )
+                        .id("paste-cancel")
+                        .debug_selector(|| "paste-cancel".into())
+                        .on_click(
+                            cx.listener(|pane, _, window, cx| pane.close_paste_editor(window, cx)),
+                        ),
+                    )
+                    .child(
+                        button_with(
+                            &tokens,
+                            labels.paste.clone(),
+                            ButtonOptions {
+                                variant: ButtonVariant::Default,
+                                disabled: empty,
+                                ..options
+                            },
+                        )
+                        .id("paste-submit")
+                        .debug_selector(|| "paste-submit".into())
+                        .on_click(cx.listener(|pane, _, window, cx| {
                             pane.submit_edited_paste(window, cx);
-                        } else {
-                            pane.confirm_pending_paste(cx);
-                            window.focus(&pane.focus_handle, cx);
-                        }
-                    })),
-                ),
-        );
+                        })),
+                    ),
+            );
         let content =
             overlay_content_boundary(content)
                 .on_key_up(|_, _, cx| cx.stop_propagation())
@@ -347,21 +311,23 @@ impl TerminalPane {
                     }
                     cx.stop_propagation();
                 }));
-        gpui::deferred(
-            gpui::anchored()
-                .anchor(gpui::Anchor::TopLeft)
-                .position_mode(gpui::AnchoredPositionMode::Window)
-                .position(gpui::point(px(0.0), px(0.0)))
-                .child(
-                    div()
-                        .relative()
-                        .w(window.viewport_size().width)
-                        .h(window.viewport_size().height)
-                        .child(dialog_overlay(&tokens, content)),
-                ),
+        Some(
+            gpui::deferred(
+                gpui::anchored()
+                    .anchor(gpui::Anchor::TopLeft)
+                    .position_mode(gpui::AnchoredPositionMode::Window)
+                    .position(gpui::point(px(0.0), px(0.0)))
+                    .child(
+                        div()
+                            .relative()
+                            .w(window.viewport_size().width)
+                            .h(window.viewport_size().height)
+                            .child(dialog_overlay(&tokens, content)),
+                    ),
+            )
+            .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
+            .into_any_element(),
         )
-        .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
-        .into_any_element()
     }
 }
 
@@ -422,7 +388,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn paste_editor_edits_before_delivery_and_cancel_discards_the_draft(cx: &mut TestAppContext) {
+    fn protected_paste_opens_editor_and_only_button_delivers(cx: &mut TestAppContext) {
         let (pane, cx) = cx.add_window_view(|window, cx| {
             TerminalPane::new_recording_playback(
                 80,
@@ -443,25 +409,40 @@ mod tests {
                     .tokens
                     .apply_motion(oxideterm_theme::UiMotionProfile::Off);
                 pane.test_accepts_input = true;
+                pane.settings.paste_protection = true;
                 pane.set_input_broadcaster(Some(Rc::new(move |kind, bytes, _| {
                     recorder.borrow_mut().push((kind, bytes.to_vec()));
                 })));
-                pane.pending_paste =
-                    Some(Zeroizing::new("echo one\r\necho two\recho three\n".into()));
-                pane.open_paste_editor(window, cx);
-                assert_eq!(
-                    pane.edited_paste_text(cx).unwrap().as_str(),
-                    "echo one\r\necho two\recho three\n"
-                );
-                pane.close_paste_editor(window, cx);
-                pane.pending_paste = Some(Zeroizing::new("```sh\r\necho one\r\n```".into()));
-                pane.pending_paste_prefix = Some(Zeroizing::new(b"\x1b[2~".to_vec()));
                 window.focus(&pane.focus_handle, cx);
             });
             window.draw(cx).clear(cx);
         });
-        let edit = cx.debug_bounds("paste-edit").unwrap().center();
-        cx.simulate_click(edit, gpui::Modifiers::none());
+
+        let original = "echo one\r\necho two\recho three\n";
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(original.into()));
+            pane.update(cx, |pane, cx| pane.paste_from_clipboard(cx));
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("paste-editor").is_some());
+        assert!(delivered.borrow().is_empty());
+        let submit = cx.debug_bounds("paste-submit").unwrap().center();
+        cx.simulate_click(submit, gpui::Modifiers::none());
+        assert_eq!(
+            &*delivered.borrow(),
+            &[(
+                TerminalBroadcastInputKind::Paste,
+                original.as_bytes().to_vec()
+            )]
+        );
+        delivered.borrow_mut().clear();
+
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("```sh\r\necho one\r\n```".into()));
+            pane.update(cx, |pane, cx| {
+                pane.paste_from_clipboard_after(b"\x1b[2~", cx)
+            });
+        });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let strip = cx.debug_bounds("paste-strip-fence").unwrap().center();
         cx.simulate_click(strip, gpui::Modifiers::none());
@@ -523,16 +504,16 @@ mod tests {
             ]
         );
         delivered.borrow_mut().clear();
-        cx.update(|window, cx| {
-            cx.write_to_clipboard(ClipboardItem::new_string("echo cancel".into()));
-            pane.update(cx, |pane, cx| pane.edit_clipboard_paste(window, cx));
-            window.draw(cx).clear(cx);
+        cx.update(|_, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string("echo cancel\necho again".into()));
+            pane.update(cx, |pane, cx| {
+                pane.paste_from_clipboard_after(b"\x1b[2~", cx)
+            });
         });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
         cx.simulate_keystrokes("escape");
         pane.read_with(cx, |pane, _| {
             assert!(pane.paste_editor.is_none());
-            assert!(pane.pending_paste.is_none());
-            assert!(pane.pending_paste_prefix.is_none());
         });
         assert!(delivered.borrow().is_empty(), "cancel must not send input");
     }
@@ -549,7 +530,7 @@ mod tests {
             )
             .unwrap()
         });
-        for (width, editing) in [(900.0, true), (360.0, true), (360.0, false)] {
+        for width in [900.0, 360.0] {
             cx.simulate_resize(gpui::size(px(width), px(480.0)));
             cx.update(|window, cx| {
                 pane.update(cx, |pane, cx| {
@@ -560,26 +541,19 @@ mod tests {
                     pane.preferences.paste_labels.edit_title = "粘贴前编辑".into();
                     pane.preferences.paste_labels.strip_fence =
                         "Codeblock-Markierungen entfernen".into();
-                    pane.pending_paste = Some(Zeroizing::new("```sh\necho one\n```".into()));
-                    if editing {
-                        pane.open_paste_editor(window, cx);
-                    }
+                    pane.open_paste_editor(Zeroizing::new("```sh\necho one\n```".into()), &[], cx);
                 });
                 window.draw(cx).clear(cx);
             });
             let dialog = cx.debug_bounds("paste-dialog").unwrap();
             assert!(dialog.left() >= px(0.0) && dialog.right() <= px(width));
             assert!(dialog.top() >= px(0.0) && dialog.bottom() <= px(480.0));
-            for name in if editing {
-                vec![
-                    "paste-editor",
-                    "paste-strip-fence",
-                    "paste-cancel",
-                    "paste-submit",
-                ]
-            } else {
-                vec!["paste-edit", "paste-cancel", "paste-submit"]
-            } {
+            for name in [
+                "paste-editor",
+                "paste-strip-fence",
+                "paste-cancel",
+                "paste-submit",
+            ] {
                 let bounds = cx.debug_bounds(name).unwrap();
                 assert!(
                     dialog.contains(&bounds.origin) && dialog.contains(&bounds.bottom_right()),

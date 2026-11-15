@@ -563,10 +563,10 @@ fn mouse_clipboard_paste_overrides_tracking_and_preserves_confirmation(cx: &mut 
         let (before_confirmation, _) = peer.input.recv_timeout(Duration::from_secs(5)).unwrap();
         assert_eq!(before_confirmation, b"before-paste");
 
-        pane.update(cx, |pane, cx| {
-            pane.confirm_pending_paste(cx);
-            pane.send_protocol_bytes(b"after-paste", cx);
-        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let submit = cx.debug_bounds("paste-submit").unwrap().center();
+        cx.simulate_click(submit, gpui::Modifiers::none());
+        pane.update(cx, |pane, cx| pane.send_protocol_bytes(b"after-paste", cx));
         let mut received = Vec::new();
         while !received.ends_with(b"after-paste") {
             let (bytes, _) = peer.input.recv_timeout(Duration::from_secs(5)).unwrap();
