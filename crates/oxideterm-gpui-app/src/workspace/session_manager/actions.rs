@@ -17,6 +17,32 @@ enum SessionManagerMoveInteraction {
     DragDrop,
 }
 
+/// How a row click combines with the current selection.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum RowSelectionMode {
+    Replace,
+    Toggle,
+    Range,
+}
+
+/// Returns the contiguous visible rows between `anchor` and `target` (both
+/// endpoints included) in render order, or `None` when either endpoint is not
+/// part of the visible list (e.g. hidden by a collapsed group or a search).
+pub(super) fn session_manager_selection_range(
+    visible: &[SessionManagerSelectionTarget],
+    anchor: &SessionManagerSelectionTarget,
+    target: &SessionManagerSelectionTarget,
+) -> Option<Vec<SessionManagerSelectionTarget>> {
+    let anchor_index = visible.iter().position(|candidate| candidate == anchor)?;
+    let target_index = visible.iter().position(|candidate| candidate == target)?;
+    let (start, end) = if anchor_index <= target_index {
+        (anchor_index, target_index)
+    } else {
+        (target_index, anchor_index)
+    };
+    Some(visible[start..=end].to_vec())
+}
+
 impl WorkspaceApp {
     pub(super) fn request_delete_ftp_profile(&mut self, id: &str, cx: &mut Context<Self>) {
         self.session_manager.update(cx, |state, cx| {
@@ -32,9 +58,9 @@ impl WorkspaceApp {
             .connections()
             .iter()
             .filter(|conn| {
-                conn.group.as_deref().is_some_and(|candidate| {
-                    candidate == group || candidate.starts_with(&format!("{group}/"))
-                })
+                conn.group
+                    .as_deref()
+                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
             })
             .count();
         let serial_count = self
@@ -42,9 +68,10 @@ impl WorkspaceApp {
             .serial_profiles()
             .iter()
             .filter(|profile| {
-                profile.group.as_deref().is_some_and(|candidate| {
-                    candidate == group || candidate.starts_with(&format!("{group}/"))
-                })
+                profile
+                    .group
+                    .as_deref()
+                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
             })
             .count();
         let local_count = self
@@ -52,9 +79,10 @@ impl WorkspaceApp {
             .local_terminal_profiles()
             .iter()
             .filter(|profile| {
-                profile.group.as_deref().is_some_and(|candidate| {
-                    candidate == group || candidate.starts_with(&format!("{group}/"))
-                })
+                profile
+                    .group
+                    .as_deref()
+                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
             })
             .count();
         let telnet_count = self
@@ -62,9 +90,10 @@ impl WorkspaceApp {
             .telnet_profiles()
             .iter()
             .filter(|profile| {
-                profile.group.as_deref().is_some_and(|candidate| {
-                    candidate == group || candidate.starts_with(&format!("{group}/"))
-                })
+                profile
+                    .group
+                    .as_deref()
+                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
             })
             .count();
         let mosh_count = self
@@ -72,9 +101,10 @@ impl WorkspaceApp {
             .mosh_profiles()
             .iter()
             .filter(|profile| {
-                profile.group.as_deref().is_some_and(|candidate| {
-                    candidate == group || candidate.starts_with(&format!("{group}/"))
-                })
+                profile
+                    .group
+                    .as_deref()
+                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
             })
             .count();
         let standalone_sftp_count = self
@@ -82,9 +112,10 @@ impl WorkspaceApp {
             .standalone_sftp_profiles()
             .iter()
             .filter(|profile| {
-                profile.group.as_deref().is_some_and(|candidate| {
-                    candidate == group || candidate.starts_with(&format!("{group}/"))
-                })
+                profile
+                    .group
+                    .as_deref()
+                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
             })
             .count();
         let remote_desktop_count = self
@@ -92,9 +123,10 @@ impl WorkspaceApp {
             .remote_desktop_profiles()
             .iter()
             .filter(|profile| {
-                profile.group.as_deref().is_some_and(|candidate| {
-                    candidate == group || candidate.starts_with(&format!("{group}/"))
-                })
+                profile
+                    .group
+                    .as_deref()
+                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
             })
             .count();
         let ble_count = self
@@ -113,9 +145,10 @@ impl WorkspaceApp {
                 .plugin_profiles()
                 .iter()
                 .filter(|profile| {
-                    profile.group.as_deref().is_some_and(|candidate| {
-                        candidate == group || candidate.starts_with(&format!("{group}/"))
-                    })
+                    profile
+                        .group
+                        .as_deref()
+                        .is_some_and(|candidate| session_group_path_is_within(candidate, group))
                 })
                 .count()
             + self
@@ -123,9 +156,10 @@ impl WorkspaceApp {
                 .ftp_profiles()
                 .iter()
                 .filter(|profile| {
-                    profile.group.as_deref().is_some_and(|candidate| {
-                        candidate == group || candidate.starts_with(&format!("{group}/"))
-                    })
+                    profile
+                        .group
+                        .as_deref()
+                        .is_some_and(|candidate| session_group_path_is_within(candidate, group))
                 })
                 .count()
             + local_count
@@ -356,6 +390,86 @@ impl WorkspaceApp {
         });
     }
 
+    /// Applies a row click selection mode and keeps the anchor/visible order
+    /// consistent so Shift+click can resolve ranges against rendered rows.
+    pub(super) fn apply_session_manager_selection(
+        &mut self,
+        target: SessionManagerSelectionTarget,
+        mode: RowSelectionMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            match mode {
+                RowSelectionMode::Replace => {
+                    session_manager.selected_items.clear();
+                    session_manager.selected_items.insert(target.clone());
+                    session_manager.selection_anchor = Some(target);
+                }
+                RowSelectionMode::Toggle => {
+                    if session_manager.selected_items.contains(&target) {
+                        session_manager.selected_items.remove(&target);
+                    } else {
+                        session_manager.selected_items.insert(target.clone());
+                    }
+                    session_manager.selection_anchor = Some(target);
+                }
+                RowSelectionMode::Range => {
+                    // Keep the anchor fixed so repeated Shift+clicks extend the
+                    // same range; without a visible anchor fall back to Replace.
+                    let range = session_manager
+                        .selection_anchor
+                        .as_ref()
+                        .and_then(|anchor| {
+                            session_manager_selection_range(
+                                &session_manager.visible_selection_targets,
+                                anchor,
+                                &target,
+                            )
+                        });
+                    match range {
+                        Some(range) => {
+                            session_manager.selected_items = range.into_iter().collect();
+                        }
+                        None => {
+                            session_manager.selected_items.clear();
+                            session_manager.selected_items.insert(target.clone());
+                            session_manager.selection_anchor = Some(target);
+                        }
+                    }
+                }
+            }
+            cx.notify();
+        });
+    }
+
+    /// Publishes the selectable rows of the surface being rendered so Shift+click
+    /// ranges resolve against visual order instead of HashSet iteration order.
+    pub(super) fn set_session_manager_visible_selection_targets(
+        &self,
+        targets: Vec<SessionManagerSelectionTarget>,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_manager.update(cx, |session_manager, _| {
+            // Rewritten on every render from the same data, so no notify is needed.
+            if session_manager.visible_selection_targets != targets {
+                session_manager.visible_selection_targets = targets;
+            }
+        });
+    }
+
+    pub(super) fn clear_session_manager_selection(&mut self, cx: &mut Context<Self>) {
+        self.session_manager.update(cx, |session_manager, cx| {
+            if session_manager.selected_items.is_empty()
+                && session_manager.selection_anchor.is_none()
+            {
+                return;
+            }
+            session_manager.selected_items.clear();
+            session_manager.selection_anchor = None;
+            cx.notify();
+        });
+    }
+
     pub(in crate::workspace) fn clear_session_selection_for_invisible_rows(
         &mut self,
         cx: &mut Context<Self>,
@@ -370,6 +484,16 @@ impl WorkspaceApp {
             session_manager
                 .selected_items
                 .retain(|target| visible_items.contains(target));
+            // A hidden anchor row would make the next Shift+click degrade or
+            // span across rows the user cannot see; keep anchors that are
+            // still visible.
+            if session_manager
+                .selection_anchor
+                .as_ref()
+                .is_some_and(|anchor| !visible_items.contains(anchor))
+            {
+                session_manager.selection_anchor = None;
+            }
             if session_manager.selected_items.len() != previous_count {
                 cx.notify();
             }
@@ -1554,6 +1678,7 @@ impl WorkspaceApp {
         let status = (deleted > 0).then(|| connections_deleted_label(&self.i18n, deleted));
         self.session_manager.update(cx, |session_manager, cx| {
             session_manager.selected_items.clear();
+            session_manager.selection_anchor = None;
             session_manager.show_batch_move = false;
             session_manager.status = status;
             cx.notify();
@@ -1721,6 +1846,7 @@ impl WorkspaceApp {
             if interaction == SessionManagerMoveInteraction::BatchMenu {
                 self.session_manager.update(cx, |session_manager, cx| {
                     session_manager.selected_items.clear();
+                    session_manager.selection_anchor = None;
                     session_manager.show_batch_move = false;
                     cx.notify();
                 });
@@ -1759,6 +1885,7 @@ impl WorkspaceApp {
                                 group_label(&self.i18n, group),
                             ));
                             session_manager.selected_items.clear();
+                            session_manager.selection_anchor = None;
                             session_manager.show_batch_move = false;
                         }
                         SessionManagerMoveInteraction::DragDrop => {

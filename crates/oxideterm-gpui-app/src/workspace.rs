@@ -310,7 +310,9 @@ use self::pane_tree::SplitDrag;
 pub(crate) use self::root::helpers::tokens_from_settings as portable_bootstrap_tokens_from_settings;
 use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
-use self::session_manager::{SessionManagerState, SessionManagerWorkspaceEvent};
+use self::session_manager::{
+    SessionManagerInput, SessionManagerState, SessionManagerWorkspaceEvent,
+};
 use self::sidebar::AiInlinePanelState;
 #[cfg(test)]
 use self::sidebar::AiStreamDeliveryEvent;
@@ -926,6 +928,15 @@ pub(crate) struct WorkspaceApp {
     context_tools_menu_scroll: ScrollHandle,
     session_search_open: bool,
     session_search_query: String,
+    // Session manager sidebar search disclosure and sort menu open state.
+    // These are sidebar-only flags so the tab's toolbar menus don't conflict.
+    session_manager_search_open: bool,
+    session_manager_sidebar_sort_open: bool,
+    // Set only across the tabbar's "show in sidebar" handoff: it closes the
+    // Session Manager tab and the sidebar form takes over, so
+    // finish_tab_removal must keep the panel on Connections instead of
+    // parking the sidebar on Active Sessions.
+    session_manager_handoff_to_sidebar: bool,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     knowledge_workspace_list_state: ListState,

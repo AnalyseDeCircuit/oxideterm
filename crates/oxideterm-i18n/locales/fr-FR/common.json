@@ -1372,6 +1372,7 @@
     "copy_title": "Copier le titre",
     "detach_to_window": "Déplacer vers une nouvelle fenêtre",
     "return_to_main_window": "Renvoyer vers la fenêtre principale",
+    "switch_to_sidebar": "Afficher dans la barre latérale",
     "split_into_active_horizontal": "Fusionner dans l’onglet actif (côte à côte)",
     "split_into_active_vertical": "Fusionner dans l’onglet actif (empilé)",
     "detached_tab_closed": "Cet onglet a été fermé.",

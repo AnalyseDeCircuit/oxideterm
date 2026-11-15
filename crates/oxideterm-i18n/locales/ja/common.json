@@ -1372,6 +1372,7 @@
     "copy_title": "タイトルをコピー",
     "detach_to_window": "新しいウィンドウへ移動",
     "return_to_main_window": "メインウィンドウへ戻す",
+    "switch_to_sidebar": "サイドバーに表示",
     "split_into_active_horizontal": "アクティブなタブに統合（左右分割）",
     "split_into_active_vertical": "アクティブなタブに統合（上下分割）",
     "detached_tab_closed": "このタブは閉じられました。",

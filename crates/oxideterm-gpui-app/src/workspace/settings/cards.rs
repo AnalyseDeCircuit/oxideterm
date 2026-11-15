@@ -2311,6 +2311,7 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
             // their trigger bounds must be cached before pointer-down.
             | SelectAnchorId::SessionManagerViewMode
             | SelectAnchorId::SessionManagerSort
+            | SelectAnchorId::SessionManagerSidebarSort
             | SelectAnchorId::SessionManagerBatchMove
     )
 }

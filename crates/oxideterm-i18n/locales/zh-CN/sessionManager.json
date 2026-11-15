@@ -52,6 +52,8 @@
     },
     "actions": {
       "connect": "连接",
+      "start_tunnel": "启动隧道",
+      "stop_tunnel": "停止隧道",
       "edit": "编辑",
       "duplicate": "复制",
       "delete": "删除",

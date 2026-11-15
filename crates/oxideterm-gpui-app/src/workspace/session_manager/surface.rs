@@ -235,7 +235,13 @@ impl WorkspaceApp {
             })
             .when(sort_menu_open, |surface| {
                 surface.child(self.workspace_context_menu_backdrop(
-                    self.render_session_manager_sort_menu(window, has_background, cx),
+                    self.render_session_manager_sort_menu(
+                        window,
+                        has_background,
+                        SelectAnchorId::SessionManagerSort,
+                        false,
+                        cx,
+                    ),
                     cx,
                 ))
             })
@@ -356,6 +362,30 @@ impl WorkspaceApp {
                 self.ime_marked_text = None;
                 true
             }
+            "escape"
+                if input == SessionManagerInput::Search
+                    && self.session_manager_search_open
+                    // The sidebar disclosure owns this keystroke only while no
+                    // Session Manager tab is the keyboard content; with the tab
+                    // active a stale sidebar flag must not steal the collapse,
+                    // which belongs to the tab's search field (generic arm).
+                    && !self
+                        .keyboard_content_tab(cx)
+                        .is_some_and(|tab| tab.kind == TabKind::SessionManager) =>
+            {
+                // Escape collapses the sidebar disclosure and drops the draft,
+                // matching the active-sessions search behavior.
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.search_query.clear();
+                    session_manager.focused_input = None;
+                    cx.notify();
+                });
+                self.begin_disclosure_motion("session-manager-search".into(), false, cx);
+                self.session_manager_search_open = false;
+                self.clear_ime_selection();
+                self.ime_marked_text = None;
+                true
+            }
             "escape" => {
                 self.session_manager.update(cx, |session_manager, cx| {
                     // Escape clears focus without copying any secret input draft.
@@ -439,6 +469,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // The two forms stay mutually exclusive: callers may reach here while
+        // the sidebar still shows the session-manager panel (welcome link,
+        // command palette, plugin lifecycle), so the tab owns moving the
+        // sidebar off it, mirroring finish_tab_removal's close path.
+        if self.active_sidebar_section == SidebarSection::Connections {
+            self.set_sidebar_section(SidebarSection::Sessions, cx);
+        }
         self.refresh_session_manager_ssh_config_hosts(cx);
         let tab_id = if let Some(tab) = self
             .tabs(cx)

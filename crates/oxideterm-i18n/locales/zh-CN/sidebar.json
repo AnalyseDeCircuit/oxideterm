@@ -96,6 +96,8 @@
       "switch_tree": "切换到树形视图",
       "switch_host": "切换到主机视图",
       "new_connection": "新建连接",
+      "open_in_tab": "在标签页中打开",
+      "sort": "排序",
       "lock_app": "锁定 OxideTerm",
       "setup_app_lock": "设置应用锁",
       "collapse": "折叠"

@@ -96,6 +96,8 @@
       "switch_tree": "ツリービューに切替",
       "switch_host": "ホストビューに切り替え",
       "new_connection": "新規接続",
+      "open_in_tab": "タブで開く",
+      "sort": "並べ替え",
       "lock_app": "OxideTerm をロック",
       "setup_app_lock": "アプリロックを設定",
       "collapse": "折りたたむ"

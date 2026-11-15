@@ -327,6 +327,32 @@ impl WorkspaceApp {
             .as_ref()
             .map(|(tab_id, kind, _)| self.render_tab_window_modals(*tab_id, kind, window, cx))
             .unwrap_or_default();
+        // The sidebar form of the Session Manager has no tab to own its
+        // dialogs, so the root mounts them whenever the Session Manager tab
+        // is not the active tab. When it is active, the tab branch above
+        // already renders them and this stays empty to avoid duplication.
+        let sidebar_session_manager_modals = if active_tab_projection
+            .as_ref()
+            .is_some_and(|(_, kind, _)| *kind == TabKind::SessionManager)
+        {
+            Vec::new()
+        } else {
+            let (show_group_manager, show_delete_confirm) = {
+                let session_manager = self.session_manager.read(cx);
+                (
+                    session_manager.show_group_manager,
+                    session_manager.delete_confirm.is_some(),
+                )
+            };
+            let mut modals = Vec::new();
+            if show_group_manager {
+                modals.push(self.render_group_manager_dialog(window, cx));
+            }
+            if show_delete_confirm {
+                modals.push(self.render_session_manager_delete_confirm(cx));
+            }
+            modals
+        };
         // Settings and Knowledge share one root-mounted select portal. Keeping it
         // above tab-owned modals lets both surfaces use the same anchored control.
         let settings_select_overlay = self.render_settings_select_overlay(window, cx);
@@ -1414,6 +1440,7 @@ impl WorkspaceApp {
             })
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.
             .children(active_tab_window_modals)
+            .children(sidebar_session_manager_modals)
             .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
             .when_some(
                 self.render_native_plugin_select_overlay(window, cx),

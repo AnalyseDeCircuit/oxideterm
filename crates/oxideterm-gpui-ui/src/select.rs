@@ -211,6 +211,7 @@ pub enum SelectAnchorId {
     RemoteDesktopResizeMenu(u64),
     SessionManagerViewMode,
     SessionManagerSort,
+    SessionManagerSidebarSort,
     SessionManagerBatchMove,
 }
 

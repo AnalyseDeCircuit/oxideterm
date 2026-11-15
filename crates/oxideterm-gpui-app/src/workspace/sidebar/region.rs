@@ -352,6 +352,25 @@ impl WorkspaceApp {
                     )
                 },
             )
+            .when(
+                self.effective_sidebar_panel_section() == SidebarSection::Connections
+                    && self
+                        .disclosure_motions
+                        .retained("session-manager-search", self.session_manager_search_open),
+                |panel| {
+                    panel.child(
+                        self.disclosure_motions.render(
+                            "session-manager-search",
+                            &self.tokens,
+                            div()
+                                .flex_none()
+                                .overflow_hidden()
+                                .child(self.render_session_manager_search_input(cx)),
+                            Some(36.0),
+                        ),
+                    )
+                },
+            )
             .child(
                 div()
                     .flex_1()
@@ -399,6 +418,7 @@ impl WorkspaceApp {
             SidebarSection::Extensions => "sidebar.panels.plugins",
             SidebarSection::CloudSync => "plugin.cloud_sync.panel_title",
             SidebarSection::Notifications => "sidebar.panels.event_log",
+            SidebarSection::Connections => "sidebar.panels.session_manager",
             _ => "sidebar.panels.sessions",
         };
         let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key));
@@ -458,6 +478,42 @@ impl WorkspaceApp {
                     cx,
                 ));
         }
+        if panel_section == SidebarSection::Connections {
+            let workspace = cx.entity();
+            // Match the tab form's sort trigger, which reflects the current
+            // sort direction instead of a static glyph.
+            let sort_direction = self.session_manager.read(cx).sort_direction;
+            let sort_action = self.render_sidebar_action(
+                sort_direction.icon(),
+                SidebarActionKind::ToggleSessionSort,
+                cx,
+            );
+            header = header
+                .child(self.render_session_manager_search_button(cx))
+                .child(
+                    div()
+                        .id("sidebar-session-manager-sort")
+                        .child(select_anchor_probe(
+                            SelectAnchorId::SessionManagerSidebarSort,
+                            sort_action,
+                            move |anchor, _window, cx| {
+                                let _ = workspace.update(cx, |this, cx| {
+                                    this.update_select_anchor(anchor, cx);
+                                });
+                            },
+                        )),
+                )
+                .child(self.render_sidebar_action(
+                    LucideIcon::ExternalLink,
+                    SidebarActionKind::OpenSessionManagerTab,
+                    cx,
+                ))
+                .child(self.render_sidebar_action(
+                    LucideIcon::Plus,
+                    SidebarActionKind::NewConnection,
+                    cx,
+                ));
+        }
         header.into_any_element()
     }
 
@@ -474,24 +530,29 @@ impl WorkspaceApp {
                 ActiveSessionSidebarViewMode::Host => self.i18n.t("sidebar.tooltips.switch_tree"),
             },
             SidebarActionKind::NewConnection => self.i18n.t("sidebar.tooltips.new_connection"),
+            SidebarActionKind::OpenSessionManagerTab => self.i18n.t("sidebar.tooltips.open_in_tab"),
+            SidebarActionKind::ToggleSessionSort => self.i18n.t("sidebar.tooltips.sort"),
         };
 
         let host_view_active = action == SidebarActionKind::ToggleSessionView
             && self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Host;
+        let sort_active = action == SidebarActionKind::ToggleSessionSort
+            && self.session_manager_sidebar_sort_open;
+        let active = host_view_active || sort_active;
 
         div()
             .ml_1()
             .child(self.workspace_tooltip_icon_button(
                 icon,
                 self.tokens.metrics.sidebar_action_icon_size,
-                rgb(if host_view_active {
+                rgb(if active {
                     theme.text
                 } else {
                     theme.text_muted
                 }),
                 IconButtonOptions {
-                    has_background: host_view_active,
-                    background: host_view_active.then_some(rgb(theme.bg_active)),
+                    has_background: active,
+                    background: active.then_some(rgb(theme.bg_active)),
                     hover_background: Some(rgb(theme.bg_hover)),
                     ..IconButtonOptions::opaque_toolbar(
                         self.tokens.metrics.sidebar_action_size,
@@ -509,6 +570,17 @@ impl WorkspaceApp {
                         SidebarActionKind::NewConnection => {
                             this.open_new_connection_form(window, cx)
                         }
+                        SidebarActionKind::OpenSessionManagerTab => {
+                            // Jump to the tab form: move the sidebar body off the
+                            // session manager so the two views stay mutually exclusive.
+                            this.set_sidebar_section(SidebarSection::Sessions, cx);
+                            this.open_session_manager_tab(window, cx);
+                        }
+                        SidebarActionKind::ToggleSessionSort => {
+                            this.session_manager_sidebar_sort_open =
+                                !this.session_manager_sidebar_sort_open;
+                            cx.notify();
+                        }
                     }
                     cx.stop_propagation();
                 }),
@@ -517,16 +589,91 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    /// Icon button that toggles the session-manager search disclosure in the
+    /// sidebar header, mirroring the active-sessions search button.
+    pub(in crate::workspace) fn render_session_manager_search_button(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let open = self.session_manager_search_open;
+        let theme = self.tokens.ui;
+        self.workspace_tooltip_icon_button(
+            LucideIcon::Search,
+            self.tokens.metrics.sidebar_action_icon_size,
+            rgb(theme.text),
+            IconButtonOptions {
+                has_background: open,
+                background: open.then_some(rgb(theme.bg_hover)),
+                hover_background: Some(rgb(theme.bg_hover)),
+                ..IconButtonOptions::opaque_toolbar(
+                    self.tokens.metrics.sidebar_action_size,
+                    ButtonRadius::Md,
+                )
+            },
+            self.i18n.t("sidebar.search.title"),
+            "sidebar-session-manager-search",
+            false,
+            cx.listener(|this, _event, window, cx| {
+                this.prepare_modal_interaction_boundary(cx);
+                let next_open = !this.session_manager_search_open;
+                this.begin_disclosure_motion("session-manager-search".into(), next_open, cx);
+                this.session_manager_search_open = next_open;
+                this.clear_ime_selection();
+                if next_open {
+                    this.selected_ime_target = Some(ime::WorkspaceImeTarget::SessionManager(
+                        SessionManagerInput::Search,
+                    ));
+                    this.session_manager.update(cx, |manager, cx| {
+                        manager.focused_input = Some(SessionManagerInput::Search);
+                        cx.notify();
+                    });
+                    window.focus(&this.focus_handle, cx);
+                    this.show_active_input_caret(cx);
+                } else {
+                    this.session_manager.update(cx, |manager, cx| {
+                        manager.search_query.clear();
+                        manager.focused_input = None;
+                        cx.notify();
+                    });
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+            cx.entity(),
+        )
+        .into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_session_manager_search_input(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let query = self.session_manager.read(cx).search_query.clone();
+        self.render_session_text_input(
+            SessionManagerInput::Search,
+            &query,
+            self.i18n.t("sessionManager.toolbar.search_placeholder"),
+            cx,
+        )
+    }
+
     pub(in crate::workspace) fn render_sidebar_content(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let panel_section = self.effective_sidebar_panel_section();
-        if panel_section == SidebarSection::Sessions {
-            let sessions = self.render_active_sessions_sidebar_content(cx);
+        if matches!(
+            panel_section,
+            SidebarSection::Sessions | SidebarSection::Connections
+        ) {
+            let navigator = if panel_section == SidebarSection::Sessions {
+                self.render_active_sessions_sidebar_content(cx)
+            } else {
+                self.render_session_manager_sidebar_surface(window, cx)
+            };
             if self.embedded_sftp_node_id.is_none() {
-                return sessions;
+                return navigator;
             }
             let sftp = self.render_sftp_sidebar_surface(window, cx);
             let session_fraction = self
@@ -548,7 +695,8 @@ impl WorkspaceApp {
             };
             let split_hover_bg =
                 rgba((self.tokens.ui.accent << 8) | EMBEDDED_SFTP_SPLIT_HOVER_ALPHA);
-            // Embedded SFTP is a subordinate surface of Active Sessions. The
+            // Embedded SFTP is a subordinate surface of the visible navigator
+            // panel (Active Sessions or the Session Manager sidebar form). The
             // upper navigator and lower file browser scroll independently,
             // while the divider keeps them visually in one sidebar shell.
             return div()
@@ -567,7 +715,7 @@ impl WorkspaceApp {
                         .flex()
                         .flex_col()
                         .overflow_hidden()
-                        .child(sessions),
+                        .child(navigator),
                 )
                 .child(
                     div()
@@ -1154,6 +1302,8 @@ pub(in crate::workspace) fn notification_sidebar_row_signatures(
 pub(in crate::workspace) enum SidebarActionKind {
     ToggleSessionView,
     NewConnection,
+    OpenSessionManagerTab,
+    ToggleSessionSort,
 }
 
 #[cfg(test)]

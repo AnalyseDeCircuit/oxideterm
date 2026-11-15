@@ -96,6 +96,8 @@
       "switch_tree": "Chế độ cây",
       "switch_host": "Chế độ máy chủ",
       "new_connection": "Kết nối mới",
+      "open_in_tab": "Mở trong tab",
+      "sort": "Sắp xếp",
       "lock_app": "Khóa OxideTerm",
       "setup_app_lock": "Thiết lập khóa ứng dụng",
       "collapse": "Thu gọn"

@@ -1478,9 +1478,18 @@ impl WorkspaceApp {
         if let Some(path) = remote_path.filter(|path| !path.trim().is_empty()) {
             self.set_sftp_path(SftpPane::Remote, path, cx);
         }
-        // Showing Active Sessions is the visibility boundary that starts the
-        // pending node-backed directory request exactly once.
-        self.set_sidebar_section(SidebarSection::Sessions, cx);
+        // Showing a navigator that hosts the embedded SFTP surface is the
+        // visibility boundary that starts the pending node-backed directory
+        // request exactly once. Keep the Session Manager panel when it is the
+        // visible one instead of jumping to Active Sessions.
+        if self.sidebar_hosts_embedded_sftp() {
+            if self.sidebar_collapsed {
+                self.set_sidebar_collapsed_with_motion(false, cx);
+            }
+            self.activate_embedded_sftp_sidebar_if_visible(cx);
+        } else {
+            self.set_sidebar_section(SidebarSection::Sessions, cx);
+        }
         // The sidebar is a consumer of the node-owned SFTP channel. Hiding it
         // never releases or disconnects the physical SSH node.
         cx.notify();
@@ -1537,7 +1546,7 @@ impl WorkspaceApp {
     ) {
         let _scope = self.enter_sftp_surface(SftpSurfaceId::Sidebar);
         if self.sidebar_collapsed
-            || self.effective_sidebar_panel_section() != SidebarSection::Sessions
+            || !self.sidebar_hosts_embedded_sftp()
             || self
                 .active_tab(cx)
                 .is_some_and(|tab| tab.kind == TabKind::Sftp)
@@ -1942,7 +1951,7 @@ impl WorkspaceApp {
                     return false;
                 };
                 !self.sidebar_collapsed
-                    && self.effective_sidebar_panel_section() == SidebarSection::Sessions
+                    && self.sidebar_hosts_embedded_sftp()
                     && !self
                         .active_tab(cx)
                         .is_some_and(|tab| tab.kind == TabKind::Sftp)

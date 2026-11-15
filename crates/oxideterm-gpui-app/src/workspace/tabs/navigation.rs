@@ -298,7 +298,6 @@ impl WorkspaceApp {
             }
             Some(TabKind::SessionManager) => {
                 self.active_surface = ActiveSurface::Terminal;
-                self.active_sidebar_section = SidebarSection::Connections;
             }
             Some(TabKind::Runtime) => {
                 self.active_surface = ActiveSurface::Terminal;
@@ -1043,6 +1042,20 @@ impl WorkspaceApp {
         self.close_plugin_connection_tab(tab.id, cx);
         if tab.kind == TabKind::NotificationCenter {
             self.hide_audit_page();
+        }
+        if tab.kind == TabKind::SessionManager
+            && self.active_sidebar_section == SidebarSection::Connections
+        {
+            if self.session_manager_handoff_to_sidebar {
+                // The tabbar's "show in sidebar" handoff closes this tab while
+                // the sidebar form takes over, so keep the panel in place.
+                self.session_manager_handoff_to_sidebar = false;
+            } else {
+                // Closing the tab form ends the Session Manager entirely; hand the
+                // sidebar back to its previous panel instead of revealing the
+                // sidebar form.
+                self.set_sidebar_section(SidebarSection::Sessions, cx);
+            }
         }
         let mut pages = Vec::new();
         if let Some(root) = &tab.root_pane {

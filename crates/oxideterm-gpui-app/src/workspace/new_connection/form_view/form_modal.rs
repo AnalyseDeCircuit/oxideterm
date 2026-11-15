@@ -182,14 +182,17 @@ impl WorkspaceApp {
             .form
             .as_ref()
             .is_some_and(|form| form.ftp_profile_id.is_some());
-        // Saved non-SSH profiles edit persisted assets without acquiring a runtime owner.
+        // Saved non-SSH profiles edit persisted assets without acquiring a
+        // runtime owner. BLE joins this list so its editor hides the
+        // transport selector like every other saved profile type.
         let saved_profile_edit_mode = remote_desktop_edit_mode
             || mosh_edit_mode
             || form.local_profile_id.is_some()
             || serial_edit_mode
             || telnet_edit_mode
             || standalone_sftp_edit_mode
-            || ftp_edit_mode;
+            || ftp_edit_mode
+            || form.ble_profile_id.is_some();
         let drill_down_mode = self
             .connection_form_state(cx)
             .drill_down_parent_node_id

@@ -52,6 +52,8 @@
     },
     "actions": {
       "connect": "Conectar",
+      "start_tunnel": "Iniciar túnel",
+      "stop_tunnel": "Detener túnel",
       "edit": "Editar",
       "duplicate": "Duplicar",
       "delete": "Eliminar",

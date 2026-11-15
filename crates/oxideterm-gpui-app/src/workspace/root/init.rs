@@ -749,6 +749,9 @@ impl WorkspaceApp {
             context_tools_menu_scroll: ScrollHandle::new(),
             session_search_open: false,
             session_search_query: String::new(),
+            session_manager_search_open: false,
+            session_manager_sidebar_sort_open: false,
+            session_manager_handoff_to_sidebar: false,
             // Mode-specific row signatures invalidate stale measurements
             // when switching between tree and host layouts.
             active_session_sidebar_list_state: ListState::new(

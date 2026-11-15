@@ -140,6 +140,83 @@ pub(super) fn ssh_config_display_projection_never_copies_proxy_command_secrets()
 }
 
 #[test]
+pub(super) fn row_menu_selection_target_maps_saved_profiles_and_skips_unselectable_rows() {
+    // Every saved-profile kind participates in the row-menu multi-delete, so a
+    // missing arm would silently downgrade that kind to single-row deletion.
+    let saved_kinds = [
+        (
+            SessionManagerRowActionTarget::Tunnel("t".into()),
+            SessionManagerSelectionTarget::Tunnel("t".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::Plugin("p".into()),
+            SessionManagerSelectionTarget::Plugin("p".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::Connection("c".into()),
+            SessionManagerSelectionTarget::Connection("c".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::Serial("s".into()),
+            SessionManagerSelectionTarget::Serial("s".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::Ble("b".into()),
+            SessionManagerSelectionTarget::Ble("b".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::LocalTerminal("l".into()),
+            SessionManagerSelectionTarget::LocalTerminal("l".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::Telnet("te".into()),
+            SessionManagerSelectionTarget::Telnet("te".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::Ftp("f".into()),
+            SessionManagerSelectionTarget::Ftp("f".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::Mosh("m".into()),
+            SessionManagerSelectionTarget::Mosh("m".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::StandaloneSftp("sf".into()),
+            SessionManagerSelectionTarget::StandaloneSftp("sf".into()),
+        ),
+        (
+            SessionManagerRowActionTarget::RemoteDesktop("rd".into()),
+            SessionManagerSelectionTarget::RemoteDesktop("rd".into()),
+        ),
+    ];
+    for (row_target, expected_selection) in saved_kinds {
+        assert_eq!(
+            session_manager_row_menu_selection_target(&row_target),
+            Some(expected_selection),
+            "row target {row_target:?} must map onto the matching selection target"
+        );
+    }
+    // Groups and transient SSH-config discoveries are not selectable and keep
+    // their dedicated single-row menu flows.
+    assert_eq!(
+        session_manager_row_menu_selection_target(&SessionManagerRowActionTarget::Group(
+            "group-a".into()
+        )),
+        None
+    );
+    assert_eq!(
+        session_manager_row_menu_selection_target(&SessionManagerRowActionTarget::GroupRoot),
+        None
+    );
+    assert_eq!(
+        session_manager_row_menu_selection_target(&SessionManagerRowActionTarget::SshConfig(
+            "host".into()
+        )),
+        None
+    );
+}
+
+#[test]
 #[ignore = "manual session group projection benchmark"]
 fn session_group_projection_performance() {
     for (group_count, item_count) in [(20, 200), (100, 1000), (500, 5000)] {
@@ -1340,4 +1417,151 @@ fn ide_access_prompt_defers_tab_creation_until_selection(cx: &mut TestAppContext
         assert_eq!(ide_tabs[0].title, "IDE · Choice Host");
         assert_eq!(workspace.active_tab_id(cx), Some(ide_tabs[0].id));
     });
+}
+
+#[gpui::test]
+fn sidebar_search_owns_keys_only_while_the_disclosure_is_visible(cx: &mut TestAppContext) {
+    let Some(fixture_dir) =
+        isolated_workspace_fixture(cx, "OXIDETERM_SIDEBAR_SEARCH_GATE_TEST_DIR")
+    else {
+        return;
+    };
+    let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
+
+    workspace.update(cx, |workspace, cx| {
+        workspace.set_sidebar_section(SidebarSection::Connections, cx);
+        workspace.session_manager.update(cx, |manager, _cx| {
+            manager.search_query = "web".into();
+            manager.focused_input = Some(SessionManagerInput::Search);
+        });
+
+        // With the disclosure closed the field must not capture keys, so the
+        // active terminal keeps its keyboard model.
+        assert_eq!(workspace.active_session_manager_input(cx), None);
+
+        workspace.session_manager_search_open = true;
+        assert_eq!(
+            workspace.active_session_manager_input(cx),
+            Some(SessionManagerInput::Search)
+        );
+
+        // The header sort menu owns the panel keyboard while it is open.
+        workspace.session_manager_sidebar_sort_open = true;
+        assert_eq!(workspace.active_session_manager_input(cx), None);
+        workspace.session_manager_sidebar_sort_open = false;
+
+        // Escape collapses the disclosure and drops the draft, matching the
+        // active-sessions search.
+        let escape = gpui::KeyDownEvent {
+            keystroke: gpui::Keystroke {
+                modifiers: gpui::Modifiers::default(),
+                key: "escape".into(),
+                key_char: None,
+            },
+            is_held: false,
+            prefer_character_input: false,
+        };
+        assert!(workspace.handle_session_manager_key(&escape, cx));
+        assert!(!workspace.session_manager_search_open);
+        assert!(workspace.session_manager.read(cx).search_query.is_empty());
+        assert_eq!(workspace.session_manager.read(cx).focused_input(), None);
+    });
+}
+
+#[gpui::test]
+fn group_dialog_name_field_owns_keys_without_the_session_manager_tab(cx: &mut TestAppContext) {
+    let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_GROUP_DIALOG_GATE_TEST_DIR")
+    else {
+        return;
+    };
+    let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
+
+    workspace.update(cx, |workspace, cx| {
+        workspace.set_sidebar_section(SidebarSection::Connections, cx);
+        workspace.session_manager.update(cx, |manager, _cx| {
+            manager.focused_input = Some(SessionManagerInput::GroupName);
+        });
+
+        // While no dialog is open the draft field must not capture keys, so
+        // the active terminal keeps its keyboard model.
+        assert_eq!(workspace.active_session_manager_input(cx), None);
+
+        // The root mounts the group manager dialog for the sidebar form, so
+        // its field owns keys while the dialog is open even though no
+        // Session Manager tab exists underneath.
+        workspace.session_manager.update(cx, |manager, _cx| {
+            manager.show_group_manager = true;
+        });
+        assert_eq!(
+            workspace.active_session_manager_input(cx),
+            Some(SessionManagerInput::GroupName)
+        );
+    });
+}
+
+#[test]
+fn row_action_targets_map_only_openable_rows_to_open_targets() {
+    let cases = [
+        (
+            SessionManagerRowActionTarget::Tunnel("t-1".into()),
+            Some(SessionManagerOpenTarget::Tunnel("t-1".into())),
+        ),
+        (
+            SessionManagerRowActionTarget::Connection("c-1".into()),
+            Some(SessionManagerOpenTarget::Connection("c-1".into())),
+        ),
+        (
+            SessionManagerRowActionTarget::SshConfig("alias".into()),
+            Some(SessionManagerOpenTarget::SshConfig("alias".into())),
+        ),
+        (
+            SessionManagerRowActionTarget::RemoteDesktop("r-1".into()),
+            Some(SessionManagerOpenTarget::RemoteDesktop("r-1".into())),
+        ),
+        (SessionManagerRowActionTarget::Group("g".into()), None),
+        (SessionManagerRowActionTarget::GroupRoot, None),
+    ];
+    for (target, expected) in cases {
+        assert_eq!(target.open_target(), expected, "target: {target:?}");
+    }
+}
+
+#[test]
+fn shift_range_selection_selects_contiguous_visible_rows() {
+    use crate::workspace::session_manager::actions::session_manager_selection_range;
+    let visible: Vec<SessionManagerSelectionTarget> = ["a", "b", "c", "d"]
+        .into_iter()
+        .map(|name| SessionManagerSelectionTarget::Connection(name.into()))
+        .collect();
+    let target = |name: &str| SessionManagerSelectionTarget::Connection(name.into());
+
+    // Endpoints are included and the result keeps render order even when the
+    // anchor sits below the target (clicking upwards must not reverse ranges).
+    assert_eq!(
+        session_manager_selection_range(&visible, &target("a"), &target("c")),
+        Some(vec![target("a"), target("b"), target("c")]),
+    );
+    assert_eq!(
+        session_manager_selection_range(&visible, &target("c"), &target("a")),
+        Some(vec![target("a"), target("b"), target("c")]),
+    );
+    // An anchor equal to the target selects exactly that row.
+    assert_eq!(
+        session_manager_selection_range(&visible, &target("b"), &target("b")),
+        Some(vec![target("b")]),
+    );
+    // Endpoints hidden by a collapsed group or search must yield None so the
+    // caller degrades to a plain single-row selection instead of a bogus range.
+    assert_eq!(
+        session_manager_selection_range(&visible, &target("z"), &target("c")),
+        None,
+    );
+    assert_eq!(
+        session_manager_selection_range(&visible, &target("a"), &target("z")),
+        None,
+    );
+    assert_eq!(
+        session_manager_selection_range(&[], &target("a"), &target("a")),
+        None,
+    );
 }

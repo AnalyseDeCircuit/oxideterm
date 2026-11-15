@@ -194,6 +194,15 @@ impl WorkspaceApp {
             }
     }
 
+    pub(in crate::workspace) fn sidebar_hosts_embedded_sftp(&self) -> bool {
+        // The embedded SFTP surface stacks below whichever navigator panel is
+        // already visible: Active Sessions or the Session Manager sidebar form.
+        matches!(
+            self.effective_sidebar_panel_section(),
+            SidebarSection::Sessions | SidebarSection::Connections
+        )
+    }
+
     pub(in crate::workspace) fn set_sidebar_section(
         &mut self,
         section: SidebarSection,
@@ -207,8 +216,18 @@ impl WorkspaceApp {
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
         }
-        if section == SidebarSection::Sessions {
+        if matches!(
+            self.active_sidebar_section,
+            SidebarSection::Sessions | SidebarSection::Connections
+        ) {
             self.activate_embedded_sftp_sidebar_if_visible(cx);
+        }
+        if section != SidebarSection::Connections {
+            // The session manager sidebar search disclosure and sort menu are
+            // scoped to the Connections panel; reset them when leaving so the
+            // next visit starts with a clean header.
+            self.session_manager_search_open = false;
+            self.session_manager_sidebar_sort_open = false;
         }
         self.persist_sidebar_settings(cx);
         cx.notify();
