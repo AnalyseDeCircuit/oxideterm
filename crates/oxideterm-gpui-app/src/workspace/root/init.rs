@@ -826,6 +826,8 @@ impl WorkspaceApp {
             focused_settings_input: None,
             settings_input_draft: String::new(),
             terminal_command_specs_editor_open: false,
+            highlight_rule_editor_index: None,
+            semantic_scheme_editor_open: false,
             settings_slider_drag: None,
             workspace_input,
             _workspace_input_observation: workspace_input_observation,

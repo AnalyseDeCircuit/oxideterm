@@ -72,7 +72,11 @@ impl WorkspaceApp {
                                         },
                                     ),
                                     Some(Self::render_lucide_icon(
-                                        LucideIcon::ChevronDown,
+                                        if self.plugin_manager_state(cx).custom_acp_expanded {
+                                            LucideIcon::ChevronDown
+                                        } else {
+                                            LucideIcon::ChevronRight
+                                        },
                                         14.0,
                                         rgb(self.tokens.ui.text_muted),
                                     )),
@@ -137,9 +141,11 @@ impl WorkspaceApp {
         div()
             .w_full()
             .min_w(px(0.0))
-            .border_t_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .pt(px(12.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
+            .p(px(14.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
@@ -356,7 +362,7 @@ impl WorkspaceApp {
             .gap(px(4.0))
             .child(
                 div()
-                    .text_size(px(12.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t(label_key)),
             )
@@ -512,15 +518,14 @@ impl WorkspaceApp {
         div()
             .w_full()
             .min_w(px(0.0))
-            .border_t_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-            .pt(px(12.0))
             .flex()
             .flex_col()
             .gap(px(8.0))
+            .child(self.card_separator())
             .child(
                 div()
-                    .text_size(px(12.0))
+                    .pt(px(4.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t("settings_view.ai.acp_agent_capabilities")),
             )
@@ -634,7 +639,6 @@ impl WorkspaceApp {
                 div()
                     .w_full()
                     .min_w(px(0.0))
-                    .mt(px(12.0))
                     .h(px(list_height))
                     .child(tauri_virtual_list(
                         state,
@@ -650,12 +654,8 @@ impl WorkspaceApp {
             None
         };
 
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .child(self.ai_collapsible_header(
+        self.ai_settings_section(
+            self.ai_collapsible_header(
                 "settings_view.ai.provider_settings",
                 summary,
                 expanded,
@@ -668,12 +668,9 @@ impl WorkspaceApp {
                     cx.notify();
                 },
                 cx,
-            ))
-            .child(div().mt(px(12.0)).child(self.ai_provider_add_controls(cx)))
-            .when_some(provider_list, |section, provider_list| {
-                section.child(provider_list)
-            })
-            .into_any_element()
+            ),
+            std::iter::once(self.ai_provider_add_controls(cx)).chain(provider_list),
+        )
     }
 
     pub(in crate::workspace) fn ai_provider_card_list_estimated_height(
@@ -822,33 +819,25 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        settings_ai_context_controls_section(
-            self.ai_section_title("settings_view.ai.context_controls"),
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.ai.context_automatic_hint"))
-                .into_any_element(),
-            settings_ai_context_sources_group(
-                &self.tokens,
-                self.i18n.t("settings_view.ai.context_sources"),
-                vec![
-                    self.ai_context_source_row(
-                        "settings_view.ai.context_source_ide",
-                        "settings_view.ai.context_source_ide_hint",
-                        settings.ai.context_sources.ide,
-                        set_ai_context_source_ide,
-                        cx,
-                    ),
-                    self.ai_context_source_row(
-                        "settings_view.ai.context_source_sftp",
-                        "settings_view.ai.context_source_sftp_hint",
-                        settings.ai.context_sources.sftp,
-                        set_ai_context_source_sftp,
-                        cx,
-                    ),
-                ],
-            ),
+        self.settings_card(
+            "settings_view.ai.context_controls",
+            "settings_view.ai.context_automatic_hint",
+            vec![
+                self.ai_context_source_row(
+                    "settings_view.ai.context_source_ide",
+                    "settings_view.ai.context_source_ide_hint",
+                    settings.ai.context_sources.ide,
+                    set_ai_context_source_ide,
+                    cx,
+                ),
+                self.ai_context_source_row(
+                    "settings_view.ai.context_source_sftp",
+                    "settings_view.ai.context_source_sftp_hint",
+                    settings.ai.context_sources.sftp,
+                    set_ai_context_source_sftp,
+                    cx,
+                ),
+            ],
         )
     }
 
@@ -864,7 +853,7 @@ impl WorkspaceApp {
             &self.tokens,
             self.i18n.t(label_key),
             self.i18n.t(hint_key),
-            checkbox(&self.tokens, label_key.to_owned(), String::new(), checked).into_any_element(),
+            switch(&self.tokens, label_key.to_owned(), String::new(), checked).into_any_element(),
         )
         .on_mouse_down(
             MouseButton::Left,
@@ -882,17 +871,19 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let has_custom_prompt = !settings.ai.custom_system_prompt.trim().is_empty();
-        settings_ai_editor_summary_section(
-            &self.tokens,
-            self.i18n.t("settings_view.ai.system_prompt_title"),
-            self.i18n.t("settings_view.ai.system_prompt_hint"),
-            None,
-            self.i18n.t(if has_custom_prompt {
-                "settings_view.ai.system_prompt_status_custom"
-            } else {
-                "settings_view.ai.system_prompt_status_default"
-            }),
-            self.ai_text_editor_action_button(AiTextEditorDialog::SystemPrompt, cx),
+        self.settings_card(
+            "settings_view.ai.system_prompt_title",
+            "settings_view.ai.system_prompt_hint",
+            vec![self.setting_row(
+                if has_custom_prompt {
+                    "settings_view.ai.system_prompt_status_custom"
+                } else {
+                    "settings_view.ai.system_prompt_status_default"
+                },
+                "",
+                self.ai_text_editor_action_button(AiTextEditorDialog::SystemPrompt, cx),
+                cx,
+            )],
         )
     }
 
@@ -908,23 +899,28 @@ impl WorkspaceApp {
                 .entries
                 .iter()
                 .any(|entry| !entry.content.trim().is_empty());
-        settings_ai_editor_summary_section(
-            &self.tokens,
-            self.i18n.t("settings_view.ai.memory_title"),
-            self.i18n.t("settings_view.ai.memory_hint"),
-            Some(self.bool_row(
-                "settings_view.ai.memory_enabled",
-                "settings_view.ai.memory_enabled_hint",
-                settings.ai.memory.enabled,
-                set_ai_memory_enabled,
-                cx,
-            )),
-            self.i18n.t(if has_saved_memory {
-                "settings_view.ai.memory_status_saved"
-            } else {
-                "settings_view.ai.memory_status_empty"
-            }),
-            self.ai_text_editor_action_button(AiTextEditorDialog::Memory, cx),
+        self.settings_card(
+            "settings_view.ai.memory_title",
+            "settings_view.ai.memory_hint",
+            vec![
+                self.setting_row(
+                    if has_saved_memory {
+                        "settings_view.ai.memory_status_saved"
+                    } else {
+                        "settings_view.ai.memory_status_empty"
+                    },
+                    "",
+                    self.ai_text_editor_action_button(AiTextEditorDialog::Memory, cx),
+                    cx,
+                ),
+                self.bool_row(
+                    "settings_view.ai.memory_enabled",
+                    "settings_view.ai.memory_enabled_hint",
+                    settings.ai.memory.enabled,
+                    set_ai_memory_enabled,
+                    cx,
+                ),
+            ],
         )
     }
 
@@ -1010,84 +1006,61 @@ impl WorkspaceApp {
             )
         });
 
-        settings_ai_tool_use_section(
-            settings_ai_icon_heading(
-                Self::render_lucide_icon(LucideIcon::Wrench, 16.0, rgb(self.tokens.ui.text)),
-                self.ai_section_title("settings_view.ai.tool_use"),
-            ),
-            div()
-                .w_full()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(self.tokens.metrics.settings_card_gap))
-                .child(self.select_setting_row(
+        let controls = self.settings_card_with_header(
+            "settings_view.ai.tool_use",
+            "",
+            Some(Self::render_lucide_icon(
+                LucideIcon::Wrench,
+                16.0,
+                rgb(self.tokens.ui.text_heading),
+            )),
+            None,
+            vec![
+                self.select_setting_row(
                     "settings_view.ide.agent_mode_label",
                     "settings_view.ide.agent_mode_hint",
                     SettingsSelect::IdeAgentMode,
                     ide_agent_label(settings.ide.agent_mode, &self.i18n),
                     self.tokens.metrics.settings_select_width,
                     cx,
-                ))
-                .child(self.bool_row(
+                ),
+                self.bool_row(
                     "settings_view.ai.tool_use_enabled",
                     "settings_view.ai.tool_use_enabled_hint",
                     settings.ai.tool_use.enabled,
                     set_ai_tool_use_enabled,
                     cx,
-                ))
-                .child(
-                    self.ai_tool_number_input_row(
-                        "settings_view.ai.tool_use_max_rounds",
-                        "settings_view.ai.tool_use_max_rounds_hint",
-                        SettingsInput::AiToolUseMaxRounds,
-                        settings
-                            .ai
-                            .tool_use
-                            .max_rounds
-                            .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS),
-                        cx,
-                    ),
-                )
-                .child(self.ai_disabled_tools_notice(settings, cx))
-                .into_any_element(),
-            self.card_title("settings_view.ai.tool_auto_approval_title"),
-            self.ai_tool_expand_button(cx),
-            collapsed_summary,
-            expanded_body,
-        )
-    }
-
-    pub(in crate::workspace) fn ai_tool_number_input_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        input: SettingsInput,
-        value: i64,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        settings_ai_tool_number_input_row(
-            &self.tokens,
-            self.setting_row(
-                label_key,
-                hint_key,
-                self.number_input(
-                    input,
-                    value.to_string(),
-                    self.tokens.metrics.settings_number_input_width,
+                ),
+                self.number_row(
+                    "settings_view.ai.tool_use_max_rounds",
+                    "settings_view.ai.tool_use_max_rounds_hint",
+                    SettingsInput::AiToolUseMaxRounds,
+                    settings
+                        .ai
+                        .tool_use
+                        .max_rounds
+                        .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS),
                     cx,
                 ),
-                cx,
-            ),
-        )
-    }
-
-    pub(in crate::workspace) fn ai_section_heading(
-        &self,
-        title_key: &str,
-        hint_key: &str,
-    ) -> AnyElement {
-        settings_ai_section_heading(&self.tokens, self.i18n.t(title_key), self.i18n.t(hint_key))
+                self.ai_disabled_tools_notice(settings, cx),
+            ],
+        );
+        let policy = self.settings_card_with_header(
+            "settings_view.ai.tool_auto_approval_title",
+            "",
+            None,
+            Some(self.ai_tool_expand_button(cx)),
+            collapsed_summary.into_iter().chain(expanded_body).collect(),
+        );
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap(px(self.tokens.metrics.settings_page_gap))
+            .child(controls)
+            .child(policy)
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn ai_collapsible_header(
@@ -1100,7 +1073,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         settings_ai_collapsible_header(
             &self.tokens,
-            self.i18n.t(title_key).to_uppercase(),
+            self.i18n.t(title_key),
             summary,
             self.render_animated_chevron(
                 (
@@ -1231,38 +1204,25 @@ impl WorkspaceApp {
         providers: &[AiProviderView],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let provider_panels = ai_model_context_window_panels(settings, providers);
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .child(self.ai_context_windows_header(cx))
-            .when(
-                self.ai_entity
-                    .read(cx)
-                    .settings_section_expanded(AiSettingsViewSection::ContextWindows),
-                |section| {
-                    if provider_panels.is_empty() {
-                        section.child(settings_ai_model_empty_text(
-                            &self.tokens,
-                            self.i18n.t("settings_view.ai.model_context_windows_empty"),
-                        ))
-                    } else {
-                        let mut list = div()
-                            .w_full()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(16.0));
-                        for panel in provider_panels {
-                            list = list.child(self.ai_context_window_provider(settings, panel, cx));
-                        }
-                        section.child(list)
-                    }
-                },
-            )
-            .into_any_element()
+        let header = self.ai_context_windows_header(cx);
+        let body = self
+            .ai_entity
+            .read(cx)
+            .settings_section_expanded(AiSettingsViewSection::ContextWindows)
+            .then(|| {
+                let mut rows = ai_model_context_window_panels(settings, providers)
+                    .into_iter()
+                    .map(|panel| self.ai_context_window_provider(settings, panel, cx))
+                    .collect::<Vec<_>>();
+                if rows.is_empty() {
+                    rows.push(settings_ai_model_empty_text(
+                        &self.tokens,
+                        self.i18n.t("settings_view.ai.model_context_windows_empty"),
+                    ));
+                }
+                self.plain_settings_card(rows)
+            });
+        self.ai_settings_section(header, body)
     }
 
     pub(in crate::workspace) fn ai_context_windows_header(

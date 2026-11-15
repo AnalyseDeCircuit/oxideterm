@@ -425,9 +425,15 @@ impl WorkspaceApp {
         let error = launch_at_login.error;
         let control = div()
             .flex_none()
-            .opacity(if loading { 0.55 } else { 1.0 })
             .child(
-                checkbox(&self.tokens, "launch-at-login", String::new(), enabled).on_mouse_down(
+                switch_with(
+                    &self.tokens,
+                    "launch-at-login",
+                    String::new(),
+                    enabled,
+                    SwitchOptions::default().disabled(loading),
+                )
+                .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
                         if !this
@@ -1297,6 +1303,12 @@ impl WorkspaceApp {
                         ),
                     ],
                 )
+            }
+            SettingsSectionId::TerminalHighlightSelection => {
+                self.highlight_selection_card(settings, cx)
+            }
+            SettingsSectionId::TerminalHighlightSemantic => {
+                self.highlight_semantic_card(settings, cx)
             }
             SettingsSectionId::TerminalHighlightRules => self.highlight_rules_card(settings, cx),
             _ => div().into_any_element(),

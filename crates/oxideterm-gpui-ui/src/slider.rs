@@ -56,7 +56,7 @@ pub fn slider(tokens: &ThemeTokens, view: SliderView) -> Div {
                         .bg(rgb(tokens.ui.accent))
                         .w(relative(pct)),
                 )
-                .child(
+                .child(crate::surface::opaque_control_surface(
                     div()
                         .absolute()
                         .size(px(thumb))
@@ -68,7 +68,7 @@ pub fn slider(tokens: &ThemeTokens, view: SliderView) -> Div {
                         .top(relative(0.5))
                         .ml(px(-thumb / 2.0))
                         .mt(px(-thumb / 2.0)),
-                ),
+                )),
         )
 }
 

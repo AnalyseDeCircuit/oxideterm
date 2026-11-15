@@ -671,7 +671,7 @@ impl WorkspaceApp {
                 self.appearance_row(
                     "settings_view.terminal.bg_enabled",
                     "settings_view.terminal.bg_enabled_hint",
-                    checkbox(&self.tokens, "background-enabled", String::new(), enabled)
+                    switch(&self.tokens, "background-enabled", String::new(), enabled)
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {
@@ -766,52 +766,75 @@ impl WorkspaceApp {
             }
         }
         rows.push(self.card_separator());
-        rows.push(self.card_subsection_header(
-            self.i18n.t("settings_view.terminal.bg_effects"),
-            None,
-        ));
         use oxideterm_settings::GeneratedBackgroundKind;
-        rows.push(
-            div()
-                .flex()
-                .flex_wrap()
-                .gap(px(self.tokens.spacing.two))
-                .children(
-                    [
-                        (None, "settings_view.terminal.bg_effect_none"),
-                        (
-                            Some(GeneratedBackgroundKind::Mineral),
-                            "settings_view.terminal.bg_source_mineral",
-                        ),
-                        (
-                            Some(GeneratedBackgroundKind::Fog),
-                            "settings_view.terminal.bg_source_fog",
-                        ),
-                        (
-                            Some(GeneratedBackgroundKind::Tide),
-                            "settings_view.terminal.bg_source_tide",
-                        ),
-                        (
-                            Some(GeneratedBackgroundKind::TideParticles),
-                            "settings_view.terminal.bg_source_tide_particles",
-                        ),
-                        (
-                            Some(GeneratedBackgroundKind::Meteor),
-                            "settings_view.terminal.bg_source_meteor",
-                        ),
-                        (
-                            Some(GeneratedBackgroundKind::Particles),
-                            "settings_view.terminal.bg_source_particles",
-                        ),
-                        (
-                            Some(GeneratedBackgroundKind::Caustics),
-                            "settings_view.terminal.bg_source_caustics",
-                        ),
-                    ]
-                    .map(|(kind, key)| {
-                        self.appearance_action_button(
-                            LucideIcon::Sparkles,
+        const BACKGROUND_EFFECT_OPTIONS: [(Option<GeneratedBackgroundKind>, &str); 8] = [
+            (None, "settings_view.terminal.bg_effect_none"),
+            (
+                Some(GeneratedBackgroundKind::Mineral),
+                "settings_view.terminal.bg_source_mineral",
+            ),
+            (
+                Some(GeneratedBackgroundKind::Fog),
+                "settings_view.terminal.bg_source_fog",
+            ),
+            (
+                Some(GeneratedBackgroundKind::Tide),
+                "settings_view.terminal.bg_source_tide",
+            ),
+            (
+                Some(GeneratedBackgroundKind::TideParticles),
+                "settings_view.terminal.bg_source_tide_particles",
+            ),
+            (
+                Some(GeneratedBackgroundKind::Meteor),
+                "settings_view.terminal.bg_source_meteor",
+            ),
+            (
+                Some(GeneratedBackgroundKind::Particles),
+                "settings_view.terminal.bg_source_particles",
+            ),
+            (
+                Some(GeneratedBackgroundKind::Caustics),
+                "settings_view.terminal.bg_source_caustics",
+            ),
+        ];
+        let active_effect_kind = terminal.background_effect.as_ref().map(|effect| effect.kind);
+        let active_effect_key = BACKGROUND_EFFECT_OPTIONS
+            .iter()
+            .find(|(kind, _)| *kind == active_effect_kind)
+            .map(|(_, key)| *key)
+            .unwrap_or("settings_view.terminal.bg_effect_none");
+        let effects_expanded = self
+            .settings_workspace
+            .read(cx)
+            .background_effects_expanded
+            .unwrap_or(terminal.background_effect.is_some());
+        rows.push(self.appearance_collapsible_subsection_header(
+            "appearance-bg-effects-toggle",
+            "settings_view.terminal.bg_effects",
+            Some(self.i18n.t(active_effect_key)),
+            effects_expanded,
+            cx.listener(move |this, _event, _window, cx| {
+                this.settings_workspace.update(cx, |entity, cx| {
+                    let current = entity
+                        .background_effects_expanded
+                        .unwrap_or(active_effect_kind.is_some());
+                    entity.background_effects_expanded = Some(!current);
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }),
+        ));
+        if effects_expanded {
+            rows.push(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .gap(px(self.tokens.spacing.two))
+                    .children(BACKGROUND_EFFECT_OPTIONS.map(|(kind, key)| {
+                        self.appearance_option_pill(
                             self.i18n.t(key),
+                            kind == active_effect_kind,
                             cx.listener(move |this, _, _, cx| {
                                 this.edit_background_style(
                                     |style| {
@@ -829,19 +852,12 @@ impl WorkspaceApp {
                                 cx.stop_propagation();
                             }),
                         )
-                        .when(
-                            kind == terminal
-                                .background_effect
-                                .as_ref()
-                                .map(|effect| effect.kind),
-                            |button| button.border_color(rgb(self.tokens.ui.accent)),
-                        )
-                    }),
-                )
-                .into_any_element(),
-        );
-        if let Some(effect) = &terminal.background_effect {
-            rows.extend(self.appearance_background_effect_rows(effect, cx));
+                    }))
+                    .into_any_element(),
+            );
+            if let Some(effect) = &terminal.background_effect {
+                rows.extend(self.appearance_background_effect_rows(effect, cx));
+            }
         }
         if has_background {
             rows.push(self.card_separator());
@@ -1235,6 +1251,99 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn appearance_option_pill(
+        &self,
+        label: String,
+        selected: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> Div {
+        self.workspace_toolbar_action_button(
+            label,
+            None,
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: if selected {
+                        ButtonVariant::Secondary
+                    } else {
+                        ButtonVariant::Outline
+                    },
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled: false,
+                },
+                height: Some(self.tokens.metrics.settings_appearance_action_height),
+                padding_x: Some(10.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                border: Some(rgb(if selected {
+                    self.tokens.ui.accent
+                } else {
+                    self.tokens.ui.border
+                })),
+                text_color: Some(rgb(if selected {
+                    self.tokens.ui.accent
+                } else {
+                    self.tokens.ui.text
+                })),
+                ..ToolbarButtonOptions::default()
+            },
+            listener,
+        )
+    }
+
+    pub(super) fn appearance_collapsible_subsection_header(
+        &self,
+        id: &'static str,
+        title_key: &str,
+        summary_badge: Option<String>,
+        expanded: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        div()
+            .id(id)
+            .w_full()
+            .min_w_0()
+            .px(px(4.0))
+            .py(px(4.0))
+            .rounded(px(self.tokens.radii.sm))
+            .cursor_pointer()
+            .hover(|style| style.bg(rgba((self.tokens.ui.bg_hover << 8) | 0x66)))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap(px(12.0))
+            .on_mouse_down(MouseButton::Left, listener)
+            .child(self.card_subsection_header(self.i18n.t(title_key), None))
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .when_some(summary_badge, |right, badge| {
+                        right.child(
+                            div()
+                                .px(px(8.0))
+                                .py(px(2.0))
+                                .rounded(px(self.tokens.radii.sm))
+                                .bg(rgb(self.tokens.ui.bg_sunken))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .text_color(rgb(self.tokens.ui.text_muted))
+                                .child(badge),
+                        )
+                    })
+                    .child(Self::render_lucide_icon(
+                        if expanded {
+                            LucideIcon::ChevronDown
+                        } else {
+                            LucideIcon::ChevronRight
+                        },
+                        14.0,
+                        rgb(self.tokens.ui.text_muted),
+                    )),
+            )
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn appearance_row(
         &self,
         label_key: &str,
@@ -1340,7 +1449,7 @@ impl WorkspaceApp {
         self.appearance_row(
             "settings_view.appearance.show_window_titlebar",
             "settings_view.appearance.show_window_titlebar_hint",
-            checkbox(&self.tokens, "window-titlebar", String::new(), checked)
+            switch(&self.tokens, "window-titlebar", String::new(), checked)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

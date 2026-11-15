@@ -125,6 +125,10 @@ pub(in crate::workspace) enum ActiveWindowModalOwner {
         phase: oxideterm_gpui_ui::motion::ExitPhase,
     },
     TerminalCommandSpecsEditor,
+    TerminalTriggerEditor,
+    SemanticSchemeEditor,
+    HighlightRuleEditor,
+    PublicMcpClientEditor,
     QuickCommandsManager,
     AiTextEditor,
     OxideImport {
@@ -168,7 +172,7 @@ impl ActiveWindowModalOwner {
             Self::AiClearAll { .. } => 10,
             Self::AiDeleteMessage { .. } => 11,
             Self::SettingsReset { .. } => 12,
-            Self::CommandHistoryClear { .. } => 54,
+            Self::CommandHistoryClear { .. } => 57,
             Self::SettingsDataDirectory { .. } => 13,
             Self::RemoteShellIntegration => 14,
             Self::TerminalTriggerQuickCommand => 15,
@@ -197,19 +201,23 @@ impl ActiveWindowModalOwner {
             Self::ThemeEditor { .. } => 37,
             Self::SettingsSshConfigImport { .. } => 38,
             Self::TerminalCommandSpecsEditor => 39,
-            Self::QuickCommandsManager => 40,
-            Self::AiTextEditor => 41,
-            Self::OxideImport { .. } => 42,
-            Self::OxideExport { .. } => 43,
-            Self::BatchAdd { .. } => 44,
-            Self::CommandPalette => 45,
-            Self::VersionMigration => 46,
-            Self::Onboarding => 47,
-            Self::LegalNotice { .. } => 48,
-            Self::NativeUpdateReleaseNotes { .. } => 49,
-            Self::Shortcuts => 50,
-            Self::AppLockDialog => 51,
-            Self::MermaidZoom => 52,
+            Self::TerminalTriggerEditor => 40,
+            Self::SemanticSchemeEditor => 41,
+            Self::HighlightRuleEditor => 42,
+            Self::PublicMcpClientEditor => 43,
+            Self::QuickCommandsManager => 44,
+            Self::AiTextEditor => 45,
+            Self::OxideImport { .. } => 46,
+            Self::OxideExport { .. } => 47,
+            Self::BatchAdd { .. } => 48,
+            Self::CommandPalette => 49,
+            Self::VersionMigration => 50,
+            Self::Onboarding => 51,
+            Self::LegalNotice { .. } => 52,
+            Self::NativeUpdateReleaseNotes { .. } => 53,
+            Self::Shortcuts => 54,
+            Self::AppLockDialog => 55,
+            Self::MermaidZoom => 56,
         }
     }
 
@@ -262,6 +270,10 @@ impl ActiveWindowModalOwner {
             | Self::SshTunnel
             | Self::TerminalCastPlayer
             | Self::TerminalCommandSpecsEditor
+            | Self::TerminalTriggerEditor
+            | Self::SemanticSchemeEditor
+            | Self::HighlightRuleEditor
+            | Self::PublicMcpClientEditor
             | Self::QuickCommandsManager
             | Self::AiTextEditor
             | Self::CommandPalette
@@ -290,6 +302,9 @@ impl ActiveWindowModalOwner {
                 | Self::ThemeEditor { .. }
                 | Self::SettingsSshConfigImport { .. }
                 | Self::TerminalCommandSpecsEditor
+                | Self::TerminalTriggerEditor
+                | Self::SemanticSchemeEditor
+                | Self::HighlightRuleEditor
                 | Self::QuickCommandsManager
                 | Self::AiTextEditor
                 | Self::ArchiveCommand
@@ -370,6 +385,10 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) settings_ssh_import_phase:
         Option<oxideterm_gpui_ui::motion::ExitPhase>,
     pub(in crate::workspace) terminal_command_specs_editor_open: bool,
+    pub(in crate::workspace) terminal_trigger_editor_open: bool,
+    pub(in crate::workspace) semantic_scheme_editor_open: bool,
+    pub(in crate::workspace) highlight_rule_editor_open: bool,
+    pub(in crate::workspace) public_mcp_client_editor_open: bool,
     pub(in crate::workspace) quick_commands_manager_open: bool,
     pub(in crate::workspace) ai_text_editor_open: bool,
     pub(in crate::workspace) oxide_import_phase: Option<oxideterm_gpui_ui::motion::ExitPhase>,
@@ -542,6 +561,18 @@ impl ActiveWindowModalProjection {
         let command_specs_owner = self
             .terminal_command_specs_editor_open
             .then_some(ActiveWindowModalOwner::TerminalCommandSpecsEditor);
+        let terminal_trigger_editor_owner = self
+            .terminal_trigger_editor_open
+            .then_some(ActiveWindowModalOwner::TerminalTriggerEditor);
+        let semantic_scheme_owner = self
+            .semantic_scheme_editor_open
+            .then_some(ActiveWindowModalOwner::SemanticSchemeEditor);
+        let highlight_rule_owner = self
+            .highlight_rule_editor_open
+            .then_some(ActiveWindowModalOwner::HighlightRuleEditor);
+        let public_mcp_client_owner = self
+            .public_mcp_client_editor_open
+            .then_some(ActiveWindowModalOwner::PublicMcpClientEditor);
         let quick_commands_manager_owner = self
             .quick_commands_manager_open
             .then_some(ActiveWindowModalOwner::QuickCommandsManager);
@@ -605,6 +636,10 @@ impl ActiveWindowModalProjection {
             theme_editor_owner,
             ssh_import_owner,
             command_specs_owner,
+            terminal_trigger_editor_owner,
+            semantic_scheme_owner,
+            highlight_rule_owner,
+            public_mcp_client_owner,
             quick_commands_manager_owner,
             ai_text_editor_owner,
             oxide_import_owner,
@@ -761,6 +796,34 @@ impl WorkspaceApp {
             theme_editor_phase,
             settings_ssh_import_phase,
             terminal_command_specs_editor_open: self.terminal_command_specs_editor_open,
+            terminal_trigger_editor_open: self.terminal_triggers.editor_open,
+            semantic_scheme_editor_open: self.semantic_scheme_editor_open
+                && self
+                    .settings_store
+                    .settings()
+                    .terminal
+                    .active_custom_semantic_scheme()
+                    .is_some(),
+            highlight_rule_editor_open: self.highlight_rule_editor_index.is_some_and(|index| {
+                index
+                    < self
+                        .settings_store
+                        .settings()
+                        .terminal
+                        .effective_highlight_rules()
+                        .len()
+            }),
+            public_mcp_client_editor_open: self
+                .settings_workspace
+                .read(cx)
+                .public_mcp_client_editor
+                .as_deref()
+                .is_some_and(|client_ref| {
+                    self.public_mcp
+                        .clients()
+                        .iter()
+                        .any(|client| client.client_ref.as_str() == client_ref)
+                }),
             quick_commands_manager_open: self.terminal.read(cx).quick_commands.manager_open(),
             ai_text_editor_open: self.ai_text_editor_dialog.is_some(),
             oxide_import_phase,
@@ -1254,6 +1317,32 @@ impl WorkspaceApp {
                     self.close_terminal_command_specs_editor(cx);
                 }
             }
+            ActiveWindowModalOwner::TerminalTriggerEditor => {
+                if event.keystroke.key.as_str() == "escape" {
+                    if self.terminal_triggers.scope_picker_open {
+                        self.clear_terminal_trigger_input_focus();
+                        self.terminal_triggers.scope_picker_open = false;
+                        cx.notify();
+                    } else {
+                        self.close_terminal_trigger_editor(cx);
+                    }
+                }
+            }
+            ActiveWindowModalOwner::SemanticSchemeEditor => {
+                if event.keystroke.key.as_str() == "escape" {
+                    self.close_semantic_scheme_editor(cx);
+                }
+            }
+            ActiveWindowModalOwner::HighlightRuleEditor => {
+                if event.keystroke.key.as_str() == "escape" {
+                    self.close_highlight_rule_editor(cx);
+                }
+            }
+            ActiveWindowModalOwner::PublicMcpClientEditor => {
+                if event.keystroke.key.as_str() == "escape" {
+                    self.close_public_mcp_client_editor(cx);
+                }
+            }
             ActiveWindowModalOwner::QuickCommandsManager => {
                 if self
                     .terminal
@@ -1553,5 +1642,59 @@ mod tests {
         let exiting_key = exiting_owner.key_route("x");
         assert!(exiting_key.consumes_key());
         assert_eq!(exiting_key.dispatch_owner, None);
+    }
+
+    #[test]
+    fn settings_editor_modals_allow_ime_and_capture_escape_above_command_specs() {
+        for (projection, expected) in [
+            (
+                ActiveWindowModalProjection {
+                    terminal_command_specs_editor_open: true,
+                    terminal_trigger_editor_open: true,
+                    ..Default::default()
+                },
+                ActiveWindowModalOwner::TerminalTriggerEditor,
+            ),
+            (
+                ActiveWindowModalProjection {
+                    terminal_trigger_editor_open: true,
+                    semantic_scheme_editor_open: true,
+                    ..Default::default()
+                },
+                ActiveWindowModalOwner::SemanticSchemeEditor,
+            ),
+            (
+                ActiveWindowModalProjection {
+                    semantic_scheme_editor_open: true,
+                    highlight_rule_editor_open: true,
+                    ..Default::default()
+                },
+                ActiveWindowModalOwner::HighlightRuleEditor,
+            ),
+            (
+                ActiveWindowModalProjection {
+                    highlight_rule_editor_open: true,
+                    public_mcp_client_editor_open: true,
+                    ..Default::default()
+                },
+                ActiveWindowModalOwner::PublicMcpClientEditor,
+            ),
+        ] {
+            let owner = projection.top_owner().expect("settings modal owner");
+            assert_eq!(owner, expected);
+            if matches!(
+                owner,
+                ActiveWindowModalOwner::TerminalTriggerEditor
+                    | ActiveWindowModalOwner::SemanticSchemeEditor
+                    | ActiveWindowModalOwner::HighlightRuleEditor
+            ) {
+                assert!(owner.allows_modal_ime());
+            } else {
+                assert!(!owner.allows_modal_ime());
+            }
+            let escape = owner.key_route("escape");
+            assert!(escape.consumes_key());
+            assert_eq!(escape.dispatch_owner, Some(owner));
+        }
     }
 }

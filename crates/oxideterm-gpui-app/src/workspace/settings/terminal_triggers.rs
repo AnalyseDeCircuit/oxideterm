@@ -7,12 +7,12 @@ use oxideterm_terminal_triggers::{
 };
 
 const TERMINAL_TRIGGER_DEFAULT_COOLDOWN_MS: u64 = 1_000;
-// Trigger forms stay readable on wide settings panes instead of stretching with the window.
 const TERMINAL_TRIGGER_EDITOR_MAX_WIDTH: f32 = 1_120.0;
 const TERMINAL_TRIGGER_FIELD_BASIS: f32 = 280.0;
-const TERMINAL_TRIGGER_COMPACT_FIELD_BASIS: f32 = 180.0;
-const TERMINAL_TRIGGER_SIDEBAR_WIDTH: f32 = 260.0;
+const TERMINAL_TRIGGER_COMPACT_FIELD_BASIS: f32 = 220.0;
 const TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT: f32 = 520.0;
+const TERMINAL_TRIGGER_MODAL_WIDTH: f32 = 760.0;
+const TERMINAL_TRIGGER_MODAL_MAX_HEIGHT: f32 = 760.0;
 
 fn editable_trigger_action(action: &TerminalTriggerAction, index: usize) -> &TerminalTriggerAction {
     match action {
@@ -91,7 +91,7 @@ fn filter_terminal_trigger_connections(
         .collect()
 }
 
-fn is_terminal_trigger_input(input: SettingsInput) -> bool {
+pub(in crate::workspace) fn is_terminal_trigger_input(input: SettingsInput) -> bool {
     matches!(
         input,
         SettingsInput::TerminalTriggerName
@@ -113,8 +113,9 @@ pub(in crate::workspace) struct TerminalTriggersSettingsState {
     settings_path: PathBuf,
     pub(in crate::workspace) snapshot: TerminalTriggersSnapshot,
     editor: Option<TerminalTrigger>,
+    pub(in crate::workspace) editor_open: bool,
     menu_item: usize,
-    scope_picker_open: bool,
+    pub(in crate::workspace) scope_picker_open: bool,
     scope_picker_query: String,
     scope_picker_scroll: gpui::ScrollHandle,
     error_key: Option<&'static str>,
@@ -129,6 +130,7 @@ impl TerminalTriggersSettingsState {
                     settings_path: settings_path.to_path_buf(),
                     snapshot,
                     editor,
+                    editor_open: false,
                     menu_item: 0,
                     scope_picker_open: false,
                     scope_picker_query: String::new(),
@@ -140,6 +142,7 @@ impl TerminalTriggersSettingsState {
                 settings_path: settings_path.to_path_buf(),
                 snapshot: default_snapshot(),
                 editor: None,
+                editor_open: false,
                 menu_item: 0,
                 scope_picker_open: false,
                 scope_picker_query: String::new(),
@@ -176,6 +179,7 @@ impl TerminalTriggersSettingsState {
             created_at: timestamp,
             updated_at: timestamp,
         });
+        self.editor_open = true;
         self.scope_picker_open = false;
         self.error_key = None;
     }
@@ -188,6 +192,7 @@ impl TerminalTriggersSettingsState {
             .iter()
             .find(|trigger| trigger.id == trigger_id)
             .cloned();
+        self.editor_open = self.editor.is_some();
         self.scope_picker_open = false;
         self.error_key = None;
     }
@@ -209,6 +214,7 @@ impl TerminalTriggersSettingsState {
         trigger.created_at = timestamp;
         trigger.updated_at = timestamp;
         self.editor = Some(trigger);
+        self.editor_open = true;
         self.scope_picker_open = false;
         self.error_key = None;
     }
@@ -226,6 +232,7 @@ impl TerminalTriggersSettingsState {
             })
             .cloned()
             .or_else(|| self.snapshot.triggers.first().cloned());
+        self.editor_open = false;
         self.scope_picker_open = false;
         self.error_key = None;
     }
@@ -278,6 +285,7 @@ impl TerminalTriggersSettingsState {
                 .iter()
                 .find(|trigger| trigger.id == trigger_id)
                 .cloned();
+            self.editor_open = false;
             self.scope_picker_open = false;
             true
         } else {
@@ -291,6 +299,13 @@ impl TerminalTriggersSettingsState {
         snapshot.updated_at = now_ms();
         let changed = self.persist_snapshot(snapshot);
         if changed {
+            if self
+                .editor
+                .as_ref()
+                .is_some_and(|editor| editor.id == trigger_id)
+            {
+                self.editor_open = false;
+            }
             self.editor = self.snapshot.triggers.first().cloned();
             self.scope_picker_open = false;
         }
@@ -699,59 +714,220 @@ impl WorkspaceApp {
         self.terminal_trigger_global_card(cx)
     }
 
-    fn terminal_trigger_global_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let header = div()
-            .w_full()
-            .min_w(px(0.0))
+    fn open_new_terminal_trigger_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prepare_modal_interaction_boundary(cx);
+        self.clear_terminal_trigger_input_focus();
+        self.terminal_triggers.new_rule();
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    fn open_edit_terminal_trigger_editor(
+        &mut self,
+        trigger_id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prepare_modal_interaction_boundary(cx);
+        self.clear_terminal_trigger_input_focus();
+        self.terminal_triggers.edit_rule(trigger_id);
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    fn open_duplicate_terminal_trigger_editor(
+        &mut self,
+        trigger_id: &str,
+        copy_suffix: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.prepare_modal_interaction_boundary(cx);
+        self.clear_terminal_trigger_input_focus();
+        self.terminal_triggers
+            .duplicate_rule(trigger_id, copy_suffix);
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_terminal_trigger_editor(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.clear_terminal_trigger_input_focus();
+        self.terminal_triggers.cancel_edit();
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    fn save_terminal_trigger_editor(&mut self, cx: &mut Context<Self>) {
+        if let Some(input) = self
+            .focused_settings_input
+            .filter(|input| is_terminal_trigger_input(*input))
+        {
+            let input_draft = self.settings_input_draft.clone();
+            if !self.apply_terminal_trigger_settings_input(input, &input_draft) {
+                self.terminal_triggers.error_key =
+                    Some("settings_view.terminal.triggers.validation_failed");
+                cx.notify();
+                return;
+            }
+        }
+        let shell_enabled = self
+            .settings_store
+            .settings()
+            .terminal
+            .triggers
+            .explicit_shell_enabled;
+        let changed = self.terminal_triggers.save_editor(shell_enabled);
+        if changed {
+            self.clear_terminal_trigger_input_focus();
+            self.ime_marked_text = None;
+        }
+        self.persist_terminal_trigger_change(changed, cx);
+    }
+
+    pub(in crate::workspace) fn render_terminal_trigger_editor_modal(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(trigger) = self.terminal_triggers.editor.as_ref() else {
+            return div().into_any_element();
+        };
+        let theme = self.tokens.ui;
+        let modal_title = if trigger.name.trim().is_empty() {
+            self.i18n.t("settings_view.terminal.triggers.add_rule")
+        } else {
+            trigger.name.clone()
+        };
+        let mut body_content = div().w_full().min_w(px(0.0)).flex().flex_col().gap(px(12.0));
+        if self.terminal_triggers.scope_picker_open {
+            body_content = body_content.child(self.terminal_trigger_scope_picker(cx));
+        } else {
+            body_content = body_content.child(self.terminal_trigger_editor(trigger, cx));
+            if let Some(error_key) = self.terminal_triggers.error_key {
+                body_content = body_content.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.error))
+                        .child(self.i18n.t(error_key)),
+                );
+            }
+        }
+
+        let footer = if self.terminal_triggers.scope_picker_open {
+            dialog_footer(&self.tokens)
+                .justify_end()
+                .child(self.terminal_trigger_button(
+                    self.i18n
+                        .t("settings_view.terminal.triggers.scope_picker_done"),
+                    ButtonVariant::Default,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.terminal_triggers.scope_picker_open = false;
+                        this.clear_terminal_trigger_input_focus();
+                        cx.notify();
+                    }),
+                ))
+        } else {
+            dialog_footer(&self.tokens)
+                .justify_end()
+                .child(self.terminal_trigger_button(
+                    self.i18n.t("settings_view.terminal.triggers.cancel"),
+                    ButtonVariant::Outline,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_terminal_trigger_editor(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.terminal_trigger_button(
+                    self.i18n.t("settings_view.terminal.triggers.save"),
+                    ButtonVariant::Default,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.save_terminal_trigger_editor(cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+        };
+
+        let dialog = oxideterm_gpui_ui::modal_container(&self.tokens)
+            .w(px(TERMINAL_TRIGGER_MODAL_WIDTH))
+            .max_w_full()
+            .max_h(px(TERMINAL_TRIGGER_MODAL_MAX_HEIGHT))
+            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
             .flex()
-            .flex_row()
-            .flex_wrap()
-            .items_start()
-            .justify_between()
-            .gap(px(16.0))
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
             .child(
-                div()
-                    .flex_1()
-                    .min_w(px(220.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.terminal.triggers.global_title")
-                                    .to_uppercase(),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("settings_view.terminal.triggers.description")),
-                    ),
+                dialog_header(&self.tokens)
+                    .child(dialog_title(&self.tokens, modal_title))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n.t("settings_view.terminal.triggers.description"),
+                    )),
             )
-            .child(self.terminal_trigger_button(
-                self.i18n.t("settings_view.terminal.triggers.add_rule"),
-                ButtonVariant::Default,
+            .child(
+                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
+                    .id("terminal-trigger-editor-modal-scroll")
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("terminal-trigger-editor-modal-scroll"),
+                    )
+                    .child(body_content),
+            )
+            .child(footer);
+
+        dismissible_dialog_backdrop()
+            .on_mouse_down(
+                MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    this.clear_terminal_trigger_input_focus();
-                    this.terminal_triggers.new_rule();
-                    cx.notify();
+                    this.close_terminal_trigger_editor(cx);
+                    cx.stop_propagation();
                 }),
-            ))
+            )
+            .child(overlay_content_boundary(dialog))
+            .into_any_element()
+    }
+
+    fn terminal_trigger_global_card(&self, cx: &mut Context<Self>) -> AnyElement {
+        let add_button = self
+            .workspace_toolbar_action_button(
+                self.i18n.t("settings_view.terminal.triggers.add_rule"),
+                Some(Self::render_lucide_icon(
+                    LucideIcon::Plus,
+                    14.0,
+                    rgb(self.tokens.ui.accent_text),
+                )),
+                ToolbarButtonOptions {
+                    button: ButtonOptions {
+                        variant: ButtonVariant::Default,
+                        size: ButtonSize::Sm,
+                        radius: ButtonRadius::Md,
+                        disabled: false,
+                    },
+                    ..ToolbarButtonOptions::default()
+                },
+                cx.listener(|this, _event, window, cx| {
+                    this.open_new_terminal_trigger_editor(window, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .into_any_element();
         let mut rows = vec![
-            header,
             self.card_separator(),
             self.terminal_trigger_shell_trust_row(cx),
             self.card_separator(),
-            self.terminal_trigger_manager(cx),
+            self.terminal_trigger_rules_summary_list(cx),
         ];
-        if let Some(error_key) = self.terminal_triggers.error_key {
+        if !self.terminal_triggers.editor_open
+            && let Some(error_key) = self.terminal_triggers.error_key
+        {
             rows.push(self.card_separator());
             rows.push(
                 div()
@@ -772,112 +948,44 @@ impl WorkspaceApp {
                 )
                 .into_any_element(),
         );
-        self.plain_settings_card(rows)
+        self.settings_card_with_header(
+            "settings_view.terminal.triggers.global_title",
+            "settings_view.terminal.triggers.description",
+            None,
+            Some(add_button),
+            rows,
+        )
     }
 
-    fn terminal_trigger_manager(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut rule_list = div().w_full().flex().flex_col().gap(px(4.0));
+    fn terminal_trigger_rules_summary_list(&self, cx: &mut Context<Self>) -> AnyElement {
         if self.terminal_triggers.snapshot.triggers.is_empty() {
-            rule_list = rule_list.child(
-                div()
-                    .py(px(16.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.terminal.triggers.no_rules")),
-            );
-        } else {
-            for trigger in &self.terminal_triggers.snapshot.triggers {
-                rule_list = rule_list.child(self.terminal_trigger_rule_row(trigger, cx));
-            }
-        }
-
-        let selected_saved_rule = self.terminal_triggers.editor.as_ref().and_then(|editor| {
-            self.terminal_triggers
-                .snapshot
-                .triggers
-                .iter()
-                .find(|trigger| trigger.id == editor.id)
-        });
-        let sidebar = div()
-            .w(px(TERMINAL_TRIGGER_SIDEBAR_WIDTH))
-            .max_w_full()
-            .flex_none()
-            .pr(px(16.0))
-            .border_r_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .flex()
-            .flex_col()
-            .gap(px(10.0))
-            .child(
-                div()
-                    .w_full()
-                    .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
-                    .overflow_y_scrollbar()
-                    .child(rule_list),
-            )
-            .when_some(selected_saved_rule, |sidebar, trigger| {
-                let duplicate_id = trigger.id.clone();
-                let delete_id = trigger.id.clone();
-                let copy_suffix = self
-                    .i18n
-                    .t("settings_view.terminal.triggers.duplicate_rule");
-                sidebar.child(
-                    div()
-                        .w_full()
-                        .pt(px(10.0))
-                        .border_t_1()
-                        .border_color(rgb(self.tokens.ui.border))
-                        .flex()
-                        .flex_wrap()
-                        .gap(px(6.0))
-                        .child(
-                            self.terminal_trigger_button(
-                                self.i18n
-                                    .t("settings_view.terminal.triggers.duplicate_rule"),
-                                ButtonVariant::Outline,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.clear_terminal_trigger_input_focus();
-                                    this.terminal_triggers
-                                        .duplicate_rule(&duplicate_id, &copy_suffix);
-                                    cx.notify();
-                                }),
-                            ),
-                        )
-                        .child(self.terminal_trigger_button(
-                            self.i18n.t("settings_view.terminal.triggers.delete_rule"),
-                            ButtonVariant::Destructive,
-                            cx.listener(move |this, _event, _window, cx| {
-                                let changed = this.terminal_triggers.delete_rule(&delete_id);
-                                this.persist_terminal_trigger_change(changed, cx);
-                            }),
-                        )),
-                )
-            });
-
-        let content = if self.terminal_triggers.scope_picker_open {
-            self.terminal_trigger_scope_picker(cx)
-        } else if let Some(editor) = self.terminal_triggers.editor.as_ref() {
-            self.terminal_trigger_editor(editor, cx)
-        } else {
-            div()
+            return div()
                 .w_full()
-                .py(px(24.0))
-                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .px(px(12.0))
+                .py(px(18.0))
+                .text_size(px(self.tokens.metrics.ui_text_xs))
                 .text_color(rgb(self.tokens.ui.text_muted))
                 .child(self.i18n.t("settings_view.terminal.triggers.no_rules"))
-                .into_any_element()
-        };
-
-        // WindTerm-style master-detail keeps navigation stable while a rule is edited.
+                .into_any_element();
+        }
+        let rows = self
+            .terminal_triggers
+            .snapshot
+            .triggers
+            .iter()
+            .map(|trigger| self.terminal_trigger_rule_row(trigger, cx))
+            .collect::<Vec<_>>();
         div()
             .w_full()
-            .min_w(px(0.0))
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
+            .px(px(12.0))
+            .py(px(10.0))
             .flex()
-            .flex_row()
-            .items_start()
-            .gap(px(20.0))
-            .child(sidebar)
-            .child(div().flex_1().min_w(px(0.0)).child(content))
+            .flex_col()
+            .children(self.separated_settings_rows(rows))
             .into_any_element()
     }
 
@@ -1070,43 +1178,22 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let edit_id = trigger.id.clone();
+        let edit_button_id = trigger.id.clone();
+        let duplicate_id = trigger.id.clone();
+        let delete_id = trigger.id.clone();
         let toggle_id = trigger.id.clone();
-        let selected = self
-            .terminal_triggers
-            .editor
-            .as_ref()
-            .is_some_and(|editor| editor.id == trigger.id);
+        let copy_suffix = self
+            .i18n
+            .t("settings_view.terminal.triggers.duplicate_rule");
+        let action_label = self.i18n.t(trigger_action_label(&trigger.action));
         div()
             .w_full()
+            .min_w(px(0.0))
             .flex()
             .items_center()
-            .gap(px(8.0))
-            .rounded(px(self.tokens.radii.md))
-            .p(px(8.0))
-            .cursor_pointer()
-            .when(selected, |row| {
-                row.bg(rgba((self.tokens.ui.accent << 8) | 0x1f))
-            })
-            .when(!selected, |row| {
-                row.hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            })
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.clear_terminal_trigger_input_focus();
-                    this.terminal_triggers.edit_rule(&edit_id);
-                    cx.notify();
-                }),
-            )
+            .gap(px(10.0))
             .child(
-                div()
-                    .w(px(2.0))
-                    .h(px(28.0))
-                    .rounded_full()
-                    .when(selected, |marker| marker.bg(rgb(self.tokens.ui.accent))),
-            )
-            .child(
-                checkbox(
+                switch(
                     &self.tokens,
                     format!("trigger-enabled-{}", trigger.id),
                     String::new(),
@@ -1125,23 +1212,82 @@ impl WorkspaceApp {
                 div()
                     .flex_1()
                     .min_w(px(0.0))
+                    .cursor_pointer()
+                    .rounded(px(self.tokens.radii.sm))
+                    .px(px(6.0))
+                    .py(px(4.0))
+                    .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, window, cx| {
+                            this.open_edit_terminal_trigger_editor(&edit_id, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
                     .flex()
                     .flex_col()
                     .gap(px(3.0))
                     .child(
                         div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(trigger.name.clone()),
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(trigger.name.clone()),
+                            )
+                            .child(self.text_badge(action_label, self.tokens.ui.text_muted)),
                     )
                     .child(
                         div()
                             .truncate()
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(trigger.matcher.pattern.clone()),
                     ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(self.terminal_trigger_button(
+                        self.i18n.t("settings_view.terminal.triggers.edit_rule"),
+                        ButtonVariant::Outline,
+                        cx.listener(move |this, _event, window, cx| {
+                            this.open_edit_terminal_trigger_editor(&edit_button_id, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(self.terminal_trigger_button(
+                        self.i18n
+                            .t("settings_view.terminal.triggers.duplicate_rule"),
+                        ButtonVariant::Outline,
+                        cx.listener(move |this, _event, window, cx| {
+                            this.open_duplicate_terminal_trigger_editor(
+                                &duplicate_id,
+                                &copy_suffix,
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ))
+                    .child(self.terminal_trigger_button(
+                        self.i18n.t("settings_view.terminal.triggers.delete_rule"),
+                        ButtonVariant::Ghost,
+                        cx.listener(move |this, _event, _window, cx| {
+                            let changed = this.terminal_triggers.delete_rule(&delete_id);
+                            this.persist_terminal_trigger_change(changed, cx);
+                            cx.stop_propagation();
+                        }),
+                    )),
             )
             .into_any_element()
     }
@@ -1204,11 +1350,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let action_label = trigger_action_label(&trigger.action);
-        let editor_title = if trigger.name.trim().is_empty() {
-            self.i18n.t("settings_view.terminal.triggers.add_rule")
-        } else {
-            trigger.name.clone()
-        };
         let details = div()
             .w_full()
             .flex()
@@ -1241,7 +1382,7 @@ impl WorkspaceApp {
             .flex_wrap()
             .items_end()
             .gap(px(12.0))
-            .child(self.terminal_trigger_responsive_field(
+            .child(self.terminal_trigger_compact_field(
                 TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
                 self.terminal_trigger_select_field(
                     self.i18n.t("settings_view.terminal.triggers.match_mode"),
@@ -1285,8 +1426,14 @@ impl WorkspaceApp {
                     )),
             );
 
-        let mut action_fields = div().w_full().flex().flex_col().gap(px(10.0)).child(
-            self.terminal_trigger_compact_field(
+        let mut action_header = div()
+            .w_full()
+            .flex()
+            .flex_row()
+            .flex_wrap()
+            .items_end()
+            .gap(px(12.0))
+            .child(self.terminal_trigger_compact_field(
                 TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
                 self.terminal_trigger_select_field(
                     self.i18n.t("settings_view.terminal.triggers.action"),
@@ -1294,25 +1441,61 @@ impl WorkspaceApp {
                     SettingsSelect::TerminalTriggerAction,
                     cx,
                 ),
-            ),
-        );
+            ));
 
-        if let TerminalTriggerAction::CustomMenu { items } = &trigger.action {
-            action_fields = action_fields.child(self.terminal_trigger_menu_editor(items, cx));
-        }
         if matches!(
             trigger.action,
             TerminalTriggerAction::CustomLink { .. } | TerminalTriggerAction::CustomMenu { .. }
         ) {
-            action_fields = action_fields.child(self.terminal_trigger_select_field(
-                self.i18n.t("settings_view.terminal.triggers.click_action"),
-                self.i18n.t(trigger_action_label(editable_trigger_action(
-                    &trigger.action,
-                    self.terminal_triggers.menu_item,
-                ))),
-                SettingsSelect::TerminalTriggerClickAction,
-                cx,
+            action_header = action_header.child(self.terminal_trigger_compact_field(
+                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
+                self.terminal_trigger_select_field(
+                    self.i18n.t("settings_view.terminal.triggers.click_action"),
+                    self.i18n.t(trigger_action_label(editable_trigger_action(
+                        &trigger.action,
+                        self.terminal_triggers.menu_item,
+                    ))),
+                    SettingsSelect::TerminalTriggerClickAction,
+                    cx,
+                ),
             ));
+        }
+
+        if let TerminalTriggerAction::RunQuickCommand { .. } =
+            editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item)
+        {
+            action_header = action_header.child(self.terminal_trigger_quick_command_option(cx));
+        }
+
+        if let TerminalTriggerAction::LaunchLocalProcess { process } =
+            editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item)
+        {
+            let shell_mode = matches!(process, LocalProcessSpec::ExplicitShell { .. });
+            action_header = action_header.child(self.terminal_trigger_compact_field(
+                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
+                self.terminal_trigger_select_field(
+                    self.i18n
+                        .t("settings_view.terminal.triggers.action_local_process"),
+                    self.i18n.t(if shell_mode {
+                        "settings_view.terminal.triggers.explicit_shell"
+                    } else {
+                        "settings_view.terminal.triggers.direct_program"
+                    }),
+                    SettingsSelect::TerminalTriggerProcessMode,
+                    cx,
+                ),
+            ));
+        }
+
+        let mut action_fields = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(px(10.0))
+            .child(action_header);
+
+        if let TerminalTriggerAction::CustomMenu { items } = &trigger.action {
+            action_fields = action_fields.child(self.terminal_trigger_menu_editor(items, cx));
         }
         action_fields =
             match editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item) {
@@ -1333,7 +1516,8 @@ impl WorkspaceApp {
                     ))
                 }
                 TerminalTriggerAction::CustomLink { .. }
-                | TerminalTriggerAction::CustomMenu { .. } => action_fields,
+                | TerminalTriggerAction::CustomMenu { .. }
+                | TerminalTriggerAction::RunQuickCommand { .. } => action_fields,
                 TerminalTriggerAction::SendText { append_enter, .. } => action_fields
                     .child(
                         self.terminal_trigger_labeled_input(
@@ -1345,93 +1529,79 @@ impl WorkspaceApp {
                             cx,
                         ),
                     )
-                    .child(self.terminal_trigger_bool_option(
-                        "settings_view.terminal.triggers.append_enter",
-                        *append_enter,
-                        cx.listener(|this, _event, _window, cx| {
-                            if let Some(trigger) = this.terminal_triggers.editor.as_mut()
-                                && let TerminalTriggerAction::SendText { append_enter, .. } =
-                                    editable_trigger_action_mut(
-                                        &mut trigger.action,
-                                        this.terminal_triggers.menu_item,
-                                    )
-                            {
-                                *append_enter = !*append_enter;
-                            }
-                            cx.notify();
-                        }),
-                    )),
-                TerminalTriggerAction::RunQuickCommand { .. } => {
-                    action_fields.child(self.terminal_trigger_quick_command_option(cx))
-                }
-                TerminalTriggerAction::LaunchLocalProcess { process } => {
-                    let shell_mode = matches!(process, LocalProcessSpec::ExplicitShell { .. });
-                    action_fields
-                        .child(
-                            self.terminal_trigger_compact_field(
-                                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                                self.terminal_trigger_select_field(
-                                    self.i18n
-                                        .t("settings_view.terminal.triggers.action_local_process"),
-                                    self.i18n.t(if shell_mode {
-                                        "settings_view.terminal.triggers.explicit_shell"
-                                    } else {
-                                        "settings_view.terminal.triggers.direct_program"
-                                    }),
-                                    SettingsSelect::TerminalTriggerProcessMode,
-                                    cx,
-                                ),
+                    .child(
+                        // Wrap single checkboxes in a horizontal flex row so the pill
+                        // keeps its intrinsic content width instead of stretching full width.
+                        div().w_full().flex().flex_row().flex_wrap().child(
+                            self.terminal_trigger_bool_option(
+                                "settings_view.terminal.triggers.append_enter",
+                                *append_enter,
+                                cx.listener(|this, _event, _window, cx| {
+                                    if let Some(trigger) = this.terminal_triggers.editor.as_mut()
+                                        && let TerminalTriggerAction::SendText {
+                                            append_enter,
+                                            ..
+                                        } = editable_trigger_action_mut(
+                                            &mut trigger.action,
+                                            this.terminal_triggers.menu_item,
+                                        )
+                                    {
+                                        *append_enter = !*append_enter;
+                                    }
+                                    cx.notify();
+                                }),
                             ),
-                        )
-                        .child(
-                            div()
-                                .w_full()
-                                .flex()
-                                .flex_row()
-                                .flex_wrap()
-                                .gap(px(12.0))
-                                .child(
-                                    self.terminal_trigger_responsive_field(
-                                        TERMINAL_TRIGGER_FIELD_BASIS,
-                                        self.terminal_trigger_labeled_input(
-                                            "settings_view.terminal.triggers.executable",
-                                            SettingsInput::TerminalTriggerExecutable,
-                                            self.terminal_triggers
-                                                .editor_input_value(
-                                                    SettingsInput::TerminalTriggerExecutable,
-                                                )
-                                                .unwrap_or_default(),
-                                            cx,
-                                        ),
-                                    ),
-                                )
-                                .child(
-                                    self.terminal_trigger_responsive_field(
-                                        TERMINAL_TRIGGER_FIELD_BASIS,
-                                        self.terminal_trigger_labeled_input(
-                                            "settings_view.terminal.triggers.working_directory",
-                                            SettingsInput::TerminalTriggerWorkingDirectory,
-                                            self.terminal_triggers
-                                                .editor_input_value(
-                                                    SettingsInput::TerminalTriggerWorkingDirectory,
-                                                )
-                                                .unwrap_or_default(),
-                                            cx,
-                                        ),
+                        ),
+                    ),
+                TerminalTriggerAction::LaunchLocalProcess { .. } => action_fields
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .gap(px(12.0))
+                            .child(
+                                self.terminal_trigger_responsive_field(
+                                    TERMINAL_TRIGGER_FIELD_BASIS,
+                                    self.terminal_trigger_labeled_input(
+                                        "settings_view.terminal.triggers.executable",
+                                        SettingsInput::TerminalTriggerExecutable,
+                                        self.terminal_triggers
+                                            .editor_input_value(
+                                                SettingsInput::TerminalTriggerExecutable,
+                                            )
+                                            .unwrap_or_default(),
+                                        cx,
                                     ),
                                 ),
-                        )
-                        .child(
-                            self.terminal_trigger_labeled_input(
-                                "settings_view.terminal.triggers.arguments",
-                                SettingsInput::TerminalTriggerArguments,
-                                self.terminal_triggers
-                                    .editor_input_value(SettingsInput::TerminalTriggerArguments)
-                                    .unwrap_or_default(),
-                                cx,
+                            )
+                            .child(
+                                self.terminal_trigger_responsive_field(
+                                    TERMINAL_TRIGGER_FIELD_BASIS,
+                                    self.terminal_trigger_labeled_input(
+                                        "settings_view.terminal.triggers.working_directory",
+                                        SettingsInput::TerminalTriggerWorkingDirectory,
+                                        self.terminal_triggers
+                                            .editor_input_value(
+                                                SettingsInput::TerminalTriggerWorkingDirectory,
+                                            )
+                                            .unwrap_or_default(),
+                                        cx,
+                                    ),
+                                ),
                             ),
-                        )
-                }
+                    )
+                    .child(
+                        self.terminal_trigger_labeled_input(
+                            "settings_view.terminal.triggers.arguments",
+                            SettingsInput::TerminalTriggerArguments,
+                            self.terminal_triggers
+                                .editor_input_value(SettingsInput::TerminalTriggerArguments)
+                                .unwrap_or_default(),
+                            cx,
+                        ),
+                    ),
             };
 
         let timing_fields = div()
@@ -1483,17 +1653,6 @@ impl WorkspaceApp {
             .flex()
             .flex_col()
             .gap(px(14.0))
-            .child(
-                div().w_full().flex().items_center().child(
-                    div()
-                        .min_w(px(0.0))
-                        .truncate()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(self.tokens.ui.text))
-                        .child(editor_title),
-                ),
-            )
             .child(details)
             .child(self.card_separator())
             .child(self.terminal_trigger_labeled_input(
@@ -1520,51 +1679,6 @@ impl WorkspaceApp {
                 )
             })
             .child(self.terminal_trigger_scope_editor(trigger, cx))
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap(px(8.0))
-                    .child(self.terminal_trigger_button(
-                        self.i18n.t("settings_view.terminal.triggers.cancel"),
-                        ButtonVariant::Outline,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.clear_terminal_trigger_input_focus();
-                            this.terminal_triggers.cancel_edit();
-                            cx.notify();
-                        }),
-                    ))
-                    .child(self.terminal_trigger_button(
-                        self.i18n.t("settings_view.terminal.triggers.save"),
-                        ButtonVariant::Default,
-                        cx.listener(|this, _event, _window, cx| {
-                            if let Some(input) = this
-                                .focused_settings_input
-                                .filter(|input| is_terminal_trigger_input(*input))
-                            {
-                                let input_draft = this.settings_input_draft.clone();
-                                if !this.apply_terminal_trigger_settings_input(input, &input_draft)
-                                {
-                                    this.terminal_triggers.error_key =
-                                        Some("settings_view.terminal.triggers.validation_failed");
-                                    cx.notify();
-                                    return;
-                                }
-                            }
-                            let shell_enabled = this
-                                .settings_store
-                                .settings()
-                                .terminal
-                                .triggers
-                                .explicit_shell_enabled;
-                            let changed = this.terminal_triggers.save_editor(shell_enabled);
-                            if changed {
-                                this.clear_terminal_trigger_input_focus();
-                            }
-                            this.persist_terminal_trigger_change(changed, cx);
-                        }),
-                    )),
-            )
             .into_any_element()
     }
 
@@ -1842,7 +1956,7 @@ impl WorkspaceApp {
             }
         };
         self.terminal_trigger_compact_field(
-            TERMINAL_TRIGGER_FIELD_BASIS,
+            TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
             self.terminal_trigger_select_field(
                 self.i18n.t("settings_view.terminal.triggers.scope"),
                 self.i18n.t(scope_label),
@@ -2325,5 +2439,45 @@ mod tests {
             state.error_key,
             Some("settings_view.terminal.triggers.shell_execution_hint")
         );
+    }
+
+    #[test]
+    fn modal_state_opens_closes_and_closes_after_valid_save() {
+        let (_directory, mut state) = state();
+        assert!(!state.editor_open);
+
+        state.new_rule();
+        assert!(state.editor_open);
+
+        assert!(!state.save_editor(false));
+        assert!(state.editor_open);
+
+        let trigger = state.editor.as_mut().expect("trigger editor");
+        trigger.name = "Alert".to_string();
+        trigger.matcher.pattern = "ERROR".to_string();
+        trigger.action = TerminalTriggerAction::SendText {
+            text: "status".to_string(),
+            append_enter: true,
+        };
+        assert!(state.save_editor(false));
+        assert!(!state.editor_open);
+
+        let saved_id = state.snapshot.triggers[0].id.clone();
+        state.edit_rule(&saved_id);
+        assert!(state.editor_open);
+        state.cancel_edit();
+        assert!(!state.editor_open);
+
+        state.duplicate_rule(&saved_id, "copy");
+        assert!(state.editor_open);
+        assert!(state.save_editor(false));
+        assert!(!state.editor_open);
+        assert_eq!(state.snapshot.triggers.len(), 2);
+
+        state.edit_rule(&saved_id);
+        assert!(state.editor_open);
+        assert!(state.delete_rule(&saved_id));
+        assert!(!state.editor_open);
+        assert_eq!(state.snapshot.triggers.len(), 1);
     }
 }

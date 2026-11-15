@@ -102,7 +102,7 @@ impl WorkspaceApp {
         let card = div()
             .w_full()
             .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
+            .rounded(px(self.tokens.radii.lg.max(10.0)))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
             .p(px(self.tokens.metrics.settings_card_padding))
@@ -136,9 +136,9 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_w(px(0.0))
                     .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(title.to_uppercase()),
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text_heading))
+                    .child(title),
             );
 
         let left = div()
@@ -195,15 +195,31 @@ impl WorkspaceApp {
         rows: Vec<AnyElement>,
     ) -> AnyElement {
         let description = (!description_key.is_empty()).then(|| self.i18n.t(description_key));
-        let mut children = Vec::with_capacity(rows.len() + 1);
-        children.push(self.settings_card_header_text(
+        let has_header = !title_key.is_empty()
+            || description.is_some()
+            || icon.is_some()
+            || actions.is_some();
+        if !has_header {
+            return self.settings_card_frame(rows);
+        }
+        let header = self.settings_card_header_text(
             self.i18n.t(title_key),
             description,
             icon,
             actions,
-        ));
-        children.extend(rows);
-        self.settings_card_frame(children)
+        );
+        if rows.is_empty() {
+            return div().w_full().min_w(px(0.0)).px(px(2.0)).child(header).into_any_element();
+        }
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(div().w_full().min_w(px(0.0)).px(px(2.0)).child(header))
+            .child(self.settings_card_frame(rows))
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn plain_settings_card(&self, rows: Vec<AnyElement>) -> AnyElement {
@@ -214,14 +230,27 @@ impl WorkspaceApp {
         &self,
         rows: Vec<AnyElement>,
     ) -> Vec<AnyElement> {
-        let mut out = Vec::with_capacity(rows.len().saturating_mul(2));
+        // Group separated rows in a zero-gap column so hairlines sit cleanly
+        // between items without inheriting the outer card stack gap twice.
+        let total = rows.len();
+        if total == 0 {
+            return Vec::new();
+        }
+        let mut group = div().w_full().min_w(px(0.0)).flex().flex_col();
         for (index, row) in rows.into_iter().enumerate() {
             if index > 0 {
-                out.push(self.card_separator());
+                group = group.child(self.card_separator());
             }
-            out.push(row);
+            let mut slot = div().w_full().min_w(px(0.0));
+            if index > 0 {
+                slot = slot.pt(px(10.0));
+            }
+            if index + 1 < total {
+                slot = slot.pb(px(10.0));
+            }
+            group = group.child(slot.child(row));
         }
-        out
+        vec![group.into_any_element()]
     }
 
     pub(in crate::workspace) fn terminal_input_settings_card(
@@ -372,15 +401,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn card_title(&self, title_key: &str) -> AnyElement {
-        div()
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .font_weight(gpui::FontWeight::MEDIUM)
-            .text_color(rgb(self.tokens.ui.text))
-            .child(self.i18n.t(title_key).to_uppercase())
-            .into_any_element()
-    }
-
     pub(in crate::workspace) fn card_subsection_header(
         &self,
         title: impl Into<SharedString>,
@@ -517,13 +537,21 @@ impl WorkspaceApp {
                 .padding(oxideterm_gpui_ui::SurfacePadding::None)
                 .has_background_image(self.settings_background_active()),
         );
-        // Settings cards already own their inner padding and children, so only
-        // shared chrome and theme-aware elevation are applied here.
+        // Settings cards sit flat in the Z=0 ground plane with a crisp border
+        // and translucent glass fallback when custom background media is active.
         let card = card
-            .rounded(px(chrome.radius))
+            .rounded(px(chrome.radius.max(10.0)))
             .border_color(chrome.border)
             .bg(chrome.background);
-        oxideterm_gpui_ui::theme_card_surface_shadow(card, &self.tokens)
+        card.child(oxideterm_gpui_ui::surface::panel_edge_highlight(
+            &self.tokens,
+            if self.settings_background_active() {
+                oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens) as f32 / 255.0
+            } else {
+                1.0
+            },
+            chrome.radius.max(10.0),
+        ))
     }
 
     pub(in crate::workspace) fn text_badge(&self, label: String, color: u32) -> AnyElement {
@@ -1025,6 +1053,36 @@ impl WorkspaceApp {
                 // This input belongs to a workspace modal, so Escape dismisses
                 // the editor instead of leaving an unfocused modal behind.
                 self.close_terminal_command_specs_editor(cx);
+                self.show_active_input_caret(cx);
+                true
+            }
+            "escape"
+                if super::terminal_triggers::is_terminal_trigger_input(input)
+                    && self.terminal_triggers.editor_open =>
+            {
+                if self.terminal_triggers.scope_picker_open {
+                    self.clear_terminal_trigger_input_focus();
+                    self.terminal_triggers.scope_picker_open = false;
+                    cx.notify();
+                } else {
+                    self.close_terminal_trigger_editor(cx);
+                }
+                self.show_active_input_caret(cx);
+                true
+            }
+            "escape"
+                if super::highlight::is_semantic_scheme_input(input)
+                    && self.semantic_scheme_editor_open =>
+            {
+                self.close_semantic_scheme_editor(cx);
+                self.show_active_input_caret(cx);
+                true
+            }
+            "escape"
+                if super::highlight::is_highlight_rule_input(input)
+                    && self.highlight_rule_editor_index.is_some() =>
+            {
+                self.close_highlight_rule_editor(cx);
                 self.show_active_input_caret(cx);
                 true
             }
@@ -2025,6 +2083,13 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) {
+        if let Some(open_index) = self.highlight_rule_editor_index {
+            if open_index == index {
+                self.close_highlight_rule_editor(cx);
+            } else if open_index > index {
+                self.highlight_rule_editor_index = Some(open_index - 1);
+            }
+        }
         self.edit_settings(
             move |settings| {
                 let rules = settings.terminal.effective_highlight_rules_mut();
@@ -2043,6 +2108,26 @@ impl WorkspaceApp {
         direction: isize,
         cx: &mut Context<Self>,
     ) {
+        let len = self
+            .settings_store
+            .settings()
+            .terminal
+            .effective_highlight_rules()
+            .len();
+        let next = if direction < 0 {
+            index.checked_sub(1)
+        } else if index + 1 < len {
+            Some(index + 1)
+        } else {
+            None
+        };
+        if let (Some(next), Some(open_index)) = (next, self.highlight_rule_editor_index) {
+            if open_index == index {
+                self.highlight_rule_editor_index = Some(next);
+            } else if open_index == next {
+                self.highlight_rule_editor_index = Some(index);
+            }
+        }
         self.edit_settings(
             move |settings| {
                 let rules = settings.terminal.effective_highlight_rules_mut();

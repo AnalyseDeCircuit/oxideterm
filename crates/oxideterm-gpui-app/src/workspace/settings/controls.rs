@@ -1184,6 +1184,7 @@ impl WorkspaceApp {
                         false,
                         cx.listener(move |this, _event, _window, cx| {
                             this.close_settings_select();
+                            this.close_semantic_scheme_editor(cx);
                             this.edit_settings(
                                 |settings| {
                                     settings.terminal.semantic_scheme = scheme;
@@ -1239,6 +1240,7 @@ impl WorkspaceApp {
                         false,
                         cx.listener(|this, _event, _window, cx| {
                             this.close_settings_select();
+                            this.close_highlight_rule_editor(cx);
                             this.edit_settings(
                                 |settings| settings.terminal.default_highlight_rule_set = None,
                                 cx,
@@ -1258,6 +1260,7 @@ impl WorkspaceApp {
                             false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.close_settings_select();
+                                this.close_highlight_rule_editor(cx);
                                 this.edit_settings(
                                     |settings| {
                                         settings.terminal.default_highlight_rule_set =
@@ -2510,7 +2513,7 @@ impl WorkspaceApp {
         self.setting_row(
             label_key,
             hint_key,
-            checkbox(&self.tokens, label_key.to_owned(), String::new(), checked)
+            switch(&self.tokens, label_key.to_owned(), String::new(), checked)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {

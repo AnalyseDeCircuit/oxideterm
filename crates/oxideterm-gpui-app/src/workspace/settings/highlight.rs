@@ -4,6 +4,31 @@ use oxideterm_terminal_semantic::{
     semantic_line_emphasis,
 };
 
+const SEMANTIC_SCHEME_MODAL_WIDTH: f32 = 820.0;
+const SEMANTIC_SCHEME_MODAL_MAX_HEIGHT: f32 = 760.0;
+const HIGHLIGHT_RULE_MODAL_WIDTH: f32 = 680.0;
+const HIGHLIGHT_RULE_MODAL_MAX_HEIGHT: f32 = 720.0;
+
+pub(in crate::workspace) fn is_semantic_scheme_input(input: SettingsInput) -> bool {
+    matches!(
+        input,
+        SettingsInput::SemanticSchemeName
+            | SettingsInput::SemanticSchemeRulePattern(_)
+            | SettingsInput::SemanticSchemeRuleCapture(_)
+            | SettingsInput::SemanticSchemeColor(_)
+    )
+}
+
+pub(in crate::workspace) fn is_highlight_rule_input(input: SettingsInput) -> bool {
+    matches!(
+        input,
+        SettingsInput::HighlightLabel(_)
+            | SettingsInput::HighlightPattern(_)
+            | SettingsInput::HighlightForeground(_)
+            | SettingsInput::HighlightBackground(_)
+    )
+}
+
 pub(in crate::workspace) fn semantic_class_label(class: SemanticClass, i18n: &I18n) -> String {
     let key = match class {
         SemanticClass::Command => "command",
@@ -51,17 +76,331 @@ pub(in crate::workspace) fn semantic_context_label(
 impl WorkspaceApp {
     const HIGHLIGHT_PREVIEW_WRAP_CHARS: usize = 32;
 
-    pub(in crate::workspace) fn highlight_rules_card(
+    pub(in crate::workspace) fn open_semantic_scheme_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self
+            .settings_store
+            .settings()
+            .terminal
+            .active_custom_semantic_scheme()
+            .is_none()
+        {
+            return;
+        }
+        self.prepare_modal_interaction_boundary(cx);
+        if let Some(input) = self
+            .focused_settings_input
+            .filter(|input| is_semantic_scheme_input(*input))
+        {
+            self.focused_settings_input = None;
+            self.clear_settings_input_draft(input);
+            self.clear_ime_selection();
+        }
+        self.semantic_scheme_editor_open = true;
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_semantic_scheme_editor(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.semantic_scheme_editor_open = false;
+        if let Some(input) = self
+            .focused_settings_input
+            .filter(|input| is_semantic_scheme_input(*input))
+        {
+            self.focused_settings_input = None;
+            self.clear_settings_input_draft(input);
+            self.clear_ime_selection();
+        }
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn open_highlight_rule_editor(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if index
+            >= self
+                .settings_store
+                .settings()
+                .terminal
+                .effective_highlight_rules()
+                .len()
+        {
+            return;
+        }
+        self.prepare_modal_interaction_boundary(cx);
+        if let Some(input) = self
+            .focused_settings_input
+            .filter(|input| is_highlight_rule_input(*input))
+        {
+            self.focused_settings_input = None;
+            self.clear_settings_input_draft(input);
+            self.clear_ime_selection();
+        }
+        self.highlight_rule_editor_index = Some(index);
+        window.focus(&self.focus_handle, cx);
+        cx.notify();
+    }
+
+    fn open_new_highlight_rule_editor(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let before_len = self
+            .settings_store
+            .settings()
+            .terminal
+            .effective_highlight_rules()
+            .len();
+        if before_len >= MAX_HIGHLIGHT_RULES {
+            return;
+        }
+        self.add_highlight_rule(cx);
+        let after_len = self
+            .settings_store
+            .settings()
+            .terminal
+            .effective_highlight_rules()
+            .len();
+        if after_len > before_len {
+            self.open_highlight_rule_editor(after_len - 1, window, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn close_highlight_rule_editor(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        self.highlight_rule_editor_index = None;
+        if let Some(input) = self
+            .focused_settings_input
+            .filter(|input| is_highlight_rule_input(*input))
+        {
+            self.focused_settings_input = None;
+            self.clear_settings_input_draft(input);
+            self.clear_ime_selection();
+        }
+        self.ime_marked_text = None;
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn render_semantic_scheme_editor_modal(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !self.semantic_scheme_editor_open {
+            return None;
+        }
+        let settings = self.settings_store.settings();
+        let scheme = settings.terminal.active_custom_semantic_scheme()?;
+        let semantic_scheme =
+            resolved_terminal_semantic_scheme(settings.terminal.semantic_scheme, Some(scheme));
+        let dialog = oxideterm_gpui_ui::modal_container(&self.tokens)
+            .w(px(SEMANTIC_SCHEME_MODAL_WIDTH))
+            .max_w_full()
+            .max_h(px(SEMANTIC_SCHEME_MODAL_MAX_HEIGHT))
+            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(&self.tokens, scheme.name.clone()))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.semantic_coloring_hint"),
+                    )),
+            )
+            .child(
+                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
+                    .id("semantic-scheme-editor-modal-scroll")
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("semantic-scheme-editor-modal-scroll"),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(16.0))
+                            .child(self.semantic_scheme_editor(scheme, cx))
+                            .child(self.card_separator())
+                            .child(self.semantic_scheme_preview(&semantic_scheme)),
+                    ),
+            )
+            .child(
+                dialog_footer(&self.tokens).justify_end().child(
+                    self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.terminal.command_specs_close"),
+                        None,
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Default,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                            has_background: true,
+                            height: Some(30.0),
+                            padding_x: Some(14.0),
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            this.close_semantic_scheme_editor(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                ),
+            );
+
+        Some(
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_semantic_scheme_editor(cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(overlay_content_boundary(dialog))
+                .into_any_element(),
+        )
+    }
+
+    pub(in crate::workspace) fn render_highlight_rule_editor_modal(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let index = self.highlight_rule_editor_index?;
+        let rules = self
+            .settings_store
+            .settings()
+            .terminal
+            .effective_highlight_rules();
+        let rule = rules.get(index)?;
+        let title = if rule.label.trim().is_empty() {
+            self.i18n
+                .t("settings_view.terminal.highlight_rules.untitled_rule")
+        } else {
+            rule.label.clone()
+        };
+        let dialog = oxideterm_gpui_ui::modal_container(&self.tokens)
+            .w(px(HIGHLIGHT_RULE_MODAL_WIDTH))
+            .max_w_full()
+            .max_h(px(HIGHLIGHT_RULE_MODAL_MAX_HEIGHT))
+            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                dialog_header(&self.tokens)
+                    .child(dialog_title(&self.tokens, title))
+                    .child(dialog_description(
+                        &self.tokens,
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.description"),
+                    )),
+            )
+            .child(
+                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
+                    .id("highlight-rule-editor-modal-scroll")
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .selectable_overflow_y_scrollbar(
+                        &self.selectable_text_scroll_handle("highlight-rule-editor-modal-scroll"),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w(px(0.0))
+                            .flex()
+                            .flex_col()
+                            .gap(px(16.0))
+                            .child(self.highlight_rule_form(index, rule, cx))
+                            .child(self.card_separator())
+                            .child(self.highlight_preview(std::slice::from_ref(rule))),
+                    ),
+            )
+            .child(
+                dialog_footer(&self.tokens).justify_end().child(
+                    self.workspace_toolbar_action_button(
+                        self.i18n.t("settings_view.terminal.command_specs_close"),
+                        None,
+                        ToolbarButtonOptions {
+                            button: ButtonOptions {
+                                variant: ButtonVariant::Default,
+                                size: ButtonSize::Sm,
+                                radius: ButtonRadius::Md,
+                                disabled: false,
+                            },
+                            has_background: true,
+                            height: Some(30.0),
+                            padding_x: Some(14.0),
+                            ..ToolbarButtonOptions::default()
+                        },
+                        cx.listener(|this, _event, _window, cx| {
+                            this.close_highlight_rule_editor(cx);
+                            cx.stop_propagation();
+                        }),
+                    ),
+                ),
+            );
+
+        Some(
+            dismissible_dialog_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, _window, cx| {
+                        this.close_highlight_rule_editor(cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(overlay_content_boundary(dialog))
+                .into_any_element(),
+        )
+    }
+
+    pub(in crate::workspace) fn highlight_selection_card(
         &self,
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let rules = settings.terminal.effective_highlight_rules();
-        let limit_text = self
-            .i18n
-            .t("settings_view.terminal.highlight_rules.limit")
-            .replace("{{count}}", &MAX_HIGHLIGHT_RULES.to_string());
-        let add_disabled = rules.len() >= MAX_HIGHLIGHT_RULES;
+        self.settings_card(
+            "terminal.highlight_override.selection_matches",
+            "",
+            vec![self.bool_row(
+                "terminal.highlight_override.selection_matches",
+                "terminal.highlight_override.selection_matches_default_hint",
+                settings.terminal.selection_highlighting,
+                |settings, enabled| settings.terminal.selection_highlighting = enabled,
+                cx,
+            )],
+        )
+    }
+
+    pub(in crate::workspace) fn highlight_semantic_card(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let active_custom_scheme = settings.terminal.active_custom_semantic_scheme();
         let semantic_scheme_label = active_custom_scheme.map_or_else(
             || terminal_semantic_scheme_label(settings.terminal.semantic_scheme, &self.i18n),
@@ -71,23 +410,11 @@ impl WorkspaceApp {
             settings.terminal.semantic_scheme,
             active_custom_scheme,
         );
-        let active_highlight_rule_set = settings
-            .terminal
-            .default_highlight_rule_set
-            .as_deref()
-            .and_then(|id| settings.terminal.highlight_rule_set(id));
-        let highlight_rule_set_label = active_highlight_rule_set.map_or_else(
-            || {
-                self.i18n
-                    .t("settings_view.terminal.highlight_rules.rule_set_global_base")
-            },
-            |rule_set| rule_set.name.clone(),
-        );
 
         let semantic_toggle = div()
             .flex_none()
             .child(
-                checkbox(
+                switch(
                     &self.tokens,
                     "semantic-coloring",
                     String::new(),
@@ -109,7 +436,7 @@ impl WorkspaceApp {
             )
             .into_any_element();
 
-        let mut semantic_rows = vec![
+        let semantic_rows = vec![
             self.card_separator(),
             self.select_setting_row(
                 "settings_view.terminal.highlight_rules.semantic_scheme",
@@ -127,12 +454,21 @@ impl WorkspaceApp {
                 .justify_end()
                 .gap(px(8.0))
                 .child(self.semantic_scheme_action_button(
+                    LucideIcon::Pencil,
+                    self.i18n.t("settings_view.terminal.triggers.edit_rule"),
+                    active_custom_scheme.is_none(),
+                    cx.listener(|this, _event, window, cx| {
+                        this.open_semantic_scheme_editor(window, cx);
+                        cx.stop_propagation();
+                    }),
+                ))
+                .child(self.semantic_scheme_action_button(
                     LucideIcon::Plus,
                     self.i18n
                         .t("settings_view.terminal.highlight_rules.semantic_scheme_create"),
                     false,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.create_semantic_scheme(cx);
+                    cx.listener(|this, _event, window, cx| {
+                        this.create_semantic_scheme(window, cx);
                         cx.stop_propagation();
                     }),
                 ))
@@ -167,20 +503,41 @@ impl WorkspaceApp {
                     }),
                 ))
                 .into_any_element(),
+            self.card_separator(),
+            self.semantic_scheme_preview(&semantic_scheme),
         ];
-        if let Some(scheme) = active_custom_scheme {
-            semantic_rows.push(self.card_separator());
-            semantic_rows.push(self.semantic_scheme_editor(scheme, cx));
-        }
-        semantic_rows.push(self.card_separator());
-        semantic_rows.push(self.semantic_scheme_preview(&semantic_scheme));
 
-        let semantic_card = self.settings_card_with_header(
+        self.settings_card_with_header(
             "settings_view.terminal.highlight_rules.semantic_coloring",
             "settings_view.terminal.highlight_rules.semantic_coloring_hint",
             None,
             Some(semantic_toggle),
             semantic_rows,
+        )
+    }
+
+    pub(in crate::workspace) fn highlight_rules_card(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let rules = settings.terminal.effective_highlight_rules();
+        let limit_text = self
+            .i18n
+            .t("settings_view.terminal.highlight_rules.limit")
+            .replace("{{count}}", &MAX_HIGHLIGHT_RULES.to_string());
+        let add_disabled = rules.len() >= MAX_HIGHLIGHT_RULES;
+        let active_highlight_rule_set = settings
+            .terminal
+            .default_highlight_rule_set
+            .as_deref()
+            .and_then(|id| settings.terminal.highlight_rule_set(id));
+        let highlight_rule_set_label = active_highlight_rule_set.map_or_else(
+            || {
+                self.i18n
+                    .t("settings_view.terminal.highlight_rules.rule_set_global_base")
+            },
+            |rule_set| rule_set.name.clone(),
         );
 
         let rules_header_actions = div()
@@ -216,17 +573,8 @@ impl WorkspaceApp {
                         },
                         ..ToolbarButtonOptions::default()
                     },
-                    cx.listener(move |this, _event, _window, cx| {
-                        if this
-                            .settings_store
-                            .settings()
-                            .terminal
-                            .effective_highlight_rules()
-                            .len()
-                            < MAX_HIGHLIGHT_RULES
-                        {
-                            this.add_highlight_rule(cx);
-                        }
+                    cx.listener(move |this, _event, window, cx| {
+                        this.open_new_highlight_rule_editor(window, cx);
                         cx.stop_propagation();
                     }),
                 ),
@@ -327,7 +675,7 @@ impl WorkspaceApp {
                 div()
                     .w_full()
                     .px(px(16.0))
-                    .py(px(32.0))
+                    .py(px(28.0))
                     .text_align(gpui::TextAlign::Center)
                     .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
@@ -335,41 +683,36 @@ impl WorkspaceApp {
                     .into_any_element(),
             );
         } else {
-            for (index, rule) in rules.iter().enumerate() {
-                rules_rows.push(self.highlight_rule_row(index, rule, rules.len(), cx));
-            }
+            let summary_rows = rules
+                .iter()
+                .enumerate()
+                .map(|(index, rule)| self.highlight_rule_summary_row(index, rule, rules.len(), cx))
+                .collect::<Vec<_>>();
+            rules_rows.push(
+                div()
+                    .w_full()
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
+                    .px(px(12.0))
+                    .py(px(10.0))
+                    .flex()
+                    .flex_col()
+                    .children(self.separated_settings_rows(summary_rows))
+                    .into_any_element(),
+            );
         }
         rules_rows.push(self.card_separator());
         rules_rows.push(self.highlight_preview(rules));
 
-        let rules_card = self.settings_card_with_header(
+        self.settings_card_with_header(
             "settings_view.terminal.highlight_rules.title",
             "settings_view.terminal.highlight_rules.description",
             None,
             Some(rules_header_actions),
             rules_rows,
-        );
-
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(24.0))
-            .child(self.settings_card(
-                "terminal.highlight_override.selection_matches",
-                "",
-                vec![self.bool_row(
-                    "terminal.highlight_override.selection_matches",
-                    "terminal.highlight_override.selection_matches_default_hint",
-                    settings.terminal.selection_highlighting,
-                    |settings, enabled| settings.terminal.selection_highlighting = enabled,
-                    cx,
-                )],
-            ))
-            .child(semantic_card)
-            .child(rules_card)
-            .into_any_element()
+        )
     }
 
     fn semantic_scheme_action_button(
@@ -400,6 +743,7 @@ impl WorkspaceApp {
     }
 
     fn create_highlight_rule_set(&mut self, cx: &mut Context<Self>) {
+        self.close_highlight_rule_editor(cx);
         let name = self
             .i18n
             .t("settings_view.terminal.highlight_rules.rule_set_default_name");
@@ -444,6 +788,7 @@ impl WorkspaceApp {
             self.send_settings_notice(message, TerminalNoticeVariant::Error, cx);
             return;
         }
+        self.close_highlight_rule_editor(cx);
         self.edit_settings(
             |settings| {
                 settings
@@ -514,6 +859,7 @@ impl WorkspaceApp {
                         cx,
                     );
                     if imported_id.is_some() {
+                        this.close_highlight_rule_editor(cx);
                         this.send_settings_notice(success, TerminalNoticeVariant::Success, cx);
                     }
                 }
@@ -587,7 +933,7 @@ impl WorkspaceApp {
         .detach();
     }
 
-    fn create_semantic_scheme(&mut self, cx: &mut Context<Self>) {
+    fn create_semantic_scheme(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let name = self
             .i18n
             .t("settings_view.terminal.highlight_rules.semantic_scheme_default_name");
@@ -602,8 +948,9 @@ impl WorkspaceApp {
             },
             cx,
         );
-        if let Err(error) = result {
-            self.send_settings_notice(error, TerminalNoticeVariant::Error, cx);
+        match result {
+            Ok(_) => self.open_semantic_scheme_editor(window, cx),
+            Err(error) => self.send_settings_notice(error, TerminalNoticeVariant::Error, cx),
         }
     }
 
@@ -642,6 +989,7 @@ impl WorkspaceApp {
             self.send_settings_notice(message, TerminalNoticeVariant::Error, cx);
             return;
         }
+        self.close_semantic_scheme_editor(cx);
         self.edit_settings(
             |settings| {
                 delete_custom_semantic_scheme(settings, &id);
@@ -885,7 +1233,7 @@ impl WorkspaceApp {
                             .items_center()
                             .gap(px(8.0))
                             .child(
-                                checkbox(
+                                switch(
                                     &self.tokens,
                                     ("semantic-rule-enabled", index),
                                     String::new(),
@@ -1043,24 +1391,198 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn highlight_rule_row(
+    fn highlight_color_swatch(&self, hex: Option<&str>) -> Option<AnyElement> {
+        let color = hex.and_then(parse_color_hex)?;
+        Some(
+            div()
+                .w(px(10.0))
+                .h(px(10.0))
+                .rounded_full()
+                .border_1()
+                .border_color(rgb(self.tokens.ui.border))
+                .bg(rgb(color))
+                .into_any_element(),
+        )
+    }
+
+    fn highlight_rule_summary_row(
         &self,
         index: usize,
         rule: &HighlightRule,
         total: usize,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let status_color = if rule.enabled {
-            self.tokens.ui.accent
-        } else {
-            self.tokens.ui.text_muted
-        };
         let title = if rule.label.trim().is_empty() {
             self.i18n
                 .t("settings_view.terminal.highlight_rules.untitled_rule")
         } else {
             rule.label.clone()
         };
+        let mode_label = highlight_render_mode_label(rule.render_mode, &self.i18n);
+        let validation_error = highlight_rule_validation_error(rule);
+        let fg_swatch = self.highlight_color_swatch(rule.foreground.as_deref());
+        let bg_swatch = if rule.render_mode == HighlightRuleRenderMode::Background
+            && !rule.preserve_background
+        {
+            self.highlight_color_swatch(rule.background.as_deref())
+        } else {
+            None
+        };
+
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(10.0))
+            .child(
+                switch(
+                    &self.tokens,
+                    ("highlight-summary-enabled", index),
+                    String::new(),
+                    rule.enabled,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        let next = !this
+                            .settings_store
+                            .settings()
+                            .terminal
+                            .effective_highlight_rules()
+                            .get(index)
+                            .is_some_and(|rule| rule.enabled);
+                        this.edit_settings(
+                            move |settings| {
+                                if let Some(rule) = settings
+                                    .terminal
+                                    .effective_highlight_rules_mut()
+                                    .get_mut(index)
+                                {
+                                    rule.enabled = next;
+                                }
+                            },
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .cursor_pointer()
+                    .rounded(px(self.tokens.radii.sm))
+                    .px(px(6.0))
+                    .py(px(4.0))
+                    .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, window, cx| {
+                            this.open_highlight_rule_editor(index, window, cx);
+                            cx.stop_propagation();
+                        }),
+                    )
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .flex_wrap()
+                            .items_center()
+                            .gap(px(8.0))
+                            .when_some(fg_swatch, |row, swatch| row.child(swatch))
+                            .when_some(bg_swatch, |row, swatch| row.child(swatch))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(title),
+                            )
+                            .child(self.text_badge(mode_label, self.tokens.ui.text_muted))
+                            .when(rule.is_regex, |row| {
+                                row.child(self.text_badge(
+                                    self.i18n.t("settings_view.terminal.highlight_rules.regex"),
+                                    self.tokens.ui.text_muted,
+                                ))
+                            })
+                            .when_some(validation_error, |row, _| {
+                                row.child(self.text_badge(
+                                    self.i18n
+                                        .t("settings_view.terminal.highlight_rules.invalid_rule"),
+                                    self.tokens.ui.warning,
+                                ))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(summarize_highlight_pattern(&rule.pattern)),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(4.0))
+                    .child(self.highlight_small_button(
+                        "↑".to_string(),
+                        index > 0,
+                        move |this, cx| this.move_highlight_rule(index, -1, cx),
+                        cx,
+                    ))
+                    .child(self.highlight_small_button(
+                        "↓".to_string(),
+                        index + 1 < total,
+                        move |this, cx| this.move_highlight_rule(index, 1, cx),
+                        cx,
+                    ))
+                    .child(
+                        self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.terminal.triggers.edit_rule"),
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Outline,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: false,
+                                },
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(move |this, _event, window, cx| {
+                                this.open_highlight_rule_editor(index, window, cx);
+                                cx.stop_propagation();
+                            }),
+                        ),
+                    )
+                    .child(self.highlight_small_button(
+                        self.i18n.t("settings_view.terminal.highlight_rules.delete"),
+                        true,
+                        move |this, cx| this.remove_highlight_rule(index, cx),
+                        cx,
+                    )),
+            )
+            .into_any_element()
+    }
+
+    fn highlight_rule_form(
+        &self,
+        index: usize,
+        rule: &HighlightRule,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let mode_label = highlight_render_mode_label(rule.render_mode, &self.i18n);
         let scope_label = highlight_match_scope_label(rule.match_scope, &self.i18n);
         let validation_error = highlight_rule_validation_error(rule);
@@ -1070,125 +1592,74 @@ impl WorkspaceApp {
             .min_w(px(0.0))
             .flex()
             .flex_col()
-            .gap(px(12.0))
+            .gap(px(14.0))
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .flex_row()
-                    .items_start()
-                    .justify_between()
+                    .flex_wrap()
+                    .items_end()
                     .gap(px(12.0))
                     .child(
                         div()
                             .flex_1()
-                            .min_w(px(0.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_row()
-                                    .flex_wrap()
-                                    .items_center()
-                                    .gap(px(8.0))
-                                    .child(
-                                        div()
-                                            .truncate()
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(self.tokens.ui.text))
-                                            .child(title),
-                                    )
-                                    .child(self.text_badge(
-                                        if rule.enabled {
-                                            self.i18n
-                                                .t("settings_view.terminal.highlight_rules.enabled")
-                                        } else {
-                                            self.i18n.t(
-                                                "settings_view.terminal.highlight_rules.disabled",
-                                            )
-                                        },
-                                        status_color,
-                                    ))
-                                    .when(rule.is_regex, |row| {
-                                        row.child(
-                                            self.text_badge(
-                                                self.i18n.t(
-                                                    "settings_view.terminal.highlight_rules.regex",
-                                                ),
-                                                self.tokens.ui.text_muted,
-                                            ),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .truncate()
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(summarize_highlight_pattern(&rule.pattern)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .gap(px(6.0))
-                            .child(self.highlight_small_button(
-                                "↑".to_string(),
-                                index > 0,
-                                move |this, cx| this.move_highlight_rule(index, -1, cx),
-                                cx,
-                            ))
-                            .child(self.highlight_small_button(
-                                "↓".to_string(),
-                                index + 1 < total,
-                                move |this, cx| this.move_highlight_rule(index, 1, cx),
-                                cx,
-                            ))
-                            .child(self.highlight_small_button(
-                                self.i18n.t("settings_view.terminal.highlight_rules.delete"),
-                                true,
-                                move |this, cx| this.remove_highlight_rule(index, cx),
+                            .min_w(px(220.0))
+                            .child(self.highlight_fill_input_block(
+                                self.i18n.t("settings_view.terminal.highlight_rules.label"),
+                                SettingsInput::HighlightLabel(index),
+                                rule.label.clone(),
+                                self.i18n
+                                    .t("settings_view.terminal.highlight_rules.label_placeholder"),
                                 cx,
                             )),
-                    ),
-            )
-            .child(
-                div()
-                    .grid()
-                    .gap(px(12.0))
-                    .child(
-                        self.highlight_input_block(
-                            self.i18n.t("settings_view.terminal.highlight_rules.label"),
-                            SettingsInput::HighlightLabel(index),
-                            rule.label.clone(),
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.label_placeholder"),
-                            220.0,
-                            cx,
-                        ),
                     )
+                    .child(self.highlight_render_mode_control(index, mode_label, cx))
+                    .child(self.highlight_match_scope_control(index, scope_label, cx)),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .child(self.highlight_fill_input_block(
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.pattern"),
+                        SettingsInput::HighlightPattern(index),
+                        rule.pattern.clone(),
+                        self.i18n
+                            .t("settings_view.terminal.highlight_rules.pattern_placeholder"),
+                        cx,
+                    ))
                     .child(
-                        self.highlight_input_block(
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.pattern"),
-                            SettingsInput::HighlightPattern(index),
-                            rule.pattern.clone(),
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.pattern_placeholder"),
-                            360.0,
-                            cx,
-                        ),
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(if validation_error.is_some() {
+                                rgb(self.tokens.ui.warning)
+                            } else {
+                                rgb(self.tokens.ui.text_muted)
+                            })
+                            .child(
+                                validation_error
+                                    .map(|reason| {
+                                        self.i18n.t(&format!(
+                                            "settings_view.terminal.highlight_rules.validation.{reason}"
+                                        ))
+                                    })
+                                    .unwrap_or_else(|| {
+                                        self.i18n.t(if rule.is_regex {
+                                            "settings_view.terminal.highlight_rules.mode_hint.regex"
+                                        } else {
+                                            "settings_view.terminal.highlight_rules.mode_hint.literal"
+                                        })
+                                    }),
+                            ),
                     ),
             )
             .child(
                 div()
+                    .w_full()
                     .flex()
                     .flex_row()
                     .flex_wrap()
@@ -1222,30 +1693,39 @@ impl WorkspaceApp {
                             )
                         },
                     )
-                    .child(self.highlight_render_mode_control(index, mode_label, cx))
-                    .child(self.highlight_match_scope_control(index, scope_label, cx))
                     .when(
                         rule.render_mode == HighlightRuleRenderMode::Background,
                         |row| {
-                            row.child(self.highlight_checkbox(
-                                ("highlight-preserve-background", index),
-                                self.i18n.t(
-                                    "settings_view.terminal.highlight_rules.preserve_background",
-                                ),
-                                rule.preserve_background,
-                                move |settings, value| {
-                                    if let Some(rule) = settings
-                                        .terminal
-                                        .effective_highlight_rules_mut()
-                                        .get_mut(index)
-                                    {
-                                        rule.preserve_background = value;
-                                    }
-                                },
-                                cx,
-                            ))
+                            row.child(
+                                div().pb(px(5.0)).child(self.highlight_checkbox(
+                                    ("highlight-preserve-background", index),
+                                    self.i18n.t(
+                                        "settings_view.terminal.highlight_rules.preserve_background",
+                                    ),
+                                    rule.preserve_background,
+                                    move |settings, value| {
+                                        if let Some(rule) = settings
+                                            .terminal
+                                            .effective_highlight_rules_mut()
+                                            .get_mut(index)
+                                        {
+                                            rule.preserve_background = value;
+                                        }
+                                    },
+                                    cx,
+                                )),
+                            )
                         },
-                    )
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_row()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(16.0))
                     .child(
                         self.highlight_checkbox(
                             ("highlight-enabled", index),
@@ -1296,30 +1776,6 @@ impl WorkspaceApp {
                             },
                             cx,
                         ),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(if validation_error.is_some() {
-                        rgb(self.tokens.ui.warning)
-                    } else {
-                        rgb(self.tokens.ui.text_muted)
-                    })
-                    .child(
-                        validation_error
-                            .map(|reason| {
-                                self.i18n.t(&format!(
-                                    "settings_view.terminal.highlight_rules.validation.{reason}"
-                                ))
-                            })
-                            .unwrap_or_else(|| {
-                                self.i18n.t(if rule.is_regex {
-                                    "settings_view.terminal.highlight_rules.mode_hint.regex"
-                                } else {
-                                    "settings_view.terminal.highlight_rules.mode_hint.literal"
-                                })
-                            }),
                     ),
             )
             .into_any_element()
@@ -1374,6 +1830,30 @@ impl WorkspaceApp {
                     .child(label),
             )
             .child(self.settings_text_input_control(input, value, placeholder, width, cx))
+            .into_any_element()
+    }
+
+    fn highlight_fill_input_block(
+        &self,
+        label: String,
+        input: SettingsInput,
+        value: String,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .w_full()
+            .min_w(px(0.0))
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(label),
+            )
+            .child(self.settings_text_input_control_fill(input, value, placeholder, cx))
             .into_any_element()
     }
 

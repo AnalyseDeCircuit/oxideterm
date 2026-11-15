@@ -28,7 +28,6 @@ impl WorkspaceApp {
         let form = dialog_content(&self.tokens)
             .w(px(KNOWLEDGE_DIALOG_WIDTH))
             .max_w(relative(0.92))
-            .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
@@ -158,7 +157,6 @@ impl WorkspaceApp {
         let form = dialog_content(&self.tokens)
             .w(px(KNOWLEDGE_DIALOG_WIDTH))
             .max_w(relative(0.92))
-            .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
@@ -361,7 +359,6 @@ impl WorkspaceApp {
                     dialog_content(&self.tokens)
                         .w(px(KNOWLEDGE_DIALOG_WIDTH))
                         .max_w(relative(0.92))
-                        .shadow_lg()
                         .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                             cx.stop_propagation();
                         })

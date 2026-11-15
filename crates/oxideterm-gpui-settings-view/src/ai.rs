@@ -36,139 +36,6 @@ fn settings_ai_textarea_shows_placeholder(display_value: &str, marked_text: Opti
     display_value.is_empty() && marked_text.is_none_or(str::is_empty)
 }
 
-pub fn settings_ai_tool_number_input_row(tokens: &ThemeTokens, row: AnyElement) -> AnyElement {
-    // The expanded tool-use section already owns the containing surface, so
-    // numeric controls remain plain rows instead of introducing another card.
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .pb(px(16.0))
-        .border_b_1()
-        .border_color(rgba((tokens.ui.border << 8) | AI_TOOL_POLICY_DIVIDER_ALPHA))
-        .child(row)
-        .into_any_element()
-}
-
-pub fn settings_ai_context_controls_section(
-    title: AnyElement,
-    description: AnyElement,
-    sources: AnyElement,
-) -> AnyElement {
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .flex()
-        .flex_col()
-        .gap(px(16.0))
-        .child(title)
-        .child(description)
-        .child(sources)
-        .into_any_element()
-}
-
-pub fn settings_ai_editor_summary_section(
-    tokens: &ThemeTokens,
-    title: String,
-    description: String,
-    option_row: Option<AnyElement>,
-    status: String,
-    edit_action: AnyElement,
-) -> AnyElement {
-    // Long-form text stays outside the settings list. This compact summary
-    // keeps the card scannable while the app owns modal state and persistence.
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .flex()
-        .flex_col()
-        .gap(px(tokens.metrics.settings_row_gap))
-        .child(crate::settings_row(
-            tokens,
-            div().child(title).into_any_element(),
-            Some(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(4.0))
-                    .child(description)
-                    .child(status)
-                    .into_any_element(),
-            ),
-            edit_action,
-        ))
-        .children(option_row)
-        .into_any_element()
-}
-
-pub fn settings_ai_icon_heading(icon: AnyElement, title: AnyElement) -> AnyElement {
-    // Icon headings are shared mini-section headers. The icon comes from the
-    // app so this crate does not need an icon mapping dependency.
-    div()
-        .flex()
-        .items_center()
-        .gap(px(8.0))
-        .child(icon)
-        .child(title)
-        .into_any_element()
-}
-
-pub fn settings_ai_tool_use_section(
-    heading: AnyElement,
-    controls: AnyElement,
-    policy_heading: AnyElement,
-    expand_button: AnyElement,
-    collapsed_summary: Option<AnyElement>,
-    expanded_body: Option<AnyElement>,
-) -> AnyElement {
-    // The tool-use section shell owns header/body ordering. Policy controls
-    // and settings writes stay in the app and settings-model crates.
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .flex()
-        .flex_col()
-        .gap(px(16.0))
-        .child(heading)
-        .child(controls)
-        .child(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .justify_between()
-                .gap(px(12.0))
-                .child(policy_heading)
-                .child(expand_button),
-        )
-        .children(collapsed_summary)
-        .children(expanded_body)
-        .into_any_element()
-}
-
-pub fn settings_ai_context_sources_group(
-    tokens: &ThemeTokens,
-    title: String,
-    rows: Vec<AnyElement>,
-) -> AnyElement {
-    // Source toggles share one small titled group under the context selectors.
-    div()
-        .w_full()
-        .min_w(px(0.0))
-        .mt(px(8.0))
-        .flex()
-        .flex_col()
-        .gap(px(12.0))
-        .child(
-            div()
-                .text_size(px(tokens.metrics.ui_text_xs))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(tokens.ui.text_muted))
-                .child(title.to_uppercase()),
-        )
-        .children(rows)
-        .into_any_element()
-}
-
 pub fn settings_ai_context_source_row(
     tokens: &ThemeTokens,
     label: String,
@@ -326,10 +193,10 @@ pub fn settings_ai_section_heading(
         .child(
             div()
                 .text_size(px(tokens.metrics.ui_text_sm))
-                .font_weight(gpui::FontWeight::MEDIUM)
-                .text_color(rgb(tokens.ui.text))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .text_color(rgb(tokens.ui.text_heading))
                 .whitespace_nowrap()
-                .child(title.to_uppercase()),
+                .child(title),
         )
         .child(
             div()
@@ -350,10 +217,8 @@ pub fn settings_ai_collapsible_header(
     // Collapsible header owns the Radix-like trigger chrome. The app attaches
     // click handling because expansion state is part of WorkspaceApp.
     div()
-        .mb(px(16.0))
         .w_full()
         .rounded(px(tokens.radii.md))
-        .px(px(4.0))
         .py(px(4.0))
         .flex()
         .items_center()
@@ -370,12 +235,12 @@ pub fn settings_ai_collapsible_header(
                 .min_w(px(0.0))
                 .flex()
                 .flex_col()
-                .gap(px(2.0))
+                .gap(px(4.0))
                 .child(
                     div()
                         .text_size(px(tokens.metrics.ui_text_sm))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(tokens.ui.text))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(tokens.ui.text_heading))
                         .child(title),
                 )
                 .child(
@@ -397,7 +262,6 @@ pub fn settings_ai_context_windows_header(
 ) -> gpui::Div {
     // Context-window headers keep provider scope visually prominent.
     div()
-        .mb(px(16.0))
         .w_full()
         .min_w(px(0.0))
         .flex()
@@ -412,13 +276,13 @@ pub fn settings_ai_context_windows_header(
                 .flex_1()
                 .flex()
                 .flex_col()
-                .gap(px(8.0))
+                .gap(px(4.0))
                 .child(
                     div()
                         .text_size(px(tokens.metrics.ui_text_sm))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(tokens.ui.text))
-                        .child(title.to_uppercase()),
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(tokens.ui.text_heading))
+                        .child(title),
                 )
                 .child(
                     div()

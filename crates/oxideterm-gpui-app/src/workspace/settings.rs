@@ -111,6 +111,7 @@ use oxideterm_gpui_ui::{
     },
     separator::{SeparatorOrientation, separator},
     slider::{SliderView, slider, slider_pointer_percent},
+    switch::{SwitchOptions, switch, switch_with},
     text_input::{
         TextInputContentAlign, TextInputView, text_caret, text_input_anchor_probe,
         text_input_value_segments,

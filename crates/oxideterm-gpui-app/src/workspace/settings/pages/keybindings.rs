@@ -441,7 +441,7 @@ impl WorkspaceApp {
                                 SelectableTextRole::PlainDocument,
                                 "settings-keybindings-scope",
                                 scope.label_key(),
-                                self.i18n.t(scope.label_key()).to_uppercase(),
+                                self.i18n.t(scope.label_key()),
                                 theme.text_muted,
                                 cx,
                             )),

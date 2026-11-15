@@ -220,14 +220,7 @@ impl WorkspaceApp {
             .min_w_0()
             .flex()
             .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
-            .child(self.ai_section_title("settings_view.ai.conversation_agents"))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.ai.conversation_agents_hint")),
-            );
+            .gap(px(self.tokens.metrics.settings_card_gap));
         if !self.settings_store.settings().ai.tool_use.enabled {
             section = section.child(
                 div()
@@ -282,9 +275,15 @@ impl WorkspaceApp {
         if picker_open {
             section = section.child(self.render_agent_model_picker(None, cx));
         }
-        section
-            .child(self.render_ai_agent_concurrency_setting(cx))
-            .into_any_element()
+        self.settings_card(
+            "settings_view.ai.conversation_agents",
+            "settings_view.ai.conversation_agents_hint",
+            vec![
+                section
+                    .child(self.render_ai_agent_concurrency_setting(cx))
+                    .into_any_element(),
+            ],
+        )
     }
 
     pub(in crate::workspace) fn render_ai_agent_concurrency_setting(

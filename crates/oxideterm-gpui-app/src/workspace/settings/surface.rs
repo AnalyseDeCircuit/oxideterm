@@ -263,84 +263,33 @@ impl WorkspaceApp {
         section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        match section {
-            SettingsSectionId::AiPageSwitcher => self.ai_page_switcher(cx),
+        let settings = self.settings_store.settings();
+        let enabled = settings.ai.enabled;
+        let content = match section {
+            SettingsSectionId::AiPageSwitcher => return self.ai_page_switcher(cx),
             SettingsSectionId::AiGeneralSettings => {
-                let settings = self.settings_store.settings();
-                self.ai_general_settings_card(settings, cx)
+                return self.ai_general_settings_card(settings, cx);
             }
-            SettingsSectionId::AiGeneralPrivacy => self.ai_privacy_settings_card(),
+            SettingsSectionId::AiGeneralPrivacy => return self.ai_privacy_settings_card(),
             SettingsSectionId::AiProvidersSettings => {
                 let provider_views = self.ai_provider_views_for_settings_render(cx);
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_provider_settings_section(&provider_views, cx),
-                    settings.ai.enabled,
-                )
+                self.ai_provider_settings_section(&provider_views, cx)
             }
-            SettingsSectionId::AiContextControls => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_context_controls_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            SettingsSectionId::AiContextSystemPrompt => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_system_prompt_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            SettingsSectionId::AiContextMemory => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_memory_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
+            SettingsSectionId::AiContextControls => self.ai_context_controls_section(settings, cx),
+            SettingsSectionId::AiContextSystemPrompt => self.ai_system_prompt_section(settings, cx),
+            SettingsSectionId::AiContextMemory => self.ai_memory_section(settings, cx),
             SettingsSectionId::AiContextModelWindows => {
-                let settings = self.settings_store.settings();
                 let provider_views = ai_provider_views(settings);
-                self.ai_disabled_settings_card(
-                    self.ai_model_context_windows_section(settings, &provider_views, cx),
-                    settings.ai.enabled,
-                )
+                self.ai_model_context_windows_section(settings, &provider_views, cx)
             }
-            SettingsSectionId::AiToolsToolUse => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_tool_use_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            SettingsSectionId::AiToolsWebSearch => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_web_search_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            SettingsSectionId::AiToolsAgents => self.ai_disabled_settings_card(
-                self.render_ai_agent_settings(cx),
-                self.settings_store.settings().ai.enabled,
-            ),
-            SettingsSectionId::AiToolsSkills => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_skills_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            SettingsSectionId::AiToolsMcpServers => {
-                let settings = self.settings_store.settings();
-                self.ai_disabled_settings_card(
-                    self.ai_mcp_servers_section(settings, cx),
-                    settings.ai.enabled,
-                )
-            }
-            _ => div().into_any_element(),
-        }
+            SettingsSectionId::AiToolsToolUse => self.ai_tool_use_section(settings, cx),
+            SettingsSectionId::AiToolsWebSearch => self.ai_web_search_section(settings, cx),
+            SettingsSectionId::AiToolsAgents => self.render_ai_agent_settings(cx),
+            SettingsSectionId::AiToolsSkills => self.ai_skills_section(settings, cx),
+            SettingsSectionId::AiToolsMcpServers => self.ai_mcp_servers_section(settings, cx),
+            _ => return div().into_any_element(),
+        };
+        self.ai_settings_availability(content, enabled)
     }
 
     pub(in crate::workspace) fn wrap_settings_section_list_item(
@@ -351,11 +300,9 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let padding = self.tokens.metrics.settings_content_padding;
         let gap = self.tokens.metrics.settings_page_gap;
-        let outer_max_width = self.settings_content_outer_max_width();
         let mut inner = div()
             .w_full()
             .min_w(px(0.0))
-            .max_w(px(outer_max_width))
             .px(px(padding))
             .pb(px(gap));
         if index == 0 {
@@ -364,21 +311,7 @@ impl WorkspaceApp {
         if index + 1 == self.settings_section_list_item_count(cx) {
             inner = inner.pb(px(padding));
         }
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .justify_center()
-            .child(inner.child(child))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn settings_content_outer_max_width(&self) -> f32 {
-        // Native keeps Tauri's padded `mx-auto` settings shell, but uses a wider
-        // semantic cap so large desktop windows do not leave every page pinned
-        // to the original browser `max-w-4xl` column.
-        self.tokens.metrics.settings_content_wide_max_width
-            + self.tokens.metrics.settings_content_padding * 2.0
+        inner.child(child).into_any_element()
     }
 
     pub(in crate::workspace) fn render_settings_virtual_header(
@@ -391,9 +324,14 @@ impl WorkspaceApp {
             .relative()
             .flex()
             .flex_col()
-            .gap(px(self.tokens.metrics.settings_page_gap))
+            .gap(px(self.tokens.spacing.three + self.tokens.spacing.one))
             .child(self.render_settings_page_header(tab, cx))
-            .child(separator(&self.tokens, SeparatorOrientation::Horizontal))
+            .child(
+                div()
+                    .h(px(1.0))
+                    .w_full()
+                    .bg(rgba((self.tokens.ui.border << 8) | 0x66)),
+            )
             .into_any_element()
     }
 
@@ -537,30 +475,32 @@ impl WorkspaceApp {
                         is_custom_theme_id(target.scheme_id(settings, dark)).hash(&mut hasher);
                     }
                 } else if section == Some(SettingsSectionId::AppearanceBackground) {
-                    // Source and effect capabilities add rows; paint-only adjustments keep scroll anchoring stable.
+                    // Source, effect capabilities, and collapsible background sub-panels add or
+                    // hide rows; paint-only adjustments keep scroll anchoring stable.
+                    let settings_entity = self.settings_workspace.read(cx);
+                    settings_entity.background_effects_expanded.hash(&mut hasher);
+                    settings_entity
+                        .background_interactions_expanded
+                        .hash(&mut hasher);
                     let style = settings
                         .terminal
                         .background_for_scheme(self.appearance_edit_scheme());
                     style.image.is_some().hash(&mut hasher);
                     style.parallax.hash(&mut hasher);
                     style.camera.is_some().hash(&mut hasher);
+                    style.day_cycle.hash(&mut hasher);
                     style
                         .effect
                         .as_ref()
                         .map(|effect| (effect.kind as u8, effect.has_motion()))
                         .hash(&mut hasher);
                     (style.scope == BackgroundScope::Content).hash(&mut hasher);
-                    self.settings_workspace
-                        .read(cx)
+                    settings_entity
                         .background_media_has_animation(style.image.as_deref())
                         .hash(&mut hasher);
                 }
             }
             SettingsTab::Network => {
-                self.settings_workspace
-                    .read(cx)
-                    .expanded_mcp_client
-                    .hash(&mut hasher);
                 settings.network.upstream_proxy.is_some().hash(&mut hasher);
                 settings
                     .network
@@ -1173,46 +1113,36 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let title = self.i18n.t(tab.title_key());
         let description = self.i18n.t(tab.description_key());
+        let title_size = self.tokens.metrics.ui_text_2xl;
+        let description_size = self.tokens.metrics.ui_text_sm;
         div()
             .w_full()
             .min_w(px(0.0))
             .flex()
             .flex_col()
-            .gap(px(8.0))
+            .gap(px(self.tokens.spacing.two))
+            .font_family(settings_ui_font_family(
+                &self.settings_store.settings().appearance.ui_font_family,
+            ))
             .child(
                 div()
                     .w_full()
                     .min_w(px(0.0))
-                    .text_size(px(24.0))
+                    .text_size(px(title_size))
                     .font_weight(gpui::FontWeight::MEDIUM)
                     .text_color(rgb(self.tokens.ui.text_heading))
-                    // Settings headers are page chrome, so they stay outside the
-                    // selectable document while preserving the full-width CJK layout.
-                    .line_height(px(30.0))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "settings-page-title",
-                        tab.title_key(),
-                        title,
-                        self.tokens.ui.text_heading,
-                        cx,
-                    )),
+                    // Plain text remains outside document selection and inherits the heading weight.
+                    .line_height(px(title_size + 6.0))
+                    .child(title),
             )
             .child(
                 div()
                     .w_full()
                     .min_w(px(0.0))
-                    .text_size(px(self.tokens.metrics.ui_text_base))
+                    .text_size(px(description_size))
                     .text_color(rgb(self.tokens.ui.text_muted))
-                    .line_height(px((self.tokens.metrics.ui_text_base + 6.0).max(20.0)))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::NonSelectable,
-                        "settings-page-description",
-                        tab.description_key(),
-                        description,
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
+                    .line_height(px(description_size + 6.0))
+                    .child(description),
             )
             .when(tab == SettingsTab::Keybindings, |header| {
                 let note = self.i18n.t("settings_view.keybindings.intl_keyboard_note");

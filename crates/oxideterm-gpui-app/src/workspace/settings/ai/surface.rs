@@ -13,28 +13,39 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ai_disabled_settings_card(
+    pub(in crate::workspace) fn ai_settings_section(
         &self,
-        body: AnyElement,
-        enabled: bool,
+        header: AnyElement,
+        content: impl IntoIterator<Item = AnyElement>,
     ) -> AnyElement {
-        let mut body = div()
+        div()
             .w_full()
-            .min_w(px(0.0))
+            .min_w_0()
             .flex()
             .flex_col()
-            .opacity(if enabled { 1.0 } else { 0.5 })
-            .child(body);
-        if !enabled {
-            // Disabled OxideSens subsections should look inert and must not let
-            // nested controls fire while the top-level feature toggle remains
-            // usable in the separate general card.
-            body = body.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            });
+            .gap(px(self.tokens.spacing.two))
+            .child(div().w_full().min_w_0().px(px(2.0)).child(header))
+            .children(content)
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn ai_settings_availability(
+        &self,
+        section: AnyElement,
+        enabled: bool,
+    ) -> AnyElement {
+        if enabled {
+            return section;
         }
 
-        self.plain_settings_card(vec![body.into_any_element()])
+        div()
+            .w_full()
+            .min_w_0()
+            .relative()
+            .child(div().w_full().min_w_0().opacity(0.5).child(section))
+            // Section actions can live above the card, so the shield covers both.
+            .child(div().absolute().inset_0().block_mouse_except_scroll())
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn ai_enabled_row(
@@ -45,7 +56,7 @@ impl WorkspaceApp {
         self.setting_row(
             "settings_view.ai.enable",
             "settings_view.ai.enable_hint",
-            checkbox(&self.tokens, "ai-enabled", String::new(), enabled)
+            switch(&self.tokens, "ai-enabled", String::new(), enabled)
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, _window, cx| {
@@ -78,10 +89,6 @@ impl WorkspaceApp {
                 .child(self.i18n.t("settings_view.ai.privacy_text"))
                 .into_any_element()],
         )
-    }
-
-    pub(in crate::workspace) fn ai_section_title(&self, key: &str) -> AnyElement {
-        self.card_title(key)
     }
 
     pub(in crate::workspace) fn i18n_count(&self, key: &str, count: usize) -> String {

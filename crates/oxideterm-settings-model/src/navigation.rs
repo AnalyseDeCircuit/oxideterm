@@ -53,6 +53,8 @@ pub enum SettingsSectionId {
     TerminalAwarenessShellIntegration,
     TerminalAwarenessTriggers,
     TerminalLoggingSession,
+    TerminalHighlightSelection,
+    TerminalHighlightSemantic,
     TerminalHighlightRules,
     ConnectionsDefaults,
     ConnectionsIdleTimeout,
@@ -317,6 +319,8 @@ pub fn terminal_settings_sections(page: TerminalSettingsPage) -> &'static [Setti
         ],
         TerminalSettingsPage::Highlight => &[
             SettingsSectionId::TerminalPageSwitcher,
+            SettingsSectionId::TerminalHighlightSelection,
+            SettingsSectionId::TerminalHighlightSemantic,
             SettingsSectionId::TerminalHighlightRules,
         ],
     }

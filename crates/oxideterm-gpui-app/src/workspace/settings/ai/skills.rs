@@ -59,36 +59,26 @@ impl WorkspaceApp {
         );
         let enabled_count = records.iter().filter(|record| record.enabled).count();
         let diagnostics_expanded = state.skill_diagnostics_expanded;
+        let refresh = self.workspace_toolbar_action_button(
+            self.i18n.t("settings_view.ai.skills_refresh"),
+            Some(Self::render_lucide_icon(
+                LucideIcon::RefreshCw,
+                14.0,
+                rgb(self.tokens.ui.text),
+            )),
+            ToolbarButtonOptions::default(),
+            cx.listener(|this, _, _, cx| {
+                this.refresh_ai_skill_registry();
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        );
         let mut section = div()
             .w_full()
             .min_w_0()
             .flex()
             .flex_col()
             .gap(px(self.tokens.metrics.settings_card_gap))
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(self.card_title("settings_view.ai.skills_title"))
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.ai.skills_refresh"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::RefreshCw,
-                            14.0,
-                            rgb(self.tokens.ui.text),
-                        )),
-                        ToolbarButtonOptions::default(),
-                        cx.listener(|this, _, _, cx| {
-                            this.refresh_ai_skill_registry();
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    )),
-            )
             .child(self.bool_row(
                 "settings_view.ai.skills_enabled",
                 "settings_view.ai.skills_enabled_hint",
@@ -161,28 +151,34 @@ impl WorkspaceApp {
                 .child(self.ai_skill_scope_filter(cx)),
         );
         if visible.is_empty() {
-            return section
-                .child(
-                    div()
-                        .py(px(20.0))
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t(if records.is_empty() {
-                            "settings_view.ai.skills_empty"
-                        } else {
-                            "settings_view.ai.skills_no_matches"
-                        })),
-                )
-                .into_any_element();
-        }
-        let mut list = div().w_full().min_w_0().flex().flex_col();
-        for (index, record) in visible.into_iter().enumerate() {
-            if index > 0 {
-                list = list.child(self.card_separator());
+            section = section.child(
+                div()
+                    .py(px(20.0))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(if records.is_empty() {
+                        "settings_view.ai.skills_empty"
+                    } else {
+                        "settings_view.ai.skills_no_matches"
+                    })),
+            );
+        } else {
+            let mut list = div().w_full().min_w_0().flex().flex_col();
+            for (index, record) in visible.into_iter().enumerate() {
+                if index > 0 {
+                    list = list.child(self.card_separator());
+                }
+                list = list.child(self.ai_skill_row(record, cx));
             }
-            list = list.child(self.ai_skill_row(record, cx));
+            section = section.child(list);
         }
-        section.child(list).into_any_element()
+        self.settings_card_with_header(
+            "settings_view.ai.skills_title",
+            "",
+            None,
+            Some(refresh.into_any_element()),
+            vec![section.into_any_element()],
+        )
     }
 
     fn ai_skill_scope_filter(&self, cx: &mut Context<Self>) -> AnyElement {

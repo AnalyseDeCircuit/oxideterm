@@ -15,6 +15,7 @@ pub(in crate::workspace) const AI_MCP_CARD_ICON_BUTTON: f32 = 28.0; // Tauri h-7
 pub(in crate::workspace) const AI_MCP_ACTION_ICON: f32 = 14.0; // Tauri w-3.5 h-3.5.
 pub(in crate::workspace) const AI_MCP_STATUS_ICON: f32 = 12.0; // Tauri status icons w-3 h-3.
 pub(in crate::workspace) const AI_MCP_ARGS_TEXTAREA_MIN_H: f32 = 84.0; // Tauri textarea-sized MCP args field.
+const AI_MCP_VISIBLE_TOOL_CHIPS: usize = 8; // Keep virtualized card height bounded near the list row estimate.
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ai_mcp_servers_section(
@@ -90,53 +91,42 @@ impl WorkspaceApp {
                 ))
         };
 
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(16.0))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(self.ai_section_heading(
-                        "settings_view.mcp.title",
-                        "settings_view.mcp.description",
-                    ))
-                    .child(
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.mcp.add_server"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::Plus,
-                                14.0,
-                                rgb(self.tokens.ui.text),
-                            )),
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Outline,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: false,
-                                },
-                                icon_gap: Some(6.0),
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(|this, _event, _window, cx| {
-                                this.ai_entity.update(cx, |ai, cx| {
-                                    ai.open_mcp_add_dialog(cx);
-                                });
-                                this.close_settings_select();
-                                this.clear_standard_confirm_focus();
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        )
-                        .into_any_element(),
-                    ),
-            )
-            .child(list)
-            .into_any_element()
+        let header = self.settings_card_header_text(
+            self.i18n.t("settings_view.mcp.title"),
+            Some(self.i18n.t("settings_view.mcp.description")),
+            None,
+            Some(
+                self.workspace_toolbar_action_button(
+                    self.i18n.t("settings_view.mcp.add_server"),
+                    Some(Self::render_lucide_icon(
+                        LucideIcon::Plus,
+                        14.0,
+                        rgb(self.tokens.ui.bg),
+                    )),
+                    ToolbarButtonOptions {
+                        button: ButtonOptions {
+                            variant: ButtonVariant::Default,
+                            size: ButtonSize::Sm,
+                            radius: ButtonRadius::Md,
+                            disabled: false,
+                        },
+                        icon_gap: Some(6.0),
+                        ..ToolbarButtonOptions::default()
+                    },
+                    cx.listener(|this, _event, _window, cx| {
+                        this.ai_entity.update(cx, |ai, cx| {
+                            ai.open_mcp_add_dialog(cx);
+                        });
+                        this.close_settings_select();
+                        this.clear_standard_confirm_focus();
+                        cx.stop_propagation();
+                        cx.notify();
+                    }),
+                )
+                .into_any_element(),
+            ),
+        );
+        self.ai_settings_section(header, [list.into_any_element()])
     }
 
     pub(in crate::workspace) fn sync_ai_mcp_server_list_state(
@@ -309,7 +299,7 @@ impl WorkspaceApp {
         }
         if !tools.is_empty() {
             let mut chips = div().flex().flex_wrap().gap(px(4.0));
-            for tool in tools {
+            for tool in tools.iter().take(AI_MCP_VISIBLE_TOOL_CHIPS) {
                 chips = chips.child(
                     div()
                         .px(px(6.0))
@@ -319,6 +309,19 @@ impl WorkspaceApp {
                         .text_size(px(self.tokens.metrics.ui_text_2xs))
                         .text_color(rgb(self.tokens.ui.text_muted))
                         .child(tool.name.clone()),
+                );
+            }
+            let remaining_tools = tools.len().saturating_sub(AI_MCP_VISIBLE_TOOL_CHIPS);
+            if remaining_tools > 0 {
+                chips = chips.child(
+                    div()
+                        .px(px(6.0))
+                        .py(px(2.0))
+                        .rounded(px(self.tokens.radii.sm))
+                        .bg(rgba((self.tokens.ui.bg_panel << 8) | AI_MCP_CODE_BG_ALPHA))
+                        .text_size(px(self.tokens.metrics.ui_text_2xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(format!("+{remaining_tools}")),
                 );
             }
             card = card.child(
@@ -574,7 +577,6 @@ impl WorkspaceApp {
             .w(px(AI_MCP_DIALOG_WIDTH))
             .max_w(relative(0.92))
             .max_h(relative(0.86))
-            .shadow_lg()
             .flex()
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {

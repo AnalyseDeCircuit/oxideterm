@@ -9,11 +9,33 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let terminal = &settings.terminal;
-        let mut rows = vec![settings_appearance_card_title(
-            &self.tokens,
-            self.i18n.t("settings_view.terminal.bg_interactions"),
+        let has_active_interaction = terminal.background_parallax
+            || terminal.background_camera.is_some()
+            || terminal.background_day_cycle;
+        let expanded = self
+            .settings_workspace
+            .read(cx)
+            .background_interactions_expanded
+            .unwrap_or(has_active_interaction);
+        let mut rows = vec![self.appearance_collapsible_subsection_header(
+            "appearance-bg-interactions-toggle",
+            "settings_view.terminal.bg_interactions",
             None,
+            expanded,
+            cx.listener(move |this, _event, _window, cx| {
+                this.settings_workspace.update(cx, |entity, cx| {
+                    let current = entity
+                        .background_interactions_expanded
+                        .unwrap_or(has_active_interaction);
+                    entity.background_interactions_expanded = Some(!current);
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }),
         )];
+        if !expanded {
+            return rows;
+        }
         for (index, key, enabled, visible) in [
             (
                 1,
@@ -55,7 +77,7 @@ impl WorkspaceApp {
                 self.appearance_row(
                     &format!("settings_view.terminal.{key}"),
                     &format!("settings_view.terminal.{key}_hint"),
-                    checkbox(&self.tokens, key, String::new(), enabled)
+                    switch(&self.tokens, key, String::new(), enabled)
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, _, cx| {
@@ -94,9 +116,9 @@ impl WorkspaceApp {
                                 ]
                                 .into_iter()
                                 .map(|(motion, key)| {
-                                    self.appearance_action_button(
-                                        LucideIcon::Image,
+                                    self.appearance_option_pill(
                                         self.i18n.t(&format!("settings_view.terminal.{key}")),
+                                        camera.motion == motion,
                                         cx.listener(move |this, _, _, cx| {
                                             this.edit_background_style(
                                                 |style| {
@@ -109,9 +131,6 @@ impl WorkspaceApp {
                                             cx.stop_propagation();
                                         }),
                                     )
-                                    .when(camera.motion == motion, |button| {
-                                        button.border_color(rgb(self.tokens.ui.accent))
-                                    })
                                 }),
                             )
                             .into_any_element(),
@@ -180,18 +199,15 @@ impl WorkspaceApp {
                 .into_iter()
                 .map(|(hour, key)| {
                     let preview = preview.clone();
-                    self.appearance_action_button(
-                        LucideIcon::Image,
+                    self.appearance_option_pill(
                         self.i18n.t(&format!("settings_view.terminal.{key}")),
+                        selected == hour,
                         cx.listener(move |_, _, _, cx| {
                             preview.update(cx, |preview, cx| preview.set_preview_hour(hour, cx));
                             cx.notify();
                             cx.stop_propagation();
                         }),
                     )
-                    .when(selected == hour, |button| {
-                        button.border_color(rgb(self.tokens.ui.accent))
-                    })
                 }),
             )
             .into_any_element()
@@ -266,17 +282,14 @@ impl WorkspaceApp {
                 .gap(px(self.tokens.spacing.one))
                 .children(BackgroundAlignment::ALL.into_iter().zip(labels).map(
                     |(alignment, key)| {
-                        self.appearance_action_button(
-                            LucideIcon::Image,
+                        self.appearance_option_pill(
                             self.i18n.t(&format!("settings_view.terminal.{key}")),
+                            selected == alignment,
                             cx.listener(move |this, _, _, cx| {
                                 this.edit_background_style(|style| style.alignment = alignment, cx);
                                 cx.stop_propagation();
                             }),
                         )
-                        .when(selected == alignment, |button| {
-                            button.border_color(rgb(self.tokens.ui.accent))
-                        })
                     },
                 ))
                 .into_any_element(),

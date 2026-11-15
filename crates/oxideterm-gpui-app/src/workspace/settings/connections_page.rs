@@ -790,7 +790,7 @@ impl WorkspaceApp {
                 self.setting_row(
                     "settings_view.connections.ssh_config.auto_load",
                     "settings_view.connections.ssh_config.auto_load_hint",
-                    checkbox(
+                    switch(
                         &self.tokens,
                         "ssh-config-auto-load",
                         String::new(),
@@ -817,7 +817,7 @@ impl WorkspaceApp {
                 self.setting_row(
                     "settings_view.connections.ssh_config.auto_sync",
                     "settings_view.connections.ssh_config.auto_sync_hint",
-                    checkbox(
+                    switch(
                         &self.tokens,
                         "ssh-config-auto-sync",
                         String::new(),
@@ -841,7 +841,7 @@ impl WorkspaceApp {
                 self.setting_row(
                     "settings_view.connections.ssh_config.allow_proxy_command",
                     "settings_view.connections.ssh_config.allow_proxy_command_hint",
-                    checkbox(
+                    switch(
                         &self.tokens,
                         "ssh-config-allow-proxy-command",
                         String::new(),
@@ -987,7 +987,6 @@ impl WorkspaceApp {
             .max_h(relative(0.88))
             .flex()
             .flex_col()
-            .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
@@ -1768,7 +1767,15 @@ impl WorkspaceApp {
                 .into_any_element();
         }
 
-        let mut list = div()
+        let rows = preview
+            .drafts
+            .into_iter()
+            .map(|draft| {
+                let selected = selected_draft_ids.contains(&draft.id);
+                self.connection_import_preview_row(draft, selected, cx)
+            })
+            .collect();
+        div()
             .id("settings-connection-import-scroll")
             .w_full()
             .h(px(288.0))
@@ -1778,12 +1785,14 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_panel));
-        for draft in preview.drafts {
-            let selected = selected_draft_ids.contains(&draft.id);
-            list = list.child(self.connection_import_preview_row(draft, selected, cx));
-        }
-        list.into_any_element()
+            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
+            .child(
+                div()
+                    .w_full()
+                    .py(px(10.0))
+                    .children(self.separated_settings_rows(rows)),
+            )
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn connection_import_preview_row(
@@ -1818,9 +1827,8 @@ impl WorkspaceApp {
             .flex()
             .items_start()
             .gap(px(8.0))
-            .border_b_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
-            .p(px(12.0))
+            .px(px(12.0))
+            .py(px(2.0))
             .opacity(if disabled { 0.5 } else { 1.0 })
             .child(
                 div()
@@ -2503,7 +2511,6 @@ impl WorkspaceApp {
             .max_h(relative(0.90))
             .flex()
             .flex_col()
-            .shadow_lg()
             .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
                 cx.stop_propagation();
             })
@@ -2935,17 +2942,14 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn connection_status_row(&self, status: String) -> AnyElement {
-        div()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.info << 8) | 0x33))
-            .bg(rgba((self.tokens.ui.info << 8) | 0x1a))
-            .px(px(12.0))
-            .py(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.info))
-            .child(status)
-            .into_any_element()
+        self.settings_callout(
+            SettingsCalloutTone::Info,
+            None,
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_xs))
+                .child(status)
+                .into_any_element(),
+        )
     }
 
     pub(in crate::workspace) fn toggle_settings_ssh_config_host(

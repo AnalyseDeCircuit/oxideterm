@@ -9,15 +9,29 @@ pub fn tab_surface(tokens: &ThemeTokens, content: AnyElement) -> AnyElement {
     TabSurface {
         content,
         limit: (tokens.metrics.sidebar_vibrancy_alpha.clamp(0.0, 1.0) * 255.0).round() / 255.0,
-        colors: [
-            tokens.ui.bg,
-            tokens.ui.bg_panel,
-            tokens.ui.bg_card,
-            tokens.ui.bg_elevated,
-            tokens.ui.bg_sunken,
-            tokens.ui.bg_hover,
-        ]
-        .map(|color| rgb(color).into()),
+        colors: Some(
+            [
+                tokens.ui.bg,
+                tokens.ui.bg_panel,
+                tokens.ui.bg_card,
+                tokens.ui.bg_elevated,
+                tokens.ui.bg_sunken,
+                tokens.ui.bg_hover,
+            ]
+            .map(|color| rgb(color).into()),
+        ),
+    }
+    .into_any_element()
+}
+
+/// Exempts opaque interactive knobs (such as switch and slider thumbs) from an
+/// enclosing `tab_surface` tint budget so white or elevated thumbs are not
+/// mistaken for nested background panels and clamped to zero alpha on light themes.
+pub fn opaque_control_surface(content: impl IntoElement) -> AnyElement {
+    TabSurface {
+        content: content.into_any_element(),
+        limit: 1.0,
+        colors: None,
     }
     .into_any_element()
 }
@@ -25,7 +39,7 @@ pub fn tab_surface(tokens: &ThemeTokens, content: AnyElement) -> AnyElement {
 struct TabSurface {
     content: AnyElement,
     limit: f32,
-    colors: [gpui::Hsla; 6],
+    colors: Option<[gpui::Hsla; 6]>,
 }
 
 impl IntoElement for TabSurface {
@@ -80,7 +94,8 @@ impl gpui::Element for TabSurface {
         window: &mut gpui::Window,
         cx: &mut gpui::App,
     ) {
-        window.with_surface_tint_limit(self.limit, &self.colors, |window| {
+        let colors: &[gpui::Hsla] = self.colors.as_ref().map_or(&[], |colors| colors.as_slice());
+        window.with_surface_tint_limit(self.limit, colors, |window| {
             self.content.paint(window, cx);
         });
     }

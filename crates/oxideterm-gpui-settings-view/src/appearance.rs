@@ -51,27 +51,34 @@ pub fn settings_appearance_card_shell(
     header: AnyElement,
     rows: Vec<AnyElement>,
 ) -> AnyElement {
-    // Appearance cards share the same Tauri card surface treatment as the rest
-    // of settings, including translucent mode when the settings background is active.
+    // Inset-grouped layout keeps section headers above flat surface groups so
+    // labels and controls remain visually paired across both light and dark themes.
     let card = div()
         .w_full()
         .min_w(px(0.0))
-        .rounded(px(tokens.radii.lg))
+        .rounded(px(tokens.radii.lg.max(10.0)))
         .border_1()
         .border_color(rgb(tokens.ui.border))
         .p(px(tokens.metrics.settings_card_padding))
         .flex()
         .flex_col()
         .gap(px(tokens.metrics.settings_card_gap))
-        .child(header)
         .children(rows);
-    oxideterm_gpui_ui::theme_card_surface(
+    let surface = oxideterm_gpui_ui::theme_card_surface(
         card,
         tokens,
         background_active,
         oxideterm_gpui_ui::theme_glass_card_background_alpha(tokens),
-    )
-    .into_any_element()
+    );
+    div()
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .child(div().w_full().min_w(px(0.0)).px(px(2.0)).child(header))
+        .child(surface)
+        .into_any_element()
 }
 
 pub fn settings_appearance_card_title(
@@ -87,10 +94,10 @@ pub fn settings_appearance_card_title(
         .items_center()
         .gap(px(8.0))
         .text_size(px(tokens.metrics.ui_text_sm))
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_color(rgb(tokens.ui.text))
+        .font_weight(gpui::FontWeight::SEMIBOLD)
+        .text_color(rgb(tokens.ui.text_heading))
         .when_some(icon, |title, icon| title.child(icon));
-    title_el.child(title.to_uppercase()).into_any_element()
+    title_el.child(title).into_any_element()
 }
 
 pub fn settings_appearance_card_header(
@@ -927,10 +934,10 @@ pub fn settings_theme_editor_color_section(
                 .pb(px(4.0))
                 .border_b_1()
                 .border_color(rgba((tokens.ui.border << 8) | 0x66))
-                .text_size(px(11.0))
-                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_size(px(tokens.metrics.ui_text_xs))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(rgb(tokens.ui.text_muted))
-                .child(title.to_uppercase()),
+                .child(title),
         )
         .child(settings_theme_editor_color_grid(cells))
         .into_any_element()
@@ -1379,7 +1386,10 @@ mod row_tests {
                         label.bottom()
                     };
                     assert_eq!(control.left(), label.left());
-                    assert_eq!((control.top().0 - copy_bottom.0) / scale, 24.0);
+                    assert_eq!(
+                        (control.top().0 - copy_bottom.0) / scale,
+                        tokens.metrics.settings_row_gap
+                    );
                 } else {
                     assert_eq!(control.right().0 / scale, width);
                     assert!(control.left() >= label.right());

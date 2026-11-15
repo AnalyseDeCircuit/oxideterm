@@ -372,20 +372,30 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
         ),
         terminal_search_entry(
             TerminalSettingsPage::Highlight,
+            SettingsSectionId::TerminalHighlightSelection,
+            "terminal.highlight_override.selection_matches",
+            &["terminal.highlight_override.selection_matches_default_hint"],
+        ),
+        terminal_search_entry(
+            TerminalSettingsPage::Highlight,
+            SettingsSectionId::TerminalHighlightSemantic,
+            "settings_view.terminal.highlight_rules.semantic_coloring",
+            &[
+                "settings_view.terminal.highlight_rules.semantic_coloring_hint",
+                "settings_view.terminal.highlight_rules.semantic_scheme",
+                "settings_view.terminal.highlight_rules.semantic_scheme_hint",
+                "settings_view.terminal.highlight_rules.semantic_scheme_balanced",
+                "settings_view.terminal.highlight_rules.semantic_scheme_conservative",
+            ],
+        ),
+        terminal_search_entry(
+            TerminalSettingsPage::Highlight,
             SettingsSectionId::TerminalHighlightRules,
             "settings_view.terminal.highlight_rules.title",
             &[
                 "settings_view.terminal.highlight_rules.description",
                 "settings_view.terminal.highlight_rules.rule_set",
                 "settings_view.terminal.highlight_rules.rule_set_hint",
-                "terminal.highlight_override.selection_matches",
-                "terminal.highlight_override.selection_matches_default_hint",
-                "settings_view.terminal.highlight_rules.semantic_coloring",
-                "settings_view.terminal.highlight_rules.semantic_coloring_hint",
-                "settings_view.terminal.highlight_rules.semantic_scheme",
-                "settings_view.terminal.highlight_rules.semantic_scheme_hint",
-                "settings_view.terminal.highlight_rules.semantic_scheme_balanced",
-                "settings_view.terminal.highlight_rules.semantic_scheme_conservative",
                 "settings_view.terminal.highlight_rules.pattern",
                 "settings_view.terminal.highlight_rules.foreground",
                 "settings_view.terminal.highlight_rules.background",
@@ -1066,6 +1076,14 @@ impl WorkspaceApp {
             }
         });
         let tab = result.tab;
+        if result.section == SettingsSectionId::AppearanceBackground {
+            // Reveal collapsible background sub-sections so jumped matches remain visible.
+            self.settings_workspace.update(cx, |entity, cx| {
+                entity.background_effects_expanded = Some(true);
+                entity.background_interactions_expanded = Some(true);
+                cx.notify();
+            });
+        }
         if result.section == SettingsSectionId::TerminalAwarenessTriggers {
             self.terminal_trigger_settings_pane = None;
         }

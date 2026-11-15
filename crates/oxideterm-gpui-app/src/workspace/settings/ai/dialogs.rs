@@ -331,7 +331,6 @@ impl WorkspaceApp {
                 dialog_content(&self.tokens)
                     .w(px(AI_CONFIRM_DIALOG_WIDTH))
                     .max_w(relative(0.92))
-                    .shadow_lg()
                     .flex()
                     .flex_col()
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
@@ -457,7 +456,6 @@ impl WorkspaceApp {
                 dialog_content(&self.tokens)
                     .w(px(AI_KEY_REMOVE_DIALOG_WIDTH))
                     .max_w(relative(0.92))
-                    .shadow_lg()
                     .rounded(px(self.tokens.radii.lg))
                     .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
@@ -562,7 +560,6 @@ impl WorkspaceApp {
                 dialog_content(&self.tokens)
                     .w(px(AI_KEY_REMOVE_DIALOG_WIDTH))
                     .max_w(relative(0.92))
-                    .shadow_lg()
                     .rounded(px(self.tokens.radii.lg))
                     .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
                     .on_mouse_down(MouseButton::Left, |_event, _window, cx| {

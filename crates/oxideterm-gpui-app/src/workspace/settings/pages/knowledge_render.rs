@@ -342,8 +342,8 @@ impl WorkspaceApp {
             );
         }
         self.settings_card(
-            "settings_view.knowledge.title",
-            "settings_view.knowledge.description",
+            "settings_view.knowledge.navigator_documents",
+            "",
             rows,
         )
     }
