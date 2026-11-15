@@ -1738,7 +1738,11 @@ impl WorkspaceApp {
                         )
                         .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
                             // Every visible child row participates in its nearest folder's drop area.
-                            let row = if sidebar { row.rounded(px(radius)) } else { row };
+                            let row = if sidebar {
+                                row.rounded(px(radius))
+                            } else {
+                                row
+                            };
                             row.border_1()
                                 .border_color(rgb(theme.accent))
                                 .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
@@ -1877,7 +1881,11 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .drag_over::<SessionManagerDrag>(move |row, _drag, _window, _cx| {
-                let row = if sidebar { row.rounded(px(radius)) } else { row };
+                let row = if sidebar {
+                    row.rounded(px(radius))
+                } else {
+                    row
+                };
                 row.border_1()
                     .border_color(rgb(theme.accent))
                     .bg(rgba((theme.accent << 8) | MANAGER_DRAG_GROUP_BG_ALPHA))
@@ -3494,90 +3502,86 @@ impl WorkspaceApp {
         }
         if let Some((delete_id, delete_label)) = delete_action {
             let delete_target = menu.target;
-            popup = popup.child(
-                self.workspace_context_menu_styled_action(
-                    oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
-                        &self.tokens,
-                        "lucide/trash-2.svg",
-                        delete_label,
-                        true,
-                        false,
-                    ),
+            popup = popup.child(self.workspace_context_menu_styled_action(
+                oxideterm_gpui_ui::dropdown_menu::dropdown_menu_item_with_icon(
+                    &self.tokens,
+                    "lucide/trash-2.svg",
+                    delete_label,
+                    true,
                     false,
-                    false,
-                    ContextMenuActionableStyle {
-                        hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1f)),
-                        hover_text_color: None,
-                    },
-                    |_| {},
-                    move |this, _event, _window, cx| {
-                        this.close_session_row_menus(cx);
-                        if batch_delete {
-                            this.request_delete_selected_connections(cx);
-                            cx.stop_propagation();
-                            return;
-                        }
-                        match &delete_target {
-                            SessionManagerRowActionTarget::Tunnel(_) => {
-                                this.session_manager.update(cx, |state, cx| {
-                                    state.delete_confirm =
-                                        Some(SessionManagerDeleteConfirm::Batch {
-                                            targets: vec![SessionManagerSelectionTarget::Tunnel(
-                                                delete_id.clone(),
-                                            )],
-                                        });
-                                    cx.notify();
-                                });
-                            }
-                            SessionManagerRowActionTarget::Plugin(_) => {
-                                this.session_manager.update(cx, |state, cx| {
-                                    state.delete_confirm =
-                                        Some(SessionManagerDeleteConfirm::Batch {
-                                            targets: vec![SessionManagerSelectionTarget::Plugin(
-                                                delete_id.clone(),
-                                            )],
-                                        });
-                                    cx.notify();
-                                });
-                            }
-                            SessionManagerRowActionTarget::Ftp(_) => {
-                                this.request_delete_ftp_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::Connection(_) => {
-                                this.request_delete_connection(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::Serial(_) => {
-                                this.request_delete_serial_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::Ble(_) => {
-                                this.request_delete_ble_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::LocalTerminal(_) => {
-                                this.request_delete_local_terminal_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::Telnet(_) => {
-                                this.request_delete_telnet_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::Mosh(_) => {
-                                this.request_delete_mosh_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::StandaloneSftp(_) => {
-                                this.request_delete_standalone_sftp_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::RemoteDesktop(_) => {
-                                this.request_delete_remote_desktop_profile(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::Group(_) => {
-                                this.request_delete_session_group(&delete_id, cx)
-                            }
-                            SessionManagerRowActionTarget::GroupRoot
-                            | SessionManagerRowActionTarget::SshConfig(_) => {}
-                        }
-                        cx.stop_propagation();
-                    },
-                    cx,
                 ),
-            );
+                false,
+                false,
+                ContextMenuActionableStyle {
+                    hover_background: Some(rgba((self.tokens.ui.error << 8) | 0x1f)),
+                    hover_text_color: None,
+                },
+                |_| {},
+                move |this, _event, _window, cx| {
+                    this.close_session_row_menus(cx);
+                    if batch_delete {
+                        this.request_delete_selected_connections(cx);
+                        cx.stop_propagation();
+                        return;
+                    }
+                    match &delete_target {
+                        SessionManagerRowActionTarget::Tunnel(_) => {
+                            this.session_manager.update(cx, |state, cx| {
+                                state.delete_confirm = Some(SessionManagerDeleteConfirm::Batch {
+                                    targets: vec![SessionManagerSelectionTarget::Tunnel(
+                                        delete_id.clone(),
+                                    )],
+                                });
+                                cx.notify();
+                            });
+                        }
+                        SessionManagerRowActionTarget::Plugin(_) => {
+                            this.session_manager.update(cx, |state, cx| {
+                                state.delete_confirm = Some(SessionManagerDeleteConfirm::Batch {
+                                    targets: vec![SessionManagerSelectionTarget::Plugin(
+                                        delete_id.clone(),
+                                    )],
+                                });
+                                cx.notify();
+                            });
+                        }
+                        SessionManagerRowActionTarget::Ftp(_) => {
+                            this.request_delete_ftp_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::Connection(_) => {
+                            this.request_delete_connection(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::Serial(_) => {
+                            this.request_delete_serial_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::Ble(_) => {
+                            this.request_delete_ble_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::LocalTerminal(_) => {
+                            this.request_delete_local_terminal_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::Telnet(_) => {
+                            this.request_delete_telnet_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::Mosh(_) => {
+                            this.request_delete_mosh_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::StandaloneSftp(_) => {
+                            this.request_delete_standalone_sftp_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::RemoteDesktop(_) => {
+                            this.request_delete_remote_desktop_profile(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::Group(_) => {
+                            this.request_delete_session_group(&delete_id, cx)
+                        }
+                        SessionManagerRowActionTarget::GroupRoot
+                        | SessionManagerRowActionTarget::SshConfig(_) => {}
+                    }
+                    cx.stop_propagation();
+                },
+                cx,
+            ));
         }
 
         // Pointer menus use the click position while ellipsis menus preserve

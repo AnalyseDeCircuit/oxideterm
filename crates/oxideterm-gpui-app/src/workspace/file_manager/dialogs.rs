@@ -402,34 +402,37 @@ impl WorkspaceApp {
             || self.file_manager.read(cx).context_menu_presence.phase()
                 == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let color = if danger { FILE_MANAGER_RED } else { theme.text };
-        let item = div()
-            .h(px(FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT))
-            .w_full()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(self.tokens.metrics.ui_menu_item_padding_x))
-            .py(px(5.0))
-            .rounded(px(self.tokens.radii.md))
-            .text_size(px(FILE_MANAGER_TEXT_XS))
-            .text_color(rgb(color))
-            .child(Self::render_lucide_icon(
-                icon,
-                FILE_MANAGER_ICON_SM,
-                if danger {
-                    rgb(color).into()
-                } else {
-                    rgba((color << 8) | 0xd9)
-                },
-            ))
-            .child(div().flex_1().min_w_0().truncate().child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "file-manager-context-menu",
-                label.clone(),
-                label,
-                color,
-                cx,
-            )));
+        let item =
+            div()
+                .h(px(FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT))
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+                .py(px(5.0))
+                .rounded(px(self.tokens.radii.md))
+                .text_size(px(FILE_MANAGER_TEXT_XS))
+                .text_color(rgb(color))
+                .child(Self::render_lucide_icon(
+                    icon,
+                    FILE_MANAGER_ICON_SM,
+                    if danger {
+                        rgb(color).into()
+                    } else {
+                        rgba((color << 8) | 0xd9)
+                    },
+                ))
+                .child(div().flex_1().min_w_0().truncate().child(
+                    self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "file-manager-context-menu",
+                        label.clone(),
+                        label,
+                        color,
+                        cx,
+                    ),
+                ));
         let hover_bg = if danger {
             rgba((FILE_MANAGER_RED << 8) | 0x1f)
         } else {

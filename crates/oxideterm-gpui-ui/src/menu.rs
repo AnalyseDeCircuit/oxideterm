@@ -1,4 +1,6 @@
-use gpui::{CursorStyle, Div, IntoElement, ParentElement, Rgba, Styled, div, prelude::*, px, rgb, svg};
+use gpui::{
+    CursorStyle, Div, IntoElement, ParentElement, Rgba, Styled, div, prelude::*, px, rgb, svg,
+};
 use oxideterm_theme::ThemeTokens;
 
 use crate::surface::{
@@ -36,7 +38,10 @@ pub(crate) fn menu_surface_chrome(tokens: &ThemeTokens) -> Div {
     let surface = material_surface(tokens, div(), MaterialRole::Popover)
         .when(crate::modal::backdrop_blur_allowed(), |surface| {
             // Keep dense terminal/table text beneath menus from muddying item labels.
-            surface.bg(color_with_alpha(tokens.ui.bg_elevated, MENU_FROSTED_BG_ALPHA))
+            surface.bg(color_with_alpha(
+                tokens.ui.bg_elevated,
+                MENU_FROSTED_BG_ALPHA,
+            ))
         })
         .overflow_hidden()
         .rounded(px(chrome.surface_radius))
@@ -156,7 +161,9 @@ pub fn menu_item(
         } else {
             CursorStyle::PointingHand
         })
-        .when(!disabled, |item| item.hover(move |style| style.bg(hover_bg)))
+        .when(!disabled, |item| {
+            item.hover(move |style| style.bg(hover_bg))
+        })
         .when(checked, |item| {
             item.child(menu_indicator_icon(
                 tokens,
@@ -195,7 +202,9 @@ pub fn menu_item_with_icon(
     } else {
         CursorStyle::PointingHand
     })
-    .when(!disabled, |item| item.hover(move |style| style.bg(hover_bg)))
+    .when(!disabled, |item| {
+        item.hover(move |style| style.bg(hover_bg))
+    })
     .child(
         svg()
             .path(icon_path)

@@ -173,7 +173,9 @@ impl WorkspaceApp {
                             .flex_1()
                             .min_h(px(0.0))
                             .w_full()
-                            .pt(px(crate::workspace::sidebar::PRIMARY_SIDEBAR_CONTENT_TOP_INSET))
+                            .pt(px(
+                                crate::workspace::sidebar::PRIMARY_SIDEBAR_CONTENT_TOP_INSET,
+                            ))
                             .child(list)
                             .into_any_element()
                     } else if has_search_query {

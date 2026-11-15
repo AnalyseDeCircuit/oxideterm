@@ -264,35 +264,38 @@ impl WorkspaceApp {
             || self.sftp_view().read(cx).context_menu_presence.phase()
                 == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
         let color = if danger { SFTP_RED } else { theme.text };
-        let item = div()
-            .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.0))
-            .px(px(self.tokens.metrics.ui_menu_item_padding_x))
-            .py(px(5.0))
-            .rounded(px(self.tokens.radii.md))
-            .text_size(px(ui.text_xs))
-            .text_color(rgb(color))
-            .child(Self::render_lucide_icon(
-                icon,
-                ui.size(SFTP_ICON_SM),
-                if danger {
-                    rgb(color).into()
-                } else {
-                    rgba((color << 8) | 0xd9)
-                },
-            ))
-            .child(div().flex_1().min_w_0().truncate().child(self.render_display_text_with_role(
-                SelectableTextRole::NonSelectable,
-                "sftp-context-menu",
-                label.clone(),
-                label,
-                color,
-                cx,
-            )));
+        let item =
+            div()
+                .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
+                .w_full()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+                .py(px(5.0))
+                .rounded(px(self.tokens.radii.md))
+                .text_size(px(ui.text_xs))
+                .text_color(rgb(color))
+                .child(Self::render_lucide_icon(
+                    icon,
+                    ui.size(SFTP_ICON_SM),
+                    if danger {
+                        rgb(color).into()
+                    } else {
+                        rgba((color << 8) | 0xd9)
+                    },
+                ))
+                .child(div().flex_1().min_w_0().truncate().child(
+                    self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "sftp-context-menu",
+                        label.clone(),
+                        label,
+                        color,
+                        cx,
+                    ),
+                ));
         let hover_bg = if danger {
             rgba((SFTP_RED << 8) | 0x1f)
         } else {

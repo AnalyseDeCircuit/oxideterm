@@ -1733,12 +1733,12 @@ fn sidebar_tree_row_rails_track_continuing_ancestors_and_terminal_siblings() {
     let item = |item_index: usize, depth: usize| SessionManagerTreeRow::Item { item_index, depth };
 
     let rows = vec![
-        group("prod", 0),       // 0: root group (followed by root item, no parent rail)
-        item(0, 1),             // 1: child of prod, continues to subgroup
-        group("prod/web", 1),   // 2: last child of prod -> outer rail for depth=2 must stop
-        item(1, 2),             // 3: first child of prod/web -> continues to item 2
-        item(2, 2),             // 4: last child of prod/web
-        item(3, 0),             // 5: ungrouped root item
+        group("prod", 0),     // 0: root group (followed by root item, no parent rail)
+        item(0, 1),           // 1: child of prod, continues to subgroup
+        group("prod/web", 1), // 2: last child of prod -> outer rail for depth=2 must stop
+        item(1, 2),           // 3: first child of prod/web -> continues to item 2
+        item(2, 2),           // 4: last child of prod/web
+        item(3, 0),           // 5: ungrouped root item
     ];
 
     assert_eq!(session_manager_tree_row_rails(&rows, 0), (vec![], false));

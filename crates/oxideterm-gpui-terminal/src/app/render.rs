@@ -11,8 +11,8 @@ use oxideterm_gpui_ui::button::{
 use oxideterm_gpui_ui::confirm::{ConfirmDialogVariant, ConfirmDialogView, confirm_dialog};
 use oxideterm_gpui_ui::context_menu::{
     context_menu_action, context_menu_backdrop, context_menu_content, context_menu_event_boundary,
-    context_menu_item_with_icon, context_menu_item_with_icon_and_shortcut,
-    context_menu_separator, context_menu_shortcut,
+    context_menu_item_with_icon, context_menu_item_with_icon_and_shortcut, context_menu_separator,
+    context_menu_shortcut,
 };
 use oxideterm_gpui_ui::menu::menu_content;
 use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, overlay_content_boundary};

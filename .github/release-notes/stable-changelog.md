@@ -3,6 +3,98 @@
 Stable releases are listed newest first. The release workflow uses each versioned
 section as the detailed changelog attached to the corresponding GitHub Release.
 
+## 2.3.3
+
+### 中文
+
+OxideTerm 2.3.3 把会话管理器带到侧栏，加入模板批量创建 SSH 连接和更紧凑的主机监控。这一版也让多行粘贴可以先编辑，并改进终端缩放、输入法和跳板连接。
+
+#### 🗂️ 会话管理与监控
+
+- 侧栏中的会话管理器支持搜索、整行拖动以及用 Ctrl 或 Shift 多选。无需打开独立标签页即可整理分组或操作连接，SFTP 仍可停靠在侧栏下方。（PR [#796](https://github.com/AnalyseDeCircuit/oxideterm/pull/796)）
+- 会话管理器和命令行都支持从模板批量创建 SSH 连接。应用内可预览新增、更新、跳过和无效条目；存在无效条目时不会写入部分结果。已保存模板使用系统钥匙串或加密便携保险库。（PR [#773](https://github.com/AnalyseDeCircuit/oxideterm/pull/773)）
+- 分组徽标现在把已保存的 BLE 连接计入总数。（PR [#793](https://github.com/AnalyseDeCircuit/oxideterm/pull/793)）
+- 重做主机监控侧栏，在较窄的空间集中显示 CPU、内存、磁盘和网络等指标；主机有逐核心数据时，可以展开查看。
+
+#### ⚡ 终端与工作区
+
+- 禅模式下，把鼠标移到窗口顶边即可显示退出按钮，不再只能靠快捷键。（PR [#799](https://github.com/AnalyseDeCircuit/oxideterm/pull/799)）
+- 启用多行粘贴保护时，弹窗默认可编辑。Enter 换行，Esc 取消，点「粘贴」才发送；没改动时按原样交给终端的粘贴处理。
+- 修复终端缩放时网格短暂不可见、提示符重绘不完整的问题。（PR [#784](https://github.com/AnalyseDeCircuit/oxideterm/pull/784)）
+- 减少高输出期间的重复解析、内存分配和绘制，避免尺寸调整与长时间的终端处理争用同一把锁。
+- 旧编码无法表示的输入现在发送 `?`，不再发送 HTML 数字实体；有效 UTF-8 字符跨读取边界时，也不再被误判成编码错误。（PR [#776](https://github.com/AnalyseDeCircuit/oxideterm/pull/776)、[#777](https://github.com/AnalyseDeCircuit/oxideterm/pull/777)）
+- MCP 可以分页读取终端历史，不受当前可见区域限制，用户滚动终端时不会打乱分页。（PR [#790](https://github.com/AnalyseDeCircuit/oxideterm/pull/790)）
+- 触控板在标签栏上滚动时使用主要方向，减少斜向手势造成的抖动。（PR [#782](https://github.com/AnalyseDeCircuit/oxideterm/pull/782)）
+
+#### 🔗 SSH、文件与插件
+
+- 设置中可查看并删除已信任的 SSH 主机密钥。主机密钥变更时，确认替换只接受本次核对过的指纹。
+- 修复已保存的多跳 SSH 路由恢复和复用问题，保留各跳的连接身份以及上游代理策略。
+- 远程 Shell 集成仅在对应 SSH 会话中发出 OSC 133 命令标记，保留 OSC 7 目录跟踪；已有 v6 集成脚本可升级。
+- 独立 SFTP 表单恢复高级选项和滚动，SSH 隧道对话框沿用其他连接表单的背景处理。多行输入和密钥导入对话框也恢复正常滚动。
+- 经授权的插件可读写 BLE GATT 特征并订阅通知，也可在受支持的终端里提供工具栏和浮窗。BLE 重连后，插件需获取新的会话 ID 并重新订阅。（PR [#775](https://github.com/AnalyseDeCircuit/oxideterm/pull/775)）
+
+#### 🖥️ 界面与平台兼容
+
+- 调整欢迎页、设置、侧栏和标签栏的排版。深色主题更容易区分工作区和周边界面；文件、终端、编辑器等菜单也统一了样式，并修复了打开侧栏排序菜单时可能崩溃的问题。
+- 工具栏实底按钮悬停时保留各自的色调，危险操作按钮的填充透明度保持一致。（PR [#783](https://github.com/AnalyseDeCircuit/oxideterm/pull/783)、[#786](https://github.com/AnalyseDeCircuit/oxideterm/pull/786)）
+- 新建知识库文档时，可在标题输入框按 Enter 提交，Tab 焦点会留在弹窗内直到关闭。（PR [#781](https://github.com/AnalyseDeCircuit/oxideterm/pull/781)、[#785](https://github.com/AnalyseDeCircuit/oxideterm/pull/785)）
+- 修复编辑器输入法组字时的光标、选区和折行问题。（PR [#780](https://github.com/AnalyseDeCircuit/oxideterm/pull/780)）
+- 升级 GPUI，修复 Linux XIM 的部分乱码、Windows 上分段字体的字距，以及 macOS 上同名回退字体偶尔绘制出错误字形的问题。Windows 本机项目探测也改用原生路径规则。
+
+#### 👥 贡献者
+
+- @idxdy：加入模板批量创建 SSH 连接及命令行支持。（PR [#773](https://github.com/AnalyseDeCircuit/oxideterm/pull/773)）
+- @allegrox：加入 BLE 插件接口和会话管理器侧栏，修复 BLE 分组计数。（PR [#775](https://github.com/AnalyseDeCircuit/oxideterm/pull/775)、[#793](https://github.com/AnalyseDeCircuit/oxideterm/pull/793)、[#796](https://github.com/AnalyseDeCircuit/oxideterm/pull/796)）
+- @HarpeLm：修复旧编码输入的替换规则和分块 UTF-8 的误判。（PR [#776](https://github.com/AnalyseDeCircuit/oxideterm/pull/776)、[#777](https://github.com/AnalyseDeCircuit/oxideterm/pull/777)）
+- @BilityLeu：改进终端缩放、触控板标签栏滚动，并为 MCP 加入终端历史分页。（PR [#782](https://github.com/AnalyseDeCircuit/oxideterm/pull/782)、[#784](https://github.com/AnalyseDeCircuit/oxideterm/pull/784)、[#790](https://github.com/AnalyseDeCircuit/oxideterm/pull/790)）
+- @m00nLi：改进输入法组字、知识库弹窗键盘交互和工具栏反馈，加入禅模式退出按钮。（PR [#780](https://github.com/AnalyseDeCircuit/oxideterm/pull/780)、[#781](https://github.com/AnalyseDeCircuit/oxideterm/pull/781)、[#783](https://github.com/AnalyseDeCircuit/oxideterm/pull/783)、[#785](https://github.com/AnalyseDeCircuit/oxideterm/pull/785)、[#786](https://github.com/AnalyseDeCircuit/oxideterm/pull/786)、[#799](https://github.com/AnalyseDeCircuit/oxideterm/pull/799)）
+
+### English
+
+OxideTerm 2.3.3 brings Session Manager into the sidebar, adds template-driven batch creation for SSH connections, and gives Host Monitoring a more compact layout. This release also makes protected multiline pastes editable and improves terminal resizing, input methods, and jump-host connections.
+
+#### 🗂️ Session management and monitoring
+
+- The sidebar Session Manager supports search, whole-row dragging, and multiselect with Ctrl or Shift. Organize groups and manage connections without opening a separate tab. SFTP can still dock below the sidebar panel. (PR [#796](https://github.com/AnalyseDeCircuit/oxideterm/pull/796))
+- Create SSH connections in bulk from a template in Session Manager or the CLI. The app previews additions, updates, skips, and invalid rows; invalid rows prevent a partial write. Saved templates use the system credential store or the encrypted portable vault. (PR [#773](https://github.com/AnalyseDeCircuit/oxideterm/pull/773))
+- Group badges now include saved BLE connections in their totals. (PR [#793](https://github.com/AnalyseDeCircuit/oxideterm/pull/793))
+- The redesigned Host Monitoring sidebar fits CPU, memory, disk, network, and other metrics in less space. Expand the CPU row to see individual cores on hosts that provide per-core readings.
+
+#### ⚡ Terminal and workspace
+
+- Move the pointer to the top edge of the window in Zen mode to reveal an exit button. You no longer need the keyboard shortcut to get out. (PR [#799](https://github.com/AnalyseDeCircuit/oxideterm/pull/799))
+- With multiline paste protection enabled, the prompt is editable by default. Enter inserts a newline, Esc cancels, and clicking **Paste** sends the text. If you leave it unchanged, the terminal receives the original text through its normal paste handling.
+- Fixed resized terminal grids briefly disappearing and prompts not redrawing completely. (PR [#784](https://github.com/AnalyseDeCircuit/oxideterm/pull/784))
+- Reduced repeated parsing, allocations, and drawing during heavy output, and kept resize handling from contending with long terminal processing on the same lock.
+- Input that a legacy encoding cannot represent is now sent as `?`, not an HTML numeric reference. Valid UTF-8 split across reads no longer triggers false encoding warnings. (PR [#776](https://github.com/AnalyseDeCircuit/oxideterm/pull/776), [#777](https://github.com/AnalyseDeCircuit/oxideterm/pull/777))
+- MCP clients can page through terminal history independently of the visible viewport. Scrolling the terminal does not disrupt pagination. (PR [#790](https://github.com/AnalyseDeCircuit/oxideterm/pull/790))
+- Tab-bar scrolling follows the dominant trackpad axis to reduce jitter on diagonal gestures. (PR [#782](https://github.com/AnalyseDeCircuit/oxideterm/pull/782))
+
+#### 🔗 SSH, files, and plugins
+
+- View and remove trusted SSH host keys in Settings. If a host key changes, confirming replacement accepts only the fingerprint you reviewed.
+- Fixed restoration and reuse of saved multihop SSH routes so each hop retains its connection identity and upstream proxy policy.
+- Remote shell integration emits OSC 133 command markers only in the intended SSH session while retaining OSC 7 directory tracking. Existing v6 integration scripts can upgrade.
+- Restored advanced options and scrolling in the standalone SFTP form, and aligned the SSH tunnel dialog backdrop with the other connection forms. Multiline fields and key import dialogs also scroll correctly again.
+- Authorized plugins can read and write BLE GATT characteristics, subscribe to notifications, and offer toolbars and popovers in supported terminals. After BLE reconnects, plugins need to obtain the new session ID and subscribe again. (PR [#775](https://github.com/AnalyseDeCircuit/oxideterm/pull/775))
+
+#### 🖥️ Interface and platform compatibility
+
+- Refined the welcome page, settings, sidebars, and tabs. Dark themes distinguish the workspace more clearly from surrounding controls. Menus across files, terminals, and editors share a consistent style, and opening the sidebar sort menu no longer crashes.
+- Filled toolbar buttons keep their own hover tints, and destructive buttons retain their fill opacity on hover. (PR [#783](https://github.com/AnalyseDeCircuit/oxideterm/pull/783), [#786](https://github.com/AnalyseDeCircuit/oxideterm/pull/786))
+- In the new knowledge-document dialog, Enter in the title field submits the form and Tab focus stays inside the dialog until it closes. (PR [#781](https://github.com/AnalyseDeCircuit/oxideterm/pull/781), [#785](https://github.com/AnalyseDeCircuit/oxideterm/pull/785))
+- Fixed caret positioning, selection, and wrapping during IME composition in the editor. (PR [#780](https://github.com/AnalyseDeCircuit/oxideterm/pull/780))
+- Updated GPUI and fixed garbled input in some Linux XIM sessions, letter spacing when Windows splits font runs, and incorrect glyphs when macOS fallback faces share a name. Local project discovery on Windows now uses native path rules.
+
+#### 👥 Contributors
+
+- @idxdy added template-driven batch SSH connection creation and CLI support. (PR [#773](https://github.com/AnalyseDeCircuit/oxideterm/pull/773))
+- @allegrox added BLE plugin APIs and the Session Manager sidebar, and fixed BLE group counts. (PR [#775](https://github.com/AnalyseDeCircuit/oxideterm/pull/775), [#793](https://github.com/AnalyseDeCircuit/oxideterm/pull/793), [#796](https://github.com/AnalyseDeCircuit/oxideterm/pull/796))
+- @HarpeLm fixed legacy encoding substitutions and false warnings on split UTF-8. (PR [#776](https://github.com/AnalyseDeCircuit/oxideterm/pull/776), [#777](https://github.com/AnalyseDeCircuit/oxideterm/pull/777))
+- @BilityLeu improved terminal resizing and tab-bar trackpad scrolling, and added MCP terminal-history pagination. (PR [#782](https://github.com/AnalyseDeCircuit/oxideterm/pull/782), [#784](https://github.com/AnalyseDeCircuit/oxideterm/pull/784), [#790](https://github.com/AnalyseDeCircuit/oxideterm/pull/790))
+- @m00nLi improved IME composition, keyboard handling in the knowledge dialog, and toolbar feedback, and added a Zen mode exit button. (PR [#780](https://github.com/AnalyseDeCircuit/oxideterm/pull/780), [#781](https://github.com/AnalyseDeCircuit/oxideterm/pull/781), [#783](https://github.com/AnalyseDeCircuit/oxideterm/pull/783), [#785](https://github.com/AnalyseDeCircuit/oxideterm/pull/785), [#786](https://github.com/AnalyseDeCircuit/oxideterm/pull/786), [#799](https://github.com/AnalyseDeCircuit/oxideterm/pull/799))
+
 ## 2.3.2
 
 ### 中文
