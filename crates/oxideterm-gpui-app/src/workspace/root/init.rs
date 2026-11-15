@@ -965,6 +965,11 @@ impl WorkspaceApp {
         workspace.bootstrap_cloud_sync_controller(cx);
         workspace.start_public_mcp_delivery(cx);
         workspace.sync_ssh_config_sync_service();
+        if workspace.active_sidebar_section == SidebarSection::Connections
+            && !workspace.sidebar_collapsed
+        {
+            workspace.refresh_session_manager_ssh_config_hosts(cx);
+        }
         workspace.start_audit_delivery(cx);
         workspace.restore_session_tree_snapshot();
         workspace.start_startup_ssh_tunnels(window, cx);

@@ -342,6 +342,33 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn close_session_manager_sidebar_search(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.session_manager_search_open {
+            return;
+        }
+        self.session_manager_search_open = false;
+        self.begin_disclosure_motion("session-manager-search".into(), false, cx);
+        self.session_manager.update(cx, |manager, cx| {
+            manager.search_query.clear();
+            if manager.focused_input == Some(SessionManagerInput::Search) {
+                manager.focused_input = None;
+            }
+            cx.notify();
+        });
+        if self.selected_ime_target
+            == Some(ime::WorkspaceImeTarget::SessionManager(
+                SessionManagerInput::Search,
+            ))
+        {
+            self.selected_ime_target = None;
+            self.clear_ime_selection();
+            self.ime_marked_text = None;
+        }
+    }
+
     pub(in crate::workspace) fn handle_session_manager_key(
         &mut self,
         event: &KeyDownEvent,
@@ -375,15 +402,7 @@ impl WorkspaceApp {
             {
                 // Escape collapses the sidebar disclosure and drops the draft,
                 // matching the active-sessions search behavior.
-                self.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.search_query.clear();
-                    session_manager.focused_input = None;
-                    cx.notify();
-                });
-                self.begin_disclosure_motion("session-manager-search".into(), false, cx);
-                self.session_manager_search_open = false;
-                self.clear_ime_selection();
-                self.ime_marked_text = None;
+                self.close_session_manager_sidebar_search(cx);
                 true
             }
             "escape" => {

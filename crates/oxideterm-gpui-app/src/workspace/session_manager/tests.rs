@@ -1466,6 +1466,25 @@ fn sidebar_search_owns_keys_only_while_the_disclosure_is_visible(cx: &mut TestAp
         assert!(workspace.session_manager.read(cx).search_query.is_empty());
         assert_eq!(workspace.session_manager.read(cx).focused_input(), None);
     });
+
+    workspace.update(cx, |workspace, cx| {
+        let visible_count = workspace.session_manager_display_items(cx).len();
+        assert!(visible_count > 1);
+        workspace.session_manager_search_open = true;
+        workspace.session_manager.update(cx, |manager, _| {
+            manager.search_query = "telnet".into();
+            manager.focused_input = Some(SessionManagerInput::Search);
+        });
+        assert_eq!(workspace.session_manager_display_items(cx).len(), 1);
+        workspace.set_sidebar_section(SidebarSection::Sessions, cx);
+        workspace.set_sidebar_section(SidebarSection::Connections, cx);
+        assert!(!workspace.session_manager_search_open);
+        assert_eq!(
+            workspace.session_manager_display_items(cx).len(),
+            visible_count
+        );
+        assert_eq!(workspace.session_manager.read(cx).focused_input(), None);
+    });
 }
 
 #[gpui::test]
@@ -1497,6 +1516,139 @@ fn group_dialog_name_field_owns_keys_without_the_session_manager_tab(cx: &mut Te
             Some(SessionManagerInput::GroupName)
         );
     });
+
+    cx.windows()[0]
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                assert!(
+                    workspace
+                        .tabs(cx)
+                        .iter()
+                        .all(|tab| tab.kind != TabKind::SessionManager)
+                );
+                let escape = KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse("escape").unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                };
+                // Keep the group manager open behind a valid batch confirmation.
+                workspace.session_manager.update(cx, |manager, _| {
+                    manager
+                        .selected_items
+                        .insert(SessionManagerSelectionTarget::Telnet(
+                            "shared-profile-id".into(),
+                        ));
+                });
+                workspace.request_delete_selected_connections(cx);
+                assert!(workspace.session_manager.read(cx).delete_confirm.is_some());
+                assert!(workspace.capture_active_window_modal_key(&escape, window, cx));
+                assert!(workspace.session_manager.read(cx).delete_confirm.is_none());
+                assert!(workspace.session_manager.read(cx).show_group_manager);
+                assert!(workspace.capture_active_window_modal_key(&escape, window, cx));
+                assert!(!workspace.session_manager.read(cx).show_group_manager);
+                assert_eq!(
+                    workspace.connection_store.telnet_profiles()[0].name,
+                    "Telnet"
+                );
+            })
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn session_manager_sidebar_loads_ssh_config_without_opening_a_tab(cx: &mut TestAppContext) {
+    let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_SIDEBAR_SSH_CONFIG_TEST_DIR")
+    else {
+        return;
+    };
+    let ssh_dir = oxideterm_portable_runtime::portable_ssh_dir()
+        .unwrap()
+        .unwrap();
+    assert!(ssh_dir.starts_with(&fixture_dir));
+    std::fs::create_dir_all(&ssh_dir).unwrap();
+    std::fs::write(
+        ssh_dir.join("config"),
+        "Host sidebar-fixture\n    HostName server.invalid\n    User demo\n",
+    )
+    .unwrap();
+    cx.executor().allow_parking();
+    let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
+    let load = workspace.update(cx, |workspace, cx| {
+        workspace
+            .settings_store
+            .settings_mut()
+            .ssh_config
+            .auto_load_hosts = true;
+        workspace.set_sidebar_section(SidebarSection::Connections, cx);
+        workspace.session_manager.update(cx, |manager, _| {
+            manager
+                .ssh_config_load_task
+                .take()
+                .expect("sidebar starts SSH config discovery")
+        })
+    });
+    cx.foreground_executor().block_test(load);
+    workspace.read_with(cx, |workspace, cx| {
+        assert!(
+            workspace
+                .tabs(cx)
+                .iter()
+                .all(|tab| tab.kind != TabKind::SessionManager)
+        );
+        let aliases = workspace
+            .session_manager_display_items(cx)
+            .into_iter()
+            .filter_map(|item| match item {
+                item @ SessionManagerDisplayItem::SshConfig(_) => Some(item.name().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(aliases, ["sidebar-fixture"]);
+    });
+}
+
+#[gpui::test]
+fn sftp_dialog_below_the_session_manager_is_visible_and_owns_escape(cx: &mut TestAppContext) {
+    use crate::workspace::sftp::{SftpDialog, SftpPane, SftpRemoteId, SftpSurfaceId};
+    use oxideterm_gpui_ui::motion::ExitPhase;
+
+    let Some(fixture_dir) = isolated_workspace_fixture(cx, "OXIDETERM_SIDEBAR_SFTP_MODAL_TEST_DIR")
+    else {
+        return;
+    };
+    let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
+    cx.windows()[0]
+        .update(cx, |_, window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.set_sidebar_section(SidebarSection::Connections, cx);
+                let node = NodeId::new("sidebar-sftp-fixture");
+                workspace.embedded_sftp_node_id = Some(node.clone());
+                workspace.sftp_view.update(cx, |sftp, _| {
+                    sftp.activate_view(SftpSurfaceId::Sidebar, SftpRemoteId::Node(node));
+                    sftp.set_dialog(SftpDialog::Delete {
+                        pane: SftpPane::Remote,
+                        files: vec!["sample.txt".into()],
+                        paths: Vec::new(),
+                    });
+                });
+                assert!(matches!(
+                    workspace.embedded_sftp_sidebar_dialog_view(cx).and_then(|view| view.dialog()),
+                    Some(SftpDialog::Delete { files, .. }) if files == ["sample.txt"]
+                ));
+                let escape = KeyDownEvent {
+                    keystroke: gpui::Keystroke::parse("escape").unwrap(),
+                    is_held: false,
+                    prefer_character_input: false,
+                };
+                assert!(workspace.capture_active_window_modal_key(&escape, window, cx));
+                assert!(
+                    workspace
+                        .embedded_sftp_sidebar_dialog_view(cx)
+                        .is_none_or(|view| view.dialog_phase() == ExitPhase::Exiting)
+                );
+            })
+        })
+        .unwrap();
 }
 
 #[test]

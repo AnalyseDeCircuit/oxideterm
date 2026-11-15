@@ -1540,6 +1540,23 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn embedded_sftp_sidebar_dialog_view<'a>(
+        &self,
+        cx: &'a App,
+    ) -> Option<&'a SftpWorkspaceEntity> {
+        let sftp = self.sftp_view.read(cx);
+        (!self.sidebar_collapsed
+            && !self.settings_store.settings().sidebar_ui.zen_mode
+            && self.sidebar_hosts_embedded_sftp()
+            && self.embedded_sftp_node_id.is_some()
+            && sftp.current_surface_id == Some(SftpSurfaceId::Sidebar)
+            && sftp.dialog_is_open()
+            && self
+                .active_content_tab(cx)
+                .is_none_or(|tab| tab.kind != TabKind::Sftp))
+        .then_some(sftp)
+    }
+
     pub(in crate::workspace) fn activate_embedded_sftp_sidebar_if_visible(
         &mut self,
         cx: &mut Context<Self>,

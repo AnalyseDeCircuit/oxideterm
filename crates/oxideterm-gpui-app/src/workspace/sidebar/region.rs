@@ -612,11 +612,12 @@ impl WorkspaceApp {
             false,
             cx.listener(|this, _event, window, cx| {
                 this.prepare_modal_interaction_boundary(cx);
-                let next_open = !this.session_manager_search_open;
-                this.begin_disclosure_motion("session-manager-search".into(), next_open, cx);
-                this.session_manager_search_open = next_open;
-                this.clear_ime_selection();
-                if next_open {
+                if this.session_manager_search_open {
+                    this.close_session_manager_sidebar_search(cx);
+                } else {
+                    this.begin_disclosure_motion("session-manager-search".into(), true, cx);
+                    this.session_manager_search_open = true;
+                    this.clear_ime_selection();
                     this.selected_ime_target = Some(ime::WorkspaceImeTarget::SessionManager(
                         SessionManagerInput::Search,
                     ));
@@ -626,12 +627,6 @@ impl WorkspaceApp {
                     });
                     window.focus(&this.focus_handle, cx);
                     this.show_active_input_caret(cx);
-                } else {
-                    this.session_manager.update(cx, |manager, cx| {
-                        manager.search_query.clear();
-                        manager.focused_input = None;
-                        cx.notify();
-                    });
                 }
                 cx.stop_propagation();
                 cx.notify();

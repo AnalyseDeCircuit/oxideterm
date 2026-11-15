@@ -563,12 +563,12 @@ impl WorkspaceApp {
         // of the tab underneath, like the Oxide import/export dialogs.
         let sidebar_search_active = input == SessionManagerInput::Search
             && self.session_manager_search_open
-            && !self.sidebar_collapsed
             && !self.session_manager_sidebar_sort_open
-            && self.effective_sidebar_panel_section() == SidebarSection::Connections;
+            && self.session_manager_sidebar_visible();
         let session_manager = self.session_manager.read(cx);
-        let group_dialog_active =
-            input == SessionManagerInput::GroupName && session_manager.show_group_manager;
+        let group_dialog_active = input == SessionManagerInput::GroupName
+            && session_manager.show_group_manager
+            && self.session_manager_sidebar_visible();
         (sidebar_search_active
             || group_dialog_active
             || session_manager_input_is_active(

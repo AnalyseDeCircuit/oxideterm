@@ -76,6 +76,7 @@ impl WorkspaceApp {
         collapsed: bool,
         cx: &mut Context<Self>,
     ) {
+        let was_collapsed = self.sidebar_collapsed;
         self.sidebar_motion.retarget(if collapsed {
             0.0
         } else {
@@ -86,7 +87,13 @@ impl WorkspaceApp {
         let generation = self.sidebar_motion_generation;
         if !collapsed {
             self.sidebar_rendered = true;
+            if was_collapsed && self.session_manager_sidebar_visible() {
+                self.refresh_session_manager_ssh_config_hosts(cx);
+            }
             return;
+        }
+        if self.effective_sidebar_panel_section() == SidebarSection::Connections {
+            self.close_session_manager_sidebar_search(cx);
         }
         if !self.tokens.motion.enabled || !self.tokens.motion.spatial_enabled {
             self.sidebar_motion.settle(0.0);
@@ -203,18 +210,30 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn session_manager_sidebar_visible(&self) -> bool {
+        !self.sidebar_collapsed
+            && !self.settings_store.settings().sidebar_ui.zen_mode
+            && self.effective_sidebar_panel_section() == SidebarSection::Connections
+    }
+
     pub(in crate::workspace) fn set_sidebar_section(
         &mut self,
         section: SidebarSection,
         cx: &mut Context<Self>,
     ) {
         self.clear_ai_sidebar_keyboard_focus(cx);
+        let was_visible = self.session_manager_sidebar_visible();
+        let was_collapsed = self.sidebar_collapsed;
         self.active_sidebar_section = section;
         if section == SidebarSection::Extensions {
             self.bootstrap_native_plugin_runtime(cx);
         }
         if self.sidebar_collapsed {
             self.set_sidebar_collapsed_with_motion(false, cx);
+        }
+        // Reopening a collapsed panel already refreshes in the expand path.
+        if !was_visible && !was_collapsed && self.session_manager_sidebar_visible() {
+            self.refresh_session_manager_ssh_config_hosts(cx);
         }
         if matches!(
             self.active_sidebar_section,
@@ -223,10 +242,7 @@ impl WorkspaceApp {
             self.activate_embedded_sftp_sidebar_if_visible(cx);
         }
         if section != SidebarSection::Connections {
-            // The session manager sidebar search disclosure and sort menu are
-            // scoped to the Connections panel; reset them when leaving so the
-            // next visit starts with a clean header.
-            self.session_manager_search_open = false;
+            self.close_session_manager_sidebar_search(cx);
             self.session_manager_sidebar_sort_open = false;
         }
         self.persist_sidebar_settings(cx);

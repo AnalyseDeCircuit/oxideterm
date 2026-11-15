@@ -98,19 +98,7 @@ impl WorkspaceApp {
                 }
             }
             TabKind::SessionManager => {
-                let (show_group_manager, show_delete_confirm) = {
-                    let session_manager = self.session_manager.read(cx);
-                    (
-                        session_manager.show_group_manager,
-                        session_manager.delete_confirm.is_some(),
-                    )
-                };
-                if show_group_manager {
-                    modals.push(self.render_group_manager_dialog(window, cx));
-                }
-                if show_delete_confirm {
-                    modals.push(self.render_session_manager_delete_confirm(cx));
-                }
+                modals.extend(self.render_session_manager_window_modals(window, cx));
             }
             TabKind::Forwards => {
                 let _scope = self.enter_forwarding_page(tab_id, cx);
@@ -151,21 +139,23 @@ impl WorkspaceApp {
             }
             _ => {}
         }
-        let _sidebar_scope = self.enter_sftp_surface(sftp::SftpSurfaceId::Sidebar);
-        if self
-            .window_registry
-            .handle_for_role(window_registry::WindowRole::Main)
-            .is_some_and(|handle| handle.window_id() == window_id)
-            && *tab_kind != TabKind::Sftp
-            && !self.sidebar_collapsed
-            && self.effective_sidebar_panel_section() == SidebarSection::Sessions
-            && self.embedded_sftp_node_id.is_some()
-            && self.sftp_view().read(cx).current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
-            && let Some(dialog) = self.sftp_view().read(cx).dialog()
-        {
-            // Sidebar-owned dialogs stay at the window root so previews and
-            // confirmations are never clipped by the narrow sidebar region.
-            modals.push(self.render_sftp_dialog(dialog, false, cx));
+        modals
+    }
+
+    fn render_session_manager_window_modals(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let manager = self.session_manager.read(cx);
+        let show_group_manager = manager.show_group_manager;
+        let show_delete_confirm = manager.delete_confirm.is_some();
+        let mut modals = Vec::new();
+        if show_group_manager {
+            modals.push(self.render_group_manager_dialog(window, cx));
+        }
+        if show_delete_confirm {
+            modals.push(self.render_session_manager_delete_confirm(cx));
         }
         modals
     }
@@ -327,31 +317,22 @@ impl WorkspaceApp {
             .as_ref()
             .map(|(tab_id, kind, _)| self.render_tab_window_modals(*tab_id, kind, window, cx))
             .unwrap_or_default();
-        // The sidebar form of the Session Manager has no tab to own its
-        // dialogs, so the root mounts them whenever the Session Manager tab
-        // is not the active tab. When it is active, the tab branch above
-        // already renders them and this stays empty to avoid duplication.
-        let sidebar_session_manager_modals = if active_tab_projection
-            .as_ref()
-            .is_some_and(|(_, kind, _)| *kind == TabKind::SessionManager)
+        // Sidebar dialogs are main-window portals even when no tab is open.
+        let sidebar_sftp_modal = self
+            .embedded_sftp_sidebar_dialog_view(cx)
+            .and_then(|sftp| sftp.dialog())
+            .map(|dialog| {
+                let _scope = self.enter_sftp_surface(sftp::SftpSurfaceId::Sidebar);
+                self.render_sftp_dialog(dialog, false, cx)
+            });
+        let sidebar_session_manager_modals = if self.session_manager_sidebar_visible()
+            && self
+                .active_content_tab(cx)
+                .is_none_or(|tab| tab.kind != TabKind::SessionManager)
         {
-            Vec::new()
+            self.render_session_manager_window_modals(window, cx)
         } else {
-            let (show_group_manager, show_delete_confirm) = {
-                let session_manager = self.session_manager.read(cx);
-                (
-                    session_manager.show_group_manager,
-                    session_manager.delete_confirm.is_some(),
-                )
-            };
-            let mut modals = Vec::new();
-            if show_group_manager {
-                modals.push(self.render_group_manager_dialog(window, cx));
-            }
-            if show_delete_confirm {
-                modals.push(self.render_session_manager_delete_confirm(cx));
-            }
-            modals
+            Vec::new()
         };
         // Settings and Knowledge share one root-mounted select portal. Keeping it
         // above tab-owned modals lets both surfaces use the same anchored control.
@@ -1440,6 +1421,7 @@ impl WorkspaceApp {
             })
             // Tab-owned dialogs are portaled here so their backdrops cover all window chrome.
             .children(active_tab_window_modals)
+            .children(sidebar_sftp_modal)
             .children(sidebar_session_manager_modals)
             .when_some(settings_select_overlay, |root, overlay| root.child(overlay))
             .when_some(

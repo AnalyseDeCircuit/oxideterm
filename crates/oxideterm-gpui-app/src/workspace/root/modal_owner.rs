@@ -846,22 +846,23 @@ impl WorkspaceApp {
 
     fn active_tab_window_modal_owner(&self, cx: &App) -> Option<ActiveTabWindowModalSnapshot> {
         let visible = oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        if self
-            .active_content_tab(cx)
-            .is_none_or(|tab| tab.kind != TabKind::Sftp)
-            && !self.sidebar_collapsed
-            && self.effective_sidebar_panel_section() == SidebarSection::Sessions
-            && self.embedded_sftp_node_id.is_some()
-            && self.sftp_view.read(cx).current_surface_id == Some(sftp::SftpSurfaceId::Sidebar)
-            && self.sftp_view.read(cx).dialog_is_open()
+        // Match the root portal order before consulting the active tab.
+        if self.session_manager_sidebar_visible()
+            && self
+                .active_content_tab(cx)
+                .is_none_or(|tab| tab.kind != TabKind::SessionManager)
+            && let Some(modal) = self.session_manager_modal_owner(cx)
         {
+            return Some(modal);
+        }
+        if let Some(sftp) = self.embedded_sftp_sidebar_dialog_view(cx) {
             return Some(ActiveTabWindowModalSnapshot {
-                kind: if self.sftp_view.read(cx).preview_text_editor_visible() {
+                kind: if sftp.preview_text_editor_visible() {
                     ActiveTabWindowModalKind::SftpEditor
                 } else {
                     ActiveTabWindowModalKind::SftpDialog
                 },
-                phase: self.sftp_view.read(cx).dialog_phase(),
+                phase: sftp.dialog_phase(),
             });
         }
         if self
@@ -966,22 +967,7 @@ impl WorkspaceApp {
                     None
                 }
             }
-            TabKind::SessionManager => {
-                let session_manager = self.session_manager.read(cx);
-                if session_manager.delete_confirm.is_some() {
-                    Some(ActiveTabWindowModalSnapshot {
-                        kind: ActiveTabWindowModalKind::SessionManagerDelete,
-                        phase: visible,
-                    })
-                } else if session_manager.show_group_manager {
-                    Some(ActiveTabWindowModalSnapshot {
-                        kind: ActiveTabWindowModalKind::SessionManagerGroupManager,
-                        phase: visible,
-                    })
-                } else {
-                    None
-                }
-            }
+            TabKind::SessionManager => self.session_manager_modal_owner(cx),
             TabKind::Forwards => {
                 let _scope = self.enter_forwarding_page(active_tab.id, cx);
                 let forwarding = self.forwarding.read(cx);
@@ -1019,6 +1005,21 @@ impl WorkspaceApp {
             ),
             _ => None,
         }
+    }
+
+    fn session_manager_modal_owner(&self, cx: &App) -> Option<ActiveTabWindowModalSnapshot> {
+        let manager = self.session_manager.read(cx);
+        let kind = if manager.delete_confirm.is_some() {
+            ActiveTabWindowModalKind::SessionManagerDelete
+        } else if manager.show_group_manager {
+            ActiveTabWindowModalKind::SessionManagerGroupManager
+        } else {
+            return None;
+        };
+        Some(ActiveTabWindowModalSnapshot {
+            kind,
+            phase: oxideterm_gpui_ui::motion::ExitPhase::Visible,
+        })
     }
 
     /// Routes the key only to the top rendered modal and always consumes it so
