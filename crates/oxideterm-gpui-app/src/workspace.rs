@@ -83,6 +83,7 @@ mod virtual_list;
 mod window_intent;
 mod window_registry;
 mod window_shell;
+mod zen_exit;
 
 use std::{
     cell::{Cell, RefCell},
@@ -882,6 +883,7 @@ pub(crate) struct WorkspaceApp {
     sidebar_resizing: bool,
     embedded_sftp_sidebar_resizing: bool,
     sidebar_resize_hotzone_hovered: bool,
+    zen_exit: zen_exit::ZenExitAffordance,
     sidebar_collapsed: bool,
     sidebar_rendered: bool,
     sidebar_motion_generation: u64,

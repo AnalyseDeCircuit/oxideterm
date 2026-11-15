@@ -1,4 +1,6 @@
 use super::super::*;
+use crate::workspace::zen_exit::HOT_ZONE_HEIGHT;
+use gpui::StatefulInteractiveElement;
 
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
@@ -1555,6 +1557,12 @@ impl WorkspaceApp {
             .when(self.mermaid_zoom.is_some(), |root| {
                 root.child(self.render_mermaid_zoom_modal(window, cx))
             })
+            .when(zen_mode, |root| {
+                root.child(self.render_zen_exit_hot_zone(cx))
+            })
+            .when(zen_mode && self.zen_exit.visible(), |root| {
+                root.child(self.render_zen_exit_affordance(cx))
+            })
             .children(overlay_layers)
             .child(WorkspaceImeElement::new(
                 cx.entity(),
@@ -1566,6 +1574,86 @@ impl WorkspaceApp {
 }
 
 impl WorkspaceApp {
+    /// Zen mode keeps the bottom bar but hides every other affordance. A thin
+    /// top strip reveals the only pointer path back out; the pill carries the
+    /// current shortcut so the affordance teaches the keyboard route.
+    fn render_zen_exit_hot_zone(&self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("zen-exit-hot-zone")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .h(px(HOT_ZONE_HEIGHT))
+            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                // Leaving the strip without ever reaching the pill must still
+                // retire it; a hover on either region keeps `apply_hide` from
+                // firing.
+                this.set_zen_exit_hot_zone_hovered(*hovered, cx);
+            }))
+            .into_any_element()
+    }
+
+    fn render_zen_exit_affordance(&self, cx: &mut Context<Self>) -> AnyElement {
+        let tokens = &self.tokens;
+        let shortcut = crate::workspace::tabs::effective_shortcut_label(
+            "app.zenMode",
+            &self.settings_store.settings().keybindings.overrides,
+        )
+        .unwrap_or_default();
+        let label = self.i18n.t("zen_mode.exit");
+        let pill = div()
+            .id("zen-exit-affordance-pill")
+            .flex()
+            .items_center()
+            .gap(px(8.0))
+            .rounded(px(tokens.radii.md))
+            .border_1()
+            .border_color(rgb(tokens.ui.border))
+            .bg(rgba((tokens.ui.bg_elevated << 8) | 0xe6))
+            .px(px(14.0))
+            .py(px(6.0))
+            .text_size(px(13.0))
+            .line_height(px(18.0))
+            .text_color(rgb(tokens.ui.text))
+            .shadow_lg()
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _window, cx| this.toggle_zen_mode(cx)))
+            .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                this.set_zen_exit_pill_hovered(*hovered, cx);
+            }))
+            .child(label)
+            .when(!shortcut.is_empty(), |pill| {
+                pill.child(
+                    div()
+                        .rounded(px(tokens.radii.sm))
+                        .bg(rgba((tokens.ui.bg_hover << 8) | 0xff))
+                        .px(px(6.0))
+                        .py(px(1.0))
+                        .text_size(px(11.0))
+                        .text_color(rgb(tokens.ui.text_muted))
+                        .child(shortcut),
+                )
+            });
+        div()
+            .absolute()
+            // The hover region starts at the strip's edge; the padding keeps the
+            // pill's visual offset while removing the dead band between them.
+            .top(px(HOT_ZONE_HEIGHT))
+            .pt(px(4.0))
+            .left_0()
+            .right_0()
+            .flex()
+            .justify_center()
+            .child(oxideterm_gpui_ui::motion::fade_in(
+                tokens,
+                "zen-exit-affordance",
+                pill,
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
+            ))
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn render_workspace_pointer_capture_overlay(
         &self,
         cx: &mut Context<Self>,

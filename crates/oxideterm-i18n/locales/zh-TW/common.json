@@ -1346,6 +1346,7 @@
     "external_import_desc": "從 SSH 設定和支援的第三方終端管理器匯入主機，並提供預覽與衝突處理。"
   },
   "zen_mode": {
+    "exit": "退出禪模式",
     "hint": "禪模式 — 按 {{shortcut}} 退出",
     "hint_unbound": "禪模式 — 可在命令面板中退出"
   },

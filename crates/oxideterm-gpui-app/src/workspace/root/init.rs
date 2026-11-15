@@ -698,6 +698,7 @@ impl WorkspaceApp {
             sidebar_resizing: false,
             embedded_sftp_sidebar_resizing: false,
             sidebar_resize_hotzone_hovered: false,
+            zen_exit: zen_exit::ZenExitAffordance::default(),
             sidebar_collapsed: settings.sidebar_ui.collapsed,
             sidebar_rendered: !settings.sidebar_ui.collapsed,
             sidebar_motion_generation: 0,

@@ -1346,6 +1346,7 @@
     "external_import_desc": "从 SSH 配置和支持的第三方终端管理器导入主机，带预览和冲突处理。"
   },
   "zen_mode": {
+    "exit": "退出禅模式",
     "hint": "禅模式 — 按 {{shortcut}} 退出",
     "hint_unbound": "禅模式 — 可在命令面板中退出"
   },
