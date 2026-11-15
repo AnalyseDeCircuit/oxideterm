@@ -39,19 +39,32 @@ fn client_window_resize_cursor(edge: ResizeEdge) -> CursorStyle {
     }
 }
 
-fn render_client_window_resize_handles(window: &Window) -> Option<AnyElement> {
-    let decorations = window.window_decorations();
-    if !client_window_resize_enabled(
+fn client_window_resize_tiling(window: &Window) -> Option<Tiling> {
+    let decorations @ Decorations::Client { tiling } = window.window_decorations() else {
+        return None;
+    };
+    client_window_resize_enabled(
         cfg!(target_os = "linux"),
         decorations,
         window.is_maximized(),
         window.is_fullscreen(),
-    ) {
-        return None;
+    )
+    .then_some(tiling)
+}
+
+pub(in crate::workspace) fn client_window_top_resize_inset(window: &Window) -> gpui::Pixels {
+    // The resize layer sits above workspace content, including hover-only controls.
+    if client_window_resize_tiling(window)
+        .is_some_and(|tiling| client_window_resize_edge_enabled(ResizeEdge::Top, tiling))
+    {
+        px(CLIENT_WINDOW_RESIZE_EDGE_SIZE)
+    } else {
+        px(0.0)
     }
-    let Decorations::Client { tiling } = decorations else {
-        return None;
-    };
+}
+
+fn render_client_window_resize_handles(window: &Window) -> Option<AnyElement> {
+    let tiling = client_window_resize_tiling(window)?;
     let edge_size = px(CLIENT_WINDOW_RESIZE_EDGE_SIZE);
     let corner_size = px(CLIENT_WINDOW_RESIZE_CORNER_SIZE);
     let handle = |id, edge| {

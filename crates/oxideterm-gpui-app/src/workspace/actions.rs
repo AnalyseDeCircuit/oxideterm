@@ -1232,8 +1232,9 @@ impl WorkspaceApp {
         let Some(generation) = self.zen_exit.schedule_hide() else {
             return;
         };
+        let timer = cx.background_executor().timer(zen_exit::HIDE_DELAY);
         cx.spawn(async move |weak, cx| {
-            Timer::after(zen_exit::HIDE_DELAY).await;
+            timer.await;
             let _ = weak.update(cx, |this, cx| {
                 if this.zen_exit.apply_hide(generation) {
                     cx.notify();

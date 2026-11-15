@@ -2,6 +2,8 @@ use super::super::*;
 use crate::workspace::zen_exit::HOT_ZONE_HEIGHT;
 use gpui::StatefulInteractiveElement;
 
+const ZEN_EXIT_GAP: f32 = 4.0;
+
 impl Focusable for WorkspaceApp {
     fn focus_handle(&self, _: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -1220,6 +1222,13 @@ impl WorkspaceApp {
                     .absolute(),
                 )
             })
+            .when(zen_mode, |root| {
+                let top = window_shell::client_window_top_resize_inset(window);
+                root.child(self.render_zen_exit_hot_zone(top, cx))
+                    .when(self.zen_exit.visible(), |root| {
+                        root.child(self.render_zen_exit_affordance(top, cx))
+                    })
+            })
             .when(
                 self.file_manager_bookmarks_resize_active(window.window_handle().window_id(), cx)
                     || self
@@ -1557,12 +1566,6 @@ impl WorkspaceApp {
             .when(self.mermaid_zoom.is_some(), |root| {
                 root.child(self.render_mermaid_zoom_modal(window, cx))
             })
-            .when(zen_mode, |root| {
-                root.child(self.render_zen_exit_hot_zone(cx))
-            })
-            .when(zen_mode && self.zen_exit.visible(), |root| {
-                root.child(self.render_zen_exit_affordance(cx))
-            })
             .children(overlay_layers)
             .child(WorkspaceImeElement::new(
                 cx.entity(),
@@ -1577,14 +1580,22 @@ impl WorkspaceApp {
     /// Zen mode keeps the bottom bar but hides every other affordance. A thin
     /// top strip reveals the only pointer path back out; the pill carries the
     /// current shortcut so the affordance teaches the keyboard route.
-    fn render_zen_exit_hot_zone(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_zen_exit_hot_zone(&self, top: Pixels, cx: &mut Context<Self>) -> AnyElement {
+        // Once revealed, keep hovering across the visual gap without capturing clicks there.
+        let height = HOT_ZONE_HEIGHT
+            + if self.zen_exit.visible() {
+                ZEN_EXIT_GAP
+            } else {
+                0.0
+            };
         div()
             .id("zen-exit-hot-zone")
+            .debug_selector(|| "zen-exit-hot-zone".into())
             .absolute()
-            .top_0()
+            .top(top)
             .left_0()
             .right_0()
-            .h(px(HOT_ZONE_HEIGHT))
+            .h(px(height))
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                 // Leaving the strip without ever reaching the pill must still
                 // retire it; a hover on either region keeps `apply_hide` from
@@ -1594,7 +1605,7 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_zen_exit_affordance(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_zen_exit_affordance(&self, top: Pixels, cx: &mut Context<Self>) -> AnyElement {
         let tokens = &self.tokens;
         let shortcut = crate::workspace::tabs::effective_shortcut_label(
             "app.zenMode",
@@ -1604,6 +1615,7 @@ impl WorkspaceApp {
         let label = self.i18n.t("zen_mode.exit");
         let pill = div()
             .id("zen-exit-affordance-pill")
+            .debug_selector(|| "zen-exit-affordance-pill".into())
             .flex()
             .items_center()
             .gap(px(8.0))
@@ -1618,6 +1630,7 @@ impl WorkspaceApp {
             .text_color(rgb(tokens.ui.text))
             .shadow_lg()
             .cursor_pointer()
+            .block_mouse_except_scroll()
             .on_click(cx.listener(|this, _, _window, cx| this.toggle_zen_mode(cx)))
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                 this.set_zen_exit_pill_hovered(*hovered, cx);
@@ -1637,10 +1650,7 @@ impl WorkspaceApp {
             });
         div()
             .absolute()
-            // The hover region starts at the strip's edge; the padding keeps the
-            // pill's visual offset while removing the dead band between them.
-            .top(px(HOT_ZONE_HEIGHT))
-            .pt(px(4.0))
+            .top(top + px(HOT_ZONE_HEIGHT + ZEN_EXIT_GAP))
             .left_0()
             .right_0()
             .flex()

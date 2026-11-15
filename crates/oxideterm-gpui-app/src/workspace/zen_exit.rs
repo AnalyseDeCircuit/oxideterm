@@ -56,7 +56,6 @@ impl ZenExitAffordance {
         if !zen_mode {
             // Both call sites are gated on zen mode today; keep the state machine
             // self-healing so a future caller cannot pin a stale affordance.
-            // The external-settings path also resets explicitly.
             self.reset();
             return false;
         }
