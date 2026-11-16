@@ -721,7 +721,7 @@ mod tests {
                         if message == "Kitty local file transmission is disabled"
                 )
             }));
-            assert!(control.take_authorization_request());
+            assert!(control.pending_authorization_prompt().is_some());
             assert!(path.exists());
             assert_eq!(std::fs::read(&path).unwrap(), bytes);
         }
@@ -731,7 +731,7 @@ mod tests {
     fn kitty_authorized_files_preserve_pixels_and_clean_only_marked_temporaries() {
         let options = GraphicsOptions::default();
         let control = options.kitty_file_transmission.clone();
-        control.authorize_for_session().unwrap();
+        assert!(control.authorization_prompt().unwrap().resolve(true).unwrap());
         let directory = tempfile::tempdir().unwrap();
         let mut ingress = GraphicsIngress::new(options);
         for (mode, name, retained) in [
@@ -768,14 +768,13 @@ mod tests {
         assert!(denied.events.contains(&TerminalGraphicsEvent::Respond(
             b"\x1b_Gi=12;EBADF:Failed to read image file\x1b\\".to_vec()
         )));
-        assert!(control.take_authorization_request());
-        control.deny_for_session();
+        assert!(control.pending_authorization_prompt().unwrap().resolve(false).unwrap());
         let denied = kitty_file_advance(&mut ingress, "f", &directory.path().join("图片.png"));
         assert!(denied.events.contains(&TerminalGraphicsEvent::Respond(
             b"\x1b_Gi=12;EBADF:Failed to read image file\x1b\\".to_vec()
         )));
-        assert!(!control.take_authorization_request());
-        control.authorize_for_session().unwrap();
+        assert!(control.pending_authorization_prompt().is_none());
+        assert!(control.authorization_prompt().unwrap().resolve(true).unwrap());
         let granted = kitty_file_advance(&mut ingress, "f", &directory.path().join("图片.png"));
         assert!(granted.events.contains(&TerminalGraphicsEvent::Respond(
             b"\x1b_Gi=12;OK\x1b\\".to_vec()
@@ -790,7 +789,7 @@ mod tests {
 
         let options = GraphicsOptions::default();
         let control = options.kitty_file_transmission.clone();
-        control.authorize_for_session().unwrap();
+        assert!(control.authorization_prompt().unwrap().resolve(true).unwrap());
         let directory = tempfile::tempdir().unwrap();
         let path = directory
             .path()

@@ -250,6 +250,7 @@ impl MoshTerminalSession {
                             sink.interrupt();
                         }
                         self.audit_exit(oxideterm_audit::AuditOutcome::Interrupted);
+                        self.graphics_ingress.end_stream();
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();
@@ -317,6 +318,7 @@ impl MoshTerminalSession {
                     }
                     self.audit_exit(oxideterm_audit::AuditOutcome::Failed);
                     self.reconcile_prediction();
+                    self.graphics_ingress.end_stream();
                     self.lifecycle = TerminalLifecycle::Exited(None);
                     self.feed_transport_output(
                         format!("\r\nMosh connection failed: {error}\r\n").as_bytes(),
@@ -340,6 +342,7 @@ impl MoshTerminalSession {
                         } else {
                             oxideterm_audit::AuditOutcome::Interrupted
                         });
+                        self.graphics_ingress.end_stream();
                         self.lifecycle = TerminalLifecycle::Exited(None);
                         self.pending_events.push(TerminalEvent::ChildExited(None));
                         report.mark_changed();

@@ -736,9 +736,11 @@ impl Render for TerminalPane {
             .when_some(self.render_paste_overlay(window, cx), |pane, overlay| {
                 pane.child(overlay)
             })
-            .when(
-                self.kitty_file_transmission_confirm_open && self.paste_editor.is_none(),
-                |pane| pane.child(self.render_kitty_file_transmission_confirm(cx)),
+            .when_some(
+                self.kitty_file_transmission_prompt
+                    .clone()
+                    .filter(|_| self.paste_editor.is_none()),
+                |pane, prompt| pane.child(self.render_kitty_file_transmission_confirm(prompt, cx)),
             )
             .when_some(self.modem_progress.clone(), |pane, transfer| {
                 pane.child(self.render_modem_progress_overlay(transfer, cx))
@@ -2387,8 +2389,13 @@ impl TerminalPane {
                                 self.terminal_exited,
                                 |this, _, _, cx| {
                                     this.dismiss_terminal_context_menu(cx);
-                                    this.kitty_file_transmission_confirm_open = true;
-                                    cx.notify();
+                                    if !this.terminal_exited {
+                                        this.kitty_file_transmission_prompt =
+                                            this.kitty_file_transmission.as_ref().and_then(
+                                                KittyFileTransmissionControl::authorization_prompt,
+                                            );
+                                        cx.notify();
+                                    }
                                 },
                                 cx,
                             ),
@@ -3084,8 +3091,13 @@ impl TerminalPane {
         cx.write_to_clipboard(ClipboardItem::new_string(output));
     }
 
-    fn render_kitty_file_transmission_confirm(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_kitty_file_transmission_confirm(
+        &self,
+        prompt: KittyFileTransmissionPrompt,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let labels = &self.preferences.kitty_file_transmission_labels;
+        let cancel = prompt.clone();
         confirm_dialog(
             &self.theme.tokens,
             ConfirmDialogView {
@@ -3095,12 +3107,12 @@ impl TerminalPane {
                 cancel_label: div().child(labels.cancel.clone()).into_any_element(),
                 confirm_label: div().child(labels.allow.clone()).into_any_element(),
             },
-            cx.listener(|this, _event, _window, cx| {
-                this.deny_kitty_file_transmission(cx);
+            cx.listener(move |this, _event, _window, cx| {
+                this.resolve_kitty_file_transmission(&cancel, false, cx);
                 cx.stop_propagation();
             }),
-            cx.listener(|this, _event, _window, cx| {
-                this.confirm_kitty_file_transmission(cx);
+            cx.listener(move |this, _event, _window, cx| {
+                this.resolve_kitty_file_transmission(&prompt, true, cx);
                 cx.stop_propagation();
             }),
         )

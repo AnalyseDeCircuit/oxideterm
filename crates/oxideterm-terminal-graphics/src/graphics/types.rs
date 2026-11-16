@@ -9,61 +9,97 @@ const MAX_GRAPHICS_METADATA_MB: u32 = 16;
 /// Per-session authority for Kitty's local-file transmission modes.
 #[derive(Clone)]
 pub struct KittyFileTransmissionControl {
-    inner: Arc<KittyFileTransmissionControlInner>,
+    inner: Arc<Mutex<KittyFileTransmissionSession>>,
 }
 
-struct KittyFileTransmissionControlInner {
-    state: Mutex<KittyFileTransmissionState>,
+struct KittyFileTransmissionSession {
+    generation: u64,
+    state: KittyFileTransmissionState,
 }
 
 enum KittyFileTransmissionState {
     AwaitingDecision { request_pending: bool },
     Denied,
     Trusted,
+    Closed,
+}
+
+/// A confirmation can only change the authority of the session that opened it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct KittyFileTransmissionPrompt {
+    control: KittyFileTransmissionControl,
+    generation: u64,
+}
+
+impl KittyFileTransmissionPrompt {
+    pub fn resolve(&self, allow: bool) -> std::io::Result<bool> {
+        let mut session = self
+            .control
+            .inner
+            .lock()
+            .map_err(|_| std::io::Error::other("Kitty file authorization is unavailable"))?;
+        if session.generation != self.generation
+            || matches!(session.state, KittyFileTransmissionState::Closed)
+        {
+            return Ok(false);
+        }
+        session.state = if allow {
+            KittyFileTransmissionState::Trusted
+        } else {
+            KittyFileTransmissionState::Denied
+        };
+        Ok(true)
+    }
 }
 
 impl KittyFileTransmissionControl {
     pub fn new() -> Self {
         Self {
-            inner: Arc::new(KittyFileTransmissionControlInner {
-                state: Mutex::new(KittyFileTransmissionState::AwaitingDecision {
+            inner: Arc::new(Mutex::new(KittyFileTransmissionSession {
+                generation: 0,
+                state: KittyFileTransmissionState::AwaitingDecision {
                     request_pending: false,
-                }),
-            }),
+                },
+            })),
         }
     }
 
-    pub fn take_authorization_request(&self) -> bool {
-        let Ok(mut state) = self.inner.state.lock() else {
-            return false;
-        };
-        let KittyFileTransmissionState::AwaitingDecision { request_pending } = &mut *state else {
-            return false;
-        };
-        std::mem::take(request_pending)
+    pub fn authorization_prompt(&self) -> Option<KittyFileTransmissionPrompt> {
+        let session = self.inner.lock().ok()?;
+        (!matches!(session.state, KittyFileTransmissionState::Closed)).then(|| {
+            KittyFileTransmissionPrompt {
+                control: self.clone(),
+                generation: session.generation,
+            }
+        })
     }
 
-    pub fn authorize_for_session(&self) -> std::io::Result<()> {
-        let mut state = self
-            .inner
-            .state
-            .lock()
-            .map_err(|_| std::io::Error::other("Kitty file authorization is unavailable"))?;
-        *state = KittyFileTransmissionState::Trusted;
-        Ok(())
+    pub fn pending_authorization_prompt(&self) -> Option<KittyFileTransmissionPrompt> {
+        let session = self.inner.lock().ok()?;
+        matches!(
+            session.state,
+            KittyFileTransmissionState::AwaitingDecision {
+                request_pending: true
+            }
+        )
+        .then(|| KittyFileTransmissionPrompt {
+            control: self.clone(),
+            generation: session.generation,
+        })
     }
 
-    pub fn deny_for_session(&self) {
-        if let Ok(mut state) = self.inner.state.lock() {
-            *state = KittyFileTransmissionState::Denied;
-        }
-    }
-
-    pub fn revoke(&self) {
-        if let Ok(mut state) = self.inner.state.lock() {
-            *state = KittyFileTransmissionState::AwaitingDecision {
+    fn reset_session(&self) {
+        if let Ok(mut session) = self.inner.lock() {
+            session.generation = session.generation.wrapping_add(1);
+            session.state = KittyFileTransmissionState::AwaitingDecision {
                 request_pending: false,
             };
+        }
+    }
+
+    pub fn close_session(&self) {
+        if let Ok(mut session) = self.inner.lock() {
+            session.state = KittyFileTransmissionState::Closed;
         }
     }
 
@@ -72,8 +108,9 @@ impl KittyFileTransmissionControl {
     }
 
     fn note_authorization_request(&self) {
-        if let Ok(mut state) = self.inner.state.lock()
-            && let KittyFileTransmissionState::AwaitingDecision { request_pending } = &mut *state
+        if let Ok(mut session) = self.inner.lock()
+            && let KittyFileTransmissionState::AwaitingDecision { request_pending } =
+                &mut session.state
         {
             *request_pending = true;
         }
@@ -81,9 +118,8 @@ impl KittyFileTransmissionControl {
 
     fn is_authorized(&self) -> bool {
         self.inner
-            .state
             .lock()
-            .is_ok_and(|state| matches!(*state, KittyFileTransmissionState::Trusted))
+            .is_ok_and(|session| matches!(session.state, KittyFileTransmissionState::Trusted))
     }
 }
 
@@ -97,12 +133,12 @@ impl std::fmt::Debug for KittyFileTransmissionControl {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let decision = self
             .inner
-            .state
             .lock()
-            .map(|state| match &*state {
+            .map(|session| match session.state {
                 KittyFileTransmissionState::AwaitingDecision { .. } => "awaiting-decision",
                 KittyFileTransmissionState::Denied => "denied",
                 KittyFileTransmissionState::Trusted => "trusted",
+                KittyFileTransmissionState::Closed => "closed",
             })
             .unwrap_or("unavailable");
         formatter

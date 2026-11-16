@@ -22,11 +22,11 @@ use gpui::{
 use oxideterm_ssh::SshConnectionHandle;
 use oxideterm_terminal::{
     BleConnectionStatus, BleSessionConfig, GraphicsOptions, KittyFileTransmissionControl,
-    LocalPtyConfig, SerialControlLine, SerialControlState, SerialDisplayMode, SerialLineEnding,
-    SerialRuntimeOptions, SerialSendMode, SerialSessionConfig, ShellIntegrationLifecycleState,
-    ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig, TermMode, TerminalCell,
-    TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
-    TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
+    KittyFileTransmissionPrompt, LocalPtyConfig, SerialControlLine, SerialControlState,
+    SerialDisplayMode, SerialLineEnding, SerialRuntimeOptions, SerialSendMode, SerialSessionConfig,
+    ShellIntegrationLifecycleState, ShellIntegrationStatus, SshSessionConfig, TelnetSessionConfig,
+    TermMode, TerminalCell, TerminalCommandMark, TerminalCommandMarkClosedBy,
+    TerminalCommandMarkConfidence, TerminalCommandMarkDetectionSource, TerminalCommandMarkEvent,
     TerminalCwdIntegrationLaunchState, TerminalDrainBudget, TerminalDrainReport,
     TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalEditorIntegrationEvent,
     TerminalEvent, TerminalLifecycle, TerminalOutputProcessor, TerminalProcessInfo,
@@ -532,7 +532,7 @@ pub struct TerminalPane {
     paste_editor: Option<paste::PasteEditor>,
     // The pane observes only its session's capability and never stores the sandbox path.
     kitty_file_transmission: Option<KittyFileTransmissionControl>,
-    kitty_file_transmission_confirm_open: bool,
+    kitty_file_transmission_prompt: Option<KittyFileTransmissionPrompt>,
     // Control-mode prompts stay pane-owned so text never reaches the hosted shell.
     tmux_prompt: Option<TmuxPromptState>,
     dismissed_tmux_message_generation: u64,
@@ -1334,7 +1334,7 @@ impl TerminalPane {
             selection: None,
             paste_editor: None,
             kitty_file_transmission,
-            kitty_file_transmission_confirm_open: false,
+            kitty_file_transmission_prompt: None,
             tmux_prompt: None,
             dismissed_tmux_message_generation: 0,
             context_menu: None,
@@ -3596,16 +3596,20 @@ impl TerminalPane {
         self.paste_text(&text, cx);
     }
 
-    pub(crate) fn confirm_kitty_file_transmission(&mut self, cx: &mut Context<Self>) {
-        self.kitty_file_transmission_confirm_open = false;
+    fn resolve_kitty_file_transmission(
+        &mut self,
+        prompt: &KittyFileTransmissionPrompt,
+        allow: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.terminal_exited || self.kitty_file_transmission_prompt.as_ref() != Some(prompt) {
+            return;
+        }
+        self.kitty_file_transmission_prompt = None;
+        let result = prompt.resolve(allow);
         let labels = &self.preferences.kitty_file_transmission_labels;
-        let result = self
-            .kitty_file_transmission
-            .as_ref()
-            .ok_or_else(|| std::io::Error::other("Kitty file transmission is unavailable"))
-            .and_then(KittyFileTransmissionControl::authorize_for_session);
         match result {
-            Ok(()) => {
+            Ok(true) if allow => {
                 self.emit_kitty_file_transmission_notice(
                     labels.allowed_title.clone(),
                     labels.allowed_description.clone(),
@@ -3617,23 +3621,9 @@ impl TerminalPane {
                 labels.failed_description.clone(),
                 TerminalNoticeVariant::Error,
             ),
+            Ok(_) => {}
         }
         cx.notify();
-    }
-
-    pub(crate) fn deny_kitty_file_transmission(&mut self, cx: &mut Context<Self>) {
-        self.kitty_file_transmission_confirm_open = false;
-        if let Some(control) = &self.kitty_file_transmission {
-            control.deny_for_session();
-        }
-        cx.notify();
-    }
-
-    fn revoke_kitty_file_transmission_session(&mut self) {
-        self.kitty_file_transmission_confirm_open = false;
-        if let Some(control) = &self.kitty_file_transmission {
-            control.revoke();
-        }
     }
 
     fn emit_kitty_file_transmission_notice(
@@ -3699,14 +3689,16 @@ impl TerminalPane {
             false
         };
         let mut needs_notify = event_effect.needs_notify || report.changed;
-        if self
-            .kitty_file_transmission
-            .as_ref()
-            .is_some_and(KittyFileTransmissionControl::take_authorization_request)
-            && !self.terminal_exited
-            && !self.kitty_file_transmission_confirm_open
+        // The parser can publish a new request before this pane sees the restart.
+        // Leave it pending in the session until its own prompt is resolved.
+        if !self.terminal_exited
+            && let Some(prompt) = self
+                .kitty_file_transmission
+                .as_ref()
+                .and_then(KittyFileTransmissionControl::pending_authorization_prompt)
+            && self.kitty_file_transmission_prompt.as_ref() != Some(&prompt)
         {
-            self.kitty_file_transmission_confirm_open = true;
+            self.kitty_file_transmission_prompt = Some(prompt);
             needs_notify = true;
         }
         if (self.preferences.show_performance_overlay && render_stats_changed)
@@ -4107,7 +4099,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::SessionRestarted => {
-                self.revoke_kitty_file_transmission_session();
+                self.kitty_file_transmission_prompt = None;
                 self.terminal_exited = false;
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.win32_pressed_keys.clear();
@@ -4130,7 +4122,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::ProcessingFailed => {
-                self.revoke_kitty_file_transmission_session();
+                self.kitty_file_transmission_prompt = None;
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
@@ -4148,7 +4140,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::StartupFailed => {
-                self.revoke_kitty_file_transmission_session();
+                self.kitty_file_transmission_prompt = None;
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.command_fact_ledger.interrupt_audit_commands();
                 self.cancel_pending_tmux_mouse();
@@ -4158,7 +4150,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::ChildExited(code) => {
-                self.revoke_kitty_file_transmission_session();
+                self.kitty_file_transmission_prompt = None;
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.command_fact_ledger.interrupt_audit_commands();
                 self.cancel_pending_tmux_mouse();
@@ -7285,7 +7277,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn session_transitions_revoke_kitty_file_transmission_authority(cx: &mut TestAppContext) {
+    fn session_transitions_close_kitty_file_transmission_prompt(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
         let pane = cx.update(|window, cx| {
             cx.new(|cx| {
@@ -7301,40 +7293,24 @@ mod tests {
         });
         pane.update(cx, |pane, cx| {
             let control = KittyFileTransmissionControl::new();
-            pane.kitty_file_transmission = Some(control.clone());
             for (name, event) in [
                 ("processing failed", TerminalEvent::ProcessingFailed),
                 ("startup failed", TerminalEvent::StartupFailed),
                 ("child exited", TerminalEvent::ChildExited(Some(1))),
+                ("session restarted", TerminalEvent::SessionRestarted),
             ] {
-                pane.terminal_exited = false;
-                pane.kitty_file_transmission_confirm_open = true;
-                control.authorize_for_session().unwrap();
+                pane.kitty_file_transmission_prompt = Some(control.authorization_prompt().unwrap());
                 pane.handle_terminal_event(event, cx);
                 assert!(
-                    !pane.kitty_file_transmission_confirm_open,
+                    pane.kitty_file_transmission_prompt.is_none(),
                     "{name}: stale confirmation must close"
                 );
-                control.request_authorization();
-                assert!(
-                    control.take_authorization_request(),
-                    "{name}: the previous session authority must be revoked"
-                );
             }
-
-            pane.terminal_exited = true;
-            pane.kitty_file_transmission_confirm_open = true;
-            control.authorize_for_session().unwrap();
-            pane.handle_terminal_event(TerminalEvent::SessionRestarted, cx);
-            assert!(!pane.terminal_exited);
-            assert!(!pane.kitty_file_transmission_confirm_open);
-            control.request_authorization();
-            assert!(control.take_authorization_request());
         });
     }
 
     #[gpui::test]
-    fn exited_session_drops_pending_kitty_file_transmission_request(cx: &mut TestAppContext) {
+    fn kitty_request_survives_delayed_session_restart_event(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
         let pane = cx.update(|window, cx| {
             cx.new(|cx| {
@@ -7350,78 +7326,31 @@ mod tests {
         });
         pane.update(cx, |pane, cx| {
             let control = KittyFileTransmissionControl::new();
+            let new_session_control = KittyFileTransmissionControl::new();
             pane.kitty_file_transmission = Some(control.clone());
-            pane.terminal_exited = true;
-            control.request_authorization();
-            pane.tick(cx);
-            assert!(!pane.kitty_file_transmission_confirm_open);
-            assert!(!control.take_authorization_request());
-
-            pane.terminal_exited = false;
-            control.request_authorization();
-            pane.tick(cx);
-            assert!(pane.kitty_file_transmission_confirm_open);
-        });
-    }
-
-    #[gpui::test]
-    fn shared_node_terminals_keep_independent_kitty_file_authority(cx: &mut TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
-        let first = cx.update(|window, cx| {
-            cx.new(|cx| {
-                TerminalPane::new_recording_playback(
-                    DEFAULT_COLS,
-                    DEFAULT_ROWS,
-                    TerminalUiPreferences::default(),
-                    window,
-                    cx,
-                )
-                .expect("first test terminal pane")
-            })
-        });
-        let second = cx.update(|window, cx| {
-            cx.new(|cx| {
-                TerminalPane::new_recording_playback(
-                    DEFAULT_COLS,
-                    DEFAULT_ROWS,
-                    TerminalUiPreferences::default(),
-                    window,
-                    cx,
-                )
-                .expect("second test terminal pane")
-            })
-        });
-
-        let first_control = KittyFileTransmissionControl::new();
-        let second_control = KittyFileTransmissionControl::new();
-        first.update(cx, |pane, _| {
-            pane.kitty_file_transmission = Some(first_control.clone());
-            pane.kitty_file_transmission_confirm_open = true;
-        });
-        second.update(cx, |pane, _| {
-            pane.kitty_file_transmission = Some(second_control.clone());
-            pane.kitty_file_transmission_confirm_open = true;
-        });
-        first_control.authorize_for_session().unwrap();
-        second_control.authorize_for_session().unwrap();
-
-        // Physical transport sharing belongs to NodeRouter; each terminal session
-        // owns its own Kitty authorization and UI confirmation instead.
-        first.update(cx, |pane, cx| {
+            let old_prompt = control.authorization_prompt().unwrap();
+            pane.kitty_file_transmission_prompt = Some(old_prompt.clone());
             pane.handle_terminal_event(TerminalEvent::ChildExited(None), cx);
-            assert!(!pane.kitty_file_transmission_confirm_open);
-        });
-        first_control.request_authorization();
-        assert!(first_control.take_authorization_request());
+            pane.kitty_file_transmission = Some(new_session_control.clone());
+            new_session_control.request_authorization();
+            pane.tick(cx);
+            assert!(pane.kitty_file_transmission_prompt.is_none());
 
-        second.update(cx, |pane, _| {
-            assert!(pane.kitty_file_transmission_confirm_open);
+            pane.handle_terminal_event(TerminalEvent::SessionRestarted, cx);
+            pane.tick(cx);
+            let current_prompt = pane
+                .kitty_file_transmission_prompt
+                .clone()
+                .expect("the new session's confirmation");
+            pane.resolve_kitty_file_transmission(&old_prompt, true, cx);
+            assert!(
+                pane.kitty_file_transmission_prompt.as_ref() == Some(&current_prompt),
+                "an old dialog callback must leave the new prompt open"
+            );
+            pane.resolve_kitty_file_transmission(&current_prompt, true, cx);
+            new_session_control.request_authorization();
+            assert!(new_session_control.pending_authorization_prompt().is_none());
         });
-        second_control.request_authorization();
-        assert!(
-            !second_control.take_authorization_request(),
-            "the surviving terminal session must remain trusted"
-        );
     }
 
     #[gpui::test]

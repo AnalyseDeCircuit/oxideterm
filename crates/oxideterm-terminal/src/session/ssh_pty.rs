@@ -345,9 +345,7 @@ impl SshPtyCore {
             }
             Err(error) => {
                 self.lifecycle = TerminalLifecycle::Exited(None);
-                self.parser_state.transport_running = false;
-                self.parser_state.close_shell_channel();
-                self.parser_state.tmux_display.reset();
+                self.parser_state.finish_transport();
                 self.parser_state.feed_utf8_terminal_output(
                     format!("\r\nSSH connection failed: {error}\r\n").as_bytes(),
                 );
@@ -479,9 +477,7 @@ impl SshPtyCore {
                             self.parser_state.interrupt_recording();
                         }
                         self.lifecycle = TerminalLifecycle::Exited(None);
-                        self.parser_state.transport_running = false;
-                        self.parser_state.close_shell_channel();
-                        self.parser_state.tmux_display.reset();
+                        self.parser_state.finish_transport();
                         let event = if self
                             .handle
                             .as_ref()
@@ -1009,9 +1005,7 @@ impl TerminalSessionBackend for SshPtyCore {
         self.handle = None;
 
         self.lifecycle = TerminalLifecycle::Closed;
-        self.parser_state.transport_running = false;
-        self.parser_state.close_shell_channel();
-        self.parser_state.tmux_display.reset();
+        self.parser_state.finish_transport();
     }
 
     fn audit_context(&self) -> Option<oxideterm_audit::AuditContext> {
@@ -1030,12 +1024,16 @@ mod ssh_startup_tests {
     use super::*;
 
     #[test]
-    fn failed_ssh_startup_does_not_emit_normal_child_exit() {
+    fn failed_ssh_startup_revokes_kitty_authority_without_a_child_exit() {
+        let graphics = GraphicsOptions::default();
+        let control = graphics.kitty_file_transmission.clone();
+        let old_prompt = control.authorization_prompt().unwrap();
+        assert!(old_prompt.resolve(true).unwrap());
         let mut session = SshPtyCore::new_disconnected_for_test(
             SshSessionConfig::new("localhost", 22, "test"),
             80,
             24,
-            GraphicsOptions::default(),
+            graphics,
             TerminalEncoding::Utf8,
             1000,
         );
@@ -1048,6 +1046,10 @@ mod ssh_startup_tests {
             session.lifecycle(),
             TerminalLifecycle::Exited(None)
         ));
+        assert!(!old_prompt.resolve(true).unwrap());
+        control.request_authorization();
+        assert!(control.pending_authorization_prompt().is_none());
+        assert!(control.authorization_prompt().is_none());
         let events = session.take_events();
         assert!(
             events
