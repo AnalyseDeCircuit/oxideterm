@@ -126,7 +126,7 @@ SSH セッションの画面です。サイドバーから同じサーバーの�
 
 - セッション管理：保存接続の検索、並べ替え、グループ化、インポート／エクスポート、入れ子のグループ、タグ、色、アイコン、メモ
 - `~/.ssh/config` から `Match` ブロック、`ProxyJump` チェーン、`RemoteCommand` を取り込み、取り込んだホストを最新に維持
-- SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm、FinalShell から保存前のプレビュー付きで取り込み
+- SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm、FinalShell、XTerminal（SSH）から保存前のプレビュー付きで取り込み
 - 全タブ、グローバルページ、ローカルターミナル、サーバー単位でタブを絞り込み；非表示のセッションも実行を継続
 - 1 タブに最大 16 ペイン；ターミナル、SFTP、IDE、転送、ノート、設定、リモートデスクトップを混在可能
 - セッションを切断せずタブを独立ウィンドウへ移動し、元に戻す

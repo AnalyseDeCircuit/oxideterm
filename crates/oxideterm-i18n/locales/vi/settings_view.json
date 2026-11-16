@@ -1072,7 +1072,11 @@
       },
       "importers": {
         "title": "Nhập từ client khác",
-        "description": "Xem trước và nhập tệp kết nối từ SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm hoặc FinalShell. Mật khẩu và trường nhạy cảm không bao giờ được nhập.",
+        "description": "Xem trước tệp kết nối và chọn mục cần nhập. Chỉ XTerminal hỗ trợ nhập thông tin xác thực.",
+        "xterminal_hint": "Lưu nội dung xuất từ danh sách SSH của XTerminal thành tệp văn bản. Để sao chép khóa riêng vào OxideTerm, hãy chọn đồng thời tệp văn bản và tệp khóa.",
+        "xterminal_key_path": "Chỉ lưu đường dẫn đến khóa. Hãy chọn thêm tệp khóa nếu muốn sao chép khóa vào OxideTerm.",
+        "xterminal_key_missing": "Thiếu khóa riêng. Hãy xuất riêng kết nối này, sau đó chọn đồng thời tệp văn bản và tệp khóa tương ứng.",
+        "xterminal_skipped": "Đã bỏ qua {{count}} mục không hợp lệ, mục không phải SSH hoặc tệp không đọc được.",
         "source": "Nguồn",
         "sources": {
           "securecrt": "Tệp .ini/.xml SecureCRT",
@@ -1081,7 +1085,8 @@
           "mobaxterm": "Phiên MobaXterm",
           "windterm": "Phiên WindTerm",
           "electerm": "JSON dấu trang Electerm",
-          "finalshell": "Thư mục conn FinalShell"
+          "finalshell": "Thư mục conn FinalShell",
+          "xterminal": "XTerminal (SSH)"
         },
         "paths": "Tệp hoặc thư mục",
         "choose_files": "Chọn tệp",

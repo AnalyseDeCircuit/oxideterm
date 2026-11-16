@@ -126,7 +126,7 @@ Le voci segnate *(plugin)* si installano dal marketplace dei plugin nell’app.
 
 - Gestore sessioni con ricerca, ordinamento, gruppi, importazione/esportazione, gruppi annidati, etichette, colori, icone e note
 - Importazione da `~/.ssh/config` con blocchi `Match`, catene `ProxyJump` e `RemoteCommand`; host importati mantenuti aggiornati
-- Importazione da SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm e FinalShell, con anteprima prima del salvataggio
+- Importazione da SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell e XTerminal (SSH), con anteprima prima del salvataggio
 - Filtri delle schede: tutte, pagine globali, terminali locali o un server; le sessioni nascoste restano attive
 - Fino a 16 pannelli per scheda combinando terminali, SFTP, IDE, inoltri, note, impostazioni e desktop remoti
 - Finestre separate: sposta una scheda in una finestra propria e riportala indietro senza interrompere le sessioni

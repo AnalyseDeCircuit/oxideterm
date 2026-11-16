@@ -3668,37 +3668,25 @@ impl ConnectionStore {
         origin: ManagedSshKeyOrigin,
         fallback_name: &str,
     ) -> Result<ManagedSshKeyInfo> {
-        let decoded_key = decode_managed_private_key(&private_key, passphrase.as_ref())?;
-        let fingerprint = fingerprint_public_key(decoded_key.public_key());
-        let public_key = public_key_line_from_private_key(&decoded_key);
+        let ImportedManagedSshKey { key, secret } = prepare_managed_ssh_key(
+            private_key,
+            managed_key_display_name(name, fallback_name),
+            passphrase.as_ref(),
+            origin,
+            false,
+        )?;
         if let Some(existing) = self
             .data
             .managed_ssh_keys
             .iter()
-            .find(|key| key.fingerprint == fingerprint)
+            .find(|existing| existing.fingerprint == key.fingerprint)
         {
             bail!("Managed SSH key already exists: {}", existing.name);
         }
 
-        let id = Uuid::new_v4().to_string();
-        let secret_id = format!("managed-key-{id}");
         // Private key material crosses into the managed secret backend here;
         // ConnectionStoreData keeps only metadata and the secret id.
-        let secret_write = self.store_managed_ssh_key_secret(&secret_id, &private_key)?;
-
-        let now = Utc::now();
-        let key = ManagedSshKey {
-            certificate: None,
-            id,
-            secret_id,
-            name: managed_key_display_name(name, fallback_name),
-            fingerprint,
-            public_key,
-            requires_passphrase: managed_key_requires_passphrase(&private_key, passphrase.as_ref()),
-            origin,
-            created_at: now,
-            updated_at: now,
-        };
+        let secret_write = self.store_managed_ssh_key_secret(&key.secret_id, &secret)?;
         let info = ManagedSshKeyInfo::from(&key);
         self.data.managed_ssh_keys.push(key);
         if let Err(error) = self.save() {

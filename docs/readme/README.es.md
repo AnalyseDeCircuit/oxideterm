@@ -126,7 +126,7 @@ Las funciones marcadas como *(plugin)* se instalan desde el mercado de plugins d
 
 - Gestor de sesiones: buscar, ordenar, agrupar, importar y exportar conexiones guardadas, con grupos anidados, etiquetas, colores, iconos y notas
 - Importación de `~/.ssh/config`, incluidos bloques `Match`, cadenas `ProxyJump` y `RemoteCommand`; los equipos importados se mantienen actualizados
-- Importación de SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm y FinalShell, con vista previa antes de guardar
+- Importación de SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell y XTerminal (SSH), con vista previa antes de guardar
 - Filtros de pestañas: todas, páginas globales, terminales locales o un servidor; las sesiones ocultas siguen ejecutándose
 - Hasta 16 paneles por pestaña, combinando terminales, SFTP, IDE, reenvíos, notas, ajustes y escritorios remotos
 - Ventanas independientes: mover una pestaña a otra ventana y devolverla sin interrumpir sesiones

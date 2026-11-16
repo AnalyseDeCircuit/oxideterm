@@ -1072,7 +1072,11 @@
       },
       "importers": {
         "title": "從其他客戶端匯入",
-        "description": "預覽並匯入 SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm 或 FinalShell 的連線檔。密碼與敏感欄位永遠不會被匯入。",
+        "description": "預覽連線檔案並選擇要匯入的項目。僅 XTerminal 支援匯入憑證。",
+        "xterminal_hint": "將 XTerminal 的 SSH 連線匯出為文字檔。若要將私密金鑰存入 OxideTerm，請同時選取匯出檔與原始金鑰檔。",
+        "xterminal_key_path": "只會儲存私密金鑰路徑。同時選取原始金鑰檔即可將金鑰存入 OxideTerm。",
+        "xterminal_key_missing": "缺少私密金鑰。請單獨匯出此連線，再同時選取匯出檔與對應的金鑰檔。",
+        "xterminal_skipped": "已略過 {{count}} 個無效或非 SSH 項目，或無法讀取的檔案。",
         "source": "來源",
         "sources": {
           "securecrt": "SecureCRT .ini/.xml 檔",
@@ -1081,7 +1085,8 @@
           "mobaxterm": "MobaXterm 工作階段",
           "windterm": "WindTerm 工作階段",
           "electerm": "Electerm 書籤 JSON",
-          "finalshell": "FinalShell conn 資料夾"
+          "finalshell": "FinalShell conn 資料夾",
+          "xterminal": "XTerminal (SSH)"
         },
         "paths": "檔案或資料夾",
         "choose_files": "選擇檔案",

@@ -126,7 +126,7 @@ OxideTerm 会列出服务器上正在监听的端口。点一下就能转发其�
 
 - 会话管理器：搜索、排序、分组、导入和导出已保存的连接，支持嵌套分组、标签、颜色、图标和备注
 - 从 `~/.ssh/config` 导入，支持 `Match` 块、`ProxyJump` 链和 `RemoteCommand`，导入的主机会随配置文件保持更新
-- 从 SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm 和 FinalShell 导入，保存前可以先预览
+- 从 SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm、FinalShell 和 XTerminal（SSH）导入，保存前可预览
 - 标签页范围：只显示全部标签页、全局页面、本地终端或某一台服务器，隐藏的会话照常运行
 - 一个标签页最多容纳 16 个窗格，终端、SFTP、IDE、端口转发、笔记、设置和远程桌面可以混排
 - 分离窗口：把标签页移到独立窗口再移回来，会话不会中断

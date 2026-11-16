@@ -126,7 +126,7 @@ OxideTerm 會列出伺服器上正在監聽的連接埠。點一下就能轉發�
 
 - 工作階段管理器：搜尋、排序、分組、匯入和匯出已儲存的連線，支援巢狀群組、標籤、顏色、圖示和備註
 - 從 `~/.ssh/config` 匯入，支援 `Match` 區塊、`ProxyJump` 鏈和 `RemoteCommand`，匯入的主機會隨設定檔保持更新
-- 從 SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm 和 FinalShell 匯入，儲存前可以先預覽
+- 從 SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm、FinalShell 和 XTerminal（SSH）匯入，儲存前可預覽
 - 分頁範圍：只顯示全部分頁、全域頁面、本機終端機或某一台伺服器，隱藏的工作階段照常執行
 - 一個分頁最多容納 16 個窗格，終端機、SFTP、IDE、連接埠轉發、筆記、設定和遠端桌面可以混合排列
 - 分離視窗：把分頁移到獨立視窗再移回來，工作階段不會中斷

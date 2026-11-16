@@ -126,7 +126,7 @@ SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, S
 
 - 저장된 연결 검색, 정렬, 그룹화, 가져오기/내보내기와 중첩 그룹, 태그, 색상, 아이콘, 메모를 제공하는 세션 관리자
 - `Match` 블록, `ProxyJump` 체인, `RemoteCommand`를 포함한 `~/.ssh/config` 가져오기 및 가져온 호스트 정보 갱신
-- SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell에서 저장 전 미리보기를 거쳐 가져오기
+- SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell, XTerminal (SSH)에서 저장 전 미리보기를 거쳐 가져오기
 - 전체 탭, 전역 페이지, 로컬 터미널 또는 서버별 필터; 숨겨진 세션도 계속 실행
 - 탭당 최대 16개 창에 터미널, SFTP, IDE, 포워딩, 메모, 설정, 원격 데스크톱 혼합 배치
 - 세션을 끊지 않고 탭을 별도 창으로 이동하거나 다시 합치기

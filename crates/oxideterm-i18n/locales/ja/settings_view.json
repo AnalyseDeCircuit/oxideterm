@@ -1072,7 +1072,11 @@
       },
       "importers": {
         "title": "他のクライアントからインポート",
-        "description": "SecureCRT、Xshell、Termius、MobaXterm、WindTerm、Electerm、FinalShell の接続ファイルをプレビューしてインポートします。パスワードと機密項目はインポートされません。",
+        "description": "接続ファイルをプレビューし、インポートする項目を選択します。認証情報のインポートに対応しているのは XTerminal のみです。",
+        "xterminal_hint": "XTerminal の SSH 一覧からエクスポートした内容をテキストファイルに保存します。秘密鍵も OxideTerm に取り込む場合は、テキストファイルと秘密鍵ファイルを同時に選択してください。",
+        "xterminal_key_path": "秘密鍵のパスのみが保存されます。鍵自体を OxideTerm に取り込むには、秘密鍵ファイルも選択してください。",
+        "xterminal_key_missing": "秘密鍵がありません。この接続だけをエクスポートし、テキストファイルと対応する秘密鍵ファイルを同時に選択してください。",
+        "xterminal_skipped": "読み取れないファイルや、無効または SSH ではない項目を {{count}} 件スキップしました。",
         "source": "ソース",
         "sources": {
           "securecrt": "SecureCRT .ini/.xml ファイル",
@@ -1081,7 +1085,8 @@
           "mobaxterm": "MobaXterm セッション",
           "windterm": "WindTerm セッション",
           "electerm": "Electerm ブックマーク JSON",
-          "finalshell": "FinalShell conn フォルダー"
+          "finalshell": "FinalShell conn フォルダー",
+          "xterminal": "XTerminal (SSH)"
         },
         "paths": "ファイルまたはフォルダー",
         "choose_files": "ファイルを選択",

@@ -24,6 +24,8 @@ use crate::{
 
 const DEFAULT_IMPORTED_GROUP: &str = "Imported";
 
+mod xterminal;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ConnectionImportSource {
@@ -37,6 +39,8 @@ pub enum ConnectionImportSource {
     WindTerm,
     Electerm,
     FinalShell,
+    #[serde(rename = "xterminal")]
+    XTerminal,
 }
 
 impl ConnectionImportSource {
@@ -49,6 +53,7 @@ impl ConnectionImportSource {
             Self::WindTerm => "windterm",
             Self::Electerm => "electerm",
             Self::FinalShell => "finalshell",
+            Self::XTerminal => "xterminal",
         }
     }
 
@@ -61,6 +66,7 @@ impl ConnectionImportSource {
             Self::WindTerm => "Imported/WindTerm",
             Self::Electerm => "Imported/Electerm",
             Self::FinalShell => "Imported/FinalShell",
+            Self::XTerminal => "Imported/XTerminal",
         }
     }
 }
@@ -188,36 +194,65 @@ pub fn preview_connection_import(
     paths: &[String],
     existing_names: &HashSet<String>,
 ) -> Result<ConnectionImportPreview, ConnectionImportError> {
+    collect_connection_import(source, paths, existing_names, None).map(|(preview, _)| preview)
+}
+
+fn collect_connection_import(
+    source: ConnectionImportSource,
+    paths: &[String],
+    existing_names: &HashSet<String>,
+    selected_ids: Option<&HashSet<String>>,
+) -> Result<
+    (
+        ConnectionImportPreview,
+        HashMap<String, xterminal::Credential>,
+    ),
+    ConnectionImportError,
+> {
     if paths.is_empty() {
         return Err(ConnectionImportError::EmptyPaths);
     }
 
     let mut drafts = Vec::new();
     let mut errors = Vec::new();
-    for path in paths {
-        match parse_import_path(source, Path::new(path)) {
-            Ok(mut parsed) => drafts.append(&mut parsed),
-            Err(error) => errors.push(ConnectionImportErrorInfo {
-                source_path: path.clone(),
-                message: error.to_string(),
-            }),
+    let mut credentials = HashMap::new();
+    if source == ConnectionImportSource::XTerminal {
+        xterminal::collect(
+            paths,
+            selected_ids,
+            &mut drafts,
+            &mut errors,
+            &mut credentials,
+        );
+    } else {
+        for path in paths {
+            match parse_import_path(source, Path::new(path)) {
+                Ok(mut parsed) => drafts.append(&mut parsed),
+                Err(error) => errors.push(ConnectionImportErrorInfo {
+                    source_path: path.clone(),
+                    message: error.to_string(),
+                }),
+            }
         }
     }
 
     for draft in &mut drafts {
         draft.duplicate = existing_names.contains(&draft.name);
-        draft.importable = !draft.host.trim().is_empty() && draft.port > 0;
+        draft.importable &= !draft.host.trim().is_empty() && draft.port > 0;
     }
 
-    Ok(ConnectionImportPreview {
-        source,
-        total: drafts.len(),
-        importable: drafts.iter().filter(|draft| draft.importable).count(),
-        duplicates: drafts.iter().filter(|draft| draft.duplicate).count(),
-        warnings: drafts.iter().map(|draft| draft.warnings.len()).sum(),
-        errors,
-        drafts,
-    })
+    Ok((
+        ConnectionImportPreview {
+            source,
+            total: drafts.len(),
+            importable: drafts.iter().filter(|draft| draft.importable).count(),
+            duplicates: drafts.iter().filter(|draft| draft.duplicate).count(),
+            warnings: drafts.iter().map(|draft| draft.warnings.len()).sum(),
+            errors,
+            drafts,
+        },
+        credentials,
+    ))
 }
 
 pub fn apply_connection_import(
@@ -234,11 +269,17 @@ pub fn apply_connection_import(
         .iter()
         .cloned()
         .collect::<HashSet<_>>();
-    let preview = preview_connection_import(request.source, &request.paths, &existing_names)?;
+    let (preview, mut credentials) = collect_connection_import(
+        request.source,
+        &request.paths,
+        &existing_names,
+        Some(&selected_ids),
+    )?;
     let mut skipped = 0usize;
     let mut renamed = 0usize;
     let mut errors = preview.errors;
     let mut connections = Vec::new();
+    let mut managed_keys = Vec::new();
 
     for draft in preview.drafts {
         if !selected_ids.contains(&draft.id) {
@@ -271,13 +312,18 @@ pub fn apply_connection_import(
             draft.group.as_ref(),
             draft.source,
         );
-        existing_names.insert(name.clone());
-        connections.push(imported_draft_to_saved_connection(&draft, name, group));
+        let mut connection = imported_draft_to_saved_connection(&draft, name, group);
+        if let Some(credential) = credentials.remove(&draft.id) {
+            connection.auth = credential.into_saved_auth(&connection.name, &mut managed_keys)?;
+        }
+        existing_names.insert(connection.name.clone());
+        connections.push(connection);
     }
 
     let imported = connections.len();
     if imported > 0 {
-        store.upsert_imported_connections_transaction(connections)?;
+        store
+            .upsert_imported_connections_and_managed_keys_transaction(connections, managed_keys)?;
     }
 
     Ok(ConnectionImportApplyResult {
@@ -300,6 +346,9 @@ fn parse_import_path(
         ConnectionImportSource::WindTerm => parse_windterm_path(path),
         ConnectionImportSource::Electerm => parse_electerm_path(path),
         ConnectionImportSource::FinalShell => parse_finalshell_path(path),
+        ConnectionImportSource::XTerminal => {
+            unreachable!("XTerminal imports a set of selected files")
+        }
     }
 }
 
@@ -1826,8 +1875,7 @@ fn imported_draft_to_saved_connection(
     name: String,
     group: Option<String>,
 ) -> SavedConnection {
-    // Imported third-party sessions intentionally contain no secret material.
-    // The normal connection prompt remains the password/passphrase boundary.
+    // The shared preview stays secret-free. Any opted-in credentials are staged separately.
     SavedConnection {
         id: Uuid::new_v4().to_string(),
         version: CONFIG_VERSION,

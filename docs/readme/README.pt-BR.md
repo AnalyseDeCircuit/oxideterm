@@ -126,7 +126,7 @@ Os itens marcados como *(plugin)* são instalados pelo marketplace de plugins de
 
 - Gerenciador de sessões com busca, ordenação, grupos, importação/exportação, grupos aninhados, etiquetas, cores, ícones e notas
 - Importação de `~/.ssh/config` com blocos `Match`, cadeias `ProxyJump` e `RemoteCommand`; hosts importados mantidos atualizados
-- Importação de SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm e FinalShell, com prévia antes de salvar
+- Importação de SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell e XTerminal (SSH), com prévia antes de salvar
 - Filtros de abas: todas, páginas globais, terminais locais ou um servidor; sessões ocultas continuam funcionando
 - Até 16 painéis por aba, combinando terminais, SFTP, IDE, encaminhamentos, notas, configurações e desktops remotos
 - Janelas separadas: mover uma aba para outra janela e trazê-la de volta sem interromper sessões

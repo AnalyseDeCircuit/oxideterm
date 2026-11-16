@@ -67,8 +67,13 @@ Supported sources and inputs:
 | WindTerm | `user.sessions` JSON |
 | Electerm | Bookmarks JSON containing `bookmarkGroups` and `bookmarks`, or a legacy bookmark array |
 | FinalShell | The `conn` folder, or the FinalShell data folder that contains `conn` |
+| XTerminal | Text exported from the SSH list, with optional original private-key files |
 
-OxideTerm imports safe connection metadata such as names, groups, hosts, ports, usernames, and supported key-file paths. Passwords, passphrases, embedded private keys, certificates, proxy credentials, and other secret values are not imported. Unsupported proxy, jump-host, and forwarding settings are shown as preview warnings. Configure authentication and review those advanced settings in OxideTerm after the metadata import.
+Apart from XTerminal, third-party imports bring in connection metadata such as names, groups, hosts, ports, usernames, and supported key-file paths, but no credentials. Review any preview warnings about proxies, jump hosts, and forwarding after importing.
+
+In the XTerminal **SSH** list, select the connections, use **Copy to Clipboard**, and save the result as a text file. Select **XTerminal (SSH)** in OxideTerm and choose that file. Passwords and key passphrases supplied in the export go to protected credential storage and are never displayed in the preview.
+
+To copy private keys, select the original key files alongside the export. When the export includes key paths, OxideTerm matches the selected files by name. If it only contains a credential ID, export that connection separately and select the text file and its key together. A key path without a selected file is saved as a reference. Encrypted OpenSSH keys can be copied as they are; if the export lacks the passphrase, add it in OxideTerm. XTerminal jump chains and non-SSH connections are out of scope.
 
 ### Batch adding
 

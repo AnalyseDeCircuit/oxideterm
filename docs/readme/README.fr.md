@@ -126,7 +126,7 @@ Les éléments marqués *(plugin)* s’installent depuis le catalogue de plugins
 
 - Gestionnaire de sessions : recherche, tri, groupes, import et export des connexions, groupes imbriqués, étiquettes, couleurs, icônes et notes
 - Import de `~/.ssh/config`, avec blocs `Match`, chaînes `ProxyJump` et `RemoteCommand` ; les hôtes importés restent synchronisés
-- Import depuis SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm et FinalShell, avec aperçu avant enregistrement
+- Import depuis SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell et XTerminal (SSH), avec aperçu avant enregistrement
 - Filtrage des onglets : tous, pages globales, terminaux locaux ou un serveur ; les sessions masquées continuent de fonctionner
 - Jusqu’à 16 volets par onglet, mêlant terminaux, SFTP, IDE, redirections, notes, paramètres et bureaux distants
 - Fenêtres détachées : déplacer un onglet dans une autre fenêtre puis le ramener sans interrompre ses sessions

@@ -126,7 +126,7 @@ Mit *(Plugin)* markierte Funktionen werden über den Plugin-Marktplatz der App i
 
 - Sitzungsmanager mit Suche, Sortierung, Gruppen, Import/Export, verschachtelten Gruppen, Tags, Farben, Symbolen und Notizen
 - Import aus `~/.ssh/config` mit `Match`-Blöcken, `ProxyJump`-Ketten und `RemoteCommand`; importierte Hosts bleiben aktuell
-- Import aus SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm und FinalShell mit Vorschau vor dem Speichern
+- Import aus SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell und XTerminal (SSH) mit Vorschau vor dem Speichern
 - Tab-Bereiche für alle Tabs, globale Seiten, lokale Terminals oder einen Server; ausgeblendete Sitzungen laufen weiter
 - Bis zu 16 Bereiche pro Tab mit Terminals, SFTP, IDE, Weiterleitungen, Notizen, Einstellungen und Remote-Desktops
 - Abgetrennte Fenster: Tabs ohne Sitzungsabbruch auslagern und zurückholen

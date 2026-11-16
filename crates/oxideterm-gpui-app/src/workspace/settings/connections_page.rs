@@ -175,6 +175,8 @@ impl SettingsWorkspaceEntity {
         if self.connection_import_source == source {
             return;
         }
+        // A pending picker belongs to the source that opened it.
+        self.connection_import_path_picker_task = None;
         self.connection_import_source = source;
         self.connection_import_paths.clear();
         self.clear_connection_import_preview();
@@ -1360,6 +1362,12 @@ impl WorkspaceApp {
         let mut rows = vec![self.connection_import_input_row(importer.source, &importer.paths, cx)];
 
         if let Some(preview) = importer.preview.take() {
+            if importer.source == ConnectionImportSource::XTerminal && !preview.errors.is_empty() {
+                rows.push(self.connection_status_row(self.i18n.t_with(
+                    "settings_view.connections.importers.xterminal_skipped",
+                    &[("count", &preview.errors.len().to_string())],
+                )));
+            }
             rows.push(self.connection_import_preview_toolbar(
                 &preview,
                 &importer.selected_draft_ids,
@@ -1378,7 +1386,11 @@ impl WorkspaceApp {
 
         self.connection_section(
             "settings_view.connections.importers.title",
-            "settings_view.connections.importers.description",
+            if importer.source == ConnectionImportSource::XTerminal {
+                "settings_view.connections.importers.xterminal_hint"
+            } else {
+                "settings_view.connections.importers.description"
+            },
             rows,
         )
     }
@@ -1807,6 +1819,11 @@ impl WorkspaceApp {
             draft.group.clone(),
             Some(connection_import_source_label(draft.source, &self.i18n)),
             Some(draft.source_path.clone()),
+            if draft.source == ConnectionImportSource::XTerminal {
+                draft.key_path.clone()
+            } else {
+                None
+            },
         ]
         .into_iter()
         .flatten()
@@ -1817,7 +1834,14 @@ impl WorkspaceApp {
             .warnings
             .iter()
             .chain(draft.unsupported_fields.iter())
-            .cloned()
+            .map(|warning| {
+                if draft.source == ConnectionImportSource::XTerminal {
+                    self.i18n
+                        .t(&format!("settings_view.connections.importers.{warning}"))
+                } else {
+                    warning.clone()
+                }
+            })
             .collect::<Vec<_>>()
             .join(" · ");
         let draft_id = draft.id.clone();
@@ -3280,6 +3304,7 @@ pub(in crate::workspace) fn connection_import_source_options() -> &'static [Conn
         ConnectionImportSource::WindTerm,
         ConnectionImportSource::Electerm,
         ConnectionImportSource::FinalShell,
+        ConnectionImportSource::XTerminal,
     ]
 }
 
@@ -3308,6 +3333,9 @@ pub(in crate::workspace) fn connection_import_source_label(
         }
         ConnectionImportSource::FinalShell => {
             i18n.t("settings_view.connections.importers.sources.finalshell")
+        }
+        ConnectionImportSource::XTerminal => {
+            i18n.t("settings_view.connections.importers.sources.xterminal")
         }
     }
 }
@@ -3642,6 +3670,19 @@ mod settings_connection_entity_tests {
                 ["/tmp/connections.ini".to_string()]
             );
             assert!(settings.connection_import_path_picker_task.is_none());
+        });
+
+        settings.update(cx, |settings, cx| {
+            settings.set_connection_import_source(ConnectionImportSource::XTerminal, cx);
+            settings.start_connection_import_path_picker(
+                std::future::ready(Some(vec!["/tmp/xterminal-export.txt".into()])),
+                cx,
+            );
+            settings.set_connection_import_source(ConnectionImportSource::Xshell, cx);
+        });
+        cx.run_until_parked();
+        cx.read(|cx| {
+            assert!(settings.read(cx).connection_import_paths.is_empty());
         });
     }
 }

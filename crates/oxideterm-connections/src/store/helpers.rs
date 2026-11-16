@@ -232,6 +232,45 @@ fn decode_ascii_hex_digit(digit: u8) -> Option<u8> {
     }
 }
 
+pub(crate) fn prepare_managed_ssh_key(
+    secret: SecretString,
+    name: String,
+    passphrase: Option<&SecretString>,
+    origin: ManagedSshKeyOrigin,
+    allow_locked_openssh: bool,
+) -> Result<ImportedManagedSshKey> {
+    let locked_key = if allow_locked_openssh && passphrase.is_none() {
+        // OpenSSH stores the public key alongside the encrypted private data.
+        PrivateKey::from_openssh(secret.expose_secret())
+            .ok()
+            .filter(PrivateKey::is_encrypted)
+    } else {
+        None
+    };
+    let decoded_key = match locked_key {
+        Some(key) => key,
+        None => decode_managed_private_key(&secret, passphrase)?,
+    };
+    let id = Uuid::new_v4().to_string();
+    let now = Utc::now();
+    Ok(ImportedManagedSshKey {
+        key: ManagedSshKey {
+            certificate: None,
+            secret_id: format!("managed-key-{id}"),
+            id,
+            name,
+            fingerprint: fingerprint_public_key(decoded_key.public_key()),
+            public_key: public_key_line_from_private_key(&decoded_key),
+            requires_passphrase: decoded_key.is_encrypted()
+                || managed_key_requires_passphrase(&secret, passphrase),
+            origin,
+            created_at: now,
+            updated_at: now,
+        },
+        secret,
+    })
+}
+
 fn decode_managed_private_key(
     private_key: &SecretString,
     passphrase: Option<&SecretString>,

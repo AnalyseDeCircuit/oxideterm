@@ -126,7 +126,7 @@ Các mục đánh dấu *(plugin)* được cài từ chợ plugin trong ứng d
 
 - Quản lý phiên: tìm, sắp xếp, nhóm, nhập/xuất kết nối đã lưu, nhóm lồng nhau, thẻ, màu, biểu tượng và ghi chú
 - Nhập `~/.ssh/config` gồm khối `Match`, chuỗi `ProxyJump` và `RemoteCommand`; cập nhật các máy đã nhập theo cấu hình
-- Nhập từ SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm và FinalShell, xem trước khi lưu
+- Nhập từ SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell và XTerminal (SSH), có thể xem trước khi lưu
 - Lọc thẻ: tất cả, trang toàn cục, terminal cục bộ hoặc một máy chủ; phiên ẩn vẫn chạy
 - Tối đa 16 ngăn mỗi thẻ, kết hợp terminal, SFTP, IDE, chuyển tiếp, ghi chú, cài đặt và màn hình từ xa
 - Tách thẻ sang cửa sổ riêng rồi đưa lại mà không ngắt phiên

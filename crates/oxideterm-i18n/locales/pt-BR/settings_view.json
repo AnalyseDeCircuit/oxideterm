@@ -1072,7 +1072,11 @@
       },
       "importers": {
         "title": "Importar de outros clientes",
-        "description": "Pré-visualize e importe arquivos de conexão do SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm ou FinalShell. Senhas e campos confidenciais nunca são importados.",
+        "description": "Confira os arquivos de conexão e escolha o que importar. Apenas o XTerminal permite importar credenciais.",
+        "xterminal_hint": "Salve a exportação da lista SSH do XTerminal como arquivo de texto. Para copiar uma chave privada para o OxideTerm, selecione a exportação e o arquivo da chave juntos.",
+        "xterminal_key_path": "Só o caminho da chave será salvo. Selecione também o arquivo da chave para copiá-lo para o OxideTerm.",
+        "xterminal_key_missing": "Chave privada ausente. Exporte apenas esta conexão e selecione juntos o arquivo de texto e a chave correspondente.",
+        "xterminal_skipped": "Foram ignorados {{count}} registros inválidos ou não SSH, ou arquivos ilegíveis.",
         "source": "Origem",
         "sources": {
           "securecrt": "Arquivos .ini/.xml do SecureCRT",
@@ -1081,7 +1085,8 @@
           "mobaxterm": "Sessões do MobaXterm",
           "windterm": "Sessões do WindTerm",
           "electerm": "JSON de favoritos do Electerm",
-          "finalshell": "Pasta conn do FinalShell"
+          "finalshell": "Pasta conn do FinalShell",
+          "xterminal": "XTerminal (SSH)"
         },
         "paths": "Arquivos ou pasta",
         "choose_files": "Escolher arquivos",

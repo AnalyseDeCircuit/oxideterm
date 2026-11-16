@@ -126,7 +126,7 @@ Items marked *(plugin)* are installed from the Plugin Marketplace inside the app
 
 - Session Manager for searching, sorting, grouping, importing and exporting saved connections, with nested groups, tags, colors, icons and notes
 - Import from `~/.ssh/config`, including `Match` blocks, `ProxyJump` chains and `RemoteCommand`, with imported hosts kept up to date
-- Import from SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm and FinalShell, with a preview before anything is saved
+- Import from SecureCRT, Xshell, Termius, MobaXterm, WindTerm, Electerm, FinalShell and XTerminal (SSH), with a preview before saving
 - Tab scopes that show all tabs, global pages, local terminals or a single server, while hidden sessions keep running
 - Up to 16 panes in one tab, mixing terminals, SFTP, the IDE, forwards, notes, settings and remote desktops
 - Detached windows: move a tab into its own window and back without dropping its sessions
