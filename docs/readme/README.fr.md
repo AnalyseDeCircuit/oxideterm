@@ -108,10 +108,10 @@ Ouvrez un bureau RDP dans un onglet. Les commandes en dessous permettent d’aju
 ![Bureau RDP ouvert dans l’espace de travail OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>Voyez OxideSens ouvrir un terminal à partir d’une demande en langage naturel</b></summary>
+<summary><b>Voyez comment modifier un fichier dans un conteneur Docker</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens ouvre un terminal dans OxideTerm" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="Modification et enregistrement d’un fichier dans un conteneur Docker avec OxideTerm" width="720">
 </a>
 
 </details>

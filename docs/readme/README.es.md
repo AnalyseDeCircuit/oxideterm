@@ -108,10 +108,10 @@ Abre un escritorio RDP en una pestaña. Los controles inferiores permiten ajusta
 ![Escritorio RDP dentro del espacio de trabajo de OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>Mira cómo OxideSens abre un terminal a partir de una petición en lenguaje natural</b></summary>
+<summary><b>Mira cómo editar un archivo en un contenedor Docker</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens abre un terminal dentro de OxideTerm" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="Edición y guardado de un archivo en un contenedor Docker con OxideTerm" width="720">
 </a>
 
 </details>

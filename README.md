@@ -108,10 +108,10 @@ Open an RDP desktop in a workspace tab, with display sizing and reconnect contro
 ![RDP desktop inside an OxideTerm workspace](docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>Watch OxideSens open a terminal from a plain-language request</b></summary>
+<summary><b>Watch how to edit a file in a Docker container</b></summary>
 
-<a href="docs/media/ai-terminal-demo.mp4">
-  <img src="docs/media/ai-terminal-demo.gif" alt="OxideSens opening a terminal inside OxideTerm" width="720">
+<a href="docs/media/container-file-edit.mp4">
+  <img src="docs/media/container-file-edit.gif" alt="Editing and saving a file inside a Docker container in OxideTerm" width="720">
 </a>
 
 </details>

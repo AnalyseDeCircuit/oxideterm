@@ -108,10 +108,10 @@ OxideTerm 会列出服务器上正在监听的端口。点一下就能转发其�
 ![在 OxideTerm 工作区中打开的 RDP 远程桌面](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>观看 OxideSens 根据一句自然语言打开终端</b></summary>
+<summary><b>观看如何编辑 Docker 容器中的文件</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens 在 OxideTerm 中打开终端" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="在 OxideTerm 中编辑并保存 Docker 容器里的文件" width="720">
 </a>
 
 </details>

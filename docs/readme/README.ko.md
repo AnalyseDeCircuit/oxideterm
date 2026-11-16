@@ -108,10 +108,10 @@ SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, S
 ![OxideTerm 작업 공간에서 열린 RDP 데스크톱](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>자연어 요청으로 OxideSens가 터미널을 여는 모습 보기</b></summary>
+<summary><b>Docker 컨테이너 안의 파일을 편집하는 방법 보기</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens가 OxideTerm 안에서 터미널을 여는 모습" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="OxideTerm에서 Docker 컨테이너 안의 파일을 편집하고 저장하는 모습" width="720">
 </a>
 
 </details>

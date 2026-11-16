@@ -108,10 +108,10 @@ Apri un desktop RDP in una scheda. I controlli in basso permettono di regolare l
 ![Desktop RDP nell’area di lavoro di OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>Guarda OxideSens aprire un terminale da una richiesta in linguaggio naturale</b></summary>
+<summary><b>Guarda come modificare un file in un container Docker</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens apre un terminale all’interno di OxideTerm" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="Modifica e salvataggio di un file in un container Docker con OxideTerm" width="720">
 </a>
 
 </details>

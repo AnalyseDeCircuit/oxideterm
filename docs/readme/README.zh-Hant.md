@@ -108,10 +108,10 @@ OxideTerm 會列出伺服器上正在監聽的連接埠。點一下就能轉發�
 ![在 OxideTerm 工作區中開啟的 RDP 遠端桌面](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>觀看 OxideSens 根據一句自然語言開啟終端機</b></summary>
+<summary><b>觀看如何編輯 Docker 容器中的檔案</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens 在 OxideTerm 中開啟終端機" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="在 OxideTerm 中編輯並儲存 Docker 容器裡的檔案" width="720">
 </a>
 
 </details>

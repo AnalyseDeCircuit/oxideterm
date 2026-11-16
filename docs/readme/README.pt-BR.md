@@ -108,10 +108,10 @@ Abra uma área de trabalho RDP em uma aba. Os controles abaixo permitem ajustar 
 ![Área de trabalho RDP no espaço de trabalho do OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>Veja o OxideSens abrir um terminal a partir de um pedido em linguagem natural</b></summary>
+<summary><b>Veja como editar um arquivo em um contêiner Docker</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens abrindo um terminal dentro do OxideTerm" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="Edição e salvamento de um arquivo em um contêiner Docker no OxideTerm" width="720">
 </a>
 
 </details>

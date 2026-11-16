@@ -108,10 +108,10 @@ SSH セッションの画面です。サイドバーから同じサーバーの�
 ![OxideTerm のワークスペースで開いた RDP デスクトップ](../../docs/screenshots/rdp-desktop.png)
 
 <details>
-<summary><b>自然な言葉での依頼から OxideSens がターミナルを開く様子を見る</b></summary>
+<summary><b>Docker コンテナ内のファイルを編集する方法を見る</b></summary>
 
-<a href="../../docs/media/ai-terminal-demo.mp4">
-  <img src="../../docs/media/ai-terminal-demo.gif" alt="OxideSens が OxideTerm 内でターミナルを開く様子" width="720">
+<a href="../../docs/media/container-file-edit.mp4">
+  <img src="../../docs/media/container-file-edit.gif" alt="OxideTerm で Docker コンテナ内のファイルを編集して保存する様子" width="720">
 </a>
 
 </details>
