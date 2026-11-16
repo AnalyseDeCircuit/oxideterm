@@ -1421,7 +1421,9 @@ mod sidebar_resize_region_tests {
                 workspace.active_background.image = Some("seam-fixture.png".into());
                 workspace.active_background.scope = oxideterm_settings::BackgroundScope::Window;
                 workspace.render_policy.allow_background_images = true;
-                workspace.tokens.ui.bg = 0x102030;
+                // Dark shell chrome uses the panel surface, distinct from the canvas.
+                workspace.tokens.ui.bg = 0x050607;
+                workspace.tokens.ui.bg_panel = 0x102030;
                 workspace.tokens.metrics.sidebar_vibrancy_alpha = 0.5;
                 workspace.sidebar_width = 300.0;
                 workspace
