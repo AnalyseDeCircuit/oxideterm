@@ -107,12 +107,22 @@ Mở màn hình RDP trong một thẻ. Các nút bên dưới cho phép điều 
 
 ![Màn hình RDP trong không gian làm việc OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
+### Trình quản lý tiện ích
+
+Quản lý các tiện ích đã cài đặt và duyệt kho tiện ích.
+
+![Trình quản lý hiển thị danh sách tiện ích đã cài đặt và bộ lọc theo danh mục](../../docs/screenshots/plugin-manager.png)
+
+### Đồng bộ đám mây
+
+Xem trạng thái và lịch sử đồng bộ có mã hóa trên máy chủ của bạn.
+
+![Trang tổng quan đồng bộ với thông tin phiên bản và hoạt động gần đây dùng dữ liệu mẫu](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Xem cách chỉnh sửa tệp trong vùng chứa Docker</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="Chỉnh sửa và lưu tệp trong vùng chứa Docker bằng OxideTerm" width="720">
-</a>
+![Chỉnh sửa và lưu tệp trong vùng chứa Docker bằng OxideTerm](../../docs/media/container-file-edit.gif)
 
 </details>
 

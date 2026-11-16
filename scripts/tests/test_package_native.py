@@ -243,28 +243,30 @@ class WindowsInstallerScriptTests(unittest.TestCase):
         display_icon_entry = r'"DisplayIcon" "$\"$INSTDIR\oxideterm-native.exe$\",0"'
         self.assertEqual(script.count(display_icon_entry), 2)
 
-    def test_stable_installer_detects_tauri_current_user_install(self) -> None:
-        identity = package_native.release_identity("v2.0.0", "2.0.0")
-        script = package_native.windows_installer_script(
-            binary=Path("oxideterm-native.exe"),
-            version="2.0.0",
-            identity=identity,
-            installer_root=Path(r"C:\dist\nsis-windows_x64"),
-            installer_path=Path(r"C:\dist\OxideTerm_setup.exe"),
-            icon_path=Path(r"C:\icons\icon.ico"),
-        )
+    def test_standard_installer_detects_tauri_current_user_install(self) -> None:
+        for version in ("2.0.0", "2.3.4-beta.1"):
+            with self.subTest(version=version):
+                identity = package_native.release_identity(f"v{version}", version)
+                script = package_native.windows_installer_script(
+                    binary=Path("oxideterm-native.exe"),
+                    version=version,
+                    identity=identity,
+                    installer_root=Path(r"C:\dist\nsis-windows_x64"),
+                    installer_path=Path(r"C:\dist\OxideTerm_setup.exe"),
+                    icon_path=Path(r"C:\icons\icon.ico"),
+                )
 
-        self.assertIn('$LOCALAPPDATA\\OxideTerm\\oxideterm.exe', script)
-        self.assertIn('StrCpy $INSTDIR "$LOCALAPPDATA\\OxideTerm"', script)
-        self.assertIn('StrCpy $IsOxideUpdate "1"', script)
-        self.assertIn('StrCpy $IsLegacyUpgrade "1"', script)
-        self.assertIn('SetSilent silent', script)
-        self.assertIn(
-            'CreateShortcut "$SMPROGRAMS\\OxideTerm\\OxideTerm.lnk" '
-            '"$INSTDIR\\oxideterm-native.exe"',
-            script,
-        )
-        self.assertIn('IfFileExists "$DESKTOP\\OxideTerm.lnk"', script)
+                self.assertIn('$LOCALAPPDATA\\OxideTerm\\oxideterm.exe', script)
+                self.assertIn('StrCpy $INSTDIR "$LOCALAPPDATA\\OxideTerm"', script)
+                self.assertIn('StrCpy $IsOxideUpdate "1"', script)
+                self.assertIn('StrCpy $IsLegacyUpgrade "1"', script)
+                self.assertIn('SetSilent silent', script)
+                self.assertIn(
+                    'CreateShortcut "$SMPROGRAMS\\OxideTerm\\OxideTerm.lnk" '
+                    '"$INSTDIR\\oxideterm-native.exe"',
+                    script,
+                )
+                self.assertIn('IfFileExists "$DESKTOP\\OxideTerm.lnk"', script)
 
     def test_installer_registers_connection_uri_capabilities_without_embedding_credentials(self) -> None:
         identity = self.identity()
@@ -535,6 +537,22 @@ class ReleaseDocumentTests(unittest.TestCase):
 
 
 class ReleaseVersionTests(unittest.TestCase):
+    def test_beta_replaces_the_standard_install_without_losing_its_version(self) -> None:
+        version = "2.3.4-beta.1"
+        identity = package_native.release_identity(f"v{version}", version)
+        plist = package_native.build_macos_info_plist(version, identity)
+
+        self.assertEqual(plist["CFBundleName"], "OxideTerm")
+        self.assertEqual(plist["CFBundleIdentifier"], "com.oxideterm.app")
+        self.assertEqual(plist["CFBundleShortVersionString"], version)
+        self.assertEqual(identity.windows_install_dir, r"$LOCALAPPDATA\Programs\OxideTerm")
+        self.assertEqual(identity.windows_registry_key, "OxideTerm")
+        self.assertEqual(identity.windows_uninstall_key, "OxideTerm")
+        self.assertEqual(identity.linux_package_name, "oxideterm")
+        self.assertEqual(identity.linux_install_dir, "oxideterm")
+        self.assertEqual(identity.linux_desktop_id, "com.oxideterm.app")
+        self.assertEqual(identity.linux_icon_name, "oxideterm")
+
     def test_release_version_must_match_compiled_workspace_version(self) -> None:
         workspace_version = package_native.workspace_version()
         package_native.validate_release_version(f"gpui-v{workspace_version}", workspace_version)
@@ -589,10 +607,11 @@ class PlatformSigningTests(unittest.TestCase):
 
         self.assertFalse(submitted)
 
-    def test_gatekeeper_artwork_is_copied_only_for_unsigned_stable_images(self) -> None:
+    def test_gatekeeper_artwork_is_copied_only_for_unsigned_standard_images(self) -> None:
         for tag, version, signer, expected in [
             ("v2.0.0", "2.0.0", "", True),
             ("v2.0.0", "2.0.0", "Developer ID Application: OxideTerm", False),
+            ("v2.3.4-beta.1", "2.3.4-beta.1", "", True),
             ("gpui-v2.0.0-gpui-preview.16", "2.0.0-gpui-preview.16", "", False),
         ]:
             with self.subTest(tag=tag, signer=signer), tempfile.TemporaryDirectory() as directory:

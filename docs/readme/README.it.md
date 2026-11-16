@@ -107,12 +107,22 @@ Apri un desktop RDP in una scheda. I controlli in basso permettono di regolare l
 
 ![Desktop RDP nell’area di lavoro di OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
+### Gestore dei plugin
+
+Gestisci i plugin installati e sfoglia il catalogo.
+
+![Gestore dei plugin con elenco di quelli installati e filtri per categoria](../../docs/screenshots/plugin-manager.png)
+
+### Sincronizzazione cloud
+
+Controlla lo stato e la cronologia della sincronizzazione cifrata sul tuo server.
+
+![Panoramica della sincronizzazione con versioni e attività recenti di esempio](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Guarda come modificare un file in un container Docker</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="Modifica e salvataggio di un file in un container Docker con OxideTerm" width="720">
-</a>
+![Modifica e salvataggio di un file in un container Docker con OxideTerm](../../docs/media/container-file-edit.gif)
 
 </details>
 

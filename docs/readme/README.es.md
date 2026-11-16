@@ -107,12 +107,22 @@ Abre un escritorio RDP en una pestaña. Los controles inferiores permiten ajusta
 
 ![Escritorio RDP dentro del espacio de trabajo de OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
+### Gestor de complementos
+
+Gestiona los complementos instalados y explora el catálogo.
+
+![Gestor de complementos con la lista de instalados y filtros por categoría](../../docs/screenshots/plugin-manager.png)
+
+### Sincronización en la nube
+
+Consulta el estado y el historial de la sincronización cifrada en tu propio servidor.
+
+![Resumen de la sincronización con datos de versión y actividad reciente de ejemplo](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Mira cómo editar un archivo en un contenedor Docker</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="Edición y guardado de un archivo en un contenedor Docker con OxideTerm" width="720">
-</a>
+![Edición y guardado de un archivo en un contenedor Docker con OxideTerm](../../docs/media/container-file-edit.gif)
 
 </details>
 

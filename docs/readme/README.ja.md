@@ -107,12 +107,22 @@ SSH セッションの画面です。サイドバーから同じサーバーの�
 
 ![OxideTerm のワークスペースで開いた RDP デスクトップ](../../docs/screenshots/rdp-desktop.png)
 
+### プラグインマネージャー
+
+インストール済みのプラグインを管理し、マーケットプレイスを閲覧できます。
+
+![インストール済みプラグインの一覧とカテゴリーフィルター](../../docs/screenshots/plugin-manager.png)
+
+### クラウド同期
+
+自分のサーバーで行う暗号化同期の状態と履歴を確認できます。
+
+![デモ用のバージョン情報と最近のアクティビティを表示するクラウド同期画面](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Docker コンテナ内のファイルを編集する方法を見る</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="OxideTerm で Docker コンテナ内のファイルを編集して保存する様子" width="720">
-</a>
+![OxideTerm で Docker コンテナ内のファイルを編集して保存する様子](../../docs/media/container-file-edit.gif)
 
 </details>
 

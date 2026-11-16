@@ -107,12 +107,22 @@ Open an RDP desktop in a workspace tab, with display sizing and reconnect contro
 
 ![RDP desktop inside an OxideTerm workspace](docs/screenshots/rdp-desktop.png)
 
+### Plugin manager
+
+Manage installed plugins and browse the marketplace.
+
+![Plugin manager showing installed plugins and category filters](docs/screenshots/plugin-manager.png)
+
+### Cloud sync
+
+Check the status and history of encrypted, self-hosted sync.
+
+![Oxide Cloud Sync overview with demo version details and recent activity](docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Watch how to edit a file in a Docker container</b></summary>
 
-<a href="docs/media/container-file-edit.mp4">
-  <img src="docs/media/container-file-edit.gif" alt="Editing and saving a file inside a Docker container in OxideTerm" width="720">
-</a>
+![Editing and saving a file inside a Docker container in OxideTerm](docs/media/container-file-edit.gif)
 
 </details>
 

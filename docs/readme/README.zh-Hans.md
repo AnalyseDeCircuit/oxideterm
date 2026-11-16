@@ -107,12 +107,22 @@ OxideTerm 会列出服务器上正在监听的端口。点一下就能转发其�
 
 ![在 OxideTerm 工作区中打开的 RDP 远程桌面](../../docs/screenshots/rdp-desktop.png)
 
+### 插件管理器
+
+管理已安装的插件，按类别浏览插件市场。
+
+![插件管理器中的已安装插件列表和分类筛选](../../docs/screenshots/plugin-manager.png)
+
+### 云同步
+
+查看加密自托管同步的状态和历史。
+
+![云同步概览，展示演示版本信息和近期活动](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>观看如何编辑 Docker 容器中的文件</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="在 OxideTerm 中编辑并保存 Docker 容器里的文件" width="720">
-</a>
+![在 OxideTerm 中编辑并保存 Docker 容器里的文件](../../docs/media/container-file-edit.gif)
 
 </details>
 

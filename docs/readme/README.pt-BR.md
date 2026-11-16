@@ -107,12 +107,22 @@ Abra uma área de trabalho RDP em uma aba. Os controles abaixo permitem ajustar 
 
 ![Área de trabalho RDP no espaço de trabalho do OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
+### Gerenciador de plugins
+
+Gerencie os plugins instalados e explore o catálogo.
+
+![Gerenciador com a lista de plugins instalados e filtros por categoria](../../docs/screenshots/plugin-manager.png)
+
+### Sincronização na nuvem
+
+Consulte o estado e o histórico da sincronização criptografada no seu próprio servidor.
+
+![Visão geral da sincronização com dados de versão e atividades recentes de exemplo](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Veja como editar um arquivo em um contêiner Docker</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="Edição e salvamento de um arquivo em um contêiner Docker no OxideTerm" width="720">
-</a>
+![Edição e salvamento de um arquivo em um contêiner Docker no OxideTerm](../../docs/media/container-file-edit.gif)
 
 </details>
 

@@ -28,6 +28,8 @@ Infer the channel only when the version is unambiguous. Ask before publishing if
 
 Do not invent another tag prefix. The native package workflow receives the existing tag through its `release_tag` dispatch input and selects release notes from that tag.
 
+Beta releases use the standard OxideTerm installation identity so they replace the installed app. They remain GitHub prereleases; only the standalone preview channels use separate installation identities.
+
 ## Workflow
 
 ### 1. Inspect repository state

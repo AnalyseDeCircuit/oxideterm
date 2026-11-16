@@ -1,38 +1,23 @@
-# OxideTerm Native Beta
+Beta 版用于提前试用新功能和修复。安装时会替换现有的 OxideTerm；如果日常工作离不开它，建议继续使用稳定版。
 
-This is a beta OxideTerm native desktop release.
-
-Use this channel when you want to test changes before they reach the stable channel. Beta builds may include packaging, updater, compatibility, and workflow changes that still need wider validation.
-
-## What This Beta Is
-
-- A pre-stable OxideTerm desktop build.
-- Intended for users who can tolerate small regressions and report issues with enough detail to reproduce them.
-- Published with updater metadata for the beta channel.
-- Less stable than the stable channel and intended for pre-release validation.
+Try the beta for early access to new features and fixes. Installing it replaces your current OxideTerm installation. Stick with the stable release if you rely on OxideTerm for critical work.
 
 <!-- RELEASE_CHANGELOG -->
 
-## 插件市场兼容说明
+## 问题反馈 / Reporting issues
 
-插件市场 v1 已冻结，原地址、索引内容和对应安装包持续保留。旧客户端仍可使用冻结目录中的插件，但不会看到后续的新插件和更新；请升级到支持 v2 目录的主程序版本。后续插件、新版本和版本历史仅发布到 v2。
+反馈问题时，请注明操作系统、处理器架构、安装包文件名和复现步骤。如果稳定版和 Beta 版的表现不同，请一并说明。
 
-## Plugin marketplace compatibility
-
-The v1 plugin marketplace is frozen. Its original URL, exact contents, and referenced packages remain available. Existing clients can keep using the frozen catalog but will not see subsequent plugins or updates; upgrade to a host version supporting v2 to receive them. All subsequent plugins, releases, and version histories are published only to v2.
-
-## Beta Notes
-
-- Keep a stable build installed if OxideTerm is business-critical for your daily work.
-- Report regressions with OS, CPU architecture, installed asset name, and steps to reproduce.
-- If a beta workflow behaves differently from the stable release, include both results in the issue.
+Include your OS, CPU architecture, installer filename, and steps to reproduce. If the stable and beta releases behave differently, describe both results.
 
 <details>
 <summary>Installation Tips / 安装提示</summary>
 
 ### macOS
 
-Downloaded `.dmg` files may be quarantined by Gatekeeper. Run in Terminal:
+如果 Gatekeeper 阻止打开下载的 `.dmg`，可在终端运行：
+
+If Gatekeeper blocks the downloaded `.dmg`, run this in Terminal:
 
 ```bash
 xattr -cr ~/Downloads/OxideTerm_*.dmg
@@ -58,8 +43,8 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 </details>
 
-## Links
+## 相关链接 / Links
 
-- Documentation: https://oxideterm.app
-- GitHub Issues: https://github.com/AnalyseDeCircuit/oxideterm/issues
-- Changelog: https://github.com/AnalyseDeCircuit/oxideterm/tree/main/docs/changelog
+- [文档 / Documentation](https://oxideterm.app)
+- [问题反馈 / GitHub Issues](https://github.com/AnalyseDeCircuit/oxideterm/issues)
+- [更新日志 / Changelog](https://github.com/AnalyseDeCircuit/oxideterm/tree/main/docs/changelog)

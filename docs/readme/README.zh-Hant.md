@@ -107,12 +107,22 @@ OxideTerm 會列出伺服器上正在監聽的連接埠。點一下就能轉發�
 
 ![在 OxideTerm 工作區中開啟的 RDP 遠端桌面](../../docs/screenshots/rdp-desktop.png)
 
+### 外掛管理器
+
+管理已安裝的外掛，依類別瀏覽外掛市集。
+
+![外掛管理器中的已安裝外掛清單和類別篩選](../../docs/screenshots/plugin-manager.png)
+
+### 雲端同步
+
+查看加密自託管同步的狀態和記錄。
+
+![雲端同步概覽，顯示示範版本資訊和近期活動](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>觀看如何編輯 Docker 容器中的檔案</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="在 OxideTerm 中編輯並儲存 Docker 容器裡的檔案" width="720">
-</a>
+![在 OxideTerm 中編輯並儲存 Docker 容器裡的檔案](../../docs/media/container-file-edit.gif)
 
 </details>
 

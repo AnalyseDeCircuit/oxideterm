@@ -107,12 +107,22 @@ Ouvrez un bureau RDP dans un onglet. Les commandes en dessous permettent d’aju
 
 ![Bureau RDP ouvert dans l’espace de travail OxideTerm](../../docs/screenshots/rdp-desktop.png)
 
+### Gestionnaire d’extensions
+
+Gérez les extensions installées et parcourez le catalogue.
+
+![Gestionnaire d’extensions avec la liste des extensions installées et des filtres par catégorie](../../docs/screenshots/plugin-manager.png)
+
+### Synchronisation dans le cloud
+
+Consultez l’état et l’historique de la synchronisation chiffrée sur votre propre serveur.
+
+![Vue d’ensemble de la synchronisation avec des informations de version et un historique de démonstration](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Voyez comment modifier un fichier dans un conteneur Docker</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="Modification et enregistrement d’un fichier dans un conteneur Docker avec OxideTerm" width="720">
-</a>
+![Modification et enregistrement d’un fichier dans un conteneur Docker avec OxideTerm](../../docs/media/container-file-edit.gif)
 
 </details>
 

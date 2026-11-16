@@ -43,7 +43,7 @@ MACOS_DMG_CREATE_RETRY_DELAY_SECONDS = 2
 MACOS_RESOURCE_BUSY_EXIT_CODE = 16
 DIST_DIR = ROOT_DIR / "dist"
 BASE_APP_NAME = "OxideTerm"
-STABLE_APP_IDENTIFIER = "com.oxideterm.app"
+STANDARD_APP_IDENTIFIER = "com.oxideterm.app"
 APP_BIN = "oxideterm-native"
 CLI_BIN = "oxideterm"
 CONNECTION_URI_SCHEMES = ("ssh", "telnet", "mosh", "rdp", "vnc")
@@ -302,6 +302,8 @@ def release_channel(raw: str, version: str) -> str:
     version_lower = version.lower()
     if raw_lower.startswith("gpui-v") or "gpui-preview" in version_lower:
         return "gpui-preview"
+    if version_lower.partition("-")[2].partition(".")[0] == "beta":
+        return "beta"
     if raw_lower.startswith("native-v") or "native-preview" in version_lower or "rustnative-preview" in version_lower:
         return "native-preview"
     if "-" in version:
@@ -311,17 +313,18 @@ def release_channel(raw: str, version: str) -> str:
 
 def release_identity(raw: str, version: str) -> ReleaseIdentity:
     channel = release_channel(raw, version)
-    if channel == "stable":
+    # Beta replaces the standard installation without becoming a stable release.
+    if channel in {"stable", "beta"}:
         return ReleaseIdentity(
             channel=channel,
             app_name=BASE_APP_NAME,
-            app_identifier=STABLE_APP_IDENTIFIER,
+            app_identifier=STANDARD_APP_IDENTIFIER,
             windows_install_dir=rf"$LOCALAPPDATA\Programs\{BASE_APP_NAME}",
             windows_registry_key=BASE_APP_NAME,
             windows_uninstall_key=BASE_APP_NAME,
             linux_package_name="oxideterm",
             linux_install_dir="oxideterm",
-            linux_desktop_id=STABLE_APP_IDENTIFIER,
+            linux_desktop_id=STANDARD_APP_IDENTIFIER,
             linux_icon_name="oxideterm",
         )
 
@@ -667,9 +670,9 @@ def macos_codesign_command(codesign: str, app_dir: Path) -> list[str]:
 
 
 def should_include_macos_unsigned_install_notice(identity: ReleaseIdentity) -> bool:
-    """Include Gatekeeper help only in an unsigned stable-release DMG."""
+    """Include Gatekeeper help in an unsigned DMG for the standard app."""
     signing_identity = os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() or "-"
-    return identity.channel == "stable" and signing_identity == "-"
+    return identity.app_identifier == STANDARD_APP_IDENTIFIER and signing_identity == "-"
 
 
 def copy_macos_unsigned_install_notice(
@@ -692,7 +695,7 @@ def copy_macos_unsigned_install_notice(
 
 
 def macos_dmg_finder_script() -> str:
-    """Return the Finder layout script for the unsigned stable DMG."""
+    """Return the Finder layout script for the unsigned standard app DMG."""
     return f'''
 on run argv
     set mountPath to item 1 of argv
@@ -1145,12 +1148,12 @@ def windows_installer_script(
     installer_path: Path,
     icon_path: Path,
 ) -> str:
-    # The NSIS package mirrors Tauri's current-user install mode while keeping
-    # each native release channel isolated in its own registry/install scope.
+    # The standard NSIS installer mirrors Tauri's current-user install scope.
+    # Standalone preview builds leave the standard installation alone.
     # Automatic updates stage payloads first; the helper performs the final
     # replacement after the running app has exited.
     legacy_upgrade_init = ""
-    if identity.channel == "stable":
+    if identity.app_identifier == STANDARD_APP_IDENTIFIER:
         legacy_upgrade_init = rf"""
   ${{If}} $IsOxideUpdate == "0"
   ${{AndIf}} ${{FileExists}} "$LOCALAPPDATA\OxideTerm\oxideterm.exe"
@@ -1492,8 +1495,7 @@ def linux_appimage_arch(target: str) -> str:
 
 
 def write_linux_desktop_file(path: Path, identity: ReleaseIdentity, exec_value: str) -> None:
-    # The desktop id and icon name are channel-specific so preview installs do
-    # not overwrite the future stable Linux desktop entry.
+    # Standalone preview packages must not overwrite the standard desktop entry.
     path.write_text(
         "\n".join(
             [

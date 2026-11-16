@@ -107,12 +107,22 @@ SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, S
 
 ![OxideTerm 작업 공간에서 열린 RDP 데스크톱](../../docs/screenshots/rdp-desktop.png)
 
+### 플러그인 관리자
+
+설치된 플러그인을 관리하고 마켓플레이스를 둘러볼 수 있습니다.
+
+![설치된 플러그인 목록과 범주 필터가 있는 플러그인 관리자](../../docs/screenshots/plugin-manager.png)
+
+### 클라우드 동기화
+
+자체 서버에서 암호화 동기화의 상태와 기록을 확인할 수 있습니다.
+
+![예시 버전 정보와 최근 활동을 보여 주는 클라우드 동기화 화면](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>Docker 컨테이너 안의 파일을 편집하는 방법 보기</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="OxideTerm에서 Docker 컨테이너 안의 파일을 편집하고 저장하는 모습" width="720">
-</a>
+![OxideTerm에서 Docker 컨테이너 안의 파일을 편집하고 저장하는 모습](../../docs/media/container-file-edit.gif)
 
 </details>
 

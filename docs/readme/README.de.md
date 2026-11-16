@@ -107,12 +107,22 @@ OxideTerm zeigt die lauschenden Ports des Servers. Leiten Sie sie mit einem Klic
 
 ![RDP-Desktop im OxideTerm-Arbeitsbereich](../../docs/screenshots/rdp-desktop.png)
 
+### Plugin-Verwaltung
+
+Verwalten Sie installierte Plugins und stöbern Sie im Plugin-Marktplatz.
+
+![Plugin-Verwaltung mit installierten Plugins und Kategoriefiltern](../../docs/screenshots/plugin-manager.png)
+
+### Cloud-Synchronisierung
+
+Sehen Sie den Status und Verlauf der verschlüsselten Synchronisierung auf Ihrem eigenen Server.
+
+![Übersicht der Cloud-Synchronisierung mit Beispielversionen und letzten Aktivitäten](../../docs/screenshots/cloud-sync.png)
+
 <details>
 <summary><b>So bearbeiten Sie eine Datei in einem Docker-Container</b></summary>
 
-<a href="../../docs/media/container-file-edit.mp4">
-  <img src="../../docs/media/container-file-edit.gif" alt="Eine Datei in einem Docker-Container mit OxideTerm bearbeiten und speichern" width="720">
-</a>
+![Eine Datei in einem Docker-Container mit OxideTerm bearbeiten und speichern](../../docs/media/container-file-edit.gif)
 
 </details>
 
