@@ -79,6 +79,35 @@ fn overflow_tools(visible: usize) -> Vec<ContextSidebarTool> {
     TOOLS[visible..].to_vec()
 }
 
+fn context_host_tools_in_focus(
+    active_surface: ActiveSurface,
+    active_tab_kind: Option<&TabKind>,
+    host_tools_sidebar_open: bool,
+    tools_menu_open: bool,
+) -> bool {
+    if host_tools_sidebar_open || tools_menu_open {
+        return true;
+    }
+    if active_surface != ActiveSurface::Terminal {
+        return false;
+    }
+    matches!(
+        active_tab_kind,
+        Some(
+            TabKind::Workspace
+                | TabKind::LocalTerminal
+                | TabKind::SshTerminal
+                | TabKind::MoshTerminal
+                | TabKind::Sftp
+                | TabKind::Ide
+                | TabKind::Forwards
+                | TabKind::Runtime
+                | TabKind::ConnectionPool
+                | TabKind::Topology
+        )
+    )
+}
+
 impl WorkspaceApp {
     fn context_tool_separator(&self) -> gpui::Div {
         div()
@@ -136,17 +165,35 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    fn context_tool_button_options(&self, active: bool) -> IconButtonOptions {
-        IconButtonOptions {
-            radius: ButtonRadius::Md,
-            has_background: active,
-            background: active
-                .then(|| self.settings_panel_background(self.tokens.ui.shell_active_bg())),
-            border: active.then(|| rgb(self.tokens.ui.border)),
-            hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-            idle_opacity: 1.0,
-            ..IconButtonOptions::compact(self.tokens.metrics.activity_icon_size)
+    fn has_live_ssh_connections(&self) -> bool {
+        self.ssh_registry
+            .list()
+            .into_iter()
+            .any(|info| !matches!(info.state, ConnectionState::Disconnected))
+    }
+
+    fn context_host_tools_dimmed(&self, cx: &App) -> bool {
+        let host_tools_sidebar_open = self.context_sidebar_visible()
+            && self.active_context_sidebar_panel == ContextSidebarPanel::HostTools;
+        let active_tab_kind = self.active_content_tab(cx).map(|tab| &tab.kind);
+        !context_host_tools_in_focus(
+            self.active_surface,
+            active_tab_kind,
+            host_tools_sidebar_open,
+            self.context_tools_menu.is_some(),
+        )
+    }
+
+    fn context_tool_tooltip(&self, label_key: &str, local_only: bool) -> String {
+        let tool = self.i18n.t(label_key);
+        if !local_only {
+            return tool;
         }
+        let target = self.i18n.t("sidebar.host_connection.local_machine");
+        self.i18n.t_with(
+            "sidebar.tooltips.host_tool_local_target",
+            &[("tool", tool.as_str()), ("target", target.as_str())],
+        )
     }
 
     pub(in crate::workspace) fn render_context_tool_buttons(
@@ -155,6 +202,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let count = self.context_tool_count(window);
+        let dimmed = self.context_host_tools_dimmed(cx);
+        let local_only = !self.has_live_ssh_connections();
         let mut buttons = div()
             .flex_1()
             .min_h_0()
@@ -177,13 +226,9 @@ impl WorkspaceApp {
                     .child(self.workspace_tooltip_icon_button(
                         tool.icon(),
                         self.tokens.metrics.activity_icon_glyph_size,
-                        rgb(if active {
-                            self.tokens.ui.accent
-                        } else {
-                            self.tokens.ui.text
-                        }),
-                        self.context_tool_button_options(active),
-                        self.i18n.t(tool.label_key()),
+                        rgb(context_rail_icon_color_hex(&self.tokens, active, dimmed)),
+                        context_rail_icon_button_options(self, active, dimmed),
+                        self.context_tool_tooltip(tool.label_key(), local_only),
                         "context-tool",
                         true,
                         cx.listener(move |this, _, _, cx| {
@@ -210,12 +255,8 @@ impl WorkspaceApp {
                     .child(self.workspace_tooltip_icon_button(
                         LucideIcon::MoreVertical,
                         self.tokens.metrics.activity_icon_glyph_size,
-                        rgb(if active {
-                            self.tokens.ui.accent
-                        } else {
-                            self.tokens.ui.text
-                        }),
-                        self.context_tool_button_options(active),
+                        rgb(context_rail_icon_color_hex(&self.tokens, active, dimmed)),
+                        context_rail_icon_button_options(self, active, dimmed),
                         self.i18n.t("sidebar.panels.more_tools"),
                         "context-tools-more",
                         true,
@@ -433,5 +474,89 @@ mod tests {
             ]
         );
         assert_eq!(visible_tool_count(80.0, 40.0, 9.0), 0);
+    }
+
+    #[test]
+    fn context_host_tools_dim_outside_terminal_host_surfaces_unless_open() {
+        let terminal_cases = [
+            (ActiveSurface::Terminal, None, false, false, false),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::SessionManager),
+                false,
+                false,
+                false,
+            ),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::Settings),
+                false,
+                false,
+                false,
+            ),
+            (
+                ActiveSurface::Settings,
+                Some(TabKind::SshTerminal),
+                false,
+                false,
+                false,
+            ),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::RemoteDesktop),
+                false,
+                false,
+                false,
+            ),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::SshTerminal),
+                false,
+                false,
+                true,
+            ),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::LocalTerminal),
+                false,
+                false,
+                true,
+            ),
+            (ActiveSurface::Terminal, Some(TabKind::Sftp), false, false, true),
+            (ActiveSurface::Terminal, Some(TabKind::Ide), false, false, true),
+            (ActiveSurface::Terminal, None, true, false, true),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::SessionManager),
+                false,
+                true,
+                true,
+            ),
+        ];
+
+        for (surface, tab_kind, sidebar_open, menu_open, expected_in_focus) in terminal_cases {
+            assert_eq!(
+                context_host_tools_in_focus(surface, tab_kind.as_ref(), sidebar_open, menu_open),
+                expected_in_focus,
+                "surface={surface:?}, tab_kind={tab_kind:?}, sidebar_open={sidebar_open}, menu_open={menu_open}"
+            );
+        }
+    }
+
+    #[test]
+    fn context_rail_icon_color_prioritizes_active_then_dimmed() {
+        let tokens = ThemeTokens::from_builtin(oxideterm_theme::theme_by_id("default"));
+        assert_eq!(
+            context_rail_icon_color_hex(&tokens, true, true),
+            tokens.ui.accent
+        );
+        assert_eq!(
+            context_rail_icon_color_hex(&tokens, false, true),
+            tokens.ui.text_muted
+        );
+        assert_eq!(
+            context_rail_icon_color_hex(&tokens, false, false),
+            tokens.ui.text
+        );
     }
 }

@@ -93,6 +93,8 @@
       "switch_to_dark": "Switch to dark theme",
       "settings": "Settings",
       "ai_hint": "OxideSens",
+      "ai_disabled": "OxideSens (Disabled — click for setup info)",
+      "host_tool_local_target": "{{tool}} ({{target}})",
       "switch_tree": "Switch to Tree View",
       "switch_host": "Switch to Host View",
       "new_connection": "New Connection",

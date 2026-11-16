@@ -421,6 +421,8 @@ impl WorkspaceApp {
             theme.bg
         };
 
+        let ai_disabled =
+            section == SidebarSection::Assistant && !self.settings_store.settings().ai.enabled;
         // Activity entries use the same static selected-card treatment as the
         // settings navigation while retaining the shared icon-button states.
         let button = oxideterm_gpui_ui::button::icon_button(
@@ -428,20 +430,13 @@ impl WorkspaceApp {
             Self::render_lucide_icon(
                 icon,
                 self.tokens.metrics.activity_icon_glyph_size,
-                rgb(if active { theme.accent } else { theme.text }),
+                rgb(context_rail_icon_color_hex(
+                    &self.tokens,
+                    active,
+                    ai_disabled,
+                )),
             ),
-            oxideterm_gpui_ui::button::IconButtonOptions {
-                size: self.tokens.metrics.activity_icon_size,
-                radius: oxideterm_gpui_ui::button::ButtonRadius::Md,
-                has_background: active,
-                background: active.then(|| self.settings_panel_background(theme.shell_active_bg())),
-                border: active.then(|| rgb(theme.border)),
-                hover_background: Some(rgb(theme.bg_hover)),
-                idle_opacity: 1.0,
-                ..oxideterm_gpui_ui::button::IconButtonOptions::compact(
-                    self.tokens.metrics.activity_icon_size,
-                )
-            },
+            context_rail_icon_button_options(self, active, ai_disabled),
         );
         let button = if active {
             oxideterm_gpui_ui::theme_card_surface_shadow(button, &self.tokens)
@@ -570,7 +565,13 @@ impl WorkspaceApp {
             SidebarSection::Extensions => self.i18n.t("sidebar.panels.plugins"),
             SidebarSection::CloudSync => self.i18n.t("plugin.cloud_sync.panel_title"),
             SidebarSection::Knowledge => self.i18n.t("sidebar.panels.knowledge"),
-            SidebarSection::Assistant => self.i18n.t("sidebar.panels.ai"),
+            SidebarSection::Assistant => {
+                if self.settings_store.settings().ai.enabled {
+                    self.i18n.t("sidebar.panels.ai")
+                } else {
+                    self.i18n.t("sidebar.tooltips.ai_disabled")
+                }
+            }
             SidebarSection::HostTools => self.i18n.t("sidebar.panels.host_tools"),
             SidebarSection::Automation => self.i18n.t("sidebar.panels.activity"),
             SidebarSection::Workspace => self.i18n.t("sidebar.actions.new_local_terminal"),

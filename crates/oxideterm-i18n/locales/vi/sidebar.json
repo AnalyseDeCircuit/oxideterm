@@ -93,6 +93,8 @@
       "switch_to_dark": "Chuyển sang giao diện tối",
       "settings": "Cài đặt",
       "ai_hint": "OxideSens",
+      "ai_disabled": "OxideSens (Đã tắt — nhấp để xem hướng dẫn bật)",
+      "host_tool_local_target": "{{tool}} ({{target}})",
       "switch_tree": "Chế độ cây",
       "switch_host": "Chế độ máy chủ",
       "new_connection": "Kết nối mới",

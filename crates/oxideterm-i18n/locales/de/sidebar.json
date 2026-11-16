@@ -93,6 +93,8 @@
       "switch_to_dark": "Zum dunklen Design wechseln",
       "settings": "Einstellungen",
       "ai_hint": "OxideSens",
+      "ai_disabled": "OxideSens (deaktiviert – für Einrichtungshinweise klicken)",
+      "host_tool_local_target": "{{tool}} ({{target}})",
       "switch_tree": "Baumansicht",
       "switch_host": "Hostansicht",
       "new_connection": "Neue Verbindung",

@@ -93,6 +93,8 @@
       "switch_to_dark": "Passer au thème sombre",
       "settings": "Paramètres",
       "ai_hint": "OxideSens",
+      "ai_disabled": "OxideSens (désactivé — cliquez pour voir comment l'activer)",
+      "host_tool_local_target": "{{tool}} ({{target}})",
       "switch_tree": "Vue arborescente",
       "switch_host": "Vue par hôte",
       "new_connection": "Nouvelle connexion",

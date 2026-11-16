@@ -93,6 +93,8 @@
       "switch_to_dark": "ダークテーマに切り替え",
       "settings": "設定",
       "ai_hint": "OxideSens",
+      "ai_disabled": "OxideSens（無効 — クリックで設定案内を表示）",
+      "host_tool_local_target": "{{tool}}（{{target}}）",
       "switch_tree": "ツリービューに切替",
       "switch_host": "ホストビューに切り替え",
       "new_connection": "新規接続",

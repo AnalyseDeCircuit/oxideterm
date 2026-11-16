@@ -93,6 +93,8 @@
       "switch_to_dark": "어두운 테마로 전환",
       "settings": "설정",
       "ai_hint": "OxideSens",
+      "ai_disabled": "OxideSens(비활성화됨 — 클릭하여 설정 안내 보기)",
+      "host_tool_local_target": "{{tool}} ({{target}})",
       "switch_tree": "트리 보기",
       "switch_host": "호스트 보기",
       "new_connection": "새 연결",

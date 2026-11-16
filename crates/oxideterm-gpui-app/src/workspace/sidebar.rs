@@ -16,6 +16,42 @@ pub(super) const SESSION_ROW_SELECTED_BG_ALPHA: u32 = 0x1a;
 // sticky-bottom behavior stay browser-like.
 const EMBEDDED_SFTP_MIN_SESSION_FRACTION: f32 = 0.2;
 const EMBEDDED_SFTP_MAX_SESSION_FRACTION: f32 = 0.75;
+// Recess non-active context-rail buttons when AI is off or the workspace is not
+// focused on a terminal/host surface, while keeping full brightness on hover.
+pub(super) const CONTEXT_RAIL_MUTED_IDLE_OPACITY: f32 = 0.55;
+
+pub(super) fn context_rail_icon_color_hex(tokens: &ThemeTokens, active: bool, dimmed: bool) -> u32 {
+    if active {
+        tokens.ui.accent
+    } else if dimmed {
+        tokens.ui.text_muted
+    } else {
+        tokens.ui.text
+    }
+}
+
+pub(super) fn context_rail_icon_button_options(
+    workspace: &WorkspaceApp,
+    active: bool,
+    dimmed: bool,
+) -> IconButtonOptions {
+    let muted = !active && dimmed;
+    IconButtonOptions {
+        radius: ButtonRadius::Md,
+        has_background: active,
+        background: active
+            .then(|| workspace.settings_panel_background(workspace.tokens.ui.shell_active_bg())),
+        border: active.then(|| rgb(workspace.tokens.ui.border)),
+        hover_background: Some(rgb(workspace.tokens.ui.bg_hover)),
+        hover_opacity: muted.then_some(1.0),
+        idle_opacity: if muted {
+            CONTEXT_RAIL_MUTED_IDLE_OPACITY
+        } else {
+            1.0
+        },
+        ..IconButtonOptions::compact(workspace.tokens.metrics.activity_icon_size)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum SidebarSection {

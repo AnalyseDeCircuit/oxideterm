@@ -93,6 +93,8 @@
       "switch_to_dark": "切換為深色主題",
       "settings": "設定",
       "ai_hint": "OxideSens",
+      "ai_disabled": "OxideSens（未啟用，點擊查看說明）",
+      "host_tool_local_target": "{{tool}}（{{target}}）",
       "switch_tree": "切換到樹形視圖",
       "switch_host": "切換到主機視圖",
       "new_connection": "新建連線",
