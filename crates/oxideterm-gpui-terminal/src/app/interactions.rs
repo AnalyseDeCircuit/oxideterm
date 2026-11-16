@@ -583,6 +583,7 @@ impl TerminalPane {
             return;
         }
 
+        self.show_scrollbar(cx);
         if scroll_delta.rows == 0 {
             let clamped_remainder = self.clamp_smooth_scroll_remainder_to_bounds();
             if scroll_delta.repaint || clamped_remainder {
@@ -1209,6 +1210,38 @@ impl TerminalPane {
         })
     }
 
+    fn show_scrollbar(&mut self, cx: &mut Context<Self>) {
+        self.scrollbar_visible = true;
+        // The pane owns the timer; replacing it cancels the previous deadline.
+        self.scrollbar_hide_task = Some(cx.spawn(async move |pane, cx| {
+            cx.background_executor().timer(SCROLLBAR_HIDE_DELAY).await;
+            let _ = pane.update(cx, |pane, cx| {
+                if pane.scrollbar_drag.is_none() && !pane.scrollbar_hovered {
+                    pane.scrollbar_visible = false;
+                    cx.notify();
+                }
+            });
+        }));
+        cx.notify();
+    }
+
+    pub(super) fn set_scrollbar_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        if self.scrollbar_hovered == hovered {
+            return;
+        }
+        self.scrollbar_hovered = hovered;
+        if hovered {
+            self.scrollbar_visible = true;
+            self.scrollbar_hide_task = None;
+            self.clear_terminal_hover(cx);
+            self.hovered_link = None;
+            self.hovered_command_mark_id = None;
+            cx.notify();
+        } else {
+            self.show_scrollbar(cx);
+        }
+    }
+
     fn scrollbar_geometry(&self) -> Option<ScrollbarGeometry> {
         terminal_scrollbar_for_viewport_display_offset(
             self.displayed_snapshot(),
@@ -1237,8 +1270,7 @@ impl TerminalPane {
         let bounds = self.bounds?;
         let max_scroll = self.terminal_horizontal_scroll_limit();
         let gutter_width = self.timestamp_gutter_width() + self.command_mark_gutter_width();
-        let track_width =
-            (bounds.size.width - px(gutter_width + SCROLLBAR_RESERVED_WIDTH)).max(px(0.0));
+        let track_width = (bounds.size.width - px(gutter_width)).max(px(0.0));
         let scrollbar = terminal_horizontal_scrollbar_for_viewport(
             f32::from(track_width),
             f32::from(max_scroll),
@@ -1467,6 +1499,7 @@ impl TerminalPane {
     }
 
     fn apply_scroll_action(&mut self, action: TerminalScrollAction, cx: &mut Context<Self>) {
+        self.show_scrollbar(cx);
         self.pending_search_reveal = false;
         self.search_navigation_needs_viewport_anchor = true;
         let folded_offset = self.folding_active().then(|| {
@@ -1614,6 +1647,17 @@ impl TerminalPane {
         }
 
         if event.button == MouseButton::Left
+            && self.scrollbar_visible
+            && let Some(geometry) = self.scrollbar_geometry()
+            && geometry.contains_thumb(event.position)
+        {
+            let thumb_offset_y = event.position.y - geometry.y - geometry.top;
+            self.scrollbar_drag = Some(ScrollbarDrag { thumb_offset_y });
+            self.set_scrollbar_position(event.position, thumb_offset_y, cx);
+            return;
+        }
+
+        if event.button == MouseButton::Left
             && terminal_link_activation_allowed(
                 event.modifiers,
                 self.settings.open_links_with_modifier,
@@ -1649,20 +1693,6 @@ impl TerminalPane {
                     }
                 }
             }
-            return;
-        }
-
-        if event.button == MouseButton::Left
-            && let Some(geometry) = self.scrollbar_geometry()
-            && geometry.contains_track(event.position)
-        {
-            let thumb_offset_y = if geometry.contains_thumb(event.position) {
-                event.position.y - geometry.y - geometry.top
-            } else {
-                geometry.height / 2.0
-            };
-            self.scrollbar_drag = Some(ScrollbarDrag { thumb_offset_y });
-            self.set_scrollbar_position(event.position, thumb_offset_y, cx);
             return;
         }
 
@@ -1824,6 +1854,16 @@ impl TerminalPane {
     }
 
     pub(crate) fn handle_mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let hovered = event.pressed_button.is_none()
+            && !self.selecting
+            && self.context_menu.is_none()
+            && self
+                .scrollbar_geometry()
+                .is_some_and(|geometry| geometry.contains_thumb(event.position));
+        self.set_scrollbar_hovered(hovered, cx);
+        if hovered {
+            return;
+        }
         if self.tmux_selection_pending {
             self.pending_tmux_mouse
                 .push_back(DeferredTmuxMouse::Move(event.clone()));
@@ -1969,7 +2009,11 @@ impl TerminalPane {
         }
 
         if self.scrollbar_drag.take().is_some() {
-            cx.notify();
+            let hovered = self
+                .scrollbar_geometry()
+                .is_some_and(|geometry| geometry.contains_thumb(event.position));
+            self.set_scrollbar_hovered(hovered, cx);
+            self.show_scrollbar(cx);
             return;
         }
 
@@ -4074,6 +4118,209 @@ mod tests {
     }
 
     #[gpui::test]
+    fn search_highlights_survive_scroll_event_drain(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(20, 3, Default::default(), window, cx).unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.feed_recording_output(b"hit\r\none\r\ntwo\r\nhit\r\nlast", cx);
+            let snapshot = pane.terminal.lock().snapshot();
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            pane.set_search_query(Some("hit".into()), None, cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(TERMINAL_SEARCH_DEBOUNCE);
+        cx.run_until_parked();
+        pane.update(cx, |pane, cx| {
+            let hits = |pane: &TerminalPane| {
+                pane.current_search_matches()
+                    .iter()
+                    .map(|hit| (hit.line, hit.start_col, hit.end_col))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(hits(pane), vec![(-2, 0, 3), (1, 0, 3)]);
+            let generation = pane
+                .search_generation
+                .load(std::sync::atomic::Ordering::Acquire);
+            for action in [TerminalScrollAction::LineUp, TerminalScrollAction::LineDown] {
+                pane.apply_scroll_action(action, cx);
+                // Consume the real cursor event emitted by Term::scroll_display before
+                // allowing a debounce timer to hide an erroneous cache invalidation.
+                pane.tick(cx);
+                assert_eq!(hits(pane), vec![(-2, 0, 3), (1, 0, 3)]);
+                assert_eq!(
+                    pane.search_generation
+                        .load(std::sync::atomic::Ordering::Acquire),
+                    generation
+                );
+            }
+            pane.feed_recording_output(b"\rhit!", cx);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(TERMINAL_SEARCH_DEBOUNCE);
+        cx.run_until_parked();
+        pane.read_with(cx, |pane, _| {
+            assert_eq!(
+                pane.current_search_matches()
+                    .iter()
+                    .map(|hit| (hit.line, hit.start_col, hit.end_col))
+                    .collect::<Vec<_>>(),
+                vec![(-2, 0, 3), (1, 0, 3), (2, 0, 3)]
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn overlay_scrollbar_hides_after_scroll_and_preserves_drag(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(20, 3, Default::default(), window, cx).unwrap()
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            pane.bounds = Some(gpui::Bounds::new(
+                point(px(0.0), px(0.0)),
+                gpui::size(px(200.0), px(100.0)),
+            ));
+            let snapshot = {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(b"0\r\n1\r\n2\r\n3\r\n4\r\n5");
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            assert!(!pane.scrollbar_visible);
+            pane.apply_scroll_action(TerminalScrollAction::LineUp, cx);
+            assert_eq!(pane.snapshot.display_offset, 1);
+            assert!(pane.scrollbar_visible);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(600));
+        pane.update(cx, |pane, cx| {
+            pane.handle_scroll(
+                &ScrollEvent {
+                    delta: ScrollDelta::Lines(point(0.0, -1.0)),
+                    ..Default::default()
+                },
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(600));
+        cx.run_until_parked();
+        pane.update(cx, |pane, cx| {
+            assert!(pane.scrollbar_visible, "new scrolling extends visibility");
+            let geometry = pane.scrollbar_geometry().unwrap();
+            pane.handle_mouse_down(
+                &MouseDownEvent {
+                    position: point(geometry.x + px(2.0), geometry.y + geometry.top + px(2.0)),
+                    button: MouseButton::Left,
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert!(pane.scrollbar_drag.is_some());
+        });
+        cx.executor().advance_clock(Duration::from_secs(2));
+        cx.run_until_parked();
+        pane.update(cx, |pane, cx| {
+            assert!(pane.scrollbar_visible, "a held thumb must remain visible");
+            pane.handle_mouse_up(
+                &MouseUpEvent {
+                    button: MouseButton::Left,
+                    ..Default::default()
+                },
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        pane.update(cx, |pane, cx| {
+            assert!(!pane.scrollbar_visible);
+            let geometry = pane.scrollbar_geometry().unwrap();
+            pane.handle_mouse_down(
+                &MouseDownEvent {
+                    position: point(geometry.x + px(2.0), geometry.y + geometry.top + px(2.0)),
+                    button: MouseButton::Left,
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert!(
+                pane.scrollbar_drag.is_none(),
+                "hidden overlays must not intercept text clicks"
+            );
+            pane.handle_mouse_up(&MouseUpEvent::default(), cx);
+            // Approach from outside the old narrow thumb, after it has disappeared.
+            pane.handle_mouse_move(
+                &MouseMoveEvent {
+                    position: point(geometry.x - px(6.0), geometry.y + geometry.top + px(2.0)),
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert!(pane.scrollbar_hovered && pane.scrollbar_visible);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(2));
+        cx.run_until_parked();
+        pane.update(cx, |pane, cx| {
+            assert!(
+                pane.scrollbar_visible,
+                "hover must outlast the hide deadline"
+            );
+            let geometry = pane.scrollbar_geometry().unwrap();
+            let position = point(geometry.x - px(6.0), geometry.y + geometry.top + px(2.0));
+            let offset = pane.snapshot.display_offset;
+            pane.handle_mouse_down(
+                &MouseDownEvent {
+                    position,
+                    button: MouseButton::Left,
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert_eq!(pane.scrollbar_drag.unwrap().thumb_offset_y, px(2.0));
+            assert_eq!(
+                pane.snapshot.display_offset, offset,
+                "wide hit area must not recenter the thumb"
+            );
+            pane.handle_mouse_move(
+                &MouseMoveEvent {
+                    position: point(position.x, geometry.y + geometry.track_height),
+                    pressed_button: Some(MouseButton::Left),
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert_eq!(pane.snapshot.display_offset, 0);
+            pane.handle_mouse_up(
+                &MouseUpEvent {
+                    position,
+                    ..Default::default()
+                },
+                cx,
+            );
+            pane.handle_mouse_move(
+                &MouseMoveEvent {
+                    position: point(px(40.0), px(10.0)),
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert!(!pane.scrollbar_hovered);
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_secs(1));
+        cx.run_until_parked();
+        pane.read_with(cx, |pane, _| assert!(!pane.scrollbar_visible));
+    }
+
+    #[gpui::test]
     fn clamped_scroll_keeps_output_received_before_the_next_frame(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, _| TerminalScrollTestRoot);
         let pane = cx.update(|window, cx| {
@@ -4273,7 +4520,7 @@ mod tests {
                     assert_eq!(pane.search_status().active_match, Some(1 - expected));
                 });
                 let output_offset = pane.update(cx, |pane, cx| {
-                    pane.terminal.lock().feed_recording_output(b"\r\nneedle 20");
+                    pane.feed_recording_output(b"\r\nneedle 20", cx);
                     pane.tick(cx);
                     pane.snapshot.display_offset
                 });
@@ -4534,9 +4781,7 @@ mod tests {
             pane.bounds = Some(gpui::Bounds::new(
                 point(px(0.0), px(0.0)),
                 gpui::size(
-                    px(pane.terminal_content_padding_x()
-                        + 16.0 * pane.metrics.cell_width_f32()
-                        + SCROLLBAR_RESERVED_WIDTH),
+                    px(pane.terminal_content_padding_x() + 16.0 * pane.metrics.cell_width_f32()),
                     px(2.0 * TERMINAL_CONTENT_PADDING + 4.0 * pane.metrics.line_height_f32()),
                 ),
             ));

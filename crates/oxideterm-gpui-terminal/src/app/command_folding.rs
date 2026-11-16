@@ -550,7 +550,7 @@ impl TerminalPane {
                         .absolute()
                         .left(px(self.terminal_content_padding_x()
                             - f32::from(self.horizontal_scroll_offset_px)))
-                        .right(px(SCROLLBAR_RESERVED_WIDTH))
+                        .right_0()
                         .top(px(y))
                         .h(self.metrics.line_height)
                         .line_height(self.metrics.line_height)

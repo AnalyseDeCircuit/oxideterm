@@ -507,6 +507,8 @@ impl Render for TerminalPane {
         .ghost_text(self.terminal_ghost_text())
         .viewport_rows(viewport_rows)
         .scrollbar_display_offset(scrollbar_display_offset)
+        .scrollbar_visible(self.scrollbar_visible)
+        .scrollbar_active(self.scrollbar_hovered || self.scrollbar_drag.is_some())
         .scroll_y_offset(smooth_scroll_y_offset)
         .scroll_x_offset(self.horizontal_scroll_offset_px)
         .performance_metrics_enabled(performance_metrics_enabled)
@@ -520,7 +522,13 @@ impl Render for TerminalPane {
             .id("terminal-pane")
             .size_full()
             .relative()
-            .cursor(gpui::CursorStyle::IBeam)
+            .cursor(if self.scrollbar_drag.is_some() {
+                gpui::CursorStyle::ClosedHand
+            } else if self.scrollbar_hovered {
+                gpui::CursorStyle::OpenHand
+            } else {
+                gpui::CursorStyle::IBeam
+            })
             .bg(if transparent_pane_base {
                 rgba(0x00000000)
             } else {
@@ -599,6 +607,7 @@ impl Render for TerminalPane {
             .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
                 if !*hovered {
                     this.clear_terminal_hover(cx);
+                    this.set_scrollbar_hovered(false, cx);
                 }
             }))
             .on_mouse_up(
@@ -633,6 +642,10 @@ impl Render for TerminalPane {
             .on_scroll(cx.listener(|this, event, _window, cx| {
                 this.handle_scroll(event, cx);
             }))
+            .when(
+                self.scrollbar_drag.is_some() || self.horizontal_scrollbar_drag.is_some(),
+                |pane| pane.child(self.render_scrollbar_drag_capture(cx)),
+            )
             .when_some(background_layer, |pane, background| pane.child(background))
             .when_some(bell_flash_layer, |pane, flash| pane.child(flash))
             .child(
@@ -763,6 +776,73 @@ impl Render for TerminalPane {
 }
 
 impl TerminalPane {
+    fn render_scrollbar_drag_capture(&self, cx: &Context<Self>) -> AnyElement {
+        let owner = cx.entity().downgrade();
+        // The initiating pane owns the drag until release, including over adjacent panes.
+        gpui::canvas(
+            |_, _, _| (),
+            move |_, _, window, _| {
+                window.set_window_cursor_style(gpui::CursorStyle::ClosedHand);
+                let move_owner = owner.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                    if phase != gpui::DispatchPhase::Capture {
+                        return;
+                    }
+                    let handled = move_owner
+                        .update(cx, |pane, cx| {
+                            if pane.scrollbar_drag.is_none()
+                                && pane.horizontal_scrollbar_drag.is_none()
+                            {
+                                return false;
+                            }
+                            if event.pressed_button == Some(MouseButton::Left) {
+                                pane.handle_mouse_move(event, cx);
+                            } else {
+                                // Recover if the native release happened outside the window.
+                                pane.handle_mouse_up(
+                                    &MouseUpEvent {
+                                        button: MouseButton::Left,
+                                        position: event.position,
+                                        modifiers: event.modifiers,
+                                        ..Default::default()
+                                    },
+                                    cx,
+                                );
+                            }
+                            true
+                        })
+                        .unwrap_or(false);
+                    if handled {
+                        cx.stop_propagation();
+                    }
+                });
+                let up_owner = owner.clone();
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                    if phase != gpui::DispatchPhase::Capture || event.button != MouseButton::Left {
+                        return;
+                    }
+                    let handled = up_owner
+                        .update(cx, |pane, cx| {
+                            if pane.scrollbar_drag.is_none()
+                                && pane.horizontal_scrollbar_drag.is_none()
+                            {
+                                return false;
+                            }
+                            pane.handle_mouse_up(event, cx);
+                            true
+                        })
+                        .unwrap_or(false);
+                    if handled {
+                        cx.stop_propagation();
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_full()
+        .into_any_element()
+    }
+
     fn render_terminal_autosuggest_overlay(
         &self,
         candidates: Vec<crate::command_facts::TerminalAutosuggestCandidate>,
@@ -3137,13 +3217,15 @@ mod tests {
     }
 
     #[gpui::test]
-    fn terminal_viewport_uses_text_mouse_cursor(cx: &mut gpui::TestAppContext) {
-        let (_, cx) = cx.add_window_view(|window, cx| {
+    fn terminal_viewport_cursor_distinguishes_text_and_scrollbar(cx: &mut gpui::TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
             super::TerminalPane::new_recording_playback(80, 24, Default::default(), window, cx)
                 .unwrap()
         });
         cx.simulate_resize(gpui::size(gpui::px(800.0), gpui::px(400.0)));
         cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.run_until_parked();
         for (x, y) in [(4.0, 4.0), (200.0, 100.0)] {
             cx.simulate_mouse_move(
                 gpui::point(gpui::px(x), gpui::px(y)),
@@ -3155,6 +3237,170 @@ mod tests {
                 assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::IBeam);
             });
         }
+        pane.update(cx, |pane, cx| {
+            pane.flush_pending_pty_resize(pane.pty_resize_generation, cx);
+            let snapshot = {
+                let mut terminal = pane.terminal.lock();
+                let mut line = vec![b'A'; pane.snapshot.cols];
+                line.extend_from_slice(b"\r\n");
+                terminal.feed_recording_output(&line.repeat(80));
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let (right_text, position) = pane.read_with(cx, |pane, _| {
+            let bounds = pane.bounds.unwrap();
+            assert!(pane.snapshot.scrollback_lines >= 40);
+            assert!(!pane.scrollbar_visible);
+            let text_x = bounds.right() - gpui::px(14.0);
+            let grid_right = bounds.origin.x + pane.metrics.cell_width * pane.snapshot.cols as f32;
+            assert!(text_x < grid_right, "the click must land on terminal text");
+            let grid_bottom =
+                bounds.origin.y + pane.metrics.line_height * pane.snapshot.rows as f32;
+            (
+                gpui::point(text_x, bounds.origin.y + gpui::px(8.0)),
+                gpui::point(bounds.right() - gpui::px(6.0), grid_bottom - gpui::px(4.0)),
+            )
+        });
+        cx.simulate_mouse_move(right_text, None, gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::IBeam);
+        });
+        cx.simulate_mouse_move(position, None, gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::OpenHand);
+        });
+        cx.simulate_mouse_down(
+            position,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(
+                window.cursor_style_for_test(),
+                gpui::CursorStyle::ClosedHand
+            );
+        });
+        cx.simulate_mouse_up(
+            position,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::OpenHand);
+        });
+        // The thumb is still visible after release, but cannot grab text above it.
+        cx.simulate_mouse_move(right_text, None, gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::IBeam);
+        });
+        pane.read_with(cx, |pane, _| assert!(pane.scrollbar_visible));
+        cx.simulate_mouse_down(
+            right_text,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        pane.read_with(cx, |pane, _| {
+            assert!(
+                pane.selection.is_some(),
+                "rightmost text must be selectable"
+            );
+            assert_eq!(pane.snapshot.display_offset, 0, "click must not scroll");
+        });
+        cx.simulate_mouse_up(
+            right_text,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+    }
+
+    #[gpui::test]
+    fn scrollbar_drag_continues_across_split_and_releases_outside(cx: &mut gpui::TestAppContext) {
+        use gpui::{Modifiers, MouseButton, div, point, prelude::*, px};
+        struct Split {
+            left: gpui::Entity<super::TerminalPane>,
+            right: gpui::Entity<super::TerminalPane>,
+        }
+        impl gpui::Render for Split {
+            fn render(
+                &mut self,
+                _: &mut gpui::Window,
+                _: &mut gpui::Context<Self>,
+            ) -> impl IntoElement {
+                div()
+                    .size_full()
+                    .flex()
+                    .child(div().w(px(400.0)).h_full().child(self.left.clone()))
+                    .child(div().flex_1().h_full().child(self.right.clone()))
+            }
+        }
+        let (split, cx) = cx.add_window_view(|window, cx| Split {
+            left: cx.new(|cx| {
+                super::TerminalPane::new_recording_playback(40, 24, Default::default(), window, cx)
+                    .unwrap()
+            }),
+            right: cx.new(|cx| {
+                super::TerminalPane::new_recording_playback(40, 24, Default::default(), window, cx)
+                    .unwrap()
+            }),
+        });
+        let (left, right) =
+            split.read_with(cx, |split, _| (split.left.clone(), split.right.clone()));
+        cx.simulate_resize(gpui::size(px(800.0), px(400.0)));
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            window.simulate_next_frame(cx);
+        });
+        cx.run_until_parked();
+        left.update(cx, |pane, cx| {
+            pane.flush_pending_pty_resize(pane.pty_resize_generation, cx);
+            pane.feed_recording_output(&b"line\r\n".repeat(100), cx);
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let start = left.read_with(cx, |pane, _| {
+            let bounds = pane.bounds.unwrap();
+            let grid_bottom =
+                bounds.origin.y + pane.metrics.line_height * pane.snapshot.rows as f32;
+            point(bounds.right() - px(6.0), grid_bottom - px(4.0))
+        });
+        cx.simulate_mouse_move(start, None, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let initial_offset = left.read_with(cx, |pane, _| {
+            assert!(pane.scrollbar_drag.is_some(), "press must grab the source scrollbar: bounds={:?}, rows={}, history={}, start={:?}", pane.bounds, pane.snapshot.rows, pane.snapshot.scrollback_lines, start);
+            pane.snapshot.display_offset
+        });
+        let outside = point(px(500.0), px(40.0));
+        cx.simulate_mouse_move(outside, Some(MouseButton::Left), Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let offset = left.read_with(cx, |pane, _| {
+            assert!(
+                pane.snapshot.display_offset > initial_offset,
+                "drag must scroll across the split boundary"
+            );
+            assert!(pane.scrollbar_drag.is_some());
+            pane.snapshot.display_offset
+        });
+        cx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::default());
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        left.read_with(cx, |pane, _| assert!(pane.scrollbar_drag.is_none()));
+        cx.simulate_mouse_move(point(px(500.0), px(300.0)), None, Modifiers::default());
+        left.read_with(cx, |pane, _| {
+            assert_eq!(pane.snapshot.display_offset, offset)
+        });
+        right.read_with(cx, |pane, _| {
+            assert_eq!(pane.snapshot.display_offset, 0);
+            assert!(!pane.selecting);
+            assert!(pane.scrollbar_drag.is_none());
+        });
     }
 
     #[gpui::test]
