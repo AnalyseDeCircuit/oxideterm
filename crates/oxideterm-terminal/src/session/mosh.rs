@@ -524,9 +524,14 @@ impl MoshTerminalSession {
                 self.pending_events.push(TerminalEvent::Bell);
                 false
             }
-            AlacEvent::Wakeup | AlacEvent::MouseCursorDirty => {
+            AlacEvent::Wakeup => {
                 self.pending_events.push(TerminalEvent::Wakeup);
                 true
+            }
+            AlacEvent::MouseCursorDirty => {
+                // Scrolling and mouse-mode changes need repainting, not content invalidation.
+                self.pending_events.push(TerminalEvent::Wakeup);
+                false
             }
             AlacEvent::CursorBlinkingChange => {
                 let blinking = self.term.lock().cursor_style().blinking;

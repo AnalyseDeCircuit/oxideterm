@@ -35,6 +35,36 @@ pub(crate) fn terminal_scrollbar_for_viewport_display_offset(
     })
 }
 
+pub(crate) fn search_scrollbar_markers(
+    matches: &[TerminalSearchMatch],
+    history: usize,
+    viewport_rows: usize,
+    track_height: f32,
+    selected_match: Option<usize>,
+) -> Vec<(f32, bool)> {
+    let total_lines = history.saturating_add(viewport_rows);
+    if total_lines == 0 || track_height <= 0.0 || matches.is_empty() {
+        return Vec::new();
+    }
+    let marker_height = SEARCH_SCROLLBAR_MARKER_HEIGHT.min(track_height);
+    let travel = track_height - marker_height;
+    let mut positions = std::collections::BTreeMap::new();
+    for (index, found) in matches.iter().enumerate() {
+        // Search lines are relative to the live screen, not the scrolled viewport.
+        // Folded matches retain their mapped start line even when ranges are hidden.
+        let line =
+            (history as i64 + i64::from(found.line)).clamp(0, total_lines.saturating_sub(1) as i64);
+        let top = line as f32 / total_lines.saturating_sub(1).max(1) as f32 * travel;
+        let bucket = (top / marker_height).round() as usize;
+        let selected = positions.entry(bucket).or_insert(false);
+        *selected |= selected_match == Some(index);
+    }
+    positions
+        .into_iter()
+        .map(|(bucket, selected)| ((bucket as f32 * marker_height).min(travel), selected))
+        .collect()
+}
+
 pub(crate) fn terminal_horizontal_scrollbar_for_viewport(
     viewport_width: f32,
     max_scroll: f32,
@@ -58,8 +88,43 @@ pub(crate) fn terminal_horizontal_scrollbar_for_viewport(
 }
 
 #[cfg(test)]
-mod horizontal_scrollbar_tests {
+mod scrollbar_tests {
     use super::*;
+
+    #[test]
+    fn search_markers_cover_history_and_merge_overlapping_hits() {
+        let matches: Vec<_> = [-90, -40, -40, 9]
+            .into_iter()
+            .map(|line| TerminalSearchMatch {
+                line,
+                start_col: 0,
+                end_col: 1,
+                ranges: Vec::new(),
+            })
+            .collect();
+        assert_eq!(
+            search_scrollbar_markers(&matches, 90, 10, 200.0, Some(2)),
+            vec![(0.0, false), (100.0, true), (198.0, false)]
+        );
+        assert_eq!(
+            search_scrollbar_markers(&matches, 90, 10, 100.0, Some(3)),
+            vec![(0.0, false), (50.0, false), (98.0, true)]
+        );
+        assert_eq!(search_scrollbar_markers(&[], 90, 10, 200.0, None), vec![]);
+        let screen_matches: Vec<_> = [0, 9]
+            .into_iter()
+            .map(|line| TerminalSearchMatch {
+                line,
+                start_col: 0,
+                end_col: 1,
+                ranges: Vec::new(),
+            })
+            .collect();
+        assert_eq!(
+            search_scrollbar_markers(&screen_matches, 0, 10, 100.0, None),
+            vec![(0.0, false), (98.0, false)]
+        );
+    }
 
     #[test]
     fn horizontal_thumb_reaches_both_ends_of_the_overflow_range() {

@@ -164,18 +164,19 @@ pub(crate) fn paint_terminal_outline(
 pub(crate) fn paint_command_mark_overlay(
     overlay: &TerminalCommandMarkOverlay,
     origin: gpui::Point<Pixels>,
-    cols: usize,
+    viewport_width: Pixels,
     metrics: &TerminalMetrics,
     decorations: bool,
     window: &mut Window,
 ) {
     let x = 0.0;
     let y = overlay.start_row as f32 * metrics.line_height_f32();
-    let width = cols as f32 * metrics.cell_width_f32();
+    // Command decorations fill the viewport, including the fractional trailing cell.
+    let width = viewport_width;
     let height =
         (overlay.end_row.saturating_sub(overlay.start_row) + 1) as f32 * metrics.line_height_f32();
     let accent = command_mark_accent(overlay);
-    let bounds = Bounds::new(origin + point(px(x), px(y)), size(px(width), px(height)));
+    let bounds = Bounds::new(origin + point(px(x), px(y)), size(width, px(height)));
 
     if decorations && let Some(fill_color) = command_mark_fill(overlay) {
         window.paint_quad(fill(bounds, fill_color));
@@ -183,7 +184,7 @@ pub(crate) fn paint_command_mark_overlay(
 
     if decorations && overlay.selected && overlay.has_top {
         window.paint_quad(fill(
-            Bounds::new(origin + point(px(x), px(y)), size(px(width), px(1.0))),
+            Bounds::new(origin + point(px(x), px(y)), size(width, px(1.0))),
             accent,
         ));
     }
@@ -191,7 +192,7 @@ pub(crate) fn paint_command_mark_overlay(
         window.paint_quad(fill(
             Bounds::new(
                 origin + point(px(x), px((y + height - 1.0).max(y))),
-                size(px(width), px(1.0)),
+                size(width, px(1.0)),
             ),
             accent,
         ));
@@ -1286,25 +1287,23 @@ pub(crate) fn paint_scrollbar(
     scrollbar: TerminalScrollbar,
     origin: gpui::Point<Pixels>,
     viewport_width: Pixels,
-    rows: usize,
-    metrics: &TerminalMetrics,
+    foreground: u32,
+    active: bool,
     window: &mut Window,
 ) {
-    let x = terminal_scrollbar_x_for_viewport(viewport_width);
-    let track = Bounds::new(
-        origin + point(x, px(0.0)),
-        size(
-            px(SCROLLBAR_WIDTH),
-            px(rows as f32 * metrics.line_height_f32()),
-        ),
-    );
-    window.paint_quad(fill(track, rgba(0xffffff20)));
-
+    let width = if active {
+        SCROLLBAR_ACTIVE_WIDTH
+    } else {
+        SCROLLBAR_WIDTH
+    };
+    // Grow inward so the overlay stays anchored to the same viewport edge.
+    let x = terminal_scrollbar_x_for_viewport(viewport_width) - px(width - SCROLLBAR_WIDTH);
     let thumb = Bounds::new(
         origin + point(x, px(scrollbar.top)),
-        size(px(SCROLLBAR_WIDTH), px(scrollbar.height)),
+        size(px(width), px(scrollbar.height)),
     );
-    window.paint_quad(fill(thumb, rgba(0xffffff66)));
+    let alpha = if active { 0x99 } else { 0x66 };
+    window.paint_quad(fill(thumb, rgba((foreground << 8) | alpha)).corner_radii(px(width / 2.0)));
 }
 
 pub(crate) fn paint_horizontal_scrollbar(

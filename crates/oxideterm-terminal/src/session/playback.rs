@@ -108,9 +108,13 @@ impl PlaybackTerminalSession {
                 AlacEvent::Bell => {
                     self.pending_events.push(TerminalEvent::Bell);
                 }
-                AlacEvent::Wakeup | AlacEvent::MouseCursorDirty => {
+                AlacEvent::Wakeup => {
                     self.pending_events.push(TerminalEvent::Wakeup);
                     changed = true;
+                }
+                AlacEvent::MouseCursorDirty => {
+                    // Scrolling and mouse-mode changes need repainting, not content invalidation.
+                    self.pending_events.push(TerminalEvent::Wakeup);
                 }
                 AlacEvent::CursorBlinkingChange => {
                     let blinking = self.term.lock().cursor_style().blinking;

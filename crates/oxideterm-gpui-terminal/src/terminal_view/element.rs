@@ -88,6 +88,8 @@ pub(crate) struct TerminalElement {
     performance_metrics_enabled: bool,
     viewport_rows: usize,
     scrollbar_display_offset: f32,
+    scrollbar_visible: bool,
+    scrollbar_active: bool,
     scroll_y_offset: Pixels,
     scroll_x_offset: Pixels,
     command_mark_gutter_width: f32,
@@ -111,6 +113,7 @@ pub(crate) struct TerminalElementLayout {
     pub(crate) highlight_underlines: Vec<TerminalRect>,
     pub(crate) highlight_outlines: Vec<TerminalRect>,
     pub(crate) search_matches: Vec<TerminalRect>,
+    pub(crate) search_scrollbar_markers: Vec<(f32, bool)>,
     pub(crate) selection_matches: Vec<TerminalRect>,
     pub(crate) command_mark_overlays: Vec<TerminalCommandMarkOverlay>,
     pub(crate) selections: Vec<TerminalRect>,
@@ -623,6 +626,8 @@ impl TerminalElement {
             performance_metrics_enabled: false,
             viewport_rows,
             scrollbar_display_offset,
+            scrollbar_visible: false,
+            scrollbar_active: false,
             scroll_y_offset: px(0.0),
             scroll_x_offset: px(0.0),
             command_mark_gutter_width: 0.0,
@@ -726,6 +731,16 @@ impl TerminalElement {
 
     pub(crate) fn viewport_rows(mut self, viewport_rows: usize) -> Self {
         self.viewport_rows = viewport_rows;
+        self
+    }
+
+    pub(crate) fn scrollbar_active(mut self, active: bool) -> Self {
+        self.scrollbar_active = active;
+        self
+    }
+
+    pub(crate) fn scrollbar_visible(mut self, visible: bool) -> Self {
+        self.scrollbar_visible = visible;
         self
     }
 
@@ -1060,6 +1075,21 @@ impl TerminalElement {
                 self.bidi_enabled,
                 highlight_layout.outlines,
             ),
+            search_scrollbar_markers: if self
+                .search_query
+                .as_ref()
+                .is_some_and(|query| !query.is_empty())
+            {
+                search_scrollbar_markers(
+                    &self.search_matches,
+                    self.snapshot.scrollback_lines,
+                    self.viewport_rows,
+                    self.viewport_rows as f32 * self.metrics.line_height_f32(),
+                    self.selected_search_match,
+                )
+            } else {
+                Vec::new()
+            },
             search_matches,
             selection_matches,
             command_mark_overlays,
@@ -2487,7 +2517,7 @@ impl Element for TerminalElement {
         let grid_mask_bounds = Bounds::new(
             viewport_origin,
             size(
-                (grid_viewport_width - px(SCROLLBAR_RESERVED_WIDTH)).max(px(0.0)),
+                grid_viewport_width.max(px(0.0)),
                 px(self.viewport_rows as f32 * self.metrics.line_height_f32()),
             ),
         );
@@ -2536,8 +2566,8 @@ impl Element for TerminalElement {
                 for overlay in &layout.command_mark_overlays {
                     paint_command_mark_overlay(
                         overlay,
-                        origin,
-                        self.snapshot.cols,
+                        viewport_origin + point(px(0.0), self.scroll_y_offset),
+                        grid_viewport_width,
                         &self.metrics,
                         self.command_mark_decorations,
                         window,
@@ -2651,25 +2681,45 @@ impl Element for TerminalElement {
                 },
             );
         }
-        if let Some(scrollbar) = layout.scrollbar {
+        if self.scrollbar_visible
+            && let Some(scrollbar) = layout.scrollbar
+        {
             paint_scrollbar(
                 scrollbar,
                 viewport_origin,
                 grid_viewport_width,
-                self.viewport_rows,
-                &self.metrics,
+                self.theme.foreground,
+                self.scrollbar_active,
                 window,
             );
         }
+        // Search locations remain visible independently of the transient scroll thumb.
+        let marker_x = terminal_scrollbar_x_for_viewport(grid_viewport_width);
+        let marker_height = SEARCH_SCROLLBAR_MARKER_HEIGHT
+            .min(self.viewport_rows as f32 * self.metrics.line_height_f32());
+        for &(top, selected) in &layout.search_scrollbar_markers {
+            let color = if selected {
+                self.theme.tokens.ui.accent
+            } else {
+                self.theme.tokens.ui.warning
+            };
+            window.paint_quad(fill(
+                Bounds::new(
+                    viewport_origin + point(marker_x, px(top)),
+                    size(px(SCROLLBAR_WIDTH), px(marker_height)),
+                ),
+                rgb(color),
+            ));
+        }
         if let Some(horizontal_scrollbar) = terminal_horizontal_scrollbar_for_viewport(
-            f32::from(grid_viewport_width) - SCROLLBAR_RESERVED_WIDTH,
+            f32::from(grid_viewport_width),
             timestamp_gutter_width,
             f32::from(self.scroll_x_offset),
         ) {
             paint_horizontal_scrollbar(
                 horizontal_scrollbar,
                 viewport_origin,
-                grid_viewport_width - px(SCROLLBAR_RESERVED_WIDTH),
+                grid_viewport_width,
                 bounds.size.height,
                 window,
             );
@@ -2778,6 +2828,38 @@ mod cache_tests {
             None,
             None,
         )
+    }
+
+    #[test]
+    fn search_overview_survives_thumb_hiding_and_scrolling_until_search_closes() {
+        let mut snapshot = snapshot(0, Vec::new());
+        snapshot.rows = 10;
+        snapshot.scrollback_lines = 90;
+        let mut view = element(snapshot);
+        view.search_query = Some("hit".into());
+        view.search_matches = Arc::from([TerminalSearchMatch {
+            line: -40,
+            start_col: 0,
+            end_col: 1,
+            ranges: Vec::new(),
+        }]);
+        view.selected_search_match = Some(0);
+        view.scrollbar_visible = false;
+        let bounds = Bounds::new(point(px(0.0), px(0.0)), size(px(200.0), px(100.0)));
+        assert_eq!(
+            view.layout_for_bounds(bounds).search_scrollbar_markers,
+            vec![(50.0, true)]
+        );
+        view.snapshot.display_offset = 90;
+        assert_eq!(
+            view.layout_for_bounds(bounds).search_scrollbar_markers,
+            vec![(50.0, true)]
+        );
+        view.search_query = None;
+        assert_eq!(
+            view.layout_for_bounds(bounds).search_scrollbar_markers,
+            vec![]
+        );
     }
 
     #[test]

@@ -628,6 +628,9 @@ pub struct TerminalPane {
     smooth_scroll_animation: Option<SmoothScrollAnimation>,
     smooth_scroll_snapshot_cache: Option<SmoothScrollSnapshotCache>,
     scrollbar_drag: Option<ScrollbarDrag>,
+    scrollbar_visible: bool,
+    scrollbar_hovered: bool,
+    scrollbar_hide_task: Option<gpui::Task<()>>,
     // Horizontal panning belongs to the visual timestamp overlay and never
     // changes the backing PTY grid or remote window size.
     horizontal_scroll_offset_px: Pixels,
@@ -1426,6 +1429,9 @@ impl TerminalPane {
             smooth_scroll_animation: None,
             smooth_scroll_snapshot_cache: None,
             scrollbar_drag: None,
+            scrollbar_visible: false,
+            scrollbar_hovered: false,
+            scrollbar_hide_task: None,
             horizontal_scroll_offset_px: px(0.0),
             horizontal_scrollbar_drag: None,
             tmux_separator_drag: None,
@@ -5283,15 +5289,10 @@ fn terminal_grid_span_for_viewport(
     cell_width: f32,
     left_gutter_width: f32,
 ) -> f32 {
-    // Browser terminals reserve right-side scrollbar chrome outside the grid.
-    // Keep that gutter stable even before scrollback exists so history growth
-    // does not resize the PTY and push the scrollbar outside the viewport.
+    // Overlay scrollbars never subtract from the PTY grid width.
     // Timestamp labels are a visual overlay and must not change PTY columns;
     // toggling them should never reflow scrollback or restamp old rows.
-    (f32::from(viewport_width)
-        - TERMINAL_CONTENT_PADDING * 2.0
-        - left_gutter_width
-        - SCROLLBAR_RESERVED_WIDTH)
+    (f32::from(viewport_width) - TERMINAL_CONTENT_PADDING * 2.0 - left_gutter_width)
         .max(cell_width * 2.0)
 }
 
@@ -5894,8 +5895,7 @@ mod tests {
                 let line_height = pane.metrics.line_height_f32();
                 // Font advances may round just below an integer cell count.
                 // The resized grid must fit, with less than one cell left over.
-                let available_width =
-                    640.0 - horizontal * 2.0 - cell_width - SCROLLBAR_RESERVED_WIDTH;
+                let available_width = 640.0 - horizontal * 2.0 - cell_width;
                 let available_height = 320.0 - vertical * 2.0;
                 let remaining_width = available_width - pane.snapshot.cols as f32 * cell_width;
                 let remaining_height = available_height - pane.snapshot.rows as f32 * line_height;
