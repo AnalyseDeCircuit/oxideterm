@@ -3629,6 +3629,13 @@ impl TerminalPane {
         cx.notify();
     }
 
+    fn revoke_kitty_file_transmission_session(&mut self) {
+        self.kitty_file_transmission_confirm_open = false;
+        if let Some(control) = &self.kitty_file_transmission {
+            control.revoke();
+        }
+    }
+
     fn emit_kitty_file_transmission_notice(
         &self,
         title: String,
@@ -3696,6 +3703,7 @@ impl TerminalPane {
             .kitty_file_transmission
             .as_ref()
             .is_some_and(KittyFileTransmissionControl::take_authorization_request)
+            && !self.terminal_exited
             && !self.kitty_file_transmission_confirm_open
         {
             self.kitty_file_transmission_confirm_open = true;
@@ -4099,6 +4107,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::SessionRestarted => {
+                self.revoke_kitty_file_transmission_session();
                 self.terminal_exited = false;
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.win32_pressed_keys.clear();
@@ -4121,6 +4130,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::ProcessingFailed => {
+                self.revoke_kitty_file_transmission_session();
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.cancel_pending_tmux_mouse();
                 self.notify_trzsz_connection_lost_if_active();
@@ -4138,6 +4148,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::StartupFailed => {
+                self.revoke_kitty_file_transmission_session();
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.command_fact_ledger.interrupt_audit_commands();
                 self.cancel_pending_tmux_mouse();
@@ -4147,6 +4158,7 @@ impl TerminalPane {
                 TerminalEventEffect::notify()
             }
             TerminalEvent::ChildExited(code) => {
+                self.revoke_kitty_file_transmission_session();
                 self.ssh_reconnect_state = SshReconnectState::Idle;
                 self.command_fact_ledger.interrupt_audit_commands();
                 self.cancel_pending_tmux_mouse();
@@ -7226,6 +7238,190 @@ mod tests {
         trim_row_timestamp_history(&mut entries, 50);
         assert_eq!(entries.len(), 50);
         assert!(!entries.contains_key(&1));
+    }
+
+    #[gpui::test]
+    fn enter_requests_reconnect_only_for_an_exited_ssh_pane(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+        let key = |name: &str| gpui::KeyDownEvent {
+            keystroke: gpui::Keystroke::parse(name).expect("valid keystroke"),
+            is_held: false,
+            prefer_character_input: false,
+        };
+        pane.update(cx, |pane, cx| {
+            // The reconnect gesture belongs to SSH panes whose shell has exited.
+            // A live session keeps delivering Enter to the shell.
+            pane.session_kind = TerminalSessionKind::SshPty;
+            pane.test_accepts_input = true;
+            assert!(pane.handle_key(&key("enter"), cx));
+            assert_eq!(pane.take_context_action_request(), None);
+
+            pane.handle_terminal_event(TerminalEvent::ChildExited(None), cx);
+
+            // Shift+Enter stays available to the session path.
+            pane.handle_key(&key("shift-enter"), cx);
+            assert_eq!(pane.take_context_action_request(), None);
+
+            assert!(pane.handle_key(&key("enter"), cx));
+            assert_eq!(
+                pane.take_context_action_request(),
+                Some(TerminalContextAction::Reconnect)
+            );
+            // The workspace consumes the request once.
+            assert_eq!(pane.take_context_action_request(), None);
+        });
+    }
+
+    #[gpui::test]
+    fn session_transitions_revoke_kitty_file_transmission_authority(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            let control = KittyFileTransmissionControl::new();
+            pane.kitty_file_transmission = Some(control.clone());
+            for (name, event) in [
+                ("processing failed", TerminalEvent::ProcessingFailed),
+                ("startup failed", TerminalEvent::StartupFailed),
+                ("child exited", TerminalEvent::ChildExited(Some(1))),
+            ] {
+                pane.terminal_exited = false;
+                pane.kitty_file_transmission_confirm_open = true;
+                control.authorize_for_session().unwrap();
+                pane.handle_terminal_event(event, cx);
+                assert!(
+                    !pane.kitty_file_transmission_confirm_open,
+                    "{name}: stale confirmation must close"
+                );
+                control.request_authorization();
+                assert!(
+                    control.take_authorization_request(),
+                    "{name}: the previous session authority must be revoked"
+                );
+            }
+
+            pane.terminal_exited = true;
+            pane.kitty_file_transmission_confirm_open = true;
+            control.authorize_for_session().unwrap();
+            pane.handle_terminal_event(TerminalEvent::SessionRestarted, cx);
+            assert!(!pane.terminal_exited);
+            assert!(!pane.kitty_file_transmission_confirm_open);
+            control.request_authorization();
+            assert!(control.take_authorization_request());
+        });
+    }
+
+    #[gpui::test]
+    fn exited_session_drops_pending_kitty_file_transmission_request(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("test terminal pane")
+            })
+        });
+        pane.update(cx, |pane, cx| {
+            let control = KittyFileTransmissionControl::new();
+            pane.kitty_file_transmission = Some(control.clone());
+            pane.terminal_exited = true;
+            control.request_authorization();
+            pane.tick(cx);
+            assert!(!pane.kitty_file_transmission_confirm_open);
+            assert!(!control.take_authorization_request());
+
+            pane.terminal_exited = false;
+            control.request_authorization();
+            pane.tick(cx);
+            assert!(pane.kitty_file_transmission_confirm_open);
+        });
+    }
+
+    #[gpui::test]
+    fn shared_node_terminals_keep_independent_kitty_file_authority(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let first = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("first test terminal pane")
+            })
+        });
+        let second = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    TerminalUiPreferences::default(),
+                    window,
+                    cx,
+                )
+                .expect("second test terminal pane")
+            })
+        });
+
+        let first_control = KittyFileTransmissionControl::new();
+        let second_control = KittyFileTransmissionControl::new();
+        first.update(cx, |pane, _| {
+            pane.kitty_file_transmission = Some(first_control.clone());
+            pane.kitty_file_transmission_confirm_open = true;
+        });
+        second.update(cx, |pane, _| {
+            pane.kitty_file_transmission = Some(second_control.clone());
+            pane.kitty_file_transmission_confirm_open = true;
+        });
+        first_control.authorize_for_session().unwrap();
+        second_control.authorize_for_session().unwrap();
+
+        // Physical transport sharing belongs to NodeRouter; each terminal session
+        // owns its own Kitty authorization and UI confirmation instead.
+        first.update(cx, |pane, cx| {
+            pane.handle_terminal_event(TerminalEvent::ChildExited(None), cx);
+            assert!(!pane.kitty_file_transmission_confirm_open);
+        });
+        first_control.request_authorization();
+        assert!(first_control.take_authorization_request());
+
+        second.update(cx, |pane, _| {
+            assert!(pane.kitty_file_transmission_confirm_open);
+        });
+        second_control.request_authorization();
+        assert!(
+            !second_control.take_authorization_request(),
+            "the surviving terminal session must remain trusted"
+        );
     }
 
     #[gpui::test]
