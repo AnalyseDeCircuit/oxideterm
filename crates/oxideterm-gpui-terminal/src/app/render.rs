@@ -20,10 +20,11 @@ use oxideterm_gpui_ui::progress::progress;
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::separator::{SeparatorOrientation, separator};
 use oxideterm_terminal::{
-    BleConnectionStatus, DetectedModemProtocol, ModemTransferDirection, SerialControlLine,
-    SerialDisplayMode, SerialFlowControl, SerialLineEnding, SerialParity, SerialRuntimeOptions,
-    SerialSendMode, SerialSessionConfig, TermMode, TerminalCommandMark, TerminalCursorShape,
-    TerminalLifecycle, TerminalSessionKind, TerminalSnapshot, TmuxAction, TmuxUiState,
+    BleConnectionStatus, DetectedModemProtocol, KittyFileTransmissionControl,
+    KittyFileTransmissionPrompt, ModemTransferDirection, SerialControlLine, SerialDisplayMode,
+    SerialFlowControl, SerialLineEnding, SerialParity, SerialRuntimeOptions, SerialSendMode,
+    SerialSessionConfig, TermMode, TerminalCommandMark, TerminalCursorShape, TerminalLifecycle,
+    TerminalSessionKind, TerminalSnapshot, TmuxAction, TmuxUiState,
 };
 
 use super::{
