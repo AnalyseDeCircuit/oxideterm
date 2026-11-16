@@ -505,6 +505,7 @@ fn ssh_recording_pressure_preserves_output_and_services_input_and_close() {
                     Default::default(),
                     TerminalEncoding::Utf8,
                     100,
+                    TerminalPalette::default(),
                 )
             },
             |terminal| wait_until(|| terminal.shared.finished.load(Ordering::Acquire)),

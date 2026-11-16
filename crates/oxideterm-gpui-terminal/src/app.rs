@@ -1008,6 +1008,7 @@ impl TerminalPane {
             graphics_options_from_preferences(preferences),
             preferences.terminal_encoding,
             preferences.scrollback_lines,
+            preferences.theme.palette(),
         )))
     }
 

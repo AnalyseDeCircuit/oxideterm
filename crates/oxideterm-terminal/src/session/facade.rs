@@ -203,6 +203,7 @@ impl TerminalSession {
             graphics_options,
             TerminalEncoding::Utf8,
             1000,
+            TerminalPalette::default(),
         )
     }
 
@@ -213,6 +214,7 @@ impl TerminalSession {
         graphics_options: GraphicsOptions,
         encoding: TerminalEncoding,
         scrollback_lines: usize,
+        initial_palette: TerminalPalette,
     ) -> Self {
         let kitty_file_transmission = Some(graphics_options.kitty_file_transmission.clone());
         let audit = config.audit_context().map(|context| context.consumer());
@@ -226,6 +228,7 @@ impl TerminalSession {
                 graphics_options,
                 encoding,
                 scrollback_lines,
+                initial_palette,
             )),
             kitty_file_transmission,
         }

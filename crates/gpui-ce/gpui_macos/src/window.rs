@@ -3567,10 +3567,17 @@ fn metal_frame(
         return;
     };
     let metal_frames = metal_frames.clone();
+    let drawable = update.drawable();
+    if !lock.renderer.drawable_matches_layer_size(&drawable) {
+        // Fullscreen and backing-scale changes can leave an old-sized drawable
+        // in flight. Preserve GPUI's dirty state until the link supplies a match.
+        metal_frames.wake();
+        return;
+    }
     let Some(callback) = lock.request_frame_callback.take() else {
         return;
     };
-    lock.renderer.set_frame_drawable(Some(update.drawable()));
+    lock.renderer.set_frame_drawable(Some(drawable));
     drop(lock);
     metal_frames.begin_frame();
     let callback = run_frame_callback(

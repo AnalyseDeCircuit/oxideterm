@@ -7,6 +7,31 @@ use gpui::{
 #[path = "../../../oxideterm-terminal/tests/support/ssh_peer.rs"]
 mod ssh_peer;
 
+#[test]
+fn ssh_first_snapshot_uses_the_requested_theme() {
+    let mut peer = ssh_peer::SshPeer::new();
+    let config = SshSessionConfig::from(peer.config.take().unwrap())
+        .with_runtime(peer.runtime.clone())
+        .with_deferred_pty(true);
+    let preferences = TerminalUiPreferences {
+        theme: TerminalUiTheme::new(0xfdf6e3, 0x657b83, 0x657b83),
+        ..Default::default()
+    };
+    let terminal = TerminalPane::ssh_shared_session(config, &preferences);
+    // Read before mounting a pane or waiting for any worker notification.
+    let snapshot = terminal.lock().snapshot();
+    terminal.lock().shutdown();
+    peer.stop();
+    assert_eq!(
+        snapshot.lines[0].cells[0].bg,
+        oxideterm_terminal::TerminalColor::rgb(0xfd, 0xf6, 0xe3)
+    );
+    assert_eq!(
+        snapshot.lines[0].cells[0].fg,
+        oxideterm_terminal::TerminalColor::rgb(0x65, 0x7b, 0x83)
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn bash_redraw_over_ssh_preserves_prompt_after_resize_and_scroll() {

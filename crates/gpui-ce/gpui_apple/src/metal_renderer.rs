@@ -584,6 +584,20 @@ impl MetalRenderer {
         &self.sprite_atlas
     }
 
+    /// A display-link drawable can outlive the layer size it was acquired for.
+    /// Reject it before consuming a frame request so resized content is not stretched.
+    pub fn drawable_matches_layer_size(
+        &self,
+        drawable: &ProtocolObject<dyn CAMetalDrawable>,
+    ) -> bool {
+        let Some(layer) = &self.layer else {
+            return false;
+        };
+        let expected = layer.drawableSize();
+        let texture = drawable.texture();
+        texture.width() as f64 == expected.width && texture.height() as f64 == expected.height
+    }
+
     /// Draw the next frame into `drawable` instead of asking the layer for one.
     ///
     /// A `CAMetalDisplayLink` hands out each frame's drawable early enough for
@@ -2916,6 +2930,29 @@ mod upstream_tests {
         for (width, height) in [(0, 0), (0, 64), (64, 0)] {
             renderer.update_drawable_size(size(DevicePixels(width), DevicePixels(height)));
             assert!(renderer.render_to_image(&Scene::default()).is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn display_link_drawable_must_match_resized_layer() -> Result<()> {
+        let mut renderer = MetalRenderer::new(Default::default(), false, false)?;
+        renderer.update_drawable_size(size(DevicePixels(64), DevicePixels(48)));
+        let old_drawable = renderer
+            .layer()
+            .and_then(|layer| layer.nextDrawable())
+            .context("window renderer must supply a drawable")?;
+        assert!(renderer.drawable_matches_layer_size(&old_drawable));
+
+        // Check each dimension independently, then a fullscreen-sized change.
+        for (width, height) in [(128, 48), (64, 96), (256, 192)] {
+            renderer.update_drawable_size(size(DevicePixels(width), DevicePixels(height)));
+            assert!(!renderer.drawable_matches_layer_size(&old_drawable));
+            let current_drawable = renderer
+                .layer()
+                .and_then(|layer| layer.nextDrawable())
+                .context("resized layer must supply a drawable")?;
+            assert!(renderer.drawable_matches_layer_size(&current_drawable));
         }
         Ok(())
     }
