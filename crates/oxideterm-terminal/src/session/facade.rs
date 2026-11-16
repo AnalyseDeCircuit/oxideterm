@@ -9,7 +9,7 @@ pub struct TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         if let Some(control) = &self.kitty_file_transmission {
-            control.revoke();
+            control.close_session();
         }
     }
 }
@@ -909,7 +909,7 @@ impl TerminalSession {
 
     pub fn shutdown(&mut self) {
         if let Some(control) = &self.kitty_file_transmission {
-            control.revoke();
+            control.close_session();
         }
         self.backend.shutdown();
     }

@@ -217,7 +217,7 @@ mod kitty_tests {
         assert!(result.events.contains(&TerminalGraphicsEvent::Respond(
             b"\x1b_Gi=9;ENOSPC:Graphics resource limit exceeded\x1b\\".to_vec()
         )));
-        control.authorize_for_session().unwrap();
+        assert!(control.authorization_prompt().unwrap().resolve(true).unwrap());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("image");
         fs::write(&path, [1, 2, 9, 8, 7, 255, 3, 4]).unwrap();
@@ -366,7 +366,7 @@ mod kitty_tests {
         assert!(denied.events.contains(&TerminalGraphicsEvent::Respond(
             b"\x1b_Gi=11;EBADF:Failed to read image file\x1b\\".to_vec()
         )));
-        control.authorize_for_session().unwrap();
+        assert!(control.authorization_prompt().unwrap().resolve(true).unwrap());
         let result = ingress.advance(command.as_bytes(), cursor());
         let image = result
             .events

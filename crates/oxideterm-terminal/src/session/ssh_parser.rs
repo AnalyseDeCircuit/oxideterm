@@ -138,11 +138,8 @@ impl SshParser {
     }
 
     pub(super) fn retire_transport(&mut self) {
-        self.graphics_ingress.reset_stream();
+        self.finish_transport();
         self.command_tx = None;
-        self.shell_channel.take();
-        self.transport_running = false;
-        self.tmux_display.reset();
         self.pending_writes.clear();
         for (mut command, _) in self.tmux_command_queue.drain(..) {
             zeroize::Zeroize::zeroize(&mut command);
@@ -156,6 +153,7 @@ impl SshParser {
         self.interrupt_trzsz_transfer();
         self.interrupt_modem_transfer();
         self.retire_transport();
+        self.graphics_ingress.reset_stream();
         self.trzsz_consumer = None;
         self.set_trzsz_policy(policy);
         self.parser = Processor::new();
@@ -273,8 +271,11 @@ impl SshParser {
             .is_some_and(|sink| sink.is_active())
     }
 
-    pub(super) fn close_shell_channel(&mut self) {
+    pub(super) fn finish_transport(&mut self) {
+        self.graphics_ingress.end_stream();
+        self.transport_running = false;
         self.shell_channel.take();
+        self.tmux_display.reset();
     }
 
     pub(super) fn acquire_shell_channel(&mut self) -> Result<crate::ShellChannel> {

@@ -59,17 +59,12 @@ impl<T: TerminalSessionBackend> Fixture<T> {
 
 impl Fixture {
     fn new() -> Self {
+        Self::with_graphics(GraphicsOptions::default())
+    }
+
+    fn with_graphics(graphics: GraphicsOptions) -> Self {
         Self::with_backend(
-            |config| {
-                SshPtySession::new(
-                    config,
-                    80,
-                    24,
-                    Default::default(),
-                    TerminalEncoding::Utf8,
-                    1000,
-                )
-            },
+            |config| SshPtySession::new(config, 80, 24, graphics, TerminalEncoding::Utf8, 1000),
             |terminal| wait_until(|| terminal.shared.finished.load(Ordering::Acquire)),
         )
     }
@@ -103,7 +98,11 @@ fn wait_until(mut ready: impl FnMut() -> bool) {
 
 #[test]
 fn closed_shell_reconnect_preserves_output_and_shared_transport_after_failure() {
-    let mut fixture = Fixture::new();
+    let graphics = GraphicsOptions::default();
+    let control = graphics.kitty_file_transmission.clone();
+    let mut fixture = Fixture::with_graphics(graphics);
+    let old_prompt = control.authorization_prompt().unwrap();
+    assert!(old_prompt.resolve(true).unwrap());
     let connection = fixture.terminal.ssh_connection_handle().unwrap();
     let connection_id = connection.connection_id().to_string();
     let _runtime_guard = fixture.runtime.enter();
@@ -122,6 +121,7 @@ fn closed_shell_reconnect_preserves_output_and_shared_transport_after_failure() 
         .block_on(fixture.peer.close(fixture.channel))
         .unwrap();
     wait_until(|| !fixture.terminal.lifecycle().is_running());
+    assert!(control.authorization_prompt().is_none());
     fixture
         .terminal
         .reconnect_ssh(
@@ -177,6 +177,9 @@ fn closed_shell_reconnect_preserves_output_and_shared_transport_after_failure() 
     fixture.peer = peer;
     fixture.channel = channel;
     wait_until(|| fixture.terminal.is_interactive());
+    control.request_authorization();
+    assert!(!old_prompt.resolve(true).unwrap());
+    assert!(control.pending_authorization_prompt().is_some());
     fixture.send(b"\x1b[Hnew output\r\n");
     wait_until(|| fixture.terminal.buffer_text().contains("new output"));
     assert!(fixture.terminal.buffer_text().contains("previous output"));

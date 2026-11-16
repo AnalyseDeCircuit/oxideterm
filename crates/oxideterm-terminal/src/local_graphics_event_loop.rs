@@ -921,6 +921,9 @@ where
                                 if let Some(tty::ChildEvent::Exited(status)) =
                                     self.pty.next_child_event()
                                 {
+                                    self.graphics_options
+                                        .kitty_file_transmission
+                                        .close_session();
                                     if let Some(status) = status {
                                         self.event_proxy.send_event(Event::ChildExit(status));
                                     }

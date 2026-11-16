@@ -57,7 +57,16 @@ fn terminal_image_data_from_decoded(
 impl GraphicsIngress {
     /// Incomplete escapes and chunked uploads belong to the preceding shell.
     pub fn reset_stream(&mut self) {
-        self.options.kitty_file_transmission.revoke();
+        self.options.kitty_file_transmission.reset_session();
+        self.clear_pending_stream();
+    }
+
+    pub fn end_stream(&mut self) {
+        self.options.kitty_file_transmission.close_session();
+        self.clear_pending_stream();
+    }
+
+    fn clear_pending_stream(&mut self) {
         self.state = ParserState::Ground;
         self.utf8_remaining = 0;
         self.kitty_chunks.clear();
