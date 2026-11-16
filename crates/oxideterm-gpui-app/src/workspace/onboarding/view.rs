@@ -20,9 +20,9 @@ impl WorkspaceApp {
         } else {
             28.0
         };
-        let width = (f32::from(viewport.width) - margin * 2.0).clamp(320.0, 1020.0);
-        let height = (f32::from(viewport.height) - margin * 2.0).clamp(380.0, 730.0);
-        let wide = width >= 840.0;
+        let width = (f32::from(viewport.width) - margin * 2.0).clamp(320.0, 920.0);
+        let height = (f32::from(viewport.height) - margin * 2.0).clamp(380.0, 620.0);
+        let wide = width >= 760.0;
         let step = OnboardingStep::from_index(self.onboarding.step);
         let content = match step {
             OnboardingStep::Welcome => self.onboarding_columns(
@@ -91,7 +91,7 @@ impl WorkspaceApp {
                             .flex_1()
                             .min_h(px(0.0))
                             .px(px(if wide { 28.0 } else { 16.0 }))
-                            .py(px(22.0))
+                            .py(px(20.0))
                             .overflow_y_scroll()
                             .track_scroll(&self.onboarding.scroll_handle)
                             .vertical_scrollbar(&self.onboarding.scroll_handle)
@@ -135,7 +135,7 @@ impl WorkspaceApp {
             .w_full()
             .grid()
             .grid_cols(if wide { 2 } else { 1 })
-            .gap(px(if wide { 28.0 } else { 20.0 }))
+            .gap(px(if wide { 32.0 } else { 20.0 }))
             .child(div().min_w(px(0.0)).child(first))
             .child(div().min_w(px(0.0)).child(second))
             .into_any_element()
@@ -181,11 +181,8 @@ impl WorkspaceApp {
         let previous = self
             .segmented_control_user_previous_index(ONBOARDING_STEPS_MOTION_ID, self.onboarding.step)
             .unwrap_or(self.onboarding.step);
-        let steps_width = if wide {
-            680.0
-        } else {
-            (modal_width - 108.0).max(200.0)
-        };
+        let horizontal_padding = if wide { 28.0 } else { 16.0 };
+        let steps_width = (modal_width - horizontal_padding * 2.0 - 52.0).max(200.0);
         let steps = segmented_control(
             &self.tokens,
             ONBOARDING_STEPS_MOTION_ID,
@@ -199,11 +196,11 @@ impl WorkspaceApp {
         );
         div()
             .flex_none()
-            .px(px(if wide { 28.0 } else { 16.0 }))
+            .px(px(horizontal_padding))
             .pt(px(12.0))
             .pb(px(8.0))
             .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
-            .bg(rgb(theme.bg_panel))
+            .bg(rgb(theme.bg))
             .border_b_1()
             .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
             .flex()
@@ -215,16 +212,10 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_none()
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
-                    .bg(rgb(theme.bg_sunken))
-                    .px(px(8.0))
-                    .py(px(3.0))
                     .font_family(SharedString::from(
                         FontFamily::Jetbrains.terminal_family_name(""),
                     ))
-                    .text_size(px(self.tokens.metrics.ui_text_2xs))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
                     .child(format!(
                         "{} / {}",
@@ -254,7 +245,7 @@ impl WorkspaceApp {
             .py(px(12.0))
             .border_t_1()
             .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
-            .bg(rgb(theme.bg_panel))
+            .bg(rgb(theme.bg))
             // Keep bottom footer clipping aligned with modal_container's outer radii.lg shell.
             .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             .child(if can_go_back {

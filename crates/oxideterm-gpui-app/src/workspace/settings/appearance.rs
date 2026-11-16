@@ -124,6 +124,15 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
+        self.appearance_theme_controls_with_hints(settings, true, cx)
+    }
+
+    pub(in crate::workspace) fn appearance_theme_controls_with_hints(
+        &self,
+        settings: &PersistedSettings,
+        show_hints: bool,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
         use oxideterm_settings::AppearanceScheme;
         let follow = settings.appearance.follow_system_appearance;
         let modes = oxideterm_gpui_ui::tabs::tabs_list(&self.tokens)
@@ -166,7 +175,11 @@ impl WorkspaceApp {
             );
         let mut rows = vec![self.appearance_row(
             "settings_view.appearance.mode",
-            "settings_view.appearance.mode_hint",
+            if show_hints {
+                "settings_view.appearance.mode_hint"
+            } else {
+                ""
+            },
             modes.into_any_element(),
         )];
         if !follow && settings.appearance.manual_scheme.is_none() {
@@ -179,14 +192,19 @@ impl WorkspaceApp {
             );
         }
         rows.extend([
-            self.appearance_scheme_control("theme-scheme", cx),
-            self.appearance_theme_target_row(settings, ThemeTarget::Application, cx),
-            self.appearance_theme_target_row(settings, ThemeTarget::Terminal, cx),
+            self.appearance_scheme_control("theme-scheme", show_hints, cx),
+            self.appearance_theme_target_row(settings, ThemeTarget::Application, show_hints, cx),
+            self.appearance_theme_target_row(settings, ThemeTarget::Terminal, show_hints, cx),
         ]);
         rows
     }
 
-    fn appearance_scheme_control(&self, id: &'static str, cx: &mut Context<Self>) -> AnyElement {
+    fn appearance_scheme_control(
+        &self,
+        id: &'static str,
+        show_hint: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let selected = self.appearance_edit_scheme().unwrap_or(self.system_dark);
         div()
             .id(id)
@@ -258,12 +276,14 @@ impl WorkspaceApp {
                     ))
                 },
             )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.appearance.scheme_edit_hint")),
-            )
+            .when(show_hint, |body| {
+                body.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("settings_view.appearance.scheme_edit_hint")),
+                )
+            })
             .into_any_element()
     }
 
@@ -271,17 +291,26 @@ impl WorkspaceApp {
         &self,
         settings: &PersistedSettings,
         target: ThemeTarget,
+        show_hint: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (title_key, hint_key, select) = match target {
             ThemeTarget::Application => (
                 "settings_view.appearance.application_theme",
-                "settings_view.appearance.application_theme_hint",
+                if show_hint {
+                    "settings_view.appearance.application_theme_hint"
+                } else {
+                    ""
+                },
                 SettingsSelect::AppearanceTheme,
             ),
             ThemeTarget::Terminal => (
                 "settings_view.appearance.terminal_theme",
-                "settings_view.appearance.color_theme_hint",
+                if show_hint {
+                    "settings_view.appearance.color_theme_hint"
+                } else {
+                    ""
+                },
                 SettingsSelect::AppearanceTerminalTheme,
             ),
         };
@@ -661,9 +690,9 @@ impl WorkspaceApp {
         });
         let mut rows = Vec::new();
         if !editor_open {
-            rows.push(self.appearance_scheme_control("background-scheme", cx));
+            rows.push(self.appearance_scheme_control("background-scheme", true, cx));
             let preview = self.settings_workspace.read(cx).background_preview.clone();
-            rows.push(self.appearance_preview(self.settings_store.settings(), preview, cx));
+            rows.push(self.appearance_preview(self.settings_store.settings(), preview, true, cx));
         }
         if has_background {
             let enabled = terminal.background_enabled;
@@ -1656,18 +1685,36 @@ impl WorkspaceApp {
         settings: &PersistedSettings,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.appearance_theme_preview_with_hint(settings, true, cx)
+    }
+
+    pub(in crate::workspace) fn appearance_theme_preview_compact(
+        &self,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.appearance_theme_preview_with_hint(settings, false, cx)
+    }
+
+    fn appearance_theme_preview_with_hint(
+        &self,
+        settings: &PersistedSettings,
+        show_hint: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let preview = self
             .settings_workspace
             .read(cx)
             .theme_background_preview
             .clone();
-        self.appearance_preview(settings, preview, cx)
+        self.appearance_preview(settings, preview, show_hint, cx)
     }
 
     fn appearance_preview(
         &self,
         settings: &PersistedSettings,
         preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
+        show_hint: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let preview_target = self
@@ -1750,12 +1797,14 @@ impl WorkspaceApp {
             .when(style.day_cycle && has_background, |view| {
                 view.child(self.appearance_daylight_preview_control(preview.clone(), cx))
             })
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.appearance.theme_preview_hint")),
-            )
+            .when(show_hint, |view| {
+                view.child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("settings_view.appearance.theme_preview_hint")),
+                )
+            })
             .into_any_element()
     }
 

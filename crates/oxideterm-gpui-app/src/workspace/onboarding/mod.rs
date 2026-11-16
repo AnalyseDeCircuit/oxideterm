@@ -6,6 +6,5 @@ mod view;
 
 use super::*;
 
-use components::*;
 pub(in crate::workspace) use state::OnboardingState;
 use state::*;
