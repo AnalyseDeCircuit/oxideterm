@@ -1791,9 +1791,6 @@ impl WorkspaceApp {
         self.bind_terminal_location(tab_id, pane_id, session_id, cx);
         self.set_main_window_active_tab(Some(tab_id), cx);
         self.active_surface = ActiveSurface::Terminal;
-        if self.sidebar_collapsed {
-            self.set_sidebar_collapsed_with_motion(false, cx);
-        }
         self.needs_active_pane_focus = true;
         self.focus_active_pane(window, cx);
         self.reveal_active_tab(window, cx);

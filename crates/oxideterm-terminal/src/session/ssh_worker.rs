@@ -116,10 +116,14 @@ impl SshPtySession {
         graphics: GraphicsOptions,
         encoding: TerminalEncoding,
         scrollback: usize,
+        initial_palette: TerminalPalette,
     ) -> Self {
-        Self::from_core(SshPtyCore::new_with_audit(
-            config, audit, cols, rows, graphics, encoding, scrollback,
-        ))
+        let mut core =
+            SshPtyCore::new_with_audit(config, audit, cols, rows, graphics, encoding, scrollback);
+        // Initialize before the parser worker can publish a default-colored frame.
+        // Later palette changes remain queued to avoid blocking the UI on parsing.
+        core.set_palette(initial_palette);
+        Self::from_core(core)
     }
 
     fn from_core(core: SshPtyCore) -> Self {
