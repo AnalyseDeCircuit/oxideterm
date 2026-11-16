@@ -57,6 +57,14 @@ Bộ nhớ khi rảnh trước và sau khi chuyển từ Tauri (1.x) sang GPUI g
 
 ## Ảnh chụp màn hình
 
+Các kết nối, cổng đang lắng nghe, tệp và nội dung trình soạn thảo trong ảnh đều là dữ liệu minh họa.
+
+### Màn hình chính
+
+Mở lại một kết nối đã lưu, mở terminal cục bộ hoặc nhập kết nối từ màn hình chính.
+
+![Màn hình chính của OxideTerm với các kết nối đã lưu và thao tác nhanh](../../docs/screenshots/welcome.png)
+
 ### Không gian làm việc kết hợp
 
 Đặt terminal SSH, terminal cục bộ, ghi chú Markdown và SFTP trong cùng một thẻ. Kết hợp các trang từ nhiều máy chủ và máy tính của bạn trong tối đa 16 ngăn.
@@ -73,7 +81,7 @@ Sắp xếp các kết nối đã lưu theo nhóm và nhập từ cấu hình SS
 
 Một phiên SSH. Thanh bên liệt kê công cụ có thể mở trên máy chủ này: terminal bổ sung, SFTP, IDE và chuyển tiếp cổng.
 
-![Terminal SSH với công cụ máy chủ ở thanh bên](../../docs/screenshots/terminal/SSHTERMINAL.png)
+![Terminal SSH với đầu ra có màu và các thao tác kết nối ở thanh bên](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### Tệp
 
@@ -91,7 +99,7 @@ Mở dự án từ xa và chỉnh sửa các tệp trong thẻ.
 
 OxideTerm liệt kê cổng đang lắng nghe trên máy chủ. Chuyển tiếp bằng một cú nhấp hoặc dùng chuyển tiếp nhanh cho công cụ như Jupyter.
 
-![Trang chuyển tiếp liệt kê cổng phát hiện trên máy chủ](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+![Trang chuyển tiếp cổng với tùy chọn nhanh và danh sách cổng đang lắng nghe trên máy chủ](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
 
 ### Máy tính từ xa
 

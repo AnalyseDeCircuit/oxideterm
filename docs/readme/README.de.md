@@ -57,6 +57,14 @@ Leerlaufspeicher vor und nach dem Wechsel von Tauri (1.x) zu nativem GPUI (2.0).
 
 ## Screenshots
 
+Die Screenshots zeigen Beispielverbindungen, Beispielwerte für lauschende Ports, Beispieldateien und Beispielinhalte im Editor.
+
+### Startseite
+
+Stellen Sie eine gespeicherte Verbindung wieder her, öffnen Sie ein lokales Terminal oder importieren Sie Verbindungen direkt von der Startseite.
+
+![OxideTerm-Startseite mit gespeicherten Verbindungen und Schnellaktionen](../../docs/screenshots/welcome.png)
+
 ### Gemischter Arbeitsbereich
 
 Ein SSH-Terminal, ein lokales Terminal, Markdown-Notizen und SFTP gemeinsam in einem Tab. Kombinieren Sie Seiten verschiedener Server und Ihres eigenen Rechners in bis zu 16 Bereichen.
@@ -73,7 +81,7 @@ Gespeicherte Verbindungen in Gruppen organisieren und aus der SSH-Konfiguration 
 
 Eine SSH-Sitzung. Die Seitenleiste zeigt die Werkzeuge dieses Servers: weitere Terminals, SFTP, IDE und Portweiterleitung.
 
-![SSH-Terminal mit Serverwerkzeugen in der Seitenleiste](../../docs/screenshots/terminal/SSHTERMINAL.png)
+![SSH-Terminal mit farbiger Ausgabe und Verbindungsaktionen in der Seitenleiste](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### Dateien
 
@@ -91,7 +99,7 @@ Remote-Projekt öffnen und Dateien in Tabs bearbeiten.
 
 OxideTerm zeigt die lauschenden Ports des Servers. Leiten Sie sie mit einem Klick weiter oder nutzen Sie eine Schnellweiterleitung für Werkzeuge wie Jupyter.
 
-![Portweiterleitung mit erkannten Serverports](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+![Portweiterleitung mit Schnellvorlagen und einer Liste lauschender Ports auf dem Server](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
 
 ### Remotedesktop
 

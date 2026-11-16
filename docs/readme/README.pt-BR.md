@@ -57,6 +57,14 @@ Memória em repouso antes e depois da migração de Tauri (1.x) para GPUI nativo
 
 ## Capturas de tela
 
+As capturas mostram exemplos de conexões, portas em escuta, arquivos e conteúdo do editor.
+
+### Tela inicial
+
+Reabra uma conexão salva, abra um terminal local ou importe conexões pela tela inicial.
+
+![Tela inicial do OxideTerm com conexões salvas e ações rápidas](../../docs/screenshots/welcome.png)
+
 ### Espaço de trabalho misto
 
 Um terminal SSH, um terminal local, notas Markdown e SFTP na mesma aba. Combine páginas de diferentes servidores e do seu computador em até 16 painéis.
@@ -73,7 +81,7 @@ Organize as conexões salvas em grupos e importe-as da configuração SSH ou de 
 
 Uma sessão SSH. A barra lateral mostra ferramentas deste servidor: mais terminais, SFTP, IDE e encaminhamento de portas.
 
-![Terminal SSH com ferramentas do servidor na barra lateral](../../docs/screenshots/terminal/SSHTERMINAL.png)
+![Terminal SSH com saída colorida e ações de conexão na barra lateral](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### Arquivos
 
@@ -91,7 +99,7 @@ Abra um projeto remoto e edite seus arquivos em abas.
 
 OxideTerm lista as portas em escuta no servidor. Encaminhe-as com um clique ou use um encaminhamento rápido para ferramentas como Jupyter.
 
-![Portas detectadas no servidor na página de encaminhamentos](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+![Tela de encaminhamento com opções rápidas e uma lista de portas em escuta no servidor](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
 
 ### Área de trabalho remota
 

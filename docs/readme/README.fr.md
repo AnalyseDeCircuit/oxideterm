@@ -57,6 +57,14 @@ Mémoire au repos avant et après le passage de Tauri (1.x) à GPUI natif (2.0).
 
 ## Captures d’écran
 
+Les connexions, les ports en écoute, les fichiers et le contenu de l’éditeur présentés dans les captures sont des exemples.
+
+### Écran d’accueil
+
+Rouvrez une connexion enregistrée, ouvrez un terminal local ou importez des connexions depuis l’écran d’accueil.
+
+![Écran d’accueil d’OxideTerm avec les connexions enregistrées et les actions rapides](../../docs/screenshots/welcome.png)
+
 ### Espace de travail mixte
 
 Un terminal SSH, un terminal local, des notes Markdown et SFTP réunis dans un même onglet. Combinez les pages de plusieurs serveurs et de votre machine dans un maximum de 16 volets.
@@ -73,7 +81,7 @@ Organisez les connexions enregistrées en groupes et importez-les depuis la conf
 
 Une session SSH. La barre latérale présente les outils disponibles sur ce serveur : terminaux supplémentaires, SFTP, IDE et redirection de ports.
 
-![Terminal SSH avec les outils du serveur dans la barre latérale](../../docs/screenshots/terminal/SSHTERMINAL.png)
+![Terminal SSH avec une sortie en couleur et des actions de connexion dans la barre latérale](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### Fichiers
 
@@ -91,7 +99,7 @@ Ouvrez un projet distant et modifiez ses fichiers dans des onglets.
 
 OxideTerm répertorie les ports en écoute sur le serveur. Redirigez-les en un clic ou utilisez une redirection rapide pour des outils comme Jupyter.
 
-![Page des redirections avec les ports détectés sur le serveur](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+![Écran de redirection avec des raccourcis et la liste des ports en écoute sur le serveur](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
 
 ### Bureau à distance
 

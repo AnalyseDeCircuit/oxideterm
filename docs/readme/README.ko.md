@@ -57,6 +57,14 @@ Tauri(1.x)에서 네이티브 GPUI(2.0)로 전환하기 전후의 유휴 메모�
 
 ## 스크린샷
 
+스크린샷에 표시된 연결, 수신 대기 포트, 파일, 편집기 내용은 모두 예시입니다.
+
+### 시작 화면
+
+시작 화면에서 저장된 연결에 다시 접속하거나, 로컬 터미널을 열거나, 연결을 가져올 수 있습니다.
+
+![저장된 연결과 빠른 작업을 보여 주는 OxideTerm 시작 화면](../../docs/screenshots/welcome.png)
+
 ### 혼합 작업 공간
 
 SSH 터미널, 로컬 터미널, Markdown 노트와 SFTP를 하나의 탭에 배치할 수 있습니다. 로컬 컴퓨터와 여러 서버의 페이지를 최대 16개 창으로 자유롭게 조합할 수 있습니다.
@@ -73,7 +81,7 @@ SSH 터미널, 로컬 터미널, Markdown 노트와 SFTP를 하나의 탭에 배
 
 SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, SFTP, IDE, 포트 포워딩을 열 수 있습니다.
 
-![사이드바에 서버 도구가 표시된 SSH 터미널](../../docs/screenshots/terminal/SSHTERMINAL.png)
+![컬러 출력과 사이드바의 연결 작업을 보여 주는 SSH 터미널](../../docs/screenshots/terminal/SSHTERMINAL.png)
 
 ### 파일
 
@@ -91,7 +99,7 @@ SSH 세션 화면입니다. 사이드바에서 이 서버의 추가 터미널, S
 
 서버에서 수신 중인 포트를 찾아 클릭 한 번으로 포워딩합니다. Jupyter 같은 도구에는 빠른 포워딩도 사용할 수 있습니다.
 
-![서버에서 감지한 포트가 표시된 포워딩 화면](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
+![빠른 포워딩과 서버의 수신 대기 포트 목록을 보여 주는 포트 포워딩 화면](../../docs/screenshots/PORTFORWARD/PORTFORWARD.png)
 
 ### 원격 데스크톱
 
