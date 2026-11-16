@@ -590,7 +590,12 @@ pub fn load_settings_from_path(path: &Path) -> Result<SettingsLoadResult> {
 
     let (raw, updated_at, should_persist) = match read_envelope(path) {
         Ok(Some((raw, updated_at))) => (raw, updated_at, true),
-        Ok(None) => (PersistedSettings::default().to_value(), now_ms(), true),
+        Ok(None) => {
+            let mut settings = PersistedSettings::default();
+            // Only a new profile starts in system mode; older files may omit the preference.
+            settings.appearance.follow_system_appearance = true;
+            (settings.to_value(), now_ms(), true)
+        }
         Err(err) => {
             recovered_from_corrupt_file = true;
             migration_warnings.push(format!("Recovered from unreadable settings file: {}", err));
@@ -794,6 +799,65 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
         assert_eq!(raw["version"], SETTINGS_SCHEMA_VERSION);
         assert!(raw.get("settings").is_some());
+    }
+
+    #[test]
+    fn new_profile_saves_system_theme_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(SETTINGS_FILENAME);
+        let store = SettingsStore::load_from_path(&path).unwrap();
+        let reloaded = SettingsStore::load_from_path(&path).unwrap();
+        for settings in [store.settings(), reloaded.settings()] {
+            let appearance = &settings.appearance;
+            assert_eq!(
+                appearance.active_scheme(false),
+                Some(crate::AppearanceScheme::Light)
+            );
+            assert_eq!(
+                appearance.active_scheme(true),
+                Some(crate::AppearanceScheme::Dark)
+            );
+            for themes in [&appearance.system_themes, &settings.terminal.system_themes] {
+                assert_eq!(
+                    (themes.light.as_str(), themes.dark.as_str()),
+                    ("code-light", "github-dark")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn existing_profile_keeps_saved_appearance_choices() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join(SETTINGS_FILENAME);
+        fs::write(
+            &path,
+            br#"{
+                "appearance": {
+                    "theme": "monokai",
+                    "systemThemes": {"light": "paper-oxide", "dark": "magnetite"}
+                },
+                "terminal": {
+                    "theme": "dracula",
+                    "systemThemes": {"light": "solarized-light", "dark": "tokyo-night"}
+                }
+            }"#,
+        )
+        .unwrap();
+        let store = SettingsStore::load_from_path(&path).unwrap();
+        let settings = store.settings();
+        assert_eq!(settings.appearance.active_scheme(true), None);
+        let stored = settings.to_value();
+        assert_eq!(
+            stored["appearance"]["systemThemes"],
+            json!({"light": "paper-oxide", "dark": "magnetite"})
+        );
+        assert_eq!(
+            stored["terminal"]["systemThemes"],
+            json!({"light": "solarized-light", "dark": "tokyo-night"})
+        );
+        assert_eq!(settings.appearance.theme, "monokai");
+        assert_eq!(settings.terminal.theme, "dracula");
     }
 
     #[test]

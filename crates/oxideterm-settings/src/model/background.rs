@@ -8,8 +8,8 @@ pub struct SystemThemeSettings {
 impl Default for SystemThemeSettings {
     fn default() -> Self {
         Self {
-            light: "paper-oxide".into(),
-            dark: "magnetite".into(),
+            light: "code-light".into(),
+            dark: "github-dark".into(),
         }
     }
 }

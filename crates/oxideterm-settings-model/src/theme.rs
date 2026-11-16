@@ -7,7 +7,7 @@
 //! GPUI rendering. The app keeps the modal layout while this module owns the
 //! JSON shape, color normalization, and editor value conversion.
 
-use oxideterm_settings::{AppearanceScheme, PersistedSettings};
+use oxideterm_settings::{AppearanceScheme, PersistedSettings, SystemThemeSettings};
 use oxideterm_theme::{AppUiColors, BUILT_IN_THEMES, TerminalTheme, ThemeTokens, theme_by_id};
 
 pub const CUSTOM_THEME_PREFIX: &str = "custom:";
@@ -464,6 +464,7 @@ pub fn delete_custom_theme_from_settings(
     fallback_theme_id: &str,
 ) {
     settings.custom_themes.remove(theme_id);
+    let defaults = SystemThemeSettings::default();
     for target in [ThemeTarget::Application, ThemeTarget::Terminal] {
         if target.selected_id(settings) == theme_id {
             target.apply(
@@ -475,10 +476,10 @@ pub fn delete_custom_theme_from_settings(
         }
         let system = target.system_themes_mut(settings);
         if system.light == theme_id {
-            system.light = "paper-oxide".into();
+            system.light = defaults.light.clone();
         }
         if system.dark == theme_id {
-            system.dark = "magnetite".into();
+            system.dark = defaults.dark.clone();
         }
     }
 }
@@ -1086,6 +1087,7 @@ mod tests {
     fn saving_a_dark_theme_draft_preserves_the_light_and_fixed_selections() {
         let mut settings = PersistedSettings::default();
         settings.terminal.theme = "monokai".into();
+        settings.terminal.system_themes.light = "paper-oxide".into();
         settings.appearance.follow_system_appearance = true;
         let mut editor =
             theme_editor_from_settings(&settings, ThemeTarget::Terminal, None, "Night".into());
