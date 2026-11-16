@@ -73,7 +73,6 @@
     "failedFetchStats": "Không thể lấy thống kê",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "Liệt kê bộ chuyển đổi BLE thất bại: {error}",
               "no_adapters": "Không có bộ chuyển đổi Bluetooth khả dụng",
               "adapter_open_failed": "Mở bộ chuyển đổi BLE thất bại: {error}",
               "device_enumeration_failed": "Liệt kê thiết bị BLE thất bại: {error}",

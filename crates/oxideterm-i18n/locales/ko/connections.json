@@ -73,7 +73,6 @@
     "failedFetchStats": "통계를 가져오지 못했습니다",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "BLE 어댑터 열거 실패: {error}",
               "no_adapters": "사용 가능한 Bluetooth 어댑터가 없습니다",
               "adapter_open_failed": "BLE 어댑터 열기 실패: {error}",
               "device_enumeration_failed": "BLE 장치 열거 실패: {error}",

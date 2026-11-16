@@ -73,7 +73,6 @@
     "failedFetchStats": "Failed to fetch stats",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "BLE adapter enumeration failed: {error}",
               "no_adapters": "no Bluetooth adapters available",
               "adapter_open_failed": "BLE adapter open failed: {error}",
               "device_enumeration_failed": "BLE device enumeration failed: {error}",

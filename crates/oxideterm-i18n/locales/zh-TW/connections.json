@@ -73,7 +73,6 @@
     "failedFetchStats": "取得統計資訊失敗",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "列舉藍牙介面卡失敗：{error}",
               "no_adapters": "沒有可用的藍牙介面卡",
               "adapter_open_failed": "開啟藍牙介面卡失敗：{error}",
               "device_enumeration_failed": "列舉藍牙裝置失敗：{error}",

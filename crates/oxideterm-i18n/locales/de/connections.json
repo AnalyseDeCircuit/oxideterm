@@ -73,7 +73,6 @@
     "failedFetchStats": "Statistiken konnten nicht abgerufen werden",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "BLE-Adapter-Aufzählung fehlgeschlagen: {error}",
               "no_adapters": "Keine Bluetooth-Adapter verfügbar",
               "adapter_open_failed": "Öffnen des BLE-Adapters fehlgeschlagen: {error}",
               "device_enumeration_failed": "BLE-Geräteaufzählung fehlgeschlagen: {error}",

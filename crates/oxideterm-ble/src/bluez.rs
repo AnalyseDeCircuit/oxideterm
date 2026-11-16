@@ -196,7 +196,7 @@ fn start_directed_discovery_blocking(
         if let Err(error) = check_cancelled(cancelled) {
             break Err(error);
         }
-        match find_device_path(&connection, device_mac) {
+        match find_device_path(&connection, &adapter_path, device_mac) {
             Ok(Some(_)) => break Ok(()),
             Ok(None) => {}
             // A rejected object-tree call is usually transient (bluetoothd
@@ -289,9 +289,16 @@ fn find_adapter_path(
 }
 
 /// Returns the object path of the `Device1` peer whose Address matches
-/// `device_mac`, if bluetoothd currently knows it.
+/// `device_mac`, if bluetoothd currently knows it under `adapter_path`.
+/// Objects under other controllers are ignored: bluetoothd keeps one device
+/// object per peer per controller, and a peer known only to another
+/// controller is not addressable through this one — counting it as "appeared"
+/// would let the recovery succeed while the caller's adapter-scoped resolve
+/// still finds nothing (btleplug filters device paths by controller the same
+/// way).
 fn find_device_path(
     connection: &SyncConnection,
+    adapter_path: &dbus::Path<'static>,
     device_mac: &str,
 ) -> Result<Option<dbus::Path<'static>>, String> {
     let message = Message::new_method_call(
@@ -305,9 +312,13 @@ fn find_device_path(
         .map_err(|error| dbus_error_text(&error))?;
     let objects: HashMap<dbus::Path<'static>, HashMap<String, PropMap>> =
         reply.read1().map_err(|error| error.to_string())?;
+    // Device paths live under their controller's path (`/org/bluez/hciN/dev_…`),
+    // so the adapter prefix with a trailing separator scopes the match.
+    let adapter_prefix = format!("{}/", adapter_path);
     Ok(objects.into_iter().find_map(|(path, interfaces)| {
         let properties = interfaces.get("org.bluez.Device1")?;
         let address = properties.get("Address")?.0.as_str()?;
-        address.eq_ignore_ascii_case(device_mac).then_some(path)
+        (path.starts_with(adapter_prefix.as_str()) && address.eq_ignore_ascii_case(device_mac))
+            .then_some(path)
     }))
 }

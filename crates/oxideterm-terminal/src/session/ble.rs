@@ -1136,7 +1136,8 @@ fn gatt_notification_is_unambiguous(
         .iter()
         .flat_map(|service| &service.characteristics)
         .filter(|entry| entry.uuid == characteristic)
-        .count() == 1
+        .count()
+        == 1
 }
 
 /// Validates the discovered GATT surface before issuing platform operations.
@@ -1289,14 +1290,10 @@ async fn execute_gatt_command(
         } => {
             let outcome = async {
                 let routes_before = routes.get(&characteristic_uuid).map_or(0, Vec::len);
-                let removed = routes
-                    .get_mut(&characteristic_uuid)
-                    .and_then(|entries| {
-                        let index = entries
-                            .iter()
-                            .position(|route| route.id == route_id)?;
-                        Some(entries.remove(index))
-                    });
+                let removed = routes.get_mut(&characteristic_uuid).and_then(|entries| {
+                    let index = entries.iter().position(|route| route.id == route_id)?;
+                    Some(entries.remove(index))
+                });
                 let now_empty = routes
                     .get(&characteristic_uuid)
                     .is_some_and(|entries| entries.is_empty());
@@ -1357,7 +1354,6 @@ pub enum BleResolveStage {
 #[derive(Clone, Debug)]
 pub enum BleResolveError {
     Cancelled,
-    AdapterEnumeration(String),
     NoAdapters,
     AdapterOpen(String),
     /// The adapter's discovery window could not be read (guard reuse path).
@@ -1395,9 +1391,6 @@ impl std::fmt::Display for BleResolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Cancelled => write!(f, "BLE connection cancelled"),
-            Self::AdapterEnumeration(error) => {
-                write!(f, "BLE adapter enumeration failed: {error}")
-            }
             Self::NoAdapters => write!(f, "no Bluetooth adapters available"),
             Self::AdapterOpen(error) => write!(f, "BLE adapter open failed: {error}"),
             Self::DeviceEnumeration(error) => {
@@ -1654,8 +1647,8 @@ pub async fn ble_resolve_profile_to_session(
             service_uuid: service_uuid.to_string(),
         })?;
 
-    // Step 0 — adapter selection. Reuse a supplied guard; otherwise pick by
-    // stored MAC preference or fall back to the first available adapter.
+    // Step 0 — adapter selection. Reuse a supplied guard; otherwise open the
+    // adapter whose controller address matches the stored MAC preference.
     let guard_supplied = guard.is_some();
     let (guard, adapter_index) = tokio::select! {
         biased;
@@ -1664,10 +1657,10 @@ pub async fn ble_resolve_profile_to_session(
             // A supplied guard wins even when the profile's adapter MAC
             // preference points elsewhere: the scan is already running on
             // the shared adapter, and the worker uses the guard's adapter
-            // instead of reopening by index. The 0 is a placeholder that is
-            // never read while a guard is handed over.
+            // instead of reopening by preference. The 0 is a placeholder that
+            // is never read while a guard is handed over.
             Some(existing) => (existing, 0usize),
-            None => open_adapter_for_profile(adapter_mac).await?,
+            None => (open_adapter_for_profile(adapter_mac).await?, 0usize),
         }) } => result?,
     };
 
@@ -2015,37 +2008,21 @@ fn match_ble_device<'a>(
     Ok(first)
 }
 
-/// Opens a [`oxideterm_ble::BleAdapterGuard`] for the profile, honoring the
-/// stored adapter MAC preference. Falls back to the first available adapter
-/// when the preference is absent or no adapter matches.
+/// Opens the profile's preferred adapter; falls back to the first adapter
+/// when the stored MAC is absent or no controller matches. All selection
+/// happens inside [`BleAdapterGuard::open`]'s single enumeration: matching a
+/// list position in one enumeration and opening by index in another would let
+/// BlueZ's unstable adapter order pair the stored MAC with a different
+/// controller.
 async fn open_adapter_for_profile(
     adapter_mac: Option<&str>,
-) -> Result<(oxideterm_ble::BleAdapterGuard, usize), BleResolveError> {
-    let infos = oxideterm_ble::ble_list_adapters()
+) -> Result<oxideterm_ble::BleAdapterGuard, BleResolveError> {
+    oxideterm_ble::BleAdapterGuard::open(adapter_mac)
         .await
-        .map_err(|error| BleResolveError::AdapterEnumeration(error.to_string()))?;
-    if infos.is_empty() {
-        return Err(BleResolveError::NoAdapters);
-    }
-
-    let index = if let Some(pref) = adapter_mac {
-        infos
-            .iter()
-            .position(|info| {
-                info.adapter_mac
-                    .as_deref()
-                    .map(|mac| mac.eq_ignore_ascii_case(pref))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(0)
-    } else {
-        0
-    };
-
-    let guard = oxideterm_ble::BleAdapterGuard::open(index)
-        .await
-        .map_err(|error| BleResolveError::AdapterOpen(error.to_string()))?;
-    Ok((guard, index))
+        .map_err(|error| match error {
+            oxideterm_ble::BleError::NoAdapters => BleResolveError::NoAdapters,
+            error => BleResolveError::AdapterOpen(error.to_string()),
+        })
 }
 
 async fn run_ble_worker(
@@ -2600,7 +2577,8 @@ mod ble_tests {
         assert_eq!(state.negotiated_mtu(), None);
         assert!(!state.connected());
         let read_char = characteristic(0x0020, btleplug::api::CharPropFlags::READ);
-        let services = std::collections::BTreeSet::from([gatt_btleplug_service(0x0010, &[read_char])]);
+        let services =
+            std::collections::BTreeSet::from([gatt_btleplug_service(0x0010, &[read_char])]);
         state.publish_services(&services);
         state.set_negotiated_mtu(185);
         state
@@ -2610,7 +2588,10 @@ mod ble_tests {
         assert_eq!(table.len(), 1);
         assert_eq!(table[0].uuid, uuid::Uuid::from_u128(0x0010));
         assert_eq!(table[0].characteristics.len(), 1);
-        assert_eq!(table[0].characteristics[0].uuid, uuid::Uuid::from_u128(0x0020));
+        assert_eq!(
+            table[0].characteristics[0].uuid,
+            uuid::Uuid::from_u128(0x0020)
+        );
         assert_eq!(
             table[0].characteristics[0].properties,
             BLE_GATT_PROPERTY_READ
@@ -2789,6 +2770,9 @@ mod ble_tests {
         dispatch_gatt_notification(&routes, uuid, b"second");
         dispatch_gatt_notification(&routes, uuid, b"third");
         assert_eq!(first_rx.recv().await.as_deref(), Some(b"second".as_slice()));
-        assert_eq!(second_rx.recv().await.as_deref(), Some(b"second".as_slice()));
+        assert_eq!(
+            second_rx.recv().await.as_deref(),
+            Some(b"second".as_slice())
+        );
     }
 }

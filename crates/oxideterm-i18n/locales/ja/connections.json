@@ -73,7 +73,6 @@
     "failedFetchStats": "統計情報の取得に失敗しました",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "BLEアダプターの列挙に失敗しました：{error}",
               "no_adapters": "利用可能なBluetoothアダプターがありません",
               "adapter_open_failed": "BLEアダプターのオープンに失敗しました：{error}",
               "device_enumeration_failed": "BLEデバイスの列挙に失敗しました：{error}",

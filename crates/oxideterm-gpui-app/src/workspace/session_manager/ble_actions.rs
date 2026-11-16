@@ -435,10 +435,6 @@ impl WorkspaceApp {
         use oxideterm_terminal::BleResolveError;
         match error {
             BleResolveError::Cancelled => self.i18n.t("connections.ble.resolve.cancelled"),
-            BleResolveError::AdapterEnumeration(error) => self.i18n.t_with(
-                "connections.ble.resolve.adapter_enumeration_failed",
-                &[("error", error)],
-            ),
             BleResolveError::NoAdapters => self.i18n.t("connections.ble.resolve.no_adapters"),
             BleResolveError::AdapterOpen(error) => self.i18n.t_with(
                 "connections.ble.resolve.adapter_open_failed",
