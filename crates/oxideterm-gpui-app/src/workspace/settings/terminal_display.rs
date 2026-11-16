@@ -25,7 +25,19 @@ impl WorkspaceApp {
                 .replace("{{font}}", &resolved.font.family)
         });
         let preview_line_height =
-            px(settings.terminal.font_size as f32 * settings.terminal.line_height as f32);
+            oxideterm_gpui_terminal::terminal_ui::terminal_line_height_for_font(
+                cx.text_system(),
+                &resolved.font,
+                px(settings.terminal.font_size as f32),
+                settings.terminal.line_height as f32,
+            );
+        let preview_letter_spacing =
+            oxideterm_gpui_terminal::terminal_ui::terminal_letter_spacing_for_font(
+                cx.text_system(),
+                &resolved.font,
+                px(settings.terminal.font_size as f32),
+                settings.terminal.character_spacing as f32,
+            );
         div()
             .w_full()
             .rounded(px(self.tokens.radii.md))
@@ -60,6 +72,9 @@ impl WorkspaceApp {
                     .flex_col()
                     .font(resolved.font)
                     .text_size(px(settings.terminal.font_size as f32))
+                    .when_some(preview_letter_spacing, |style, spacing| {
+                        style.letter_spacing(spacing)
+                    })
                     .text_color(rgb(self.tokens.ui.text))
                     .child(
                         div()

@@ -1259,6 +1259,7 @@ impl WorkspaceApp {
             font_ligatures: terminal.font_ligatures,
             font_size: terminal.font_size as f32,
             font_weight: terminal.font_weight as f32,
+            character_spacing: terminal.character_spacing as f32,
             line_height: terminal.line_height as f32,
             padding_horizontal: terminal.padding_horizontal as f32,
             padding_vertical: terminal.padding_vertical as f32,

@@ -168,7 +168,7 @@ impl WorkspaceApp {
                         .line_height
                         .map(compact_decimal)
                         .unwrap_or_default(),
-                    compact_decimal(settings.terminal.line_height),
+                    compact_decimal(settings.terminal.resolved_ide_line_height()),
                     None,
                     cx,
                 ),

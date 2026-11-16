@@ -125,6 +125,55 @@ pub(crate) struct TerminalElementLayout {
     cached_rows: Vec<CachedTerminalRowLayout>,
 }
 
+impl TerminalElementLayout {
+    fn glyph_edge_exclusions(
+        &self,
+        rows: usize,
+        cols: usize,
+        command_mark_decorations: bool,
+    ) -> Vec<Vec<bool>> {
+        // Mark cells whose backdrop differs from the pane's solid fill. Keep this
+        // outside the cached text layout so selection and search don't reshape text.
+        let mut exclusions = vec![Vec::new(); rows];
+        let mut exclude = |row: usize, col: usize, cells: usize| {
+            if let Some(excluded) = exclusions.get_mut(row) {
+                excluded.resize(cols, false);
+                excluded[col.min(cols)..col.saturating_add(cells).min(cols)].fill(true);
+            }
+        };
+        for rect in self
+            .backgrounds
+            .iter()
+            .chain(&self.highlight_backgrounds)
+            .chain(&self.selection_matches)
+            .chain(&self.search_matches)
+            .chain(&self.selections)
+        {
+            exclude(rect.row, rect.col, rect.cells);
+        }
+        for cached_row in &self.cached_rows {
+            for rect in cached_row
+                .layout
+                .backgrounds
+                .iter()
+                .chain(&cached_row.layout.selections)
+            {
+                exclude(cached_row.row, rect.col, rect.cells);
+            }
+        }
+        if command_mark_decorations {
+            for overlay in &self.command_mark_overlays {
+                if overlay.selected || overlay.hovered {
+                    for row in overlay.start_row..=overlay.end_row {
+                        exclude(row, 0, cols);
+                    }
+                }
+            }
+        }
+        exclusions
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct TerminalRect {
     pub(crate) row: usize,
@@ -2557,11 +2606,25 @@ impl Element for TerminalElement {
                         );
                     }
                 }
+                let glyph_edge_exclusions = if cfg!(target_os = "macos")
+                    && !self.transparent_background
+                    && layout.images.is_empty()
+                    && terminal_background(&self.theme).l >= 0.8
+                {
+                    Some(layout.glyph_edge_exclusions(
+                        self.snapshot.lines.len(),
+                        self.snapshot.cols,
+                        self.command_mark_decorations,
+                    ))
+                } else {
+                    None
+                };
                 paint_text_runs_by_row(
                     &layout.text_runs,
                     origin,
                     self.snapshot.cols,
                     &self.metrics,
+                    glyph_edge_exclusions.as_deref(),
                     window,
                     cx,
                 );
@@ -2572,6 +2635,7 @@ impl Element for TerminalElement {
                         origin,
                         self.snapshot.cols,
                         &self.metrics,
+                        glyph_edge_exclusions.as_deref(),
                         window,
                         cx,
                     );
@@ -2701,7 +2765,10 @@ mod cache_tests {
             ),
             font_size: px(14.0),
             cell_width: px(8.0),
+            letter_spacing: None,
             line_height: px(10.0),
+            primary_ascent: px(7.5),
+            primary_descent: px(2.5),
         }
     }
 
@@ -3105,6 +3172,30 @@ mod cache_tests {
                 .collect::<String>(),
             "cached"
         );
+    }
+
+    #[test]
+    fn glyph_edge_enhancement_excludes_selection_in_both_paint_layouts() {
+        use crate::terminal_view::selection::{TerminalGridPoint, TerminalSelectionMode};
+
+        let mut view = element(snapshot(0, vec![row_with_text_and_cursor(0, "abcde", 4)]));
+        view.snapshot.cols = 5;
+        view.snapshot.cursor_shape = TerminalCursorShape::Hidden;
+        view.selection = Some(TerminalSelection {
+            anchor: TerminalGridPoint { line: 0, col: 1 },
+            head: TerminalGridPoint { line: 0, col: 2 },
+            mode: TerminalSelectionMode::Simple,
+        });
+        let mut cache = TerminalLayoutCache::default();
+        for layout in [
+            view.layout_for_rows(0..1, None),
+            view.layout_for_rows(0..1, Some(&mut cache)),
+        ] {
+            assert_eq!(
+                layout.glyph_edge_exclusions(1, 5, false),
+                vec![vec![false, true, true, false, false]]
+            );
+        }
     }
 
     #[test]

@@ -390,6 +390,8 @@
       "font_weight_hint": "100～900を入力します。フォントによっては最も近い利用可能な太さが使われます。",
       "font_ligatures": "フォントリガチャ",
       "font_ligatures_hint": "選択したフォントが対応している場合、プログラミング用リガチャを使います。",
+      "character_spacing": "文字間隔",
+      "character_spacing_hint": "文字の横方向の間隔倍率",
       "line_height": "行の高さ",
       "line_height_hint": "行間のスペース",
       "padding_horizontal": "左右の余白（px）",

@@ -1286,6 +1286,8 @@ pub struct Window {
     rendered_resource_generation: u64,
     text_system: Rc<WindowTextSystem>,
     text_rendering_mode: Rc<Cell<TextRenderingMode>>,
+    #[cfg(target_os = "macos")]
+    enhance_glyph_edges: bool,
     rem_size: Pixels,
     corner_shape: CornerShape,
     /// The stack of override values for the window's rem size.
@@ -2490,6 +2492,8 @@ impl Window {
             rendered_resource_generation,
             text_system,
             text_rendering_mode: cx.text_rendering_mode.clone(),
+            #[cfg(target_os = "macos")]
+            enhance_glyph_edges: false,
             rem_size: px(16.),
             corner_shape: CornerShape::default(),
             rem_size_override_stack: SmallVec::new(),
@@ -4728,6 +4732,37 @@ impl Window {
         result
     }
 
+    /// Enables macOS edge coverage enhancement for dark glyphs painted in this scope.
+    /// Callers should opt in only when painting text over a known opaque light background.
+    pub fn with_enhanced_glyph_edges<R>(
+        &mut self,
+        enabled: bool,
+        paint: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        #[cfg(target_os = "macos")]
+        {
+            self.invalidator.debug_assert_paint();
+            let previous = self.enhance_glyph_edges;
+            self.enhance_glyph_edges = enabled && self.element_opacity() == 1.0;
+            let result = paint(self);
+            self.enhance_glyph_edges = previous;
+            result
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            let _ = enabled;
+            paint(self)
+        }
+    }
+
+    #[inline]
+    fn enhance_glyph_edges(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        return self.enhance_glyph_edges;
+        #[cfg(not(target_os = "macos"))]
+        false
+    }
+
     /// Limits the composed opacity of palette surface fills, without fading text,
     /// images, accent controls, or borders. The scope belongs to the painted subtree.
     pub fn with_surface_tint_limit<R>(
@@ -5645,9 +5680,14 @@ impl Window {
 
         let content_mask = self.snapped_content_mask();
         let opacity = self.element_opacity();
-        self.next_frame
-            .scene
-            .insert_prepared_glyph_batch(batch, origin, content_mask, opacity);
+        let enhance_glyph_edges = self.enhance_glyph_edges();
+        self.next_frame.scene.insert_prepared_glyph_batch(
+            batch,
+            origin,
+            content_mask,
+            opacity,
+            enhance_glyph_edges,
+        );
     }
 
     /// Paints a monochrome (non-emoji) glyph into the scene for the next frame at the current z-index.
@@ -5722,9 +5762,10 @@ impl Window {
                     transformation: TransformationMatrix::unit(),
                 });
             } else {
+                let enhance_glyph_edges = self.enhance_glyph_edges().into();
                 self.next_frame.scene.insert_primitive(MonochromeSprite {
                     order: 0,
-                    pad: 0,
+                    enhance_glyph_edges,
                     bounds,
                     content_mask,
                     color: color.opacity(element_opacity).into(),
@@ -5875,7 +5916,7 @@ impl Window {
 
         self.next_frame.scene.insert_primitive(MonochromeSprite {
             order: 0,
-            pad: 0,
+            enhance_glyph_edges: false.into(),
             bounds: final_bounds,
             content_mask,
             color: color.opacity(element_opacity).into(),

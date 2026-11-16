@@ -390,6 +390,8 @@
       "font_weight_hint": "Wert von 100–900. Die Schrift verwendet gegebenenfalls die nächste verfügbare Stärke.",
       "font_ligatures": "Schriftligaturen",
       "font_ligatures_hint": "Programmierligaturen verwenden, wenn die ausgewählte Schrift sie unterstützt.",
+      "character_spacing": "Zeichenabstand",
+      "character_spacing_hint": "Horizontaler Abstandsfaktor zwischen Zeichen",
       "line_height": "Zeilenhöhe",
       "line_height_hint": "Abstand zwischen Zeilen",
       "padding_horizontal": "Horizontaler Innenabstand (px)",

@@ -626,6 +626,7 @@ struct MonochromeSpriteVertexOutput {
   float2 tile_position;
   float4 color [[flat]];
   float4 clip_distance;
+  float coverage_exponent [[flat]];
 };
 
 struct MonochromeSpriteFragmentInput {
@@ -633,6 +634,7 @@ struct MonochromeSpriteFragmentInput {
   float2 tile_position;
   float4 color [[flat]];
   float4 clip_distance;
+  float coverage_exponent [[flat]];
 };
 
 vertex MonochromeSpriteVertexOutput monochrome_sprite_vertex(
@@ -651,11 +653,17 @@ vertex MonochromeSpriteVertexOutput monochrome_sprite_vertex(
                                                  sprite.content_mask.bounds, sprite.transformation);
   float2 tile_position = to_tile_position(unit_vertex, sprite.tile, atlas_size);
   float4 color = hsla_to_rgba(sprite.color);
+  float coverage_exponent = 1.0;
+  if (sprite.enhance_glyph_edges && color.a == 1.0) {
+    float luma = dot(color.rgb, float3(0.2126, 0.7152, 0.0722));
+    coverage_exponent = mix(0.84, 1.0, smoothstep(0.0, 0.2, luma));
+  }
   return MonochromeSpriteVertexOutput{
       device_position,
       tile_position,
       color,
-      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w}};
+      {clip_distance.x, clip_distance.y, clip_distance.z, clip_distance.w},
+      coverage_exponent};
 }
 
 fragment float4 monochrome_sprite_fragment(
@@ -671,7 +679,12 @@ fragment float4 monochrome_sprite_fragment(
   float4 sample =
       atlas_texture.sample(atlas_texture_sampler, input.tile_position);
   float4 color = input.color;
-  color.a *= sample.a;
+  // Keep text opacity independent of the antialiasing coverage adjustment.
+  float coverage = sample.a;
+  if (input.coverage_exponent < 1.0) {
+    coverage = pow(coverage, input.coverage_exponent);
+  }
+  color.a *= coverage;
   return color;
 }
 

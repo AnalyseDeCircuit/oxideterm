@@ -1222,7 +1222,7 @@ impl WorkspaceApp {
             editor_line_height: settings
                 .ide
                 .line_height
-                .unwrap_or(settings.terminal.line_height)
+                .unwrap_or_else(|| settings.terminal.resolved_ide_line_height())
                 .clamp(0.8, 3.0) as f32,
             word_wrap: settings.ide.word_wrap,
             background_active: self.background_surface_active("ide"),

@@ -19,7 +19,7 @@ use crate::terminal_view::element::{
 
 const POWERLINE_SEAM_OVERLAP_DEVICE_PIXELS: f32 = 0.5;
 const POWERLINE_THIN_STROKE_DEVICE_PIXELS: f32 = 1.4;
-const POWERLINE_HALF_CIRCLE_CONTROL_FACTOR: f32 = 4.0 / 3.0;
+const POWERLINE_HALF_CIRCLE_KAPPA: f32 = 0.552_284_8;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct PowerlinePaintMetrics {
@@ -42,9 +42,12 @@ impl PowerlinePaintMetrics {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct PowerlineHalfCircleCurve {
     pub(crate) start: Point<Pixels>,
+    pub(crate) tip: Point<Pixels>,
     pub(crate) end: Point<Pixels>,
-    pub(crate) start_control: Point<Pixels>,
-    pub(crate) end_control: Point<Pixels>,
+    pub(crate) upper_flat_control: Point<Pixels>,
+    pub(crate) upper_tip_control: Point<Pixels>,
+    pub(crate) lower_tip_control: Point<Pixels>,
+    pub(crate) lower_flat_control: Point<Pixels>,
 }
 
 pub(crate) fn paint_terminal_rect(
@@ -84,6 +87,44 @@ pub(crate) fn paint_terminal_row_rect(
     );
 }
 
+fn pixel_snap_bounds(bounds: Bounds<Pixels>, window: &Window) -> Bounds<Pixels> {
+    Bounds::from_corners(
+        window.pixel_snap_point(bounds.origin),
+        window.pixel_snap_point(point(bounds.right(), bounds.bottom())),
+    )
+}
+
+fn device_aligned_stroke(logical_px: f32, scale_factor: f32) -> Pixels {
+    let scale = scale_factor.max(1.0);
+    px((logical_px * scale).round().max(1.0) / scale)
+}
+
+fn paint_cell_outline(
+    bounds: Bounds<Pixels>,
+    stroke: Pixels,
+    color: gpui::Hsla,
+    window: &mut Window,
+) {
+    let width = bounds.size.width;
+    let height = bounds.size.height;
+    let stroke_x = stroke.min(width);
+    let stroke_y = stroke.min(height);
+    for edge in [
+        Bounds::new(bounds.origin, size(width, stroke_y)),
+        Bounds::new(
+            point(bounds.left(), (bounds.bottom() - stroke_y).max(bounds.top())),
+            size(width, stroke_y),
+        ),
+        Bounds::new(bounds.origin, size(stroke_x, height)),
+        Bounds::new(
+            point((bounds.right() - stroke_x).max(bounds.left()), bounds.top()),
+            size(stroke_x, height),
+        ),
+    ] {
+        window.paint_quad(fill(edge, color));
+    }
+}
+
 fn paint_terminal_rect_at(
     row: usize,
     col: usize,
@@ -94,22 +135,23 @@ fn paint_terminal_rect_at(
     metrics: &TerminalMetrics,
     window: &mut Window,
 ) {
-    let bounds = Bounds::new(
-        origin
-            + point(
-                px(col as f32 * metrics.cell_width_f32()),
-                px(row as f32 * metrics.line_height_f32()),
+    // Snap all cell background edges consistently so normal quads and Powerline
+    // cutouts meet on the same device pixels without fractional seams.
+    let bounds = pixel_snap_bounds(
+        Bounds::new(
+            origin
+                + point(
+                    px(col as f32 * metrics.cell_width_f32()),
+                    px(row as f32 * metrics.line_height_f32()),
+                ),
+            size(
+                px(cells as f32 * metrics.cell_width_f32()),
+                metrics.line_height,
             ),
-        size(
-            px(cells as f32 * metrics.cell_width_f32()),
-            metrics.line_height,
         ),
+        window,
     );
     if let Some(ch) = powerline_cutout {
-        let bounds = Bounds::from_corners(
-            window.pixel_snap_point(bounds.origin),
-            window.pixel_snap_point(point(bounds.right(), bounds.bottom())),
-        );
         if let Some(path) = powerline_background_path(ch, bounds) {
             window.paint_path(path, color);
         }
@@ -118,19 +160,36 @@ fn paint_terminal_rect_at(
     }
 }
 
+fn underline_top_offset(metrics: &TerminalMetrics, thickness: Pixels) -> Pixels {
+    let max_top = (metrics.line_height - thickness).max(px(0.0));
+    if metrics.primary_ascent + metrics.primary_descent <= px(0.0) {
+        return max_top;
+    }
+    gpui::underline_y_offset(
+        metrics.line_height,
+        metrics.primary_ascent,
+        metrics.primary_descent,
+    )
+    .clamp(px(0.0), max_top)
+}
+
 pub(crate) fn paint_terminal_underline(
     rect: &TerminalRect,
     origin: gpui::Point<Pixels>,
     metrics: &TerminalMetrics,
     window: &mut Window,
 ) {
-    let bounds = Bounds::new(
-        origin
-            + point(
-                px(rect.col as f32 * metrics.cell_width_f32()),
-                px((rect.row + 1) as f32 * metrics.line_height_f32() - 2.0),
-            ),
-        size(px(rect.cells as f32 * metrics.cell_width_f32()), px(2.0)),
+    let thickness = device_aligned_stroke(
+        (f32::from(metrics.font_size) / 14.0).clamp(1.0, 2.0),
+        window.scale_factor(),
+    );
+    let y = px(rect.row as f32 * metrics.line_height_f32()) + underline_top_offset(metrics, thickness);
+    let bounds = pixel_snap_bounds(
+        Bounds::new(
+            origin + point(px(rect.col as f32 * metrics.cell_width_f32()), y),
+            size(px(rect.cells as f32 * metrics.cell_width_f32()), thickness),
+        ),
+        window,
     );
     window.paint_quad(fill(bounds, rect.color));
 }
@@ -141,24 +200,22 @@ pub(crate) fn paint_terminal_outline(
     metrics: &TerminalMetrics,
     window: &mut Window,
 ) {
-    let x = rect.col as f32 * metrics.cell_width_f32();
-    let y = rect.row as f32 * metrics.line_height_f32();
-    let width = rect.cells as f32 * metrics.cell_width_f32();
-    let height = metrics.line_height_f32();
-    for bounds in [
-        Bounds::new(origin + point(px(x), px(y)), size(px(width), px(1.0))),
+    let bounds = pixel_snap_bounds(
         Bounds::new(
-            origin + point(px(x), px(y + height - 1.0)),
-            size(px(width), px(1.0)),
+            origin
+                + point(
+                    px(rect.col as f32 * metrics.cell_width_f32()),
+                    px(rect.row as f32 * metrics.line_height_f32()),
+                ),
+            size(
+                px(rect.cells as f32 * metrics.cell_width_f32()),
+                metrics.line_height,
+            ),
         ),
-        Bounds::new(origin + point(px(x), px(y)), size(px(1.0), px(height))),
-        Bounds::new(
-            origin + point(px(x + width - 1.0), px(y)),
-            size(px(1.0), px(height)),
-        ),
-    ] {
-        window.paint_quad(fill(bounds, rect.color));
-    }
+        window,
+    );
+    let stroke = device_aligned_stroke(1.0, window.scale_factor());
+    paint_cell_outline(bounds, stroke, rect.color, window);
 }
 
 pub(crate) fn paint_command_mark_overlay(
@@ -647,7 +704,7 @@ fn paint_text_run_parts(
         return;
     }
 
-    let position = origin
+    let mut position = origin
         + point(
             px(run.col as f32 * metrics.cell_width_f32()),
             px(run.row as f32 * metrics.line_height_f32()),
@@ -663,6 +720,13 @@ fn paint_text_run_parts(
                 Some(metrics.cell_width),
             )
         });
+        position.y = aligned_run_position_y(
+            position.y,
+            metrics.primary_ascent,
+            metrics.primary_descent,
+            layout.ascent,
+            layout.descent,
+        );
         let decoration = DecorationRun {
             len: run.style.len as u32,
             color: run.style.color,
@@ -699,6 +763,13 @@ fn paint_text_run_parts(
         std::slice::from_ref(run.style),
         Some(metrics.cell_width),
     );
+    position.y = aligned_run_position_y(
+        position.y,
+        metrics.primary_ascent,
+        metrics.primary_descent,
+        shaped.ascent,
+        shaped.descent,
+    );
     let _ = shaped.paint(
         position,
         metrics.line_height,
@@ -718,9 +789,9 @@ type CellDrawingCache =
     super::RecentCache<(char, u32, u32, u32), std::sync::Arc<CachedCellDrawing>>;
 
 thread_local! {
-    // Four recent physical sizes for all 160 characters, shared by same-thread panes.
+    // Holds all 160 box/block and 255 active Braille characters across recent scales.
     static CELL_DRAWINGS: std::cell::RefCell<CellDrawingCache> =
-        std::cell::RefCell::new(CellDrawingCache::new(640));
+        std::cell::RefCell::new(CellDrawingCache::new(1024));
 }
 
 fn paint_cell_drawing_run(
@@ -741,6 +812,9 @@ fn paint_cell_drawing_run(
     // with differently rounded edges still join with the same line thickness.
     let stroke = (metrics.cell_width.as_f32() * scale / 8.0).round().max(1.0) as u32;
     for (column, ch) in run.text.chars().enumerate() {
+        if ch == '\u{2800}' {
+            continue;
+        }
         let raw = Bounds::new(
             origin
                 + point(
@@ -789,6 +863,7 @@ pub(crate) fn paint_text_runs_by_row(
     origin: gpui::Point<Pixels>,
     terminal_cols: usize,
     metrics: &TerminalMetrics,
+    glyph_edge_exclusions: Option<&[Vec<bool>]>,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -805,7 +880,11 @@ pub(crate) fn paint_text_runs_by_row(
         // One row-scoped layer still avoids a layer pair for every adjacent style run.
         window.paint_layer(row_bounds, |window| {
             for run in row_runs {
-                paint_text_run_with_layer(run, origin, metrics, false, window, cx);
+                let enhance =
+                    enhance_run_glyph_edges(glyph_edge_exclusions, row, run.col, run.cells);
+                window.with_enhanced_glyph_edges(enhance, |window| {
+                    paint_text_run_with_layer(run, origin, metrics, false, window, cx);
+                });
             }
         });
     }
@@ -817,6 +896,7 @@ pub(crate) fn paint_cached_text_runs_for_row(
     origin: gpui::Point<Pixels>,
     terminal_cols: usize,
     metrics: &TerminalMetrics,
+    glyph_edge_exclusions: Option<&[Vec<bool>]>,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -832,23 +912,40 @@ pub(crate) fn paint_cached_text_runs_for_row(
     );
     window.paint_layer(row_bounds, |window| {
         for run in runs {
-            paint_text_run_parts(
-                TerminalPaintRun {
-                    row,
-                    col: run.col,
-                    text: &run.text,
-                    cells: run.cells,
-                    style: &run.style,
-                    cache: Some(&run.cache),
-                },
-                origin,
-                metrics,
-                false,
-                window,
-                cx,
-            );
+            let enhance = enhance_run_glyph_edges(glyph_edge_exclusions, row, run.col, run.cells);
+            window.with_enhanced_glyph_edges(enhance, |window| {
+                paint_text_run_parts(
+                    TerminalPaintRun {
+                        row,
+                        col: run.col,
+                        text: &run.text,
+                        cells: run.cells,
+                        style: &run.style,
+                        cache: Some(&run.cache),
+                    },
+                    origin,
+                    metrics,
+                    false,
+                    window,
+                    cx,
+                );
+            });
         }
     });
+}
+
+fn enhance_run_glyph_edges(
+    exclusions: Option<&[Vec<bool>]>,
+    row: usize,
+    col: usize,
+    cells: usize,
+) -> bool {
+    exclusions
+        .and_then(|rows| rows.get(row))
+        .is_some_and(|excluded| {
+            let end = col.saturating_add(cells).min(excluded.len());
+            !excluded[col.min(end)..end].contains(&true)
+        })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -874,29 +971,34 @@ pub(crate) fn paint_grid_text_run(
         );
     }
     for segment in ghost_text_grid_segments(&run.text) {
-        let position = origin
+        let mut position = origin
             + point(
                 px((run.col + segment.col_offset) as f32 * metrics.cell_width_f32()),
                 px(run.row as f32 * metrics.line_height_f32()),
             );
         let mut style = run.style.clone();
         style.len = segment.text.len();
-        let _ = window
-            .text_system()
-            .shape_line(
-                SharedString::from(segment.text),
-                metrics.font_size,
-                &[style],
-                Some(px(segment.cell_stride as f32 * metrics.cell_width_f32())),
-            )
-            .paint(
-                position,
-                metrics.line_height,
-                TextAlign::Left,
-                None,
-                window,
-                cx,
-            );
+        let shaped = window.text_system().shape_line(
+            SharedString::from(segment.text),
+            metrics.font_size,
+            &[style],
+            Some(px(segment.cell_stride as f32 * metrics.cell_width_f32())),
+        );
+        position.y = aligned_run_position_y(
+            position.y,
+            metrics.primary_ascent,
+            metrics.primary_descent,
+            shaped.ascent,
+            shaped.descent,
+        );
+        let _ = shaped.paint(
+            position,
+            metrics.line_height,
+            TextAlign::Left,
+            None,
+            window,
+            cx,
+        );
     }
 }
 
@@ -1027,7 +1129,7 @@ fn paint_powerline_separators(
                 let mut builder = PathBuilder::fill();
                 builder.move_to(curve.start);
                 builder.line_to(curve.end);
-                builder.cubic_bezier_to(curve.start, curve.end_control, curve.start_control);
+                push_half_circle_arc(&mut builder, &curve, true);
                 builder.close();
                 if let Ok(path) = builder.build() {
                     window.paint_path(path, run.style.color);
@@ -1039,7 +1141,7 @@ fn paint_powerline_separators(
                 };
                 let mut builder = PathBuilder::stroke(paint_metrics.thin_stroke_width);
                 builder.move_to(curve.start);
-                builder.cubic_bezier_to(curve.end, curve.start_control, curve.end_control);
+                push_half_circle_arc(&mut builder, &curve, false);
                 if let Ok(path) = builder.build() {
                     window.paint_path(path, run.style.color);
                 }
@@ -1048,6 +1150,51 @@ fn paint_powerline_separators(
     }
 
     true
+}
+
+fn aligned_run_position_y(
+    position_y: Pixels,
+    primary_ascent: Pixels,
+    primary_descent: Pixels,
+    layout_ascent: Pixels,
+    layout_descent: Pixels,
+) -> Pixels {
+    // GPUI centers each shaped run with its own max ascent/descent; cancel the
+    // delta so fallback symbols (e.g., prompt icons or CJK) share one row baseline.
+    if primary_ascent + primary_descent <= px(0.0) {
+        return position_y;
+    }
+    position_y + ((primary_ascent - primary_descent) - (layout_ascent - layout_descent)) * 0.5
+}
+
+fn push_half_circle_arc(
+    builder: &mut PathBuilder,
+    curve: &PowerlineHalfCircleCurve,
+    reverse: bool,
+) {
+    if reverse {
+        builder.cubic_bezier_to(
+            curve.tip,
+            curve.lower_flat_control,
+            curve.lower_tip_control,
+        );
+        builder.cubic_bezier_to(
+            curve.start,
+            curve.upper_tip_control,
+            curve.upper_flat_control,
+        );
+    } else {
+        builder.cubic_bezier_to(
+            curve.tip,
+            curve.upper_flat_control,
+            curve.upper_tip_control,
+        );
+        builder.cubic_bezier_to(
+            curve.end,
+            curve.lower_tip_control,
+            curve.lower_flat_control,
+        );
+    }
 }
 
 fn powerline_background_path(ch: char, bounds: Bounds<Pixels>) -> Option<gpui::Path<Pixels>> {
@@ -1077,7 +1224,7 @@ fn powerline_background_path(ch: char, bounds: Bounds<Pixels>) -> Option<gpui::P
             builder.line_to(point(outer_x, curve.start.y));
             builder.line_to(point(outer_x, curve.end.y));
             builder.line_to(curve.end);
-            builder.cubic_bezier_to(curve.start, curve.end_control, curve.start_control);
+            push_half_circle_arc(&mut builder, &curve, true);
             builder.close();
         }
     }
@@ -1123,6 +1270,80 @@ mod powerline_background_tests {
             }
         }
     }
+
+    #[test]
+    fn aligned_run_position_y_keeps_fallback_runs_on_primary_baseline() {
+        let primary_ascent = px(14.28);
+        let primary_descent = px(4.20);
+        let line_height = px(16.63);
+        let origin_y = px(20.0);
+
+        let baseline_from = |pos_y: Pixels, ascent: Pixels, descent: Pixels| {
+            pos_y + (line_height - ascent - descent) * 0.5 + ascent
+        };
+
+        let adjusted_y = aligned_run_position_y(
+            origin_y,
+            primary_ascent,
+            primary_descent,
+            px(15.50),
+            px(6.10),
+        );
+        let primary_baseline = baseline_from(origin_y, primary_ascent, primary_descent);
+        let adjusted_baseline = baseline_from(adjusted_y, px(15.50), px(6.10));
+
+        assert!((f32::from(adjusted_baseline) - f32::from(primary_baseline)).abs() < 0.001);
+    }
+
+    #[test]
+    fn device_aligned_stroke_snaps_to_physical_pixels() {
+        for (logical, scale, expected) in [
+            (1.0, 1.0, 1.0),
+            (1.0, 1.25, 0.8),
+            (1.0, 1.5, 2.0 / 1.5),
+            (2.0, 1.25, 2.4),
+            (1.0, 2.0, 1.0),
+        ] {
+            let snapped = f32::from(device_aligned_stroke(logical, scale));
+            assert!((snapped - expected).abs() < 0.001);
+            let device_px = snapped * scale;
+            assert!((device_px - device_px.round()).abs() < 0.001);
+        }
+    }
+
+    #[test]
+    fn underline_top_offset_tracks_primary_font_baseline_inside_cell() {
+        let mut metrics = TerminalMetrics {
+            font: terminal_font_with_family_and_cjk(
+                TERMINAL_FONT,
+                None,
+                TERMINAL_FONT_LIGATURES,
+                TERMINAL_FONT_WEIGHT,
+            ),
+            font_size: px(14.0),
+            cell_width: px(8.4),
+            letter_spacing: None,
+            line_height: px(18.48),
+            primary_ascent: px(14.28),
+            primary_descent: px(4.20),
+        };
+        let thickness = px(1.0);
+        let expected = gpui::underline_y_offset(
+            metrics.line_height,
+            metrics.primary_ascent,
+            metrics.primary_descent,
+        );
+        assert_eq!(underline_top_offset(&metrics, thickness), expected);
+
+        // Compact line heights clamp the underline inside the row instead of bleeding into row+1.
+        metrics.line_height = px(16.63);
+        let max_top = metrics.line_height - thickness;
+        assert_eq!(underline_top_offset(&metrics, thickness), max_top);
+
+        metrics.primary_ascent = px(0.0);
+        metrics.primary_descent = px(0.0);
+        assert_eq!(underline_top_offset(&metrics, thickness), max_top);
+    }
 }
 
 pub(crate) fn powerline_separator_points(
@@ -1155,17 +1376,21 @@ pub(crate) fn powerline_half_circle_curve(
     }
 
     let extents = powerline_shape_extents(bounds, separator.direction, separator.weight, metrics);
-    let control_x =
-        extents.flat_x + (extents.tip_x - extents.flat_x) * POWERLINE_HALF_CIRCLE_CONTROL_FACTOR;
+    let rx = extents.tip_x - extents.flat_x;
+    let ry = (extents.bottom - extents.top) * 0.5;
+    let cx = extents.flat_x + rx * POWERLINE_HALF_CIRCLE_KAPPA;
+    let cy_offset = ry * POWERLINE_HALF_CIRCLE_KAPPA;
 
-    // A single cubic reaches the cell edge at its midpoint only when the controls are 4/3 of
-    // the flat-edge-to-tip distance away. Using the tip itself as the controls makes a 3/4-width
-    // curve, which is the narrow cap reported in issue #339.
+    // Two kappa quarter-ellipse segments avoid the flat horizontal top/bottom
+    // shelf produced by a single cubic curve across narrow terminal cells.
     Some(PowerlineHalfCircleCurve {
         start: point(px(extents.flat_x), px(extents.top)),
+        tip: point(px(extents.tip_x), px(extents.middle_y)),
         end: point(px(extents.flat_x), px(extents.bottom)),
-        start_control: point(px(control_x), px(extents.top)),
-        end_control: point(px(control_x), px(extents.bottom)),
+        upper_flat_control: point(px(cx), px(extents.top)),
+        upper_tip_control: point(px(extents.tip_x), px(extents.middle_y - cy_offset)),
+        lower_tip_control: point(px(extents.tip_x), px(extents.middle_y + cy_offset)),
+        lower_flat_control: point(px(cx), px(extents.bottom)),
     })
 }
 
@@ -1230,54 +1455,40 @@ pub(crate) fn paint_cursor(
 ) {
     let cell_width = metrics.cell_width_f32();
     let line_height = metrics.line_height_f32();
+    let scale = window.scale_factor();
+    let color: gpui::Hsla = rgb(cursor_color).into();
+    let cell_bounds = pixel_snap_bounds(
+        Bounds::new(
+            origin
+                + point(
+                    px(cursor.col as f32 * cell_width),
+                    px(cursor.row as f32 * line_height),
+                ),
+            size(metrics.cell_width, metrics.line_height),
+        ),
+        window,
+    );
     match cursor.shape {
         TerminalCursorShape::Block | TerminalCursorShape::Hidden => {}
         TerminalCursorShape::Underline => {
+            let stroke = device_aligned_stroke(2.0, scale).min(cell_bounds.size.height);
             let bounds = Bounds::new(
-                origin
-                    + point(
-                        px(cursor.col as f32 * cell_width),
-                        px((cursor.row + 1) as f32 * line_height - 2.0),
-                    ),
-                size(metrics.cell_width, px(2.0)),
+                point(
+                    cell_bounds.left(),
+                    (cell_bounds.bottom() - stroke).max(cell_bounds.top()),
+                ),
+                size(cell_bounds.size.width, stroke),
             );
-            window.paint_quad(fill(bounds, rgb(cursor_color)));
+            window.paint_quad(fill(bounds, color));
         }
         TerminalCursorShape::Bar => {
-            let bounds = Bounds::new(
-                origin
-                    + point(
-                        px(cursor.col as f32 * cell_width),
-                        px(cursor.row as f32 * line_height),
-                    ),
-                size(px(2.0), metrics.line_height),
-            );
-            window.paint_quad(fill(bounds, rgb(cursor_color)));
+            let stroke = device_aligned_stroke(2.0, scale).min(cell_bounds.size.width);
+            let bounds = Bounds::new(cell_bounds.origin, size(stroke, cell_bounds.size.height));
+            window.paint_quad(fill(bounds, color));
         }
         TerminalCursorShape::Hollow => {
-            let x = cursor.col as f32 * cell_width;
-            let y = cursor.row as f32 * line_height;
-            let color = rgb(cursor_color);
-            for bounds in [
-                Bounds::new(
-                    origin + point(px(x), px(y)),
-                    size(metrics.cell_width, px(1.0)),
-                ),
-                Bounds::new(
-                    origin + point(px(x), px(y + line_height - 1.0)),
-                    size(metrics.cell_width, px(1.0)),
-                ),
-                Bounds::new(
-                    origin + point(px(x), px(y)),
-                    size(px(1.0), metrics.line_height),
-                ),
-                Bounds::new(
-                    origin + point(px(x + cell_width - 1.0), px(y)),
-                    size(px(1.0), metrics.line_height),
-                ),
-            ] {
-                window.paint_quad(fill(bounds, color));
-            }
+            let stroke = device_aligned_stroke(1.0, scale);
+            paint_cell_outline(cell_bounds, stroke, color, window);
         }
     }
 }

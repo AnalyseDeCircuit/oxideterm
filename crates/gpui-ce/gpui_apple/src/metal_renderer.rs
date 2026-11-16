@@ -2431,6 +2431,80 @@ mod tests {
     use super::*;
 
     #[test]
+    fn dark_glyph_edge_enhancement_changes_only_opted_in_partial_coverage() {
+        use gpui::{
+            FontId, GlyphId, MonochromeSprite, PlatformAtlas, RenderGlyphParams,
+            TransformationMatrix, black, px, white,
+        };
+        use std::borrow::Cow;
+
+        let mut renderer = MetalRenderer::new_headless(Default::default()).unwrap();
+        renderer.opaque = false;
+        let tile = renderer
+            .sprite_atlas()
+            .get_or_insert_with(
+                RenderGlyphParams {
+                    font_id: FontId(0),
+                    glyph_id: GlyphId(0),
+                    font_size: px(14.0),
+                    subpixel_variant: Default::default(),
+                    scale_factor: 1.0,
+                    is_emoji: false,
+                    subpixel_rendering: false,
+                    dilation: 0,
+                }
+                .into(),
+                &mut || {
+                    Ok(Some((
+                        size(DevicePixels(3), DevicePixels(1)),
+                        Cow::Borrowed(&[0, 128, 255]),
+                    )))
+                },
+            )
+            .unwrap()
+            .unwrap();
+        let mut scene = Scene::default();
+        for (row, enabled, color) in [
+            (1.0, false, black()),
+            (2.0, true, black()),
+            (3.0, true, white()),
+            (4.0, true, black().opacity(0.5)),
+        ] {
+            let bounds = Bounds::new(
+                point(ScaledPixels(1.0), ScaledPixels(row)),
+                size(ScaledPixels(3.0), ScaledPixels(1.0)),
+            );
+            scene.insert_primitive(MonochromeSprite {
+                order: 0,
+                enhance_glyph_edges: enabled.into(),
+                tile,
+                bounds,
+                content_mask: ContentMask { bounds },
+                transformation: TransformationMatrix::unit(),
+                color: color.into(),
+            });
+        }
+        scene.finish();
+        let image = renderer
+            .render_scene_to_image(&scene, size(DevicePixels(5), DevicePixels(6)))
+            .unwrap();
+        for (row, expected) in [
+            (1, [0, 128, 255]),
+            (2, [0, 143, 255]),
+            (3, [0, 128, 255]),
+            (4, [0, 64, 128]),
+        ] {
+            let actual = [1, 2, 3].map(|x| image.get_pixel(x, row).0[3]);
+            for (actual, expected) in actual.into_iter().zip(expected) {
+                assert!(
+                    actual.abs_diff(expected) <= 1,
+                    "row {row}: {actual} != {expected}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn corner_contours_match_across_paint_paths() {
         use gpui::{
             AtlasKey, DynamicTexture, DynamicTextureParams, PlatformAtlas, PolychromeSprite, Quad,

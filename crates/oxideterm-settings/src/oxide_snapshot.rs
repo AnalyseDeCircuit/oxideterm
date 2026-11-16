@@ -42,6 +42,7 @@ const TERMINAL_APPEARANCE_KEYS: &[&str] = &[
     "fontFamily",
     "customFontFamily",
     "fontSize",
+    "characterSpacing",
     "lineHeight",
     "paddingHorizontal",
     "paddingVertical",
@@ -258,6 +259,16 @@ pub fn merge_oxide_settings_snapshot(
     // Materialize the released shared theme before current settings fill this key.
     // Copying sections below still limits it to imports that include appearance.
     migrate_legacy_theme_selection(&mut snapshot_settings);
+    let snapshot_version = snapshot_settings
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    if snapshot_version < 4 {
+        crate::normalize::migrate_legacy_terminal_line_height(
+            &mut snapshot_settings,
+            current.terminal.font_family,
+        );
+    }
 
     let requested = selected_sections
         .cloned()

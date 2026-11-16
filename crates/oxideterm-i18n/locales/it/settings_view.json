@@ -390,6 +390,8 @@
       "font_weight_hint": "Inserisci un valore da 100 a 900. Il carattere può usare il peso disponibile più vicino.",
       "font_ligatures": "Legature del font",
       "font_ligatures_hint": "Usa le legature di programmazione quando il font selezionato le supporta.",
+      "character_spacing": "Spaziatura caratteri",
+      "character_spacing_hint": "Moltiplicatore di spaziatura orizzontale tra i caratteri",
       "line_height": "Altezza Linea",
       "line_height_hint": "Spaziatura tra le linee",
       "padding_horizontal": "Margine interno orizzontale (px)",

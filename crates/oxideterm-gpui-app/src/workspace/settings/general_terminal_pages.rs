@@ -797,6 +797,14 @@ impl WorkspaceApp {
                     self.font_size_row(settings, cx),
                     self.card_separator(),
                     self.decimal_row(
+                        "settings_view.terminal.character_spacing",
+                        "settings_view.terminal.character_spacing_hint",
+                        SettingsInput::TerminalCharacterSpacing,
+                        compact_decimal(settings.terminal.character_spacing),
+                        cx,
+                    ),
+                    self.card_separator(),
+                    self.decimal_row(
                         "settings_view.terminal.line_height",
                         "settings_view.terminal.line_height_hint",
                         SettingsInput::TerminalLineHeight,

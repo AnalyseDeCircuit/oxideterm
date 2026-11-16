@@ -2220,6 +2220,8 @@ impl TerminalPane {
             || self.preferences.font_ligatures != preferences.font_ligatures
             || self.preferences.font_size.to_bits() != preferences.font_size.to_bits()
             || self.preferences.font_weight.to_bits() != preferences.font_weight.to_bits()
+            || self.preferences.character_spacing.to_bits()
+                != preferences.character_spacing.to_bits()
             || self.preferences.line_height.to_bits() != preferences.line_height.to_bits();
         let next_settings = TerminalUiSettings::from_preferences(&preferences);
         if self.preferences.command_folding_enabled != preferences.command_folding_enabled {

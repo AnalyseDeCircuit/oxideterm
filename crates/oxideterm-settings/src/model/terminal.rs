@@ -429,6 +429,8 @@ pub struct TerminalSettings {
     // Terminal ligatures stay opt-in so existing monospace rendering remains stable.
     #[serde(default)]
     pub font_ligatures: bool,
+    #[serde(default = "default_terminal_character_spacing")]
+    pub character_spacing: f64,
     pub line_height: f64,
     #[serde(default = "default_terminal_padding_horizontal")]
     pub padding_horizontal: i64,
@@ -551,6 +553,12 @@ pub const MAX_TERMINAL_BACKGROUND_OPACITY: f64 = 1.0;
 pub const DEFAULT_TERMINAL_FONT_WEIGHT: i64 = 400;
 pub const MIN_TERMINAL_FONT_WEIGHT: i64 = 100;
 pub const MAX_TERMINAL_FONT_WEIGHT: i64 = 900;
+pub const DEFAULT_TERMINAL_CHARACTER_SPACING: f64 = 1.0;
+pub const MIN_TERMINAL_CHARACTER_SPACING: f64 = 0.8;
+pub const MAX_TERMINAL_CHARACTER_SPACING: f64 = 2.0;
+pub const DEFAULT_TERMINAL_LINE_HEIGHT: f64 = 0.9;
+pub const MIN_TERMINAL_LINE_HEIGHT: f64 = 0.7;
+pub const MAX_TERMINAL_LINE_HEIGHT: f64 = 3.0;
 pub const DEFAULT_TERMINAL_PADDING_HORIZONTAL: i64 = 1;
 pub const DEFAULT_TERMINAL_PADDING_VERTICAL: i64 = 1;
 pub const MAX_TERMINAL_PADDING: i64 = 64;
@@ -558,6 +566,10 @@ pub const MAX_CUSTOM_SEMANTIC_SCHEMES: usize = 32;
 
 const fn default_terminal_font_weight() -> i64 {
     DEFAULT_TERMINAL_FONT_WEIGHT
+}
+
+const fn default_terminal_character_spacing() -> f64 {
+    DEFAULT_TERMINAL_CHARACTER_SPACING
 }
 
 const fn default_terminal_padding_horizontal() -> i64 {
@@ -609,6 +621,11 @@ impl TerminalSettings {
             .and_then(|id| self.highlight_rule_set(id))
             .map(|rule_set| rule_set.name.as_str())
     }
+
+    /// Converts the font-natural terminal multiplier into an em-based line height for IDE inheritance.
+    pub fn resolved_ide_line_height(&self) -> f64 {
+        (self.line_height * self.font_family.reference_natural_line_height_ratio()).clamp(0.8, 3.0)
+    }
 }
 
 impl Default for TerminalSettings {
@@ -622,7 +639,8 @@ impl Default for TerminalSettings {
             font_size: 14,
             font_weight: DEFAULT_TERMINAL_FONT_WEIGHT,
             font_ligatures: false,
-            line_height: 1.2,
+            character_spacing: DEFAULT_TERMINAL_CHARACTER_SPACING,
+            line_height: DEFAULT_TERMINAL_LINE_HEIGHT,
             padding_horizontal: DEFAULT_TERMINAL_PADDING_HORIZONTAL,
             padding_vertical: DEFAULT_TERMINAL_PADDING_VERTICAL,
             cursor_style: CursorStyle::Block,

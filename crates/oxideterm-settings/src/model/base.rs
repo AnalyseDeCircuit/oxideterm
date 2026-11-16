@@ -1,6 +1,6 @@
 pub use oxideterm_render_policy::RenderProfile;
 
-pub const SETTINGS_SCHEMA_VERSION: u32 = 3;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 4;
 pub const DEFAULT_COLOR_THEME: &str = "default";
 pub const DEFAULT_TERMINAL_SCROLLBACK: i64 = 1000;
 pub const TERMINAL_SCROLLBACK_MIN: i64 = 500;
@@ -244,6 +244,17 @@ impl FontFamily {
             Self::Consolas => "Consolas".to_string(),
             Self::Menlo => "Menlo".to_string(),
             Self::Custom => JETBRAINS_MONO_SUBSET_FAMILY.to_string(),
+        }
+    }
+
+    /// Natural `(ascent + |descent| + line_gap) / units_per_em` ratio used for
+    /// offline v3 -> v4 line-height migration when no GPUI text system exists.
+    pub fn reference_natural_line_height_ratio(self) -> f64 {
+        match self {
+            Self::Jetbrains | Self::Maple => 1.32,
+            Self::Meslo => 3184.0 / 2048.0,
+            Self::Menlo => 2384.0 / 2048.0,
+            Self::Cascadia | Self::Consolas | Self::Custom => 1.2,
         }
     }
 }

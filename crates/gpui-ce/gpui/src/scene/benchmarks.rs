@@ -81,7 +81,7 @@ fn prepared_glyph_batch_expansion() {
                 // Terminal text already has a row layer. Keep its bounds tree stable
                 // and retain vector capacity so allocator growth is outside measurement.
                 scene.push_layer(mask.bounds);
-                scene.insert_prepared_glyph_batch(batch.clone(), origin, mask, 0.65);
+                scene.insert_prepared_glyph_batch(batch.clone(), origin, mask, 0.65, false);
                 let tiles = match kind {
                     AtlasTextureKind::Monochrome => scene
                         .monochrome_sprites
@@ -123,6 +123,7 @@ fn prepared_glyph_batch_expansion() {
                                 black_box(origin),
                                 black_box(mask),
                                 black_box(0.65),
+                                false,
                             );
                             black_box((
                                 &scene.monochrome_sprites,

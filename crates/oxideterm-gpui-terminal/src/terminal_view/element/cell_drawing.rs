@@ -15,7 +15,7 @@ pub(super) enum CellDrawing {
 }
 
 pub(super) fn is_cell_drawing(ch: char) -> bool {
-    ('\u{2500}'..='\u{259f}').contains(&ch)
+    ('\u{2500}'..='\u{259f}').contains(&ch) || ('\u{2800}'..='\u{28ff}').contains(&ch)
 }
 
 struct CellGeometry {
@@ -246,6 +246,37 @@ fn draw_geometry(ch: char, geometry: CellGeometry, mut emit: impl FnMut(CellDraw
                 &mut emit,
             );
         }
+        0x2800..=0x28ff => {
+            let bits = (code - 0x2800) as u8;
+            if bits == 0 {
+                return;
+            }
+            // Unicode Braille maps bits (0,1,2,6) to the left column and (3,4,5,7) to the right.
+            const DOT_MASKS: [(u8, usize, usize); 8] = [
+                (0x01, 0, 0),
+                (0x02, 0, 1),
+                (0x04, 0, 2),
+                (0x40, 0, 3),
+                (0x08, 1, 0),
+                (0x10, 1, 1),
+                (0x20, 1, 2),
+                (0x80, 1, 3),
+            ];
+            const COL_SPANS: [(f32, f32); 2] = [(0.125, 0.4375), (0.5625, 0.875)];
+            const ROW_SPANS: [(f32, f32); 4] = [
+                (0.0625, 0.21875),
+                (0.3125, 0.46875),
+                (0.5625, 0.71875),
+                (0.8125, 0.96875),
+            ];
+            for (mask, col, row) in DOT_MASKS {
+                if bits & mask != 0 {
+                    let (x0, x1) = COL_SPANS[col];
+                    let (y0, y1) = ROW_SPANS[row];
+                    geometry.fraction([x0, y0, x1, y1], 1.0, &mut emit);
+                }
+            }
+        }
         _ => {}
     }
 }
@@ -423,6 +454,29 @@ mod tests {
                 assert_eq!(rectangle, bounds);
                 assert_eq!(alpha, expected);
             });
+        }
+    }
+
+    #[test]
+    fn braille_patterns_emit_pixel_aligned_dots_for_every_non_blank_codepoint() {
+        assert!(shapes('\u{2800}', 1.0).is_empty());
+        for code in 0x2801..=0x28ff {
+            let ch = char::from_u32(code).unwrap();
+            let expected_dots = (code - 0x2800).count_ones() as usize;
+            for scale in [1.0, 1.25, 1.5, 2.0] {
+                let dots = shapes(ch, scale);
+                assert_eq!(dots.len(), expected_dots, "U+{code:04X} at {scale}");
+                for dot in dots {
+                    let CellDrawing::Fill(bounds, alpha) = dot else {
+                        panic!("braille dot must emit fill");
+                    };
+                    assert_eq!(alpha, 1.0);
+                    for value in [bounds.left(), bounds.top(), bounds.right(), bounds.bottom()] {
+                        let device = value.as_f32() * scale;
+                        assert!((device - device.round()).abs() < 0.0001);
+                    }
+                }
+            }
         }
     }
 }

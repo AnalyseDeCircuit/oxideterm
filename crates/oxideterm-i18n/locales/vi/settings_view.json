@@ -390,6 +390,8 @@
       "font_weight_hint": "Nhập giá trị từ 100 đến 900. Phông chữ có thể dùng độ đậm khả dụng gần nhất.",
       "font_ligatures": "Chữ ghép của phông",
       "font_ligatures_hint": "Dùng chữ ghép lập trình khi phông đã chọn hỗ trợ.",
+      "character_spacing": "Khoảng cách ký tự",
+      "character_spacing_hint": "Hệ số giãn cách ngang giữa các ký tự",
       "line_height": "Chiều cao dòng",
       "line_height_hint": "Khoảng cách giữa các dòng",
       "padding_horizontal": "Khoảng đệm ngang (px)",

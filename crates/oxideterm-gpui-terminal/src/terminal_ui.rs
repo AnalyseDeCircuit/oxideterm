@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use gpui::{
     Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Hsla, Pixels, Rgba, SharedString,
-    TextRun, TextSystem, Window, px, rgb,
+    TextSystem, Window, px, rgb,
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_settings::{
@@ -32,7 +32,10 @@ pub(crate) const DEFAULT_SCROLLBACK_LINES: usize = 1000;
 pub const TERMINAL_FONT: &str = oxideterm_settings::JETBRAINS_MONO_SUBSET_FAMILY;
 pub(crate) const TERMINAL_FONT_SIZE: f32 = 14.0;
 pub(crate) const TERMINAL_FONT_WEIGHT: f32 = 400.0;
-pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 = 1.2;
+pub(crate) const TERMINAL_CHARACTER_SPACING: f32 =
+    oxideterm_settings::DEFAULT_TERMINAL_CHARACTER_SPACING as f32;
+pub(crate) const TERMINAL_LINE_HEIGHT_RATIO: f32 =
+    oxideterm_settings::DEFAULT_TERMINAL_LINE_HEIGHT as f32;
 // User padding is applied outside the element; these coordinates are grid-local.
 pub(crate) const TERMINAL_CONTENT_PADDING: f32 = 0.0;
 // Command marks do not reserve additional space before column zero.
@@ -75,6 +78,7 @@ pub struct TerminalUiPreferences {
     pub font_ligatures: bool,
     pub font_size: f32,
     pub font_weight: f32,
+    pub character_spacing: f32,
     pub line_height: f32,
     pub padding_horizontal: f32,
     pub padding_vertical: f32,
@@ -202,6 +206,7 @@ impl Default for TerminalUiPreferences {
             font_ligatures: TERMINAL_FONT_LIGATURES,
             font_size: TERMINAL_FONT_SIZE,
             font_weight: TERMINAL_FONT_WEIGHT,
+            character_spacing: TERMINAL_CHARACTER_SPACING,
             line_height: TERMINAL_LINE_HEIGHT_RATIO,
             padding_horizontal: oxideterm_settings::DEFAULT_TERMINAL_PADDING_HORIZONTAL as f32,
             padding_vertical: oxideterm_settings::DEFAULT_TERMINAL_PADDING_VERTICAL as f32,
@@ -1111,7 +1116,82 @@ pub(crate) struct TerminalMetrics {
     pub(crate) font: Font,
     pub(crate) font_size: Pixels,
     pub(crate) cell_width: Pixels,
+    // Keep platform shaping in sync with scaled `cell_width` so small multipliers
+    // (for example 1.05x) do not hit `apply_force_width_to_layout`'s 1px snap threshold.
+    pub(crate) letter_spacing: Option<Pixels>,
     pub(crate) line_height: Pixels,
+    pub(crate) primary_ascent: Pixels,
+    pub(crate) primary_descent: Pixels,
+}
+
+fn primary_font_vertical_metrics(
+    text_system: &TextSystem,
+    font_id: gpui::FontId,
+    font_size: Pixels,
+) -> (Pixels, Pixels) {
+    let ascent = px(f32::from(text_system.ascent(font_id, font_size)).max(0.0));
+    let descent = px(f32::from(text_system.descent(font_id, font_size)).abs());
+    (ascent, descent)
+}
+
+/// Computes terminal line height by scaling the primary font's natural
+/// `ascent + |descent|` box rather than bare `font_size`, matching macOS Terminal.
+pub fn terminal_line_height_for_font(
+    text_system: &TextSystem,
+    font: &Font,
+    font_size: Pixels,
+    line_height_multiplier: f32,
+) -> Pixels {
+    let font_id = text_system.resolve_font(font);
+    let (ascent, descent) = primary_font_vertical_metrics(text_system, font_id, font_size);
+    let natural = f32::from(ascent + descent);
+    let base = if natural > 0.0 {
+        natural
+    } else {
+        f32::from(font_size)
+    };
+    px((base * line_height_multiplier).max(1.0))
+}
+
+fn sanitize_character_spacing(multiplier: f32) -> f32 {
+    if multiplier.is_finite() {
+        multiplier.clamp(
+            oxideterm_settings::MIN_TERMINAL_CHARACTER_SPACING as f32,
+            oxideterm_settings::MAX_TERMINAL_CHARACTER_SPACING as f32,
+        )
+    } else {
+        TERMINAL_CHARACTER_SPACING
+    }
+}
+
+fn base_cell_width_for_font(text_system: &TextSystem, font: &Font, font_size: Pixels) -> Pixels {
+    let font_id = text_system.resolve_font(font);
+    text_system
+        .advance(font_id, font_size, 'm')
+        .map(|advance| advance.width)
+        .unwrap_or_else(|_| text_system.layout_width(font_id, font_size, 'm'))
+        .max(px(1.0))
+}
+
+fn scaled_cell_width_and_letter_spacing(
+    base_width: Pixels,
+    character_spacing: f32,
+) -> (Pixels, Option<Pixels>) {
+    let spacing = sanitize_character_spacing(character_spacing);
+    let cell_width = (base_width * spacing).max(px(1.0));
+    let delta = cell_width - base_width;
+    let letter_spacing = (delta.as_f32().abs() > 0.001).then_some(delta);
+    (cell_width, letter_spacing)
+}
+
+pub fn terminal_letter_spacing_for_font(
+    text_system: &TextSystem,
+    font: &Font,
+    font_size: Pixels,
+    character_spacing: f32,
+) -> Option<Pixels> {
+    let base_width = base_cell_width_for_font(text_system, font, font_size);
+    scaled_cell_width_and_letter_spacing(base_width, character_spacing).1
 }
 
 impl TerminalMetrics {
@@ -1120,7 +1200,6 @@ impl TerminalMetrics {
         preferences: &TerminalUiPreferences,
     ) -> Self {
         let font_size = px(preferences.font_size);
-        let line_height = px(preferences.font_size * preferences.line_height);
         let font = resolve_terminal_font(
             window.text_system(),
             &preferences.font_family,
@@ -1130,17 +1209,26 @@ impl TerminalMetrics {
         )
         .font;
         let font_id = window.text_system().resolve_font(&font);
-        let measured_width = window
-            .text_system()
-            .advance(font_id, font_size, 'm')
-            .map(|advance| advance.width)
-            .unwrap_or_else(|_| fallback_cell_width(window, &font, font_size));
+        let (primary_ascent, primary_descent) =
+            primary_font_vertical_metrics(window.text_system(), font_id, font_size);
+        let line_height = terminal_line_height_for_font(
+            window.text_system(),
+            &font,
+            font_size,
+            preferences.line_height,
+        );
+        let base_width = base_cell_width_for_font(window.text_system(), &font, font_size);
+        let (cell_width, letter_spacing) =
+            scaled_cell_width_and_letter_spacing(base_width, preferences.character_spacing);
 
         Self {
             font,
             font_size,
-            cell_width: measured_width.max(px(1.0)),
+            cell_width,
+            letter_spacing,
             line_height,
+            primary_ascent,
+            primary_descent,
         }
     }
 
@@ -1165,24 +1253,6 @@ pub(crate) fn terminal_timestamp_gutter_width(metrics: &TerminalMetrics, enabled
 /// Emulator-owned identity is stable across scrolling, eviction and local row movement.
 pub(crate) fn terminal_row_timestamp_identity(row: &TerminalRow) -> u64 {
     row.source_id as u64
-}
-
-pub(crate) fn fallback_cell_width(window: &mut Window, font: &Font, font_size: Pixels) -> Pixels {
-    let sample = SharedString::from("m");
-    let run = TextRun {
-        len: sample.len(),
-        font: font.clone(),
-        color: rgb(0xe6e8eb).into(),
-        background_color: None,
-        underline: None,
-        strikethrough: None,
-        letter_spacing: None,
-    };
-
-    window
-        .text_system()
-        .shape_line(sample, font_size, &[run], None)
-        .width
 }
 
 pub struct ResolvedTerminalFont {
@@ -1384,5 +1454,30 @@ mod tests {
         );
         assert_eq!(preferences.delete_sequence, TerminalDeleteSequence::Delete);
         assert_eq!(preferences.font_family, original_font_family);
+    }
+
+    #[test]
+    fn character_spacing_scales_cell_width_and_derives_matching_letter_spacing() {
+        let base_width = px(10.0);
+        assert_eq!(
+            scaled_cell_width_and_letter_spacing(base_width, 1.0),
+            (px(10.0), None)
+        );
+        assert_eq!(
+            scaled_cell_width_and_letter_spacing(base_width, 1.1),
+            (px(11.0), Some(px(1.0)))
+        );
+        assert_eq!(
+            scaled_cell_width_and_letter_spacing(base_width, 0.85),
+            (px(8.5), Some(px(-1.5)))
+        );
+        assert_eq!(
+            scaled_cell_width_and_letter_spacing(base_width, 5.0),
+            (px(20.0), Some(px(10.0)))
+        );
+        assert_eq!(
+            scaled_cell_width_and_letter_spacing(base_width, f32::NAN),
+            (px(10.0), None)
+        );
     }
 }

@@ -331,6 +331,7 @@ pub(super) fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18
         "cjkFontFamily" => i18n.t("settings_view.terminal.cjk_font_family"),
         "fontSize" => i18n.t("settings_view.terminal.font_size"),
         "fontLigatures" => i18n.t("settings_view.terminal.font_ligatures"),
+        "characterSpacing" => i18n.t("settings_view.terminal.character_spacing"),
         "lineHeight" => i18n.t("settings_view.terminal.line_height"),
         "paddingHorizontal" => i18n.t("settings_view.terminal.padding_horizontal"),
         "paddingVertical" => i18n.t("settings_view.terminal.padding_vertical"),

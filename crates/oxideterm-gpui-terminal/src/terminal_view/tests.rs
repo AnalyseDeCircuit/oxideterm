@@ -21,7 +21,10 @@ fn test_metrics() -> TerminalMetrics {
         ),
         font_size: px(14.0),
         cell_width: px(8.0),
+        letter_spacing: None,
         line_height: px(10.0),
+        primary_ascent: px(7.5),
+        primary_descent: px(2.5),
     }
 }
 

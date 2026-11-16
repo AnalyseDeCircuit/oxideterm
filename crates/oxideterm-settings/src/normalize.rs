@@ -661,6 +661,37 @@ fn derive_backend_hot_lines(scrollback: i64) -> i64 {
     clamp_backend_hot_lines(clamp_terminal_scrollback(scrollback) * 2)
 }
 
+/// Converts pre-v4 em-relative `terminal.lineHeight` values into the natural
+/// font-height scale so existing profiles keep their visual row density.
+pub(crate) fn migrate_legacy_terminal_line_height(
+    settings: &mut Value,
+    fallback_font_family: FontFamily,
+) -> bool {
+    let Some(old_line_height) = settings
+        .pointer("/terminal/lineHeight")
+        .and_then(Value::as_f64)
+    else {
+        return false;
+    };
+    if !old_line_height.is_finite() {
+        return false;
+    }
+
+    let font_family = settings
+        .pointer("/terminal/fontFamily")
+        .and_then(|value| serde_json::from_value::<FontFamily>(value.clone()).ok())
+        .unwrap_or(fallback_font_family);
+    let converted =
+        ((old_line_height / font_family.reference_natural_line_height_ratio()) * 100.0).round()
+            / 100.0;
+
+    let Some(terminal) = settings.get_mut("terminal").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    terminal.insert("lineHeight".to_string(), json!(converted));
+    true
+}
+
 pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     let saved_version = raw.get("version").and_then(Value::as_u64).unwrap_or(0);
     if saved_version > u64::from(SETTINGS_SCHEMA_VERSION) {
@@ -709,6 +740,14 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
             "Migrated legacy terminal.scrollback into terminal.scrollback + buffer.maxLines"
                 .to_string(),
         );
+    }
+
+    if saved_version < 4
+        && raw.pointer("/terminal/lineHeight").is_some()
+        && migrate_legacy_terminal_line_height(&mut settings, FontFamily::default())
+    {
+        migration_warnings
+            .push("Migrated legacy terminal.lineHeight to font-metrics scale".to_string());
     }
 
     for (path, fallback, min, max) in [
@@ -844,7 +883,18 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     }
 
     for (path, fallback, min, max) in [
-        ("terminal.lineHeight", 1.2, 0.8, 3.0),
+        (
+            "terminal.characterSpacing",
+            DEFAULT_TERMINAL_CHARACTER_SPACING,
+            MIN_TERMINAL_CHARACTER_SPACING,
+            MAX_TERMINAL_CHARACTER_SPACING,
+        ),
+        (
+            "terminal.lineHeight",
+            DEFAULT_TERMINAL_LINE_HEIGHT,
+            MIN_TERMINAL_LINE_HEIGHT,
+            MAX_TERMINAL_LINE_HEIGHT,
+        ),
         (
             "terminal.backgroundOpacity",
             DEFAULT_TERMINAL_BACKGROUND_OPACITY,
@@ -1724,5 +1774,49 @@ mod tests {
             first.get("id").and_then(Value::as_str)
         );
         assert_eq!(sanitized.settings.ai.active_model, None);
+    }
+
+    #[test]
+    fn migrates_pre_v4_terminal_line_height_preserving_density() {
+        let legacy_jetbrains = sanitize_settings_value(json!({
+            "version": 3,
+            "terminal": {
+                "fontFamily": "jetbrains",
+                "lineHeight": 1.2
+            }
+        }))
+        .expect("sanitize v3 jetbrains settings");
+        assert_eq!(legacy_jetbrains.settings.terminal.line_height, 0.91);
+        assert!(
+            legacy_jetbrains
+                .migration_warnings
+                .iter()
+                .any(|warning| warning.contains("lineHeight"))
+        );
+
+        let legacy_menlo = sanitize_settings_value(json!({
+            "version": 3,
+            "terminal": {
+                "fontFamily": "menlo",
+                "lineHeight": 1.2
+            }
+        }))
+        .expect("sanitize v3 menlo settings");
+        assert_eq!(legacy_menlo.settings.terminal.line_height, 1.03);
+
+        let v4_explicit = sanitize_settings_value(json!({
+            "version": 4,
+            "terminal": {
+                "fontFamily": "jetbrains",
+                "characterSpacing": 3.5,
+                "lineHeight": 0.95
+            }
+        }))
+        .expect("sanitize v4 settings");
+        assert_eq!(
+            v4_explicit.settings.terminal.character_spacing,
+            MAX_TERMINAL_CHARACTER_SPACING
+        );
+        assert_eq!(v4_explicit.settings.terminal.line_height, 0.95);
     }
 }

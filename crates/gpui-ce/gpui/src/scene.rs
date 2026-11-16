@@ -206,6 +206,7 @@ impl Scene {
         origin: Point<ScaledPixels>,
         content_mask: ContentMask<ScaledPixels>,
         opacity: f32,
+        enhance_glyph_edges: bool,
     ) {
         let layer_order = self.layer_stack.last().copied();
         let fully_visible = batch.bounds().is_some_and(|bounds| {
@@ -216,7 +217,7 @@ impl Scene {
         for glyph in &batch.monochrome {
             let mut sprite = MonochromeSprite {
                 order: 0,
-                pad: 0,
+                enhance_glyph_edges: enhance_glyph_edges.into(),
                 bounds: glyph.bounds + origin,
                 content_mask,
                 color: SceneHsla {
@@ -295,6 +296,7 @@ impl Scene {
                 origin,
                 content_mask,
                 opacity,
+                enhance_glyph_edges,
             });
     }
 
@@ -307,11 +309,13 @@ impl Scene {
                     origin,
                     content_mask,
                     opacity,
+                    enhance_glyph_edges,
                 } => self.insert_prepared_glyph_batch(
                     batch.clone(),
                     *origin,
                     *content_mask,
                     *opacity,
+                    *enhance_glyph_edges,
                 ),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
@@ -441,6 +445,7 @@ pub(crate) enum PaintOperation {
         origin: Point<ScaledPixels>,
         content_mask: ContentMask<ScaledPixels>,
         opacity: f32,
+        enhance_glyph_edges: bool,
     },
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
@@ -1078,7 +1083,7 @@ impl Default for TransformationMatrix {
 #[expect(missing_docs)]
 pub struct MonochromeSprite {
     pub order: DrawOrder,
-    pub pad: u32,
+    pub enhance_glyph_edges: PaddedBool32,
     pub tile: AtlasTile,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
@@ -1543,7 +1548,7 @@ mod tests {
             ],
             ..Default::default()
         });
-        scene.insert_prepared_glyph_batch(batch, Point::default(), mask(), 1.0);
+        scene.insert_prepared_glyph_batch(batch, Point::default(), mask(), 1.0, true);
         scene.pop_layer();
 
         assert_eq!(scene.monochrome_sprites.len(), 2);
@@ -1555,6 +1560,10 @@ mod tests {
         assert_eq!(
             replayed.monochrome_sprites[0].order,
             scene.monochrome_sprites[0].order
+        );
+        assert_eq!(
+            u32::from(replayed.monochrome_sprites[0].enhance_glyph_edges),
+            1
         );
     }
 
@@ -1577,7 +1586,7 @@ mod tests {
                     scene.push_layer(full_bounds());
                 }
                 let origin = point(sp(x), sp(0.0));
-                scene.insert_prepared_glyph_batch(batch.clone(), origin, mask(), 0.5);
+                scene.insert_prepared_glyph_batch(batch.clone(), origin, mask(), 0.5, false);
                 let expected = if x == 100.0 {
                     vec![]
                 } else {
@@ -1630,7 +1639,13 @@ mod tests {
             for (opacity, alpha) in [(-0.5, 0.0), (0.25, 0.2), (1.5, 0.8)] {
                 let mut scene = Scene::default();
                 scene.push_layer(full_bounds());
-                scene.insert_prepared_glyph_batch(batch.clone(), Point::default(), mask(), opacity);
+                scene.insert_prepared_glyph_batch(
+                    batch.clone(),
+                    Point::default(),
+                    mask(),
+                    opacity,
+                    false,
+                );
                 let expected = vec![SceneHsla {
                     h: expected_hue,
                     s: 0.5,

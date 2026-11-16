@@ -14,9 +14,10 @@ use oxideterm_ai::{
 };
 use oxideterm_settings::{
     DEFAULT_AI_TOOL_MAX_CALLS_PER_ROUND, DEFAULT_AI_TOOL_MAX_ROUNDS,
-    MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MAX_TERMINAL_FONT_WEIGHT,
-    MAX_TERMINAL_PADDING, MIN_AI_TOOL_MAX_CALLS_PER_ROUND, MIN_AI_TOOL_MAX_ROUNDS,
-    MIN_TERMINAL_FONT_WEIGHT, PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS,
+    MAX_AI_TOOL_MAX_CALLS_PER_ROUND, MAX_AI_TOOL_MAX_ROUNDS, MAX_TERMINAL_CHARACTER_SPACING,
+    MAX_TERMINAL_FONT_WEIGHT, MAX_TERMINAL_PADDING, MIN_AI_TOOL_MAX_CALLS_PER_ROUND,
+    MIN_AI_TOOL_MAX_ROUNDS, MIN_TERMINAL_CHARACTER_SPACING, MIN_TERMINAL_FONT_WEIGHT,
+    MIN_TERMINAL_LINE_HEIGHT, PersistedSettings, RECOMMENDED_FOCUS_HANDOFF_COMMANDS,
     SettingsUpstreamProxyAuth, UpdateProxyMode, parse_terminal_session_log_content_template,
     parse_terminal_session_log_directory_template, parse_terminal_session_log_file_name_template,
     reindex_highlight_rules,
@@ -50,6 +51,9 @@ pub fn persisted_settings_input_value(
             .autosuggest
             .history_retention_days
             .to_string(),
+        SettingsInput::TerminalCharacterSpacing => {
+            compact_decimal(settings.terminal.character_spacing)
+        }
         SettingsInput::TerminalLineHeight => compact_decimal(settings.terminal.line_height),
         SettingsInput::TerminalPaddingHorizontal => {
             settings.terminal.padding_horizontal.to_string()
@@ -455,8 +459,16 @@ pub fn apply_persisted_settings_input_draft(
                     value.clamp(0, u32::MAX as i64) as u32
             })
             .into(),
+        SettingsInput::TerminalCharacterSpacing => parse_f64(draft)
+            .map(|value| {
+                settings.terminal.character_spacing =
+                    value.clamp(MIN_TERMINAL_CHARACTER_SPACING, MAX_TERMINAL_CHARACTER_SPACING)
+            })
+            .into(),
         SettingsInput::TerminalLineHeight => parse_f64(draft)
-            .map(|value| settings.terminal.line_height = value.clamp(0.8, 2.0))
+            .map(|value| {
+                settings.terminal.line_height = value.clamp(MIN_TERMINAL_LINE_HEIGHT, 2.0)
+            })
             .into(),
         SettingsInput::TerminalPaddingHorizontal => parse_i64(draft)
             .map(|value| {
@@ -1130,6 +1142,21 @@ mod tests {
             SettingsInputDraftApply::Applied
         );
         assert_eq!(settings.terminal.font_weight, MAX_TERMINAL_FONT_WEIGHT);
+
+        assert_eq!(
+            apply_persisted_settings_input_draft(
+                &mut settings,
+                SettingsInput::TerminalCharacterSpacing,
+                "1.08",
+            ),
+            SettingsInputDraftApply::Applied
+        );
+        assert_eq!(settings.terminal.character_spacing, 1.08);
+        assert_eq!(
+            persisted_settings_input_value(&settings, SettingsInput::TerminalCharacterSpacing)
+                .as_deref(),
+            Some("1.08")
+        );
 
         assert_eq!(
             apply_persisted_settings_input_draft(

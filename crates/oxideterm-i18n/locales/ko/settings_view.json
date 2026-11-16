@@ -390,6 +390,8 @@
       "font_weight_hint": "100~900을 입력하세요. 글꼴에 따라 가장 가까운 사용 가능한 굵기가 적용될 수 있습니다.",
       "font_ligatures": "글꼴 리가처",
       "font_ligatures_hint": "선택한 글꼴이 지원할 때 프로그래밍 리가처를 사용합니다.",
+      "character_spacing": "문자 간격",
+      "character_spacing_hint": "문자 가로 간격 배율",
       "line_height": "줄 높이",
       "line_height_hint": "줄 간격",
       "padding_horizontal": "가로 안쪽 여백 (px)",

@@ -390,6 +390,8 @@
       "font_weight_hint": "輸入 100–900。所選字型可能使用最接近的可用字重。",
       "font_ligatures": "字型連字",
       "font_ligatures_hint": "所選字型支援時，啟用程式符號連字。",
+      "character_spacing": "字元間距",
+      "character_spacing_hint": "字元橫向間距倍率",
       "line_height": "行高",
       "line_height_hint": "行之間的間距",
       "padding_horizontal": "水平內邊距（px）",

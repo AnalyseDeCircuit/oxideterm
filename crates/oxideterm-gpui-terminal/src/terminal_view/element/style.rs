@@ -44,7 +44,7 @@ pub(crate) fn text_run_for_cell(
             thickness: px(1.0),
             color: Some(color),
         }),
-        letter_spacing: None,
+        letter_spacing: metrics.letter_spacing,
     }
 }
 
@@ -65,7 +65,7 @@ pub(crate) fn marked_text_run(
             wavy: false,
         }),
         strikethrough: None,
-        letter_spacing: None,
+        letter_spacing: metrics.letter_spacing,
     }
 }
 
@@ -81,7 +81,7 @@ pub(crate) fn ghost_text_run(
         background_color: None,
         underline: None,
         strikethrough: None,
-        letter_spacing: None,
+        letter_spacing: metrics.letter_spacing,
     }
 }
 
@@ -220,4 +220,56 @@ pub(crate) fn to_hsla(color: TerminalColor) -> Hsla {
 
 pub(crate) fn terminal_background(theme: &TerminalUiTheme) -> Hsla {
     to_hsla(terminal_color_from_hex(theme.background))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn text_runs_propagate_metrics_letter_spacing() {
+        let font = terminal_font_with_family_and_cjk(
+            TERMINAL_FONT,
+            None,
+            TERMINAL_FONT_LIGATURES,
+            TERMINAL_FONT_WEIGHT,
+        );
+        let metrics = TerminalMetrics {
+            font,
+            font_size: px(14.0),
+            cell_width: px(11.0),
+            letter_spacing: Some(px(1.0)),
+            line_height: px(16.0),
+            primary_ascent: px(12.0),
+            primary_descent: px(4.0),
+        };
+        let theme = TerminalUiTheme::default();
+        let cell = TerminalCell {
+            ch: 'a',
+            wide: false,
+            fg: terminal_color_from_hex(theme.foreground),
+            bg: terminal_color_from_hex(theme.background),
+            style_origin: Default::default(),
+            attrs: Default::default(),
+            extra: None,
+            cursor: false,
+        };
+
+        assert_eq!(
+            text_run_for_cell(&cell, gpui::white(), false, &metrics).letter_spacing,
+            Some(px(1.0))
+        );
+        assert_eq!(
+            marked_text_run("ab", &theme, &metrics).letter_spacing,
+            Some(px(1.0))
+        );
+        assert_eq!(
+            ghost_text_run("ls", &theme, &metrics).letter_spacing,
+            Some(px(1.0))
+        );
+        assert_eq!(
+            timestamp_text_run("12:00", &theme, &metrics).letter_spacing,
+            None
+        );
+    }
 }
