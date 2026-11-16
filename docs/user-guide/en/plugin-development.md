@@ -1409,6 +1409,11 @@ do not gain these checks retroactively. See the
 [publishing guide](https://github.com/AnalyseDeCircuit/oxideterm-plugins/blob/main/docs/PUBLISHING.en.md)
 for the catalog format and release workflow.
 
+If the host range contains only stable versions, a prerelease is checked using its
+`major.minor.patch` version. For example, `2.3.4-beta.1` satisfies `>2.2.0` but not
+`<2.3.4`. A range that explicitly names a prerelease uses the full version and
+standard SemVer prerelease matching rules.
+
 During development:
 
 1. Copy the plugin directory into `<config-dir>/plugins/`.

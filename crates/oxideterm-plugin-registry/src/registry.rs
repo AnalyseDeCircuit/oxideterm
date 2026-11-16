@@ -1394,6 +1394,7 @@ mod release_tests {
         for (host, target, expected) in [
             ("2.2.0", "aarch64-apple-darwin", Some("1.10.0")),
             ("2.2.0", "x86_64-pc-windows-msvc", Some("1.11.0")),
+            ("2.3.4-beta.1", "aarch64-apple-darwin", Some("1.10.0")),
             ("1.9.0", "aarch64-apple-darwin", Some("1.0.0")),
             ("3.2.0", "aarch64-apple-darwin", Some("2.0.0")),
             ("4.0.0", "aarch64-apple-darwin", Some("3.0.0")),

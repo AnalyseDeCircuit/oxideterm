@@ -6,7 +6,15 @@ use semver::{Version, VersionReq};
 
 pub(crate) fn host_version_matches(requirement: Option<&str>, host: &Version) -> bool {
     requirement.is_none_or(|requirement| {
-        VersionReq::parse(requirement).is_ok_and(|range| range.matches(host))
+        VersionReq::parse(requirement).is_ok_and(|range| {
+            // Stable-only ranges describe the host API version, including its prerelease builds.
+            // Keep exact SemVer matching when the plugin explicitly constrains a prerelease.
+            if !host.pre.is_empty() && range.comparators.iter().all(|cmp| cmp.pre.is_empty()) {
+                range.matches(&Version::new(host.major, host.minor, host.patch))
+            } else {
+                range.matches(host)
+            }
+        })
     })
 }
 
@@ -82,5 +90,31 @@ pub(crate) fn apply_catalog_compatibility(
         })
     {
         manifest.engines = Some(release.effective_engines().clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prerelease_hosts_use_their_base_version_only_for_stable_ranges() {
+        let host = Version::parse("2.3.4-beta.1").unwrap();
+        for (requirement, expected) in [
+            (">2.2.0", true),
+            (">=2.3.4, <3.0.0", true),
+            ("<2.3.4", false),
+            (">=2.3.5", false),
+            ("=2.3.4-beta.1", true),
+            (">=2.3.4-beta.2, <3.0.0", false),
+            (">=2.3.3-beta.1, <3.0.0", false),
+            ("invalid", false),
+        ] {
+            assert_eq!(
+                host_version_matches(Some(requirement), &host),
+                expected,
+                "{host} against {requirement}"
+            );
+        }
     }
 }

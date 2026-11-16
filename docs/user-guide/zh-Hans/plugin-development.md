@@ -1351,6 +1351,10 @@ com.example.native-dashboard/
 但不会改写安装包。未收录且未声明范围的旧安装包仍允许使用；旧版主应用不会因此自动获得兼容检查。
 目录格式和发布流程见[发布指南](https://github.com/AnalyseDeCircuit/oxideterm-plugins/blob/main/docs/PUBLISHING.md)。
 
+如果宿主范围只写了稳定版本，预发行版按主版本号、次版本号和修订号判断。
+例如，`2.3.4-beta.1` 满足 `>2.2.0`，但不满足 `<2.3.4`。
+如果范围明确写了预发行版本，就按语义化版本的预发行匹配规则比较完整版本号。
+
 开发时：
 
 1. 将插件目录复制到 `<config-dir>/plugins/`。

@@ -675,7 +675,10 @@ fn cached_catalog_tags_are_available_offline_and_follow_catalog_updates() {
 fn host_incompatibility_blocks_install_and_restart_without_losing_plugin_state() {
     let temp_dir = unique_temp_dir("plugin-host-compatibility");
     let settings_path = temp_dir.join("settings.json");
-    let original = manifest_json("com.example.demo", "1.0.0");
+    let mut compatible: serde_json::Value =
+        serde_json::from_str(&manifest_json("com.example.demo", "1.0.0")).unwrap();
+    compatible["engines"] = serde_json::json!({"oxideterm": ">2.2.0"});
+    let original = compatible.to_string();
     let package = plugin_package(&[("plugin.json", original.clone())]);
     NativePluginRegistry::install_plugin_package_from_bytes(&settings_path, &package, None, false)
         .unwrap();
