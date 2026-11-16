@@ -1649,13 +1649,9 @@ impl TerminalPane {
         if event.button == MouseButton::Left
             && self.scrollbar_visible
             && let Some(geometry) = self.scrollbar_geometry()
-            && geometry.contains_track(event.position)
+            && geometry.contains_thumb(event.position)
         {
-            let thumb_offset_y = if geometry.contains_thumb(event.position) {
-                event.position.y - geometry.y - geometry.top
-            } else {
-                geometry.height / 2.0
-            };
+            let thumb_offset_y = event.position.y - geometry.y - geometry.top;
             self.scrollbar_drag = Some(ScrollbarDrag { thumb_offset_y });
             self.set_scrollbar_position(event.position, thumb_offset_y, cx);
             return;
@@ -1863,7 +1859,7 @@ impl TerminalPane {
             && self.context_menu.is_none()
             && self
                 .scrollbar_geometry()
-                .is_some_and(|geometry| geometry.contains_track(event.position));
+                .is_some_and(|geometry| geometry.contains_thumb(event.position));
         self.set_scrollbar_hovered(hovered, cx);
         if hovered {
             return;
@@ -2015,7 +2011,7 @@ impl TerminalPane {
         if self.scrollbar_drag.take().is_some() {
             let hovered = self
                 .scrollbar_geometry()
-                .is_some_and(|geometry| geometry.contains_track(event.position));
+                .is_some_and(|geometry| geometry.contains_thumb(event.position));
             self.set_scrollbar_hovered(hovered, cx);
             self.show_scrollbar(cx);
             return;

@@ -23,16 +23,11 @@ pub(super) struct ScrollbarGeometry {
 
 impl ScrollbarGeometry {
     pub(super) fn contains_thumb(&self, position: gpui::Point<Pixels>) -> bool {
-        self.contains_track(position)
-            && position.y >= self.y + self.top
-            && position.y <= self.y + self.top + self.height
-    }
-
-    pub(super) fn contains_track(&self, position: gpui::Point<Pixels>) -> bool {
+        // Only the thumb overlays input; the rest of this strip is terminal content.
         position.x >= self.x - px(SCROLLBAR_HIT_WIDTH - SCROLLBAR_WIDTH)
             && position.x <= self.x + px(SCROLLBAR_WIDTH)
-            && position.y >= self.y
-            && position.y <= self.y + self.track_height
+            && position.y >= self.y + self.top
+            && position.y <= self.y + self.top + self.height
     }
 }
 

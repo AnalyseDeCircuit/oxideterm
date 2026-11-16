@@ -3238,16 +3238,37 @@ mod tests {
             });
         }
         pane.update(cx, |pane, cx| {
+            pane.flush_pending_pty_resize(pane.pty_resize_generation, cx);
             let snapshot = {
                 let mut terminal = pane.terminal.lock();
-                terminal.feed_recording_output(&b"line\r\n".repeat(80));
+                let mut line = vec![b'A'; pane.snapshot.cols];
+                line.extend_from_slice(b"\r\n");
+                terminal.feed_recording_output(&line.repeat(80));
                 terminal.snapshot()
             };
             pane.snapshot = pane.stamp_snapshot(snapshot);
             cx.notify();
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        let position = gpui::point(gpui::px(794.0), gpui::px(100.0));
+        let (right_text, position) = pane.read_with(cx, |pane, _| {
+            let bounds = pane.bounds.unwrap();
+            assert!(pane.snapshot.scrollback_lines >= 40);
+            assert!(!pane.scrollbar_visible);
+            let text_x = bounds.right() - gpui::px(14.0);
+            let grid_right = bounds.origin.x + pane.metrics.cell_width * pane.snapshot.cols as f32;
+            assert!(text_x < grid_right, "the click must land on terminal text");
+            let grid_bottom =
+                bounds.origin.y + pane.metrics.line_height * pane.snapshot.rows as f32;
+            (
+                gpui::point(text_x, bounds.origin.y + gpui::px(8.0)),
+                gpui::point(bounds.right() - gpui::px(6.0), grid_bottom - gpui::px(4.0)),
+            )
+        });
+        cx.simulate_mouse_move(right_text, None, gpui::Modifiers::default());
+        cx.update(|window, cx| {
+            window.draw(cx).clear(cx);
+            assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::IBeam);
+        });
         cx.simulate_mouse_move(position, None, gpui::Modifiers::default());
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
@@ -3274,15 +3295,30 @@ mod tests {
             window.draw(cx).clear(cx);
             assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::OpenHand);
         });
-        cx.simulate_mouse_move(
-            gpui::point(gpui::px(200.0), gpui::px(100.0)),
-            None,
-            gpui::Modifiers::default(),
-        );
+        // The thumb is still visible after release, but cannot grab text above it.
+        cx.simulate_mouse_move(right_text, None, gpui::Modifiers::default());
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
             assert_eq!(window.cursor_style_for_test(), gpui::CursorStyle::IBeam);
         });
+        pane.read_with(cx, |pane, _| assert!(pane.scrollbar_visible));
+        cx.simulate_mouse_down(
+            right_text,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        pane.read_with(cx, |pane, _| {
+            assert!(
+                pane.selection.is_some(),
+                "rightmost text must be selectable"
+            );
+            assert_eq!(pane.snapshot.display_offset, 0, "click must not scroll");
+        });
+        cx.simulate_mouse_up(
+            right_text,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
     }
 
     #[gpui::test]
@@ -3324,12 +3360,15 @@ mod tests {
         });
         cx.run_until_parked();
         left.update(cx, |pane, cx| {
+            pane.flush_pending_pty_resize(pane.pty_resize_generation, cx);
             pane.feed_recording_output(&b"line\r\n".repeat(100), cx);
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let start = left.read_with(cx, |pane, _| {
             let bounds = pane.bounds.unwrap();
-            point(bounds.right() - px(6.0), bounds.origin.y + px(200.0))
+            let grid_bottom =
+                bounds.origin.y + pane.metrics.line_height * pane.snapshot.rows as f32;
+            point(bounds.right() - px(6.0), grid_bottom - px(4.0))
         });
         cx.simulate_mouse_move(start, None, Modifiers::default());
         cx.update(|window, cx| window.draw(cx).clear(cx));
