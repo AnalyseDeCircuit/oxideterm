@@ -681,9 +681,9 @@ pub(crate) fn migrate_legacy_terminal_line_height(
         .pointer("/terminal/fontFamily")
         .and_then(|value| serde_json::from_value::<FontFamily>(value.clone()).ok())
         .unwrap_or(fallback_font_family);
-    let converted =
-        ((old_line_height / font_family.reference_natural_line_height_ratio()) * 100.0).round()
-            / 100.0;
+    let converted = ((old_line_height / font_family.reference_natural_line_height_ratio()) * 100.0)
+        .round()
+        / 100.0;
 
     let Some(terminal) = settings.get_mut("terminal").and_then(Value::as_object_mut) else {
         return false;

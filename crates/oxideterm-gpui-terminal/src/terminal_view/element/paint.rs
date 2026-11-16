@@ -112,7 +112,10 @@ fn paint_cell_outline(
     for edge in [
         Bounds::new(bounds.origin, size(width, stroke_y)),
         Bounds::new(
-            point(bounds.left(), (bounds.bottom() - stroke_y).max(bounds.top())),
+            point(
+                bounds.left(),
+                (bounds.bottom() - stroke_y).max(bounds.top()),
+            ),
             size(width, stroke_y),
         ),
         Bounds::new(bounds.origin, size(stroke_x, height)),
@@ -183,7 +186,8 @@ pub(crate) fn paint_terminal_underline(
         (f32::from(metrics.font_size) / 14.0).clamp(1.0, 2.0),
         window.scale_factor(),
     );
-    let y = px(rect.row as f32 * metrics.line_height_f32()) + underline_top_offset(metrics, thickness);
+    let y =
+        px(rect.row as f32 * metrics.line_height_f32()) + underline_top_offset(metrics, thickness);
     let bounds = pixel_snap_bounds(
         Bounds::new(
             origin + point(px(rect.col as f32 * metrics.cell_width_f32()), y),
@@ -1173,27 +1177,15 @@ fn push_half_circle_arc(
     reverse: bool,
 ) {
     if reverse {
-        builder.cubic_bezier_to(
-            curve.tip,
-            curve.lower_flat_control,
-            curve.lower_tip_control,
-        );
+        builder.cubic_bezier_to(curve.tip, curve.lower_flat_control, curve.lower_tip_control);
         builder.cubic_bezier_to(
             curve.start,
             curve.upper_tip_control,
             curve.upper_flat_control,
         );
     } else {
-        builder.cubic_bezier_to(
-            curve.tip,
-            curve.upper_flat_control,
-            curve.upper_tip_control,
-        );
-        builder.cubic_bezier_to(
-            curve.end,
-            curve.lower_tip_control,
-            curve.lower_flat_control,
-        );
+        builder.cubic_bezier_to(curve.tip, curve.upper_flat_control, curve.upper_tip_control);
+        builder.cubic_bezier_to(curve.end, curve.lower_tip_control, curve.lower_flat_control);
     }
 }
 

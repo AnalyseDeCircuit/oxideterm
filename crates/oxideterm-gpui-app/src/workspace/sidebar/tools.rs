@@ -522,8 +522,20 @@ mod tests {
                 false,
                 true,
             ),
-            (ActiveSurface::Terminal, Some(TabKind::Sftp), false, false, true),
-            (ActiveSurface::Terminal, Some(TabKind::Ide), false, false, true),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::Sftp),
+                false,
+                false,
+                true,
+            ),
+            (
+                ActiveSurface::Terminal,
+                Some(TabKind::Ide),
+                false,
+                false,
+                true,
+            ),
             (ActiveSurface::Terminal, None, true, false, true),
             (
                 ActiveSurface::Terminal,

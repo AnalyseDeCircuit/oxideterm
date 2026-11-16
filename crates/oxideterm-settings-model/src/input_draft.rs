@@ -461,14 +461,14 @@ pub fn apply_persisted_settings_input_draft(
             .into(),
         SettingsInput::TerminalCharacterSpacing => parse_f64(draft)
             .map(|value| {
-                settings.terminal.character_spacing =
-                    value.clamp(MIN_TERMINAL_CHARACTER_SPACING, MAX_TERMINAL_CHARACTER_SPACING)
+                settings.terminal.character_spacing = value.clamp(
+                    MIN_TERMINAL_CHARACTER_SPACING,
+                    MAX_TERMINAL_CHARACTER_SPACING,
+                )
             })
             .into(),
         SettingsInput::TerminalLineHeight => parse_f64(draft)
-            .map(|value| {
-                settings.terminal.line_height = value.clamp(MIN_TERMINAL_LINE_HEIGHT, 2.0)
-            })
+            .map(|value| settings.terminal.line_height = value.clamp(MIN_TERMINAL_LINE_HEIGHT, 2.0))
             .into(),
         SettingsInput::TerminalPaddingHorizontal => parse_i64(draft)
             .map(|value| {
