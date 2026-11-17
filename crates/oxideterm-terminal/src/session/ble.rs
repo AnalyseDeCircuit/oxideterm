@@ -21,7 +21,7 @@ const BLE_ATT_HEADER_BYTES: usize = 3;
 /// The peripheral identity comes from the discovery flow; the service UUID
 /// identifies which GATT service carries the notify/write channel used as
 /// the terminal byte stream.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BleSessionConfig {
     /// Adapter to reopen when the session runs without a handed-over
     /// adapter guard. When a guard is supplied the worker uses the guard's
@@ -49,12 +49,6 @@ pub struct BleSessionConfig {
     /// write-without-response because the OS rejects acknowledged writes on
     /// characteristics lacking the WRITE property.
     pub write_without_response: bool,
-    /// Lease on the matched peripheral. The session worker returns it the
-    /// moment it decides to exit, and other holders release it when the last
-    /// clone drops, so reopening a device this process already opened fails
-    /// with `BleResolveError::DeviceBusy` until the terminal closes, without
-    /// waiting for the radio teardown to finish.
-    reservation: std::sync::Arc<BleDeviceReservation>,
 }
 
 impl BleSessionConfig {
@@ -1438,47 +1432,24 @@ impl std::fmt::Display for BleResolveError {
 /// reservation in [`crate::session::serial`]: the session manager must not
 /// stack a second terminal (or issue a second connect) for a device this
 /// process already owns. The key is the device identity normalized by
-/// [`ble_reservation_key`]; the registry value pairs the human-facing label
-/// with an owner token so a late `Drop` from a previous holder cannot evict
-/// a freshly claimed lease.
+/// [`ble_reservation_key`]; the registry stores the human-facing label.
 #[derive(Debug)]
 struct BleDeviceReservation {
     key: String,
-    /// Owner token minted at claim time; a late `Drop` from a previous
-    /// holder only removes an entry whose token still matches.
-    token: u64,
-}
-
-impl BleDeviceReservation {
-    /// Returns the lease before the holder's teardown finishes. The session
-    /// worker calls this the moment it decides to exit so the next open does
-    /// not wait on the bounded unsubscribe/disconnect D-Bus round trips: the
-    /// resolver's link adoption and [`heal_dying_link`] already handle a
-    /// racing `Device1.Disconnect` in flight. The token check makes repeated
-    /// and stale calls no-ops without further state.
-    fn release(&self) {
-        let mut owners = ble_device_owners()
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        if owners
-            .get(&self.key)
-            .is_some_and(|entry| entry.1 == self.token)
-        {
-            owners.remove(&self.key);
-        }
-    }
 }
 
 impl Drop for BleDeviceReservation {
     fn drop(&mut self) {
-        self.release();
+        ble_device_owners()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.key);
     }
 }
 
-fn ble_device_owners() -> &'static std::sync::Mutex<std::collections::HashMap<String, (String, u64)>>
-{
+fn ble_device_owners() -> &'static std::sync::Mutex<std::collections::HashMap<String, String>> {
     static OWNERS: std::sync::OnceLock<
-        std::sync::Mutex<std::collections::HashMap<String, (String, u64)>>,
+        std::sync::Mutex<std::collections::HashMap<String, String>>,
     > = std::sync::OnceLock::new();
     OWNERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
 }
@@ -1492,13 +1463,9 @@ fn ble_reservation_key(clue: &str) -> String {
 }
 
 /// Claims the lease for `key`, or reports [`BleResolveError::DeviceBusy`]
-/// when another session (or in-flight open) already holds it. The caller
-/// wraps the reservation in an `Arc` and moves it into [`BleSessionConfig`]:
-/// the session worker returns it the moment it decides to exit, and any
-/// other holder releases it when the last clone drops.
+/// when another session (or in-flight open) already holds it. The resolver
+/// hands the lease to the verified link so it survives handoff and cleanup.
 fn reserve_ble_device(key: String, label: &str) -> Result<BleDeviceReservation, BleResolveError> {
-    static NEXT_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-    let token = NEXT_TOKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let mut owners = ble_device_owners()
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -1507,15 +1474,15 @@ fn reserve_ble_device(key: String, label: &str) -> Result<BleDeviceReservation, 
             device: label.to_owned(),
         });
     }
-    owners.insert(key.clone(), (label.to_owned(), token));
-    Ok(BleDeviceReservation { key, token })
+    owners.insert(key.clone(), label.to_owned());
+    Ok(BleDeviceReservation { key })
 }
 
 /// Reports the reserved device label when a session (or in-flight open)
 /// already holds the lease for this profile identity, and `None` otherwise.
 /// The session manager uses this to reject a duplicate open in its status
-/// line before creating a second row, matching the serial port's busy
-/// handling. The identity is resolved through [`oxideterm_ble::BleKnownIdentity`]
+/// line before starting the worker, matching the serial port's busy handling.
+/// The identity is resolved through [`oxideterm_ble::BleKnownIdentity`]
 /// so the lookup derives exactly the key the direct path would claim.
 pub fn ble_device_reservation_label(
     device_mac: Option<&str>,
@@ -1527,7 +1494,7 @@ pub fn ble_device_reservation_label(
         .lock()
         .unwrap_or_else(|error| error.into_inner())
         .get(&key)
-        .map(|entry| entry.0.clone())
+        .cloned()
 }
 
 /// Closes a link this flow created or opened for service inspection or a
@@ -1603,9 +1570,21 @@ async fn heal_dying_link(
 pub struct BleResolvedLink {
     peripheral: btleplug::platform::Peripheral,
     owned: bool,
+    reservation: BleDeviceReservation,
 }
 
 impl BleResolvedLink {
+    fn new(
+        (peripheral, owned): (btleplug::platform::Peripheral, bool),
+        reservation: BleDeviceReservation,
+    ) -> Self {
+        Self {
+            peripheral,
+            owned,
+            reservation,
+        }
+    }
+
     /// Closes a handed-over link that was never adopted by a session.
     pub async fn close(self) {
         disconnect_temporary_link(&self.peripheral, self.owned).await;
@@ -1625,7 +1604,7 @@ async fn verify_target_service(
     device_id: &oxideterm_ble::BlePeripheralId,
     cancelled: &tokio_util::sync::CancellationToken,
     target_service: uuid::Uuid,
-) -> Result<(bool, Option<BleResolvedLink>), BleResolveError> {
+) -> Result<Option<(btleplug::platform::Peripheral, bool)>, BleResolveError> {
     use btleplug::api::Peripheral as _;
     let (peripheral, was_connected) = match oxideterm_ble::ble_connect_discovered_device(
         guard.adapter(),
@@ -1660,9 +1639,9 @@ async fn verify_target_service(
     };
     if !has_target {
         disconnect_temporary_link(&peripheral, owned).await;
-        return Ok((false, None));
+        return Ok(None);
     }
-    Ok((true, Some(BleResolvedLink { peripheral, owned })))
+    Ok(Some((peripheral, owned)))
 }
 
 /// Builds the session config for a connect that skipped the discovery flow.
@@ -1677,7 +1656,6 @@ async fn ble_direct_session_config(
     runtime_options: SerialRuntimeOptions,
     mtu: Option<u16>,
     write_without_response: bool,
-    reservation: std::sync::Arc<BleDeviceReservation>,
 ) -> BleSessionConfig {
     use btleplug::api::Peripheral as _;
     let info = oxideterm_ble::ble_peripheral_info(peripheral).await;
@@ -1701,7 +1679,6 @@ async fn ble_direct_session_config(
         runtime_options,
         mtu,
         write_without_response,
-        reservation,
     }
 }
 
@@ -1793,13 +1770,12 @@ pub async fn ble_resolve_profile_to_session(
         {
             // Lease the device before touching the radio: a second open of a
             // peripheral this process already owns must fail fast, mirroring
-            // the serial port reservation. The reservation is released on
-            // every early-exit path below when it drops, and moved into the
-            // session config on success.
-            let reservation = std::sync::Arc::new(reserve_ble_device(
+            // the serial port reservation. The verified link takes ownership
+            // of the lease before it leaves the resolver.
+            let reservation = reserve_ble_device(
                 ble_reservation_key(identity.clue_label()),
                 device_name.unwrap_or_else(|| identity.clue_label()),
-            )?);
+            )?;
             on_stage(BleResolveStage::DirectConnect);
             #[cfg(target_os = "linux")]
             let mut directed_discovery: Option<oxideterm_ble::BluezDirectedDiscovery> = None;
@@ -1906,7 +1882,7 @@ pub async fn ble_resolve_profile_to_session(
             #[cfg(not(target_os = "linux"))]
             guard.stop_scan().await;
             match verified {
-                Ok((true, link)) => {
+                Ok(Some(link)) => {
                     let config = ble_direct_session_config(
                         &peripheral,
                         adapter_index,
@@ -1916,15 +1892,14 @@ pub async fn ble_resolve_profile_to_session(
                         runtime_options,
                         mtu,
                         write_without_response,
-                        reservation,
                     )
                     .await;
                     on_stage(BleResolveStage::Ready);
-                    return Ok((config, guard, link));
+                    return Ok((config, guard, Some(BleResolvedLink::new(link, reservation))));
                 }
                 // The device answered with a GATT table lacking the target
                 // service: a real profile mismatch, not a reachability issue.
-                Ok((false, _)) => {
+                Ok(None) => {
                     return Err(BleResolveError::ServiceMismatch {
                         service_uuid: service_uuid.to_string(),
                     });
@@ -1975,7 +1950,7 @@ pub async fn ble_resolve_profile_to_session(
                         )
                         .await
                         {
-                            Ok((true, link)) => {
+                            Ok(Some(link)) => {
                                 guard.stop_scan().await;
                                 let config = ble_direct_session_config(
                                     &peripheral,
@@ -1986,13 +1961,16 @@ pub async fn ble_resolve_profile_to_session(
                                     runtime_options,
                                     mtu,
                                     write_without_response,
-                                    reservation,
                                 )
                                 .await;
                                 on_stage(BleResolveStage::Ready);
-                                return Ok((config, guard, link));
+                                return Ok((
+                                    config,
+                                    guard,
+                                    Some(BleResolvedLink::new(link, reservation)),
+                                ));
                             }
-                            Ok((false, _)) => {
+                            Ok(None) => {
                                 return Err(BleResolveError::ServiceMismatch {
                                     service_uuid: service_uuid.to_string(),
                                 });
@@ -2073,7 +2051,7 @@ pub async fn ble_resolve_profile_to_session(
         ble_reservation_key(&discovered_identity),
         device.name.as_deref().unwrap_or(&device.address),
     ) {
-        Ok(reservation) => std::sync::Arc::new(reservation),
+        Ok(reservation) => reservation,
         Err(error) => {
             guard.stop_scan().await;
             return Err(error);
@@ -2084,21 +2062,19 @@ pub async fn ble_resolve_profile_to_session(
     // reads the real GATT table: a cached device that is no longer reachable
     // must fail here instead of matching through stale advertisement data.
     on_stage(BleResolveStage::VerifyingService);
-    let (uuid_match, link) =
-        match verify_target_service(&guard, &device.id, cancelled, target_service).await {
-            Ok(result) => result,
-            Err(error) => {
-                guard.stop_scan().await;
-                return Err(error);
-            }
-        };
-
-    if !uuid_match {
-        let _ = guard.stop_scan().await;
-        return Err(BleResolveError::ServiceMismatch {
-            service_uuid: service_uuid.to_string(),
-        });
-    }
+    let link = match verify_target_service(&guard, &device.id, cancelled, target_service).await {
+        Ok(Some(link)) => link,
+        Ok(None) => {
+            guard.stop_scan().await;
+            return Err(BleResolveError::ServiceMismatch {
+                service_uuid: service_uuid.to_string(),
+            });
+        }
+        Err(error) => {
+            guard.stop_scan().await;
+            return Err(error);
+        }
+    };
 
     let config = BleSessionConfig {
         adapter_index,
@@ -2113,10 +2089,9 @@ pub async fn ble_resolve_profile_to_session(
         runtime_options,
         mtu,
         write_without_response,
-        reservation,
     };
     on_stage(BleResolveStage::Ready);
-    Ok((config, guard, link))
+    Ok((config, guard, Some(BleResolvedLink::new(link, reservation))))
 }
 
 fn match_ble_device<'a>(
@@ -2225,8 +2200,12 @@ async fn run_ble_worker(
     // macOS/Windows the cache was populated by the scan. Once the link is up
     // the device is no longer temporary, so the guard can be dropped to
     // release the radio.
-    let (peripheral, mut owned) = match resolved_link {
-        Some(BleResolvedLink { peripheral, owned }) => (peripheral, owned),
+    let (peripheral, mut owned, reservation) = match resolved_link {
+        Some(BleResolvedLink {
+            peripheral,
+            owned,
+            reservation,
+        }) => (peripheral, owned, Some(reservation)),
         None => match oxideterm_ble::ble_connect_discovered_device(
             &adapter,
             &config.device_id,
@@ -2235,7 +2214,7 @@ async fn run_ble_worker(
         )
         .await
         {
-            Ok((peripheral, was_connected)) => (peripheral, !was_connected),
+            Ok((peripheral, was_connected)) => (peripheral, !was_connected, None),
             Err(error) => {
                 // Connect failed before the link was up; release the discovery
                 // window so the radio does not stay active for a dead session.
@@ -2435,11 +2414,6 @@ async fn run_ble_worker(
         _ = close_token.cancelled() => {},
         _ = connected_worker => {},
     }
-    // Deciding to exit means this session can no longer use the device, so
-    // the lease returns now: a reopen must not wait out the bounded
-    // unsubscribe/disconnect below, whose racing teardown the resolver's
-    // link adoption and heal path already absorb.
-    config.reservation.release();
     // Every exit path releases the notify registration and the physical link,
     // otherwise the next open reuses a live connection and receives one extra
     // copy of every peer notification per leaked attempt.
@@ -2458,6 +2432,8 @@ async fn run_ble_worker(
     if let Some(guard) = adapter_guard.take() {
         guard.stop_scan().await;
     }
+    // A reopen must not adopt a link this worker can still disconnect.
+    drop(reservation);
 }
 
 #[cfg(test)]
@@ -2492,39 +2468,6 @@ mod ble_tests {
         }
         drop(reservation);
         assert!(reserve_ble_device(key, "reopened").is_ok());
-    }
-
-    #[test]
-    fn early_release_frees_the_key_and_a_stale_drop_keeps_the_new_owner() {
-        let key = format!("EARLY-{}", uuid::Uuid::new_v4());
-        let first = Arc::new(reserve_ble_device(key.clone(), "first open").unwrap());
-        first.release();
-        let second = Arc::new(reserve_ble_device(key.clone(), "second open").unwrap());
-        // A stale clone of the released lease must not evict the new owner:
-        // the worker releases early while its config clones still exist.
-        drop(first);
-        match reserve_ble_device(key.clone(), "third open") {
-            Err(BleResolveError::DeviceBusy { device }) => assert_eq!(device, "third open"),
-            other => panic!("expected the second lease to still hold, got {other:?}"),
-        }
-        drop(second);
-        assert!(reserve_ble_device(key, "reopened").is_ok());
-    }
-
-    #[test]
-    fn reservation_lease_follows_the_last_config_holder() {
-        // The session config is cloned into the worker; the lease must stay
-        // claimed while any holder exists and release only with the last one.
-        let key = format!("RESV-{}", uuid::Uuid::new_v4());
-        let holder = std::sync::Arc::new(reserve_ble_device(key.clone(), "device").unwrap());
-        let clone = std::sync::Arc::clone(&holder);
-        drop(holder);
-        assert!(matches!(
-            reserve_ble_device(key.clone(), "other"),
-            Err(BleResolveError::DeviceBusy { .. })
-        ));
-        drop(clone);
-        assert!(reserve_ble_device(key, "free again").is_ok());
     }
 
     #[test]
