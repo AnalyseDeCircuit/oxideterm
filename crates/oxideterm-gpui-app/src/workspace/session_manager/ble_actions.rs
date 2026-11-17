@@ -157,6 +157,31 @@ impl WorkspaceApp {
                 )
             }
         };
+        // Standalone records are plain workspace state: every mutation needs
+        // an explicit notify or the sidebar keeps showing the pre-open list.
+        cx.notify();
+        // A saved-profile reopen of a device this process already opened must
+        // not reach the radio: the row stays in the active list marked failed
+        // (like the serial port reservation, which also runs after the row
+        // exists) and the localized reason goes to the status line only, with
+        // no trace card. The async DeviceBusy claim still guards the form
+        // path and same-tick races.
+        if request.profile_id.is_some() {
+            if let Some(device) = oxideterm_terminal::ble_device_reservation_label(
+                request.device_mac.as_deref(),
+                request.platform_identifier.as_deref(),
+            ) {
+                let status = self.i18n.t_with(
+                    "connections.ble.resolve.device_busy",
+                    &[("device", &device)],
+                );
+                self.standalone_connections.mark_attempt_error(&attempt_id);
+                self.session_manager.update(cx, |session_manager, cx| {
+                    session_manager.set_status(Some(status), cx)
+                });
+                return;
+            }
+        }
         self.push_ble_trace_event(
             &request.target,
             &attempt_id,
@@ -435,10 +460,6 @@ impl WorkspaceApp {
         use oxideterm_terminal::BleResolveError;
         match error {
             BleResolveError::Cancelled => self.i18n.t("connections.ble.resolve.cancelled"),
-            BleResolveError::AdapterEnumeration(error) => self.i18n.t_with(
-                "connections.ble.resolve.adapter_enumeration_failed",
-                &[("error", error)],
-            ),
             BleResolveError::NoAdapters => self.i18n.t("connections.ble.resolve.no_adapters"),
             BleResolveError::AdapterOpen(error) => self.i18n.t_with(
                 "connections.ble.resolve.adapter_open_failed",
@@ -459,6 +480,9 @@ impl WorkspaceApp {
                 "connections.ble.resolve.ambiguous_device",
                 &[("identity", identity)],
             ),
+            BleResolveError::DeviceBusy { device } => self
+                .i18n
+                .t_with("connections.ble.resolve.device_busy", &[("device", device)]),
             BleResolveError::Connect(error) => self.i18n.t_with(
                 "connections.ble.resolve.connect_failed",
                 &[("error", error)],

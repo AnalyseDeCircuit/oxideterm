@@ -73,13 +73,13 @@
     "failedFetchStats": "Failed to fetch stats",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "BLE adapter enumeration failed: {error}",
               "no_adapters": "no Bluetooth adapters available",
               "adapter_open_failed": "BLE adapter open failed: {error}",
               "device_enumeration_failed": "BLE device enumeration failed: {error}",
               "scan_failed": "BLE scan failed: {error}",
               "no_device_matched": "no BLE device in range matched the profile ({identity})",
               "ambiguous_device": "Multiple BLE devices match {identity}; select a device from a fresh scan.",
+              "device_busy": "This BLE device ({device}) is already open; close its terminal before opening it again.",
               "cancelled": "BLE connection cancelled",
               "connect_failed": "BLE connect failed: {error}",
               "service_discovery_failed": "service discovery failed: {error}",

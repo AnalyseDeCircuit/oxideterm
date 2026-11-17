@@ -73,13 +73,13 @@
     "failedFetchStats": "取得統計資訊失敗",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "列舉藍牙介面卡失敗：{error}",
               "no_adapters": "沒有可用的藍牙介面卡",
               "adapter_open_failed": "開啟藍牙介面卡失敗：{error}",
               "device_enumeration_failed": "列舉藍牙裝置失敗：{error}",
               "scan_failed": "藍牙掃描失敗：{error}",
               "no_device_matched": "附近沒有符合該設定檔的 BLE 裝置（{identity}）",
               "ambiguous_device": "多個藍牙裝置符合「{identity}」，請重新掃描並選擇裝置。",
+              "device_busy": "該藍牙裝置（{device}）已開啟，請先關閉其終端再重新開啟。",
               "cancelled": "藍牙連線已取消",
               "connect_failed": "連線 BLE 裝置失敗：{error}",
               "service_discovery_failed": "服務探索失敗：{error}",

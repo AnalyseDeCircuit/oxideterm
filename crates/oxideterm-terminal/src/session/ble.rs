@@ -21,7 +21,7 @@ const BLE_ATT_HEADER_BYTES: usize = 3;
 /// The peripheral identity comes from the discovery flow; the service UUID
 /// identifies which GATT service carries the notify/write channel used as
 /// the terminal byte stream.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct BleSessionConfig {
     /// Adapter to reopen when the session runs without a handed-over
     /// adapter guard. When a guard is supplied the worker uses the guard's
@@ -49,6 +49,12 @@ pub struct BleSessionConfig {
     /// write-without-response because the OS rejects acknowledged writes on
     /// characteristics lacking the WRITE property.
     pub write_without_response: bool,
+    /// Lease on the matched peripheral. The session worker returns it the
+    /// moment it decides to exit, and other holders release it when the last
+    /// clone drops, so reopening a device this process already opened fails
+    /// with `BleResolveError::DeviceBusy` until the terminal closes, without
+    /// waiting for the radio teardown to finish.
+    reservation: std::sync::Arc<BleDeviceReservation>,
 }
 
 impl BleSessionConfig {
@@ -1136,7 +1142,8 @@ fn gatt_notification_is_unambiguous(
         .iter()
         .flat_map(|service| &service.characteristics)
         .filter(|entry| entry.uuid == characteristic)
-        .count() == 1
+        .count()
+        == 1
 }
 
 /// Validates the discovered GATT surface before issuing platform operations.
@@ -1289,14 +1296,10 @@ async fn execute_gatt_command(
         } => {
             let outcome = async {
                 let routes_before = routes.get(&characteristic_uuid).map_or(0, Vec::len);
-                let removed = routes
-                    .get_mut(&characteristic_uuid)
-                    .and_then(|entries| {
-                        let index = entries
-                            .iter()
-                            .position(|route| route.id == route_id)?;
-                        Some(entries.remove(index))
-                    });
+                let removed = routes.get_mut(&characteristic_uuid).and_then(|entries| {
+                    let index = entries.iter().position(|route| route.id == route_id)?;
+                    Some(entries.remove(index))
+                });
                 let now_empty = routes
                     .get(&characteristic_uuid)
                     .is_some_and(|entries| entries.is_empty());
@@ -1357,7 +1360,6 @@ pub enum BleResolveStage {
 #[derive(Clone, Debug)]
 pub enum BleResolveError {
     Cancelled,
-    AdapterEnumeration(String),
     NoAdapters,
     AdapterOpen(String),
     /// The adapter's discovery window could not be read (guard reuse path).
@@ -1370,6 +1372,11 @@ pub enum BleResolveError {
     },
     AmbiguousDevice {
         identity: String,
+    },
+    /// Another session (or in-flight open) in this process already owns the
+    /// matched device; the payload is the device label to show the user.
+    DeviceBusy {
+        device: String,
     },
     Connect(String),
     ServiceDiscovery(String),
@@ -1395,9 +1402,6 @@ impl std::fmt::Display for BleResolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Cancelled => write!(f, "BLE connection cancelled"),
-            Self::AdapterEnumeration(error) => {
-                write!(f, "BLE adapter enumeration failed: {error}")
-            }
             Self::NoAdapters => write!(f, "no Bluetooth adapters available"),
             Self::AdapterOpen(error) => write!(f, "BLE adapter open failed: {error}"),
             Self::DeviceEnumeration(error) => {
@@ -1411,6 +1415,9 @@ impl std::fmt::Display for BleResolveError {
                 f,
                 "multiple BLE devices matched ({identity}); select the device explicitly"
             ),
+            Self::DeviceBusy { device } => {
+                write!(f, "BLE device is already open ({device})")
+            }
             Self::Connect(error) => write!(f, "BLE connect failed: {error}"),
             Self::ServiceDiscovery(error) => write!(f, "service discovery failed: {error}"),
             Self::ServiceMismatch { service_uuid } => write!(
@@ -1425,6 +1432,102 @@ impl std::fmt::Display for BleResolveError {
             }
         }
     }
+}
+
+/// Process-wide lease on one BLE peripheral, mirroring the serial port
+/// reservation in [`crate::session::serial`]: the session manager must not
+/// stack a second terminal (or issue a second connect) for a device this
+/// process already owns. The key is the device identity normalized by
+/// [`ble_reservation_key`]; the registry value pairs the human-facing label
+/// with an owner token so a late `Drop` from a previous holder cannot evict
+/// a freshly claimed lease.
+#[derive(Debug)]
+struct BleDeviceReservation {
+    key: String,
+    /// Owner token minted at claim time; a late `Drop` from a previous
+    /// holder only removes an entry whose token still matches.
+    token: u64,
+}
+
+impl BleDeviceReservation {
+    /// Returns the lease before the holder's teardown finishes. The session
+    /// worker calls this the moment it decides to exit so the next open does
+    /// not wait on the bounded unsubscribe/disconnect D-Bus round trips: the
+    /// resolver's link adoption and [`heal_dying_link`] already handle a
+    /// racing `Device1.Disconnect` in flight. The token check makes repeated
+    /// and stale calls no-ops without further state.
+    fn release(&self) {
+        let mut owners = ble_device_owners()
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if owners
+            .get(&self.key)
+            .is_some_and(|entry| entry.1 == self.token)
+        {
+            owners.remove(&self.key);
+        }
+    }
+}
+
+impl Drop for BleDeviceReservation {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+fn ble_device_owners() -> &'static std::sync::Mutex<std::collections::HashMap<String, (String, u64)>>
+{
+    static OWNERS: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, (String, u64)>>,
+    > = std::sync::OnceLock::new();
+    OWNERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Normalizes an identity clue (stored profile MAC, discovered address, or
+/// platform identifier) into the reservation key. Profiles and platforms
+/// report addresses in different cases, so the direct and scan paths must
+/// derive the same key for the same device.
+fn ble_reservation_key(clue: &str) -> String {
+    clue.trim().to_ascii_uppercase()
+}
+
+/// Claims the lease for `key`, or reports [`BleResolveError::DeviceBusy`]
+/// when another session (or in-flight open) already holds it. The caller
+/// wraps the reservation in an `Arc` and moves it into [`BleSessionConfig`]:
+/// the session worker returns it the moment it decides to exit, and any
+/// other holder releases it when the last clone drops.
+fn reserve_ble_device(key: String, label: &str) -> Result<BleDeviceReservation, BleResolveError> {
+    static NEXT_TOKEN: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let token = NEXT_TOKEN.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let mut owners = ble_device_owners()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if owners.contains_key(&key) {
+        return Err(BleResolveError::DeviceBusy {
+            device: label.to_owned(),
+        });
+    }
+    owners.insert(key.clone(), (label.to_owned(), token));
+    Ok(BleDeviceReservation { key, token })
+}
+
+/// Reports the reserved device label when a session (or in-flight open)
+/// already holds the lease for this profile identity, and `None` otherwise.
+/// The session manager uses this to reject a duplicate open in its status
+/// line before creating a second row, matching the serial port's busy
+/// handling. The identity is resolved through [`oxideterm_ble::BleKnownIdentity`]
+/// so the lookup derives exactly the key the direct path would claim.
+pub fn ble_device_reservation_label(
+    device_mac: Option<&str>,
+    platform_identifier: Option<&str>,
+) -> Option<String> {
+    let identity = oxideterm_ble::BleKnownIdentity::from_clues(device_mac, platform_identifier)?;
+    let key = ble_reservation_key(identity.clue_label());
+    ble_device_owners()
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .get(&key)
+        .map(|entry| entry.0.clone())
 }
 
 /// Closes a link this flow created or opened for service inspection or a
@@ -1574,6 +1677,7 @@ async fn ble_direct_session_config(
     runtime_options: SerialRuntimeOptions,
     mtu: Option<u16>,
     write_without_response: bool,
+    reservation: std::sync::Arc<BleDeviceReservation>,
 ) -> BleSessionConfig {
     use btleplug::api::Peripheral as _;
     let info = oxideterm_ble::ble_peripheral_info(peripheral).await;
@@ -1597,6 +1701,7 @@ async fn ble_direct_session_config(
         runtime_options,
         mtu,
         write_without_response,
+        reservation,
     }
 }
 
@@ -1654,8 +1759,8 @@ pub async fn ble_resolve_profile_to_session(
             service_uuid: service_uuid.to_string(),
         })?;
 
-    // Step 0 — adapter selection. Reuse a supplied guard; otherwise pick by
-    // stored MAC preference or fall back to the first available adapter.
+    // Step 0 — adapter selection. Reuse a supplied guard; otherwise open the
+    // adapter whose controller address matches the stored MAC preference.
     let guard_supplied = guard.is_some();
     let (guard, adapter_index) = tokio::select! {
         biased;
@@ -1664,10 +1769,10 @@ pub async fn ble_resolve_profile_to_session(
             // A supplied guard wins even when the profile's adapter MAC
             // preference points elsewhere: the scan is already running on
             // the shared adapter, and the worker uses the guard's adapter
-            // instead of reopening by index. The 0 is a placeholder that is
-            // never read while a guard is handed over.
+            // instead of reopening by preference. The 0 is a placeholder that
+            // is never read while a guard is handed over.
             Some(existing) => (existing, 0usize),
-            None => open_adapter_for_profile(adapter_mac).await?,
+            None => (open_adapter_for_profile(adapter_mac).await?, 0usize),
         }) } => result?,
     };
 
@@ -1686,6 +1791,15 @@ pub async fn ble_resolve_profile_to_session(
         if let Some(identity) =
             oxideterm_ble::BleKnownIdentity::from_clues(device_mac, platform_identifier)
         {
+            // Lease the device before touching the radio: a second open of a
+            // peripheral this process already owns must fail fast, mirroring
+            // the serial port reservation. The reservation is released on
+            // every early-exit path below when it drops, and moved into the
+            // session config on success.
+            let reservation = std::sync::Arc::new(reserve_ble_device(
+                ble_reservation_key(identity.clue_label()),
+                device_name.unwrap_or_else(|| identity.clue_label()),
+            )?);
             on_stage(BleResolveStage::DirectConnect);
             #[cfg(target_os = "linux")]
             let mut directed_discovery: Option<oxideterm_ble::BluezDirectedDiscovery> = None;
@@ -1802,6 +1916,7 @@ pub async fn ble_resolve_profile_to_session(
                         runtime_options,
                         mtu,
                         write_without_response,
+                        reservation,
                     )
                     .await;
                     on_stage(BleResolveStage::Ready);
@@ -1871,6 +1986,7 @@ pub async fn ble_resolve_profile_to_session(
                                     runtime_options,
                                     mtu,
                                     write_without_response,
+                                    reservation,
                                 )
                                 .await;
                                 on_stage(BleResolveStage::Ready);
@@ -1941,6 +2057,29 @@ pub async fn ble_resolve_profile_to_session(
         }
     };
 
+    // Lease the matched device before the service check connects: a second
+    // open of a peripheral this process already owns must fail without radio
+    // work, and a failed check below releases the reservation on drop. The
+    // identity prefers the reported address (stable MAC on Linux/Windows,
+    // empty on Apple) over the platform peripheral id: the BlueZ object path
+    // embeds the adapter index, so a path-based key would let the same
+    // peripheral through when two adapters can both see it.
+    let discovered_identity = if device.address.is_empty() {
+        device.id.to_string()
+    } else {
+        device.address.clone()
+    };
+    let reservation = match reserve_ble_device(
+        ble_reservation_key(&discovered_identity),
+        device.name.as_deref().unwrap_or(&device.address),
+    ) {
+        Ok(reservation) => std::sync::Arc::new(reservation),
+        Err(error) => {
+            guard.stop_scan().await;
+            return Err(error);
+        }
+    };
+
     // Step 3 — service UUID verification. The check always opens a link and
     // reads the real GATT table: a cached device that is no longer reachable
     // must fail here instead of matching through stale advertisement data.
@@ -1974,6 +2113,7 @@ pub async fn ble_resolve_profile_to_session(
         runtime_options,
         mtu,
         write_without_response,
+        reservation,
     };
     on_stage(BleResolveStage::Ready);
     Ok((config, guard, link))
@@ -2015,37 +2155,21 @@ fn match_ble_device<'a>(
     Ok(first)
 }
 
-/// Opens a [`oxideterm_ble::BleAdapterGuard`] for the profile, honoring the
-/// stored adapter MAC preference. Falls back to the first available adapter
-/// when the preference is absent or no adapter matches.
+/// Opens the profile's preferred adapter; falls back to the first adapter
+/// when the stored MAC is absent or no controller matches. All selection
+/// happens inside [`BleAdapterGuard::open`]'s single enumeration: matching a
+/// list position in one enumeration and opening by index in another would let
+/// BlueZ's unstable adapter order pair the stored MAC with a different
+/// controller.
 async fn open_adapter_for_profile(
     adapter_mac: Option<&str>,
-) -> Result<(oxideterm_ble::BleAdapterGuard, usize), BleResolveError> {
-    let infos = oxideterm_ble::ble_list_adapters()
+) -> Result<oxideterm_ble::BleAdapterGuard, BleResolveError> {
+    oxideterm_ble::BleAdapterGuard::open(adapter_mac)
         .await
-        .map_err(|error| BleResolveError::AdapterEnumeration(error.to_string()))?;
-    if infos.is_empty() {
-        return Err(BleResolveError::NoAdapters);
-    }
-
-    let index = if let Some(pref) = adapter_mac {
-        infos
-            .iter()
-            .position(|info| {
-                info.adapter_mac
-                    .as_deref()
-                    .map(|mac| mac.eq_ignore_ascii_case(pref))
-                    .unwrap_or(false)
-            })
-            .unwrap_or(0)
-    } else {
-        0
-    };
-
-    let guard = oxideterm_ble::BleAdapterGuard::open(index)
-        .await
-        .map_err(|error| BleResolveError::AdapterOpen(error.to_string()))?;
-    Ok((guard, index))
+        .map_err(|error| match error {
+            oxideterm_ble::BleError::NoAdapters => BleResolveError::NoAdapters,
+            error => BleResolveError::AdapterOpen(error.to_string()),
+        })
 }
 
 async fn run_ble_worker(
@@ -2311,6 +2435,11 @@ async fn run_ble_worker(
         _ = close_token.cancelled() => {},
         _ = connected_worker => {},
     }
+    // Deciding to exit means this session can no longer use the device, so
+    // the lease returns now: a reopen must not wait out the bounded
+    // unsubscribe/disconnect below, whose racing teardown the resolver's
+    // link adoption and heal path already absorb.
+    config.reservation.release();
     // Every exit path releases the notify registration and the physical link,
     // otherwise the next open reuses a live connection and receives one extra
     // copy of every peer notification per leaked attempt.
@@ -2349,6 +2478,133 @@ mod ble_tests {
         cancellation.cancel();
         shutdown_ble_runtime(runtime, Some(worker));
         assert_eq!(complete_rx.try_recv().unwrap(), "cleanup completed");
+    }
+
+    #[test]
+    fn reservation_blocks_duplicate_key_until_the_holder_drops() {
+        let key = format!("RESV-{}", uuid::Uuid::new_v4());
+        let reservation = reserve_ble_device(key.clone(), "UART dongle").unwrap();
+        // A second open while the lease is held must report the busy error
+        // with the label of the rejected attempt, not a generic failure.
+        match reserve_ble_device(key.clone(), "second open") {
+            Err(BleResolveError::DeviceBusy { device }) => assert_eq!(device, "second open"),
+            other => panic!("expected DeviceBusy, got {other:?}"),
+        }
+        drop(reservation);
+        assert!(reserve_ble_device(key, "reopened").is_ok());
+    }
+
+    #[test]
+    fn early_release_frees_the_key_and_a_stale_drop_keeps_the_new_owner() {
+        let key = format!("EARLY-{}", uuid::Uuid::new_v4());
+        let first = Arc::new(reserve_ble_device(key.clone(), "first open").unwrap());
+        first.release();
+        let second = Arc::new(reserve_ble_device(key.clone(), "second open").unwrap());
+        // A stale clone of the released lease must not evict the new owner:
+        // the worker releases early while its config clones still exist.
+        drop(first);
+        match reserve_ble_device(key.clone(), "third open") {
+            Err(BleResolveError::DeviceBusy { device }) => assert_eq!(device, "third open"),
+            other => panic!("expected the second lease to still hold, got {other:?}"),
+        }
+        drop(second);
+        assert!(reserve_ble_device(key, "reopened").is_ok());
+    }
+
+    #[test]
+    fn reservation_lease_follows_the_last_config_holder() {
+        // The session config is cloned into the worker; the lease must stay
+        // claimed while any holder exists and release only with the last one.
+        let key = format!("RESV-{}", uuid::Uuid::new_v4());
+        let holder = std::sync::Arc::new(reserve_ble_device(key.clone(), "device").unwrap());
+        let clone = std::sync::Arc::clone(&holder);
+        drop(holder);
+        assert!(matches!(
+            reserve_ble_device(key.clone(), "other"),
+            Err(BleResolveError::DeviceBusy { .. })
+        ));
+        drop(clone);
+        assert!(reserve_ble_device(key, "free again").is_ok());
+    }
+
+    #[test]
+    fn reservations_for_distinct_devices_are_independent() {
+        let key_a = format!("RESV-A-{}", uuid::Uuid::new_v4());
+        let key_b = format!("RESV-B-{}", uuid::Uuid::new_v4());
+        let a = reserve_ble_device(key_a.clone(), "A").unwrap();
+        let b = reserve_ble_device(key_b.clone(), "B").unwrap();
+        assert!(matches!(
+            reserve_ble_device(key_a.clone(), "A"),
+            Err(BleResolveError::DeviceBusy { .. })
+        ));
+        assert!(matches!(
+            reserve_ble_device(key_b.clone(), "B"),
+            Err(BleResolveError::DeviceBusy { .. })
+        ));
+        // Releasing one device's lease must not free the other's.
+        drop(a);
+        assert!(reserve_ble_device(key_a.clone(), "A").is_ok());
+        assert!(matches!(
+            reserve_ble_device(key_b.clone(), "B"),
+            Err(BleResolveError::DeviceBusy { .. })
+        ));
+        drop(b);
+    }
+
+    #[test]
+    fn reservation_label_lookup_matches_the_leased_identity_clue() {
+        // The session manager rejects duplicate opens through this lookup; a
+        // key that drifted from the direct path's claim would silently allow
+        // the second row again. Each platform only accepts its own clue
+        // (CoreBluetooth a UUID identifier, everything else a MAC), so the
+        // fixture must carry the clue from_clues would resolve.
+        #[cfg(target_vendor = "apple")]
+        let (device_mac, platform_identifier) =
+            (None::<String>, Some(uuid::Uuid::new_v4().to_string()));
+        #[cfg(not(target_vendor = "apple"))]
+        let (device_mac, platform_identifier) = {
+            let raw = uuid::Uuid::new_v4().as_u128() as u64;
+            let mac = format!(
+                "{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
+                (raw >> 40) & 0xff,
+                (raw >> 32) & 0xff,
+                (raw >> 24) & 0xff,
+                (raw >> 16) & 0xff,
+                (raw >> 8) & 0xff,
+                raw & 0xff
+            );
+            (Some(mac), None::<String>)
+        };
+        let clue = device_mac
+            .as_deref()
+            .or(platform_identifier.as_deref())
+            .expect("fixture carries one clue");
+        let held = reserve_ble_device(ble_reservation_key(clue), "probe").unwrap();
+        assert_eq!(
+            ble_device_reservation_label(device_mac.as_deref(), platform_identifier.as_deref())
+                .as_deref(),
+            Some("probe")
+        );
+        drop(held);
+        assert_eq!(
+            ble_device_reservation_label(device_mac.as_deref(), platform_identifier.as_deref()),
+            None
+        );
+    }
+
+    #[test]
+    fn reservation_key_normalization_unifies_direct_and_scan_identities() {
+        // Profiles store the MAC in the case the device advertised and BlueZ
+        // reports it uppercase; both paths must derive the same lease key for
+        // one device or the mutex silently allows the duplicate open.
+        assert_eq!(
+            ble_reservation_key(" b8:1f:3f:aa:72:7a "),
+            ble_reservation_key("B8:1F:3F:AA:72:7A")
+        );
+        assert_eq!(
+            ble_reservation_key("b8:1f:3f:aa:72:7a"),
+            "B8:1F:3F:AA:72:7A"
+        );
     }
 
     #[test]
@@ -2600,7 +2856,8 @@ mod ble_tests {
         assert_eq!(state.negotiated_mtu(), None);
         assert!(!state.connected());
         let read_char = characteristic(0x0020, btleplug::api::CharPropFlags::READ);
-        let services = std::collections::BTreeSet::from([gatt_btleplug_service(0x0010, &[read_char])]);
+        let services =
+            std::collections::BTreeSet::from([gatt_btleplug_service(0x0010, &[read_char])]);
         state.publish_services(&services);
         state.set_negotiated_mtu(185);
         state
@@ -2610,7 +2867,10 @@ mod ble_tests {
         assert_eq!(table.len(), 1);
         assert_eq!(table[0].uuid, uuid::Uuid::from_u128(0x0010));
         assert_eq!(table[0].characteristics.len(), 1);
-        assert_eq!(table[0].characteristics[0].uuid, uuid::Uuid::from_u128(0x0020));
+        assert_eq!(
+            table[0].characteristics[0].uuid,
+            uuid::Uuid::from_u128(0x0020)
+        );
         assert_eq!(
             table[0].characteristics[0].properties,
             BLE_GATT_PROPERTY_READ
@@ -2789,6 +3049,9 @@ mod ble_tests {
         dispatch_gatt_notification(&routes, uuid, b"second");
         dispatch_gatt_notification(&routes, uuid, b"third");
         assert_eq!(first_rx.recv().await.as_deref(), Some(b"second".as_slice()));
-        assert_eq!(second_rx.recv().await.as_deref(), Some(b"second".as_slice()));
+        assert_eq!(
+            second_rx.recv().await.as_deref(),
+            Some(b"second".as_slice())
+        );
     }
 }

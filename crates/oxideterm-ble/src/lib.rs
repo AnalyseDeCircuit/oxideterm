@@ -37,8 +37,6 @@ pub const NORDIC_UART_SERVICE_UUID: Uuid = Uuid::from_u128(0x6e400001_b5a3_f393_
 pub enum BleError {
     #[error("no bluetooth adapters are available")]
     NoAdapters,
-    #[error("bluetooth adapter index {index} is out of range")]
-    AdapterOutOfRange { index: usize },
     #[error("connecting to the device timed out")]
     ConnectTimedOut,
     #[error("device is no longer available")]
@@ -249,18 +247,31 @@ pub struct BleAdapterGuard {
 }
 
 impl BleAdapterGuard {
-    /// Opens the adapter at `adapter_index`; discovery is not started until
-    /// [`BleAdapterGuard::scan`] is called.
-    pub async fn open(adapter_index: usize) -> Result<Self, BleError> {
+    /// Opens the adapter whose controller address matches `adapter_mac`, or
+    /// the first adapter when the preference is absent or no controller
+    /// matches. Matching and opening share one `Manager::adapters()`
+    /// enumeration: BlueZ reports adapters in unstable object-tree order, so
+    /// a list index resolved in a separate enumeration can select a different
+    /// controller. Discovery is not started until [`BleAdapterGuard::scan`]
+    /// is called.
+    pub async fn open(adapter_mac: Option<&str>) -> Result<Self, BleError> {
         let manager = Manager::new().await?;
-        let adapter = manager
-            .adapters()
-            .await?
-            .into_iter()
-            .nth(adapter_index)
-            .ok_or(BleError::AdapterOutOfRange {
-                index: adapter_index,
-            })?;
+        let adapters = manager.adapters().await?;
+        if adapters.is_empty() {
+            return Err(BleError::NoAdapters);
+        }
+        let mut matched = None;
+        if let Some(preferred) = adapter_mac {
+            for adapter in &adapters {
+                if let Ok(Some(address)) = adapter.adapter_address().await {
+                    if address.to_string().eq_ignore_ascii_case(preferred) {
+                        matched = Some(adapter.clone());
+                        break;
+                    }
+                }
+            }
+        }
+        let adapter = matched.unwrap_or_else(|| adapters[0].clone());
         // Treated as best-effort: a missing address only disables the
         // address-based direct connect, never the adapter itself.
         let adapter_mac = adapter

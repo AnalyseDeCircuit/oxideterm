@@ -73,13 +73,13 @@
     "failedFetchStats": "Statistiken konnten nicht abgerufen werden",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "BLE-Adapter-Aufzählung fehlgeschlagen: {error}",
               "no_adapters": "Keine Bluetooth-Adapter verfügbar",
               "adapter_open_failed": "Öffnen des BLE-Adapters fehlgeschlagen: {error}",
               "device_enumeration_failed": "BLE-Geräteaufzählung fehlgeschlagen: {error}",
               "scan_failed": "BLE-Scan fehlgeschlagen: {error}",
               "no_device_matched": "Kein BLE-Gerät in Reichweite passt zum Profil ({identity})",
               "ambiguous_device": "Mehrere BLE-Geräte passen zu {identity}; bitte erneut scannen und ein Gerät auswählen.",
+              "device_busy": "Dieses BLE-Gerät ({device}) ist bereits geöffnet; bitte das zugehörige Terminal schließen, bevor es erneut geöffnet wird.",
               "cancelled": "BLE-Verbindung abgebrochen",
               "connect_failed": "BLE-Verbindung fehlgeschlagen: {error}",
               "service_discovery_failed": "Diensterkennung fehlgeschlagen: {error}",

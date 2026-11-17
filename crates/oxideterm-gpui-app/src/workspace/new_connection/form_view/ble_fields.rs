@@ -866,7 +866,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn start_new_connection_ble_scan(&mut self, cx: &mut Context<Self>) {
-        let Some((generation, adapter_index, form_id)) =
+        let Some((generation, adapter_mac, form_id)) =
             self.update_connection_form_state(cx, |state| {
                 state.form.as_mut().map(|form| {
                     form.ble.scan_generation += 1;
@@ -880,7 +880,13 @@ impl WorkspaceApp {
                     form.error = None;
                     (
                         form.ble.scan_generation,
-                        form.ble.selected_adapter_index,
+                        // Open the guard by controller address instead of the
+                        // list index: adapter enumeration order is unstable,
+                        // so an index can select a different radio.
+                        form.ble
+                            .adapters
+                            .get(form.ble.selected_adapter_index)
+                            .and_then(|adapter| adapter.adapter_mac.clone()),
                         form.ble.instance_id,
                     )
                 })
@@ -898,7 +904,8 @@ impl WorkspaceApp {
             // the old window closes before a new one opens.
             let result = runtime
                 .spawn(async move {
-                    let guard = oxideterm_ble::BleAdapterGuard::open(adapter_index).await?;
+                    let guard =
+                        oxideterm_ble::BleAdapterGuard::open(adapter_mac.as_deref()).await?;
                     let devices = guard.scan(oxideterm_ble::BLE_SCAN_DURATION).await?;
                     Ok::<_, oxideterm_ble::BleError>((devices, guard))
                 })
