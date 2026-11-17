@@ -307,6 +307,7 @@ macro_rules! raw_stream_backend_methods {
         &self,
         display_offset: usize,
         rows: usize,
+        previous: Option<&TerminalSnapshot>,
     ) -> TerminalSnapshot {
         let term = self.term.lock();
         snapshot_from_term_with_display_offset(
@@ -321,6 +322,7 @@ macro_rules! raw_stream_backend_methods {
             &self.palette,
             display_offset,
             rows,
+            previous,
         )
     }
 

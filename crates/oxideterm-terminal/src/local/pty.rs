@@ -1065,6 +1065,7 @@ impl LocalPtySession {
         &self,
         display_offset: usize,
         rows: usize,
+        previous: Option<&TerminalSnapshot>,
     ) -> TerminalSnapshot {
         let requested_size = TerminalSize { rows, ..self.size };
         if let Some(snapshot) = self.tmux_display.snapshot(requested_size, None) {
@@ -1079,6 +1080,7 @@ impl LocalPtySession {
             &self.palette,
             display_offset,
             rows,
+            previous,
         )
     }
 }
@@ -1103,6 +1105,7 @@ pub(crate) fn snapshot_from_term<T: EventListener>(
         palette,
         term.grid().display_offset(),
         size.rows,
+        None,
     )
 }
 
@@ -1169,6 +1172,7 @@ pub(crate) fn incremental_snapshot_from_term<T: EventListener>(
             palette,
             display_offset,
             size.rows,
+            Some(previous),
         );
     }
 
@@ -1278,6 +1282,7 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
             palette,
             display_offset,
             size.rows,
+            Some(previous),
         );
         term.reset_damage();
         return snapshot;
@@ -1314,6 +1319,7 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
     }
     .unwrap_or(usize::MAX);
     let mut snapshot = TerminalSnapshot {
+        logical_context: previous.logical_context.clone(),
         generation: 0,
         cols: size.cols,
         rows: size.rows,
@@ -1345,6 +1351,7 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     palette: &TerminalPalette,
     display_offset: usize,
     rows: usize,
+    previous: Option<&TerminalSnapshot>,
 ) -> TerminalSnapshot {
     let content = term.renderable_content();
     let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
@@ -1367,7 +1374,9 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
 
     let mut images = graphics.visible_images(display_offset, requested_rows);
     resolve_sixel_backgrounds(&mut images, palette, term.colors());
-    TerminalSnapshot {
+    let mut snapshot = TerminalSnapshot {
+        logical_context: previous
+            .map_or_else(Vec::new, |snapshot| snapshot.logical_context.clone()),
         generation: 0,
         cols: size.cols,
         rows: size.rows,
@@ -1378,7 +1387,9 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
         scrollback_lines,
         lines: rows,
         images,
-    }
+    };
+    crate::logical_context::capture(term, &mut snapshot);
+    snapshot
 }
 
 /// Builds cells whose signature is finalized after cursor and input metadata are applied.
@@ -1584,6 +1595,7 @@ fn refresh_snapshot_metadata<T: EventListener>(
     display_offset: usize,
     mut metadata_rows: Vec<usize>,
 ) {
+    crate::logical_context::capture(term, snapshot);
     let content = term.renderable_content();
     let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
     let cursor_col = content.cursor.point.column.0;
@@ -1634,9 +1646,55 @@ fn refresh_snapshot_metadata<T: EventListener>(
 
 #[cfg(test)]
 mod incremental_snapshot_tests {
+    use alacritty_terminal::{event::VoidListener, index::Column};
     use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
     use super::*;
+
+    #[test]
+    fn predecessor_wrap_changes_invalidate_an_unchanged_logical_line() {
+        let size = TerminalSize {
+            cols: 10,
+            rows: 4,
+            cell_width: 8,
+            cell_height: 16,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, b"prefix\r\n'abcdefghijklmno'\r\nend");
+        let graphics = TerminalGraphicsState::default();
+        let palette = TerminalPalette::default();
+        let before = snapshot_from_term(&term, size, &graphics, &palette);
+        assert_eq!(
+            before.logical_context[0].text.trim_end(),
+            "'abcdefghijklmno'"
+        );
+        term.grid_mut()[Line(0)]
+            .cell_mut(Column(9))
+            .flags
+            .insert(Flags::WRAPLINE);
+        let after = snapshot_from_term_with_display_offset(
+            &term,
+            size,
+            &graphics,
+            &palette,
+            0,
+            4,
+            Some(&before),
+        );
+        assert_eq!(
+            after.logical_context[0].text.trim_end(),
+            "prefix    'abcdefghijklmno'"
+        );
+        assert!(!Arc::ptr_eq(
+            &before.logical_context[0].text,
+            &after.logical_context[0].text
+        ));
+        assert_eq!(
+            before.logical_context[0].members[0].revision,
+            after.logical_context[0].members[1].revision
+        );
+    }
 
     fn assert_snapshot_content_eq(actual: &TerminalSnapshot, expected: &TerminalSnapshot) {
         assert_eq!(actual.cols, expected.cols);
@@ -1725,6 +1783,7 @@ mod incremental_snapshot_tests {
             &palette,
             0,
             size.rows,
+            None,
         );
         // Independent content expectations: the burst scrolled three rows into
         // scrollback, leaving the fill lines shifted up and the burst rows at

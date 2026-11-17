@@ -41,7 +41,7 @@ impl TerminalHighlightLayout {
 
 #[derive(Clone)]
 pub(super) struct LogicalLine {
-    pub(super) text: String,
+    pub(super) text: zeroize::Zeroizing<String>,
     pub(super) map: Vec<TextCell>,
     // The line paint range excludes fixed-width terminal padding.
     content_len: usize,
@@ -145,16 +145,13 @@ pub(crate) fn selection_match_rects(
     let mut rects = Vec::new();
     let mut row = rows.start.min(snapshot.lines.len());
     while row < rows.end.min(snapshot.lines.len()) {
-        let mut start = row;
-        while start > 0 && snapshot.lines[start - 1].wrapped {
-            start -= 1;
-        }
-        let mut end = row + 1;
-        while end < snapshot.lines.len() && snapshot.lines[end - 1].wrapped {
-            end += 1;
-        }
+        let Some(range) = logical_line_range(snapshot, row) else {
+            break;
+        };
+        let start = range.start;
+        let end = range.end;
         let line = build_logical_line(snapshot, start..end);
-        let text = zeroize::Zeroizing::new(line.text);
+        let text = line.text;
         let query_chars = query.chars().count();
         let mut previous_byte = 0;
         let mut start_cell = 0;
@@ -290,11 +287,20 @@ pub(super) fn logical_line_range(snapshot: &TerminalSnapshot, row: usize) -> Opt
         return None;
     }
     let mut start = row;
-    while start > 0 && snapshot.lines.get(start).is_some_and(|line| line.wrapped) {
+    while start > 0
+        && !snapshot.lines[start].cells.is_empty()
+        && snapshot
+            .lines
+            .get(start - 1)
+            .is_some_and(|line| line.wrapped)
+    {
         start -= 1;
     }
     let mut end = row + 1;
-    while end < snapshot.lines.len() && snapshot.lines.get(end).is_some_and(|line| line.wrapped) {
+    while end < snapshot.lines.len()
+        && !snapshot.lines[end].cells.is_empty()
+        && snapshot.lines.get(end - 1).is_some_and(|line| line.wrapped)
+    {
         end += 1;
     }
     Some(start..end)
@@ -307,11 +313,27 @@ pub(super) fn build_logical_line(snapshot: &TerminalSnapshot, rows: Range<usize>
         let Some(row) = snapshot.lines.get(row_index) else {
             continue;
         };
-        append_row_text(row, row_index, snapshot.cols, &mut text, &mut map);
+        let context_columns = snapshot
+            .logical_context_for_row(row_index)
+            .and_then(|context| {
+                context
+                    .rows
+                    .iter()
+                    .find(|mapped| mapped.source_id == row.source_id)
+            })
+            .map(|mapped| mapped.columns.as_slice());
+        append_row_text(
+            row,
+            row_index,
+            snapshot.cols,
+            context_columns,
+            &mut text,
+            &mut map,
+        );
     }
     let content_len = text.trim_end_matches(' ').chars().count();
     LogicalLine {
-        text,
+        text: zeroize::Zeroizing::new(text),
         map,
         content_len,
     }
@@ -321,6 +343,7 @@ fn append_row_text(
     row: &TerminalRow,
     row_index: usize,
     max_cols: usize,
+    context_columns: Option<&[(usize, usize)]>,
     text: &mut String,
     map: &mut Vec<TextCell>,
 ) {
@@ -328,6 +351,11 @@ fn append_row_text(
     for (col, cell) in row.cells.iter().take(max_cols).enumerate() {
         if skip_wide_spacer {
             skip_wide_spacer = false;
+            continue;
+        }
+        if context_columns
+            .is_some_and(|columns| columns.binary_search_by_key(&col, |&(_, col)| col).is_err())
+        {
             continue;
         }
         let cells = if cell.wide { 2 } else { 1 };

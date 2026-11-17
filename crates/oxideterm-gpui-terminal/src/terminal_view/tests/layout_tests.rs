@@ -502,8 +502,8 @@ fn terminal_highlight_scopes_preserve_match_and_logical_line_geometry() {
         row.cells_mut().truncate(snapshot.cols);
         row.refresh_signature();
     }
-    snapshot.lines[1].wrapped = true;
-    snapshot.lines[1].refresh_signature();
+    snapshot.lines[0].wrapped = true;
+    snapshot.lines[0].refresh_signature();
     for (scope, expected) in [
         (TerminalHighlightMatchScope::Match, [(0, 7, 2), (1, 0, 3)]),
         (

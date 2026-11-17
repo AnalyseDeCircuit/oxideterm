@@ -614,6 +614,7 @@ impl TmuxDisplay {
             line.refresh_signature();
         }
         let mut snapshot = TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 0,
             cols: size.cols,
             rows: size.rows,

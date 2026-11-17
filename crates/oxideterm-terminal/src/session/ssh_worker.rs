@@ -1089,11 +1089,16 @@ impl TerminalSessionBackend for SshPtySession {
         self.shared.core.lock().snapshot_incremental(previous)
     }
 
-    fn snapshot_with_display_offset(&self, display_offset: usize, rows: usize) -> TerminalSnapshot {
+    fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+        previous: Option<&TerminalSnapshot>,
+    ) -> TerminalSnapshot {
         self.shared
             .core
             .lock()
-            .snapshot_with_display_offset(display_offset, rows)
+            .snapshot_with_display_offset(display_offset, rows, previous)
     }
 
     fn terminate_active_task(&mut self) -> Result<()> {

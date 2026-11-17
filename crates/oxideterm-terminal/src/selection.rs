@@ -58,7 +58,7 @@ mod tests {
         session.feed_recording_output(
             "\x1b[31m界e\u{301} \x1b]8;;https://example.test\x1b\\link\x1b]8;;\x1b\\\x1b[0m\r\none\r\ntwo\r\nthree".as_bytes(),
         );
-        let original = session.snapshot_with_display_offset(1, 3).lines[0].source_id;
+        let original = session.snapshot_with_display_offset(1, 3, None).lines[0].source_id;
         for cols in [120, 60, 240, 120] {
             session.resize_with_cell_size(cols, 3, 0, 0).unwrap();
             assert_eq!(session.buffer_text(), "界e\u{301} link\none\ntwo\nthree");
@@ -79,7 +79,7 @@ mod tests {
                     }],
                 }]
             );
-            let snapshot = session.snapshot_with_display_offset(1, 3);
+            let snapshot = session.snapshot_with_display_offset(1, 3, None);
             let row = &snapshot.lines[0];
             assert_eq!(row.source_id, original);
             assert_eq!(row.cells[0].ch, '界');

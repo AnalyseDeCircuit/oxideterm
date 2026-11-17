@@ -385,7 +385,12 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
         )
     }
 
-    fn snapshot_with_display_offset(&self, display_offset: usize, rows: usize) -> TerminalSnapshot {
+    fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+        previous: Option<&TerminalSnapshot>,
+    ) -> TerminalSnapshot {
         let term = self.term.lock();
         snapshot_from_term_with_display_offset(
             &term,
@@ -394,6 +399,7 @@ impl TerminalSessionBackend for PlaybackTerminalSession {
             &self.palette,
             display_offset,
             rows,
+            previous,
         )
     }
 

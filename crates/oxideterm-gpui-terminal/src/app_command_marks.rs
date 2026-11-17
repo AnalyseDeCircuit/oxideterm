@@ -119,7 +119,7 @@ impl TerminalPane {
         let command_id = mark.command_id.clone();
         // Retain only the current AI command's prompt, independently of the exit ledger.
         self.ai_command_prompt = if source == TerminalCommandMarkDetectionSource::Ai {
-            let live = self.terminal.lock().snapshot_with_display_offset(0, self.snapshot.rows);
+            let live = self.terminal.lock().snapshot_with_display_offset(0, self.snapshot.rows, Some(&self.snapshot));
             Some(AiCommandPrompt {
                 command_id: command_id.clone(),
                 start_line: live.scrollback_lines.saturating_add(live.cursor_row),
@@ -1266,7 +1266,7 @@ impl TerminalPane {
             &self
                 .terminal
                 .lock()
-                .snapshot_with_display_offset(0, self.snapshot.rows),
+                .snapshot_with_display_offset(0, self.snapshot.rows, Some(&self.snapshot)),
             self.last_terminal_activity.elapsed(),
             blocked,
         )

@@ -272,6 +272,7 @@ impl TerminalPane {
         let total = self.snapshot.scrollback_lines + self.snapshot.rows;
         let mut result = self.snapshot.clone();
         result.lines.clear();
+        result.logical_context.clear();
         result.images.clear();
         result.scrollback_lines = history;
         result.display_offset = offset;
@@ -321,9 +322,11 @@ impl TerminalPane {
                 } else {
                     let display_offset = self.snapshot.scrollback_lines.saturating_sub(physical);
                     let skip = physical.saturating_sub(self.snapshot.scrollback_lines);
-                    self.terminal
-                        .lock()
-                        .snapshot_with_display_offset(display_offset, skip + count)
+                    self.terminal.lock().snapshot_with_display_offset(
+                        display_offset,
+                        skip + count,
+                        Some(&self.snapshot),
+                    )
                 };
             let segment_top = segment
                 .scrollback_lines
@@ -347,6 +350,39 @@ impl TerminalPane {
                     let mut image = image;
                     image.row = map.visible_line(first).saturating_sub(top);
                     result.images.push(image);
+                }
+            }
+            for context in &segment.logical_context {
+                let rows = context
+                    .rows
+                    .iter()
+                    .filter(|mapped| {
+                        segment
+                            .lines
+                            .iter()
+                            .skip(skip)
+                            .take(count)
+                            .any(|row| row.source_id == mapped.source_id)
+                    })
+                    .map(|row| oxideterm_terminal::TerminalLogicalContextRow {
+                        source_id: row.source_id,
+                        columns: row.columns.clone(),
+                    })
+                    .collect::<Vec<_>>();
+                if !rows.is_empty() {
+                    result.logical_context.push(Arc::new(
+                        oxideterm_terminal::TerminalLogicalContext {
+                            text: context.text.clone(),
+                            signature: context.signature,
+                            cols: context.cols,
+                            members: context.members.clone(),
+                            start_line: map.visible_line(context.start_line),
+                            end_line: map.visible_line(context.end_line),
+                            active_input: context.active_input,
+                            start_at_history_boundary: context.start_at_history_boundary,
+                            rows,
+                        },
+                    ));
                 }
             }
             let before = result.lines.len();
@@ -576,5 +612,41 @@ impl TerminalPane {
                 )
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod semantic_context_tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn folded_output_preserves_physical_wrapped_context_and_maps_its_coordinates(
+        cx: &mut TestAppContext,
+    ) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(10, 8, Default::default(), window, cx).unwrap()
+        });
+        pane.update(cx, |pane, _| {
+            {
+                let mut terminal = pane.terminal.lock();
+                terminal
+                    .feed_recording_output(b"hide1\r\nhide2\r\n'abcdefghijklmnopqrstuvwx'\r\nDONE");
+                pane.snapshot = terminal.snapshot();
+            }
+            pane.command_folding.ranges = vec![FoldedOutput {
+                command_id: "hidden-output".into(),
+                lines: 0..2,
+            }];
+            let folded = pane.folded_snapshot(0, 8).unwrap();
+            assert!(folded.logical_context_for_row(0).is_none());
+            assert_eq!(folded.lines[1].text(), "'abcdefghi");
+            let context = folded.logical_context_for_row(1).unwrap();
+            assert_eq!(context.text.trim_end(), "'abcdefghijklmnopqrstuvwx'");
+            assert_eq!((context.start_line, context.end_line), (1, 3));
+            assert_eq!(context.rows[0].columns[0], (0, 0));
+            assert_eq!(context.rows[1].columns[0], (10, 0));
+            assert_eq!(context.rows[2].columns[0], (20, 0));
+        });
     }
 }

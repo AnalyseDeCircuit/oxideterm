@@ -12,6 +12,7 @@ use crate::term::cell::ResetDiscriminant;
 #[derive(Debug)]
 pub struct Row<T: GridCell> {
     identity: usize,
+    revision: u64,
     // In compact rows the final stored cell represents every remaining logical column.
     inner: Vec<T>,
     packed: Option<T::History>,
@@ -30,6 +31,7 @@ impl<T: GridCell> Default for Row<T> {
     fn default() -> Self {
         Self {
             identity: next_row_identity(),
+            revision: 0,
             inner: Vec::new(),
             packed: None,
             packing_rejected: false,
@@ -43,6 +45,7 @@ impl<T: GridCell> Clone for Row<T> {
     fn clone(&self) -> Self {
         Self {
             identity: next_row_identity(),
+            revision: 0,
             inner: self.inner.clone(),
             packed: self.packed.clone(),
             packing_rejected: self.packing_rejected,
@@ -64,6 +67,7 @@ impl<T: GridCell + Default> Row<T> {
         let inner = std::iter::repeat_with(T::default).take(columns).collect();
         Self {
             identity: next_row_identity(),
+            revision: 0,
             inner,
             packed: None,
             packing_rejected: false,
@@ -77,6 +81,7 @@ impl<T: GridCell + Default> Row<T> {
         assert!(columns > 0);
         Self {
             identity: next_row_identity(),
+            revision: 0,
             inner: vec![T::default()],
             packed: None,
             packing_rejected: false,
@@ -92,6 +97,23 @@ impl<T: GridCell> Row<T> {
     pub fn identity(&self) -> usize {
         self.identity
     }
+    /// Writable access conservatively invalidates text snapshots without changing row identity.
+    #[inline]
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    #[inline]
+    fn invalidate_content(&mut self) {
+        if let Some(revision) = self.revision.checked_add(1) {
+            self.revision = revision;
+        } else {
+            // Reusing a version after wraparound must not alias an old snapshot.
+            self.identity = next_row_identity();
+            self.revision = 0;
+        }
+    }
+
     #[inline]
     pub fn occupied_len(&self) -> usize {
         self.occ
@@ -100,6 +122,7 @@ impl<T: GridCell> Row<T> {
     pub fn from_vec(inner: Vec<T>, occ: usize) -> Self {
         Self {
             identity: next_row_identity(),
+            revision: 0,
             len: inner.len(),
             inner,
             packed: None,
@@ -175,6 +198,7 @@ impl<T: GridCell> Row<T> {
 
     #[inline]
     pub fn as_mut_slice(&mut self) -> &mut [T] {
+        self.invalidate_content();
         self.make_dense();
         self.occ = self.len;
         &mut self.inner
@@ -183,12 +207,14 @@ impl<T: GridCell> Row<T> {
     /// Bounded writes preserve the dirty-cell bound used by reset and compaction.
     #[inline]
     pub fn cells_mut(&mut self, range: std::ops::Range<usize>) -> &mut [T] {
+        self.invalidate_content();
         self.make_dense();
         self.occ = max(self.occ, range.end);
         &mut self.inner[range]
     }
 
     pub fn last_mut(&mut self) -> Option<&mut T> {
+        self.invalidate_content();
         self.make_dense();
         self.occ = self.len;
         self.inner.last_mut()
@@ -198,6 +224,7 @@ impl<T: GridCell> Row<T> {
     where
         T: GridCell,
     {
+        self.invalidate_content();
         self.make_dense();
         self.occ += vec.len();
         self.inner.append(vec);
@@ -205,6 +232,7 @@ impl<T: GridCell> Row<T> {
     }
 
     pub fn append_front(&mut self, mut vec: Vec<T>) {
+        self.invalidate_content();
         self.make_dense();
         self.occ += vec.len();
         vec.append(&mut self.inner);
@@ -213,6 +241,7 @@ impl<T: GridCell> Row<T> {
     }
 
     pub fn front_split_off(&mut self, at: usize) -> Vec<T> {
+        self.invalidate_content();
         self.make_dense();
         self.occ = self.occ.saturating_sub(at);
         let mut split = self.inner.split_off(at);
@@ -271,6 +300,7 @@ impl<T: GridCell> Row<T> {
         if self.len <= columns {
             return None;
         }
+        self.invalidate_content();
         // Removed columns may contain all the attributes that made packing unprofitable.
         self.packing_rejected = false;
         if let Some(packed) = &mut self.packed {
@@ -341,6 +371,7 @@ impl<T: GridCell + Default> Row<T> {
         if self.len >= columns {
             return;
         }
+        self.invalidate_content();
         if let Some(packed) = &mut self.packed {
             if packed.cell(packed.len() - 1).into_owned() == T::default() {
                 self.len = columns;
@@ -428,6 +459,7 @@ impl<T: GridCell> Row<T> {
     }
     #[inline]
     pub fn cell_mut(&mut self, index: Column) -> &mut T {
+        self.invalidate_content();
         self.make_dense();
         self.occ = max(self.occ, index.0 + 1);
         &mut self.inner[index.0]
@@ -605,6 +637,41 @@ mod tests {
     use crate::vte::ansi::{Color, NamedColor};
 
     #[test]
+    fn writable_access_and_reflow_invalidate_row_content_stamps() {
+        let cell = |c| Cell { c, ..Cell::default() };
+        let cases: &[(&str, fn(&mut Row<Cell>), &str)] = &[
+            ("cell", |row| row.cell_mut(Column(1)).c = 'X', "aXc"),
+            ("slice", |row| row.as_mut_slice()[0].c = 'X', "Xbc"),
+            ("range", |row| row.cells_mut(1..2)[0].c = 'X', "aXc"),
+            ("last", |row| row.last_mut().unwrap().c = 'X', "abX"),
+            ("append", |row| row.append(&mut vec![Cell { c: 'X', ..Cell::default() }]), "abcX"),
+            ("prepend", |row| row.append_front(vec![Cell { c: 'X', ..Cell::default() }]), "Xabc"),
+            ("split", |row| { row.front_split_off(1); }, "bc"),
+            ("shrink", |row| { row.shrink(2); }, "ab"),
+            ("grow", |row| row.grow(4), "abc "),
+            ("reset", |row| row.reset(&Cell::default()), "   "),
+            ("recycle", |row| row.recycle(vec![Cell::default(); 4], 0, &Cell::default()), "    "),
+        ];
+        for &(name, mutate, expected) in cases {
+            let mut row = Row::from_vec("abc".chars().map(cell).collect(), 3);
+            let before = (row.identity(), row.revision());
+            mutate(&mut row);
+            assert_eq!(row.iter().map(|cell| cell.c).collect::<String>(), expected, "{name}");
+            assert_ne!((row.identity(), row.revision()), before, "{name}");
+        }
+    }
+
+    #[test]
+    fn version_wrap_cannot_alias_an_old_content_stamp() {
+        let mut row = Row::<Cell>::new(2);
+        let original = (row.identity(), row.revision());
+        row.revision = u64::MAX;
+        row.cell_mut(Column(0)).c = 'X';
+        assert_ne!((row.identity(), row.revision()), original);
+        assert_eq!(row.cell(Column(0)).c, 'X');
+    }
+
+    #[test]
     fn compact_reads_and_mutation_preserve_styles_width_and_identity() {
         let mut tail = Cell {
             bg: Color::Named(NamedColor::Red),
@@ -621,6 +688,7 @@ mod tests {
         row.cell_mut(Column(2)).c = 'e';
         row.cell_mut(Column(2)).push_zerowidth('\u{301}');
         let identity = row.identity();
+        let revision = row.revision();
         let buffer = row.compact().unwrap().0;
         assert_eq!(row.inner.len(), 4);
         assert_eq!(row.inner.capacity(), 4);
@@ -632,7 +700,10 @@ mod tests {
         assert!(row.iter().skip(3).all(|cell| cell == &tail));
         assert!(row.iter().rev().take(117).all(|cell| cell == &tail));
         assert_eq!(row.inner.len(), 4, "reading must not expand history");
+        row.make_dense();
+        assert_eq!(row.revision(), revision);
         row.cell_mut(Column(118)).flags.insert(Flags::UNDERLINE);
+        assert_ne!(row.revision(), revision);
         assert_eq!(row.cell(Column(117)), tail);
         assert!(row.cell(Column(118)).flags.contains(Flags::UNDERLINE));
         assert_eq!(row.cell(Column(119)), tail);

@@ -21,6 +21,7 @@ mod color;
 mod command_sender;
 mod data;
 mod history;
+mod logical_context;
 pub use history::{
     TerminalHistoryCapture, TerminalHistoryError, TerminalHistoryRow, TerminalHistoryStamp,
 };
@@ -60,7 +61,8 @@ pub use data::{
     GraphicsOptions, KittyFileTransmissionControl, KittyFileTransmissionPrompt, TerminalAttrs,
     TerminalCell, TerminalColor, TerminalCursorShape, TerminalImageAnimationState,
     TerminalImageData, TerminalImageFrame, TerminalImageId, TerminalImageProtocol,
-    TerminalImageSnapshot, TerminalRow, TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
+    TerminalImageSnapshot, TerminalLogicalContext, TerminalLogicalContextRow,
+    TerminalLogicalMember, TerminalRow, TerminalSearchMatch, TerminalSearchRange, TerminalSnapshot,
     TerminalStyleOrigin,
 };
 pub use editor_integration::{

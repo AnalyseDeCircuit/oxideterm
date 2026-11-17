@@ -1076,10 +1076,11 @@ impl TerminalPane {
 
         // Cross-page selections outlive a viewport snapshot. Materialize only the selected grid
         // range when copying text or deriving a new selection-highlight query.
-        let snapshot = self
-            .terminal
-            .lock()
-            .snapshot_with_display_offset(request.display_offset, request.rows);
+        let snapshot = self.terminal.lock().snapshot_with_display_offset(
+            request.display_offset,
+            request.rows,
+            Some(&self.snapshot),
+        );
         selected_text_for_selection(&snapshot, selection)
     }
 
@@ -4960,6 +4961,7 @@ mod tests {
         cols: usize,
     ) -> TerminalSnapshot {
         TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 1,
             cols,
             rows: lines.len(),

@@ -29,6 +29,15 @@ fn benchmark_line(
 }
 
 fn benchmark_semantic_classifier(criterion: &mut Criterion) {
+    let long_line = "'sample', 123, ".repeat(4096);
+    criterion.bench_function("semantic_classifier/wrapped_payload", |bencher| {
+        bencher.iter(|| {
+            black_box(classify_line(
+                black_box(&long_line),
+                SemanticLineRole::Output,
+            ))
+        });
+    });
     benchmark_line(
         criterion,
         "semantic_classifier/hash_line",
