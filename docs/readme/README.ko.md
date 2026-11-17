@@ -322,7 +322,11 @@ Bash, Zsh, Fish, PowerShell, Elvish 완성을 지원합니다. 전체 명령은 
 
 ### macOS
 
-Gatekeeper가 앱 실행을 차단하면 격리 속성을 제거하세요.
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+DMG로 직접 설치했을 때 Gatekeeper가 앱 실행을 차단하면 격리 속성을 제거하세요.
 
 ```bash
 xattr -cr /Applications/OxideTerm.app
@@ -330,7 +334,12 @@ xattr -cr /Applications/OxideTerm.app
 
 ### Windows
 
-SmartScreen 경고가 표시되면 **추가 정보 → 실행**을 선택하세요.
+```powershell
+scoop bucket add extras
+scoop install oxideterm
+```
+
+`.exe` 설치 프로그램을 직접 실행했을 때 SmartScreen 경고가 표시되면 **추가 정보 → 실행**을 선택하세요.
 
 ### Linux
 
@@ -343,6 +352,9 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 # Fedora / RHEL-compatible
 sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Arch Linux (AUR)
+yay -S oxideterm-bin
 
 # Nix; updates are managed by Nix
 nix run github:AnalyseDeCircuit/oxideterm

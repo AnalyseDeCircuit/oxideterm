@@ -322,7 +322,11 @@ Bash、Zsh、Fish、PowerShell、Elvish の補完に対応。全コマンドは 
 
 ### macOS
 
-Gatekeeper にブロックされた場合は、隔離属性を解除してください。
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+DMG から手動でインストールし、Gatekeeper にブロックされた場合は、隔離属性を解除してください。
 
 ```bash
 xattr -cr /Applications/OxideTerm.app
@@ -330,7 +334,12 @@ xattr -cr /Applications/OxideTerm.app
 
 ### Windows
 
-SmartScreen の警告が表示された場合は、**詳細情報 → 実行**を選択してください。
+```powershell
+scoop bucket add extras
+scoop install oxideterm
+```
+
+`.exe` インストーラーを手動で実行して SmartScreen の警告が表示された場合は、**詳細情報 → 実行**を選択してください。
 
 ### Linux
 
@@ -343,6 +352,9 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 # Fedora / RHEL-compatible
 sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Arch Linux (AUR)
+yay -S oxideterm-bin
 
 # Nix; updates are managed by Nix
 nix run github:AnalyseDeCircuit/oxideterm

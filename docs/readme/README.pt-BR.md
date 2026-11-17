@@ -322,7 +322,11 @@ A página inclui arquivos portáteis, assinaturas e `sha256sums.txt` para verifi
 
 ### macOS
 
-Se o Gatekeeper bloquear o aplicativo, remova o atributo de quarentena:
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+Se você instalar o DMG manualmente e o Gatekeeper bloquear o aplicativo, remova o atributo de quarentena:
 
 ```bash
 xattr -cr /Applications/OxideTerm.app
@@ -330,7 +334,12 @@ xattr -cr /Applications/OxideTerm.app
 
 ### Windows
 
-Se o SmartScreen exibir um aviso, escolha **Mais informações → Executar assim mesmo**.
+```powershell
+scoop bucket add extras
+scoop install oxideterm
+```
+
+Se você executar o instalador `.exe` manualmente e o SmartScreen exibir um aviso, escolha **Mais informações → Executar assim mesmo**.
 
 ### Linux
 
@@ -343,6 +352,9 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 # Fedora / RHEL-compatible
 sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Arch Linux (AUR)
+yay -S oxideterm-bin
 
 # Nix; updates are managed by Nix
 nix run github:AnalyseDeCircuit/oxideterm

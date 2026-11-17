@@ -322,7 +322,11 @@ oxideterm oxide export ./profile.oxide --connection prod --password-stdin
 
 ### macOS
 
-如果 Gatekeeper 阻止打开应用，请移除隔离标记：
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+如果手动安装 DMG 时 Gatekeeper 阻止打开应用，请移除隔离标记：
 
 ```bash
 xattr -cr /Applications/OxideTerm.app
@@ -330,7 +334,12 @@ xattr -cr /Applications/OxideTerm.app
 
 ### Windows
 
-如果 SmartScreen 显示警告，请选择 **更多信息 → 仍要运行**。
+```powershell
+scoop bucket add extras
+scoop install oxideterm
+```
+
+如果手动运行 `.exe` 安装程序时 SmartScreen 显示警告，请选择 **更多信息 → 仍要运行**。
 
 ### Linux
 
@@ -343,6 +352,9 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 # Fedora / RHEL-compatible
 sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Arch Linux (AUR)
+yay -S oxideterm-bin
 
 # Nix; updates are managed by Nix
 nix run github:AnalyseDeCircuit/oxideterm

@@ -322,7 +322,11 @@ Trang phát hành còn có bản nén di động, chữ ký và `sha256sums.txt`
 
 ### macOS
 
-Nếu Gatekeeper chặn ứng dụng, hãy xóa cờ cách ly:
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+Nếu bạn cài đặt thủ công từ DMG và Gatekeeper chặn ứng dụng, hãy xóa cờ cách ly:
 
 ```bash
 xattr -cr /Applications/OxideTerm.app
@@ -330,7 +334,12 @@ xattr -cr /Applications/OxideTerm.app
 
 ### Windows
 
-Nếu SmartScreen hiển thị cảnh báo, chọn **Thông tin thêm → Vẫn chạy**.
+```powershell
+scoop bucket add extras
+scoop install oxideterm
+```
+
+Nếu bạn chạy trình cài đặt `.exe` thủ công và SmartScreen hiển thị cảnh báo, chọn **Thông tin thêm → Vẫn chạy**.
 
 ### Linux
 
@@ -343,6 +352,9 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 # Fedora / RHEL-compatible
 sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Arch Linux (AUR)
+yay -S oxideterm-bin
 
 # Nix; updates are managed by Nix
 nix run github:AnalyseDeCircuit/oxideterm
