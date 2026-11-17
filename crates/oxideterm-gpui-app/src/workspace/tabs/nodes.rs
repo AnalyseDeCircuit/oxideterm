@@ -793,7 +793,7 @@ impl WorkspaceApp {
             .origin
             .saved_connection_id()
             .and_then(|id| self.connection_store.get(id))
-            .map(|connection| connection.name.clone())
+            .map(|connection| new_connection::ssh_connection_display_title(&connection.name))
             .unwrap_or_else(|| format!("{}@{}", snapshot.username, snapshot.host));
         let ssh_channel_strategy = snapshot
             .origin

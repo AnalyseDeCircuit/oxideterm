@@ -40,3 +40,8 @@ pub(super) use ssh_flow::{
 };
 
 pub(super) use form_view::restore_saved_password_placeholder_if_empty;
+
+pub(super) fn ssh_connection_display_title(name: &str) -> String {
+    // Keep tabs out of single-line session titles without changing the saved SSH alias.
+    name.replace('\t', " ")
+}

@@ -1485,7 +1485,7 @@ impl WorkspaceApp {
                 continue;
             };
             let title = if node_id == &expansion.target_node_id {
-                target_title.clone()
+                new_connection::ssh_connection_display_title(&target_title)
             } else {
                 saved_tree_node_title(
                     &self.connection_store,
@@ -2379,12 +2379,12 @@ mod create_tests {
             oxideterm_connections::ConnectionStore::load(directory.path().join("connections.json"))
                 .unwrap();
         let mut jump = saved_connection_metadata("jump");
-        jump.name = "Saved jump".into();
+        jump.name = "Saved\tjump".into();
         jump.host = "jump.example.com".into();
         jump.auth = oxideterm_connections::SavedAuth::Agent;
         store.upsert_imported_connection(jump).unwrap();
         let mut target = saved_connection_metadata("destination");
-        target.name = "Saved destination".into();
+        target.name = "Saved\tdestination".into();
         target.auth = oxideterm_connections::SavedAuth::Agent;
         target.options.jump_host = Some("jump".into());
         target.upstream_proxy = SavedUpstreamProxyPolicy::Custom {

@@ -1264,12 +1264,15 @@ pub(in crate::workspace) fn saved_tree_node_title(
             } else if *hop_index == 0
                 && let Some(jump_id) = connection.options.jump_host.as_deref()
             {
-                return store.get(jump_id).map(|jump| jump.name.clone());
+                return store.get(jump_id).map(|jump| jump.name.as_str());
             }
         }
-        Some(connection.name.clone())
+        Some(connection.name.as_str())
     });
-    title.unwrap_or_else(|| format!("{username}@{host}"))
+    title.map_or_else(
+        || format!("{username}@{host}"),
+        new_connection::ssh_connection_display_title,
+    )
 }
 
 pub(in crate::workspace) fn write_session_tree_snapshot(

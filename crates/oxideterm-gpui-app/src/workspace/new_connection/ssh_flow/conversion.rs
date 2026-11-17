@@ -694,7 +694,7 @@ mod runtime_save_tests {
         assert!(sync_saved_connection_node_title_for_nodes(
             &mut nodes,
             "home",
-            "Renamed Home"
+            "Renamed\tHome"
         ));
 
         let home = nodes.get(&NodeId::new("node-home")).unwrap();

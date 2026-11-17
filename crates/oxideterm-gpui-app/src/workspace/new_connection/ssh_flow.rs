@@ -48,6 +48,7 @@ use super::{
         identity_agent_selector, ssh_auth_tab_from_saved_auth,
     },
     host_key_dialog::HostKeyChallenge,
+    ssh_connection_display_title,
 };
 use crate::workspace::{
     WorkspaceApp, WorkspaceSshNode,
@@ -304,6 +305,7 @@ fn sync_saved_connection_node_title_for_nodes(
     saved_connection_id: &str,
     title: &str,
 ) -> bool {
+    let title = ssh_connection_display_title(title);
     let mut changed = false;
     for node in ssh_nodes.values_mut() {
         if node.saved_connection_id.as_deref() != Some(saved_connection_id) {
@@ -314,7 +316,7 @@ fn sync_saved_connection_node_title_for_nodes(
         }
         // Only mirror saved display metadata. The live runtime config keeps
         // describing the already-created SSH node until the user reconnects.
-        node.title = title.to_string();
+        node.title.clone_from(&title);
         changed = true;
     }
     changed

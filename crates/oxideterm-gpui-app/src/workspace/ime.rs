@@ -3975,6 +3975,10 @@ fn normalize_clipboard_text_for_ime_target(
     // Normalize in one zeroizing allocation so CRLF conversion never creates
     // an unprotected intermediate copy of secret clipboard contents.
     let mut normalized = Zeroizing::new(String::with_capacity(text.len()));
+    let connection_name = matches!(
+        target,
+        WorkspaceImeTarget::NewConnection(NewConnectionField::Name)
+    );
     let mut characters = text.chars().peekable();
     while let Some(character) = characters.next() {
         if character == '\r' {
@@ -3982,6 +3986,8 @@ fn normalize_clipboard_text_for_ime_target(
                 characters.next();
             }
             normalized.push('\n');
+        } else if character == '\t' && connection_name {
+            normalized.push(' ');
         } else {
             normalized.push(character);
         }
@@ -4782,6 +4788,21 @@ mod tests {
         ] {
             let normalized = normalize_clipboard_text_for_ime_target(target, text);
             assert_eq!(normalized.as_str(), expected, "{target:?}");
+        }
+    }
+
+    #[test]
+    fn only_connection_name_paste_replaces_tabs() {
+        for (field, expected) in [
+            (NewConnectionField::Name, "Demo server"),
+            (NewConnectionField::Notes, "Demo\tserver"),
+            (NewConnectionField::Password, "Demo\tserver"),
+        ] {
+            let actual = normalize_clipboard_text_for_ime_target(
+                WorkspaceImeTarget::NewConnection(field),
+                "Demo\tserver",
+            );
+            assert_eq!(actual.as_str(), expected, "{field:?}");
         }
     }
 
