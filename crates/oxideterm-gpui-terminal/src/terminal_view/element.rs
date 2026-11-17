@@ -12,7 +12,8 @@ use gpui::{
     Pixels, SharedString, Style, TextRun, Window, fill, point, px, relative, rgb, rgba, size,
 };
 use oxideterm_terminal::{
-    TerminalCommandMark, TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
+    TerminalCommandMark, TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
+    TerminalCursorShape, TerminalSearchMatch, TerminalSnapshot,
 };
 use oxideterm_terminal_semantic::{
     CompiledSemanticScheme, SemanticLineRole, SemanticScheme, SemanticShellDialect,
@@ -96,6 +97,7 @@ pub(crate) struct TerminalElement {
     command_mark_gutter_width: f32,
     command_mark_decorations: bool,
     collapsed_commands: HashSet<String>,
+    fold_rotations: HashMap<String, f32>,
 }
 
 #[derive(Clone)]
@@ -220,6 +222,8 @@ pub(crate) struct TerminalCommandMarkOverlay {
     pub(crate) running: bool,
     pub(crate) exit_code: Option<i32>,
     pub(crate) collapsed: bool,
+    pub(crate) foldable: bool,
+    pub(crate) fold_rotation: f32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -732,6 +736,7 @@ impl TerminalElement {
             command_mark_gutter_width: 0.0,
             command_mark_decorations: true,
             collapsed_commands: HashSet::new(),
+            fold_rotations: HashMap::new(),
         }
     }
 
@@ -817,9 +822,15 @@ impl TerminalElement {
         self
     }
 
-    pub(crate) fn command_folding(mut self, collapsed: HashSet<String>, decorations: bool) -> Self {
+    pub(crate) fn command_folding(
+        mut self,
+        collapsed: HashSet<String>,
+        decorations: bool,
+        fold_rotations: HashMap<String, f32>,
+    ) -> Self {
         self.collapsed_commands = collapsed;
         self.command_mark_decorations = decorations;
+        self.fold_rotations = fold_rotations;
         self
     }
 
@@ -1014,6 +1025,7 @@ impl TerminalElement {
             self.selected_command_mark_id.as_deref(),
             self.hovered_command_mark_id.as_deref(),
             &self.collapsed_commands,
+            &self.fold_rotations,
         );
         let mut selections = Vec::new();
         let mut images = self
@@ -2199,17 +2211,41 @@ fn terminal_semantic_style_signature(
     hasher.finish()
 }
 
+pub(crate) fn command_mark_foldable_range(
+    mark: &TerminalCommandMark,
+    total_lines: usize,
+) -> Option<Range<usize>> {
+    if mark.stale
+        || mark.command_line_clipped
+        || !mark.is_closed
+        || mark.output_confidence != TerminalCommandMarkConfidence::High
+        || mark.closed_by != Some(TerminalCommandMarkClosedBy::ShellIntegration)
+    {
+        return None;
+    }
+    let start = mark.output_start?;
+    let end = mark.output_end?;
+    // Partial boundary rows may contain the input or the following prompt.
+    // Keep them visible rather than hiding cells outside the output range.
+    let first =
+        (start.line + usize::from(start.column != 0)).max(mark.command_line.saturating_add(1));
+    let last = end.line;
+    (last > first && last <= total_lines).then_some(first..last)
+}
+
 fn command_mark_overlays_for_rows(
     snapshot: &TerminalSnapshot,
     marks: &[TerminalCommandMark],
     selected_command_mark_id: Option<&str>,
     hovered_command_mark_id: Option<&str>,
     collapsed_commands: &HashSet<String>,
+    fold_rotations: &HashMap<String, f32>,
 ) -> Vec<TerminalCommandMarkOverlay> {
     let viewport_start = snapshot
         .scrollback_lines
         .saturating_sub(snapshot.display_offset);
     let viewport_end = viewport_start.saturating_add(snapshot.lines.len().saturating_sub(1));
+    let total_lines = snapshot.scrollback_lines.saturating_add(snapshot.rows);
     let mut overlays = Vec::new();
 
     for mark in marks {
@@ -2230,6 +2266,13 @@ fn command_mark_overlays_for_rows(
         let hovered = !selected && hovered_command_mark_id == Some(mark.command_id.as_str());
         let visible_start_line = start_line.max(viewport_start);
         let visible_end_line = end_line.min(viewport_end);
+        let collapsed = collapsed_commands.contains(&mark.command_id);
+        let foldable = collapsed || command_mark_foldable_range(mark, total_lines).is_some();
+        let fold_rotation = fold_rotations
+            .get(&mark.command_id)
+            .copied()
+            .unwrap_or(if collapsed { 1.0 } else { 0.0 })
+            .clamp(0.0, 1.0);
         overlays.push(TerminalCommandMarkOverlay {
             start_row: visible_start_line.saturating_sub(viewport_start),
             end_row: visible_end_line.saturating_sub(viewport_start),
@@ -2240,7 +2283,9 @@ fn command_mark_overlays_for_rows(
             hovered,
             running: !mark.is_closed,
             exit_code: mark.exit_code,
-            collapsed: collapsed_commands.contains(&mark.command_id),
+            collapsed,
+            foldable,
+            fold_rotation,
         });
     }
 

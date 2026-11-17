@@ -1915,11 +1915,13 @@ impl WorkspaceApp {
                 TauriBackdropRole::CommandPalette,
                 visible,
             ))
-            .child(oxideterm_gpui_ui::motion::slide_fade_y(
+            .child(oxideterm_gpui_ui::motion::zoom_fade_y(
                 &self.tokens,
                 ("command-palette-panel-motion", palette.motion_generation),
                 div().mt(px(palette_top)).child(overlay_content_boundary(panel)),
-                -8.0,
+                -6.0,
+                0.95,
+                gpui::point(0.5, 0.0),
                 MotionDuration::Control,
                 visible,
             ))
@@ -2422,14 +2424,16 @@ impl WorkspaceApp {
                 TauriBackdropRole::Dialog,
                 visible,
             ))
-            .child(oxideterm_gpui_ui::motion::slide_fade_y(
+            .child(oxideterm_gpui_ui::motion::zoom_fade_y(
                 &self.tokens,
                 (
                     "shortcuts-modal-motion",
                     self.shortcuts_modal.motion_generation,
                 ),
                 div().child(card),
-                12.0,
+                8.0,
+                0.95,
+                gpui::point(0.5, 0.5),
                 MotionDuration::Control,
                 visible,
             ))

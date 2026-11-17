@@ -135,7 +135,10 @@ pub(super) struct TerminalSearchState {
 
 impl TerminalSearchState {
     fn open(&mut self, pane_id: PaneId) {
-        self.panes.entry(pane_id).or_default().visible = true;
+        let entry = self.panes.entry(pane_id).or_default();
+        entry.visible = true;
+        entry.exiting = false;
+        entry.presence.reopen();
         self.focused = Some(pane_id);
     }
 
@@ -151,6 +154,23 @@ impl TerminalSearchState {
         self.focused == Some(pane_id) && self.blur()
     }
 
+    fn begin_exit(&mut self, pane_id: PaneId) -> Option<u64> {
+        let search = self.panes.get_mut(&pane_id)?;
+        search.exiting = true;
+        search.presence.begin_exit()
+    }
+
+    fn finish_exit(&mut self, pane_id: PaneId, generation: u64) -> bool {
+        let Some(search) = self.panes.get_mut(&pane_id) else {
+            return false;
+        };
+        if !search.visible && search.presence.finish_exit(generation) {
+            search.exiting = false;
+            return true;
+        }
+        false
+    }
+
     pub(super) fn remove(&mut self, pane_id: PaneId) {
         self.panes.remove(&pane_id);
         if self.focused == Some(pane_id) {
@@ -159,9 +179,10 @@ impl TerminalSearchState {
     }
 }
 
-#[derive(Default)]
 pub(super) struct SearchBarState {
     pub(super) visible: bool,
+    pub(super) exiting: bool,
+    presence: oxideterm_gpui_ui::motion::ExitPresence,
     pub(super) query: String,
     pub(super) options: oxideterm_terminal::TerminalSearchOptions,
     editor: Option<Entity<TextEditorView>>,
@@ -170,6 +191,24 @@ pub(super) struct SearchBarState {
     pub(super) active_match: Option<usize>,
     pub(super) match_count: usize,
     invalid_regex: bool,
+}
+
+impl Default for SearchBarState {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            exiting: false,
+            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
+            query: String::new(),
+            options: oxideterm_terminal::TerminalSearchOptions::default(),
+            editor: None,
+            _editor_subscription: None,
+            editor_version: 0,
+            active_match: None,
+            match_count: 0,
+            invalid_regex: false,
+        }
+    }
 }
 
 impl SearchBarState {
@@ -408,6 +447,29 @@ mod terminal_search_tests {
             searches.panes.keys().copied().collect::<Vec<_>>(),
             vec![second]
         );
+    }
+
+    #[test]
+    fn pane_search_exit_rejects_stale_completion_after_reopen() {
+        let mut searches = TerminalSearchState::default();
+        let pane = PaneId(11);
+        searches.open(pane);
+        searches.close(pane);
+        assert!(!searches.panes[&pane].visible);
+
+        let first_exit = searches.begin_exit(pane).expect("first exit generation");
+        assert!(searches.panes[&pane].exiting);
+
+        searches.open(pane);
+        assert!(searches.panes[&pane].visible);
+        assert!(!searches.panes[&pane].exiting);
+        assert!(!searches.finish_exit(pane, first_exit));
+        assert!(searches.panes[&pane].visible);
+
+        searches.close(pane);
+        let second_exit = searches.begin_exit(pane).expect("second exit generation");
+        assert!(searches.finish_exit(pane, second_exit));
+        assert!(!searches.panes[&pane].exiting);
     }
 }
 
@@ -1047,12 +1109,37 @@ impl WorkspaceApp {
     }
 
     pub(super) fn hide_search(&mut self, pane_id: PaneId, cx: &mut Context<Self>) {
+        let was_visible = self
+            .search
+            .panes
+            .get(&pane_id)
+            .is_some_and(|search| search.visible);
         if self.search.close(pane_id) {
             self.ime_marked_text = None;
             self.clear_ime_selection();
         }
         if let Some(pane) = self.tab_host.read(cx).panes().get(&pane_id).cloned() {
             pane.update(cx, |pane, cx| pane.set_search_query(None, None, cx));
+        }
+        if was_visible
+            && self.tokens.motion.enabled
+            && let Some(generation) = self.search.begin_exit(pane_id)
+        {
+            let timer = cx.background_executor().timer(
+                oxideterm_gpui_ui::motion::exit_settle_duration(
+                    &self.tokens,
+                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                ),
+            );
+            cx.spawn(async move |weak, cx| {
+                timer.await;
+                let _ = weak.update(cx, |this, cx| {
+                    if this.search.finish_exit(pane_id, generation) {
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
         }
         cx.notify();
     }
@@ -3832,9 +3919,15 @@ impl WorkspaceApp {
             format!("{}/{}", active_match.unwrap_or(0) + 1, match_count)
         };
 
-        search_panel(&self.tokens)
+        let visible = search.visible;
+        let panel = search_panel(&self.tokens)
             .id(("terminal-search", pane_id.0))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .relative()
+            .top_0()
+            .right_0()
+            .when(visible, |panel| {
+                panel.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            })
             .child(
                 search_row()
                     .border_b_1()
@@ -3974,15 +4067,29 @@ impl WorkspaceApp {
                             }),
                         ),
                     ),
-            )
-            .child(
-                div()
-                    .px(px(12.0))
-                    .py(px(7.0))
-                    .text_size(px(11.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("search.visible_terminal_hint")),
-            )
+            );
+        let panel = panel.child(
+            div()
+                .px(px(12.0))
+                .py(px(7.0))
+                .text_size(px(11.0))
+                .text_color(rgb(theme.text_muted))
+                .child(self.i18n.t("search.visible_terminal_hint")),
+        );
+        div()
+            .absolute()
+            .top(px(12.0))
+            .right(px(12.0))
+            .child(oxideterm_gpui_ui::motion::zoom_fade_y(
+                &self.tokens,
+                ("terminal-search-bar", pane_id.0),
+                div().child(panel),
+                -8.0,
+                0.96,
+                gpui::point(1.0, 0.0),
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                visible,
+            ))
             .into_any_element()
     }
 }

@@ -351,13 +351,24 @@ impl WorkspaceApp {
             cx,
         ));
 
+        let menu_visible = self.file_manager.read(cx).context_menu_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         self.workspace_context_menu_backdrop(
             deferred(
                 anchored()
                     .anchor(Corner::TopLeft)
                     .position(gpui::point(px(placement.x), px(placement.y)))
                     .position_mode(AnchoredPositionMode::Window)
-                    .child(overlay_content_boundary(popup)),
+                    .child(oxideterm_gpui_ui::motion::zoom_fade_y(
+                        &self.tokens,
+                        "file-manager-context-menu-motion",
+                        div().child(overlay_content_boundary(popup)),
+                        -4.0,
+                        0.95,
+                        gpui::point(0.0, 0.0),
+                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                        menu_visible,
+                    )),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
             cx,
@@ -529,94 +540,99 @@ impl WorkspaceApp {
             }
         };
         let width = FILE_MANAGER_DIALOG_WIDTH_SM;
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
+        let card = material_surface(&self.tokens, div(), MaterialRole::Dialog)
+            .w(px(width.min(f32::from(window.viewport_size().width) - 32.0)))
+            .max_h(px(
+                (f32::from(window.viewport_size().height) * 0.86).max(240.0)
+            ))
+            .flex()
+            .flex_col()
+            .rounded(px(self.tokens.radii.lg))
+            // Tauri DialogContent clips all child paint to the rounded
+            // shell. Keep the local file-manager modal on the same
+            // contract so body/footer backgrounds cannot leak.
+            .overflow_hidden()
+            .border_1()
+            .border_color(rgba(
+                (self.tokens.ui.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA,
+            ))
+            // Tauri DialogContent keeps inside clicks from becoming
+            // backdrop outside-click dismissals.
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .shadow_lg()
+            .child(
+                div()
+                    .h(px(48.0))
+                    .px(px(16.0))
+                    .flex()
+                    .items_center()
+                    .border_b_1()
+                    .border_color(file_manager_border(
+                        self.tokens.ui.border,
+                        has_background,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(FILE_MANAGER_TEXT_SM))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "file-manager-dialog-title",
+                                title.clone(),
+                                title,
+                                self.tokens.ui.text,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .size(px(28.0))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .hover({
+                                let theme = self.tokens.ui;
+                                move |button| button.bg(rgb(theme.bg_hover))
+                            })
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                FILE_MANAGER_ICON_MD,
+                                rgb(self.tokens.ui.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, _event, _window, cx| {
+                                    this.close_file_manager_dialog(cx);
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            ),
+                    ),
+            )
+            .child(body);
+        staged_dialog_overlay(
+            &self.tokens,
+            "file-manager-dialog",
+            TauriBackdropRole::Dialog,
+            staged_overlay_root().on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
                     this.close_file_manager_dialog(cx);
                     cx.stop_propagation();
                     cx.notify();
                 }),
-            )
-            .child(
-                material_surface(&self.tokens, div(), MaterialRole::Dialog)
-                    .w(px(width.min(f32::from(window.viewport_size().width) - 32.0)))
-                    .max_h(px(
-                        (f32::from(window.viewport_size().height) * 0.86).max(240.0)
-                    ))
-                    .flex()
-                    .flex_col()
-                    .rounded(px(self.tokens.radii.lg))
-                    // Tauri DialogContent clips all child paint to the rounded
-                    // shell. Keep the local file-manager modal on the same
-                    // contract so body/footer backgrounds cannot leak.
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.border << 8) | FILE_MANAGER_DIALOG_BORDER_ALPHA,
-                    ))
-                    // Tauri DialogContent keeps inside clicks from becoming
-                    // backdrop outside-click dismissals.
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .shadow_lg()
-                    .child(
-                        div()
-                            .h(px(48.0))
-                            .px(px(16.0))
-                            .flex()
-                            .items_center()
-                            .border_b_1()
-                            .border_color(file_manager_border(
-                                self.tokens.ui.border,
-                                has_background,
-                            ))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .truncate()
-                                    .text_size(px(FILE_MANAGER_TEXT_SM))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(self.render_display_text_with_role(
-                                        SelectableTextRole::PlainDocument,
-                                        "file-manager-dialog-title",
-                                        title.clone(),
-                                        title,
-                                        self.tokens.ui.text,
-                                        cx,
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .size(px(28.0))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .cursor_pointer()
-                                    .hover({
-                                        let theme = self.tokens.ui;
-                                        move |button| button.bg(rgb(theme.bg_hover))
-                                    })
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::X,
-                                        FILE_MANAGER_ICON_MD,
-                                        rgb(self.tokens.ui.text_muted),
-                                    ))
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.close_file_manager_dialog(cx);
-                                            cx.stop_propagation();
-                                            cx.notify();
-                                        }),
-                                    ),
-                            ),
-                    )
-                    .child(body),
-            )
-            .into_any_element()
+            ),
+            card,
+            8.0,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+            true,
+        )
     }
 
     fn render_file_manager_preview_modal(
@@ -645,7 +661,7 @@ impl WorkspaceApp {
             .min(max_height);
         let form_visible = self.file_manager.read(cx).dialog_presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        quicklook_backdrop()
+        staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -653,6 +669,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .child(staged_overlay_scrim(
+                &self.tokens,
+                "file-manager-preview-scrim",
+                TauriBackdropRole::QuickLook,
+                form_visible,
+            ))
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "file-manager-preview-transition",
@@ -704,7 +726,7 @@ impl WorkspaceApp {
         let icon = file_icon_for_entry(&entry);
         let form_visible = self.file_manager.read(cx).dialog_presence.phase()
             == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        dismissible_dialog_backdrop()
+        staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -712,6 +734,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .child(staged_overlay_scrim(
+                &self.tokens,
+                "file-manager-properties-scrim",
+                TauriBackdropRole::Dialog,
+                form_visible,
+            ))
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "file-manager-properties-transition",

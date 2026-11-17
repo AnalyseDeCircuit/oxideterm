@@ -281,7 +281,13 @@ impl IdeSurface {
                         .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(popup),
+                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                            &self.tokens,
+                            "ide-agent-menu-motion",
+                            div().child(popup),
+                            -6.0,
+                            gpui::point(0.5, 0.0),
+                        )),
                 )
                 .with_priority(IDE_AGENT_MENU_Z),
             )

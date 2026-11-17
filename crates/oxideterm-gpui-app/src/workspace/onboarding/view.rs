@@ -2,7 +2,9 @@ use super::*;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
-use oxideterm_gpui_ui::modal::{dialog_backdrop, rounded_shell_child_radius};
+use oxideterm_gpui_ui::modal::{
+    TauriBackdropRole, rounded_shell_child_radius, staged_overlay_root, staged_overlay_scrim,
+};
 use oxideterm_gpui_ui::motion::{self, MotionDuration};
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{SegmentedControlOptions, segmented_control, segmented_control_item};
@@ -20,8 +22,8 @@ impl WorkspaceApp {
         } else {
             28.0
         };
-        let width = (f32::from(viewport.width) - margin * 2.0).clamp(320.0, 920.0);
-        let height = (f32::from(viewport.height) - margin * 2.0).clamp(380.0, 620.0);
+        let width = (f32::from(viewport.width) - margin * 2.0).clamp(320.0, 900.0);
+        let height = (f32::from(viewport.height) - margin * 2.0).clamp(380.0, 560.0);
         let wide = width >= 760.0;
         let step = OnboardingStep::from_index(self.onboarding.step);
         let content = match step {
@@ -30,7 +32,7 @@ impl WorkspaceApp {
                 self.render_onboarding_welcome(cx),
                 self.render_onboarding_disclaimer(cx),
             ),
-            OnboardingStep::Appearance => self.render_onboarding_appearance(wide, cx),
+            OnboardingStep::Appearance => self.render_onboarding_appearance(wide, width, cx),
             OnboardingStep::Workflow => self.onboarding_columns(
                 wide,
                 self.render_onboarding_workflow(cx),
@@ -71,7 +73,14 @@ impl WorkspaceApp {
             content
         };
 
-        dialog_backdrop()
+        staged_overlay_root()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(staged_overlay_scrim(
+                &self.tokens,
+                "onboarding-dialog-scrim",
+                TauriBackdropRole::Dialog,
+                true,
+            ))
             .child(motion::form_enter(
                 &self.tokens,
                 "onboarding-dialog",
@@ -197,8 +206,8 @@ impl WorkspaceApp {
         div()
             .flex_none()
             .px(px(horizontal_padding))
-            .pt(px(12.0))
-            .pb(px(8.0))
+            .pt(px(14.0))
+            .pb(px(10.0))
             .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             .bg(rgb(theme.bg))
             .border_b_1()
@@ -212,10 +221,16 @@ impl WorkspaceApp {
             .child(
                 div()
                     .flex_none()
+                    .rounded(px(self.tokens.radii.sm))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+                    .bg(rgb(theme.bg_sunken))
+                    .px(px(8.0))
+                    .py(px(2.0))
                     .font_family(SharedString::from(
                         FontFamily::Jetbrains.terminal_family_name(""),
                     ))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_size(px(self.tokens.metrics.ui_text_2xs))
                     .text_color(rgb(theme.text_muted))
                     .child(format!(
                         "{} / {}",
@@ -251,7 +266,7 @@ impl WorkspaceApp {
             .child(if can_go_back {
                 self.onboarding_button(
                     self.i18n.t("onboarding.back"),
-                    Some(LucideIcon::ChevronLeft),
+                    Some((LucideIcon::ChevronLeft, true)),
                     ButtonVariant::Ghost,
                     false,
                     |this, _window, cx| this.onboarding_back(cx),
@@ -279,7 +294,7 @@ impl WorkspaceApp {
                     .child(if can_go_next {
                         self.onboarding_button(
                             self.i18n.t("onboarding.next"),
-                            Some(LucideIcon::ChevronRight),
+                            Some((LucideIcon::ChevronRight, false)),
                             ButtonVariant::Default,
                             next_disabled,
                             |this, _window, cx| this.onboarding_next(cx),
@@ -288,7 +303,7 @@ impl WorkspaceApp {
                     } else {
                         self.onboarding_button(
                             self.i18n.t("onboarding.start_exploring"),
-                            Some(LucideIcon::ArrowRight),
+                            Some((LucideIcon::ArrowRight, false)),
                             ButtonVariant::Default,
                             !self.onboarding.disclaimer_accepted,
                             |this, _window, cx| this.complete_onboarding(cx),
@@ -302,23 +317,33 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn onboarding_button(
         &self,
         label: String,
-        icon: Option<LucideIcon>,
+        icon: Option<(LucideIcon, bool)>,
         variant: ButtonVariant,
         disabled: bool,
         action: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut button = button_with(
+        let icon_color = rgb(if variant == ButtonVariant::Default {
+            theme.accent_text
+        } else {
+            theme.text
+        });
+        let button = button_with(
             &self.tokens,
             label,
             ButtonOptions {
                 variant,
-                size: ButtonSize::Sm,
+                size: ButtonSize::Default,
                 radius: ButtonRadius::Md,
                 disabled,
             },
         )
+        .when_some(icon, |button, (icon_kind, leading)| {
+            button
+                .when(leading, |button| button.flex_row_reverse())
+                .child(Self::render_lucide_icon(icon_kind, 14.0, icon_color))
+        })
         .when(variant == ButtonVariant::Default, |button| {
             button
                 .bg(rgb(theme.accent))
@@ -344,17 +369,6 @@ impl WorkspaceApp {
         } else {
             CursorStyle::PointingHand
         });
-        if let Some(icon) = icon {
-            button = button.child(Self::render_lucide_icon(
-                icon,
-                14.0,
-                rgb(if variant == ButtonVariant::Default {
-                    theme.accent_text
-                } else {
-                    theme.text
-                }),
-            ));
-        }
         button
             .on_mouse_down(
                 MouseButton::Left,

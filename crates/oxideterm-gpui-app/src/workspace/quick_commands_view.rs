@@ -15,7 +15,7 @@ use oxideterm_gpui_editor::{EditorContextMenuLabels, EditorSettings, TextEditorV
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, StatusPillOptions, StatusTone,
     confirm::confirm_dialog,
-    modal::{dismissible_dialog_backdrop, overlay_content_boundary},
+    modal::{TauriBackdropRole, overlay_content_boundary, staged_dialog_overlay, staged_overlay_root},
     scroll::ScrollableElement,
     status_pill,
     text_input::{TextInputView, text_input_with_viewport},
@@ -1572,16 +1572,22 @@ impl WorkspaceApp {
                     .child(self.render_quick_command_manager_inspector(&snapshot, cx)),
             );
 
-        let manager_dialog = dismissible_dialog_backdrop()
-            .on_mouse_down(
+        let manager_dialog = staged_dialog_overlay(
+            &self.tokens,
+            "quick-commands-manager-dialog",
+            TauriBackdropRole::Dialog,
+            staged_overlay_root().on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
                     this.close_quick_commands_manager(cx);
                     cx.stop_propagation();
                 }),
-            )
-            .child(overlay_content_boundary(manager))
-            .into_any_element();
+            ),
+            overlay_content_boundary(manager),
+            8.0,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+            true,
+        );
 
         div()
             .size_full()

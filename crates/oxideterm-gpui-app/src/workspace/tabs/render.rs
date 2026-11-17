@@ -368,7 +368,7 @@ impl WorkspaceApp {
                             ),
                     )
                 });
-            scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::fade_in(
+            scroll_viewport = scroll_viewport.child(oxideterm_gpui_ui::motion::slide_fade_in_x(
                 &self.tokens,
                 ("workspace-tab-open", tab_id.0),
                 div()
@@ -376,6 +376,7 @@ impl WorkspaceApp {
                     .h_full()
                     .flex_none()
                     .child(tab_element),
+                -12.0,
                 oxideterm_gpui_ui::motion::MotionDuration::Control,
             ));
         }

@@ -1586,6 +1586,63 @@ impl WorkspaceApp {
         });
     }
 
+    fn remote_desktop_footer_action_button(
+        &self,
+        group_id: impl Into<SharedString>,
+        icon: LucideIcon,
+        label: String,
+        disabled: bool,
+        danger_hover: bool,
+        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+    ) -> gpui::Stateful<gpui::Div> {
+        let theme = self.tokens.ui;
+        let group_id: SharedString = group_id.into();
+        let idle_color = if disabled {
+            theme.text_muted
+        } else {
+            theme.text_secondary
+        };
+        let hover_color = if danger_hover {
+            theme.error
+        } else {
+            theme.text
+        };
+        // Match sidebar session actions: keep the persistent footer calm at rest and
+        // reveal the error tint for icon + label together only on hover.
+        let hover_background = danger_hover.then(|| rgba((theme.error << 8) | 0x1a).into());
+        let mut icon_element = svg()
+            .path(icon.path())
+            .size(px(12.0))
+            .text_color(rgb(idle_color));
+        if !disabled {
+            icon_element = icon_element.group_hover(group_id.clone(), move |icon| {
+                icon.text_color(rgb(hover_color))
+            });
+        }
+        self.workspace_toolbar_action_button(
+            label,
+            Some(icon_element.into_any_element()),
+            ToolbarButtonOptions {
+                button: ButtonOptions {
+                    variant: ButtonVariant::Ghost,
+                    size: ButtonSize::Sm,
+                    radius: ButtonRadius::Md,
+                    disabled,
+                },
+                height: Some(24.0),
+                padding_x: Some(8.0),
+                font_size: Some(self.tokens.metrics.ui_text_xs),
+                text_color: Some(rgb(idle_color).into()),
+                hover_text_color: (!disabled).then(|| rgb(hover_color).into()),
+                hover_background,
+                ..ToolbarButtonOptions::default()
+            },
+            listener,
+        )
+        .id(group_id.clone())
+        .group(group_id)
+    }
+
     fn render_remote_desktop_resize_control(
         &self,
         tab_id: TabId,
@@ -1597,25 +1654,12 @@ impl WorkspaceApp {
             .is_some_and(|session| session.read(cx).uses_monitor_layout());
         let theme = self.tokens.ui;
         let workspace = cx.entity();
-        let fit_button = self.workspace_toolbar_action_button(
+        let fit_button = self.remote_desktop_footer_action_button(
+            format!("remote-desktop-fit-{}", tab_id.0),
+            LucideIcon::Monitor,
             self.i18n.t("remote_desktop.fit_current_window"),
-            Some(Self::render_lucide_icon(
-                LucideIcon::Monitor,
-                12.0,
-                rgb(theme.text_muted),
-            )),
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Secondary,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                height: Some(24.0),
-                padding_x: Some(8.0),
-                font_size: Some(self.tokens.metrics.ui_text_xs),
-                ..ToolbarButtonOptions::default()
-            },
+            disabled,
+            false,
             cx.listener(move |this, _event, window, cx| {
                 this.fit_remote_desktop_to_current_viewport(tab_id, window, cx);
                 cx.stop_propagation();
@@ -1624,7 +1668,11 @@ impl WorkspaceApp {
         let menu_button = self.workspace_icon_action_button(
             LucideIcon::ChevronDown,
             12.0,
-            rgb(theme.text_muted),
+            rgb(if disabled {
+                theme.text_muted
+            } else {
+                theme.text_secondary
+            }),
             IconButtonOptions {
                 radius: ButtonRadius::Md,
                 has_background: menu_open,
@@ -1767,7 +1815,13 @@ impl WorkspaceApp {
                 .anchor(Corner::TopLeft)
                 .position(gpui::point(px(placement.x), px(placement.y)))
                 .position_mode(AnchoredPositionMode::Window)
-                .child(overlay_content_boundary(menu)),
+                .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                    &self.tokens,
+                    "remote-desktop-resize-menu",
+                    div().child(overlay_content_boundary(menu)),
+                    -4.0,
+                    gpui::point(0.5, 0.0),
+                )),
         )
         .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
         .into_any_element()
@@ -1856,7 +1910,7 @@ impl WorkspaceApp {
                 ))
             })
             .when(!resize_capability.is_supported(), |footer| {
-                footer.child(remote_desktop_capability_chip(
+                footer.child(remote_desktop_footer_status_label(
                     &self.tokens,
                     resize_capability_label,
                 ))
@@ -1865,30 +1919,52 @@ impl WorkspaceApp {
                 vnc_capability_presentation,
                 |footer, (capability_label, capability_tooltip)| {
                     let tooltip_for_move = capability_tooltip;
-                    footer.child(
-                        remote_desktop_capability_chip(&self.tokens, capability_label)
-                            .id("remote-desktop-vnc-capabilities")
-                            .on_mouse_move(cx.listener(
-                                move |this, event: &MouseMoveEvent, _window, cx| {
-                                    this.queue_workspace_tooltip(
-                                        "remote-desktop-vnc-capabilities",
-                                        tooltip_for_move.clone(),
-                                        f32::from(event.position.x) + 12.0,
-                                        f32::from(event.position.y) + 16.0,
-                                        cx,
-                                    );
-                                },
-                            ))
-                            .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
-                                if !*hovered {
-                                    this.clear_workspace_tooltip(
-                                        "remote-desktop-vnc-capabilities",
-                                        cx,
-                                    );
-                                }
-                            })),
-                    )
+                    footer
+                        .when(!resize_capability.is_supported(), |footer| {
+                            footer.child(
+                                div()
+                                    .flex_none()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgba((theme.text_muted << 8) | 0x80))
+                                    .child("·"),
+                            )
+                        })
+                        .child(
+                            remote_desktop_footer_status_label(&self.tokens, capability_label)
+                                .id(SharedString::from(format!(
+                                    "remote-desktop-vnc-capabilities-{}",
+                                    tab_id.0
+                                )))
+                                .hover(move |style| style.text_color(rgb(theme.text_secondary)))
+                                .on_mouse_move(cx.listener(
+                                    move |this, event: &MouseMoveEvent, _window, cx| {
+                                        this.queue_workspace_tooltip(
+                                            "remote-desktop-vnc-capabilities",
+                                            tooltip_for_move.clone(),
+                                            f32::from(event.position.x) + 12.0,
+                                            f32::from(event.position.y) + 16.0,
+                                            cx,
+                                        );
+                                    },
+                                ))
+                                .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                                    if !*hovered {
+                                        this.clear_workspace_tooltip(
+                                            "remote-desktop-vnc-capabilities",
+                                            cx,
+                                        );
+                                    }
+                                })),
+                        )
                 },
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(1.0))
+                    .h(px(12.0))
+                    .mx(px(self.tokens.spacing.one))
+                    .bg(rgba((theme.border << 8) | 0x66)),
             )
             .child(
                 div()
@@ -1896,73 +1972,34 @@ impl WorkspaceApp {
                     .items_center()
                     .gap(px(self.tokens.spacing.one))
                     .when(vnc_file_download_available, |actions| {
-                        actions.child(self.workspace_toolbar_action_button(
+                        actions.child(self.remote_desktop_footer_action_button(
+                            format!("remote-desktop-files-{}", tab_id.0),
+                            LucideIcon::FolderOpen,
                             self.i18n.t("remote_desktop.file_browser"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::FolderOpen,
-                                12.0,
-                                rgb(theme.text_muted),
-                            )),
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Secondary,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: false,
-                                },
-                                height: Some(24.0),
-                                padding_x: Some(8.0),
-                                font_size: Some(self.tokens.metrics.ui_text_xs),
-                                ..ToolbarButtonOptions::default()
-                            },
+                            false,
+                            false,
                             cx.listener(move |this, _event, _window, cx| {
                                 this.open_vnc_file_browser(tab_id, cx);
                             }),
                         ))
                     })
-                    .child(self.workspace_toolbar_action_button(
+                    .child(self.remote_desktop_footer_action_button(
+                        format!("remote-desktop-reconnect-{}", tab_id.0),
+                        LucideIcon::RefreshCw,
                         self.i18n.t("remote_desktop.reconnect"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::RefreshCw,
-                            12.0,
-                            rgb(theme.text_muted),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Secondary,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: reconnect_disabled,
-                            },
-                            height: Some(24.0),
-                            padding_x: Some(8.0),
-                            font_size: Some(self.tokens.metrics.ui_text_xs),
-                            ..ToolbarButtonOptions::default()
-                        },
+                        reconnect_disabled,
+                        false,
                         cx.listener(move |this, _event, window, cx| {
                             this.reconnect_remote_desktop(tab_id, window, cx);
                             cx.notify();
                         }),
                     ))
-                    .child(self.workspace_toolbar_action_button(
+                    .child(self.remote_desktop_footer_action_button(
+                        format!("remote-desktop-disconnect-{}", tab_id.0),
+                        LucideIcon::Power,
                         self.i18n.t("remote_desktop.disconnect"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Power,
-                            12.0,
-                            rgb(theme.text_muted),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Destructive,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
-                            },
-                            height: Some(24.0),
-                            padding_x: Some(8.0),
-                            font_size: Some(self.tokens.metrics.ui_text_xs),
-                            ..ToolbarButtonOptions::default()
-                        },
+                        false,
+                        true,
                         cx.listener(move |this, _event, window, cx| {
                             this.release_remote_desktop_inputs_for_tab(tab_id, cx);
                             this.disconnect_remote_desktop(tab_id, window, cx);

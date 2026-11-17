@@ -35,6 +35,21 @@ pub(in crate::workspace) fn sidebar_resize_hotzone_origin(seam: f32) -> f32 {
     seam - SIDEBAR_RESIZE_HOTZONE_WIDTH
 }
 
+fn workspace_sidebar_resize_cursor() -> impl IntoElement {
+    // The handle is above terminal cursors, but its override must end at the
+    // hitbox rather than depend on a mouse-leave arriving during capture.
+    gpui::canvas(
+        |bounds, window, _| window.insert_hitbox(bounds, gpui::HitboxBehavior::Normal),
+        |_, hitbox, window, _| {
+            window.set_cursor_style_override(gpui::CursorStyle::ResizeColumn, &hitbox);
+        },
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
+}
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn render_animated_sidebar_region(
         &mut self,
@@ -222,12 +237,7 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             }),
         )
-        .on_hover(cx.listener(|this, hovered, _window, cx| {
-            if this.sidebar_resize_hotzone_hovered != *hovered {
-                this.sidebar_resize_hotzone_hovered = *hovered;
-                cx.notify();
-            }
-        }));
+        .child(workspace_sidebar_resize_cursor());
         self.sidebar_motion.animate(
             &self.tokens,
             "left-sidebar-edge-motion",
@@ -262,12 +272,7 @@ impl WorkspaceApp {
                 cx.stop_propagation();
             }),
         )
-        .on_hover(cx.listener(|this, hovered, _window, cx| {
-            if this.sidebar_resize_hotzone_hovered != *hovered {
-                this.sidebar_resize_hotzone_hovered = *hovered;
-                cx.notify();
-            }
-        }));
+        .child(workspace_sidebar_resize_cursor());
         self.context_sidebar_motion.animate(
             &self.tokens,
             "right-sidebar-edge-motion",
@@ -328,6 +333,32 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
+        let panel_section = self.effective_sidebar_panel_section();
+        let transition_gen = self
+            .sidebar_section_transition
+            .filter(|(section, _)| *section == panel_section)
+            .map(|(_, generation)| generation);
+        let sidebar_content = self.render_sidebar_content(window, cx);
+        let body_content = {
+            let body = div()
+                .flex_1()
+                .min_h_0()
+                .w_full()
+                .flex()
+                .flex_col()
+                .child(sidebar_content);
+            if let Some(transition_gen) = transition_gen {
+                oxideterm_gpui_ui::motion::slide_fade_in_x(
+                    &self.tokens,
+                    ("sidebar-section-body", transition_gen as usize),
+                    body,
+                    -10.0,
+                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                )
+            } else {
+                body.into_any_element()
+            }
+        };
         div()
             .w_full()
             .h_full()
@@ -337,7 +368,7 @@ impl WorkspaceApp {
             // untinted layout border between the sidebar and main content.
             .child(self.render_sidebar_header(cx))
             .when(
-                self.effective_sidebar_panel_section() == SidebarSection::Sessions
+                panel_section == SidebarSection::Sessions
                     && self
                         .disclosure_motions
                         .retained("session-search", self.session_search_open),
@@ -356,7 +387,7 @@ impl WorkspaceApp {
                 },
             )
             .when(
-                self.effective_sidebar_panel_section() == SidebarSection::Connections
+                panel_section == SidebarSection::Connections
                     && self
                         .disclosure_motions
                         .retained("session-manager-search", self.session_manager_search_open),
@@ -381,13 +412,14 @@ impl WorkspaceApp {
                     .w_full()
                     .flex()
                     .flex_col()
+                    .overflow_hidden()
                     // Match the activity bar and context sidebar base surface
                     // so the full-height navigation body does not read as a card.
                     .bg(self.workspace_sidebar_background(theme.shell_bg()))
-                    .child(self.render_sidebar_content(window, cx)),
+                    .child(body_content),
             )
             .when(
-                self.effective_sidebar_panel_section() == SidebarSection::Sessions,
+                panel_section == SidebarSection::Sessions,
                 |sidebar| sidebar.child(self.render_active_sessions_footer(cx)),
             )
             .into_any_element()
@@ -425,6 +457,37 @@ impl WorkspaceApp {
             _ => "sidebar.panels.sessions",
         };
         let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key));
+        let transition_gen = self
+            .sidebar_section_transition
+            .filter(|(section, _)| *section == panel_section)
+            .map(|(_, generation)| generation);
+        let title_inner = div()
+            .flex()
+            .items_center()
+            .truncate()
+            .text_size(px(self.tokens.metrics.sidebar_title_font_size))
+            .font_weight(gpui::FontWeight::MEDIUM)
+            .text_color(rgb(theme.text_secondary))
+            // A title inside the native drag region must never start
+            // read-only text selection or retain pointer ownership.
+            .child(self.render_display_text_with_role(
+                SelectableTextRole::NonSelectable,
+                "sidebar-header-title",
+                title_key,
+                title,
+                theme.text_muted,
+                cx,
+            ));
+        let title_element = if let Some(transition_gen) = transition_gen {
+            oxideterm_gpui_ui::motion::fade_in(
+                &self.tokens,
+                ("sidebar-header-title", transition_gen as usize),
+                title_inner,
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            )
+        } else {
+            title_inner.into_any_element()
+        };
         let mut header = div()
             // Align sidebar titles with the neighboring workspace tab bar.
             .h(px(self.tokens.metrics.tabbar_height))
@@ -438,36 +501,19 @@ impl WorkspaceApp {
             .border_b_1()
             .border_color(self.workspace_chrome_divider())
             .px_3()
-            .child(
-                self.render_window_drag_content_region(
-                    "sidebar-header-title-drag-region",
-                    div()
-                        .flex()
-                        .items_center()
-                        .truncate()
-                        .text_size(px(self.tokens.metrics.sidebar_title_font_size))
-                        .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(rgb(theme.text_secondary))
-                        // A title inside the native drag region must never start
-                        // read-only text selection or retain pointer ownership.
-                        .child(self.render_display_text_with_role(
-                            SelectableTextRole::NonSelectable,
-                            "sidebar-header-title",
-                            title_key,
-                            title,
-                            theme.text_muted,
-                            cx,
-                        ))
-                        .into_any_element(),
-                    cx,
-                ),
-            );
+            .child(self.render_window_drag_content_region(
+                "sidebar-header-title-drag-region",
+                title_element,
+                cx,
+            ));
         if panel_section == SidebarSection::Sessions {
             let view_icon = match self.active_session_sidebar_view_mode {
                 ActiveSessionSidebarViewMode::Tree => LucideIcon::Folder,
                 ActiveSessionSidebarViewMode::Host => LucideIcon::Server,
             };
-            header = header
+            let actions = div()
+                .flex()
+                .items_center()
                 .child(self.render_session_search_button(cx))
                 .child(self.render_session_sort_button(cx))
                 .child(self.render_sidebar_action(
@@ -480,6 +526,16 @@ impl WorkspaceApp {
                     SidebarActionKind::NewConnection,
                     cx,
                 ));
+            header = header.child(if let Some(transition_gen) = transition_gen {
+                oxideterm_gpui_ui::motion::fade_in(
+                    &self.tokens,
+                    ("sidebar-header-actions", transition_gen as usize),
+                    actions,
+                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                )
+            } else {
+                actions.into_any_element()
+            });
         }
         if panel_section == SidebarSection::Connections {
             let workspace = cx.entity();
@@ -491,21 +547,21 @@ impl WorkspaceApp {
                 SidebarActionKind::ToggleSessionSort,
                 cx,
             );
-            header = header
+            let actions = div()
+                .flex()
+                .items_center()
                 .child(self.render_session_manager_search_button(cx))
-                .child(
-                    div()
-                        .id("sidebar-session-manager-sort")
-                        .child(select_anchor_probe(
-                            SelectAnchorId::SessionManagerSidebarSort,
-                            sort_action,
-                            move |anchor, _window, cx| {
-                                let _ = workspace.update(cx, |this, cx| {
-                                    this.update_select_anchor(anchor, cx);
-                                });
-                            },
-                        )),
-                )
+                .child(div().id("sidebar-session-manager-sort").child(
+                    select_anchor_probe(
+                        SelectAnchorId::SessionManagerSidebarSort,
+                        sort_action,
+                        move |anchor, _window, cx| {
+                            let _ = workspace.update(cx, |this, cx| {
+                                this.update_select_anchor(anchor, cx);
+                            });
+                        },
+                    ),
+                ))
                 .child(self.render_sidebar_action(
                     LucideIcon::ExternalLink,
                     SidebarActionKind::OpenSessionManagerTab,
@@ -516,6 +572,16 @@ impl WorkspaceApp {
                     SidebarActionKind::NewConnection,
                     cx,
                 ));
+            header = header.child(if let Some(transition_gen) = transition_gen {
+                oxideterm_gpui_ui::motion::fade_in(
+                    &self.tokens,
+                    ("sidebar-header-actions", transition_gen as usize),
+                    actions,
+                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                )
+            } else {
+                actions.into_any_element()
+            });
         }
         header.into_any_element()
     }
@@ -1383,8 +1449,7 @@ mod sidebar_resize_region_tests {
         }
     }
 
-    #[gpui::test]
-    fn sidebar_tints_reach_the_seams_without_exposing_wallpaper(cx: &mut TestAppContext) {
+    fn isolated_sidebar_settings(cx: &mut TestAppContext) -> Option<SettingsStore> {
         let executable = std::env::current_exe().unwrap();
         let fixture_key = "OXIDETERM_SIDEBAR_SEAM_TEST_DIR";
         let Some(fixture_dir) = std::env::var_os(fixture_key) else {
@@ -1407,15 +1472,23 @@ mod sidebar_resize_region_tests {
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
-            return;
+            return None;
         };
         let settings_path = default_settings_path();
         assert!(settings_path.starts_with(PathBuf::from(fixture_dir)));
         let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
         settings.settings_mut().ssh_config.auto_load_hosts = false;
         settings.settings_mut().onboarding_completed = true;
-        settings.save().unwrap();
         cx.executor().allow_parking();
+        Some(settings)
+    }
+
+    #[gpui::test]
+    fn sidebar_tints_reach_the_seams_without_exposing_wallpaper(cx: &mut TestAppContext) {
+        let Some(mut settings) = isolated_sidebar_settings(cx) else {
+            return;
+        };
+        settings.save().unwrap();
         let (view, cx) = cx.add_window_view(|window, cx| {
             SidebarSurfaceView(cx.new(|cx| {
                 let mut workspace = WorkspaceApp::new(window, cx, None, None).unwrap();
@@ -1464,6 +1537,115 @@ mod sidebar_resize_region_tests {
         });
     }
 
+    #[gpui::test]
+    fn sidebar_resize_cursor_follows_the_handle_after_release(cx: &mut TestAppContext) {
+        let Some(mut settings) = isolated_sidebar_settings(cx) else {
+            return;
+        };
+        let config = settings.settings_mut();
+        config.appearance.animation_speed = oxideterm_settings::AnimationSpeed::Off;
+        config.ai.enabled = true;
+        config.sidebar_ui.collapsed = false;
+        config.sidebar_ui.ai_sidebar_collapsed = false;
+        config.sidebar_ui.width = 280;
+        config.sidebar_ui.ai_sidebar_width = 300;
+        settings.save().unwrap();
+        let (shell, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
+            super::super::window_shell::WorkspaceWindowShell::new(workspace, window, cx)
+        });
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        let viewport_width = 1200.0;
+        cx.simulate_resize(size(px(viewport_width), px(700.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        for right in [false, true] {
+            let seam = |cx: &gpui::VisualTestContext| {
+                workspace.read_with(cx, |workspace, cx| {
+                    if right {
+                        viewport_width
+                            - workspace.tokens.metrics.activity_bar_width
+                            - workspace.ai_entity.read(cx).chat_ui().sidebar_width
+                    } else {
+                        workspace.sidebar_width
+                    }
+                })
+            };
+            let handle = |cx: &gpui::VisualTestContext| {
+                gpui::point(px(seam(cx) + if right { 3.0 } else { -3.0 }), px(180.0))
+            };
+            let modifiers = Modifiers::default();
+            let before = seam(cx);
+            let grip = handle(cx);
+            cx.simulate_mouse_move(grip, None, modifiers);
+            assert_eq!(
+                cx.update(|window, _| window.cursor_style_for_test()),
+                CursorStyle::ResizeColumn
+            );
+            cx.simulate_mouse_down(grip, MouseButton::Left, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let moved = gpui::point(grip.x + px(if right { -48.0 } else { 48.0 }), grip.y);
+            cx.simulate_mouse_move(moved, Some(MouseButton::Left), modifiers);
+            assert!((seam(cx) - before).abs() > 30.0);
+            assert_eq!(
+                cx.update(|window, _| window.cursor_style_for_test()),
+                CursorStyle::ResizeColumn
+            );
+
+            // Release without sending a final move to the captured resize overlay.
+            let outside = gpui::point(moved.x, px(-12.0));
+            cx.simulate_mouse_up(outside, MouseButton::Left, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.update(|window, _| window.cursor_style_for_test()),
+                CursorStyle::Arrow,
+                "sidebar {right} held the cursor after releasing outside the window"
+            );
+            let released = seam(cx);
+            cx.simulate_mouse_move(gpui::point(px(600.0), px(180.0)), None, modifiers);
+            assert_eq!(seam(cx), released);
+
+            let grip = handle(cx);
+            cx.simulate_mouse_move(grip, None, modifiers);
+            assert_eq!(
+                cx.update(|window, _| window.cursor_style_for_test()),
+                CursorStyle::ResizeColumn
+            );
+            cx.simulate_mouse_down(grip, MouseButton::Left, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            // The initial press moves the seam to the pointer.
+            cx.simulate_mouse_up(handle(cx), MouseButton::Left, modifiers);
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(
+                cx.update(|window, _| window.cursor_style_for_test()),
+                CursorStyle::ResizeColumn,
+                "the cursor should still show resize while over the released handle"
+            );
+            cx.simulate_mouse_move(gpui::point(px(600.0), px(180.0)), None, modifiers);
+            assert_eq!(
+                cx.update(|window, _| window.cursor_style_for_test()),
+                CursorStyle::Arrow
+            );
+
+            cx.update(|window, _| window.activate_window());
+            let grip = handle(cx);
+            cx.simulate_mouse_move(grip, None, modifiers);
+            cx.simulate_mouse_down(grip, MouseButton::Left, modifiers);
+            let resizing = |cx: &gpui::VisualTestContext| {
+                workspace.read_with(cx, |workspace, cx| {
+                    workspace.sidebar_resizing
+                        || workspace.ai_entity.read(cx).chat_ui().sidebar_resizing
+                })
+            };
+            assert!(resizing(cx));
+            cx.deactivate_window();
+            assert!(
+                !resizing(cx),
+                "sidebar {right} kept the drag after focus loss"
+            );
+        }
+    }
+
     struct TestContextSidebarChrome {
         total_width: f32,
         resize_started: Rc<Cell<bool>>,
@@ -1474,7 +1656,6 @@ mod sidebar_resize_region_tests {
     struct TestLeftSidebarChrome {
         total_width: f32,
         resize_started: Rc<Cell<bool>>,
-        hotzone_hovered: bool,
     }
 
     impl Render for TestLeftSidebarChrome {
@@ -1510,22 +1691,8 @@ mod sidebar_resize_region_tests {
                                 resize_started.set(true);
                             }),
                         )
-                        .on_hover(cx.listener(|this, hovered, _window, cx| {
-                            if this.hotzone_hovered != *hovered {
-                                this.hotzone_hovered = *hovered;
-                                cx.notify();
-                            }
-                        })),
+                        .child(workspace_sidebar_resize_cursor()),
                 )
-                .when(self.hotzone_hovered, |root| {
-                    root.child(canvas(
-                        |_, _, _| (),
-                        |_, _, window, _| {
-                            // The resize handle must beat earlier window-wide cursor requests.
-                            window.set_window_cursor_style(CursorStyle::ResizeColumn);
-                        },
-                    ))
-                })
         }
     }
 
@@ -1637,7 +1804,6 @@ mod sidebar_resize_region_tests {
         let (_, cx) = cx.add_window_view(|_, _| TestLeftSidebarChrome {
             total_width,
             resize_started: resize_started.clone(),
-            hotzone_hovered: false,
         });
         cx.simulate_resize(size(px(700.0), px(180.0)));
         cx.update(|window, cx| {

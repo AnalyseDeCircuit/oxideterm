@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "失敗次數過多，請等待 30 秒後再試。",
       "app_lock_operation_failed": "無法更新應用程式鎖定憑證。",
       "app_lock_unavailable": "此裝置上的安全憑證儲存空間無法使用。",
+      "app_lock_state_unavailable": "無法讀取或儲存應用程式鎖定狀態，請檢查資料目錄的存取權限。",
       "app_lock_pending": "正在儲存...",
       "app_lock_locked_title": "OxideTerm 已鎖定",
       "app_lock_locked_description": "工作區內容已隱藏，現有連線和背景工作仍會繼續執行。",

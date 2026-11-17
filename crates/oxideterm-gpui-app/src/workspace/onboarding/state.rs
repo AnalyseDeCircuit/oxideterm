@@ -3,8 +3,10 @@ use super::*;
 pub(in crate::workspace) const ONBOARDING_TOTAL_STEPS: usize = 5;
 pub(in crate::workspace) const ONBOARDING_STEPS_MOTION_ID: &str = "onboarding-steps";
 pub(in crate::workspace) const ONBOARDING_ANIMATION_MOTION_ID: &str = "onboarding-animation";
-pub(in crate::workspace) const ONBOARDING_ACCENT_SUBTLE_ALPHA: u32 = 0x0d;
-pub(in crate::workspace) const ONBOARDING_HAIRLINE_ALPHA: u32 = 0x66;
+pub(in crate::workspace) const ONBOARDING_ACCENT_SUBTLE_ALPHA: u32 = 0x14;
+pub(in crate::workspace) const ONBOARDING_ACCENT_BORDER_ALPHA: u32 = 0x80;
+pub(in crate::workspace) const ONBOARDING_HAIRLINE_ALPHA: u32 = 0x4d;
+pub(in crate::workspace) const ONBOARDING_CARD_BORDER_ALPHA: u32 = 0x59;
 pub(in crate::workspace) const ONBOARDING_DISABLED_OPACITY: f32 = 0.45;
 
 pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool); 4] = [

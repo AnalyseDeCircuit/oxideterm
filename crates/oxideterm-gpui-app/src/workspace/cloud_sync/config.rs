@@ -957,7 +957,13 @@ impl WorkspaceApp {
                 }),
             ));
         }
-        let popup = overlay_content_boundary(popup).into_any_element();
+        let popup = oxideterm_gpui_ui::motion::popover_zoom_enter(
+            &self.tokens,
+            "cloud-sync-select-popup",
+            div().child(overlay_content_boundary(popup)),
+            -4.0,
+            point(0.5, 0.0),
+        );
 
         Some(
             popover_backdrop()

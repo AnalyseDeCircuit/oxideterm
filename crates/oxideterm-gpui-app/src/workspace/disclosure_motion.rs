@@ -346,14 +346,14 @@ mod tests {
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
-        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.executor().advance_clock(Duration::from_millis(45));
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
         assert_eq!(cx.debug_bounds("following-row").unwrap().origin.y, px(36.0));
         let opacity = view.read_with(cx, |view, _| view.motions.entries["test"].opacity.get());
         assert!((opacity - 0.125).abs() < 0.0001);
-        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.executor().advance_clock(Duration::from_millis(45));
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
@@ -384,7 +384,7 @@ mod tests {
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
-        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.executor().advance_clock(Duration::from_millis(45));
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });

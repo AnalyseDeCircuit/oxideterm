@@ -531,18 +531,22 @@ impl WorkspaceApp {
                     .child(rename_action),
             );
 
-        Some(
-            oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, window, cx| {
-                        this.cancel_tab_rename(window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(oxideterm_gpui_ui::modal::overlay_content_boundary(content))
-                .into_any_element(),
-        )
+        Some(oxideterm_gpui_ui::modal::staged_dialog_overlay(
+            &self.tokens,
+            "tab-rename-dialog",
+            oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
+            oxideterm_gpui_ui::modal::staged_overlay_root().on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    this.cancel_tab_rename(window, cx);
+                    cx.stop_propagation();
+                }),
+            ),
+            overlay_content_boundary(content),
+            8.0,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+            true,
+        ))
     }
 
     pub(in crate::workspace) fn detach_tab_to_window(
@@ -1545,7 +1549,13 @@ impl WorkspaceApp {
                         .anchor(Corner::TopLeft)
                         .position(gpui::point(px(placement.x), px(placement.y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(menu_body),
+                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                            &self.tokens,
+                            ("tab-context-menu-motion", menu.tab_id.0),
+                            div().child(menu_body),
+                            -4.0,
+                            gpui::point(0.0, 0.0),
+                        )),
                 )
                 .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
                 cx,

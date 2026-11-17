@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "Quá nhiều lần thử thất bại. Hãy đợi 30 giây trước khi thử lại.",
       "app_lock_operation_failed": "Không thể cập nhật thông tin xác thực khóa ứng dụng.",
       "app_lock_unavailable": "Kho thông tin xác thực an toàn không khả dụng trên thiết bị này.",
+      "app_lock_state_unavailable": "Không thể đọc hoặc lưu trạng thái khóa ứng dụng. Hãy kiểm tra quyền truy cập thư mục dữ liệu.",
       "app_lock_pending": "Đang lưu...",
       "app_lock_locked_title": "OxideTerm đã bị khóa",
       "app_lock_locked_description": "Nội dung không gian làm việc đã được ẩn. Các kết nối đang hoạt động và tác vụ nền vẫn tiếp tục chạy.",

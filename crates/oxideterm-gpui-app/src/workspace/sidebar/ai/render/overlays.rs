@@ -176,12 +176,12 @@ impl WorkspaceApp {
                 let anchor = self.select_anchors.get(&SelectAnchorId::AiContextPopover)?;
                 // Context usage is an informational inspector rather than a menu.
                 // Reduced motion keeps only opacity, while Off mounts immediately.
-                let popover = oxideterm_gpui_ui::motion::slide_fade_in_y(
+                let popover = oxideterm_gpui_ui::motion::popover_zoom_enter(
                     &self.tokens,
                     "ai-context-popover-enter",
                     div().child(self.render_ai_context_popover(cx)),
-                    8.0,
-                    oxideterm_gpui_ui::motion::MotionDuration::Control,
+                    6.0,
+                    gpui::point(0.5, 1.0),
                 );
                 (
                     Corner::BottomLeft,

@@ -688,7 +688,13 @@ impl WorkspaceApp {
                     .child(
                         gpui::anchored()
                             .position(position)
-                            .child(context_menu_event_boundary(menu)),
+                            .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                                &self.tokens,
+                                "ssh-algorithm-menu-motion",
+                                div().child(context_menu_event_boundary(menu)),
+                                -4.0,
+                                gpui::point(0.0, 0.0),
+                            )),
                     ),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)

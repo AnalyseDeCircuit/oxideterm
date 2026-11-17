@@ -483,7 +483,10 @@ impl WorkspaceApp {
         settings_workspace.update(cx, |settings, _cx| {
             settings.initialize_background_gallery(background_images);
         });
-        let app_lock = app_lock::AppLockState::load(oxideterm_app_lock::AppLockStore::new());
+        let app_lock = app_lock::AppLockState::load(
+            oxideterm_app_lock::AppLockStore::new(),
+            settings_store.path(),
+        );
         let ai_key_store = oxideterm_ai::AiProviderKeyStore::new();
         let ai_entity = cx.new(|cx| {
             let mut entity = ai_state::AiWorkspaceEntity::new_with_agent_fs(
@@ -697,11 +700,12 @@ impl WorkspaceApp {
             disclosure_motions: disclosure_motion::DisclosureMotions::default(),
             sidebar_resizing: false,
             embedded_sftp_sidebar_resizing: false,
-            sidebar_resize_hotzone_hovered: false,
             zen_exit: zen_exit::ZenExitAffordance::default(),
             sidebar_collapsed: settings.sidebar_ui.collapsed,
             sidebar_rendered: !settings.sidebar_ui.collapsed,
             sidebar_motion_generation: 0,
+            sidebar_section_motion_generation: 0,
+            sidebar_section_transition: None,
             sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion::new(
                 if settings.sidebar_ui.collapsed {
                     0.0
@@ -947,14 +951,21 @@ impl WorkspaceApp {
             this.update_ai_sidebar_overlay_for_window_bounds(window, cx);
             this.capture_main_window_state(window, cx);
         });
-        let ai_knowledge_activation = cx.observe_window_activation(window, |this, window, cx| {
+        let workspace_window_activation = cx.observe_window_activation(window, |this, window, cx| {
             if window.is_window_active() {
                 this.knowledge_sync_external_edit(false, cx);
+            } else {
+                // A release in another window need not reach this workspace.
+                this.finish_sidebar_resize(cx);
+                this.finish_ai_sidebar_resize(cx);
             }
         });
         workspace.ai_entity.update(cx, |ai, _cx| {
-            ai.retain_window_observers(workspace_window_bounds, ai_knowledge_activation);
+            ai.retain_window_observers(workspace_window_bounds, workspace_window_activation);
         });
+        if workspace.app_lock.locked {
+            workspace.focus_app_lock_screen(window, cx);
+        }
         workspace.sync_ai_workspace_visibility(cx);
         if workspace.ai_sidebar_visible() {
             workspace.ensure_ai_chat_initialized(cx);

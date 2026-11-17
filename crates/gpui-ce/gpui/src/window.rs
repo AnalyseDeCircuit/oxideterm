@@ -743,6 +743,7 @@ pub(crate) type AnyMouseListener =
 pub(crate) struct CursorStyleRequest {
     pub(crate) hitbox_id: Option<HitboxId>,
     pub(crate) style: CursorStyle,
+    pub(crate) priority: bool,
 }
 
 #[derive(Default, Eq, PartialEq)]
@@ -1208,13 +1209,18 @@ impl Frame {
         self.cursor_styles
             .iter()
             .rev()
-            .fold_while(None, |style, request| match request.hitbox_id {
-                None => Done(Some(request.style)),
-                Some(hitbox_id) => Continue(style.or_else(|| {
-                    hitbox_id
-                        .is_hovered_ignoring_last_input(window)
-                        .then_some(request.style)
-                })),
+            .fold_while(None, |style, request| {
+                if request
+                    .hitbox_id
+                    .is_some_and(|id| !id.is_hovered_ignoring_last_input(window))
+                {
+                    return Continue(style);
+                }
+                if request.priority {
+                    Done(Some(request.style))
+                } else {
+                    Continue(style.or(Some(request.style)))
+                }
             })
             .into_inner()
     }
@@ -4626,6 +4632,18 @@ impl Window {
         self.next_frame.cursor_styles.push(CursorStyleRequest {
             hitbox_id: Some(hitbox.id),
             style,
+            priority: false,
+        });
+    }
+
+    /// Gives a hovered hitbox the same cursor precedence as a window-wide request.
+    /// Use during paint when an overlay must beat cursors requested by content below it.
+    pub fn set_cursor_style_override(&mut self, style: CursorStyle, hitbox: &Hitbox) {
+        self.invalidator.debug_assert_paint();
+        self.next_frame.cursor_styles.push(CursorStyleRequest {
+            hitbox_id: Some(hitbox.id),
+            style,
+            priority: true,
         });
     }
 
@@ -4646,6 +4664,7 @@ impl Window {
         self.next_frame.cursor_styles.push(CursorStyleRequest {
             hitbox_id: None,
             style,
+            priority: true,
         })
     }
 
@@ -4729,6 +4748,24 @@ impl Window {
         self.element_opacity = previous_opacity * opacity;
         let result = f(self);
         self.element_opacity = previous_opacity;
+        result
+    }
+
+    /// Visually scales painted primitives inside `f` around `pivot` without mutating layout.
+    pub fn with_element_scale<R>(
+        &mut self,
+        scale: f32,
+        pivot: Point<Pixels>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.invalidator.debug_assert_paint();
+        if (scale - 1.0).abs() < 1e-5 {
+            return f(self);
+        }
+        let scaled_pivot = pivot.scale(self.scale_factor());
+        self.next_frame.scene.push_scale(scale, scaled_pivot);
+        let result = f(self);
+        self.next_frame.scene.pop_scale();
         result
     }
 

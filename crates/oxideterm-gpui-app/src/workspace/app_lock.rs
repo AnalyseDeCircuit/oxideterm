@@ -8,16 +8,18 @@ use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
     modal::{
-        dialog_content, dialog_description, dialog_footer, dialog_header, dialog_title,
-        dismissible_dialog_backdrop,
+        TauriBackdropRole, dialog_content, dialog_description, dialog_footer, dialog_header,
+        dialog_title, overlay_content_boundary, staged_dialog_overlay, staged_overlay_root,
     },
 };
 use zeroize::{Zeroize, Zeroizing};
 
 const APP_LOCK_DIALOG_WIDTH: f32 = 460.0;
-const APP_LOCK_SCREEN_CARD_WIDTH: f32 = 460.0;
-const APP_LOCK_SCREEN_DESCRIPTION_WIDTH: f32 = 390.0;
+const APP_LOCK_SCREEN_CARD_WIDTH: f32 = 360.0;
+const APP_LOCK_SCREEN_DESCRIPTION_WIDTH: f32 = 340.0;
 const APP_LOCK_MINIMUM_PASSWORD_LENGTH: usize = 6;
+const APP_LOCK_MARKER: &str = "app-locked";
+const APP_LOCK_STATE_UNAVAILABLE: &str = "settings_view.general.app_lock_state_unavailable";
 const APP_LOCK_FAILURE_COOLDOWN: Duration = Duration::from_secs(1);
 const APP_LOCK_EXTENDED_COOLDOWN: Duration = Duration::from_secs(30);
 const APP_LOCK_EXTENDED_COOLDOWN_THRESHOLD: u32 = 5;
@@ -39,6 +41,7 @@ pub(super) enum AppLockDialog {
 
 pub(super) struct AppLockState {
     store: AppLockStore,
+    marker_path: PathBuf,
     pub(super) configured: bool,
     pub(super) locked: bool,
     pub(super) dialog: Option<AppLockDialog>,
@@ -55,18 +58,25 @@ pub(super) struct AppLockState {
 }
 
 impl AppLockState {
-    pub(super) fn load(store: AppLockStore) -> Self {
-        let (configured, error) = match store.is_configured() {
+    pub(super) fn load(store: AppLockStore, settings_path: &Path) -> Self {
+        let (configured, mut error) = match store.is_configured() {
             Ok(configured) => (configured, None),
             Err(_) => (
                 false,
                 Some("settings_view.general.app_lock_unavailable".to_string()),
             ),
         };
+        let marker_path = settings_path.with_file_name(APP_LOCK_MARKER);
+        let locked = marker_path.try_exists().unwrap_or_else(|_| {
+            // An unreadable marker cannot be treated as permission to unlock.
+            error = Some(APP_LOCK_STATE_UNAVAILABLE.to_string());
+            true
+        });
         Self {
             store,
+            marker_path,
             configured,
-            locked: false,
+            locked,
             dialog: None,
             lock_after_configure: false,
             pending: false,
@@ -79,6 +89,18 @@ impl AppLockState {
             failed_attempts: 0,
             retry_at: None,
         }
+    }
+
+    fn set_locked(&mut self, locked: bool) -> std::io::Result<()> {
+        // The marker contains no credentials and must be durable before the UI
+        // changes state, even if the process exits without running shutdown.
+        if locked {
+            oxideterm_atomic_file::durable_write(&self.marker_path, b"")?;
+        } else {
+            oxideterm_atomic_file::durable_remove(&self.marker_path)?;
+        }
+        self.locked = locked;
+        Ok(())
     }
 
     fn clear_passwords(&mut self) {
@@ -136,6 +158,10 @@ impl WorkspaceApp {
             self.open_app_lock_dialog(AppLockDialog::Configure, true, window, cx);
             return;
         }
+        if !self.begin_app_lock(cx) {
+            cx.notify();
+            return;
+        }
 
         // Locking releases forwarded input before sensitive surfaces stop rendering,
         // preventing a held key or mouse button from remaining active remotely.
@@ -154,6 +180,33 @@ impl WorkspaceApp {
         self.close_terminal_command_overlays(cx);
         self.clear_workspace_tooltip("activity-app-lock", cx);
         self.clear_app_lock_input_state();
+        self.app_lock.error = None;
+        self.focus_app_lock_screen(window, cx);
+        // Detached tab windows share the workspace lock state but own separate render roots.
+        cx.refresh_windows();
+    }
+
+    fn persist_app_lock(&mut self, locked: bool, cx: &App) -> bool {
+        if self.app_lock.set_locked(locked).is_ok() {
+            return true;
+        }
+        self.app_lock.error = Some(APP_LOCK_STATE_UNAVAILABLE.to_string());
+        if locked {
+            self.push_workspace_notice(
+                TerminalNotice {
+                    title: self.i18n.t(APP_LOCK_STATE_UNAVAILABLE),
+                    description: None,
+                    status_text: None,
+                    progress: None,
+                    variant: TerminalNoticeVariant::Warning,
+                },
+                cx,
+            );
+        }
+        false
+    }
+
+    fn begin_app_lock(&mut self, cx: &App) -> bool {
         let was_locked = self.app_lock.locked;
         let audit = oxideterm_audit::AuditOperation::begin(
             oxideterm_audit::AuditCategory::Security,
@@ -161,9 +214,11 @@ impl WorkspaceApp {
             None,
             None,
         );
-        self.app_lock.locked = true;
+        let persisted = self.persist_app_lock(true, cx);
         audit.finish(
-            if was_locked {
+            if !persisted {
+                oxideterm_audit::AuditOutcome::Failed
+            } else if was_locked {
                 oxideterm_audit::AuditOutcome::Unchanged
             } else {
                 oxideterm_audit::AuditOutcome::Succeeded
@@ -172,14 +227,15 @@ impl WorkspaceApp {
             None,
             None,
         );
-        self.app_lock.error = None;
+        persisted
+    }
+
+    pub(super) fn focus_app_lock_screen(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.refresh_app_lock_biometric_availability(cx);
         self.focus_app_lock_input(SettingsInput::AppLockCurrentPassword, window, cx);
         window.set_window_title(&SharedString::from(
             self.i18n.t("settings_view.general.app_lock_window_title"),
         ));
-        // Detached tab windows share the workspace lock state but own separate render roots.
-        cx.refresh_windows();
     }
 
     pub(in crate::workspace) fn open_app_lock_dialog(
@@ -356,21 +412,8 @@ impl WorkspaceApp {
                         this.app_lock.dialog = None;
                         this.app_lock.lock_after_configure = false;
                         this.clear_app_lock_input_state();
-                        if should_lock {
-                            let lock_audit = oxideterm_audit::AuditOperation::begin(
-                                oxideterm_audit::AuditCategory::Security,
-                                "app_lock",
-                                None,
-                                None,
-                            );
+                        if should_lock && this.begin_app_lock(cx) {
                             this.suspend_public_mcp_runtime(cx);
-                            this.app_lock.locked = true;
-                            lock_audit.finish(
-                                oxideterm_audit::AuditOutcome::Succeeded,
-                                oxideterm_audit::AuditEvidence::Lifecycle,
-                                None,
-                                None,
-                            );
                             this.focused_settings_input =
                                 Some(SettingsInput::AppLockCurrentPassword);
                             this.refresh_app_lock_biometric_availability(cx);
@@ -444,14 +487,7 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 this.app_lock.pending = false;
                 match result {
-                    Ok(true) => {
-                        this.app_lock.locked = false;
-                        this.app_lock.failed_attempts = 0;
-                        this.app_lock.retry_at = None;
-                        this.clear_app_lock_input_state();
-                        this.needs_active_pane_focus = true;
-                        cx.refresh_windows();
-                    }
+                    Ok(true) => this.finish_app_unlock(cx),
                     Ok(false) => {
                         this.register_app_lock_failure(cx);
                     }
@@ -514,14 +550,7 @@ impl WorkspaceApp {
             let _ = weak.update(cx, |this, cx| {
                 this.app_lock.pending = false;
                 match result {
-                    Ok(BiometricOutcome::Verified) => {
-                        this.app_lock.locked = false;
-                        this.app_lock.failed_attempts = 0;
-                        this.app_lock.retry_at = None;
-                        this.clear_app_lock_input_state();
-                        this.needs_active_pane_focus = true;
-                        cx.refresh_windows();
-                    }
+                    Ok(BiometricOutcome::Verified) => this.finish_app_unlock(cx),
                     Ok(BiometricOutcome::Canceled) => {
                         // Cancellation is not an authentication failure; password remains ready.
                     }
@@ -544,6 +573,17 @@ impl WorkspaceApp {
             });
         })
         .detach();
+    }
+
+    fn finish_app_unlock(&mut self, cx: &mut Context<Self>) {
+        if !self.persist_app_lock(false, cx) {
+            return;
+        }
+        self.app_lock.failed_attempts = 0;
+        self.app_lock.retry_at = None;
+        self.clear_app_lock_input_state();
+        self.needs_active_pane_focus = true;
+        cx.refresh_windows();
     }
 
     fn refresh_app_lock_biometric_availability(&mut self, cx: &mut Context<Self>) {
@@ -820,13 +860,6 @@ impl WorkspaceApp {
             ),
         };
         let pending = self.app_lock.pending;
-        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event, _window, cx| {
-                this.close_app_lock_dialog(cx);
-                cx.stop_propagation();
-            }),
-        );
         let mut fields = div()
             .px(px(24.0))
             .py(px(18.0))
@@ -903,28 +936,22 @@ impl WorkspaceApp {
                         cx,
                     )),
             );
-        Some(
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .bottom_0()
-                .child(backdrop)
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(form),
-                )
-                .into_any_element(),
-        )
+        Some(staged_dialog_overlay(
+            &self.tokens,
+            ("app-lock-dialog", dialog as usize),
+            TauriBackdropRole::Dialog,
+            staged_overlay_root().on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_app_lock_dialog(cx);
+                    cx.stop_propagation();
+                }),
+            ),
+            overlay_content_boundary(form),
+            8.0,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+            true,
+        ))
     }
 
     pub(in crate::workspace) fn render_app_lock_screen(
@@ -940,117 +967,148 @@ impl WorkspaceApp {
         } else {
             "settings_view.general.app_lock_locked_description"
         };
-        let card = oxideterm_gpui_ui::theme_card_surface_shadow(
-            div()
-                .w(px(APP_LOCK_SCREEN_CARD_WIDTH))
-                .max_w(relative(0.9))
-                .rounded(px(self.tokens.radii.lg))
-                .border_1()
-                .border_color(rgb(self.tokens.ui.border))
-                .bg(rgb(self.tokens.ui.bg_panel))
-                .p(px(28.0))
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(16.0))
-                .child(
-                    div()
-                        .size(px(54.0))
-                        .rounded_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .bg(rgba((self.tokens.ui.accent << 8) | 0x1f))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Lock,
-                            25.0,
-                            rgb(self.tokens.ui.accent),
-                        )),
-                )
-                .child(
-                    div()
-                        .text_size(px(22.0))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(rgb(self.tokens.ui.text))
-                        .child(self.i18n.t("settings_view.general.app_lock_locked_title")),
-                )
-                .child(
-                    div()
-                        .debug_selector(move || description_key.into())
-                        .max_w(px(APP_LOCK_SCREEN_DESCRIPTION_WIDTH))
-                        .text_center()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t(description_key)),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .gap(px(8.0))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .child(
-                                    self.i18n
-                                        .t("settings_view.general.app_lock_current_password"),
-                                ),
-                        )
-                        .child(self.portable_password_input(
-                            SettingsInput::AppLockCurrentPassword,
-                            &self.app_lock.current_password,
-                            cx,
-                        )),
-                )
-                .when_some(self.app_lock.error.clone(), |card, error| {
-                    card.child(self.app_lock_error_message(error))
-                })
-                .child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .justify_center()
-                        .gap(px(10.0))
-                        .when(self.app_lock.biometric_available, |actions| {
-                            actions.child(self.standard_footer_action_button(
-                                if self.app_lock.pending {
-                                    self.i18n
-                                        .t("settings_view.general.app_lock_biometric_verifying")
-                                } else {
-                                    self.i18n.t(if cfg!(target_os = "windows") {
-                                        "settings_view.general.app_lock_windows_hello_unlock"
-                                    } else {
-                                        "settings_view.general.app_lock_biometric_unlock"
-                                    })
-                                },
-                                ButtonVariant::Outline,
-                                ConfirmDialogAction::Cancel,
-                                self.app_lock.pending,
-                                |this, _event, window, cx| this.submit_biometric_unlock(window, cx),
+        let action_button_height = 34.0;
+        let biometric_button = self.app_lock.biometric_available.then(|| {
+            self.standard_footer_action_button(
+                if self.app_lock.pending {
+                    self.i18n
+                        .t("settings_view.general.app_lock_biometric_verifying")
+                } else {
+                    self.i18n.t(if cfg!(target_os = "windows") {
+                        "settings_view.general.app_lock_windows_hello_unlock"
+                    } else {
+                        "settings_view.general.app_lock_biometric_unlock"
+                    })
+                },
+                ButtonVariant::Outline,
+                ConfirmDialogAction::Cancel,
+                self.app_lock.pending,
+                |this, _event, window, cx| this.submit_biometric_unlock(window, cx),
+                cx,
+            )
+            .flex_1()
+            .min_w(px(0.0))
+            .h(px(action_button_height))
+        });
+        let unlock_button = self
+            .standard_footer_action_button(
+                if self.app_lock.pending {
+                    self.i18n.t("settings_view.general.app_lock_unlocking")
+                } else if blocked {
+                    self.i18n
+                        .t("settings_view.general.app_lock_wait_before_retry")
+                } else {
+                    self.i18n.t("settings_view.general.app_lock_unlock")
+                },
+                ButtonVariant::Default,
+                ConfirmDialogAction::Confirm,
+                !can_submit,
+                |this, _event, _window, cx| this.submit_app_unlock(cx),
+                cx,
+            )
+            .flex_1()
+            .min_w(px(0.0))
+            .h(px(action_button_height));
+        let lock_column = div()
+            .w(px(APP_LOCK_SCREEN_CARD_WIDTH))
+            .max_w(relative(0.9))
+            .flex()
+            .flex_col()
+            .gap(px(20.0))
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(14.0))
+                    .child(
+                        div()
+                            .size(px(46.0))
+                            .rounded_full()
+                            .border_1()
+                            .border_color(rgba((self.tokens.ui.accent << 8) | 0x33))
+                            .bg(rgba((self.tokens.ui.accent << 8) | 0x16))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Lock,
+                                20.0,
+                                rgb(self.tokens.ui.accent),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .text_size(px(19.0))
+                                    .line_height(px(25.0))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(rgb(self.tokens.ui.text))
+                                    .child(
+                                        self.i18n
+                                            .t("settings_view.general.app_lock_locked_title"),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .debug_selector(move || description_key.into())
+                                    .max_w(px(APP_LOCK_SCREEN_DESCRIPTION_WIDTH))
+                                    .text_center()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .line_height(px(19.0))
+                                    .text_color(rgb(self.tokens.ui.text_muted))
+                                    .child(self.i18n.t(description_key)),
+                            ),
+                    ),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(10.0))
+                    .child(
+                        div()
+                            .w_full()
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.0))
+                            .child(
+                                div()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .text_color(rgb(self.tokens.ui.text_secondary))
+                                    .child(
+                                        self.i18n
+                                            .t("settings_view.general.app_lock_current_password"),
+                                    ),
+                            )
+                            .child(self.portable_password_input(
+                                SettingsInput::AppLockCurrentPassword,
+                                &self.app_lock.current_password,
                                 cx,
-                            ))
-                        })
-                        .child(self.standard_footer_action_button(
-                            if self.app_lock.pending {
-                                self.i18n.t("settings_view.general.app_lock_unlocking")
-                            } else if blocked {
-                                self.i18n
-                                    .t("settings_view.general.app_lock_wait_before_retry")
-                            } else {
-                                self.i18n.t("settings_view.general.app_lock_unlock")
-                            },
-                            ButtonVariant::Default,
-                            ConfirmDialogAction::Confirm,
-                            !can_submit,
-                            |this, _event, _window, cx| this.submit_app_unlock(cx),
-                            cx,
-                        )),
-                ),
-            &self.tokens,
-        );
+                            )),
+                    )
+                    .when_some(self.app_lock.error.clone(), |form, error| {
+                        form.child(self.app_lock_error_message(error))
+                    }),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .when_some(biometric_button, |actions, button| actions.child(button))
+                    .child(unlock_button),
+            );
 
         div()
             .id("app-lock-root")
@@ -1077,7 +1135,7 @@ impl WorkspaceApp {
                 }
             }))
             .when(titlebar_visible, |root| {
-                root.child(self.render_title_bar(window, cx))
+                root.child(self.render_locked_title_bar(window, cx))
             })
             .child(
                 div()
@@ -1086,8 +1144,14 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .p(px(24.0))
-                    .child(card),
+                    .px(px(24.0))
+                    .pt(px(24.0))
+                    .pb(px(56.0))
+                    .child(oxideterm_gpui_ui::motion::form_enter(
+                        &self.tokens,
+                        "app-lock-screen-card",
+                        div().child(lock_column),
+                    )),
             )
             .when(
                 self.tab_host.read(cx).close_confirm() == Some(&TabCloseConfirm::ApplicationQuit),
@@ -1143,6 +1207,57 @@ mod tests {
     use super::*;
 
     #[test]
+    fn app_lock_survives_a_new_workspace_until_unlocked() {
+        let executable = std::env::current_exe().unwrap();
+        let fixture_key = "OXIDETERM_APP_LOCK_TEST_DIR";
+        let Some(root) = std::env::var_os(fixture_key) else {
+            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
+            let child = directory.path().join(executable.file_name().unwrap());
+            std::fs::hard_link(executable, &child).unwrap();
+            std::fs::write(directory.path().join("portable"), []).unwrap();
+            let output = std::process::Command::new(child)
+                .args([
+                    "app_lock_survives_a_new_workspace_until_unlocked",
+                    "--nocapture",
+                ])
+                .env(fixture_key, directory.path())
+                .env_remove("APPIMAGE")
+                .current_dir(directory.path())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        };
+
+        oxideterm_portable_runtime::initialize_portable_runtime().unwrap();
+        let settings = oxideterm_settings::default_settings_path();
+        assert!(settings.starts_with(PathBuf::from(root)));
+        oxideterm_portable_runtime::keystore::create_portable_keystore("test-only-vault-password")
+            .unwrap();
+        let store = AppLockStore::new();
+        store
+            .set_password(Zeroizing::new("test-only-app-password".into()))
+            .unwrap();
+
+        let mut state = AppLockState::load(store.clone(), &settings);
+        assert!(state.configured);
+        assert!(!state.locked, "configuring a password alone does not lock");
+        state.set_locked(true).unwrap();
+        assert_eq!(std::fs::read(&state.marker_path).unwrap(), b"");
+        drop(state);
+
+        let mut reopened = AppLockState::load(store.clone(), &settings);
+        assert!(reopened.locked, "a new workspace must start locked");
+        reopened.set_locked(false).unwrap();
+        assert!(!AppLockState::load(store, &settings).locked);
+    }
+
+    #[test]
     fn repeated_failures_switch_to_extended_cooldown() {
         assert_eq!(app_lock_failure_cooldown(4), APP_LOCK_FAILURE_COOLDOWN);
         assert_eq!(app_lock_failure_cooldown(5), APP_LOCK_EXTENDED_COOLDOWN);
@@ -1153,6 +1268,7 @@ mod tests {
     fn focused_password_handoff_moves_one_allocation_between_owners() {
         let mut state = AppLockState {
             store: AppLockStore::new(),
+            marker_path: PathBuf::new(),
             configured: true,
             locked: false,
             dialog: Some(AppLockDialog::Change),

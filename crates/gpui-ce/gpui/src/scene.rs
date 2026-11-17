@@ -54,6 +54,7 @@ pub struct Scene {
     pub(crate) paint_operations: Vec<PaintOperation>,
     primitive_bounds: BoundsTree<ScaledPixels>,
     layer_stack: Vec<DrawOrder>,
+    scale_stack: Vec<(f32, Point<ScaledPixels>)>,
     pub shadows: Vec<Shadow>,
     pub quads: Vec<Quad>,
     pub paths: Vec<Path<ScaledPixels>>,
@@ -72,6 +73,7 @@ impl Scene {
         self.paint_operations.clear();
         self.primitive_bounds.clear();
         self.layer_stack.clear();
+        self.scale_stack.clear();
         self.paths.clear();
         self.shadows.clear();
         self.quads.clear();
@@ -86,6 +88,14 @@ impl Scene {
 
     pub fn len(&self) -> usize {
         self.paint_operations.len()
+    }
+
+    pub(crate) fn push_scale(&mut self, scale: f32, pivot: Point<ScaledPixels>) {
+        self.scale_stack.push((scale, pivot));
+    }
+
+    pub(crate) fn pop_scale(&mut self) {
+        self.scale_stack.pop();
     }
 
     pub fn push_layer(&mut self, bounds: Bounds<ScaledPixels>) {
@@ -111,9 +121,13 @@ impl Scene {
 
     pub fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
         let mut primitive = primitive.into();
-        let clipped_bounds = primitive
-            .bounds()
-            .intersect(&primitive.content_mask().bounds);
+        let replay_primitive = (!self.scale_stack.is_empty()).then(|| primitive.clone());
+        let order_bounds_raw = if self.scale_stack.is_empty() {
+            *primitive.bounds()
+        } else {
+            apply_scale_to_primitive(&mut primitive, &self.scale_stack)
+        };
+        let clipped_bounds = order_bounds_raw.intersect(&primitive.content_mask().bounds);
 
         // Content-filter boundaries must always be inserted as matched pairs — dropping one
         // (e.g. for an empty clipped region) would orphan its partner and corrupt the renderer's
@@ -133,7 +147,7 @@ impl Scene {
 
         let order = if is_filter_boundary {
             let order_bounds = if clipped_bounds.is_empty() {
-                *primitive.bounds()
+                order_bounds_raw
             } else {
                 clipped_bounds
             };
@@ -195,8 +209,10 @@ impl Scene {
                 self.filter_boundaries.push(boundary.clone());
             }
         }
+        // Keep cached paint operations in unscaled coordinates so parent scale animations
+        // never compound across cached child-view replays.
         self.paint_operations
-            .push(PaintOperation::Primitive(primitive));
+            .push(PaintOperation::Primitive(replay_primitive.unwrap_or(primitive)));
     }
 
     /// Expands a cached glyph batch into sprites while retaining one replay operation.
@@ -209,9 +225,10 @@ impl Scene {
         enhance_glyph_edges: bool,
     ) {
         let layer_order = self.layer_stack.last().copied();
+        let effective_mask = scale_content_mask(content_mask, &self.scale_stack);
         let fully_visible = batch.bounds().is_some_and(|bounds| {
-            let bounds = bounds + origin;
-            bounds.intersect(&content_mask.bounds) == bounds
+            let bounds = scale_bounds_with_stack(bounds + origin, &self.scale_stack);
+            bounds.intersect(&effective_mask.bounds) == bounds
         });
         let glyph_opacity = opacity.clamp(0.0, 1.0);
         for glyph in &batch.monochrome {
@@ -219,18 +236,22 @@ impl Scene {
                 order: 0,
                 enhance_glyph_edges: enhance_glyph_edges.into(),
                 bounds: glyph.bounds + origin,
-                content_mask,
+                content_mask: effective_mask,
                 color: SceneHsla {
                     a: glyph.color.a * glyph_opacity,
                     ..glyph.color
                 },
                 tile: glyph.tile,
-                transformation: TransformationMatrix::unit(),
+                transformation: scale_matrix_with_stack(
+                    TransformationMatrix::unit(),
+                    &self.scale_stack,
+                ),
             };
+            let screen_bounds = scale_bounds_with_stack(sprite.bounds, &self.scale_stack);
             let clipped_bounds = if fully_visible {
-                sprite.bounds
+                screen_bounds
             } else {
-                let clipped = sprite.bounds.intersect(&sprite.content_mask.bounds);
+                let clipped = screen_bounds.intersect(&sprite.content_mask.bounds);
                 if clipped.is_empty() {
                     continue;
                 }
@@ -245,18 +266,22 @@ impl Scene {
                 order: 0,
                 pad: 0,
                 bounds: glyph.bounds + origin,
-                content_mask,
+                content_mask: effective_mask,
                 color: SceneHsla {
                     a: glyph.color.a * glyph_opacity,
                     ..glyph.color
                 },
                 tile: glyph.tile,
-                transformation: TransformationMatrix::unit(),
+                transformation: scale_matrix_with_stack(
+                    TransformationMatrix::unit(),
+                    &self.scale_stack,
+                ),
             };
+            let screen_bounds = scale_bounds_with_stack(sprite.bounds, &self.scale_stack);
             let clipped_bounds = if fully_visible {
-                sprite.bounds
+                screen_bounds
             } else {
-                let clipped = sprite.bounds.intersect(&sprite.content_mask.bounds);
+                let clipped = screen_bounds.intersect(&sprite.content_mask.bounds);
                 if clipped.is_empty() {
                     continue;
                 }
@@ -272,8 +297,8 @@ impl Scene {
                 corner_shape: 0,
                 grayscale: false.into(),
                 opacity,
-                bounds: glyph.bounds + origin,
-                content_mask,
+                bounds: scale_bounds_with_stack(glyph.bounds + origin, &self.scale_stack),
+                content_mask: effective_mask,
                 corner_radii: Default::default(),
                 tile: glyph.tile,
             };
@@ -449,6 +474,175 @@ pub(crate) enum PaintOperation {
     },
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
+}
+
+#[inline]
+fn scale_point_around(
+    point: Point<ScaledPixels>,
+    pivot: Point<ScaledPixels>,
+    scale: f32,
+) -> Point<ScaledPixels> {
+    Point {
+        x: ScaledPixels(pivot.x.0 + (point.x.0 - pivot.x.0) * scale),
+        y: ScaledPixels(pivot.y.0 + (point.y.0 - pivot.y.0) * scale),
+    }
+}
+
+#[inline]
+fn scale_bounds_around(
+    bounds: Bounds<ScaledPixels>,
+    pivot: Point<ScaledPixels>,
+    scale: f32,
+) -> Bounds<ScaledPixels> {
+    Bounds {
+        origin: scale_point_around(bounds.origin, pivot, scale),
+        size: Size {
+            width: ScaledPixels(bounds.size.width.0 * scale),
+            height: ScaledPixels(bounds.size.height.0 * scale),
+        },
+    }
+}
+
+#[inline]
+fn scale_bounds_with_stack(
+    mut bounds: Bounds<ScaledPixels>,
+    scale_stack: &[(f32, Point<ScaledPixels>)],
+) -> Bounds<ScaledPixels> {
+    for &(scale, pivot) in scale_stack.iter().rev() {
+        bounds = scale_bounds_around(bounds, pivot, scale);
+    }
+    bounds
+}
+
+#[inline]
+fn scale_content_mask(
+    mut mask: ContentMask<ScaledPixels>,
+    scale_stack: &[(f32, Point<ScaledPixels>)],
+) -> ContentMask<ScaledPixels> {
+    mask.bounds = scale_bounds_with_stack(mask.bounds, scale_stack);
+    mask
+}
+
+#[inline]
+fn scale_corners(corners: Corners<ScaledPixels>, scale: f32) -> Corners<ScaledPixels> {
+    Corners {
+        top_left: ScaledPixels(corners.top_left.0 * scale),
+        top_right: ScaledPixels(corners.top_right.0 * scale),
+        bottom_right: ScaledPixels(corners.bottom_right.0 * scale),
+        bottom_left: ScaledPixels(corners.bottom_left.0 * scale),
+    }
+}
+
+#[inline]
+fn scale_edges(edges: Edges<ScaledPixels>, scale: f32) -> Edges<ScaledPixels> {
+    Edges {
+        top: ScaledPixels(edges.top.0 * scale),
+        right: ScaledPixels(edges.right.0 * scale),
+        bottom: ScaledPixels(edges.bottom.0 * scale),
+        left: ScaledPixels(edges.left.0 * scale),
+    }
+}
+
+#[inline]
+fn scale_matrix_with_stack(
+    mut matrix: TransformationMatrix,
+    scale_stack: &[(f32, Point<ScaledPixels>)],
+) -> TransformationMatrix {
+    for &(scale, pivot) in scale_stack.iter().rev() {
+        let scale_about_pivot = TransformationMatrix {
+            rotation_scale: [[scale, 0.0], [0.0, scale]],
+            translation: [pivot.x.0 * (1.0 - scale), pivot.y.0 * (1.0 - scale)],
+        };
+        matrix = scale_about_pivot.compose(matrix);
+    }
+    matrix
+}
+
+fn apply_scale_to_primitive(
+    primitive: &mut Primitive,
+    scale_stack: &[(f32, Point<ScaledPixels>)],
+) -> Bounds<ScaledPixels> {
+    for &(scale, pivot) in scale_stack.iter().rev() {
+        match primitive {
+            Primitive::Shadow(shadow) => {
+                shadow.bounds = scale_bounds_around(shadow.bounds, pivot, scale);
+                shadow.element_bounds = scale_bounds_around(shadow.element_bounds, pivot, scale);
+                shadow.content_mask.bounds =
+                    scale_bounds_around(shadow.content_mask.bounds, pivot, scale);
+                shadow.corner_radii = scale_corners(shadow.corner_radii, scale);
+                shadow.element_corner_radii = scale_corners(shadow.element_corner_radii, scale);
+                shadow.blur_radius = ScaledPixels(shadow.blur_radius.0 * scale);
+            }
+            Primitive::Quad(quad) => {
+                quad.bounds = scale_bounds_around(quad.bounds, pivot, scale);
+                quad.content_mask.bounds =
+                    scale_bounds_around(quad.content_mask.bounds, pivot, scale);
+                quad.corner_radii = scale_corners(quad.corner_radii, scale);
+                quad.border_widths = scale_edges(quad.border_widths, scale);
+            }
+            Primitive::Path(path) => {
+                path.bounds = scale_bounds_around(path.bounds, pivot, scale);
+                path.content_mask.bounds =
+                    scale_bounds_around(path.content_mask.bounds, pivot, scale);
+                for vertex in &mut path.vertices {
+                    vertex.xy_position = scale_point_around(vertex.xy_position, pivot, scale);
+                }
+            }
+            Primitive::Underline(underline) => {
+                underline.bounds = scale_bounds_around(underline.bounds, pivot, scale);
+                underline.content_mask.bounds =
+                    scale_bounds_around(underline.content_mask.bounds, pivot, scale);
+                underline.thickness = ScaledPixels(underline.thickness.0 * scale);
+            }
+            Primitive::MonochromeSprite(sprite) => {
+                sprite.content_mask.bounds =
+                    scale_bounds_around(sprite.content_mask.bounds, pivot, scale);
+                let scale_about_pivot = TransformationMatrix {
+                    rotation_scale: [[scale, 0.0], [0.0, scale]],
+                    translation: [pivot.x.0 * (1.0 - scale), pivot.y.0 * (1.0 - scale)],
+                };
+                sprite.transformation = scale_about_pivot.compose(sprite.transformation);
+            }
+            Primitive::SubpixelSprite(sprite) => {
+                sprite.content_mask.bounds =
+                    scale_bounds_around(sprite.content_mask.bounds, pivot, scale);
+                let scale_about_pivot = TransformationMatrix {
+                    rotation_scale: [[scale, 0.0], [0.0, scale]],
+                    translation: [pivot.x.0 * (1.0 - scale), pivot.y.0 * (1.0 - scale)],
+                };
+                sprite.transformation = scale_about_pivot.compose(sprite.transformation);
+            }
+            Primitive::PolychromeSprite(sprite) => {
+                sprite.bounds = scale_bounds_around(sprite.bounds, pivot, scale);
+                sprite.content_mask.bounds =
+                    scale_bounds_around(sprite.content_mask.bounds, pivot, scale);
+                sprite.corner_radii = scale_corners(sprite.corner_radii, scale);
+            }
+            Primitive::Surface(surface) => {
+                surface.bounds = scale_bounds_around(surface.bounds, pivot, scale);
+                surface.content_mask.bounds =
+                    scale_bounds_around(surface.content_mask.bounds, pivot, scale);
+            }
+            Primitive::BackdropFilter(filter) => {
+                filter.bounds = scale_bounds_around(filter.bounds, pivot, scale);
+                filter.content_mask.bounds =
+                    scale_bounds_around(filter.content_mask.bounds, pivot, scale);
+                filter.corner_radii = scale_corners(filter.corner_radii, scale);
+            }
+            Primitive::FilterBoundary(boundary) => {
+                boundary.bounds = scale_bounds_around(boundary.bounds, pivot, scale);
+                boundary.content_mask.bounds =
+                    scale_bounds_around(boundary.content_mask.bounds, pivot, scale);
+                boundary.corner_radii = scale_corners(boundary.corner_radii, scale);
+            }
+        }
+    }
+    match primitive {
+        Primitive::MonochromeSprite(_) | Primitive::SubpixelSprite(_) => {
+            scale_bounds_with_stack(*primitive.bounds(), scale_stack)
+        }
+        _ => *primitive.bounds(),
+    }
 }
 
 #[derive(Clone)]

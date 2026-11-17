@@ -54,7 +54,7 @@ use oxideterm_gpui_ui::{
         ToolbarButtonOptions,
     },
     checkbox, checkbox_with, form_field,
-    modal::{dialog_backdrop_color, dismissible_dialog_backdrop, modal_backdrop, popover_backdrop},
+    modal::{dismissible_dialog_backdrop, popover_backdrop},
     modal_body, modal_container, modal_footer, modal_header, segmented_tab, segmented_tabs,
     select::{
         SelectAnchorId, select_anchor_probe, select_option, select_option_action,

@@ -322,7 +322,13 @@ impl IdeSurface {
                         .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(popup),
+                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                            &self.tokens,
+                            "ide-context-menu-motion",
+                            div().child(popup),
+                            -4.0,
+                            gpui::point(0.0, 0.0),
+                        )),
                 )
                 .with_priority(IDE_TAB_CONTEXT_MENU_Z),
             )
@@ -589,7 +595,13 @@ impl IdeSurface {
                         .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(popup),
+                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                            &self.tokens,
+                            "ide-context-menu-motion",
+                            div().child(popup),
+                            -4.0,
+                            gpui::point(0.0, 0.0),
+                        )),
                 )
                 .with_priority(IDE_TREE_CONTEXT_MENU_Z),
             )

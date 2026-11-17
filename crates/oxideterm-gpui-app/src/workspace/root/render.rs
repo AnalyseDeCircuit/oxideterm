@@ -372,12 +372,8 @@ impl WorkspaceApp {
         let zen_mode = self.settings_store.settings().sidebar_ui.zen_mode;
         let titlebar_visible = self.window_titlebar_visible(window);
         let effective_titlebar_height = self.window_titlebar_height(window);
-        let resize_hotzone_visible =
-            !zen_mode && (!self.sidebar_collapsed || self.context_sidebar_visible());
-        let sidebar_resize_cursor_active = (resize_hotzone_visible
-            && self.sidebar_resize_hotzone_hovered)
-            || self.sidebar_resizing
-            || self.ai_entity.read(cx).chat_ui().sidebar_resizing;
+        let sidebar_resize_cursor_active =
+            self.sidebar_resizing || self.ai_entity.read(cx).chat_ui().sidebar_resizing;
         let embedded_sftp_resize_cursor_active = self.embedded_sftp_sidebar_resizing;
         let read_only_selection_workspace = cx.entity();
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode, cx);
@@ -855,9 +851,15 @@ impl WorkspaceApp {
                     cx.notify();
                 }
             }))
-            .on_mouse_up_all(move |event, phase, _hitbox, _window, cx| {
+            .on_mouse_up_all(move |event, phase, hitbox, window, cx| {
                 if phase == gpui::DispatchPhase::Capture && event.button == MouseButton::Left {
                     read_only_selection_workspace.update(cx, |this, cx| {
+                        // The hit-tested capture listener below cannot receive a
+                        // sidebar release outside the workspace root.
+                        if !hitbox.is_hovered(window) {
+                            this.finish_sidebar_resize(cx);
+                            this.finish_ai_sidebar_resize(cx);
+                        }
                         if this.read_only_selection_drag_active() {
                             // This listener deliberately ignores hit testing: a
                             // release outside the window or behind an occluding
@@ -1792,65 +1794,69 @@ impl WorkspaceApp {
             .map(|line| line.trim().to_string())
             .unwrap_or_else(|| "Mermaid".to_string());
 
-        deferred(
-            oxideterm_gpui_ui::modal::dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.mermaid_zoom = None;
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
+        let modal_card = oxideterm_gpui_ui::modal_container(&self.tokens)
+            .w(px(max_width.min(state.width + 48.0).max(360.0)))
+            .max_h(px(max_height))
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(oxideterm_gpui_ui::modal_header(
+                &self.tokens,
+                title,
+                subtitle,
+            ))
+            .when_some(state.render_error.as_ref(), |modal, error| {
+                modal.child(
+                    div()
+                        .px_3()
+                        .text_size(px(self.tokens.metrics.ui_text_sm))
+                        .text_color(rgb(self.tokens.ui.error))
+                        .child(format!(
+                            "{}: {error}",
+                            self.i18n.t("markdown.mermaid_unsupported")
+                        )),
                 )
-                .child(
-                    oxideterm_gpui_ui::modal_container(&self.tokens)
-                        .w(px(max_width.min(state.width + 48.0).max(360.0)))
-                        .max_h(px(max_height))
-                        .flex()
-                        .flex_col()
-                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .child(oxideterm_gpui_ui::modal_header(
-                            &self.tokens,
-                            title,
-                            subtitle,
-                        ))
-                        .when_some(state.render_error.as_ref(), |modal, error| {
-                            modal.child(
-                                div()
-                                    .px_3()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(self.tokens.ui.error))
-                                    .child(format!(
-                                        "{}: {error}",
-                                        self.i18n.t("markdown.mermaid_unsupported")
-                                    )),
-                            )
-                        })
-                        .child(
-                            oxideterm_gpui_ui::modal_body(&self.tokens)
-                                .id("mermaid-zoom-modal-body-scroll")
-                                .flex_1()
-                                .min_h(px(0.0))
-                                .selectable_overflow_y_scroll(&self.selectable_text_scroll_handle(
-                                    "mermaid-zoom-modal-body-scroll",
-                                ))
+            })
+            .child(
+                oxideterm_gpui_ui::modal_body(&self.tokens)
+                    .id("mermaid-zoom-modal-body-scroll")
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .selectable_overflow_y_scroll(
+                        &self.selectable_text_scroll_handle("mermaid-zoom-modal-body-scroll"),
+                    )
+                    .child(
+                        div().w_full().overflow_x_scrollbar().child(
+                            div()
+                                .w(px(state.width.max(1.0)))
+                                .h(px(state.height.max(1.0)))
                                 .child(
-                                    div().w_full().overflow_x_scrollbar().child(
-                                        div()
-                                            .w(px(state.width.max(1.0)))
-                                            .h(px(state.height.max(1.0)))
-                                            .child(
-                                                gpui::img(state.image.clone())
-                                                    .w(px(state.width.max(1.0)))
-                                                    .h(px(state.height.max(1.0))),
-                                            ),
-                                    ),
+                                    gpui::img(state.image.clone())
+                                        .w(px(state.width.max(1.0)))
+                                        .h(px(state.height.max(1.0))),
                                 ),
                         ),
-                ),
-        )
+                    ),
+            );
+        deferred(oxideterm_gpui_ui::modal::staged_dialog_overlay(
+            &self.tokens,
+            "mermaid-zoom-dialog",
+            oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
+            oxideterm_gpui_ui::modal::staged_overlay_root().on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.mermaid_zoom = None;
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ),
+            modal_card,
+            8.0,
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+            true,
+        ))
         .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
         .into_any_element()
     }

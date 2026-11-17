@@ -246,11 +246,13 @@ pub fn confirm_dialog_with_focus_motion(
             TauriBackdropRole::Dialog,
             visible,
         ))
-        .child(crate::motion::slide_fade_y(
+        .child(crate::motion::zoom_fade_y(
             tokens,
             (id, "card"),
             div().child(card),
-            10.0,
+            8.0,
+            0.95,
+            point(0.5, 0.5),
             crate::motion::MotionDuration::Control,
             visible,
         ))

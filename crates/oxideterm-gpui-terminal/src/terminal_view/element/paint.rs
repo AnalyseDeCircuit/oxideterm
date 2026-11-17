@@ -260,6 +260,154 @@ pub(crate) fn paint_command_mark_overlay(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CommandGutterHead {
+    Square,
+    Dot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CommandGutterGeometry {
+    stroke: Pixels,
+    spine_x: f32,
+    elbow_right_x: f32,
+    head: Option<(CommandGutterHead, f32)>,
+    square_half: f32,
+    fold_rotation: f32,
+    node_radius: f32,
+    rail_top: f32,
+    rail_bottom: f32,
+    finished: bool,
+    bend_radius: f32,
+}
+
+fn snap_stroke_center(coord: f32, stroke_px: f32, scale: f32) -> f32 {
+    let scale = scale.max(1.0);
+    let device_stroke = (stroke_px * scale).round().max(1.0) as i32;
+    // Odd device-pixel strokes align to pixel centers (`n + 0.5`); even strokes align to edges (`n`).
+    if device_stroke % 2 == 1 {
+        ((coord * scale - 0.5).round() + 0.5) / scale
+    } else {
+        (coord * scale).round() / scale
+    }
+}
+
+fn command_gutter_colors(overlay: &TerminalCommandMarkOverlay, theme: &TerminalUiTheme) -> (Rgba, Rgba) {
+    let failed = overlay.exit_code.is_some_and(|code| code != 0) && !overlay.stale;
+    let emphasized = overlay.hovered || overlay.selected || overlay.collapsed;
+    let base = if overlay.stale {
+        theme.foreground
+    } else if failed {
+        theme.tokens.ui.error
+    } else if emphasized || overlay.running {
+        theme.tokens.ui.accent
+    } else {
+        theme.foreground
+    };
+
+    let rail_alpha = if overlay.stale {
+        0x30
+    } else if emphasized {
+        0xe0
+    } else if failed {
+        0x8c
+    } else if overlay.running {
+        0x99
+    } else {
+        0x48
+    };
+    let head_alpha = if overlay.stale {
+        0x42
+    } else if emphasized {
+        0xf2
+    } else if failed {
+        0xb8
+    } else if overlay.foldable || overlay.running {
+        0xa8
+    } else {
+        0x6c
+    };
+
+    (rgba((base << 8) | rail_alpha), rgba((base << 8) | head_alpha))
+}
+
+fn command_gutter_geometry(
+    overlay: &TerminalCommandMarkOverlay,
+    origin: Point<Pixels>,
+    line_height: f32,
+    width: f32,
+    scale: f32,
+) -> CommandGutterGeometry {
+    let origin_x = f32::from(origin.x);
+    let origin_y = f32::from(origin.y);
+    let stroke = device_aligned_stroke(1.2, scale);
+    let stroke_f = f32::from(stroke);
+    // Offset slightly left of gutter center so chevrons and end bends leave breathing room before cell 0 prompts.
+    let spine_x = snap_stroke_center(origin_x - width * 0.56, stroke_f, scale);
+    let elbow_right_x = origin_x + (-width * 0.14).min(-1.2).max(-width * 0.35);
+
+    let square_half = (width * 0.24).clamp(1.8, 2.5).min(line_height * 0.20);
+    let fold_rotation = overlay.fold_rotation.clamp(0.0, 1.0);
+    let node_radius = (width * 0.16).clamp(1.3, 2.0);
+
+    let head = overlay.has_top.then(|| {
+        let center_y = origin_y + (overlay.start_row as f32 + 0.5) * line_height;
+        let kind = if overlay.foldable || overlay.collapsed {
+            CommandGutterHead::Square
+        } else {
+            CommandGutterHead::Dot
+        };
+        (kind, center_y)
+    });
+
+    let rail_top = match head {
+        Some((CommandGutterHead::Square, cy)) => {
+            let theta = fold_rotation * std::f32::consts::FRAC_PI_4;
+            let (sin_t, cos_t) = theta.sin_cos();
+            let vertical_extent = square_half * (cos_t.abs() + sin_t.abs());
+            cy + vertical_extent + 2.5
+        }
+        Some((CommandGutterHead::Dot, cy)) => cy + node_radius + 2.5,
+        None => origin_y + overlay.start_row as f32 * line_height,
+    };
+
+    let finished = overlay.has_bottom && !overlay.running;
+    let rail_bottom = if finished {
+        snap_stroke_center(
+            origin_y + (overlay.end_row as f32 + 0.5) * line_height,
+            stroke_f,
+            scale,
+        )
+    } else {
+        origin_y + (overlay.end_row + 1) as f32 * line_height
+    };
+
+    let bend_span = (elbow_right_x - spine_x).max(0.0);
+    let vertical_span = (rail_bottom - rail_top).max(0.0);
+    let bend_radius = if finished && vertical_span > 1.0 {
+        (bend_span * 0.72)
+            .min(vertical_span * 0.45)
+            .min(4.0)
+            .max(0.0)
+    } else {
+        0.0
+    };
+
+    CommandGutterGeometry {
+        stroke,
+        spine_x,
+        elbow_right_x,
+        head,
+        square_half,
+        fold_rotation,
+        node_radius,
+        rail_top,
+        rail_bottom,
+        finished,
+        bend_radius,
+    }
+}
+
 pub(super) fn paint_command_gutter(
     overlay: &TerminalCommandMarkOverlay,
     origin: Point<Pixels>,
@@ -268,81 +416,90 @@ pub(super) fn paint_command_gutter(
     theme: &TerminalUiTheme,
     window: &mut Window,
 ) {
-    let line_height = metrics.line_height_f32();
-    let box_size = (width - 2.0).max(2.0).min(line_height * 0.55);
-    // Thicken inside the existing cell while keeping the start box hollow at small sizes.
-    let stroke = (box_size / 4.0).clamp(1.0, 2.0);
-    let center_x = -width / 2.0;
-    let center_y = (overlay.start_row as f32 + 0.5) * line_height;
-    let left = center_x - box_size / 2.0;
-    let top = center_y - box_size / 2.0;
-    let right = left + box_size;
-    let bottom = top + box_size;
-    let scale = window.scale_factor();
-    let color = if overlay.exit_code.is_some_and(|code| code != 0) && !overlay.stale {
-        rgba((theme.tokens.ui.error << 8) | 0xcc)
-    } else if overlay.hovered || overlay.selected {
-        rgba((theme.tokens.ui.accent << 8) | 0xe6)
-    } else {
-        rgba((theme.foreground << 8) | 0xb0)
-    };
-    // Snap every edge in window coordinates so the outline stays crisp
-    // at fractional font sizes and display scale factors.
-    let mut rect = |x: f32, y: f32, w: f32, h: f32| {
-        if w <= 0.0 || h <= 0.0 {
-            return;
-        }
-        let x0 = ((f32::from(origin.x) + x) * scale).round() / scale;
-        let y0 = ((f32::from(origin.y) + y) * scale).round() / scale;
-        let x1 = ((f32::from(origin.x) + x + w) * scale).round() / scale;
-        let y1 = ((f32::from(origin.y) + y + h) * scale).round() / scale;
-        window.paint_quad(fill(
-            Bounds::new(point(px(x0), px(y0)), size(px(x1 - x0), px(y1 - y0))),
-            color,
-        ));
-    };
+    let scale = window.scale_factor().max(1.0);
+    let geom = command_gutter_geometry(overlay, origin, metrics.line_height_f32(), width, scale);
+    let (rail_color, head_color) = command_gutter_colors(overlay, theme);
 
-    // Avoid overlapping translucent strokes, which would darken corners and joins.
-    if overlay.has_top {
-        if overlay.collapsed {
-            rect(left, top, box_size, box_size);
-        } else {
-            rect(left, top, box_size, stroke);
-            rect(left, bottom - stroke, box_size, stroke);
-            rect(left, top + stroke, stroke, box_size - 2.0 * stroke);
-            rect(
-                right - stroke,
-                top + stroke,
-                stroke,
-                box_size - 2.0 * stroke,
-            );
+    if let Some((head, cy)) = geom.head {
+        match head {
+            CommandGutterHead::Square => {
+                let half = geom.square_half;
+                let theta = geom.fold_rotation * std::f32::consts::FRAC_PI_4;
+                if theta <= 0.001 {
+                    let size_px = half * 2.0;
+                    let radius = (half * 0.35).min(0.8);
+                    window.paint_quad(
+                        fill(
+                            Bounds::new(
+                                point(px(geom.spine_x - half), px(cy - half)),
+                                size(px(size_px), px(size_px)),
+                            ),
+                            head_color,
+                        )
+                        .corner_radii(Corners::all(px(radius))),
+                    );
+                } else {
+                    let (sin_t, cos_t) = theta.sin_cos();
+                    let rotate = |dx: f32, dy: f32| {
+                        point(
+                            px(geom.spine_x + dx * cos_t - dy * sin_t),
+                            px(cy + dx * sin_t + dy * cos_t),
+                        )
+                    };
+                    let corners = [
+                        rotate(-half, -half),
+                        rotate(half, -half),
+                        rotate(half, half),
+                        rotate(-half, half),
+                    ];
+                    let mut builder = PathBuilder::fill();
+                    builder.add_polygon(&corners, true);
+                    if let Ok(path) = builder.build() {
+                        window.paint_path(path, head_color);
+                    }
+                }
+            }
+            CommandGutterHead::Dot => {
+                let r = geom.node_radius;
+                window.paint_quad(
+                    fill(
+                        Bounds::new(
+                            point(px(geom.spine_x - r), px(cy - r)),
+                            size(px(r * 2.0), px(r * 2.0)),
+                        ),
+                        head_color,
+                    )
+                    .corner_radii(Corners::all(px(r))),
+                );
+            }
         }
     }
 
-    let line_top = if overlay.has_top {
-        bottom
-    } else {
-        overlay.start_row as f32 * line_height
-    };
-    let finished = overlay.has_bottom && !overlay.running;
-    let line_bottom = if finished {
-        ((overlay.end_row as f32 + 0.5) * line_height).max(line_top + 2.0 * stroke)
-    } else {
-        (overlay.end_row + 1) as f32 * line_height
-    };
-    rect(
-        center_x - stroke / 2.0,
-        line_top,
-        stroke,
-        line_bottom - line_top - if finished { stroke } else { 0.0 },
-    );
-    if finished {
-        rect(
-            center_x - stroke / 2.0,
-            line_bottom - stroke,
-            right - center_x + stroke / 2.0,
-            stroke,
-        );
+    if geom.rail_bottom > geom.rail_top + 1.0 {
+        let mut rail = PathBuilder::stroke(geom.stroke);
+        rail.move_to(point(px(geom.spine_x), px(geom.rail_top)));
+        if geom.finished {
+            if geom.bend_radius >= 1.1 {
+                rail.line_to(point(
+                    px(geom.spine_x),
+                    px(geom.rail_bottom - geom.bend_radius),
+                ));
+                rail.curve_to(
+                    point(px(geom.spine_x + geom.bend_radius), px(geom.rail_bottom)),
+                    point(px(geom.spine_x), px(geom.rail_bottom)),
+                );
+            } else {
+                rail.line_to(point(px(geom.spine_x), px(geom.rail_bottom)));
+            }
+            if geom.elbow_right_x > geom.spine_x + 0.5 {
+                rail.line_to(point(px(geom.elbow_right_x), px(geom.rail_bottom)));
+            }
+        } else {
+            rail.line_to(point(px(geom.spine_x), px(geom.rail_bottom)));
+        }
+        if let Ok(path) = rail.build() {
+            window.paint_path(path, rail_color);
+        }
     }
 }
 
@@ -1336,6 +1493,77 @@ mod powerline_background_tests {
         metrics.primary_ascent = px(0.0);
         metrics.primary_descent = px(0.0);
         assert_eq!(underline_top_offset(&metrics, thickness), max_top);
+    }
+
+    #[test]
+    fn command_gutter_geometry_keeps_end_elbow_and_clearance_before_cell_zero() {
+        let base_overlay = TerminalCommandMarkOverlay {
+            start_row: 1,
+            end_row: 4,
+            has_top: true,
+            has_bottom: true,
+            stale: false,
+            selected: false,
+            hovered: false,
+            running: false,
+            exit_code: Some(0),
+            collapsed: false,
+            foldable: true,
+            fold_rotation: 0.0,
+        };
+        let origin = point(px(24.0), px(10.0));
+        let expanded = command_gutter_geometry(&base_overlay, origin, 20.0, 9.0, 2.0);
+        assert_eq!(
+            expanded.head.map(|(kind, _)| kind),
+            Some(CommandGutterHead::Square)
+        );
+        assert_eq!(expanded.fold_rotation, 0.0);
+        assert!(expanded.finished);
+        assert!(expanded.elbow_right_x > expanded.spine_x);
+        assert!(expanded.elbow_right_x <= f32::from(origin.x) - 1.2);
+        assert!(expanded.bend_radius >= 1.1);
+        assert!(expanded.rail_bottom > expanded.rail_top);
+
+        let collapsed = command_gutter_geometry(
+            &TerminalCommandMarkOverlay {
+                collapsed: true,
+                fold_rotation: 1.0,
+                end_row: 2,
+                ..base_overlay.clone()
+            },
+            origin,
+            20.0,
+            9.0,
+            2.0,
+        );
+        assert_eq!(
+            collapsed.head.map(|(kind, _)| kind),
+            Some(CommandGutterHead::Square)
+        );
+        assert_eq!(collapsed.fold_rotation, 1.0);
+        // Rotated 45-degree diamond projects sqrt(2) * half vertically, pushing rail_top slightly lower.
+        assert!(collapsed.rail_top > expanded.rail_top);
+        assert!(collapsed.finished);
+        assert!(collapsed.rail_bottom > collapsed.rail_top);
+
+        let running = command_gutter_geometry(
+            &TerminalCommandMarkOverlay {
+                running: true,
+                has_bottom: false,
+                foldable: false,
+                ..base_overlay
+            },
+            origin,
+            20.0,
+            9.0,
+            2.0,
+        );
+        assert_eq!(
+            running.head.map(|(kind, _)| kind),
+            Some(CommandGutterHead::Dot)
+        );
+        assert!(!running.finished);
+        assert_eq!(running.bend_radius, 0.0);
     }
 }
 

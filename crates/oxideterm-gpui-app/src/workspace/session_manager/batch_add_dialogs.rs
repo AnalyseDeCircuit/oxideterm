@@ -1150,7 +1150,15 @@ impl WorkspaceApp {
         } else {
             (Corner::TopLeft, anchor.bounds.bottom_left(), popup_gap)
         };
-        let popup = popup.into_any_element();
+        let popup_offset_y = if opens_above { 4.0 } else { -4.0 };
+        let popup_origin = gpui::point(0.5, if opens_above { 1.0 } else { 0.0 });
+        let popup = oxideterm_gpui_ui::motion::popover_zoom_enter(
+            &self.tokens,
+            "batch-add-template-menu",
+            div().child(popup),
+            popup_offset_y,
+            popup_origin,
+        );
         Some(
             popover_backdrop()
                 .on_mouse_down(
@@ -1763,7 +1771,15 @@ impl WorkspaceApp {
         } else {
             (Corner::TopLeft, anchor.bounds.bottom_left(), popup_gap)
         };
-        let popup = popup.into_any_element();
+        let popup_offset_y = if opens_above { 4.0 } else { -4.0 };
+        let popup_origin = gpui::point(0.5, if opens_above { 1.0 } else { 0.0 });
+        let popup = oxideterm_gpui_ui::motion::popover_zoom_enter(
+            &self.tokens,
+            "batch-add-key-menu",
+            div().child(popup),
+            popup_offset_y,
+            popup_origin,
+        );
         Some(
             popover_backdrop()
                 .on_mouse_down(

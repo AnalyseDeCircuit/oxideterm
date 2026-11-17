@@ -374,7 +374,13 @@ impl WorkspaceApp {
                         ))
                         .position_mode(AnchoredPositionMode::Window)
                         .snap_to_window_with_margin(px(8.0))
-                        .child(popup),
+                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                            &self.tokens,
+                            "context-tools-menu-motion",
+                            div().child(popup),
+                            -6.0,
+                            point(0.5, 0.0),
+                        )),
                 ))
                 .into_any_element(),
         )

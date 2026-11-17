@@ -247,6 +247,55 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    pub(in crate::workspace) fn render_locked_title_bar(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let text_color = readable_color(theme.bg, theme.text_muted, theme.text);
+        let button_layout = client_titlebar_button_layout(cx);
+        let supported_controls = window.window_controls();
+        let show_client_controls = cfg!(any(target_os = "windows", target_os = "linux"))
+            && self.window_titlebar_controls_visible(window);
+        let show_native_controls = cfg!(target_os = "macos") && !window.is_fullscreen();
+
+        // Locked state hides all workspace chrome (tabs, command palette, zen, theme toggle)
+        // while keeping native/client window controls and the drag strip functional.
+        div()
+            .w_full()
+            .h(px(self.tokens.metrics.titlebar_height))
+            .flex()
+            .flex_row()
+            .items_center()
+            .bg(rgb(theme.bg))
+            .when(show_native_controls, |bar| {
+                bar.child(div().w(px(72.0)).h_full().flex_none())
+            })
+            .when(show_client_controls && cfg!(target_os = "linux"), |bar| {
+                bar.child(self.render_client_titlebar_controls(
+                    button_layout.left,
+                    supported_controls,
+                    theme.bg,
+                    text_color,
+                    window.is_maximized(),
+                    cx,
+                ))
+            })
+            .child(self.render_window_drag_region("app-lock-titlebar-drag", cx))
+            .when(show_client_controls, |bar| {
+                bar.child(self.render_client_titlebar_controls(
+                    button_layout.right,
+                    supported_controls,
+                    theme.bg,
+                    text_color,
+                    window.is_maximized(),
+                    cx,
+                ))
+            })
+            .into_any_element()
+    }
+
     pub(in crate::workspace) fn render_title_bar(
         &self,
         window: &mut Window,

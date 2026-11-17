@@ -7,8 +7,8 @@ use oxideterm_gpui_ui::{
     checkbox::checkbox,
     form_field,
     modal::{
-        dialog_backdrop_color, modal_backdrop, modal_body, modal_container, modal_footer,
-        modal_header,
+        TauriBackdropRole, modal_body, modal_container, modal_footer, modal_header,
+        staged_overlay_root, staged_overlay_scrim,
     },
     section_header, segmented_tab, segmented_tabs,
 };
@@ -304,7 +304,7 @@ impl WorkspaceApp {
                     ),
             );
         Some(
-            modal_backdrop(dialog_backdrop_color())
+            staged_overlay_root()
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| {
@@ -312,7 +312,17 @@ impl WorkspaceApp {
                         cx.stop_propagation();
                     }),
                 )
-                .child(dialog)
+                .child(staged_overlay_scrim(
+                    &self.tokens,
+                    "ssh-tunnel-form-scrim",
+                    TauriBackdropRole::Dialog,
+                    true,
+                ))
+                .child(oxideterm_gpui_ui::motion::form_enter(
+                    &self.tokens,
+                    "ssh-tunnel-form-enter",
+                    dialog,
+                ))
                 .into_any_element(),
         )
     }

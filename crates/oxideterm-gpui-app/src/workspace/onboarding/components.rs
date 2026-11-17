@@ -85,11 +85,21 @@ impl WorkspaceApp {
             .py(px(2.0))
             .child(
                 div()
-                    .pt(px(2.0))
+                    .size(px(26.0))
+                    .mt(px(1.0))
                     .flex_none()
+                    .rounded(px(self.tokens.radii.md))
+                    .border_1()
+                    .border_color(rgba(
+                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    ))
+                    .bg(rgb(self.tokens.ui.bg_sunken))
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .child(Self::render_lucide_icon(
                         icon,
-                        15.0,
+                        13.5,
                         rgb(self.tokens.ui.text_muted),
                     )),
             )
@@ -99,7 +109,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .flex()
                     .flex_col()
-                    .gap(px(1.0))
+                    .gap(px(1.5))
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
@@ -110,6 +120,7 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(self.tokens.metrics.ui_text_xs * 1.4))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
                     ),
@@ -129,11 +140,11 @@ impl WorkspaceApp {
                     .rounded(px(self.tokens.radii.xs))
                     .border_1()
                     .border_color(rgba(
-                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                        (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
                     ))
                     .bg(rgb(self.tokens.ui.bg_sunken))
-                    .px(px(5.0))
-                    .py(px(1.0))
+                    .px(px(6.0))
+                    .py(px(1.5))
                     .font_family(SharedString::from(
                         FontFamily::Jetbrains.terminal_family_name(""),
                     ))
@@ -159,20 +170,35 @@ impl WorkspaceApp {
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .line_height(px(self.tokens.metrics.ui_text_xs * 1.35))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
             )
             .into_any_element();
+        let leading_icon = div()
+            .size(px(26.0))
+            .flex_none()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgba(
+                (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+            ))
+            .bg(rgb(self.tokens.ui.bg_sunken))
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(Self::render_lucide_icon(
+                icon,
+                13.5,
+                rgb(self.tokens.ui.text_muted),
+            ))
+            .into_any_element();
         div()
-            .py(px(8.0))
+            .py(px(5.0))
             .child(action_slot_row(
                 &self.tokens,
                 ActionSlotRowOptions::new().align_start().gap(10.0),
-                Some(Self::render_lucide_icon(
-                    icon,
-                    15.0,
-                    rgb(self.tokens.ui.text_muted),
-                )),
+                Some(leading_icon),
                 content,
                 trailing,
             ))
@@ -197,9 +223,9 @@ impl WorkspaceApp {
                     .rounded_full()
                     .border_1()
                     .border_color(rgba(
-                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                        (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
                     ))
-                    .bg(rgb(self.tokens.ui.bg_panel))
+                    .bg(rgb(self.tokens.ui.bg_sunken))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -207,8 +233,8 @@ impl WorkspaceApp {
                         FontFamily::Jetbrains.terminal_family_name(""),
                     ))
                     .text_size(px(self.tokens.metrics.ui_text_2xs))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text))
                     .child(number.to_string()),
             )
             .child(
@@ -324,9 +350,9 @@ impl WorkspaceApp {
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(if checked {
-                rgb(self.tokens.ui.accent)
+                rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA)
             } else {
-                rgb(self.tokens.ui.border)
+                rgba((self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA)
             })
             .bg(if checked {
                 rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
@@ -434,24 +460,25 @@ impl WorkspaceApp {
         action: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let theme = self.tokens.ui;
         div()
             .flex()
             .items_center()
             .gap(px(7.0))
-            .py(px(4.0))
+            .px(px(8.0))
+            .py(px(5.0))
             .rounded(px(self.tokens.radii.sm))
-            .hover(|style| style.text_color(rgb(self.tokens.ui.text)))
+            .border_1()
+            .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+            .bg(rgb(theme.bg_sunken))
+            .hover(move |style| style.bg(rgb(theme.bg_hover)))
             .cursor(CursorStyle::PointingHand)
-            .child(Self::render_lucide_icon(
-                icon,
-                13.0,
-                rgb(self.tokens.ui.text_muted),
-            ))
+            .child(Self::render_lucide_icon(icon, 13.0, rgb(theme.accent)))
             .child(
                 div()
                     .flex_1()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .text_color(rgb(theme.text))
                     .child(text),
             )
             .on_mouse_down(

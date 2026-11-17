@@ -2001,6 +2001,18 @@ fn render_tooltip(
 }
 
 fn render_zen_hint(tokens: &ThemeTokens, label: &str) -> AnyElement {
+    let card = div()
+        .rounded(px(tokens.radii.md))
+        .border_1()
+        .border_color(rgb(tokens.ui.border))
+        .bg(rgba((tokens.ui.bg_elevated << 8) | 0xe6))
+        .px(px(16.0))
+        .py(px(8.0))
+        .text_size(px(14.0))
+        .line_height(px(20.0))
+        .text_color(rgb(tokens.ui.text_muted))
+        .shadow_lg()
+        .child(label.to_owned());
     div()
         .absolute()
         .left_0()
@@ -2008,20 +2020,15 @@ fn render_zen_hint(tokens: &ThemeTokens, label: &str) -> AnyElement {
         .bottom(px(24.0))
         .flex()
         .justify_center()
-        .child(
-            div()
-                .rounded(px(tokens.radii.md))
-                .border_1()
-                .border_color(rgb(tokens.ui.border))
-                .bg(rgba((tokens.ui.bg_elevated << 8) | 0xe6))
-                .px(px(16.0))
-                .py(px(8.0))
-                .text_size(px(14.0))
-                .line_height(px(20.0))
-                .text_color(rgb(tokens.ui.text_muted))
-                .shadow_lg()
-                .child(label.to_owned()),
-        )
+        .child(oxideterm_gpui_ui::motion::zoom_fade_in_y(
+            tokens,
+            "workspace-zen-hint",
+            card,
+            8.0,
+            0.94,
+            gpui::point(0.5, 1.0),
+            oxideterm_gpui_ui::motion::MotionDuration::Control,
+        ))
         .into_any_element()
 }
 
@@ -2058,6 +2065,8 @@ fn render_terminal_font_size_hud(
                 .text_color(rgb(tokens.ui.text_muted))
                 .child("px"),
         );
+    // Zoom the pill itself rather than fading the full-screen wrapper so font
+    // step updates scale cleanly around the badge center.
     let layer = div()
         .absolute()
         .top_0()
@@ -2067,15 +2076,18 @@ fn render_terminal_font_size_hud(
         .flex()
         .items_center()
         .justify_center()
-        .child(card);
-    deferred(oxideterm_gpui_ui::motion::fade_in(
-        tokens,
-        "terminal-font-size-hud",
-        layer,
-        oxideterm_gpui_ui::motion::MotionDuration::Control,
-    ))
-    .with_priority(oxideterm_gpui_ui::modal::TAURI_TOOLTIP_LAYER_PRIORITY)
-    .into_any_element()
+        .child(oxideterm_gpui_ui::motion::zoom_fade_in_y(
+            tokens,
+            "terminal-font-size-hud",
+            card,
+            6.0,
+            0.92,
+            gpui::point(0.5, 0.5),
+            oxideterm_gpui_ui::motion::MotionDuration::Micro,
+        ));
+    deferred(layer)
+        .with_priority(oxideterm_gpui_ui::modal::TAURI_TOOLTIP_LAYER_PRIORITY)
+        .into_any_element()
 }
 
 fn connection_trace_title(i18n: &I18n, event: &ConnectionTraceEvent) -> String {
@@ -2656,7 +2668,7 @@ mod tests {
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
-        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.executor().advance_clock(Duration::from_millis(45));
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });
@@ -2680,7 +2692,7 @@ mod tests {
             window.draw(cx).clear(cx);
         });
         assert_tooltip_origin(cx, 10.0, 20.375);
-        cx.executor().advance_clock(Duration::from_millis(100));
+        cx.executor().advance_clock(Duration::from_millis(75));
         cx.update(|window, cx| {
             window.draw(cx).clear(cx);
         });

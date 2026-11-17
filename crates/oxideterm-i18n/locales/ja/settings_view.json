@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "失敗回数が多すぎます。30秒待ってから再試行してください。",
       "app_lock_operation_failed": "アプリロックの認証情報を更新できませんでした。",
       "app_lock_unavailable": "このデバイスでは安全な認証情報ストレージを利用できません。",
+      "app_lock_state_unavailable": "アプリのロック状態を読み込みまたは保存できませんでした。データフォルダのアクセス権を確認してください。",
       "app_lock_pending": "保存中...",
       "app_lock_locked_title": "OxideTerm はロックされています",
       "app_lock_locked_description": "ワークスペースの内容は非表示です。アクティブな接続とバックグラウンドタスクは動作を続けます。",

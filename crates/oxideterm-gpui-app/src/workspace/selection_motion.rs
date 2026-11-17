@@ -380,7 +380,7 @@ mod tests {
         cx.executor().advance_clock(Duration::from_millis(50));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let before = cx.debug_bounds("row-selection").unwrap().top();
-        assert!((f32::from(before) - 53.1).abs() <= 0.6);
+        assert!((f32::from(before) - 71.3).abs() <= 0.6);
         view.update(cx, |view, cx| {
             view.index = 1;
             view.motions

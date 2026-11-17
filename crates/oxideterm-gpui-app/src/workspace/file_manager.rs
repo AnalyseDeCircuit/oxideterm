@@ -13,8 +13,8 @@ use oxideterm_gpui_ui::{
     button::{ButtonRadius, ButtonVariant, IconButtonOptions, ToolbarButtonOptions},
     context_menu::{ContextMenuActionableStyle, context_menu_event_boundary},
     modal::{
-        dismissible_dialog_backdrop, overlay_content_boundary, quicklook_backdrop,
-        rounded_shell_child_radius,
+        TauriBackdropRole, overlay_content_boundary, rounded_shell_child_radius,
+        staged_dialog_overlay, staged_overlay_root, staged_overlay_scrim,
     },
     scroll::ScrollableElement,
     surface::{color_for_background, color_with_background_scaled_alpha},

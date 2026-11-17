@@ -145,20 +145,17 @@ pub(super) fn remote_desktop_protocol_chip(
         .child(label)
 }
 
-pub(super) fn remote_desktop_capability_chip(
+pub(super) fn remote_desktop_footer_status_label(
     tokens: &ThemeTokens,
     label: impl Into<String>,
 ) -> gpui::Div {
     div()
         .min_w(px(0.0))
         .flex_shrink_1()
-        .h(px(20.0))
-        .px(px(tokens.spacing.two))
+        .h(px(24.0))
+        .px(px(tokens.spacing.one))
         .flex()
         .items_center()
-        .rounded(px(tokens.radii.sm))
-        .border_1()
-        .border_color(rgba((tokens.ui.border << 8) | 0x99))
         .text_size(px(tokens.metrics.ui_text_xs))
         .text_color(rgb(tokens.ui.text_muted))
         .child(div().min_w(px(0.0)).truncate().child(label.into()))

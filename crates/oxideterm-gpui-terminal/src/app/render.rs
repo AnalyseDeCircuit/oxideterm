@@ -297,7 +297,9 @@ impl Render for TerminalPane {
             self.clear_terminal_hover(cx);
         }
         self.refresh_command_folding();
-        let _ = self.advance_smooth_scroll_animation(Instant::now());
+        let now = Instant::now();
+        let _ = self.advance_smooth_scroll_animation(now);
+        let fold_animating = self.advance_command_fold_animations(now);
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
         if self
             .context_menu
@@ -309,7 +311,7 @@ impl Render for TerminalPane {
         }
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
-        if self.snapshot_dirty || self.smooth_scroll_animation.is_some() {
+        if self.snapshot_dirty || self.smooth_scroll_animation.is_some() || fold_animating {
             window.request_animation_frame();
         }
         snapshot.cursor_shape =
@@ -483,7 +485,11 @@ impl Render for TerminalPane {
             selected_command_mark_id,
             hovered_command_mark_id,
         )
-        .command_folding(self.collapsed_command_ids(), command_mark_ui_visible)
+        .command_folding(
+            self.collapsed_command_ids(),
+            command_mark_ui_visible,
+            self.command_fold_marker_rotations(now),
+        )
         .highlight_rules(self.preferences.highlight_rules.clone())
         .transient_command_highlight(
             self.command_context_highlighting_enabled
@@ -2681,10 +2687,13 @@ impl TerminalPane {
                         .anchor(Anchor::TopLeft)
                         .position(position)
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(oxideterm_gpui_ui::motion::fade(
+                        .child(oxideterm_gpui_ui::motion::zoom_fade_y(
                             tokens,
                             "terminal-context-menu-presence",
-                            overlay_content_boundary(popup),
+                            div().child(overlay_content_boundary(popup)),
+                            0.0,
+                            0.95,
+                            gpui::point(0.0, 0.0),
                             oxideterm_gpui_ui::motion::MotionDuration::Micro,
                             menu_visible,
                         )),
@@ -2960,7 +2969,7 @@ impl TerminalPane {
         let Some(generation) = self.context_menu_presence.begin_exit() else {
             return;
         };
-        let delay = oxideterm_gpui_ui::motion::duration(
+        let delay = oxideterm_gpui_ui::motion::exit_settle_duration(
             &self.theme.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Micro,
         );

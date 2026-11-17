@@ -304,6 +304,8 @@ struct VisualSlideSurface {
     element: Option<Div>,
     opacity: f32,
     offset: Point<Pixels>,
+    scale: f32,
+    transform_origin: Point<f32>,
     rendered: Option<AnyElement>,
 }
 
@@ -362,16 +364,23 @@ impl Element for VisualSlideSurface {
         &mut self,
         _: Option<&GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _: &mut (),
         _: &mut (),
         window: &mut Window,
         cx: &mut App,
     ) {
-        self.rendered
+        let rendered = self
+            .rendered
             .as_mut()
-            .expect("rendered visual slide surface")
-            .paint(window, cx);
+            .expect("rendered visual slide surface");
+        let pivot = point(
+            bounds.origin.x + self.offset.x + bounds.size.width * self.transform_origin.x,
+            bounds.origin.y + self.offset.y + bounds.size.height * self.transform_origin.y,
+        );
+        window.with_element_scale(self.scale, pivot, |window| {
+            rendered.paint(window, cx);
+        });
     }
 }
 
@@ -403,11 +412,13 @@ where
         .into_any_element()
 }
 
-fn slide_fade_axis(
+fn zoom_slide_fade_axis(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
     element: Div,
     offset: Point<f32>,
+    from_scale: f32,
+    transform_origin: Point<f32>,
     tier: MotionDuration,
     visible: bool,
 ) -> AnyElement {
@@ -417,14 +428,18 @@ fn slide_fade_axis(
     } else {
         MotionPhase::Exit
     };
+    let zoom_span = 1.0 - from_scale;
     VisualSlideSurface {
         element: Some(element),
         opacity: if visible { 0.0 } else { 1.0 },
         offset: point(px(0.0), px(0.0)),
+        scale: if spatial && visible { from_scale } else { 1.0 },
+        transform_origin,
         rendered: None,
     }
-    // Give travel its own target so the shorter exit does not rescale an
-    // in-flight offset on the frame when the direction changes.
+    // Give travel and zoom one spatial track while opacity settles on `id`,
+    // matching shadcn/ui `fade-in + zoom-in-95 + slide-in` and avoiding jumps
+    // on mid-flight reversals.
     .with_spring(
         "slide-travel",
         phase_spatial_spring(
@@ -436,6 +451,11 @@ fn slide_fade_axis(
         .from(if spatial && visible { 1.0 } else { 0.0 }),
         move |mut surface, travel| {
             surface.offset = point(px(offset.x * travel), px(offset.y * travel));
+            surface.scale = if spatial {
+                (1.0 - zoom_span * travel).clamp(0.5, 1.5)
+            } else {
+                1.0
+            };
             surface
         },
     )
@@ -474,7 +494,78 @@ pub fn slide_fade_y(
     tier: MotionDuration,
     visible: bool,
 ) -> AnyElement {
-    slide_fade_axis(tokens, id, element, point(0.0, offset), tier, visible)
+    zoom_slide_fade_axis(
+        tokens,
+        id,
+        element,
+        point(0.0, offset),
+        1.0,
+        point(0.5, 0.5),
+        tier,
+        visible,
+    )
+}
+
+pub fn zoom_fade_in_y(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    element: Div,
+    offset_y: f32,
+    from_scale: f32,
+    transform_origin: Point<f32>,
+    tier: MotionDuration,
+) -> AnyElement {
+    zoom_fade_y(
+        tokens,
+        id,
+        element,
+        offset_y,
+        from_scale,
+        transform_origin,
+        tier,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn zoom_fade_y(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    element: Div,
+    offset_y: f32,
+    from_scale: f32,
+    transform_origin: Point<f32>,
+    tier: MotionDuration,
+    visible: bool,
+) -> AnyElement {
+    zoom_slide_fade_axis(
+        tokens,
+        id,
+        element,
+        point(0.0, offset_y),
+        from_scale,
+        transform_origin,
+        tier,
+        visible,
+    )
+}
+
+pub fn popover_zoom_enter(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    element: Div,
+    offset_y: f32,
+    transform_origin: Point<f32>,
+) -> AnyElement {
+    zoom_fade_in_y(
+        tokens,
+        id,
+        element,
+        offset_y,
+        0.95,
+        transform_origin,
+        MotionDuration::Micro,
+    )
 }
 
 pub fn form_enter(tokens: &ThemeTokens, id: impl Into<ElementId>, form: Div) -> AnyElement {
@@ -487,12 +578,14 @@ pub fn form_transition(
     form: Div,
     visible: bool,
 ) -> AnyElement {
-    slide_fade_y(
+    zoom_fade_y(
         tokens,
         id,
         form,
-        FORM_ENTER_OFFSET_Y,
-        MotionDuration::Overlay,
+        8.0,
+        0.955,
+        point(0.5, 0.5),
+        MotionDuration::Control,
         visible,
     )
 }
@@ -515,7 +608,16 @@ pub fn slide_fade_x(
     tier: MotionDuration,
     visible: bool,
 ) -> AnyElement {
-    slide_fade_axis(tokens, id, element, point(offset, 0.0), tier, visible)
+    zoom_slide_fade_axis(
+        tokens,
+        id,
+        element,
+        point(offset, 0.0),
+        1.0,
+        point(0.5, 0.5),
+        tier,
+        visible,
+    )
 }
 
 pub fn horizontal_reveal(
@@ -680,8 +782,8 @@ mod tests {
         for (profile, expected_opacity, expected_x) in [
             (UiMotionProfile::Off, 1.0, 100.0),
             (UiMotionProfile::Reduced, 0.8009, 100.0),
-            (UiMotionProfile::Normal, 0.5372, 53.72),
-            (UiMotionProfile::Fast, 0.8381, 83.81),
+            (UiMotionProfile::Normal, 0.6916, 69.16),
+            (UiMotionProfile::Fast, 0.8009, 80.09),
         ] {
             let opacity = Rc::new(Cell::new(0.0));
             let (view, cx) = cx.add_window_view(|_, _| {
@@ -960,5 +1062,47 @@ mod tests {
         cx.executor().advance_clock(Duration::from_millis(195));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert_eq!(cx.debug_bounds("sliding-panel").unwrap().top(), px(6.0));
+    }
+
+    #[gpui::test]
+    fn zoom_fade_scales_painted_quads_without_mutating_layout(cx: &mut TestAppContext) {
+        struct ZoomView {
+            tokens: ThemeTokens,
+        }
+
+        impl Render for ZoomView {
+            fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+                div().w(px(300.0)).h(px(200.0)).child(zoom_fade_in_y(
+                    &self.tokens,
+                    "zoom-card",
+                    div()
+                        .w(px(100.0))
+                        .h(px(80.0))
+                        .bg(gpui::rgb(0x336699))
+                        .debug_selector(|| "zoomed-card".into()),
+                    8.0,
+                    0.95,
+                    point(0.5, 0.5),
+                    MotionDuration::Control,
+                ))
+            }
+        }
+
+        let tokens = oxideterm_theme::default_tokens();
+        let (_, cx) = cx.add_window_view(|_, _| ZoomView { tokens });
+        cx.simulate_resize(size(px(300.0), px(200.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let layout_bounds = cx.debug_bounds("zoomed-card").unwrap();
+        assert_eq!(layout_bounds.size.width, px(100.0));
+        let color: gpui::Hsla = gpui::rgb(0x336699).into();
+        let (scale, painted_width) = cx.update(|window, _| {
+            let quad = window
+                .painted_quads()
+                .into_iter()
+                .find(|quad| quad.background.as_solid().is_some_and(|c| c.h == color.h))
+                .expect("scaled card quad");
+            (window.scale_factor(), quad.bounds.size.width.0)
+        });
+        assert!((painted_width / scale - 95.0).abs() < 0.5);
     }
 }

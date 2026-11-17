@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "Trop de tentatives échouées. Attendez 30 secondes avant de réessayer.",
       "app_lock_operation_failed": "Impossible de mettre à jour l’identifiant de verrouillage.",
       "app_lock_unavailable": "Le stockage sécurisé des identifiants n’est pas disponible sur cet appareil.",
+      "app_lock_state_unavailable": "Impossible de lire ou d’enregistrer l’état du verrouillage. Vérifiez les droits d’accès au dossier de données.",
       "app_lock_pending": "Enregistrement...",
       "app_lock_locked_title": "OxideTerm est verrouillé",
       "app_lock_locked_description": "Le contenu de l’espace de travail est masqué. Les connexions actives et les tâches en arrière-plan continuent de fonctionner.",

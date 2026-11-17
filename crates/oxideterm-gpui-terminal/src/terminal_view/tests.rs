@@ -419,6 +419,33 @@ fn command_mark_overlays_preserve_boundaries_and_distinguish_selection_from_hove
             "selected={selected:?}, hovered={hovered:?}"
         );
     }
+
+    let mut foldable_mark = test_command_mark("cmd-foldable", 0, Some(3), Some(0));
+    foldable_mark.output_start = Some(oxideterm_terminal::TerminalCommandPosition {
+        line: 1,
+        column: 0,
+    });
+    foldable_mark.output_end = Some(oxideterm_terminal::TerminalCommandPosition {
+        line: 3,
+        column: 0,
+    });
+    let non_foldable_mark = test_command_mark("cmd-single", 4, Some(4), Some(0));
+    let foldable_layout = TerminalElement::new(
+        snapshot,
+        None,
+        test_metrics(),
+        true,
+        None,
+        None,
+        Vec::new(),
+        None,
+        None,
+        None,
+    )
+    .command_marks(vec![foldable_mark, non_foldable_mark], None, None)
+    .layout();
+    assert!(foldable_layout.command_mark_overlays[0].foldable);
+    assert!(!foldable_layout.command_mark_overlays[1].foldable);
 }
 
 pub(super) fn test_command_mark(

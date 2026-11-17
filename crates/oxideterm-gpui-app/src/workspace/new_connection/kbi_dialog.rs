@@ -18,7 +18,7 @@ use oxideterm_gpui_ui::{
     TextInputView,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
     form_field,
-    modal::{dialog_backdrop_color, modal_backdrop, modal_container, rounded_shell_child_radius},
+    modal::{modal_container, rounded_shell_child_radius},
     text_input_anchor_probe,
 };
 
@@ -362,7 +362,7 @@ impl WorkspaceApp {
 
         // Authentication fields redraw while waiting and typing. Avoid sampling
         // the entire window for blur on each of those frames.
-        modal_backdrop(dialog_backdrop_color())
+        oxideterm_gpui_ui::modal::staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -372,6 +372,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .child(oxideterm_gpui_ui::modal::staged_overlay_scrim(
+                &self.tokens,
+                "keyboard-interactive-dialog-scrim",
+                oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
+                true,
+            ))
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "keyboard-interactive-dialog-transition",

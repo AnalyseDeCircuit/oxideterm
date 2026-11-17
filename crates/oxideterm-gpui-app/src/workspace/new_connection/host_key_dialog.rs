@@ -6,7 +6,6 @@ use oxideterm_gpui_ui::{
     MaterialRole,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
     material_surface,
-    modal::dismissible_dialog_backdrop,
 };
 use oxideterm_ssh::{HostKeyReplacement, HostKeyStatus, SshConfig};
 
@@ -243,7 +242,7 @@ impl WorkspaceApp {
             ),
         };
 
-        dismissible_dialog_backdrop()
+        oxideterm_gpui_ui::modal::staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
@@ -254,6 +253,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .child(oxideterm_gpui_ui::modal::staged_overlay_scrim(
+                &self.tokens,
+                "host-key-dialog-scrim",
+                oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
+                true,
+            ))
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "host-key-dialog-transition",

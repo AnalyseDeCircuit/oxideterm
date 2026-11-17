@@ -932,9 +932,27 @@ impl WorkspaceApp {
                     .terminal
                     .command_bar
                     .quick_bar_enabled,
-                |surface| surface.child(self.render_terminal_quick_bar(window, cx)),
+                |surface| {
+                    surface.child(oxideterm_gpui_ui::motion::slide_fade_in_y(
+                        &self.tokens,
+                        "terminal-quick-bar-enter",
+                        div()
+                            .flex_none()
+                            .child(self.render_terminal_quick_bar(window, cx)),
+                        6.0,
+                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                    ))
+                },
             )
-            .child(self.render_terminal_command_bar(window, cx))
+            .child(oxideterm_gpui_ui::motion::slide_fade_in_y(
+                &self.tokens,
+                "terminal-command-bar-enter",
+                div()
+                    .flex_none()
+                    .child(self.render_terminal_command_bar(window, cx)),
+                8.0,
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            ))
             .child(self.render_terminal_quick_commands_panel(cx))
             // The toolbar is the sender header. Hidden, compact, and expanded
             // layouts all retain the same document and running jobs below it.

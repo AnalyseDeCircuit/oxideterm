@@ -281,7 +281,7 @@ mod tests {
             window.draw(cx).clear(cx);
         });
         let closing_width = cx.debug_bounds("sidebar-viewport").unwrap().size.width;
-        assert!((f32::from(closing_width) - 92.1).abs() <= 0.6);
+        assert!((f32::from(closing_width) - 53.3).abs() <= 0.6);
         assert_eq!(
             cx.debug_bounds("sidebar-edge").unwrap().origin.x,
             closing_width

@@ -1,7 +1,7 @@
 use gpui::{
-    App, AppContext as _, Context, EventEmitter, FocusHandle, Focusable, IntoElement, MouseButton,
-    ParentElement, PromptButton, PromptLevel, PromptResponse, Render, Styled, Window, div,
-    prelude::*, px, rgb,
+    App, AppContext as _, Context, EventEmitter, FocusHandle, Focusable, FontWeight, IntoElement,
+    MouseButton, ParentElement, PromptButton, PromptLevel, PromptResponse, Render, Styled, Window,
+    div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -9,10 +9,12 @@ use crate::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_focus_visible, button_with,
 };
 use crate::modal::{
-    MODAL_KEY_CONTEXT, TauriBackdropRole, dialog_content, dialog_footer, dialog_header,
-    dialog_title, modal_body, staged_overlay_root, staged_overlay_scrim,
+    MODAL_KEY_CONTEXT, TauriBackdropRole, dialog_content, dialog_title, staged_overlay_root,
+    staged_overlay_scrim,
 };
 use crate::radio_group::{radio_group, radio_group_item};
+
+const CHOICE_DIALOG_WIDTH: f32 = 400.0;
 
 pub struct ChoiceDialog {
     pub title: String,
@@ -93,30 +95,55 @@ impl Render for ChoiceDialogView {
         let theme = tokens.ui;
         let mut options = radio_group(tokens)
             .w_full()
+            .gap(px(8.0))
             .text_align(gpui::TextAlign::Left);
         for (index, action) in self.actions.iter().take(2).enumerate() {
+            let selected = self.selected == index;
+            let row = div()
+                .w_full()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(10.0))
+                .px(px(14.0))
+                .py(px(11.0))
+                .rounded(px(tokens.radii.md))
+                .border_1()
+                .cursor_pointer()
+                .when(selected, |row| {
+                    row.bg(rgba((theme.accent << 8) | 0x1a))
+                        .border_color(rgba((theme.accent << 8) | 0x80))
+                })
+                .when(!selected, |row| {
+                    row.bg(rgba((theme.bg_panel << 8) | 0x2e))
+                        .border_color(rgba((theme.border << 8) | 0x66))
+                        .hover(move |row| {
+                            row.bg(rgb(theme.bg_hover))
+                                .border_color(rgb(theme.border))
+                        })
+                })
+                .child(radio_group_item(tokens, selected, false).flex_none())
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .text_size(px(tokens.metrics.ui_text_sm))
+                        .line_height(px(tokens.metrics.ui_text_sm * 1.35))
+                        .when(selected, |label| {
+                            label
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_color(rgb(theme.text_heading))
+                        })
+                        .when(!selected, |label| label.text_color(rgb(theme.text)))
+                        .child(action.label().clone()),
+                );
             options = options.child(
                 button_focus_visible(
                     tokens,
-                    div()
-                        .w_full()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .gap(px(tokens.spacing.two))
-                        .px(px(tokens.spacing.two))
-                        .py(px(tokens.spacing.two))
-                        .rounded(px(tokens.radii.md))
-                        .text_size(px(tokens.metrics.ui_text_sm))
-                        .text_color(rgb(tokens.ui.text))
-                        .cursor_pointer()
-                        .hover(move |row| row.bg(rgb(theme.bg_hover)))
-                        .child(radio_group_item(tokens, self.selected == index, false).flex_none())
-                        .child(div().flex_1().min_w_0().child(action.label().clone())),
-                    self.keyboard_focus
-                        && self.focused_control == ChoiceFocus::Options
-                        && self.selected == index,
+                    row,
+                    self.keyboard_focus && self.focused_control == ChoiceFocus::Options && selected,
                 )
+                .id(("choice-dialog-option", index))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _, _, cx| {
@@ -129,34 +156,55 @@ impl Render for ChoiceDialogView {
                 ),
             );
         }
+        // Compact unified card layout avoids the fragmented three-band divider look
+        // when description is absent on short two-choice prompts.
         let form = dialog_content(tokens)
-            .max_w(gpui::relative(0.9))
-            .max_h(gpui::relative(0.9))
-            .shadow(crate::theme_overlay_shadow(tokens))
+            .id("choice-dialog-card")
+            .w(px(CHOICE_DIALOG_WIDTH))
+            .max_h(px(520.0))
             .flex()
             .flex_col()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(dialog_header(tokens).child(dialog_title(tokens, self.title.clone())))
             .child(
-                modal_body(tokens)
+                div()
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.0))
+                    .px(px(20.0))
+                    .pt(px(20.0))
+                    .pb(px(12.0))
+                    .child(dialog_title(tokens, self.title.clone()))
+                    .when_some(self.description.clone(), |header, description| {
+                        header.child(
+                            div()
+                                .text_size(px(tokens.metrics.ui_text_sm))
+                                .line_height(px(tokens.metrics.ui_text_sm * 1.45))
+                                .text_color(rgb(theme.text_muted))
+                                .child(description),
+                        )
+                    }),
+            )
+            .child(
+                div()
                     .id("choice-dialog-body")
                     .w_full()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .when_some(self.description.clone(), |body, description| {
-                        body.child(
-                            div()
-                                .text_size(px(tokens.metrics.ui_text_sm))
-                                .line_height(px(tokens.metrics.ui_text_sm * 1.5))
-                                .text_color(rgb(theme.text_muted))
-                                .child(description),
-                        )
-                    })
+                    .px(px(20.0))
+                    .py(px(4.0))
                     .child(options),
             )
             .child(
-                dialog_footer(tokens)
+                div()
                     .flex_none()
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(8.0))
+                    .px(px(20.0))
+                    .pt(px(16.0))
+                    .pb(px(20.0))
                     .child(
                         button_focus_visible(
                             tokens,
@@ -220,11 +268,13 @@ impl Render for ChoiceDialogView {
                 TauriBackdropRole::Dialog,
                 true,
             ))
-            .child(crate::motion::slide_fade_in_y(
+            .child(crate::motion::zoom_fade_in_y(
                 tokens,
                 "choice-dialog",
                 div().child(form),
-                12.0,
+                8.0,
+                0.95,
+                gpui::point(0.5, 0.5),
                 crate::motion::MotionDuration::Control,
             ));
         div()
@@ -287,5 +337,133 @@ impl Render for ChoiceDialogView {
             .on_mouse_up(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_mouse_up(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
             .child(dialog)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    #[gpui::test]
+    fn choice_dialog_renders_compact_selectable_cards_and_routes_actions(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let mut tokens = oxideterm_theme::default_tokens();
+        tokens.motion.enabled = false;
+        tokens.motion.spatial_enabled = false;
+        let emitted: Rc<Cell<Option<usize>>> = Rc::new(Cell::new(None));
+        let emitted_clone = emitted.clone();
+
+        let (view, cx) = cx.add_window_view(|_window, cx| ChoiceDialogView {
+            tokens: tokens.clone(),
+            title: "Select file access".to_string(),
+            description: Some("Choose the transport used to browse remote files.".to_string()),
+            actions: vec![
+                PromptButton::new("SFTP"),
+                PromptButton::new("SSH"),
+                PromptButton::cancel("Cancel"),
+            ],
+            focus: cx.focus_handle(),
+            selected: 0,
+            keyboard_focus: false,
+            focused_control: ChoiceFocus::Options,
+            confirm: "OK".to_string(),
+        });
+
+        cx.simulate_resize(gpui::size(px(800.0), px(600.0)));
+        let window_handle = cx.update(|window, app| {
+            let sub = app.subscribe(&view, move |_view, response: &PromptResponse, _| {
+                emitted_clone.set(Some(response.0));
+            });
+            std::mem::forget(sub);
+            let focus = view.read(app).focus.clone();
+            focus.focus(window, app);
+            window.window_handle()
+        });
+        cx.run_until_parked();
+
+        let (scale, quads) = cx.update(|window, app| {
+            window.draw(app).clear(app);
+            (window.scale_factor(), window.painted_quads())
+        });
+
+        // Compact dialog width (400px) rather than bloated 512px modal_width.
+        let card_quad = quads
+            .iter()
+            .find(|quad| {
+                (quad.bounds.size.width.0 / scale - CHOICE_DIALOG_WIDTH).abs() < 0.5
+                    && quad.bounds.size.height.0 / scale > 100.0
+            })
+            .unwrap_or_else(|| {
+                let sizes: Vec<_> = quads
+                    .iter()
+                    .map(|q| (q.bounds.size.width.0 / scale, q.bounds.size.height.0 / scale))
+                    .collect();
+                panic!("compact dialog card quad not found; painted sizes: {sizes:?}")
+            });
+        assert!((card_quad.bounds.size.width.0 / scale - CHOICE_DIALOG_WIDTH).abs() < 0.5);
+
+        // Option cards fill the 400px card inner width (358px inside 2*20px padding + 2*1px card border);
+        // verify only 1 radio dot quad (10x10) is painted for the active selection.
+        let dot_count = quads
+            .iter()
+            .filter(|quad| {
+                (quad.bounds.size.width.0 / scale - tokens.metrics.ui_radio_dot_size).abs() < 0.5
+                    && (quad.bounds.size.height.0 / scale - tokens.metrics.ui_radio_dot_size).abs()
+                        < 0.5
+            })
+            .count();
+        assert_eq!(dot_count, 1);
+
+        let selected_border: gpui::SceneHsla =
+            gpui::Hsla::from(rgba((tokens.ui.accent << 8) | 0x80)).into();
+        let unselected_border: gpui::SceneHsla =
+            gpui::Hsla::from(rgba((tokens.ui.border << 8) | 0x66)).into();
+        let mut option_quads: Vec<_> = quads
+            .iter()
+            .filter(|quad| {
+                (quad.bounds.size.width.0 / scale - (CHOICE_DIALOG_WIDTH - 42.0)).abs() < 1.0
+                    && quad.bounds.size.height.0 / scale >= 32.0
+                    && (quad.border_color == selected_border
+                        || quad.border_color == unselected_border)
+            })
+            .collect();
+        option_quads.sort_by(|a, b| a.bounds.top().0.total_cmp(&b.bounds.top().0));
+        option_quads.dedup_by(|a, b| (a.bounds.top().0 - b.bounds.top().0).abs() < 1.0);
+        assert_eq!(option_quads.len(), 2);
+        assert_eq!(option_quads[0].border_color, selected_border);
+        assert_eq!(option_quads[1].border_color, unselected_border);
+
+        let second_center = gpui::point(
+            px(option_quads[1].bounds.center().x.0 / scale),
+            px(option_quads[1].bounds.center().y.0 / scale),
+        );
+        cx.simulate_mouse_down(
+            second_center,
+            MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        cx.run_until_parked();
+        view.read_with(cx, |this, _| assert_eq!(this.selected, 1));
+
+        cx.dispatch_keystroke(window_handle, gpui::Keystroke::parse("up").expect("up"));
+        cx.run_until_parked();
+        view.read_with(cx, |this, _| assert_eq!(this.selected, 0));
+
+        cx.dispatch_keystroke(
+            window_handle,
+            gpui::Keystroke::parse("enter").expect("enter"),
+        );
+        cx.run_until_parked();
+        assert_eq!(emitted.get(), Some(0));
+
+        cx.dispatch_keystroke(
+            window_handle,
+            gpui::Keystroke::parse("escape").expect("escape"),
+        );
+        cx.run_until_parked();
+        assert_eq!(emitted.get(), Some(2));
     }
 }

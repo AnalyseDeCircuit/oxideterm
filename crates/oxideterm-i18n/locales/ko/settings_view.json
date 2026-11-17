@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "실패 횟수가 너무 많습니다. 30초 후 다시 시도하세요.",
       "app_lock_operation_failed": "애플리케이션 잠금 자격 증명을 업데이트할 수 없습니다.",
       "app_lock_unavailable": "이 장치에서는 안전한 자격 증명 저장소를 사용할 수 없습니다.",
+      "app_lock_state_unavailable": "앱 잠금 상태를 읽거나 저장할 수 없습니다. 데이터 폴더의 접근 권한을 확인하세요.",
       "app_lock_pending": "저장 중...",
       "app_lock_locked_title": "OxideTerm이 잠겼습니다",
       "app_lock_locked_description": "작업 공간 내용이 숨겨졌습니다. 활성 연결과 백그라운드 작업은 계속 실행됩니다.",

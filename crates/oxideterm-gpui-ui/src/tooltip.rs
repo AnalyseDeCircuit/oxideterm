@@ -40,12 +40,7 @@ pub fn tooltip_content(
     let label = label.into();
     let animation_id = "tooltip-enter";
     let tooltip = tooltip_surface(tokens, label, shortcut);
-    crate::motion::fade_in(
-        tokens,
-        animation_id,
-        tooltip,
-        crate::motion::MotionDuration::Micro,
-    )
+    crate::motion::popover_zoom_enter(tokens, animation_id, tooltip, 4.0, gpui::point(0.5, 0.5))
 }
 
 /// Unanimated surface for owners that retain tooltips through an exit transition.

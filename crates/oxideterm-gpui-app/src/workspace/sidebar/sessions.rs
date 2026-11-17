@@ -800,7 +800,13 @@ impl WorkspaceApp {
                             .position(anchor.bounds.bottom_right())
                             .offset(point(px(0.0), px(4.0)))
                             .position_mode(AnchoredPositionMode::Window)
-                            .child(popup),
+                            .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                                &self.tokens,
+                                "session-sort-menu-motion",
+                                div().child(popup),
+                                -6.0,
+                                point(0.5, 0.0),
+                            )),
                     )
                     .with_priority(oxideterm_gpui_ui::modal::TAURI_SELECT_LAYER_PRIORITY),
                 )

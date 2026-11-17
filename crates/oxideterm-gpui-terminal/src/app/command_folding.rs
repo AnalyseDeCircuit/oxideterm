@@ -1,12 +1,43 @@
 use super::*;
-use gpui::{AnyElement, MouseButton, div, prelude::*, rgb};
-use std::collections::HashSet;
+use gpui::{AnyElement, MouseButton, div, prelude::*, rgb, rgba};
+use oxideterm_gpui_ui::motion::{MotionDuration, duration, ease_out_cubic, exit_settle_duration, fade, fade_in};
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, PartialEq, Eq)]
 struct FoldedOutput {
     command_id: String,
     lines: Range<usize>,
+}
+
+struct ExpandFoldHighlight {
+    command_id: String,
+    generation: u64,
+}
+
+#[derive(Clone, Copy)]
+struct FoldMarkerRotation {
+    started_at: Instant,
+    from: f32,
+    to: f32,
+    duration: Duration,
+}
+
+impl FoldMarkerRotation {
+    fn progress_at(self, now: Instant) -> f32 {
+        let total = self.duration.as_secs_f32();
+        if total <= 0.0 {
+            return self.to;
+        }
+        let elapsed = now.saturating_duration_since(self.started_at).as_secs_f32();
+        let t = ease_out_cubic((elapsed / total).clamp(0.0, 1.0));
+        self.from + (self.to - self.from) * t
+    }
+
+    fn is_finished(self, now: Instant) -> bool {
+        self.duration.is_zero() || now.saturating_duration_since(self.started_at) >= self.duration
+    }
 }
 
 #[derive(Default)]
@@ -15,6 +46,10 @@ pub(super) struct CommandFolding {
     collapsed: HashSet<String>,
     ranges: Vec<FoldedOutput>,
     snapshot: Option<TerminalSnapshot>,
+    fold_epochs: HashMap<String, u64>,
+    next_epoch: u64,
+    expand_highlight: Option<ExpandFoldHighlight>,
+    marker_rotations: HashMap<String, FoldMarkerRotation>,
 }
 
 impl CommandFolding {
@@ -59,6 +94,21 @@ impl CommandFolding {
 impl TerminalPane {
     pub(super) fn collapsed_command_ids(&self) -> HashSet<String> {
         self.command_folding.collapsed.clone()
+    }
+
+    pub(super) fn advance_command_fold_animations(&mut self, now: Instant) -> bool {
+        self.command_folding
+            .marker_rotations
+            .retain(|_, rotation| !rotation.is_finished(now));
+        !self.command_folding.marker_rotations.is_empty()
+    }
+
+    pub(super) fn command_fold_marker_rotations(&self, now: Instant) -> HashMap<String, f32> {
+        self.command_folding
+            .marker_rotations
+            .iter()
+            .map(|(id, rotation)| (id.clone(), rotation.progress_at(now)))
+            .collect()
     }
 
     pub(super) fn command_gutter_contains(&self, position: Point<Pixels>) -> bool {
@@ -132,23 +182,13 @@ impl TerminalPane {
     fn foldable_output(&self, mark: &TerminalCommandMark) -> Option<Range<usize>> {
         if !self.preferences.command_folding_enabled
             || !self.command_actions_available(self.render_mode)
-            || mark.stale
-            || mark.command_line_clipped
-            || !mark.is_closed
-            || mark.output_confidence != TerminalCommandMarkConfidence::High
-            || mark.closed_by != Some(TerminalCommandMarkClosedBy::ShellIntegration)
         {
             return None;
         }
-        let start = mark.output_start?;
-        let end = mark.output_end?;
-        // Partial boundary rows may contain the input or the following prompt.
-        // Keep them visible rather than hiding cells outside the output range.
-        let first =
-            (start.line + usize::from(start.column != 0)).max(mark.command_line.saturating_add(1));
-        let last = end.line;
-        (last > first && last <= self.snapshot.scrollback_lines + self.snapshot.rows)
-            .then_some(first..last)
+        crate::terminal_view::command_mark_foldable_range(
+            mark,
+            self.snapshot.scrollback_lines + self.snapshot.rows,
+        )
     }
 
     pub(super) fn command_fold_action(&self, id: &str) -> Option<String> {
@@ -209,6 +249,10 @@ impl TerminalPane {
                 .iter()
                 .any(|mark| &mark.command_id == id && !mark.stale && !mark.command_line_clipped)
         });
+        let collapsed = &self.command_folding.collapsed;
+        self.command_folding
+            .fold_epochs
+            .retain(|id, _| collapsed.contains(id));
         if self.command_folding.ranges == ranges
             && self
                 .command_folding
@@ -505,8 +549,73 @@ impl TerminalPane {
             return;
         }
         let anchor = self.displayed_absolute_line(0);
-        if !self.command_folding.collapsed.remove(id) {
+        let now = Instant::now();
+        let was_collapsed = self.command_folding.collapsed.contains(id);
+        let current_rotation = self
+            .command_folding
+            .marker_rotations
+            .get(id)
+            .map(|rotation| rotation.progress_at(now))
+            .unwrap_or(if was_collapsed { 1.0 } else { 0.0 });
+        self.command_folding.next_epoch = self.command_folding.next_epoch.wrapping_add(1);
+        let epoch = self.command_folding.next_epoch;
+        let collapsed_now = !was_collapsed;
+        if collapsed_now {
             self.command_folding.collapsed.insert(id.to_owned());
+            self.command_folding.fold_epochs.insert(id.to_owned(), epoch);
+            if self
+                .command_folding
+                .expand_highlight
+                .as_ref()
+                .is_some_and(|highlight| highlight.command_id == id)
+            {
+                self.command_folding.expand_highlight = None;
+            }
+        } else {
+            self.command_folding.collapsed.remove(id);
+            self.command_folding.fold_epochs.remove(id);
+            if self.theme.tokens.motion.enabled {
+                self.command_folding.expand_highlight = Some(ExpandFoldHighlight {
+                    command_id: id.to_owned(),
+                    generation: epoch,
+                });
+                let delay = exit_settle_duration(&self.theme.tokens, MotionDuration::Control);
+                cx.spawn(async move |weak, cx| {
+                    cx.background_executor().timer(delay).await;
+                    let _ = weak.update(cx, |this, cx| {
+                        if this
+                            .command_folding
+                            .expand_highlight
+                            .as_ref()
+                            .is_some_and(|highlight| highlight.generation == epoch)
+                        {
+                            this.command_folding.expand_highlight = None;
+                            cx.notify();
+                        }
+                    });
+                })
+                .detach();
+            } else {
+                self.command_folding.expand_highlight = None;
+            }
+        }
+        if self.theme.tokens.motion.enabled && self.theme.tokens.motion.spatial_enabled {
+            let marker_duration = duration(&self.theme.tokens, MotionDuration::Micro);
+            if !marker_duration.is_zero() {
+                self.command_folding.marker_rotations.insert(
+                    id.to_owned(),
+                    FoldMarkerRotation {
+                        started_at: now,
+                        from: current_rotation,
+                        to: if collapsed_now { 1.0 } else { 0.0 },
+                        duration: marker_duration,
+                    },
+                );
+            } else {
+                self.command_folding.marker_rotations.remove(id);
+            }
+        } else {
+            self.command_folding.marker_rotations.remove(id);
         }
         self.clear_smooth_scroll_remainder();
         self.clear_terminal_interactions(cx);
@@ -541,6 +650,10 @@ impl TerminalPane {
                 }
             })
         });
+        let collapsed = &self.command_folding.collapsed;
+        self.command_folding
+            .fold_epochs
+            .retain(|id, _| collapsed.contains(id));
         self.refresh_command_folding();
     }
 
@@ -550,7 +663,12 @@ impl TerminalPane {
         let base_offset = offset.ceil() as usize;
         let top = snapshot.scrollback_lines.saturating_sub(base_offset);
         let y_offset = (offset - base_offset as f32) * self.metrics.line_height_f32();
-        self.command_folding
+        let line_height = self.metrics.line_height_f32();
+        let tokens = &self.theme.tokens;
+        let left_px =
+            self.terminal_content_padding_x() - f32::from(self.horizontal_scroll_offset_px);
+        let mut elements: Vec<AnyElement> = self
+            .command_folding
             .ranges
             .iter()
             .filter_map(|fold| {
@@ -562,6 +680,12 @@ impl TerminalPane {
                     return None;
                 }
                 let id = fold.command_id.clone();
+                let epoch = self
+                    .command_folding
+                    .fold_epochs
+                    .get(&id)
+                    .copied()
+                    .unwrap_or(0);
                 let labels = &self.preferences.command_selection_labels;
                 let mut label = labels
                     .folded_output
@@ -580,38 +704,203 @@ impl TerminalPane {
                             .replace("{{code}}", &code.to_string()),
                     );
                 }
-                let y = y_offset + row as f32 * self.metrics.line_height_f32();
+                let text_color = rgb(if failure.is_some() {
+                    tokens.ui.error
+                } else {
+                    tokens.ui.text_muted
+                });
+                let hover_color = rgb(if failure.is_some() {
+                    tokens.ui.error
+                } else {
+                    tokens.ui.text_secondary
+                });
+                let summary_id = SharedString::from(format!("terminal-fold-summary-{epoch}-{id}"));
+                let summary = div()
+                    .h(self.metrics.line_height)
+                    .line_height(self.metrics.line_height)
+                    .text_size(self.metrics.font_size)
+                    .text_color(text_color)
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .cursor_pointer()
+                    .hover(move |style| style.text_color(hover_color))
+                    .child(label)
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _, window, cx| {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.toggle_command_fold(&id, cx);
+                        }),
+                    );
+                let y = y_offset + row as f32 * line_height;
                 Some(
                     div()
                         .absolute()
-                        .left(px(self.terminal_content_padding_x()
-                            - f32::from(self.horizontal_scroll_offset_px)))
+                        .left(px(left_px))
                         .right_0()
                         .top(px(y))
                         .h(self.metrics.line_height)
-                        .line_height(self.metrics.line_height)
-                        .text_size(self.metrics.font_size)
-                        .text_color(rgb(if failure.is_some() {
-                            self.theme.tokens.ui.error
-                        } else {
-                            self.theme.tokens.ui.text_muted
-                        }))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .cursor_pointer()
-                        .child(label)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, window, cx| {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.toggle_command_fold(&id, cx);
-                            }),
-                        )
+                        .child(fade_in(tokens, summary_id, summary, MotionDuration::Micro))
                         .into_any_element(),
                 )
             })
-            .collect()
+            .collect();
+
+        if let Some(highlight) = &self.command_folding.expand_highlight
+            && let Some(mark) = self
+                .command_marks
+                .iter()
+                .find(|mark| mark.command_id == highlight.command_id)
+            && let Some(range) = self.foldable_output(mark)
+        {
+            let visible_start = self.command_folding.visible_line(range.start);
+            let visible_end = self.command_folding.visible_line(range.end - 1);
+            let viewport_end = top.saturating_add(snapshot.rows.saturating_sub(1));
+            if visible_end >= top && visible_start <= viewport_end {
+                let start_row = visible_start.max(top) - top;
+                let end_row = visible_end.min(viewport_end) - top;
+                let band_top = y_offset + start_row as f32 * line_height;
+                let band_height = (end_row - start_row + 1) as f32 * line_height;
+                let band = div()
+                    .size_full()
+                    .rounded(px(tokens.radii.sm.max(2.0)))
+                    .bg(rgba((tokens.ui.accent << 8) | 0x16));
+                elements.push(
+                    div()
+                        .absolute()
+                        .left(px(left_px))
+                        .right_0()
+                        .top(px(band_top))
+                        .h(px(band_height))
+                        .child(fade(
+                            tokens,
+                            SharedString::from(format!(
+                                "terminal-fold-expand-{}",
+                                highlight.generation
+                            )),
+                            band,
+                            MotionDuration::Control,
+                            false,
+                        ))
+                        .into_any_element(),
+                );
+            }
+        }
+
+        elements
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+    use oxideterm_terminal::{
+        TerminalCommandMarkClosedBy, TerminalCommandMarkConfidence,
+        TerminalCommandMarkDetectionSource, TerminalCommandPosition,
+    };
+
+    fn foldable_mark(id: &str) -> TerminalCommandMark {
+        TerminalCommandMark {
+            command_id: id.to_string(),
+            command: Some("ls -la".to_string()),
+            start_line: 0,
+            command_line: 0,
+            command_line_clipped: false,
+            output_start: Some(TerminalCommandPosition { line: 1, column: 0 }),
+            output_end: Some(TerminalCommandPosition { line: 4, column: 0 }),
+            end_line: Some(4),
+            is_closed: true,
+            closed_by: Some(TerminalCommandMarkClosedBy::ShellIntegration),
+            exit_code: Some(0),
+            duration_ms: Some(12),
+            detection_source: TerminalCommandMarkDetectionSource::ShellIntegration,
+            submitted_by: None,
+            confidence: TerminalCommandMarkConfidence::High,
+            output_confidence: TerminalCommandMarkConfidence::High,
+            stale: false,
+            started_at: 1,
+            finished_at: Some(2),
+        }
+    }
+
+    #[gpui::test]
+    fn toggle_command_fold_tracks_epochs_and_motion_gated_expand_highlight(cx: &mut TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(
+                80,
+                10,
+                TerminalUiPreferences {
+                    command_folding_enabled: true,
+                    ..Default::default()
+                },
+                window,
+                cx,
+            )
+            .expect("test terminal pane")
+        });
+
+        pane.update(cx, |pane, cx| {
+            pane.command_marks.push(foldable_mark("cmd-1"));
+            pane.theme.tokens.motion.enabled = true;
+
+            pane.toggle_command_fold("cmd-1", cx);
+            assert!(pane.command_folding.collapsed.contains("cmd-1"));
+            assert_eq!(pane.command_folding.fold_epochs.get("cmd-1"), Some(&1));
+            assert!(pane.command_folding.expand_highlight.is_none());
+            assert!(pane.command_folding.marker_rotations.contains_key("cmd-1"));
+            assert_eq!(
+                pane.command_folding.marker_rotations["cmd-1"].to,
+                1.0,
+                "collapsing rotates square 0 -> 45deg"
+            );
+
+            pane.toggle_command_fold("cmd-1", cx);
+            assert!(!pane.command_folding.collapsed.contains("cmd-1"));
+            assert!(!pane.command_folding.fold_epochs.contains_key("cmd-1"));
+            assert_eq!(
+                pane.command_folding
+                    .expand_highlight
+                    .as_ref()
+                    .map(|highlight| highlight.command_id.as_str()),
+                Some("cmd-1")
+            );
+            assert_eq!(
+                pane.command_folding.marker_rotations["cmd-1"].to,
+                0.0,
+                "expanding rotates square back 45deg -> 0"
+            );
+        });
+
+        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.run_until_parked();
+        pane.update(cx, |pane, _cx| {
+            assert!(
+                pane.command_folding.expand_highlight.is_none(),
+                "expand highlight should clear after its settle timer"
+            );
+            assert!(
+                !pane.advance_command_fold_animations(
+                    Instant::now() + std::time::Duration::from_secs(1)
+                ),
+                "completed marker rotation animation must prune cleanly"
+            );
+        });
+
+        pane.update(cx, |pane, cx| {
+            pane.theme.tokens.motion.enabled = false;
+            pane.toggle_command_fold("cmd-1", cx);
+            pane.toggle_command_fold("cmd-1", cx);
+            assert!(
+                pane.command_folding.expand_highlight.is_none(),
+                "disabled motion must not schedule an expand reveal wash"
+            );
+            assert!(
+                pane.command_folding.marker_rotations.is_empty(),
+                "disabled motion must snap marker rotation directly"
+            );
+        });
     }
 }
 

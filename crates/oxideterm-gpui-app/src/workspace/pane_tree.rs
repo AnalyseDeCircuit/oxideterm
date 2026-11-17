@@ -1548,7 +1548,7 @@ impl WorkspaceApp {
                         self.search
                             .panes
                             .get(pane_id)
-                            .is_some_and(|search| search.visible),
+                            .is_some_and(|search| search.visible || search.exiting),
                         |frame| frame.child(self.render_search_bar(*pane_id, cx)),
                     )
                     .into_any_element()

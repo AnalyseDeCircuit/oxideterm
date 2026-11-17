@@ -323,7 +323,13 @@ impl WorkspaceApp {
                 .anchor(Corner::TopLeft)
                 .position(gpui::point(px(placement.x), px(placement.y)))
                 .position_mode(AnchoredPositionMode::Window)
-                .child(overlay_content_boundary(menu)),
+                .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                    &self.tokens,
+                    "session-manager-view-menu-motion",
+                    div().child(overlay_content_boundary(menu)),
+                    -6.0,
+                    gpui::point(0.5, 0.0),
+                )),
         )
         .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
         .into_any_element()
@@ -409,7 +415,13 @@ impl WorkspaceApp {
                 .anchor(Corner::TopLeft)
                 .position(gpui::point(px(placement.x), px(placement.y)))
                 .position_mode(AnchoredPositionMode::Window)
-                .child(overlay_content_boundary(menu)),
+                .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                    &self.tokens,
+                    "session-manager-view-menu-motion",
+                    div().child(overlay_content_boundary(menu)),
+                    -6.0,
+                    gpui::point(0.5, 0.0),
+                )),
         )
         .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
         .into_any_element()

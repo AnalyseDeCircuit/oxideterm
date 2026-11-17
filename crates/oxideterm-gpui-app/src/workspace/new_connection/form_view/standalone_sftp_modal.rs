@@ -233,7 +233,7 @@ impl WorkspaceApp {
             )
             .child(Scrollbar::new(&fields_scroll).axis(ScrollbarAxis::Both));
 
-        modal_backdrop(dialog_backdrop_color())
+        oxideterm_gpui_ui::modal::staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -241,6 +241,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .child(oxideterm_gpui_ui::modal::staged_overlay_scrim(
+                &self.tokens,
+                "standalone-sftp-form-scrim",
+                oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
+                true,
+            ))
             .child(oxideterm_gpui_ui::motion::form_transition(
                 &self.tokens,
                 "standalone-sftp-form-enter",

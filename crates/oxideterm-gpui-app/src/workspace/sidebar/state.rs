@@ -88,9 +88,15 @@ impl WorkspaceApp {
         if !collapsed {
             self.sidebar_rendered = true;
             if was_collapsed && self.session_manager_sidebar_visible() {
-                // Defer SSH config scan off frame 0 so the expand spring hits VSync without stalling.
+                // Defer SSH config scan until the drawer expand spring settles so disk scans never drop frames.
+                let settle_delay = oxideterm_gpui_ui::motion::settle_duration(
+                    &self.tokens,
+                    oxideterm_gpui_ui::motion::MotionDuration::Control,
+                );
                 cx.spawn(async move |weak, cx| {
-                    Timer::after(Duration::from_millis(16)).await;
+                    if !settle_delay.is_zero() {
+                        Timer::after(settle_delay).await;
+                    }
                     let _ = weak.update(cx, |this, cx| {
                         if !this.sidebar_collapsed
                             && this.sidebar_motion_generation == generation
@@ -236,7 +242,31 @@ impl WorkspaceApp {
         self.clear_ai_sidebar_keyboard_focus(cx);
         let was_visible = self.session_manager_sidebar_visible();
         let was_collapsed = self.sidebar_collapsed;
+        let previous_panel = self.effective_sidebar_panel_section();
         self.active_sidebar_section = section;
+        let next_panel = self.effective_sidebar_panel_section();
+        if !was_collapsed && previous_panel != next_panel && self.tokens.motion.enabled {
+            self.sidebar_section_motion_generation =
+                self.sidebar_section_motion_generation.wrapping_add(1);
+            let transition_gen = self.sidebar_section_motion_generation;
+            self.sidebar_section_transition = Some((next_panel, transition_gen));
+            let settle_delay = oxideterm_gpui_ui::motion::settle_duration(
+                &self.tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            );
+            cx.spawn(async move |weak, cx| {
+                Timer::after(settle_delay).await;
+                let _ = weak.update(cx, |this, cx| {
+                    if this.sidebar_section_transition == Some((next_panel, transition_gen)) {
+                        this.sidebar_section_transition = None;
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        } else {
+            self.sidebar_section_transition = None;
+        }
         if section == SidebarSection::Extensions {
             self.bootstrap_native_plugin_runtime(cx);
         }
@@ -282,7 +312,6 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
         self.set_sidebar_collapsed_with_motion(!self.sidebar_collapsed, cx);
         self.sidebar_resizing = false;
-        self.sidebar_resize_hotzone_hovered = false;
         self.persist_sidebar_settings(cx);
         cx.notify();
     }
@@ -512,7 +541,6 @@ impl WorkspaceApp {
         self.ai_entity.update(cx, |ai, _cx| {
             ai.set_chat_sidebar_resizing(false);
         });
-        self.sidebar_resize_hotzone_hovered = false;
         self.sync_host_tools_lifecycle(false, cx);
         self.clear_ai_sidebar_keyboard_focus(cx);
         self.close_ai_sidebar_popovers(cx);

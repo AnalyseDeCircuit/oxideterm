@@ -366,6 +366,13 @@ impl WorkspaceApp {
             );
         }
 
+        let popup = oxideterm_gpui_ui::motion::popover_zoom_enter(
+            &self.tokens,
+            "path-completion-popup",
+            div().child(oxideterm_gpui_ui::modal::overlay_content_boundary(popup)),
+            -4.0,
+            gpui::point(0.5, 0.0),
+        );
         Some(
             deferred(
                 anchored()
@@ -373,7 +380,7 @@ impl WorkspaceApp {
                     .position(anchor.bounds.bottom_left())
                     .offset(gpui::point(px(0.0), px(PATH_COMPLETION_POPUP_GAP)))
                     .position_mode(AnchoredPositionMode::Window)
-                    .child(oxideterm_gpui_ui::modal::overlay_content_boundary(popup)),
+                    .child(popup),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
             .into_any_element(),

@@ -1116,7 +1116,13 @@ impl TextEditorView {
                         .anchor(Anchor::TopLeft)
                         .position(gpui::point(px(x), px(y)))
                         .position_mode(AnchoredPositionMode::Window)
-                        .child(popup),
+                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                            &self.language_notice_tokens,
+                            "editor-context-menu-motion",
+                            div().child(popup),
+                            -4.0,
+                            gpui::point(0.0, 0.0),
+                        )),
                 )
                 .with_priority(CM_CONTEXT_MENU_Z),
             )

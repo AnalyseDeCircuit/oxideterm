@@ -233,13 +233,24 @@ impl WorkspaceApp {
             cx,
         ));
 
+        let menu_visible = self.sftp_view().read(cx).context_menu_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
         self.workspace_context_menu_backdrop(
             deferred(
                 anchored()
                     .anchor(Corner::TopLeft)
                     .position(gpui::point(px(placement.x), px(placement.y)))
                     .position_mode(AnchoredPositionMode::Window)
-                    .child(overlay_content_boundary(popup)),
+                    .child(oxideterm_gpui_ui::motion::zoom_fade_y(
+                        &self.tokens,
+                        "sftp-context-menu-motion",
+                        div().child(overlay_content_boundary(popup)),
+                        -4.0,
+                        0.95,
+                        gpui::point(0.0, 0.0),
+                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                        menu_visible,
+                    )),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
             cx,
@@ -487,7 +498,13 @@ impl WorkspaceApp {
                     .anchor(Corner::TopLeft)
                     .position(gpui::point(px(placement.x), px(placement.y)))
                     .position_mode(AnchoredPositionMode::Window)
-                    .child(overlay_content_boundary(popup)),
+                    .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                        &self.tokens,
+                        "sftp-bookmark-menu-motion",
+                        div().child(overlay_content_boundary(popup)),
+                        -6.0,
+                        gpui::point(0.5, 0.0),
+                    )),
             )
             .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
             cx,

@@ -569,9 +569,9 @@ impl UiMotion {
         Self {
             enabled: true,
             spatial_enabled: true,
-            short_duration_ms: 120,
-            normal_duration_ms: 200,
-            long_duration_ms: 300,
+            short_duration_ms: 90,
+            normal_duration_ms: 150,
+            long_duration_ms: 220,
         }
     }
 
@@ -595,9 +595,9 @@ impl UiMotion {
             UiMotionProfile::Fast => Self {
                 enabled: true,
                 spatial_enabled: true,
-                short_duration_ms: 70,
-                normal_duration_ms: 110,
-                long_duration_ms: 160,
+                short_duration_ms: 75,
+                normal_duration_ms: 120,
+                long_duration_ms: 175,
             },
         }
     }

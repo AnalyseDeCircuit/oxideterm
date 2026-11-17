@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "Troppi tentativi non riusciti. Attendi 30 secondi prima di riprovare.",
       "app_lock_operation_failed": "Impossibile aggiornare la credenziale di blocco.",
       "app_lock_unavailable": "L’archivio sicuro delle credenziali non è disponibile su questo dispositivo.",
+      "app_lock_state_unavailable": "Impossibile leggere o salvare lo stato del blocco. Controlla i permessi della cartella dei dati.",
       "app_lock_pending": "Salvataggio...",
       "app_lock_locked_title": "OxideTerm è bloccato",
       "app_lock_locked_description": "Il contenuto dell’area di lavoro è nascosto. Le connessioni attive e le attività in background continuano a funzionare.",

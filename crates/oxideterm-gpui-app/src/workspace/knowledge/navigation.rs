@@ -599,7 +599,13 @@ impl WorkspaceApp {
                         gpui::anchored()
                             .position(position)
                             .position_mode(gpui::AnchoredPositionMode::Window)
-                            .child(panel),
+                            .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                                &self.tokens,
+                                "knowledge-action-menu",
+                                div().child(panel),
+                                -4.0,
+                                gpui::point(0.5, 0.0),
+                            )),
                     )
                     .with_priority(oxideterm_gpui_ui::modal::TAURI_SELECT_LAYER_PRIORITY),
                 )

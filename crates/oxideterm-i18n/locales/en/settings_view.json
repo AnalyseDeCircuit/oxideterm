@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "Too many failed attempts. Wait 30 seconds before trying again.",
       "app_lock_operation_failed": "The application lock credential could not be updated.",
       "app_lock_unavailable": "Secure credential storage is unavailable on this device.",
+      "app_lock_state_unavailable": "Could not read or save the app lock state. Check permissions on the data folder.",
       "app_lock_pending": "Saving...",
       "app_lock_locked_title": "OxideTerm is locked",
       "app_lock_locked_description": "Workspace content is hidden. Active connections and background tasks continue running.",

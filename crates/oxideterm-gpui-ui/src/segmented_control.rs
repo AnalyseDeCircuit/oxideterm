@@ -294,7 +294,7 @@ mod tests {
         cx.executor().advance_clock(Duration::from_millis(50));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let moving = cx.debug_bounds("indicator").unwrap().left();
-        assert!((f32::from(moving) - 66.3).abs() <= 0.6);
+        assert!((f32::from(moving) - 89.1).abs() <= 0.6);
         view.update(cx, |view, cx| {
             view.previous = 3;
             view.index = 1;
@@ -325,8 +325,8 @@ mod tests {
         for (profile, expected) in [
             (UiMotionProfile::Off, None),
             (UiMotionProfile::Reduced, Some((120, false))),
-            (UiMotionProfile::Normal, Some((200, true))),
-            (UiMotionProfile::Fast, Some((110, true))),
+            (UiMotionProfile::Normal, Some((150, true))),
+            (UiMotionProfile::Fast, Some((120, true))),
         ] {
             let mut tokens = default_tokens();
             tokens.motion = UiMotion::from_profile(profile);

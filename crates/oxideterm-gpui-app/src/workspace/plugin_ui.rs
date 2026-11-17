@@ -1462,7 +1462,13 @@ impl WorkspaceApp {
                                 px(self.tokens.metrics.settings_select_popup_gap),
                             ))
                             .position_mode(AnchoredPositionMode::Window)
-                            .child(overlay_content_boundary(popup)),
+                            .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                                &self.tokens,
+                                "native-plugin-select-popup",
+                                div().child(overlay_content_boundary(popup)),
+                                -4.0,
+                                point(0.5, 0.0),
+                            )),
                     )
                     .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
                 )

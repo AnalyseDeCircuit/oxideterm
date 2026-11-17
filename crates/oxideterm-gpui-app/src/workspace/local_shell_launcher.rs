@@ -3,7 +3,7 @@ use super::*;
 use oxideterm_gpui_ui::{
     ToolbarButtonOptions,
     button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant},
-    modal::{dismissible_dialog_backdrop, overlay_content_boundary},
+    modal::overlay_content_boundary,
 };
 
 const LOCAL_SHELL_LAUNCHER_WIDTH: f32 = 480.0; // Match the Tauri shell launcher dialog width.
@@ -185,15 +185,7 @@ impl WorkspaceApp {
         }
 
         let selected_is_default = selected_shell_id.as_deref() == default_shell_id.as_deref();
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_local_shell_launcher(cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(overlay_content_boundary(
+        let card = overlay_content_boundary(
                 div()
                     .w(px(LOCAL_SHELL_LAUNCHER_WIDTH))
                     .max_w_full()
@@ -298,6 +290,25 @@ impl WorkspaceApp {
                                     )),
                             ),
                     ),
+            );
+        oxideterm_gpui_ui::modal::staged_overlay_root()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, _window, cx| {
+                    this.close_local_shell_launcher(cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(oxideterm_gpui_ui::modal::staged_overlay_scrim(
+                &self.tokens,
+                "local-shell-launcher-scrim",
+                oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
+                true,
+            ))
+            .child(oxideterm_gpui_ui::motion::form_enter(
+                &self.tokens,
+                "local-shell-launcher-enter",
+                div().child(card),
             ))
             .into_any_element()
     }

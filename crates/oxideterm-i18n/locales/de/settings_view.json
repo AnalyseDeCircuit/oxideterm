@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "Zu viele Fehlversuche. Warte 30 Sekunden und versuche es erneut.",
       "app_lock_operation_failed": "Die Anmeldedaten der Anwendungssperre konnten nicht aktualisiert werden.",
       "app_lock_unavailable": "Der sichere Anmeldedatenspeicher ist auf diesem Gerät nicht verfügbar.",
+      "app_lock_state_unavailable": "Der Status der Anwendungssperre konnte nicht gelesen oder gespeichert werden. Prüfe die Zugriffsrechte für den Datenordner.",
       "app_lock_pending": "Wird gespeichert...",
       "app_lock_locked_title": "OxideTerm ist gesperrt",
       "app_lock_locked_description": "Der Inhalt des Arbeitsbereichs ist ausgeblendet. Aktive Verbindungen und Hintergrundaufgaben laufen weiter.",

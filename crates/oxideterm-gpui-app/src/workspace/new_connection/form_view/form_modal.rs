@@ -427,7 +427,7 @@ impl WorkspaceApp {
         // A long scrolling form uses an opaque theme surface: underlying text
         // must not bleed through, and live backdrop blur would add GPU work
         // to every scroll frame.
-        modal_backdrop(dialog_backdrop_color())
+        oxideterm_gpui_ui::modal::staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
@@ -438,6 +438,12 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .child(oxideterm_gpui_ui::modal::staged_overlay_scrim(
+                &self.tokens,
+                "new-connection-form-scrim",
+                oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
+                true,
+            ))
             .child(
                 oxideterm_gpui_ui::motion::form_transition(
                     &self.tokens,

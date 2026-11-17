@@ -260,26 +260,47 @@ where
         .on_scroll(|_, _, cx| cx.stop_propagation())
 }
 
-pub fn dialog_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
-    let dialog = crate::motion::slide_fade_in_y(
+pub fn staged_dialog_overlay(
+    tokens: &ThemeTokens,
+    id: impl Into<gpui::ElementId>,
+    role: TauriBackdropRole,
+    root: Div,
+    card: Div,
+    offset_y: f32,
+    tier: crate::motion::MotionDuration,
+    visible: bool,
+) -> AnyElement {
+    let id = id.into();
+    root.child(staged_overlay_scrim(
         tokens,
-        "dialog-content-enter",
+        (id.clone(), "scrim"),
+        role,
+        visible,
+    ))
+    .child(crate::motion::zoom_fade_y(
+        tokens,
+        (id, "card"),
+        card,
+        offset_y,
+        0.95,
+        gpui::point(0.5, 0.5),
+        tier,
+        visible,
+    ))
+    .into_any_element()
+}
+
+pub fn dialog_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElement {
+    staged_dialog_overlay(
+        tokens,
+        "dialog-content",
+        TauriBackdropRole::Dialog,
+        staged_overlay_root().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()),
         div().child(dialog),
-        12.0,
-        crate::motion::MotionDuration::Overlay,
-    );
-    // Keep scrim and foreground surface on independent motion tracks so card
-    // shadow and fill never suffer double opacity multiplication.
-    staged_overlay_root()
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(staged_overlay_scrim(
-            tokens,
-            "dialog-backdrop-enter",
-            TauriBackdropRole::Dialog,
-            true,
-        ))
-        .child(dialog)
-        .into_any_element()
+        8.0,
+        crate::motion::MotionDuration::Control,
+        true,
+    )
 }
 
 pub fn modal_container(tokens: &ThemeTokens) -> Div {

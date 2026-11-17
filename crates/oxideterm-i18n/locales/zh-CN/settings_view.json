@@ -257,6 +257,7 @@
       "app_lock_too_many_attempts": "失败次数过多，请等待 30 秒后重试。",
       "app_lock_operation_failed": "无法更新应用锁凭据。",
       "app_lock_unavailable": "此设备上的安全凭据存储不可用。",
+      "app_lock_state_unavailable": "无法读取或保存应用锁状态，请检查数据目录的访问权限。",
       "app_lock_pending": "正在保存...",
       "app_lock_locked_title": "OxideTerm 已锁定",
       "app_lock_locked_description": "工作区内容已隐藏，现有连接和后台任务仍会继续运行。",

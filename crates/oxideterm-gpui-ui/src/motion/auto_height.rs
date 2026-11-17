@@ -241,7 +241,7 @@ mod tests {
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(0.0));
-        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.executor().advance_clock(Duration::from_millis(45));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 64.1).abs() <= 0.5);
         view.update(cx, |view, cx| {
@@ -254,7 +254,7 @@ mod tests {
             "removed content must not be retained for exit animation"
         );
         assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 64.1).abs() <= 0.5);
-        cx.executor().advance_clock(Duration::from_millis(60));
+        cx.executor().advance_clock(Duration::from_millis(45));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 14.5).abs() <= 0.6);
         cx.executor().advance_clock(Duration::from_millis(120));
@@ -363,9 +363,9 @@ mod tests {
             );
             if animated {
                 let half = if profile == UiMotionProfile::Fast {
-                    35
+                    38
                 } else {
-                    60
+                    45
                 };
                 cx.executor().advance_clock(Duration::from_millis(half));
                 cx.update(|window, cx| window.draw(cx).clear(cx));
