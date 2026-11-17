@@ -10,7 +10,9 @@ use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
     PrivilegePromptType, PrivilegeResponseMode,
 };
+pub(in crate::workspace) use oxideterm_gpui_settings_view::SettingsNavigationDraftAction;
 use oxideterm_gpui_settings_view::{SettingsInput, SettingsKeybindingScopeFilter};
+use oxideterm_gpui_settings_view::{SettingsRouteSnapshot, SettingsRouteState};
 use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
 use oxideterm_settings_model::{
     AiSettingsPage, SettingsNavigationLayout, SettingsTab, TerminalSettingsPage,
@@ -333,67 +335,6 @@ fn is_theme_editor_input(input: SettingsInput) -> bool {
         )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) struct SettingsRouteSnapshot {
-    pub(in crate::workspace) active_tab: SettingsTab,
-    pub(in crate::workspace) terminal_page: TerminalSettingsPage,
-    pub(in crate::workspace) previous_terminal_page: TerminalSettingsPage,
-    pub(in crate::workspace) ai_page: AiSettingsPage,
-    pub(in crate::workspace) previous_ai_page: AiSettingsPage,
-}
-
-/// Keeps settings route history and its navigation editor draft under one writer.
-struct SettingsRouteState {
-    active_tab: SettingsTab,
-    terminal_page: TerminalSettingsPage,
-    previous_terminal_page: TerminalSettingsPage,
-    ai_page: AiSettingsPage,
-    previous_ai_page: AiSettingsPage,
-    navigation_draft: Option<Arc<SettingsNavigationLayout>>,
-}
-
-impl Default for SettingsRouteState {
-    fn default() -> Self {
-        Self {
-            active_tab: SettingsTab::General,
-            terminal_page: TerminalSettingsPage::Display,
-            previous_terminal_page: TerminalSettingsPage::Display,
-            ai_page: AiSettingsPage::General,
-            previous_ai_page: AiSettingsPage::General,
-            navigation_draft: None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum SettingsNavigationDraftAction {
-    MoveTabBefore {
-        tab: SettingsTab,
-        target: SettingsTab,
-    },
-    MoveTabToGroupStart {
-        tab: SettingsTab,
-        group_index: usize,
-    },
-    MoveTabToGroupEnd {
-        tab: SettingsTab,
-        group_index: usize,
-    },
-    MoveGroupToPosition {
-        source_index: usize,
-        target_index: usize,
-    },
-    MoveGroupToEnd {
-        source_index: usize,
-    },
-    RemoveEmptyGroup {
-        group_index: usize,
-    },
-    AddGroup,
-    AddGroupWithTab(SettingsTab),
-    RestoreDefault,
-}
-
 /// Owns settings work that must complete independently from root rendering.
 pub(in crate::workspace) struct SettingsWorkspaceEntity {
     pub(super) theme_background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
@@ -699,13 +640,7 @@ impl SettingsWorkspaceEntity {
     }
 
     pub(in crate::workspace) fn route_snapshot(&self) -> SettingsRouteSnapshot {
-        SettingsRouteSnapshot {
-            active_tab: self.route.active_tab,
-            terminal_page: self.route.terminal_page,
-            previous_terminal_page: self.route.previous_terminal_page,
-            ai_page: self.route.ai_page,
-            previous_ai_page: self.route.previous_ai_page,
-        }
+        self.route.route_snapshot()
     }
 
     pub(in crate::workspace) fn set_active_tab(
@@ -713,12 +648,11 @@ impl SettingsWorkspaceEntity {
         tab: SettingsTab,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.route.active_tab == tab {
+        if !self.route.set_active_tab(tab) {
             return false;
         }
         self.totp_draft = None;
         self.totp_error = None;
-        self.route.active_tab = tab;
         if tab == SettingsTab::Connections {
             self.refresh_known_hosts(cx);
         }
@@ -731,13 +665,11 @@ impl SettingsWorkspaceEntity {
         page: TerminalSettingsPage,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.route.terminal_page == page {
-            return false;
+        let changed = self.route.set_terminal_page(page);
+        if changed {
+            cx.notify();
         }
-        self.route.previous_terminal_page = self.route.terminal_page;
-        self.route.terminal_page = page;
-        cx.notify();
-        true
+        changed
     }
 
     pub(in crate::workspace) fn set_ai_page(
@@ -745,13 +677,11 @@ impl SettingsWorkspaceEntity {
         page: AiSettingsPage,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.route.ai_page == page {
-            return false;
+        let changed = self.route.set_ai_page(page);
+        if changed {
+            cx.notify();
         }
-        self.route.previous_ai_page = self.route.ai_page;
-        self.route.ai_page = page;
-        cx.notify();
-        true
+        changed
     }
 
     pub(in crate::workspace) fn open_navigation_editor(
@@ -759,27 +689,24 @@ impl SettingsWorkspaceEntity {
         persisted_groups: &[Vec<String>],
         cx: &mut Context<Self>,
     ) {
-        self.route.navigation_draft = Some(Arc::new(
-            SettingsNavigationLayout::from_persisted_groups(persisted_groups),
-        ));
+        self.route.open_navigation_editor(persisted_groups);
         cx.notify();
     }
 
     pub(in crate::workspace) fn close_navigation_editor(&mut self, cx: &mut Context<Self>) {
-        if self.route.navigation_draft.take().is_some() {
+        if self.route.close_navigation_editor() {
             cx.notify();
         }
     }
 
-    /// Returns a shallow immutable render snapshot of the navigation draft.
     pub(in crate::workspace) fn navigation_draft_snapshot(
         &self,
     ) -> Option<Arc<SettingsNavigationLayout>> {
-        self.route.navigation_draft.as_ref().map(Arc::clone)
+        self.route.navigation_draft_snapshot()
     }
 
     pub(in crate::workspace) fn navigation_editor_open(&self) -> bool {
-        self.route.navigation_draft.is_some()
+        self.route.navigation_editor_open()
     }
 
     pub(in crate::workspace) fn apply_navigation_draft_action(
@@ -787,74 +714,20 @@ impl SettingsWorkspaceEntity {
         action: SettingsNavigationDraftAction,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(layout) = self.route.navigation_draft.as_mut() else {
-            return false;
-        };
-        let layout = Arc::make_mut(layout);
-        let changed = match action {
-            SettingsNavigationDraftAction::MoveTabBefore { tab, target } => {
-                layout.move_tab_to_position(tab, target)
-            }
-            SettingsNavigationDraftAction::MoveTabToGroupStart { tab, group_index } => {
-                layout.move_tab_to_group_start(tab, group_index)
-            }
-            SettingsNavigationDraftAction::MoveTabToGroupEnd { tab, group_index } => {
-                layout.move_tab_to_group_end(tab, group_index)
-            }
-            SettingsNavigationDraftAction::MoveGroupToPosition {
-                source_index,
-                target_index,
-            } => layout.move_group_to_position(source_index, target_index),
-            SettingsNavigationDraftAction::MoveGroupToEnd { source_index } => {
-                layout.move_group_to_end(source_index)
-            }
-            SettingsNavigationDraftAction::RemoveEmptyGroup { group_index } => {
-                layout.remove_empty_group(group_index)
-            }
-            SettingsNavigationDraftAction::AddGroup => {
-                layout.add_group();
-                true
-            }
-            SettingsNavigationDraftAction::AddGroupWithTab(tab) => {
-                layout.add_group();
-                let destination_group = layout.group_count() - 1;
-                // The group addition is itself a state change even if a
-                // malformed draft no longer contains the requested page.
-                let _ = layout.move_tab_to_group_end(tab, destination_group);
-                true
-            }
-            SettingsNavigationDraftAction::RestoreDefault => {
-                if layout.is_default() {
-                    false
-                } else {
-                    *layout = SettingsNavigationLayout::default();
-                    true
-                }
-            }
-        };
+        let changed = self.route.apply_navigation_draft_action(action);
         if changed {
             cx.notify();
         }
         changed
     }
 
-    /// Closes the editor and serializes only the persistence payload.
     pub(in crate::workspace) fn take_navigation_editor_persisted_groups(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<Vec<Vec<String>>> {
-        let layout = self.route.navigation_draft.take()?;
-        let serialized_groups = layout.to_persisted_groups();
-        let default_groups = SettingsNavigationLayout::default().to_persisted_groups();
-        // Empty groups are not persisted, so compare serialized forms before
-        // choosing the "follow future product defaults" empty payload.
-        let persisted_groups = if serialized_groups == default_groups {
-            Vec::new()
-        } else {
-            serialized_groups
-        };
+        let groups = self.route.take_navigation_editor_persisted_groups()?;
         cx.notify();
-        Some(persisted_groups)
+        Some(groups)
     }
 
     pub(in crate::workspace) fn launch_at_login_snapshot(&self) -> LaunchAtLoginSnapshot {

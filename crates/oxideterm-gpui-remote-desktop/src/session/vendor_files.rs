@@ -1,7 +1,15 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use super::panel::{DesktopChrome, LucideIcon};
 use super::*;
+use gpui::{AnyElement, MouseButton, PathPromptOptions, relative};
+use oxideterm_gpui_ui::{
+    ScrollableElement,
+    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
+    modal::{dialog_overlay, modal_body, modal_container, modal_footer, modal_header},
+};
+use oxideterm_i18n::I18n;
 
 #[derive(Clone, Debug)]
 pub(super) struct RemoteDesktopVncDownloadProgress {
@@ -153,168 +161,125 @@ impl RemoteDesktopSessionEntity {
     }
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn open_vnc_file_browser(
-        &mut self,
-        tab_id: TabId,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) else {
+impl RemoteDesktopSessionEntity {
+    pub(super) fn open_vnc_file_browser(&mut self, cx: &mut Context<Self>) {
+        if !self.vnc_file_download_available() {
             return;
-        };
-        session_entity.update(cx, |session, cx| {
-            if !session.vnc_file_download_available() {
-                return;
-            }
-            session.vnc_files.open = true;
-            if session.vnc_files.entries.is_empty()
-                && session.vnc_files.pending_request_id.is_none()
-            {
-                session.request_vnc_file_list(session.vnc_files.current_path.clone());
-            }
+        }
+        self.vnc_files.open = true;
+        if self.vnc_files.entries.is_empty() && self.vnc_files.pending_request_id.is_none() {
+            self.request_vnc_file_list(self.vnc_files.current_path.clone());
+        }
+        cx.notify();
+    }
+
+    fn close_vnc_file_browser(&mut self, cx: &mut Context<Self>) {
+        self.vnc_files.open = false;
+        cx.notify();
+    }
+
+    fn navigate_vnc_file_browser(&mut self, path: String, cx: &mut Context<Self>) {
+        if self.vnc_files.pending_request_id.is_none() && self.vnc_files.transfer.is_none() {
+            self.request_vnc_file_list(path);
             cx.notify();
-        });
-    }
-
-    fn close_vnc_file_browser(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
-        if let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) {
-            session_entity.update(cx, |session, cx| {
-                session.vnc_files.open = false;
-                cx.notify();
-            });
         }
     }
 
-    fn navigate_vnc_file_browser(&mut self, tab_id: TabId, path: String, cx: &mut Context<Self>) {
-        if let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) {
-            session_entity.update(cx, |session, cx| {
-                if session.vnc_files.pending_request_id.is_none()
-                    && session.vnc_files.transfer.is_none()
-                {
-                    session.request_vnc_file_list(path);
-                    cx.notify();
-                }
-            });
+    fn toggle_vnc_file_selection(&mut self, path: String, cx: &mut Context<Self>) {
+        if !self.vnc_files.selected_paths.remove(&path) {
+            self.vnc_files.selected_paths.insert(path);
         }
-    }
-
-    fn toggle_vnc_file_selection(&mut self, tab_id: TabId, path: String, cx: &mut Context<Self>) {
-        if let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) {
-            session_entity.update(cx, |session, cx| {
-                if !session.vnc_files.selected_paths.remove(&path) {
-                    session.vnc_files.selected_paths.insert(path);
-                }
-                cx.notify();
-            });
-        }
+        cx.notify();
     }
 
     fn set_vnc_file_conflict_policy(
         &mut self,
-        tab_id: TabId,
         policy: RemoteDesktopFileConflictPolicy,
         cx: &mut Context<Self>,
     ) {
-        if let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) {
-            session_entity.update(cx, |session, cx| {
-                session.vnc_files.conflict_policy = policy;
-                cx.notify();
-            });
-        }
+        self.vnc_files.conflict_policy = policy;
+        cx.notify();
     }
 
-    fn choose_vnc_download_destination(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
-        let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) else {
+    fn choose_vnc_download_destination(&mut self, i18n: &I18n, cx: &mut Context<Self>) {
+        if self.vnc_files.transfer.is_some() || self.vnc_files.selected_paths.is_empty() {
             return;
-        };
-        let (remote_paths, conflict_policy) = {
-            let session = session_entity.read(cx);
-            if session.vnc_files.transfer.is_some() || session.vnc_files.selected_paths.is_empty() {
-                return;
-            }
-            (
-                session
-                    .vnc_files
-                    .selected_paths
-                    .iter()
-                    .cloned()
-                    .collect::<Vec<_>>(),
-                session.vnc_files.conflict_policy,
-            )
-        };
+        }
+        let remote_paths = self
+            .vnc_files
+            .selected_paths
+            .iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let conflict_policy = self.vnc_files.conflict_policy;
+        let generation = self.worker_generation;
         let receiver = cx.prompt_for_paths(PathPromptOptions {
             files: false,
             directories: true,
             multiple: false,
             prompt: Some(SharedString::from(
-                self.i18n.t("remote_desktop.file_download_destination"),
+                i18n.t("remote_desktop.file_download_destination"),
             )),
         });
-        cx.spawn(async move |workspace, cx| {
-            let destination = match receiver.await {
-                Ok(Ok(Some(paths))) => paths.into_iter().next(),
-                _ => None,
-            };
-            let Some(destination) = destination else {
+
+        cx.spawn(async move |session, cx| {
+            let Ok(Ok(Some(paths))) = receiver.await else {
                 return;
             };
-            let _ = workspace.update(cx, |workspace, cx| {
-                let Some(session_entity) = workspace.remote_desktop_session_entity(tab_id, cx)
-                else {
+            let Some(destination) = paths.into_iter().next() else {
+                return;
+            };
+            let _ = session.update(cx, |session, cx| {
+                if session.worker_generation != generation
+                    || session.vnc_files.transfer.is_some()
+                    || !session.vnc_files.open
+                {
                     return;
-                };
-                session_entity.update(cx, |session, cx| {
-                    if session.vnc_files.transfer.is_some() || !session.vnc_files.open {
-                        return;
-                    }
-                    let transfer_id = uuid::Uuid::new_v4().to_string();
-                    let total_bytes = session
-                        .vnc_files
-                        .entries
-                        .iter()
-                        .filter(|entry| remote_paths.contains(&entry.path))
-                        .filter_map(|entry| entry.size)
-                        .sum();
-                    session.vnc_files.transfer = Some(RemoteDesktopVncDownloadProgress {
-                        transfer_id: transfer_id.clone(),
-                        file_name: String::new(),
-                        transferred_bytes: 0,
-                        total_bytes,
-                        completed_files: 0,
-                        total_files: u32::try_from(remote_paths.len()).unwrap_or(u32::MAX),
-                    });
-                    session.send_request(RemoteDesktopHelperRequest::VncDownloadRemoteFiles {
-                        transfer_id,
-                        remote_paths,
-                        destination,
-                        conflict_policy,
-                    });
-                    cx.notify();
+                }
+                let transfer_id = uuid::Uuid::new_v4().to_string();
+                let total_bytes = session
+                    .vnc_files
+                    .entries
+                    .iter()
+                    .filter(|entry| remote_paths.contains(&entry.path))
+                    .filter_map(|entry| entry.size)
+                    .sum();
+                session.vnc_files.transfer = Some(RemoteDesktopVncDownloadProgress {
+                    transfer_id: transfer_id.clone(),
+                    file_name: String::new(),
+                    transferred_bytes: 0,
+                    total_bytes,
+                    completed_files: 0,
+                    total_files: u32::try_from(remote_paths.len()).unwrap_or(u32::MAX),
                 });
+                session.send_request(RemoteDesktopHelperRequest::VncDownloadRemoteFiles {
+                    transfer_id,
+                    remote_paths,
+                    destination,
+                    conflict_policy,
+                });
+                cx.notify();
             });
         })
         .detach();
     }
 
-    fn cancel_vnc_file_download(&mut self, tab_id: TabId, cx: &mut Context<Self>) {
-        if let Some(session_entity) = self.remote_desktop_session_entity(tab_id, cx) {
-            session_entity.update(cx, |session, cx| {
-                let Some(transfer) = session.vnc_files.transfer.as_ref() else {
-                    return;
-                };
-                session.send_request(RemoteDesktopHelperRequest::CancelVncFileTransfer {
-                    transfer_id: transfer.transfer_id.clone(),
-                });
-                cx.notify();
-            });
-        }
+    fn cancel_vnc_file_download(&mut self, cx: &mut Context<Self>) {
+        let Some(transfer) = self.vnc_files.transfer.as_ref() else {
+            return;
+        };
+        self.send_request(RemoteDesktopHelperRequest::CancelVncFileTransfer {
+            transfer_id: transfer.transfer_id.clone(),
+        });
+        cx.notify();
     }
+}
 
+impl DesktopChrome<'_> {
     pub(super) fn render_vnc_file_browser(
         &self,
-        tab_id: TabId,
         browser: RemoteDesktopVncFileBrowserState,
-        cx: &mut Context<Self>,
+        cx: &mut Context<RemoteDesktopSessionEntity>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
         let loading = browser.pending_request_id.is_some();
@@ -324,107 +289,104 @@ impl WorkspaceApp {
             browser.current_path.clone()
         };
         let parent_path = remote_vnc_parent_path(&browser.current_path);
-        let rows = if loading {
-            vec![self.render_vnc_file_browser_message(
-                self.i18n.t("remote_desktop.file_browser_loading"),
-            )]
-        } else if browser.list_failed {
-            vec![
-                self.render_vnc_file_browser_message(
+        let rows =
+            if loading {
+                vec![self.render_vnc_file_browser_message(
+                    self.i18n.t("remote_desktop.file_browser_loading"),
+                )]
+            } else if browser.list_failed {
+                vec![self.render_vnc_file_browser_message(
                     self.i18n.t("remote_desktop.file_browser_failed"),
-                ),
-            ]
-        } else if browser.entries.is_empty() {
-            vec![
-                self.render_vnc_file_browser_message(
+                )]
+            } else if browser.entries.is_empty() {
+                vec![self.render_vnc_file_browser_message(
                     self.i18n.t("remote_desktop.file_browser_empty"),
-                ),
-            ]
-        } else {
-            browser
-                .entries
-                .iter()
-                .map(|entry| {
-                    let entry_path = entry.path.clone();
-                    let is_directory = entry.kind == RemoteDesktopRemoteFileKind::Directory;
-                    let selected = browser.selected_paths.contains(&entry.path);
-                    let icon = if is_directory {
-                        LucideIcon::Folder
-                    } else if selected {
-                        LucideIcon::CheckSquare
-                    } else {
-                        LucideIcon::Square
-                    };
-                    let size = entry.size.map(format_remote_file_size).unwrap_or_default();
-                    let modified = entry
-                        .modified_seconds
-                        .and_then(|seconds| i64::try_from(seconds).ok())
-                        .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
-                        .map(|timestamp| {
-                            timestamp
-                                .with_timezone(&chrono::Local)
-                                .format("%Y-%m-%d %H:%M")
-                                .to_string()
-                        })
-                        .unwrap_or_default();
-                    div()
-                        .h(px(32.0))
-                        .px(px(8.0))
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .rounded(px(self.tokens.radii.sm))
-                        .cursor_pointer()
-                        .hover(|row| row.bg(rgb(theme.bg_hover)))
-                        .child(Self::render_lucide_icon(
-                            icon,
-                            14.0,
-                            rgb(if selected {
-                                theme.accent
-                            } else {
-                                theme.text_muted
-                            }),
-                        ))
-                        .child(
-                            div()
-                                .min_w(px(0.0))
-                                .flex_1()
-                                .truncate()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .text_color(rgb(theme.text))
-                                .child(entry.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .w(px(92.0))
-                                .text_right()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(theme.text_muted))
-                                .child(size),
-                        )
-                        .child(
-                            div()
-                                .w(px(116.0))
-                                .text_right()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(theme.text_muted))
-                                .child(modified),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, _window, cx| {
-                                if is_directory {
-                                    this.navigate_vnc_file_browser(tab_id, entry_path.clone(), cx);
+                )]
+            } else {
+                browser
+                    .entries
+                    .iter()
+                    .map(|entry| {
+                        let entry_path = entry.path.clone();
+                        let is_directory = entry.kind == RemoteDesktopRemoteFileKind::Directory;
+                        let selected = browser.selected_paths.contains(&entry.path);
+                        let icon = if is_directory {
+                            LucideIcon::Folder
+                        } else if selected {
+                            LucideIcon::CheckSquare
+                        } else {
+                            LucideIcon::Square
+                        };
+                        let size = entry.size.map(format_remote_file_size).unwrap_or_default();
+                        let modified = entry
+                            .modified_seconds
+                            .and_then(|seconds| i64::try_from(seconds).ok())
+                            .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+                            .map(|timestamp| {
+                                timestamp
+                                    .with_timezone(&chrono::Local)
+                                    .format("%Y-%m-%d %H:%M")
+                                    .to_string()
+                            })
+                            .unwrap_or_default();
+                        div()
+                            .h(px(32.0))
+                            .px(px(8.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.0))
+                            .rounded(px(self.tokens.radii.sm))
+                            .cursor_pointer()
+                            .hover(|row| row.bg(rgb(theme.bg_hover)))
+                            .child(Self::render_lucide_icon(
+                                icon,
+                                14.0,
+                                rgb(if selected {
+                                    theme.accent
                                 } else {
-                                    this.toggle_vnc_file_selection(tab_id, entry_path.clone(), cx);
-                                }
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .into_any_element()
-                })
-                .collect()
-        };
+                                    theme.text_muted
+                                }),
+                            ))
+                            .child(
+                                div()
+                                    .min_w(px(0.0))
+                                    .flex_1()
+                                    .truncate()
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
+                                    .text_color(rgb(theme.text))
+                                    .child(entry.name.clone()),
+                            )
+                            .child(
+                                div()
+                                    .w(px(92.0))
+                                    .text_right()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(size),
+                            )
+                            .child(
+                                div()
+                                    .w(px(116.0))
+                                    .text_right()
+                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_color(rgb(theme.text_muted))
+                                    .child(modified),
+                            )
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    if is_directory {
+                                        this.navigate_vnc_file_browser(entry_path.clone(), cx);
+                                    } else {
+                                        this.toggle_vnc_file_selection(entry_path.clone(), cx);
+                                    }
+                                    cx.stop_propagation();
+                                }),
+                            )
+                            .into_any_element()
+                    })
+                    .collect()
+            };
         let progress = browser.transfer.as_ref().map(|transfer| {
             let percent = if transfer.total_bytes == 0 {
                 0.0
@@ -503,7 +465,7 @@ impl WorkspaceApp {
                                     compact_vnc_file_button(parent_path.is_none() || loading),
                                     cx.listener(move |this, _event, _window, cx| {
                                         if let Some(parent_path) = parent_path.clone() {
-                                            this.navigate_vnc_file_browser(tab_id, parent_path, cx);
+                                            this.navigate_vnc_file_browser(parent_path, cx);
                                         }
                                     }),
                                 ))
@@ -517,7 +479,6 @@ impl WorkspaceApp {
                                     compact_vnc_file_button(loading),
                                     cx.listener(move |this, _event, _window, cx| {
                                         this.navigate_vnc_file_browser(
-                                            tab_id,
                                             browser.current_path.clone(),
                                             cx,
                                         );
@@ -592,9 +553,7 @@ impl WorkspaceApp {
                                                 ..ToolbarButtonOptions::default()
                                             },
                                             cx.listener(move |this, _event, _window, cx| {
-                                                this.set_vnc_file_conflict_policy(
-                                                    tab_id, policy, cx,
-                                                );
+                                                this.set_vnc_file_conflict_policy(policy, cx);
                                             }),
                                         )
                                     }),
@@ -616,7 +575,7 @@ impl WorkspaceApp {
                             None,
                             compact_vnc_file_button(false),
                             cx.listener(move |this, _event, _window, cx| {
-                                this.close_vnc_file_browser(tab_id, cx);
+                                this.close_vnc_file_browser(cx);
                             }),
                         ))
                         .when(browser.transfer.is_some(), |footer| {
@@ -625,7 +584,7 @@ impl WorkspaceApp {
                                 None,
                                 compact_vnc_file_button(false),
                                 cx.listener(move |this, _event, _window, cx| {
-                                    this.cancel_vnc_file_download(tab_id, cx);
+                                    this.cancel_vnc_file_download(cx);
                                 }),
                             ))
                         })
@@ -649,9 +608,12 @@ impl WorkspaceApp {
                                     font_size: Some(self.tokens.metrics.ui_text_xs),
                                     ..ToolbarButtonOptions::default()
                                 },
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.choose_vnc_download_destination(tab_id, cx);
-                                }),
+                                {
+                                    let i18n = (*self.i18n).clone();
+                                    cx.listener(move |this, _event, _window, cx| {
+                                        this.choose_vnc_download_destination(&i18n, cx);
+                                    })
+                                },
                             ))
                         }),
                 ),

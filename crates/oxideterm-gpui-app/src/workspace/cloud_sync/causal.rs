@@ -3,6 +3,7 @@
 
 use super::*;
 use oxideterm_cloud_sync::operation::{PreparedSync, SyncDirection, SyncOutcome};
+use oxideterm_gpui_cloud_sync::CloudSyncDeliverySink;
 
 impl WorkspaceApp {
     pub(super) fn start_cloud_sync_password_change(&mut self, cx: &mut Context<Self>) {

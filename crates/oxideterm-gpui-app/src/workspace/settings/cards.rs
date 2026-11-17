@@ -886,8 +886,6 @@ impl WorkspaceApp {
                         .as_ref()
                         .is_some_and(|dialog| dialog.key_menu_open)
             })
-            || (matches!(anchor.id, SelectAnchorId::RemoteDesktopResizeMenu(_))
-                && self.remote_desktop_resize_menu_tab_id.is_some())
             || self
                 .settings_slider_drag
                 .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);

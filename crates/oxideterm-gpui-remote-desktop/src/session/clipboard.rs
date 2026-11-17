@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 use super::*;
+use gpui::Image;
 
 impl RemoteDesktopSessionEntity {
     pub(super) fn bind_file_clipboard(&mut self, window: &mut Window, cx: &mut Context<Self>) {

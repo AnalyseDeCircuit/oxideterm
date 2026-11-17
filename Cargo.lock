@@ -7485,6 +7485,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "gpui-pre",
+ "oxideterm-ai",
  "oxideterm-audit",
  "oxideterm-ble",
  "oxideterm-cloud-sync",
@@ -7496,6 +7497,7 @@ dependencies = [
  "oxideterm-settings",
  "oxideterm-settings-model",
  "oxideterm-theme",
+ "oxideterm-workspace",
  "serde",
  "serde_json",
  "tokio",
@@ -7613,11 +7615,21 @@ dependencies = [
 name = "oxideterm-gpui-remote-desktop"
 version = "2.3.4-beta.1"
 dependencies = [
+ "chrono",
  "gpui-pre",
  "image",
+ "oxideterm-audit",
  "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-public-mcp",
  "oxideterm-remote-desktop",
  "oxideterm-theme",
+ "oxideterm-workspace",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "uuid",
+ "zeroize",
 ]
 
 [[package]]

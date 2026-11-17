@@ -6,7 +6,7 @@ use oxideterm_public_mcp::{
     DesktopButtonState, DesktopClipboardKind, DesktopInputEvent, PublicDesktopMouseButton,
 };
 
-pub(in crate::workspace) enum RemoteDesktopPublicClipboardSnapshot {
+pub enum RemoteDesktopPublicClipboardSnapshot {
     Text(Zeroizing<String>),
     Image {
         format: RemoteDesktopClipboardFormat,
@@ -15,7 +15,7 @@ pub(in crate::workspace) enum RemoteDesktopPublicClipboardSnapshot {
 }
 
 impl RemoteDesktopSessionEntity {
-    pub(in crate::workspace) fn public_mcp_state_projection(&self) -> serde_json::Value {
+    pub fn public_mcp_state_projection(&self) -> serde_json::Value {
         let snapshot = self.state.snapshot();
         let clipboard = self.profile.session_options.clipboard;
         let image_clipboard_available = self.public_mcp_image_clipboard_available(&snapshot);
@@ -42,35 +42,27 @@ impl RemoteDesktopSessionEntity {
         })
     }
 
-    pub(in crate::workspace) fn public_mcp_frame_snapshot(
-        &self,
-    ) -> Option<oxideterm_gpui_remote_desktop::RemoteDesktopFrameSnapshot> {
+    pub fn public_mcp_frame_snapshot(&self) -> Option<crate::RemoteDesktopFrameSnapshot> {
         self.state.frame_snapshot()
     }
 
-    pub(in crate::workspace) fn attach_public_mcp_frame_observer(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn attach_public_mcp_frame_observer(&mut self, cx: &mut Context<Self>) {
         self.public_mcp_frame_observers = self.public_mcp_frame_observers.saturating_add(1);
         self.apply_frame_visibility(cx);
     }
 
-    pub(in crate::workspace) fn detach_public_mcp_frame_observer(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn detach_public_mcp_frame_observer(&mut self, cx: &mut Context<Self>) {
         self.public_mcp_frame_observers = self.public_mcp_frame_observers.saturating_sub(1);
         self.apply_frame_visibility(cx);
     }
 
-    pub(in crate::workspace) fn release_public_mcp_inputs(&mut self) {
+    pub fn release_public_mcp_inputs(&mut self) {
         // Revoking input authority releases every edge even if the client
         // disappeared between a press and its matching release.
         self.release_inputs();
     }
 
-    pub(in crate::workspace) fn apply_public_mcp_input(
+    pub fn apply_public_mcp_input(
         &mut self,
         graphics_epoch: u64,
         event: &DesktopInputEvent,
@@ -174,10 +166,7 @@ impl RemoteDesktopSessionEntity {
         Ok(())
     }
 
-    pub(in crate::workspace) fn apply_public_mcp_resize(
-        &mut self,
-        size: RemoteDesktopSize,
-    ) -> Result<(), String> {
+    pub fn apply_public_mcp_resize(&mut self, size: RemoteDesktopSize) -> Result<(), String> {
         if !self.provider.capabilities.resize {
             return Err("The remote desktop provider does not support resize".to_owned());
         }
@@ -191,7 +180,7 @@ impl RemoteDesktopSessionEntity {
         Ok(())
     }
 
-    pub(in crate::workspace) fn public_mcp_clipboard_snapshot(
+    pub fn public_mcp_clipboard_snapshot(
         &self,
         kind: DesktopClipboardKind,
     ) -> Result<RemoteDesktopPublicClipboardSnapshot, String> {
@@ -210,15 +199,12 @@ impl RemoteDesktopSessionEntity {
         }
     }
 
-    pub(in crate::workspace) fn clear_public_mcp_clipboard(&mut self) {
+    pub fn clear_public_mcp_clipboard(&mut self) {
         // The platform clipboard remains owned by the desktop UI; this only revokes MCP content.
         self.public_mcp_clipboard = None;
     }
 
-    pub(in crate::workspace) fn write_public_mcp_clipboard_text(
-        &mut self,
-        text: &str,
-    ) -> Result<(), String> {
+    pub fn write_public_mcp_clipboard_text(&mut self, text: &str) -> Result<(), String> {
         self.require_public_mcp_clipboard_write(false)?;
         self.send_request(RemoteDesktopHelperRequest::ClipboardText {
             text: text.to_owned(),
@@ -226,7 +212,7 @@ impl RemoteDesktopSessionEntity {
         Ok(())
     }
 
-    pub(in crate::workspace) fn write_public_mcp_clipboard_image(
+    pub fn write_public_mcp_clipboard_image(
         &mut self,
         format: RemoteDesktopClipboardFormat,
         bytes: &[u8],
@@ -258,7 +244,7 @@ impl RemoteDesktopSessionEntity {
 
     fn public_mcp_image_clipboard_available(
         &self,
-        snapshot: &oxideterm_gpui_remote_desktop::RemoteDesktopViewSnapshot,
+        snapshot: &crate::RemoteDesktopViewSnapshot,
     ) -> bool {
         self.provider.capabilities.clipboard_data
             && self.profile.session_options.clipboard.images

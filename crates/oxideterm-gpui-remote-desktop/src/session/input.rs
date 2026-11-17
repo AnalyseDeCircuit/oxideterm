@@ -119,24 +119,14 @@ pub(super) fn next_remote_desktop_worker_generation(current: u64) -> u64 {
     current.saturating_add(1).max(1)
 }
 
-pub(super) fn remote_desktop_paste_shortcut(
-    keystroke: &gpui::Keystroke,
-    overrides: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    remote_desktop_clipboard_shortcut(keystroke, "remoteDesktop.paste", overrides)
-}
+pub type DesktopShortcutMatcher =
+    fn(&gpui::Keystroke, &str, &serde_json::Map<String, serde_json::Value>) -> bool;
 
-pub(super) fn remote_desktop_copy_shortcut(
-    keystroke: &gpui::Keystroke,
-    overrides: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    remote_desktop_clipboard_shortcut(keystroke, "remoteDesktop.copy", overrides)
-}
-
-fn remote_desktop_clipboard_shortcut(
+pub fn desktop_shortcut_matches(
     keystroke: &gpui::Keystroke,
     action: &str,
     overrides: &serde_json::Map<String, serde_json::Value>,
+    matcher: DesktopShortcutMatcher,
 ) -> bool {
     let mut key = keystroke.clone();
     if key.key.len() == 4
@@ -147,7 +137,7 @@ fn remote_desktop_clipboard_shortcut(
     {
         key.key = key.key[3..].to_lowercase();
     }
-    crate::keybindings::keystroke_matches_action(&key, action, overrides)
+    matcher(&key, action, overrides)
 }
 
 pub(super) fn remote_desktop_shortcut_modifier_release_codes(

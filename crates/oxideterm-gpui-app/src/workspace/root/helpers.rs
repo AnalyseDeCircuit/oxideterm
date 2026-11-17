@@ -1080,7 +1080,7 @@ impl WorkspaceApp {
         if self.dismiss_terminal_highlight_popover() {
             changed = true;
         }
-        if self.remote_desktop_resize_menu_tab_id.take().is_some() {
+        if self.remote_desktop.update(cx, |desktops, _| desktops.close_resize_menu()) {
             changed = true;
         }
         if self.close_terminal_git_branch_picker(cx) {

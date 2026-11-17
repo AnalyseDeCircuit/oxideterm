@@ -114,13 +114,13 @@ use self::{
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, Animation, AnimationExt, AnyElement, AnyWindowHandle, App, Bounds,
-    ClipboardEntry, ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable,
-    FollowMode, FontWeight, Image, ImageFormat, IntoElement, KeyDownEvent, KeyUpEvent,
-    ListAlignment, ListState, ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ObjectFit, ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage,
-    Rgba, ScrollEvent, ScrollHandle, SharedString, Styled, StyledImage, Subscription, Task,
-    TextLayout, Timer, UniformListScrollHandle, Window, anchored, canvas, deferred, div,
-    prelude::*, px, relative, rgb, rgba, svg,
+    ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable, FollowMode,
+    FontWeight, Image, IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment, ListState,
+    ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
+    ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollEvent,
+    ScrollHandle, SharedString, Styled, StyledImage, Subscription, Task, TextLayout, Timer,
+    UniformListScrollHandle, Window, anchored, canvas, deferred, div, prelude::*, px, relative,
+    rgb, rgba, svg,
 };
 use oxideterm_connection_monitor::{ConnectionPoolEntryState, ConnectionPoolEntrySummary};
 use oxideterm_connections::{
@@ -347,9 +347,6 @@ const AI_PROVIDER_CARD_LIST_OVERSCAN: usize = 3;
 const AI_MCP_SERVER_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT: f32 = 156.0;
 const AI_MCP_SERVER_LIST_OVERSCAN: usize = 4;
-const CLOUD_SYNC_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 7;
-const CLOUD_SYNC_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 240.0;
-const CLOUD_SYNC_SECTION_LIST_OVERSCAN: usize = 1;
 const FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 5;
 const FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
 const FORWARDS_SECTION_LIST_OVERSCAN: usize = 2;
@@ -383,12 +380,6 @@ const OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN: usize = 6;
 const OXIDE_IMPORT_NAME_GROUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT: f32 = 28.0;
 const OXIDE_IMPORT_NAME_GROUP_LIST_OVERSCAN: usize = 6;
-const CLOUD_SYNC_ROLLBACK_BACKUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT: f32 = 72.0;
-const CLOUD_SYNC_ROLLBACK_BACKUP_LIST_OVERSCAN: usize = 4;
-const CLOUD_SYNC_HISTORY_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT: f32 = 72.0;
-const CLOUD_SYNC_HISTORY_LIST_OVERSCAN: usize = 4;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum AiCompactionNoticePhase {
@@ -1038,7 +1029,6 @@ pub(crate) struct WorkspaceApp {
     _session_manager_observation: Subscription,
     _session_manager_subscription: Subscription,
     remote_desktop: Entity<remote_desktop::RemoteDesktopWorkspaceEntity>,
-    remote_desktop_resize_menu_tab_id: Option<TabId>,
     local_shells: Vec<ShellInfo>,
     local_shell_launcher_open: bool,
     local_shell_launcher_selected_id: Option<String>,

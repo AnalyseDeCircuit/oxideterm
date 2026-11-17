@@ -263,19 +263,19 @@ impl CloudSyncPageRenderer {
                 let render = std::rc::Rc::clone(&self.render);
                 self.cloud_sync
                     .update(cx, |cloud_sync, cx| match active_tab {
-                        CloudSyncTab::Overview => {
-                            cloud_sync.render_recent_rollback_backups(render, busy, cx)
-                        }
-                        CloudSyncTab::History => {
-                            cloud_sync.render_rollback_backup_list(render, busy, cx)
-                        }
+                        CloudSyncTab::Overview => super::history::render_recent_rollback_backups(
+                            cloud_sync, render, busy, cx,
+                        ),
+                        CloudSyncTab::History => super::history::render_rollback_backup_list(
+                            cloud_sync, render, busy, cx,
+                        ),
                         CloudSyncTab::Configure => div().into_any_element(),
                     })
             }
             CloudSyncSection::History if active_tab == CloudSyncTab::History => {
                 let render = std::rc::Rc::clone(&self.render);
                 self.cloud_sync.update(cx, |cloud_sync, cx| {
-                    cloud_sync.render_history_list(render, cx)
+                    super::history::render_history_list(cloud_sync, render, cx)
                 })
             }
             CloudSyncSection::ConfigConnection if active_tab == CloudSyncTab::Configure => {

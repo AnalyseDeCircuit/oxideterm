@@ -650,23 +650,6 @@ impl CloudSyncPageRenderer {
     }
 }
 
-impl CloudSyncWorkspaceEntity {
-    pub(super) fn clear_select_focus(&mut self) {
-        browser_behavior::clear_browser_highlighted_select_focus(
-            &mut self.view.open_select,
-            &mut self.view.focused_select,
-            &mut self.view.select_focus_origin,
-            &mut self.view.select_highlighted,
-        );
-    }
-
-    fn close_select(&mut self) {
-        // Dropdown dismissal is synchronous and independent of motion settings.
-        self.view.open_select = None;
-        self.view.select_highlighted = None;
-    }
-}
-
 impl WorkspaceApp {
     pub(super) fn cloud_sync_select_options(
         &self,
@@ -782,59 +765,9 @@ impl WorkspaceApp {
         action: CloudSyncSelectAction,
         cx: &mut Context<Self>,
     ) {
-        if self.cloud_sync.read(cx).operation_in_flight() {
-            return;
-        }
-        // Tauri's Radix Select uses the same onValueChange path for mouse and
-        // keyboard selection. Keep native mutations centralized so Enter and
-        // pointer clicks cannot drift apart.
-        let trigger_select = self.cloud_sync.update(cx, |cloud_sync, _cx| match action {
-            CloudSyncSelectAction::LocalFile => {
-                cloud_sync.view.local_file_mode = true;
-                cloud_sync.view.pending_preview = None;
-                cloud_sync.view.upload_preview = None;
-                cloud_sync.view.preview_selection = None;
-                cloud_sync.view.upload_selection = None;
-                CloudSyncSelect::Backend
-            }
-            CloudSyncSelectAction::Backend(backend) => {
-                if cloud_sync.view.local_file_mode {
-                    cloud_sync.view.pending_preview = None;
-                    cloud_sync.view.upload_preview = None;
-                    cloud_sync.view.preview_selection = None;
-                    cloud_sync.view.upload_selection = None;
-                }
-                cloud_sync.view.local_file_mode = false;
-                if cloud_sync.view.form.backend_type != backend {
-                    cloud_sync.view.set_active_tab(CloudSyncTab::Configure);
-                }
-                cloud_sync.view.form.backend_type = backend.clone();
-                if matches!(backend, BackendType::Dropbox) {
-                    cloud_sync.view.form.auth_mode = AuthMode::Bearer;
-                } else if matches!(
-                    backend,
-                    BackendType::GithubGist | BackendType::Git | BackendType::S3
-                ) {
-                    cloud_sync.view.form.auth_mode = AuthMode::None;
-                }
-                CloudSyncSelect::Backend
-            }
-            CloudSyncSelectAction::AuthMode(auth_mode) => {
-                cloud_sync.view.form.auth_mode = auth_mode;
-                CloudSyncSelect::AuthMode
-            }
-            CloudSyncSelectAction::ConflictStrategy(strategy) => {
-                cloud_sync.view.form.default_conflict_strategy = strategy;
-                CloudSyncSelect::ConflictStrategy
-            }
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
+            cloud_sync.apply_select_action(action, cx);
         });
-        self.reschedule_cloud_sync_auto_upload(cx);
-        self.close_cloud_sync_select(cx);
-        self.cloud_sync.update(cx, |cloud_sync, _cx| {
-            cloud_sync.view.focused_select = Some(trigger_select);
-            cloud_sync.view.select_highlighted = None;
-        });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn handle_cloud_sync_select_key(

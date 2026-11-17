@@ -263,8 +263,7 @@ impl WorkspaceApp {
                         },
                     ));
             Ok(PendingRemoteDesktopSshTunnel::new(
-                lease_id,
-                forwarding_service,
+                move || forwarding_service.close_remote_desktop_tunnel(lease_id),
                 worker,
                 audit_context,
                 connect_audit.take(),
@@ -456,31 +455,24 @@ impl WorkspaceApp {
                 frame_slot,
                 window.window_handle(),
             );
-            if !session
-                .provider
-                .entry
-                .args
-                .iter()
-                .any(|arg| arg == "--fake")
-            {
-                session.plugin_entity = Some(self.plugin_entity.downgrade());
-            }
-            if let Some(context) = ssh_tunnel
-                .as_ref()
-                .and_then(|lease| lease.audit_context.clone())
-            {
-                // Tunnel setup and the eventual desktop share the original identity,
-                // even when UI delivery resumes outside the initiating request scope.
-                session.audit_context = Some(context);
-            }
-            session.ssh_tunnel = ssh_tunnel;
+            let plugins = self.plugin_entity.downgrade();
+            session.use_plugin_provider(move |id, cx| {
+                plugins.upgrade().and_then(|plugins| {
+                    plugins
+                        .read(cx)
+                        .remote_desktop_providers()
+                        .into_iter()
+                        .find(|provider| provider.id == id)
+                })
+            });
+            session.attach_tunnel(ssh_tunnel);
             session.install_release_handler(cx);
             session
         });
         let session_subscription = cx.subscribe(
             &session,
             move |workspace, session, event: &RemoteDesktopSessionEvent, cx| {
-                workspace.handle_remote_desktop_session_event(tab_id, &session, event, cx);
+                workspace.handle_remote_desktop_session_event(&session, event, cx);
             },
         );
         let session_observation = cx.observe(&session, |_workspace, _session, cx| {
@@ -555,11 +547,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Rendering is the authoritative mount boundary for both the main
-        // workspace and detached windows.
         self.bind_remote_desktop_window(tab_id, window.window_handle(), cx);
         self.sync_remote_desktop_frame_visibility(tab_id, cx);
-        let Some(session_entity) = self.remote_desktop.read(cx).session(tab_id) else {
+        let Some(session) = self.remote_desktop_session_entity(tab_id, cx) else {
             return div()
                 .size_full()
                 .flex()
@@ -569,298 +559,54 @@ impl WorkspaceApp {
                 .child(self.i18n.t("remote_desktop.session_missing"))
                 .into_any_element();
         };
-
-        session_entity.update(cx, |session, cx| session.bind_file_clipboard(window, cx));
-        let session = session_entity.read(cx);
-        let geometry = session.geometry.clone();
-        let certificate_challenge = session.certificate_challenge.clone();
-        let vnc_file_browser = session.vnc_files.open.then(|| session.vnc_files.clone());
-        let worker_generation = session.worker_generation;
-        let resize_menu_open = self.remote_desktop_resize_menu_tab_id == Some(tab_id);
-        let resize_session = session_entity.clone();
-        window.on_next_frame(move |window, cx| {
-            let scale_factor = Some(remote_desktop_scale_factor_percent(window.scale_factor()));
-            let _ = resize_session.update(cx, |session, cx| {
-                // Canvas geometry is final only after layout. Replaying it on
-                // the next frame makes local window/sidebar/tab changes drive
-                // resize independently from incoming remote desktop frames.
-                if session.schedule_viewport_resize(scale_factor, cx) {
-                    cx.notify();
-                }
-            });
-        });
-        let desktop_surface = div()
-            .id(("remote-desktop-surface", tab_id.0))
-            .min_h(px(0.0))
-            .flex_1()
-            .relative()
-            .on_hover({
-                let session = session_entity.clone();
-                move |hovered, window, cx| {
-                    if *hovered && window.is_window_active() {
-                        session.update(cx, |session, cx| session.sync_local_file_clipboard(cx));
+        let certificate_dialog =
+            session
+                .read(cx)
+                .certificate_prompt()
+                .map(|(generation, challenge)| {
+                    self.render_remote_desktop_certificate_dialog(tab_id, generation, challenge, cx)
+                });
+        let owner = cx.entity().downgrade();
+        render_remote_desktop_panel(
+            &session,
+            &self.remote_desktop,
+            &self.tokens,
+            &self.i18n,
+            window,
+            cx,
+            certificate_dialog,
+            move |action, window, cx| {
+                let _ = owner.update(cx, |app, cx| match action {
+                    DesktopWindowAction::FocusKeyboard(tab_id) => {
+                        app.focus_remote_desktop_keyboard(tab_id, window, cx)
                     }
-                }
-            })
-            .child(remote_desktop_surface_with_geometry(
-                &self.tokens,
-                &session.state,
-                Some(geometry),
-            ))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Pressed,
-                        cx,
-                    ) {
+                    DesktopWindowAction::Reconnect(tab_id) => {
+                        app.reconnect_remote_desktop(tab_id, window, cx);
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Pressed,
-                        cx,
-                    ) {
+                    DesktopWindowAction::Disconnect(tab_id) => {
+                        app.release_remote_desktop_inputs_for_tab(tab_id, cx);
+                        app.disconnect_remote_desktop(tab_id, window, cx);
                         cx.notify();
                     }
-                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Middle,
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Pressed,
-                        cx,
-                    ) {
-                        cx.notify();
+                    DesktopWindowAction::DismissOverlays => {
+                        app.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                        cx.stop_propagation();
                     }
-                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Navigate(gpui::NavigationDirection::Back),
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Pressed,
-                        cx,
-                    ) {
-                        cx.notify();
+                    DesktopWindowAction::ShowCapabilityTooltip { text, position } => {
+                        app.queue_workspace_tooltip(
+                            "remote-desktop-vnc-capabilities",
+                            text,
+                            f32::from(position.x) + 12.0,
+                            f32::from(position.y) + 16.0,
+                            cx,
+                        );
                     }
-                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Navigate(gpui::NavigationDirection::Forward),
-                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Pressed,
-                        cx,
-                    ) {
-                        cx.notify();
+                    DesktopWindowAction::ClearCapabilityTooltip => {
+                        app.clear_workspace_tooltip("remote-desktop-vnc-capabilities", cx);
                     }
-                    this.focus_remote_desktop_keyboard(tab_id, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Released,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_up_out(
-                MouseButton::Left,
-                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_mouse_button_release_out(
-                        tab_id,
-                        RemoteDesktopMouseButton::Left,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Right,
-                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Released,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_up_out(
-                MouseButton::Right,
-                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_mouse_button_release_out(
-                        tab_id,
-                        RemoteDesktopMouseButton::Right,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Middle,
-                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Released,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_up_out(
-                MouseButton::Middle,
-                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_mouse_button_release_out(
-                        tab_id,
-                        RemoteDesktopMouseButton::Middle,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Navigate(gpui::NavigationDirection::Back),
-                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Released,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_up_out(
-                MouseButton::Navigate(gpui::NavigationDirection::Back),
-                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_mouse_button_release_out(
-                        tab_id,
-                        RemoteDesktopMouseButton::Back,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_mouse_up(
-                MouseButton::Navigate(gpui::NavigationDirection::Forward),
-                cx.listener(move |this, event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_gpui_mouse_button(
-                        tab_id,
-                        event.position,
-                        event.button,
-                        RemoteDesktopMouseButtonState::Released,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_up_out(
-                MouseButton::Navigate(gpui::NavigationDirection::Forward),
-                cx.listener(move |this, _event: &MouseUpEvent, _window, cx| {
-                    if this.handle_remote_desktop_mouse_button_release_out(
-                        tab_id,
-                        RemoteDesktopMouseButton::Forward,
-                        cx,
-                    ) {
-                        cx.notify();
-                    }
-                }),
-            )
-            .on_mouse_move(
-                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    if this.handle_remote_desktop_mouse_move(tab_id, event.position, cx) {
-                        cx.notify();
-                    }
-                    cx.stop_propagation();
-                }),
-            )
-            .on_scroll(cx.listener(move |this, event: &ScrollEvent, _window, cx| {
-                if this.handle_remote_desktop_wheel(tab_id, event.position, &event.delta, cx) {
-                    cx.notify();
-                }
-                cx.stop_propagation();
-            }));
-
-        div()
-            .size_full()
-            .min_h(px(0.0))
-            .flex()
-            .flex_col()
-            .child(desktop_surface)
-            .child(self.render_remote_desktop_footer(tab_id, cx))
-            .when(resize_menu_open, |surface| {
-                surface.child(self.workspace_context_menu_backdrop(
-                    self.render_remote_desktop_resize_menu(tab_id, window, cx),
-                    cx,
-                ))
-            })
-            .when_some(certificate_challenge, |surface, challenge| {
-                surface.child(self.render_remote_desktop_certificate_dialog(
-                    tab_id,
-                    worker_generation,
-                    challenge,
-                    cx,
-                ))
-            })
-            .when_some(vnc_file_browser, |surface, browser| {
-                surface.child(self.render_vnc_file_browser(tab_id, browser, cx))
-            })
-            .into_any_element()
+                });
+            },
+        )
     }
 }

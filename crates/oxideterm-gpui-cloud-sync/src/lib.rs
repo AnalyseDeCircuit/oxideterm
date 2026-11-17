@@ -1,14 +1,15 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Cloud Sync workspace view models and pure state transitions.
+//! Cloud Sync panel models and GPUI operation lifecycle.
 //!
-//! This crate owns Cloud Sync panel domain state that does not need
-//! `WorkspaceApp`: preview summaries, import selection rules, section/list
-//! signatures, formatting helpers, and select focus transitions.
+//! This crate owns the panel's operation mailbox, timers, form and selection
+//! state. The workspace supplies cross-feature data and applies changes to
+//! its settings, connections, and other stores.
 
 pub mod config;
 pub mod delivery;
+pub mod entity;
 pub mod form;
 pub mod format;
 pub mod guide;

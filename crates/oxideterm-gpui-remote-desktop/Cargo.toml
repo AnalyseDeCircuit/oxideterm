@@ -8,8 +8,21 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+chrono.workspace = true
 gpui.workspace = true
 image.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-public-mcp = { path = "../oxideterm-public-mcp" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+tokio.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3.23"

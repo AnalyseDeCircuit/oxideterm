@@ -630,372 +630,323 @@ impl CloudSyncListRenderProjection {
     }
 }
 
-impl CloudSyncWorkspaceEntity {
-    fn rollback_backup_list_spec() -> TauriVirtualListSpec {
-        TauriVirtualListSpec::new(
-            px(CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT),
-            CLOUD_SYNC_ROLLBACK_BACKUP_LIST_OVERSCAN,
-        )
+fn render_rollback_backup_row(
+    entity: &CloudSyncWorkspaceEntity,
+    index: usize,
+    busy: bool,
+    show_management: bool,
+    render: &CloudSyncListRenderProjection,
+    cx: &mut Context<CloudSyncWorkspaceEntity>,
+) -> AnyElement {
+    let Some(backup) = entity.controller.store.state().rollback_backups.get(index) else {
+        return div().into_any_element();
+    };
+    // The virtual callback only derives strings for this visible row.
+    let signature = cloud_sync_rollback_backup_signature(backup);
+    let id = backup.id.clone();
+    let created_at = backup.created_at.clone();
+    let summary = match cloud_sync_rollback_backup_summary_spec(backup) {
+        CloudSyncRollbackBackupSummarySpec::Metadata {
+            connections,
+            forwards,
+            quick_commands,
+            serial_profiles,
+            ble_profiles,
+            telnet_profiles,
+            sensitive_credentials,
+            plugin_settings_count,
+            size,
+        } => render.replace(
+            "plugin.cloud_sync.backup.summary_line",
+            &[
+                ("connections", connections.to_string()),
+                ("forwards", forwards.to_string()),
+                ("quickCommands", quick_commands.to_string()),
+                ("serialProfiles", serial_profiles.to_string()),
+                ("bleProfiles", ble_profiles.to_string()),
+                ("telnetProfiles", telnet_profiles.to_string()),
+                ("sensitiveCredentials", sensitive_credentials.to_string()),
+                ("pluginSettingsCount", plugin_settings_count.to_string()),
+                ("size", size),
+            ],
+        ),
+        CloudSyncRollbackBackupSummarySpec::SizeOnly(size) => size,
+    };
+    let mut actions = div()
+        .flex()
+        .items_center()
+        .gap(px(8.0))
+        .child(render.inline_button(
+            "plugin.cloud_sync.actions.restore_backup",
+            cx.listener(move |_cloud_sync, _event, _window, cx| {
+                if !busy {
+                    cx.emit(CloudSyncWorkspaceEvent::UiIntent(
+                        CloudSyncUiIntent::RestoreRollbackBackup { signature },
+                    ));
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        ));
+    if show_management {
+        actions = actions.child(render.inline_button(
+            "plugin.cloud_sync.actions.delete_backup",
+            cx.listener(move |_cloud_sync, _event, _window, cx| {
+                if !busy {
+                    cx.emit(CloudSyncWorkspaceEvent::UiIntent(
+                        CloudSyncUiIntent::DeleteRollbackBackup { signature },
+                    ));
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }),
+        ));
     }
+    cloud_sync_rollback_backup_row(
+        &render.tokens,
+        render.selectable_text(
+            SelectableTextRole::PlainDocument,
+            "cloud-sync-rollback-backup",
+            (id.as_str(), "created-at"),
+            created_at,
+            render.tokens.ui.text,
+            cx,
+        ),
+        render.selectable_text(
+            SelectableTextRole::PlainDocument,
+            "cloud-sync-rollback-backup",
+            (id.as_str(), "summary"),
+            summary,
+            render.tokens.ui.text_muted,
+            cx,
+        ),
+        actions.into_any_element(),
+    )
+}
 
-    fn history_list_spec() -> TauriVirtualListSpec {
-        TauriVirtualListSpec::new(
-            px(CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT),
-            CLOUD_SYNC_HISTORY_LIST_OVERSCAN,
-        )
-    }
-
-    fn sync_rollback_rows(&mut self) {
-        let signatures = self
-            .controller
-            .store
-            .state()
-            .rollback_backups
-            .iter()
-            .map(cloud_sync_rollback_backup_signature)
-            .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.view.rollback_backup_list_state,
-            &mut self.view.rollback_backup_list_cache.borrow_mut(),
-            "cloud-sync-rollback-backups",
-            &signatures,
-            Self::rollback_backup_list_spec(),
-        );
-    }
-
-    fn sync_history_rows(&mut self) {
-        let signatures = self
-            .controller
-            .store
-            .state()
-            .sync_history
-            .iter()
-            .map(cloud_sync_history_signature)
-            .collect::<Vec<_>>();
-        sync_tauri_variable_list_state_by_signatures(
-            &self.view.history_list_state,
-            &mut self.view.history_list_cache.borrow_mut(),
-            "cloud-sync-history",
-            &signatures,
-            Self::history_list_spec(),
-        );
-    }
-
-    fn render_rollback_backup_row(
-        &self,
-        index: usize,
-        busy: bool,
-        show_management: bool,
-        render: &CloudSyncListRenderProjection,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(backup) = self.controller.store.state().rollback_backups.get(index) else {
-            return div().into_any_element();
-        };
-        // The virtual callback only derives strings for this visible row.
-        let signature = cloud_sync_rollback_backup_signature(backup);
-        let id = backup.id.clone();
-        let created_at = backup.created_at.clone();
-        let summary = match cloud_sync_rollback_backup_summary_spec(backup) {
-            CloudSyncRollbackBackupSummarySpec::Metadata {
-                connections,
-                forwards,
-                quick_commands,
-                serial_profiles,
-                ble_profiles,
-                telnet_profiles,
-                sensitive_credentials,
-                plugin_settings_count,
-                size,
-            } => render.replace(
-                "plugin.cloud_sync.backup.summary_line",
-                &[
-                    ("connections", connections.to_string()),
-                    ("forwards", forwards.to_string()),
-                    ("quickCommands", quick_commands.to_string()),
-                    ("serialProfiles", serial_profiles.to_string()),
-                    ("bleProfiles", ble_profiles.to_string()),
-                    ("telnetProfiles", telnet_profiles.to_string()),
-                    ("sensitiveCredentials", sensitive_credentials.to_string()),
-                    ("pluginSettingsCount", plugin_settings_count.to_string()),
-                    ("size", size),
-                ],
+fn render_history_row(
+    entity: &CloudSyncWorkspaceEntity,
+    index: usize,
+    render: &CloudSyncListRenderProjection,
+    cx: &mut Context<CloudSyncWorkspaceEntity>,
+) -> AnyElement {
+    let Some(entry) = entity.controller.store.state().sync_history.get(index) else {
+        return div().into_any_element();
+    };
+    // History payloads stay in the Entity store; only this visible row is formatted.
+    let action = cloud_sync_history_action_label_key(&entry.action)
+        .map(|key| render.i18n.t(key))
+        .unwrap_or_else(|| entry.action.clone());
+    let timestamp = cloud_sync_format_timestamp(&entry.timestamp);
+    let summary = render.replace(
+        "plugin.cloud_sync.history.summary_line",
+        &[
+            ("connections", entry.summary.connections.to_string()),
+            ("forwards", entry.summary.forwards.to_string()),
+            ("quickCommands", entry.summary.quick_commands.to_string()),
+            ("serialProfiles", entry.summary.serial_profiles.to_string()),
+            ("bleProfiles", entry.summary.ble_profiles.to_string()),
+            ("telnetProfiles", entry.summary.telnet_profiles.to_string()),
+            (
+                "sensitiveCredentials",
+                entry.summary.sensitive_credentials.to_string(),
             ),
-            CloudSyncRollbackBackupSummarySpec::SizeOnly(size) => size,
-        };
-        let mut actions = div()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .child(render.inline_button(
-                "plugin.cloud_sync.actions.restore_backup",
-                cx.listener(move |_cloud_sync, _event, _window, cx| {
-                    if !busy {
-                        cx.emit(CloudSyncWorkspaceEvent::UiIntent(
-                            CloudSyncUiIntent::RestoreRollbackBackup { signature },
-                        ));
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            ));
-        if show_management {
-            actions = actions.child(render.inline_button(
-                "plugin.cloud_sync.actions.delete_backup",
-                cx.listener(move |_cloud_sync, _event, _window, cx| {
-                    if !busy {
-                        cx.emit(CloudSyncWorkspaceEvent::UiIntent(
-                            CloudSyncUiIntent::DeleteRollbackBackup { signature },
-                        ));
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            ));
-        }
-        cloud_sync_rollback_backup_row(
+            (
+                "pluginSettingsCount",
+                entry.summary.plugin_settings_count.to_string(),
+            ),
+        ],
+    );
+    let error = entry
+        .error
+        .as_deref()
+        .map(|error| render.format_error(error));
+    div()
+        .pb(px(8.0))
+        .child(cloud_sync_history_entry(
             &render.tokens,
             render.selectable_text(
                 SelectableTextRole::PlainDocument,
-                "cloud-sync-rollback-backup",
-                (id.as_str(), "created-at"),
-                created_at,
+                "cloud-sync-history-action",
+                (entry.id.as_str(), entry.action.as_str()),
+                action,
                 render.tokens.ui.text,
                 cx,
             ),
             render.selectable_text(
                 SelectableTextRole::PlainDocument,
-                "cloud-sync-rollback-backup",
-                (id.as_str(), "summary"),
-                summary,
+                "cloud-sync-history-summary",
+                (entry.id.as_str(), timestamp.as_str()),
+                format!("{timestamp} · {summary}"),
                 render.tokens.ui.text_muted,
                 cx,
             ),
-            actions.into_any_element(),
-        )
-    }
+            error.as_ref().map(|error| {
+                render.selectable_text(
+                    SelectableTextRole::PlainDocument,
+                    "cloud-sync-history-error",
+                    (entry.id.as_str(), error.as_str()),
+                    error.clone(),
+                    render.tokens.ui.error,
+                    cx,
+                )
+            }),
+        ))
+        .into_any_element()
+}
 
-    fn render_history_row(
-        &self,
-        index: usize,
-        render: &CloudSyncListRenderProjection,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let Some(entry) = self.controller.store.state().sync_history.get(index) else {
-            return div().into_any_element();
-        };
-        // History payloads stay in the Entity store; only this visible row is formatted.
-        let action = cloud_sync_history_action_label_key(&entry.action)
-            .map(|key| render.i18n.t(key))
-            .unwrap_or_else(|| entry.action.clone());
-        let timestamp = cloud_sync_format_timestamp(&entry.timestamp);
-        let summary = render.replace(
-            "plugin.cloud_sync.history.summary_line",
-            &[
-                ("connections", entry.summary.connections.to_string()),
-                ("forwards", entry.summary.forwards.to_string()),
-                ("quickCommands", entry.summary.quick_commands.to_string()),
-                ("serialProfiles", entry.summary.serial_profiles.to_string()),
-                ("bleProfiles", entry.summary.ble_profiles.to_string()),
-                ("telnetProfiles", entry.summary.telnet_profiles.to_string()),
-                (
-                    "sensitiveCredentials",
-                    entry.summary.sensitive_credentials.to_string(),
-                ),
-                (
-                    "pluginSettingsCount",
-                    entry.summary.plugin_settings_count.to_string(),
-                ),
-            ],
-        );
-        let error = entry
-            .error
-            .as_deref()
-            .map(|error| render.format_error(error));
-        div()
-            .pb(px(8.0))
-            .child(cloud_sync_history_entry(
-                &render.tokens,
-                render.selectable_text(
-                    SelectableTextRole::PlainDocument,
-                    "cloud-sync-history-action",
-                    (entry.id.as_str(), entry.action.as_str()),
-                    action,
-                    render.tokens.ui.text,
-                    cx,
-                ),
-                render.selectable_text(
-                    SelectableTextRole::PlainDocument,
-                    "cloud-sync-history-summary",
-                    (entry.id.as_str(), timestamp.as_str()),
-                    format!("{timestamp} · {summary}"),
-                    render.tokens.ui.text_muted,
-                    cx,
-                ),
-                error.as_ref().map(|error| {
-                    render.selectable_text(
-                        SelectableTextRole::PlainDocument,
-                        "cloud-sync-history-error",
-                        (entry.id.as_str(), error.as_str()),
-                        error.clone(),
-                        render.tokens.ui.error,
-                        cx,
-                    )
+pub(super) fn render_rollback_backup_list(
+    entity: &mut CloudSyncWorkspaceEntity,
+    render: std::rc::Rc<CloudSyncListRenderProjection>,
+    busy: bool,
+    cx: &mut Context<CloudSyncWorkspaceEntity>,
+) -> AnyElement {
+    entity.sync_rollback_rows();
+    let row_count = entity.controller.store.state().rollback_backups.len();
+    let state = entity.view.rollback_backup_list_state.clone();
+    let cloud_sync = cx.entity();
+    let list_render = std::rc::Rc::clone(&render);
+    let header = div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(12.0))
+        .child(render.section_title("plugin.cloud_sync.sections.rollback_backups", cx))
+        .when(row_count != 0, |header| {
+            header.child(render.inline_button(
+                "plugin.cloud_sync.actions.clear_backups",
+                cx.listener(move |_cloud_sync, _event, _window, cx| {
+                    if !busy {
+                        cx.emit(CloudSyncWorkspaceEvent::UiIntent(
+                            CloudSyncUiIntent::ClearRollbackBackups,
+                        ));
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
                 }),
             ))
-            .into_any_element()
-    }
-
-    pub(super) fn render_rollback_backup_list(
-        &mut self,
-        render: std::rc::Rc<CloudSyncListRenderProjection>,
-        busy: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.sync_rollback_rows();
-        let row_count = self.controller.store.state().rollback_backups.len();
-        let state = self.view.rollback_backup_list_state.clone();
-        let cloud_sync = cx.entity();
-        let list_render = std::rc::Rc::clone(&render);
-        let header = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .child(render.section_title("plugin.cloud_sync.sections.rollback_backups", cx))
-            .when(row_count != 0, |header| {
-                header.child(render.inline_button(
-                    "plugin.cloud_sync.actions.clear_backups",
-                    cx.listener(move |_cloud_sync, _event, _window, cx| {
-                        if !busy {
-                            cx.emit(CloudSyncWorkspaceEvent::UiIntent(
-                                CloudSyncUiIntent::ClearRollbackBackups,
-                            ));
-                        }
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ))
-            });
-        render
-            .plugin_card()
-            .child(header)
-            .child(
-                div()
-                    .h(px(
-                        row_count as f32 * CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT
-                    ))
-                    .on_scroll(|_, _, cx| cx.stop_propagation())
-                    .child(tauri_virtual_list(
-                        state,
-                        Self::rollback_backup_list_spec(),
-                        move |index, _window, cx| {
-                            cloud_sync.update(cx, |cloud_sync, cx| {
-                                cloud_sync.render_rollback_backup_row(
-                                    index,
-                                    busy,
-                                    true,
-                                    &list_render,
-                                    cx,
-                                )
-                            })
-                        },
-                    )),
-            )
-            .into_any_element()
-    }
-
-    pub(super) fn render_recent_rollback_backups(
-        &mut self,
-        render: std::rc::Rc<CloudSyncListRenderProjection>,
-        busy: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.sync_rollback_rows();
-        let row_count = self.controller.store.state().rollback_backups.len();
-        if row_count == 0 {
-            return div().into_any_element();
-        }
-        let mut card = render
-            .plugin_card()
-            .child(render.section_title("plugin.cloud_sync.sections.rollback_backups", cx));
-        for index in 0..row_count.min(3) {
-            card = card.child(self.render_rollback_backup_row(index, busy, false, &render, cx));
-        }
-        card.into_any_element()
-    }
-
-    pub(super) fn render_history_list(
-        &mut self,
-        render: std::rc::Rc<CloudSyncListRenderProjection>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.sync_history_rows();
-        let busy = self.controller.delivery_rx.is_some();
-        let row_count = self.controller.store.state().sync_history.len();
-        let body = if row_count == 0 {
-            cloud_sync_history_empty(
-                &render.tokens,
-                render.selectable_text(
-                    SelectableTextRole::NonSelectable,
-                    "cloud-sync-history",
-                    "empty",
-                    render.i18n.t("plugin.cloud_sync.history_empty"),
-                    render.tokens.ui.text_muted,
-                    cx,
-                ),
-            )
-        } else {
-            let state = self.view.history_list_state.clone();
-            let cloud_sync = cx.entity();
-            let list_render = std::rc::Rc::clone(&render);
+        });
+    render
+        .plugin_card()
+        .child(header)
+        .child(
             div()
                 .h(px(
-                    row_count as f32 * CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT
+                    row_count as f32 * CLOUD_SYNC_ROLLBACK_BACKUP_LIST_ESTIMATED_HEIGHT
                 ))
                 .on_scroll(|_, _, cx| cx.stop_propagation())
                 .child(tauri_virtual_list(
                     state,
-                    Self::history_list_spec(),
+                    CloudSyncWorkspaceEntity::rollback_backup_list_spec(),
                     move |index, _window, cx| {
                         cloud_sync.update(cx, |cloud_sync, cx| {
-                            cloud_sync.render_history_row(index, &list_render, cx)
+                            render_rollback_backup_row(
+                                cloud_sync,
+                                index,
+                                busy,
+                                true,
+                                &list_render,
+                                cx,
+                            )
                         })
                     },
-                ))
-                .into_any_element()
-        };
-        let header = div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .child(render.selectable_text(
+                )),
+        )
+        .into_any_element()
+}
+
+pub(super) fn render_recent_rollback_backups(
+    entity: &mut CloudSyncWorkspaceEntity,
+    render: std::rc::Rc<CloudSyncListRenderProjection>,
+    busy: bool,
+    cx: &mut Context<CloudSyncWorkspaceEntity>,
+) -> AnyElement {
+    entity.sync_rollback_rows();
+    let row_count = entity.controller.store.state().rollback_backups.len();
+    if row_count == 0 {
+        return div().into_any_element();
+    }
+    let mut card = render
+        .plugin_card()
+        .child(render.section_title("plugin.cloud_sync.sections.rollback_backups", cx));
+    for index in 0..row_count.min(3) {
+        card = card.child(render_rollback_backup_row(
+            entity, index, busy, false, &render, cx,
+        ));
+    }
+    card.into_any_element()
+}
+
+pub(super) fn render_history_list(
+    entity: &mut CloudSyncWorkspaceEntity,
+    render: std::rc::Rc<CloudSyncListRenderProjection>,
+    cx: &mut Context<CloudSyncWorkspaceEntity>,
+) -> AnyElement {
+    entity.sync_history_rows();
+    let busy = entity.controller.delivery_rx.is_some();
+    let row_count = entity.controller.store.state().sync_history.len();
+    let body = if row_count == 0 {
+        cloud_sync_history_empty(
+            &render.tokens,
+            render.selectable_text(
                 SelectableTextRole::NonSelectable,
                 "cloud-sync-history",
-                "title",
-                render.i18n.t("plugin.cloud_sync.sections.sync_history"),
-                render.tokens.ui.text_heading,
+                "empty",
+                render.i18n.t("plugin.cloud_sync.history_empty"),
+                render.tokens.ui.text_muted,
                 cx,
+            ),
+        )
+    } else {
+        let state = entity.view.history_list_state.clone();
+        let cloud_sync = cx.entity();
+        let list_render = std::rc::Rc::clone(&render);
+        div()
+            .h(px(
+                row_count as f32 * CLOUD_SYNC_HISTORY_LIST_ESTIMATED_HEIGHT
             ))
-            .when(row_count != 0, |header| {
-                header.child(render.inline_button(
-                    "plugin.cloud_sync.actions.clear_history",
-                    cx.listener(move |_cloud_sync, _event, _window, cx| {
-                        if !busy {
-                            cx.emit(CloudSyncWorkspaceEvent::UiIntent(
-                                CloudSyncUiIntent::ClearHistory,
-                            ));
-                        }
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ))
-            });
-        render
-            .plugin_card()
-            .child(header)
-            .child(body)
+            .on_scroll(|_, _, cx| cx.stop_propagation())
+            .child(tauri_virtual_list(
+                state,
+                CloudSyncWorkspaceEntity::history_list_spec(),
+                move |index, _window, cx| {
+                    cloud_sync.update(cx, |cloud_sync, cx| {
+                        render_history_row(cloud_sync, index, &list_render, cx)
+                    })
+                },
+            ))
             .into_any_element()
-    }
+    };
+    let header = div()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(12.0))
+        .child(render.selectable_text(
+            SelectableTextRole::NonSelectable,
+            "cloud-sync-history",
+            "title",
+            render.i18n.t("plugin.cloud_sync.sections.sync_history"),
+            render.tokens.ui.text_heading,
+            cx,
+        ))
+        .when(row_count != 0, |header| {
+            header.child(render.inline_button(
+                "plugin.cloud_sync.actions.clear_history",
+                cx.listener(move |_cloud_sync, _event, _window, cx| {
+                    if !busy {
+                        cx.emit(CloudSyncWorkspaceEvent::UiIntent(
+                            CloudSyncUiIntent::ClearHistory,
+                        ));
+                    }
+                    cx.stop_propagation();
+                    cx.notify();
+                }),
+            ))
+        });
+    render
+        .plugin_card()
+        .child(header)
+        .child(body)
+        .into_any_element()
 }

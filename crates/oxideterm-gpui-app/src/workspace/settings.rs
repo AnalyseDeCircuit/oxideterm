@@ -35,7 +35,7 @@ use oxideterm_settings_model::{
     reconnect_base_delay_options, reconnect_delay_label, reconnect_max_attempt_options,
     reconnect_max_delay_options, save_theme_editor_snapshot_to_settings,
     set_ai_tool_policy_group_approval, set_ai_user_context_window, settings_multiline_line_ranges,
-    settings_multiline_line_selection, settings_section_index,
+    settings_multiline_line_selection,
     settings_section_list_identity as settings_model_section_list_identity,
     settings_section_list_item_count as settings_model_section_list_item_count,
     settings_section_list_item_index, settings_tab_section_at, take_cloud_sync_form_input_value,
