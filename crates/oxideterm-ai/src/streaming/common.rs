@@ -13,7 +13,9 @@ use crate::AiStreamEvent;
 
 const RAW_BODY_PREVIEW_LIMIT: usize = 65_536;
 
-pub(super) async fn read_provider_error_body(response: &mut reqwest::Response) -> Zeroizing<Vec<u8>> {
+pub(super) async fn read_provider_error_body(
+    response: &mut reqwest::Response,
+) -> Zeroizing<Vec<u8>> {
     const MAX_ERROR_BODY: usize = 8 * 1024;
     let mut body = Zeroizing::new(Vec::with_capacity(MAX_ERROR_BODY));
     while let Ok(Some(chunk)) = response.chunk().await {

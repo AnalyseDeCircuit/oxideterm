@@ -601,16 +601,22 @@ fn accept_candidates(candidates: &mut Vec<scheme::Candidate>) -> Vec<SemanticSpa
             .then_with(|| right.span.range.len().cmp(&left.span.range.len()))
     });
 
-    let mut accepted = Vec::new();
+    let mut accepted = std::collections::BTreeMap::<usize, SemanticSpan>::new();
     for candidate in candidates.drain(..) {
-        if accepted.iter().any(|existing: &SemanticSpan| {
-            candidate.span.range.start < existing.range.end
-                && candidate.span.range.end > existing.range.start
-        }) {
-            continue;
+        let range = &candidate.span.range;
+        // Accepted spans are disjoint. Neighbor checks keep long wrapped output
+        // from scanning every previously accepted token for each new candidate.
+        let overlaps_before = accepted
+            .range(..=range.start)
+            .next_back()
+            .is_some_and(|(_, existing)| existing.range.end > range.start);
+        let overlaps_after = accepted
+            .range(range.start..)
+            .next()
+            .is_some_and(|(&start, _)| start < range.end);
+        if !overlaps_before && !overlaps_after {
+            accepted.insert(range.start, candidate.span);
         }
-        accepted.push(candidate.span);
     }
-    accepted.sort_by_key(|span| span.range.start);
-    accepted
+    accepted.into_values().collect()
 }

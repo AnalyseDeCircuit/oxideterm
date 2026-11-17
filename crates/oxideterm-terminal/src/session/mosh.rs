@@ -880,7 +880,12 @@ impl TerminalSessionBackend for MoshTerminalSession {
         )
     }
 
-    fn snapshot_with_display_offset(&self, display_offset: usize, rows: usize) -> TerminalSnapshot {
+    fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+        previous: Option<&TerminalSnapshot>,
+    ) -> TerminalSnapshot {
         snapshot_from_term_with_display_offset(
             &self.term.lock(),
             TerminalSize {
@@ -893,6 +898,7 @@ impl TerminalSessionBackend for MoshTerminalSession {
             &self.palette,
             display_offset,
             rows,
+            previous,
         )
     }
 

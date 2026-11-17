@@ -7005,6 +7005,7 @@ mod tests {
 
     fn timestamp_test_snapshot(row: TerminalRow) -> TerminalSnapshot {
         TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 1,
             cols: row.cells.len().max(1),
             rows: 1,
@@ -7028,6 +7029,7 @@ mod tests {
             row.source_id = 100 + index;
         }
         let previous = TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 1,
             cols: 8,
             rows: 3,

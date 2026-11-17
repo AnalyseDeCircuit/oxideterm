@@ -962,7 +962,12 @@ impl TerminalSessionBackend for SshPtyCore {
         )
     }
 
-    fn snapshot_with_display_offset(&self, display_offset: usize, rows: usize) -> TerminalSnapshot {
+    fn snapshot_with_display_offset(
+        &self,
+        display_offset: usize,
+        rows: usize,
+        previous: Option<&TerminalSnapshot>,
+    ) -> TerminalSnapshot {
         let size = TerminalSize {
             cols: self.parser_state.resize.cols,
             rows,
@@ -984,6 +989,7 @@ impl TerminalSessionBackend for SshPtyCore {
             &self.parser_state.palette,
             display_offset,
             rows,
+            previous,
         )
     }
 

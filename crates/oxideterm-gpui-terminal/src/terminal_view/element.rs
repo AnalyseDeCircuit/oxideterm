@@ -43,6 +43,7 @@ mod style;
 
 const TERMINAL_ROW_LAYOUT_CACHE_CAPACITY: usize = 512;
 const TERMINAL_HIGHLIGHT_CACHE_CAPACITY: usize = 128;
+const TERMINAL_SEMANTIC_SPAN_CACHE_BUDGET: usize = 65_536;
 const TERMINAL_LINK_CACHE_CAPACITY: usize = 512;
 const TRANSIENT_COMMAND_HIGHLIGHT_ALPHA: u32 = 0x52;
 
@@ -402,22 +403,36 @@ where
         }
     }
 
+    fn get(&self, key: &K) -> Option<V> {
+        self.entries.get(key).cloned()
+    }
+
+    fn pop_oldest(&mut self) -> Option<V> {
+        let key = self.insertion_order.pop_front()?;
+        self.entries.remove(&key)
+    }
+
+    fn insert(&mut self, key: K, value: V) -> Option<V> {
+        if let Some(previous) = self.entries.get_mut(&key) {
+            return Some(std::mem::replace(previous, value));
+        }
+        // Insertion-order eviction keeps streaming misses constant-time.
+        let evicted = if self.entries.len() >= self.capacity {
+            self.pop_oldest()
+        } else {
+            None
+        };
+        self.insertion_order.push_back(key.clone());
+        self.entries.insert(key, value);
+        evicted
+    }
+
     fn get_or_insert_with(&mut self, key: K, build: impl FnOnce() -> V) -> (V, bool) {
-        if let Some(value) = self.entries.get(&key) {
-            return (value.clone(), true);
+        if let Some(value) = self.get(&key) {
+            return (value, true);
         }
-
-        if self.entries.len() >= self.capacity
-            && let Some(oldest_key) = self.insertion_order.pop_front()
-        {
-            // Streaming output continuously misses these caches. Insertion-order eviction keeps
-            // that hot path constant-time while retaining several viewports of recent rows.
-            self.entries.remove(&oldest_key);
-        }
-
         let value = build();
-        self.entries.insert(key.clone(), value.clone());
-        self.insertion_order.push_back(key);
+        self.insert(key, value.clone());
         (value, false)
     }
 
@@ -433,6 +448,11 @@ pub(crate) struct TerminalLayoutCache {
     reuse_metrics: Option<[u32; 3]>,
     semantic_roles: RecentCache<(usize, usize, bool), SemanticLineRole>,
     semantic_marks: Option<Weak<[TerminalCommandMark]>>,
+    semantic_spans: RecentCache<
+        (u64, SemanticLineRole, u64),
+        Arc<Vec<oxideterm_terminal_semantic::SemanticSpan>>,
+    >,
+    semantic_span_count: usize,
     highlights: RecentCache<TerminalLogicalHighlightCacheKey, Arc<TerminalLogicalHighlightLayout>>,
     links: RecentCache<TerminalRowLinkCacheKey, Arc<TerminalRowLinkLayout>>,
     performance: TerminalLayoutPerformance,
@@ -448,6 +468,8 @@ impl Default for TerminalLayoutCache {
             reuse_metrics: None,
             semantic_roles: RecentCache::new(TERMINAL_ROW_LAYOUT_CACHE_CAPACITY),
             semantic_marks: None,
+            semantic_spans: RecentCache::new(TERMINAL_HIGHLIGHT_CACHE_CAPACITY),
+            semantic_span_count: 0,
             highlights: RecentCache::new(TERMINAL_HIGHLIGHT_CACHE_CAPACITY),
             links: RecentCache::new(TERMINAL_LINK_CACHE_CAPACITY),
             performance: TerminalLayoutPerformance::default(),
@@ -487,6 +509,32 @@ impl TerminalLayoutCache {
         }
         self.record_cache_access(false, collect_performance_metrics);
         layout
+    }
+
+    fn semantic_spans_for(
+        &mut self,
+        key: (u64, SemanticLineRole, u64),
+        build: impl FnOnce() -> Vec<oxideterm_terminal_semantic::SemanticSpan>,
+    ) -> Arc<Vec<oxideterm_terminal_semantic::SemanticSpan>> {
+        if let Some(spans) = self.semantic_spans.get(&key) {
+            return spans;
+        }
+        let spans = Arc::new(build());
+        if spans.len() > TERMINAL_SEMANTIC_SPAN_CACHE_BUDGET {
+            return spans;
+        }
+        while self.semantic_span_count + spans.len() > TERMINAL_SEMANTIC_SPAN_CACHE_BUDGET {
+            let evicted = self
+                .semantic_spans
+                .pop_oldest()
+                .expect("span budget belongs to cached entries");
+            self.semantic_span_count -= evicted.len();
+        }
+        if let Some(evicted) = self.semantic_spans.insert(key, spans.clone()) {
+            self.semantic_span_count -= evicted.len();
+        }
+        self.semantic_span_count += spans.len();
+        spans
     }
 
     fn get_or_insert_highlight_with(
@@ -550,6 +598,8 @@ impl TerminalLayoutCache {
         self.semantic_roles.clear();
         self.semantic_marks = None;
         self.highlights.clear();
+        self.semantic_spans.clear();
+        self.semantic_span_count = 0;
         self.links.clear();
         self.performance = TerminalLayoutPerformance::default();
         self.cache_hits = 0;
@@ -1192,11 +1242,29 @@ impl TerminalElement {
             let semantic_role = semantic_roles.get(&logical_line.range).copied();
             let key =
                 self.logical_highlight_cache_key_with_logical_line(logical_line, semantic_role);
-            let relative_layout =
+            let relative_layout = if let Some(layout) = cache.highlights.get(&key) {
+                cache.record_cache_access(true, self.performance_metrics_enabled);
+                layout
+            } else {
+                // Classification is only needed when the visible layout cannot be reused.
+                let spans = self.snapshot.logical_context_for_row(logical_line.range.start)
+                    .filter(|_| self.semantic_coloring)
+                    .map(|context| {
+                        let role = semantic_role.unwrap_or(SemanticLineRole::Unknown);
+                        cache.semantic_spans_for((context.signature, role, self.semantic_style_signature), || {
+                            oxideterm_terminal_semantic::classify_line_with_compiled_scheme_and_shell(
+                                &context.text, role, self.semantic_scheme(), self.semantic_shell,
+                            )
+                        })
+                    });
                 cache.get_or_insert_highlight_with(key, self.performance_metrics_enabled, || {
-                    let line_layout = self.highlight_layout_for_rows(logical_line.range.clone());
+                    let line_layout = self.highlight_layout_for_rows_with_spans(
+                        logical_line.range.clone(),
+                        spans.as_deref().map(Vec::as_slice),
+                    );
                     relative_highlight_layout(logical_line.range.start, line_layout)
-                });
+                })
+            };
             append_relative_highlight_layout(
                 logical_line.range.start,
                 &relative_layout,
@@ -1226,6 +1294,14 @@ impl TerminalElement {
     }
 
     fn highlight_layout_for_rows(&self, rows: Range<usize>) -> TerminalHighlightLayout {
+        self.highlight_layout_for_rows_with_spans(rows, None)
+    }
+
+    fn highlight_layout_for_rows_with_spans(
+        &self,
+        rows: Range<usize>,
+        spans: Option<&[oxideterm_terminal_semantic::SemanticSpan]>,
+    ) -> TerminalHighlightLayout {
         let transient = self.transient_command_highlight.as_ref().map(|highlight| {
             (
                 highlight,
@@ -1248,6 +1324,7 @@ impl TerminalElement {
                 self.semantic_scheme(),
                 self.semantic_shell,
                 &mut layout,
+                spans,
             );
         }
         layout
@@ -1601,6 +1678,18 @@ impl TerminalElement {
         semantic_role: Option<SemanticLineRole>,
         hasher: &mut impl Hasher,
     ) {
+        if let Some(context) = self.snapshot.logical_context_for_row(rows.start) {
+            context.signature.hash(hasher);
+            for row in rows.clone() {
+                if let Some(mapped) = context
+                    .rows
+                    .iter()
+                    .find(|mapped| mapped.source_id == self.snapshot.lines[row].source_id)
+                {
+                    mapped.columns.hash(hasher);
+                }
+            }
+        }
         self.semantic_style_signature.hash(hasher);
         if !self.semantic_coloring {
             return;
@@ -1620,7 +1709,9 @@ impl TerminalElement {
         let mut row_index = visible_rows.start;
 
         while row_index < visible_rows.end {
-            let Some(range) = logical_line_range_for_row(&self.snapshot, row_index) else {
+            let Some(range) =
+                crate::terminal_view::highlight::logical_line_range(&self.snapshot, row_index)
+            else {
                 break;
             };
             let mut hasher = DefaultHasher::new();
@@ -1680,10 +1771,13 @@ impl TerminalElement {
             let classify = || {
                 semantic_line_role_for_rows(&self.snapshot, &self.command_marks, line.range.clone())
             };
-            let role = if let Some(cache) = cache
-                .as_deref_mut()
-                .filter(|_| !self.command_marks.is_empty())
-            {
+            let role = if let Some(cache) = cache.as_deref_mut().filter(|_| {
+                !self.command_marks.is_empty()
+                    && self
+                        .snapshot
+                        .logical_context_for_row(line.range.start)
+                        .is_none()
+            }) {
                 let active_input = self
                     .snapshot
                     .lines
@@ -1894,27 +1988,6 @@ fn extend_or_push_row_rect(
         color,
         powerline_cutout: None,
     });
-}
-
-fn logical_line_range_for_row(
-    snapshot: &TerminalSnapshot,
-    row_index: usize,
-) -> Option<Range<usize>> {
-    if row_index >= snapshot.lines.len() {
-        return None;
-    }
-
-    let mut start = row_index;
-    while start > 0 && snapshot.lines.get(start).is_some_and(|line| line.wrapped) {
-        start -= 1;
-    }
-
-    let mut end = row_index + 1;
-    while end < snapshot.lines.len() && snapshot.lines.get(end).is_some_and(|line| line.wrapped) {
-        end += 1;
-    }
-
-    Some(start..end)
 }
 
 fn relative_highlight_layout(
@@ -2869,6 +2942,7 @@ mod cache_tests {
 
     fn snapshot(display_offset: usize, lines: Vec<TerminalRow>) -> TerminalSnapshot {
         TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 1,
             cols: 1,
             rows: lines.len(),
@@ -2927,6 +3001,168 @@ mod cache_tests {
             view.layout_for_bounds(bounds).search_scrollbar_markers,
             vec![]
         );
+    }
+
+    #[test]
+    fn semantic_budget_accounts_for_both_eviction_limits_and_clear() {
+        use oxideterm_terminal_semantic::{SemanticClass, SemanticSpan};
+        let mut cache = TerminalLayoutCache::default();
+        let key = |id| (id, SemanticLineRole::Output, 0);
+        let spans = |count| {
+            vec![
+                SemanticSpan {
+                    range: 0..1,
+                    class: SemanticClass::Number,
+                    style_variant: None
+                };
+                count
+            ]
+        };
+        cache.semantic_spans_for(key(1), || spans(40_000));
+        cache.semantic_spans_for(key(2), || spans(20_000));
+        cache.semantic_spans_for(key(3), || spans(10_000));
+        let mut keys = cache
+            .semantic_spans
+            .entries
+            .keys()
+            .map(|key| key.0)
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        assert_eq!(keys, vec![2, 3]);
+        assert_eq!(cache.semantic_span_count, 30_000);
+        cache.semantic_spans_for(key(2), || panic!("a cache hit must not classify again"));
+        assert_eq!(cache.semantic_span_count, 30_000);
+        cache.clear();
+        assert_eq!(cache.semantic_span_count, 0);
+        cache.semantic_spans.capacity = 2;
+        for id in 1..=3 {
+            cache.semantic_spans_for(key(id), || spans(id as usize * 3));
+        }
+        let mut keys = cache
+            .semantic_spans
+            .entries
+            .keys()
+            .map(|key| key.0)
+            .collect::<Vec<_>>();
+        keys.sort_unstable();
+        assert_eq!(keys, vec![2, 3]);
+        assert_eq!(cache.semantic_span_count, 15);
+    }
+
+    #[test]
+    fn layout_hit_does_not_repopulate_evicted_classifications() {
+        let mut cache = TerminalLayoutCache::default();
+        let mut terminal =
+            oxideterm_terminal::TerminalSession::recording_playback(10, 4, Default::default(), 100);
+        terminal.feed_recording_output(b"'abcdefghijklmnopqrstuvwx'\r\nDONE");
+        let mut view = element(terminal.snapshot());
+        view.semantic_coloring = true;
+        let lines = view.logical_lines_for_rows(0..4);
+        let roles = view.semantic_roles_for_lines(&lines, Some(&mut cache));
+        let (_, first) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
+        cache.semantic_spans.clear();
+        cache.semantic_span_count = 0;
+        let (_, second) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
+        assert!(Arc::ptr_eq(&first[0].1, &second[0].1));
+        assert!(cache.semantic_spans.entries.is_empty());
+        assert_eq!(cache.semantic_span_count, 0);
+    }
+
+    #[test]
+    fn oversized_classification_preserves_other_cached_lines_and_reuses_layout() {
+        let mut cache = TerminalLayoutCache::default();
+        let mut terminal = oxideterm_terminal::TerminalSession::recording_playback(
+            120,
+            4,
+            Default::default(),
+            2000,
+        );
+        for repetitions in [100, 70_000] {
+            terminal.feed_recording_output(("1 ".repeat(repetitions) + "\r\nDONE\r\n").as_bytes());
+            let mut view = element(terminal.snapshot());
+            view.semantic_coloring = true;
+            let lines = view.logical_lines_for_rows(0..4);
+            let roles = view.semantic_roles_for_lines(&lines, Some(&mut cache));
+            let (_, first) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
+            let (_, second) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
+            assert!(Arc::ptr_eq(&first[0].1, &second[0].1));
+            assert!(
+                cache
+                    .semantic_spans
+                    .entries
+                    .values()
+                    .any(|spans| spans.len() == 100)
+            );
+            assert!(
+                cache
+                    .semantic_spans
+                    .entries
+                    .values()
+                    .all(|spans| spans.len() <= TERMINAL_SEMANTIC_SPAN_CACHE_BUDGET)
+            );
+        }
+    }
+
+    #[test]
+    fn semantic_cache_invalidates_when_a_clipped_closing_quote_changes() {
+        let mut terminal =
+            oxideterm_terminal::TerminalSession::recording_playback(10, 6, Default::default(), 100);
+        terminal.feed_recording_output(b"'abcdefghijklmnopqrstuvwx'\r\nDONE");
+        let mut cache = TerminalLayoutCache::default();
+        let mut view = element(terminal.snapshot_with_display_offset(0, 1, None));
+        view.semantic_coloring = true;
+        let lines = view.logical_lines_for_rows(0..1);
+        let roles = view.semantic_roles_for_lines(&lines, Some(&mut cache));
+        let (_, before) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
+        let expected = to_hsla(terminal_color_from_hex(terminal_semantic_color(
+            &view.theme,
+            oxideterm_terminal_semantic::SemanticClass::String,
+            view.semantic_scheme(),
+        )));
+        assert_eq!(before[0].1.foregrounds.get(&(0, 1)), Some(&expected));
+        terminal.feed_recording_output(b"\x1b[3;6H \x1b[4;1H");
+        view.snapshot = terminal.snapshot_with_display_offset(0, 1, None);
+        let lines = view.logical_lines_for_rows(0..1);
+        let roles = view.semantic_roles_for_lines(&lines, Some(&mut cache));
+        let (_, after) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
+        assert!(
+            after
+                .iter()
+                .all(|(start, colors)| *start != 0 || !colors.foregrounds.contains_key(&(0, 1)))
+        );
+    }
+
+    #[test]
+    fn semantic_classification_is_reused_across_scrolled_fragments() {
+        let mut terminal =
+            oxideterm_terminal::TerminalSession::recording_playback(10, 2, Default::default(), 100);
+        terminal.feed_recording_output(b"'abcdefghijklmnopqrstuvwx'\r\nDONE");
+        let mut cache = TerminalLayoutCache::default();
+        let mut classified = None;
+        for offset in [2, 1, 0, 2] {
+            let mut view = element(terminal.snapshot_with_display_offset(offset, 2, None));
+            view.semantic_coloring = true;
+            let lines = view.logical_lines_for_rows(0..2);
+            let roles = view.semantic_roles_for_lines(&lines, Some(&mut cache));
+            let (_, layout) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
+            let expected = to_hsla(terminal_color_from_hex(terminal_semantic_color(
+                &view.theme,
+                oxideterm_terminal_semantic::SemanticClass::String,
+                view.semantic_scheme(),
+            )));
+            assert_eq!(layout[0].1.foregrounds.get(&(0, 0)), Some(&expected));
+            let spans = cache
+                .semantic_spans
+                .entries
+                .values()
+                .next()
+                .unwrap()
+                .clone();
+            if let Some(previous) = &classified {
+                assert!(Arc::ptr_eq(previous, &spans));
+            }
+            classified = Some(spans);
+        }
     }
 
     #[test]

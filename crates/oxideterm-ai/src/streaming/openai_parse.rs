@@ -200,7 +200,8 @@ pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<
         });
     }
     if let Some(error) = openai_finish_error(
-        json.pointer("/choices/0/finish_reason").and_then(Value::as_str),
+        json.pointer("/choices/0/finish_reason")
+            .and_then(Value::as_str),
     ) {
         events.retain(|event| !matches!(event, AiStreamEvent::ToolCallComplete { .. }));
         events.push(AiStreamEvent::Error(error.into()));
@@ -250,7 +251,10 @@ fn openai_error_event(json: &Value) -> Option<AiStreamEvent> {
     Some(AiStreamEvent::Error(reason.into()))
 }
 
-pub(super) fn chat_provider_error(code: Option<&str>, message: Option<&str>) -> Option<&'static str> {
+pub(super) fn chat_provider_error(
+    code: Option<&str>,
+    message: Option<&str>,
+) -> Option<&'static str> {
     match code {
         Some("invalid_api_key" | "permission_denied") => Some("chat_auth"),
         Some("rate_limit_exceeded" | "insufficient_quota") => Some("chat_rate_limit"),
@@ -259,7 +263,10 @@ pub(super) fn chat_provider_error(code: Option<&str>, message: Option<&str>) -> 
         Some("server_error" | "overloaded") => Some("chat_unavailable"),
         _ if message.is_some_and(|message| {
             message.starts_with("The `reasoning_content` in the thinking mode must be passed back")
-        }) => Some("chat_thinking_context"),
+        }) =>
+        {
+            Some("chat_thinking_context")
+        }
         _ => None,
     }
 }

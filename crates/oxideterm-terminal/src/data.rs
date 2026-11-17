@@ -21,10 +21,59 @@ pub struct TerminalSnapshot {
     pub display_offset: usize,
     pub scrollback_lines: usize,
     pub lines: Vec<TerminalRow>,
+    pub logical_context: Vec<Arc<TerminalLogicalContext>>,
     pub images: Vec<TerminalImageSnapshot>,
 }
 
+/// Immutable text captured under the same emulator lock as the visible rows.
+/// Only wrapped lines need off-screen context; rendering still uses viewport coordinates.
+pub struct TerminalLogicalContext {
+    pub text: Arc<zeroize::Zeroizing<String>>,
+    pub signature: u64,
+    pub cols: usize,
+    pub members: Arc<Vec<TerminalLogicalMember>>,
+    pub start_line: usize,
+    pub end_line: usize,
+    pub active_input: bool,
+    pub start_at_history_boundary: bool,
+    pub rows: Vec<TerminalLogicalContextRow>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TerminalLogicalMember {
+    pub source_id: usize,
+    pub revision: u64,
+    pub byte_start: usize,
+}
+
+#[derive(Debug)]
+pub struct TerminalLogicalContextRow {
+    pub source_id: usize,
+    /// UTF-8 offsets in the full logical text, paired with physical columns.
+    pub columns: Arc<Vec<(usize, usize)>>,
+}
+
+impl std::fmt::Debug for TerminalLogicalContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TerminalLogicalContext")
+            .field("text", &"[redacted]")
+            .field("rows", &self.rows.len())
+            .finish()
+    }
+}
+
 impl TerminalSnapshot {
+    pub fn logical_context_for_row(&self, row: usize) -> Option<&TerminalLogicalContext> {
+        let source = self.lines.get(row)?.source_id;
+        if source == 0 {
+            return None;
+        }
+        self.logical_context
+            .iter()
+            .find(|context| context.rows.iter().any(|row| row.source_id == source))
+            .map(AsRef::as_ref)
+    }
+
     pub fn with_generation(mut self, generation: u64) -> Self {
         self.generation = generation;
         self
@@ -158,6 +207,7 @@ mod tests {
         previous_row.refresh_signature();
 
         let previous = TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 1,
             cols: 1,
             rows: 1,
@@ -211,6 +261,7 @@ mod tests {
         };
         second_row.refresh_signature();
         let previous = TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 1,
             cols: 1,
             rows: 2,
@@ -244,6 +295,7 @@ mod tests {
         };
         new_bottom_row.refresh_signature();
         let mut next = TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 0,
             cols: 1,
             rows: 2,

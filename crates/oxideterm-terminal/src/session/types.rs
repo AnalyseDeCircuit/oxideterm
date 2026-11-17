@@ -351,8 +351,9 @@ pub trait TerminalSessionBackend: Send {
         &self,
         display_offset: usize,
         rows: usize,
+        previous: Option<&TerminalSnapshot>,
     ) -> TerminalSnapshot {
-        let _ = (display_offset, rows);
+        let _ = (display_offset, rows, previous);
         self.snapshot()
     }
     fn terminate_active_task(&mut self) -> Result<()>;

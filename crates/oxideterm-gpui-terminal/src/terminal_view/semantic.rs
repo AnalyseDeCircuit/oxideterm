@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use oxideterm_terminal::{TerminalAttrs, TerminalCommandMark, TerminalSnapshot};
 use oxideterm_terminal_semantic::{
-    CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticShellDialect,
+    CompiledSemanticScheme, SemanticClass, SemanticLineRole, SemanticShellDialect, SemanticSpan,
     classify_line_with_compiled_scheme_and_shell, semantic_line_emphasis,
     semantic_output_role_for_command,
 };
@@ -31,6 +31,7 @@ pub(super) fn append_terminal_semantics_for_rows(
     semantic_scheme: &CompiledSemanticScheme,
     semantic_shell: SemanticShellDialect,
     layout: &mut TerminalHighlightLayout,
+    cached_spans: Option<&[SemanticSpan]>,
 ) {
     let mut seen_lines = std::collections::HashSet::new();
     for row in rows {
@@ -41,27 +42,56 @@ pub(super) fn append_terminal_semantics_for_rows(
             continue;
         }
         let role = semantic_line_role_for_rows(snapshot, command_marks, line_range.clone());
-        let line = build_logical_line(snapshot, line_range.clone());
-        let spans = classify_line_with_compiled_scheme_and_shell(
-            &line.text,
-            role,
-            semantic_scheme,
-            semantic_shell,
-        );
-        if let Some(emphasis) = semantic_line_emphasis(&line.text, role)
+        let context = snapshot.logical_context_for_row(line_range.start);
+        let fallback = context
+            .is_none()
+            .then(|| build_logical_line(snapshot, line_range.clone()));
+        let text = context
+            .map(|context| context.text.as_str())
+            .unwrap_or_else(|| fallback.as_ref().unwrap().text.as_str());
+        let mut columns = Vec::new();
+        if let Some(context) = context {
+            for row in line_range.clone() {
+                if let Some(mapped) = context
+                    .rows
+                    .iter()
+                    .find(|mapped| mapped.source_id == snapshot.lines[row].source_id)
+                {
+                    columns.extend(mapped.columns.iter().map(|&(byte, col)| (byte, row, col)));
+                }
+            }
+        } else {
+            columns.extend(
+                text.char_indices()
+                    .zip(&fallback.as_ref().unwrap().map)
+                    .map(|((byte, _), cell)| (byte, cell.row, cell.col)),
+            );
+        }
+        let classified;
+        let spans = if let Some(spans) = cached_spans {
+            spans
+        } else {
+            classified = classify_line_with_compiled_scheme_and_shell(
+                text,
+                role,
+                semantic_scheme,
+                semantic_shell,
+            );
+            &classified
+        };
+        if let Some(emphasis) = semantic_line_emphasis(text, role)
             && spans.iter().any(|span| span.class == emphasis)
         {
             append_semantic_line_band(snapshot, line_range, theme, emphasis, layout);
         }
         for span in spans {
-            let start = line.text[..span.range.start].chars().count();
-            let end = line.text[..span.range.end].chars().count();
-            let Some(cells) = line.map.get(start..end) else {
-                continue;
-            };
-            let Some(span_text) = line.text.get(span.range.clone()) else {
-                continue;
-            };
+            let start = columns.partition_point(|&(byte, _, _)| byte < span.range.start);
+            let end = columns.partition_point(|&(byte, _, _)| byte < span.range.end);
+            let option_prefix_end = span.range.start
+                + text[span.range.clone()]
+                    .bytes()
+                    .take_while(|&b| b == b'-')
+                    .count();
             let foreground = semantic_foreground_for_variant(
                 theme,
                 span.class,
@@ -71,21 +101,14 @@ pub(super) fn append_terminal_semantics_for_rows(
             let operator_foreground =
                 matches!(span.class, SemanticClass::Timestamp | SemanticClass::Option)
                     .then(|| semantic_foreground(theme, SemanticClass::Operator, semantic_scheme));
-            let mut option_prefix = span.class == SemanticClass::Option;
-            for (ch, mapped) in span_text.chars().zip(cells) {
-                let class = semantic_component_class(span.class, ch, option_prefix);
-                if option_prefix && ch != '-' {
-                    option_prefix = false;
-                }
-                let key = (mapped.row, mapped.col);
+            for &(byte, row, col) in &columns[start..end] {
+                let ch = text[byte..].chars().next().unwrap();
+                let class = semantic_component_class(span.class, ch, byte < option_prefix_end);
+                let key = (row, col);
                 if layout.foregrounds.contains_key(&key) {
                     continue;
                 }
-                let Some(cell) = snapshot
-                    .lines
-                    .get(mapped.row)
-                    .and_then(|row| row.cells.get(mapped.col))
-                else {
+                let Some(cell) = snapshot.lines.get(row).and_then(|row| row.cells.get(col)) else {
                     continue;
                 };
                 // Semantic colors fill only genuinely unstyled terminal text.
@@ -162,19 +185,25 @@ pub(super) fn semantic_line_role_for_rows(
     command_marks: &[TerminalCommandMark],
     rows: Range<usize>,
 ) -> SemanticLineRole {
-    if snapshot
-        .lines
-        .get(rows.clone())
-        .is_some_and(|lines| lines.iter().any(|row| row.active_input))
+    let context = snapshot.logical_context_for_row(rows.start);
+    if context.is_some_and(|context| context.active_input)
+        || snapshot
+            .lines
+            .get(rows.clone())
+            .is_some_and(|lines| lines.iter().any(|row| row.active_input))
     {
         return SemanticLineRole::Command;
     }
-
     let viewport_start = snapshot
         .scrollback_lines
         .saturating_sub(snapshot.display_offset);
-    let start_line = viewport_start.saturating_add(rows.start);
-    let end_line = viewport_start.saturating_add(rows.end.saturating_sub(1));
+    let start_line = context.map_or(viewport_start.saturating_add(rows.start), |context| {
+        context.start_line
+    });
+    let end_line = context.map_or(
+        viewport_start.saturating_add(rows.end.saturating_sub(1)),
+        |context| context.end_line,
+    );
     if command_marks.iter().any(|mark| {
         !mark.command_line_clipped && (start_line..=end_line).contains(&mark.command_line)
     }) {
@@ -259,6 +288,7 @@ mod tests {
         };
         row.refresh_signature();
         TerminalSnapshot {
+            logical_context: Vec::new(),
             generation: 0,
             cols: text.chars().count(),
             rows: 1,
@@ -270,6 +300,75 @@ mod tests {
             lines: vec![row],
             images: Vec::new(),
         }
+    }
+
+    #[test]
+    fn wrapped_strings_keep_their_color_across_viewport_boundaries() {
+        let mut terminal =
+            oxideterm_terminal::TerminalSession::recording_playback(10, 4, Default::default(), 100);
+        terminal.feed_recording_output(b"before\r\n'abcdefghijklmnopqrstuvwx'\r\nafter\r\nend\r\n");
+        let theme = TerminalUiTheme::default();
+        let scheme = compiled_builtin_scheme(SemanticScheme::Balanced);
+        let string = semantic_foreground(&theme, SemanticClass::String, scheme);
+        for offset in 0..=terminal.snapshot().scrollback_lines {
+            let snapshot = terminal.snapshot_with_display_offset(offset, 4, None);
+            let mut layout = TerminalHighlightLayout::empty();
+            append_terminal_semantics_for_rows(
+                &snapshot,
+                &[],
+                0..snapshot.lines.len(),
+                &theme,
+                scheme,
+                SemanticShellDialect::Auto,
+                &mut layout,
+                None,
+            );
+            for (row, line) in snapshot.lines.iter().enumerate() {
+                let absolute = snapshot.scrollback_lines as i64 + line.absolute_line;
+                if (1..=3).contains(&absolute) {
+                    for (col, cell) in line.cells.iter().enumerate() {
+                        if cell.ch != ' ' {
+                            assert_eq!(
+                                layout.foregrounds.get(&(row, col)),
+                                Some(&string),
+                                "offset {offset}, row {row}, col {col}"
+                            );
+                        }
+                    }
+                } else if absolute == 0 || absolute == 4 {
+                    assert_eq!(layout.foregrounds.get(&(row, 0)), None);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn wide_wrapped_strings_preserve_ansi_and_combining_character_colors() {
+        let mut terminal =
+            oxideterm_terminal::TerminalSession::recording_playback(10, 4, Default::default(), 100);
+        terminal.feed_recording_output("'abcdefgh界e\u{301}\x1b[31mX\x1b[0m'\r\nDONE".as_bytes());
+        let snapshot = terminal.snapshot();
+        let theme = TerminalUiTheme::default();
+        let scheme = compiled_builtin_scheme(SemanticScheme::Balanced);
+        let string = semantic_foreground(&theme, SemanticClass::String, scheme);
+        let mut layout = TerminalHighlightLayout::empty();
+        append_terminal_semantics_for_rows(
+            &snapshot,
+            &[],
+            0..4,
+            &theme,
+            scheme,
+            SemanticShellDialect::Auto,
+            &mut layout,
+            None,
+        );
+        assert_eq!(layout.foregrounds.get(&(0, 8)), Some(&string));
+        assert_eq!(layout.foregrounds.get(&(0, 9)), None);
+        assert_eq!(layout.foregrounds.get(&(1, 0)), Some(&string));
+        assert_eq!(layout.foregrounds.get(&(1, 1)), None);
+        assert_eq!(layout.foregrounds.get(&(1, 2)), Some(&string));
+        assert_eq!(layout.foregrounds.get(&(1, 3)), None);
+        assert_eq!(layout.foregrounds.get(&(1, 4)), Some(&string));
     }
 
     #[test]
@@ -285,6 +384,7 @@ mod tests {
             compiled_builtin_scheme(SemanticScheme::Balanced),
             SemanticShellDialect::Auto,
             &mut layout,
+            None,
         );
 
         assert!(!layout.foregrounds.contains_key(&(0, 0)));
@@ -306,6 +406,7 @@ mod tests {
             scheme,
             SemanticShellDialect::Auto,
             &mut error_layout,
+            None,
         );
 
         assert_eq!(error_layout.backgrounds.len(), 1);
@@ -327,6 +428,7 @@ mod tests {
             scheme,
             SemanticShellDialect::Auto,
             &mut warning_layout,
+            None,
         );
 
         assert_eq!(warning_layout.backgrounds.len(), 1);
@@ -353,6 +455,7 @@ mod tests {
             scheme,
             SemanticShellDialect::Auto,
             &mut ansi_layout,
+            None,
         );
 
         assert!(ansi_layout.backgrounds.is_empty());
@@ -378,6 +481,7 @@ mod tests {
                 scheme,
                 SemanticShellDialect::Auto,
                 &mut layout,
+                None,
             );
 
             assert!(
@@ -407,6 +511,7 @@ mod tests {
             scheme,
             SemanticShellDialect::Auto,
             &mut layout,
+            None,
         );
 
         let timestamp = semantic_foreground(&theme, SemanticClass::Timestamp, scheme);
@@ -480,6 +585,7 @@ mod tests {
             compiled_builtin_scheme(SemanticScheme::Balanced),
             SemanticShellDialect::Auto,
             &mut layout,
+            None,
         );
 
         assert_eq!(layout.foregrounds.get(&(0, 0)), Some(&manual_color));
@@ -499,6 +605,7 @@ mod tests {
             compiled_builtin_scheme(SemanticScheme::Conservative),
             SemanticShellDialect::Auto,
             &mut layout,
+            None,
         );
 
         assert!(!layout.foregrounds.contains_key(&(0, 0)));
@@ -537,6 +644,7 @@ mod tests {
             scheme,
             SemanticShellDialect::Auto,
             &mut layout,
+            None,
         );
 
         let timestamp = semantic_foreground(&theme, SemanticClass::Timestamp, scheme);

@@ -258,8 +258,9 @@ impl TerminalSessionBackend for LocalPtySession {
         &self,
         display_offset: usize,
         rows: usize,
+        previous: Option<&TerminalSnapshot>,
     ) -> TerminalSnapshot {
-        LocalPtySession::snapshot_with_display_offset(self, display_offset, rows)
+        LocalPtySession::snapshot_with_display_offset(self, display_offset, rows, previous)
     }
 
     fn terminate_active_task(&mut self) -> Result<()> {

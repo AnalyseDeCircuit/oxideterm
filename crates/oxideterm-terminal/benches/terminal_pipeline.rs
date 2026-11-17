@@ -464,6 +464,46 @@ fn snapshot_benchmark_session() -> TerminalSession {
 
 fn benchmark_terminal_snapshots(criterion: &mut Criterion) {
     let mut group = criterion.benchmark_group("terminal_snapshots");
+    for bytes in [57_344, 480_000, 2_400_000] {
+        group.bench_with_input(
+            BenchmarkId::new("wrapped_unchanged", bytes),
+            &bytes,
+            |bencher, &bytes| {
+                let mut terminal = TerminalSession::recording_playback(
+                    120,
+                    40,
+                    GraphicsOptions::default(),
+                    20_000,
+                );
+                terminal.feed_recording_output(&vec![b'x'; bytes]);
+                terminal.feed_recording_output(b"\r\nend");
+                let previous = terminal.snapshot_consuming_damage();
+                bencher.iter(|| black_box(terminal.snapshot_incremental(&previous)));
+            },
+        );
+        group.bench_with_input(
+            BenchmarkId::new("wrapped_scroll", bytes),
+            &bytes,
+            |bencher, &bytes| {
+                let mut terminal = TerminalSession::recording_playback(
+                    120,
+                    40,
+                    GraphicsOptions::default(),
+                    20_000,
+                );
+                terminal.feed_recording_output(&vec![b'x'; bytes]);
+                terminal.feed_recording_output(b"\r\nend");
+                let mut previous = terminal.snapshot_consuming_damage();
+                let mut offset = 0;
+                bencher.iter(|| {
+                    offset = 1 - offset;
+                    previous = terminal.snapshot_with_display_offset(offset, 40, Some(&previous));
+                    black_box(&previous);
+                });
+            },
+        );
+    }
+
     group.throughput(Throughput::Elements(
         (BENCHMARK_ROWS * BENCHMARK_COLS) as u64,
     ));

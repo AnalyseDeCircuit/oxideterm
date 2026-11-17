@@ -2264,10 +2264,15 @@ impl TerminalPane {
             return cached.snapshot.clone();
         }
         let snapshot_started = self.preferences.show_performance_overlay.then(Instant::now);
-        let snapshot = self
-            .terminal
-            .lock()
-            .snapshot_with_display_offset(display_offset, rows);
+        let snapshot = self.terminal.lock().snapshot_with_display_offset(
+            display_offset,
+            rows,
+            Some(
+                self.smooth_scroll_snapshot_cache
+                    .as_ref()
+                    .map_or(&self.snapshot, |cached| &cached.snapshot),
+            ),
+        );
         if let Some(snapshot_started) = snapshot_started {
             // Count only cache misses because cached overscan snapshots do not rebuild terminal
             // rows and therefore do not represent smooth-scroll snapshot work.
@@ -3227,6 +3232,44 @@ mod tests {
                 Some(self.image.clone()),
             )
         }
+    }
+
+    #[gpui::test]
+    fn smooth_scroll_context_refreshes_with_the_source_snapshot(cx: &mut gpui::TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            super::TerminalPane::new_recording_playback(10, 4, Default::default(), window, cx)
+                .unwrap()
+        });
+        pane.update(cx, |pane, _| {
+            let snapshot = {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(b"'abcdefghijklmnopqrstuvwx'\r\nDONE");
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            let before = pane.smooth_scroll_overscan_snapshot(0, 5);
+            assert_eq!(
+                before.logical_context_for_row(0).unwrap().text.trim_end(),
+                "'abcdefghijklmnopqrstuvwx'"
+            );
+            let changed_overscan = pane.smooth_scroll_overscan_snapshot(0, 4);
+            assert!(std::sync::Arc::ptr_eq(
+                &before.logical_context[0].text,
+                &changed_overscan.logical_context[0].text,
+            ));
+            let snapshot = {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(b"\x1b[3;1HZ\x1b[4;1H");
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(snapshot);
+            let after = pane.smooth_scroll_overscan_snapshot(0, 4);
+            assert_eq!(after.lines[0].text(), before.lines[0].text());
+            assert_eq!(
+                after.logical_context_for_row(0).unwrap().text.trim_end(),
+                "'abcdefghijklmnopqrsZuvwx'"
+            );
+        });
     }
 
     #[gpui::test]

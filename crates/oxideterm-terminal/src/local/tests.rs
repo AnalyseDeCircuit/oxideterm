@@ -880,8 +880,7 @@ mod tests {
         // Reflow may move the beginning of the logical line into scrollback.
         let contents = session.snapshot_with_display_offset(
             next.scrollback_lines,
-            next.rows + next.scrollback_lines,
-        );
+            next.rows + next.scrollback_lines, None);
         session.shutdown();
         assert_eq!(
             contents.lines[0]
@@ -2677,8 +2676,7 @@ mod tests {
             &TerminalGraphicsState::default(),
             &TerminalPalette::default(),
             1,
-            4,
-        );
+            4, None);
 
         assert_eq!(snapshot.display_offset, 1);
         assert_eq!(snapshot.rows, 3);
