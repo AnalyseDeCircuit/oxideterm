@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · cổng nối tiếp · RDP/VNC · SFTP · chuyển ti�
 Không cần tài khoản. Không cần đăng ký thuê bao. Không thu thập dữ liệu đo từ xa. Không dùng Electron.
 
 [![Bản phát hành mới nhất](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![Lượt tải xuống](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![Nền tảng](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![Giấy phép](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![Lượt gắn sao](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

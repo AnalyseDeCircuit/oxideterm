@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · serielle Verbindungen · RDP/VNC · SFTP · Portweiterl
 Kein Konto. Kein Abo. Keine Telemetrie. Kein Electron.
 
 [![Neueste Version](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![Plattformen](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![Lizenz](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![Sterne](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

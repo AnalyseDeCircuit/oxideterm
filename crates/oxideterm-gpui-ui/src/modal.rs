@@ -190,7 +190,13 @@ pub fn staged_overlay_scrim(
     if let Some(blur_px) = effect.blur_px {
         scrim = scrim.backdrop_blur(px(blur_px));
     }
-    crate::motion::fade(tokens, id, scrim, crate::motion::MotionDuration::Micro, visible)
+    crate::motion::fade(
+        tokens,
+        id,
+        scrim,
+        crate::motion::MotionDuration::Micro,
+        visible,
+    )
 }
 
 fn modal_backdrop_with_effect(backdrop: Rgba, blur_px: f32) -> Div {

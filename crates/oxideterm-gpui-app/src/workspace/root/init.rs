@@ -951,15 +951,16 @@ impl WorkspaceApp {
             this.update_ai_sidebar_overlay_for_window_bounds(window, cx);
             this.capture_main_window_state(window, cx);
         });
-        let workspace_window_activation = cx.observe_window_activation(window, |this, window, cx| {
-            if window.is_window_active() {
-                this.knowledge_sync_external_edit(false, cx);
-            } else {
-                // A release in another window need not reach this workspace.
-                this.finish_sidebar_resize(cx);
-                this.finish_ai_sidebar_resize(cx);
-            }
-        });
+        let workspace_window_activation =
+            cx.observe_window_activation(window, |this, window, cx| {
+                if window.is_window_active() {
+                    this.knowledge_sync_external_edit(false, cx);
+                } else {
+                    // A release in another window need not reach this workspace.
+                    this.finish_sidebar_resize(cx);
+                    this.finish_ai_sidebar_resize(cx);
+                }
+            });
         workspace.ai_entity.update(cx, |ai, _cx| {
             ai.retain_window_observers(workspace_window_bounds, workspace_window_activation);
         });

@@ -1052,8 +1052,7 @@ impl WorkspaceApp {
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(self.tokens.ui.text))
                                     .child(
-                                        self.i18n
-                                            .t("settings_view.general.app_lock_locked_title"),
+                                        self.i18n.t("settings_view.general.app_lock_locked_title"),
                                     ),
                             )
                             .child(

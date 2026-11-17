@@ -292,7 +292,10 @@ fn snap_stroke_center(coord: f32, stroke_px: f32, scale: f32) -> f32 {
     }
 }
 
-fn command_gutter_colors(overlay: &TerminalCommandMarkOverlay, theme: &TerminalUiTheme) -> (Rgba, Rgba) {
+fn command_gutter_colors(
+    overlay: &TerminalCommandMarkOverlay,
+    theme: &TerminalUiTheme,
+) -> (Rgba, Rgba) {
     let failed = overlay.exit_code.is_some_and(|code| code != 0) && !overlay.stale;
     let emphasized = overlay.hovered || overlay.selected || overlay.collapsed;
     let base = if overlay.stale {
@@ -328,7 +331,10 @@ fn command_gutter_colors(overlay: &TerminalCommandMarkOverlay, theme: &TerminalU
         0x6c
     };
 
-    (rgba((base << 8) | rail_alpha), rgba((base << 8) | head_alpha))
+    (
+        rgba((base << 8) | rail_alpha),
+        rgba((base << 8) | head_alpha),
+    )
 }
 
 fn command_gutter_geometry(

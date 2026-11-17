@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · 시리얼 · RDP/VNC · SFTP · 포트 포워딩 · 코
 계정도, 구독도 필요 없습니다. 텔레메트리와 Electron을 사용하지 않습니다.
 
 [![최신 릴리스](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![다운로드 수](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![지원 플랫폼](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![라이선스](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![스타](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

@@ -418,10 +418,9 @@ impl WorkspaceApp {
                     .bg(self.workspace_sidebar_background(theme.shell_bg()))
                     .child(body_content),
             )
-            .when(
-                panel_section == SidebarSection::Sessions,
-                |sidebar| sidebar.child(self.render_active_sessions_footer(cx)),
-            )
+            .when(panel_section == SidebarSection::Sessions, |sidebar| {
+                sidebar.child(self.render_active_sessions_footer(cx))
+            })
             .into_any_element()
     }
 
@@ -551,17 +550,19 @@ impl WorkspaceApp {
                 .flex()
                 .items_center()
                 .child(self.render_session_manager_search_button(cx))
-                .child(div().id("sidebar-session-manager-sort").child(
-                    select_anchor_probe(
-                        SelectAnchorId::SessionManagerSidebarSort,
-                        sort_action,
-                        move |anchor, _window, cx| {
-                            let _ = workspace.update(cx, |this, cx| {
-                                this.update_select_anchor(anchor, cx);
-                            });
-                        },
-                    ),
-                ))
+                .child(
+                    div()
+                        .id("sidebar-session-manager-sort")
+                        .child(select_anchor_probe(
+                            SelectAnchorId::SessionManagerSidebarSort,
+                            sort_action,
+                            move |anchor, _window, cx| {
+                                let _ = workspace.update(cx, |this, cx| {
+                                    this.update_select_anchor(anchor, cx);
+                                });
+                            },
+                        )),
+                )
                 .child(self.render_sidebar_action(
                     LucideIcon::ExternalLink,
                     SidebarActionKind::OpenSessionManagerTab,

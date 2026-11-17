@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · 串口 · RDP/VNC · SFTP · 端口转发 · 代码编�
 无需账号。无需订阅。没有遥测。没有 Electron。
 
 [![最新版本](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![下载量](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![平台](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![Stars](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

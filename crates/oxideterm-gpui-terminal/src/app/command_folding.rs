@@ -1,6 +1,8 @@
 use super::*;
 use gpui::{AnyElement, MouseButton, div, prelude::*, rgb, rgba};
-use oxideterm_gpui_ui::motion::{MotionDuration, duration, ease_out_cubic, exit_settle_duration, fade, fade_in};
+use oxideterm_gpui_ui::motion::{
+    MotionDuration, duration, ease_out_cubic, exit_settle_duration, fade, fade_in,
+};
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::time::{Duration, Instant};
@@ -562,7 +564,9 @@ impl TerminalPane {
         let collapsed_now = !was_collapsed;
         if collapsed_now {
             self.command_folding.collapsed.insert(id.to_owned());
-            self.command_folding.fold_epochs.insert(id.to_owned(), epoch);
+            self.command_folding
+                .fold_epochs
+                .insert(id.to_owned(), epoch);
             if self
                 .command_folding
                 .expand_highlight
@@ -826,7 +830,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn toggle_command_fold_tracks_epochs_and_motion_gated_expand_highlight(cx: &mut TestAppContext) {
+    fn toggle_command_fold_tracks_epochs_and_motion_gated_expand_highlight(
+        cx: &mut TestAppContext,
+    ) {
         let (pane, cx) = cx.add_window_view(|window, cx| {
             TerminalPane::new_recording_playback(
                 80,
@@ -851,8 +857,7 @@ mod tests {
             assert!(pane.command_folding.expand_highlight.is_none());
             assert!(pane.command_folding.marker_rotations.contains_key("cmd-1"));
             assert_eq!(
-                pane.command_folding.marker_rotations["cmd-1"].to,
-                1.0,
+                pane.command_folding.marker_rotations["cmd-1"].to, 1.0,
                 "collapsing rotates square 0 -> 45deg"
             );
 
@@ -867,13 +872,13 @@ mod tests {
                 Some("cmd-1")
             );
             assert_eq!(
-                pane.command_folding.marker_rotations["cmd-1"].to,
-                0.0,
+                pane.command_folding.marker_rotations["cmd-1"].to, 0.0,
                 "expanding rotates square back 45deg -> 0"
             );
         });
 
-        cx.executor().advance_clock(std::time::Duration::from_secs(1));
+        cx.executor()
+            .advance_clock(std::time::Duration::from_secs(1));
         cx.run_until_parked();
         pane.update(cx, |pane, _cx| {
             assert!(

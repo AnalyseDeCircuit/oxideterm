@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · serial · RDP/VNC · SFTP · encaminhamento de portas �
 Sem conta. Sem assinatura. Sem telemetria. Sem Electron.
 
 [![Última versão](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![Plataformas](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![Licença](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![Estrelas](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

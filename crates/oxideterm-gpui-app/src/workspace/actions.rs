@@ -1125,12 +1125,12 @@ impl WorkspaceApp {
             && self.tokens.motion.enabled
             && let Some(generation) = self.search.begin_exit(pane_id)
         {
-            let timer = cx.background_executor().timer(
-                oxideterm_gpui_ui::motion::exit_settle_duration(
-                    &self.tokens,
-                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
-                ),
-            );
+            let timer =
+                cx.background_executor()
+                    .timer(oxideterm_gpui_ui::motion::exit_settle_duration(
+                        &self.tokens,
+                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                    ));
             cx.spawn(async move |weak, cx| {
                 timer.await;
                 let _ = weak.update(cx, |this, cx| {

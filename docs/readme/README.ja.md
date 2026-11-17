@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · シリアル · RDP/VNC · SFTP · ポート転送 · �
 アカウント不要。サブスクリプションなし。テレメトリーなし。Electron 不使用。
 
 [![最新リリース](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![ダウンロード数](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![対応プラットフォーム](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![ライセンス](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![スター](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

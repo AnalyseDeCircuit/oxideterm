@@ -211,8 +211,9 @@ impl Scene {
         }
         // Keep cached paint operations in unscaled coordinates so parent scale animations
         // never compound across cached child-view replays.
-        self.paint_operations
-            .push(PaintOperation::Primitive(replay_primitive.unwrap_or(primitive)));
+        self.paint_operations.push(PaintOperation::Primitive(
+            replay_primitive.unwrap_or(primitive),
+        ));
     }
 
     /// Expands a cached glyph batch into sprites while retaining one replay operation.

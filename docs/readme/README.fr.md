@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · série · RDP/VNC · SFTP · redirection de ports · é
 Sans compte. Sans abonnement. Sans télémétrie. Sans Electron.
 
 [![Dernière version](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![Téléchargements](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![Plateformes](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![Licence](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![Étoiles](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

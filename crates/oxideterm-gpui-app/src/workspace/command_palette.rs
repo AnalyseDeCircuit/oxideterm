@@ -1804,39 +1804,37 @@ impl WorkspaceApp {
                             )),
                     )
                     .child(
-                        div()
-                            .py(px(COMMAND_PALETTE_LIST_PADDING_Y))
-                            .child(
-                                div()
-                                    .relative()
-                                    .id("command-palette-scroll")
-                                    .w_full()
-                                    .h(px(rows_height))
-                                    .max_h(px(list_max_height))
-                                    .child(tauri_virtual_uniform_list(
-                                        "command-palette-virtual-list",
-                                        row_count,
-                                        palette.scroll_handle.clone(),
-                                        TauriVirtualListSpec::new(
-                                            px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
-                                            COMMAND_PALETTE_VIRTUAL_OVERSCAN,
-                                        ),
-                                        move |range, _window, cx| {
-                                            range
-                                                .map(|row_index| {
-                                                    let row = virtual_rows[row_index].clone();
-                                                    entity.update(cx, |this, cx| {
-                                                        this.render_command_palette_virtual_row(
-                                                            row,
-                                                            selected_index,
-                                                            cx,
-                                                        )
-                                                    })
+                        div().py(px(COMMAND_PALETTE_LIST_PADDING_Y)).child(
+                            div()
+                                .relative()
+                                .id("command-palette-scroll")
+                                .w_full()
+                                .h(px(rows_height))
+                                .max_h(px(list_max_height))
+                                .child(tauri_virtual_uniform_list(
+                                    "command-palette-virtual-list",
+                                    row_count,
+                                    palette.scroll_handle.clone(),
+                                    TauriVirtualListSpec::new(
+                                        px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
+                                        COMMAND_PALETTE_VIRTUAL_OVERSCAN,
+                                    ),
+                                    move |range, _window, cx| {
+                                        range
+                                            .map(|row_index| {
+                                                let row = virtual_rows[row_index].clone();
+                                                entity.update(cx, |this, cx| {
+                                                    this.render_command_palette_virtual_row(
+                                                        row,
+                                                        selected_index,
+                                                        cx,
+                                                    )
                                                 })
-                                                .collect::<Vec<_>>()
-                                        },
-                                    )),
-                            ),
+                                            })
+                                            .collect::<Vec<_>>()
+                                    },
+                                )),
+                        ),
                     )
                     .when_some(preview, |root, preview| root.child(preview))
                     .when_some(palette.error, |root, error| {
@@ -1918,7 +1916,9 @@ impl WorkspaceApp {
             .child(oxideterm_gpui_ui::motion::zoom_fade_y(
                 &self.tokens,
                 ("command-palette-panel-motion", palette.motion_generation),
-                div().mt(px(palette_top)).child(overlay_content_boundary(panel)),
+                div()
+                    .mt(px(palette_top))
+                    .child(overlay_content_boundary(panel)),
                 -6.0,
                 0.95,
                 gpui::point(0.5, 0.0),
@@ -2124,7 +2124,12 @@ impl WorkspaceApp {
             ))
             .child(label_row)
             .when(has_trailing, |row| {
-                let mut trailing = div().ml_auto().flex_none().flex().items_center().gap(px(8.0));
+                let mut trailing = div()
+                    .ml_auto()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0));
                 if let Some(count) = ranked.item.count.as_ref() {
                     trailing = trailing.child(
                         div()
@@ -2158,11 +2163,8 @@ impl WorkspaceApp {
                     );
                 }
                 if let Some(shortcut) = ranked.item.shortcut.as_ref() {
-                    trailing = trailing.child(self.render_shortcut_keycap(
-                        shortcut.clone(),
-                        None,
-                        cx,
-                    ));
+                    trailing =
+                        trailing.child(self.render_shortcut_keycap(shortcut.clone(), None, cx));
                 }
                 row.child(trailing)
             });
@@ -2297,107 +2299,107 @@ impl WorkspaceApp {
         let entity = cx.entity();
         let visible = self.shortcuts_modal.presence.phase() == ExitPhase::Visible;
         let card = overlay_content_boundary(
-                dialog_content(&self.tokens)
-                    .w(px(600.0))
-                    .child(
-                        div()
-                            .h(px(44.0))
-                            .px(px(16.0))
-                            .flex()
-                            .items_center()
-                            .gap(px(12.0))
-                            .border_b_1()
-                            .border_color(rgb(self.tokens.ui.border))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Search,
-                                16.0,
-                                rgb(self.tokens.ui.text_muted),
-                            ))
-                            .child(self.render_overlay_query_input(
-                                WorkspaceImeTarget::ShortcutsModalSearch,
-                                self.shortcuts_modal.query.clone(),
-                                query_placeholder,
-                                self.tokens.metrics.ui_text_sm,
-                                20.0,
-                                cx,
-                            ))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .border_1()
-                                    .border_color(rgb(self.tokens.ui.border))
-                                    .bg(rgb(self.tokens.ui.bg))
-                                    .px(px(6.0))
-                                    .py(px(2.0))
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .text_size(px(10.0))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(if cfg!(target_os = "macos") {
-                                        "⌘/".to_string()
-                                    } else {
-                                        "Ctrl+/".to_string()
-                                    }),
+            dialog_content(&self.tokens)
+                .w(px(600.0))
+                .child(
+                    div()
+                        .h(px(44.0))
+                        .px(px(16.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(12.0))
+                        .border_b_1()
+                        .border_color(rgb(self.tokens.ui.border))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::Search,
+                            16.0,
+                            rgb(self.tokens.ui.text_muted),
+                        ))
+                        .child(self.render_overlay_query_input(
+                            WorkspaceImeTarget::ShortcutsModalSearch,
+                            self.shortcuts_modal.query.clone(),
+                            query_placeholder,
+                            self.tokens.metrics.ui_text_sm,
+                            20.0,
+                            cx,
+                        ))
+                        .child(
+                            div()
+                                .flex_none()
+                                .rounded(px(self.tokens.radii.sm))
+                                .border_1()
+                                .border_color(rgb(self.tokens.ui.border))
+                                .bg(rgb(self.tokens.ui.bg))
+                                .px(px(6.0))
+                                .py(px(2.0))
+                                .font_family(settings_mono_font_family(
+                                    self.settings_store.settings(),
+                                ))
+                                .text_size(px(10.0))
+                                .text_color(rgb(self.tokens.ui.text_muted))
+                                .child(if cfg!(target_os = "macos") {
+                                    "⌘/".to_string()
+                                } else {
+                                    "Ctrl+/".to_string()
+                                }),
+                        ),
+                )
+                .child(
+                    div()
+                        .h(px(rows_height))
+                        .max_h(px(SHORTCUTS_MODAL_LIST_MAX_HEIGHT))
+                        .px(px(16.0))
+                        .py(px(4.0))
+                        .child(tauri_virtual_uniform_list(
+                            "shortcuts-modal-virtual-list",
+                            row_count,
+                            self.shortcuts_modal.scroll_handle.clone(),
+                            TauriVirtualListSpec::new(
+                                px(SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT),
+                                SHORTCUTS_MODAL_VIRTUAL_OVERSCAN,
                             ),
-                    )
-                    .child(
-                        div()
-                            .h(px(rows_height))
-                            .max_h(px(SHORTCUTS_MODAL_LIST_MAX_HEIGHT))
-                            .px(px(16.0))
-                            .py(px(4.0))
-                            .child(tauri_virtual_uniform_list(
-                                "shortcuts-modal-virtual-list",
-                                row_count,
-                                self.shortcuts_modal.scroll_handle.clone(),
-                                TauriVirtualListSpec::new(
-                                    px(SHORTCUTS_MODAL_VIRTUAL_ROW_HEIGHT),
-                                    SHORTCUTS_MODAL_VIRTUAL_OVERSCAN,
-                                ),
-                                move |range, _window, cx| {
-                                    range
-                                        .map(|row_index| {
-                                            let row = virtual_rows[row_index].clone();
-                                            entity.update(cx, |this, cx| {
-                                                this.render_shortcuts_modal_virtual_row(row, cx)
-                                            })
+                            move |range, _window, cx| {
+                                range
+                                    .map(|row_index| {
+                                        let row = virtual_rows[row_index].clone();
+                                        entity.update(cx, |this, cx| {
+                                            this.render_shortcuts_modal_virtual_row(row, cx)
                                         })
-                                        .collect::<Vec<_>>()
-                                },
-                            )),
-                    )
-                    .child(
-                        div()
-                            .px(px(16.0))
-                            .py(px(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .border_t_1()
-                            .border_color(rgb(self.tokens.ui.border))
-                            .bg(rgb(self.tokens.ui.bg_panel))
-                            // This footer paints against the shared DialogContent
-                            // bottom edge, so it must own the same clipped inner
-                            // corners as Tauri's rounded dialog shell.
-                            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
-                            .text_size(px(11.0))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t("shortcuts_modal.footer_hint"))
-                            .child(
-                                div()
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .child(format!(
-                                        "{} {}",
-                                        shortcut_count,
-                                        self.i18n.t("shortcuts_modal.shortcut_count")
-                                    )),
-                            ),
-                    ),
-            );
+                                    })
+                                    .collect::<Vec<_>>()
+                            },
+                        )),
+                )
+                .child(
+                    div()
+                        .px(px(16.0))
+                        .py(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .border_t_1()
+                        .border_color(rgb(self.tokens.ui.border))
+                        .bg(rgb(self.tokens.ui.bg_panel))
+                        // This footer paints against the shared DialogContent
+                        // bottom edge, so it must own the same clipped inner
+                        // corners as Tauri's rounded dialog shell.
+                        .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
+                        .text_size(px(11.0))
+                        .text_color(rgb(self.tokens.ui.text_muted))
+                        .child(self.i18n.t("shortcuts_modal.footer_hint"))
+                        .child(
+                            div()
+                                .font_family(settings_mono_font_family(
+                                    self.settings_store.settings(),
+                                ))
+                                .child(format!(
+                                    "{} {}",
+                                    shortcut_count,
+                                    self.i18n.t("shortcuts_modal.shortcut_count")
+                                )),
+                        ),
+                ),
+        );
         staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
@@ -2766,7 +2768,9 @@ fn next_enabled_palette_index(
     let current = current.min(last);
     match step {
         PaletteStep::First => ranked_items.iter().position(|ranked| !ranked.item.disabled),
-        PaletteStep::Last => ranked_items.iter().rposition(|ranked| !ranked.item.disabled),
+        PaletteStep::Last => ranked_items
+            .iter()
+            .rposition(|ranked| !ranked.item.disabled),
         PaletteStep::Forward(delta) => {
             let start = current.saturating_add(delta).min(last);
             (start..=last)

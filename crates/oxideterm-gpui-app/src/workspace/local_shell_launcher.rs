@@ -186,111 +186,110 @@ impl WorkspaceApp {
 
         let selected_is_default = selected_shell_id.as_deref() == default_shell_id.as_deref();
         let card = overlay_content_boundary(
-                div()
-                    .w(px(LOCAL_SHELL_LAUNCHER_WIDTH))
-                    .max_w_full()
-                    .rounded(px(self.tokens.radii.lg))
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_panel))
-                    .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
-                    .p(px(16.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(14.0))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_base))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(theme.text_heading))
-                            .child(self.i18n.t("settings_view.local_terminal.select_shell")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("settings_view.local_terminal.available_shells")),
-                    )
-                    .child(shell_list)
-                    .child(
-                        div()
-                            .w_full()
-                            .border_t_1()
-                            .border_color(rgb(theme.border))
-                            .pt(px(12.0))
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(8.0))
-                            .child(self.workspace_toolbar_action_button(
-                                self.i18n.t("settings_view.ai.profile_set_default"),
-                                None,
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Ghost,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: selected_shell_id.is_none()
-                                            || selected_is_default,
-                                    },
-                                    ..ToolbarButtonOptions::default()
+            div()
+                .w(px(LOCAL_SHELL_LAUNCHER_WIDTH))
+                .max_w_full()
+                .rounded(px(self.tokens.radii.lg))
+                .border_1()
+                .border_color(rgb(theme.border))
+                .bg(rgb(theme.bg_panel))
+                .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
+                .p(px(16.0))
+                .flex()
+                .flex_col()
+                .gap(px(14.0))
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_base))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(theme.text_heading))
+                        .child(self.i18n.t("settings_view.local_terminal.select_shell")),
+                )
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .text_color(rgb(theme.text_muted))
+                        .child(self.i18n.t("settings_view.local_terminal.available_shells")),
+                )
+                .child(shell_list)
+                .child(
+                    div()
+                        .w_full()
+                        .border_t_1()
+                        .border_color(rgb(theme.border))
+                        .pt(px(12.0))
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .gap(px(8.0))
+                        .child(self.workspace_toolbar_action_button(
+                            self.i18n.t("settings_view.ai.profile_set_default"),
+                            None,
+                            ToolbarButtonOptions {
+                                button: ButtonOptions {
+                                    variant: ButtonVariant::Ghost,
+                                    size: ButtonSize::Sm,
+                                    radius: ButtonRadius::Md,
+                                    disabled: selected_shell_id.is_none() || selected_is_default,
                                 },
-                                cx.listener(|this, _event, _window, cx| {
-                                    let Some(selected_id) =
-                                        this.local_shell_launcher_selected_id.clone()
-                                    else {
-                                        return;
-                                    };
-                                    this.edit_settings(
-                                        |settings| {
-                                            settings.local_terminal.default_shell_id =
-                                                Some(selected_id.clone());
+                                ..ToolbarButtonOptions::default()
+                            },
+                            cx.listener(|this, _event, _window, cx| {
+                                let Some(selected_id) =
+                                    this.local_shell_launcher_selected_id.clone()
+                                else {
+                                    return;
+                                };
+                                this.edit_settings(
+                                    |settings| {
+                                        settings.local_terminal.default_shell_id =
+                                            Some(selected_id.clone());
+                                    },
+                                    cx,
+                                );
+                                cx.notify();
+                            }),
+                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .gap(px(8.0))
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t("sessionManager.edit_properties.cancel"),
+                                    None,
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Secondary,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: false,
                                         },
-                                        cx,
-                                    );
-                                    cx.notify();
-                                }),
-                            ))
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(px(8.0))
-                                    .child(self.workspace_toolbar_action_button(
-                                        self.i18n.t("sessionManager.edit_properties.cancel"),
-                                        None,
-                                        ToolbarButtonOptions {
-                                            button: ButtonOptions {
-                                                variant: ButtonVariant::Secondary,
-                                                size: ButtonSize::Sm,
-                                                radius: ButtonRadius::Md,
-                                                disabled: false,
-                                            },
-                                            ..ToolbarButtonOptions::default()
+                                        ..ToolbarButtonOptions::default()
+                                    },
+                                    cx.listener(|this, _event, _window, cx| {
+                                        this.close_local_shell_launcher(cx);
+                                    }),
+                                ))
+                                .child(self.workspace_toolbar_action_button(
+                                    self.i18n.t("workspace.new_local_terminal"),
+                                    None,
+                                    ToolbarButtonOptions {
+                                        button: ButtonOptions {
+                                            variant: ButtonVariant::Default,
+                                            size: ButtonSize::Sm,
+                                            radius: ButtonRadius::Md,
+                                            disabled: selected_shell_id.is_none(),
                                         },
-                                        cx.listener(|this, _event, _window, cx| {
-                                            this.close_local_shell_launcher(cx);
-                                        }),
-                                    ))
-                                    .child(self.workspace_toolbar_action_button(
-                                        self.i18n.t("workspace.new_local_terminal"),
-                                        None,
-                                        ToolbarButtonOptions {
-                                            button: ButtonOptions {
-                                                variant: ButtonVariant::Default,
-                                                size: ButtonSize::Sm,
-                                                radius: ButtonRadius::Md,
-                                                disabled: selected_shell_id.is_none(),
-                                            },
-                                            ..ToolbarButtonOptions::default()
-                                        },
-                                        cx.listener(|this, _event, window, cx| {
-                                            this.launch_selected_local_shell(window, cx);
-                                        }),
-                                    )),
-                            ),
-                    ),
-            );
+                                        ..ToolbarButtonOptions::default()
+                                    },
+                                    cx.listener(|this, _event, window, cx| {
+                                        this.launch_selected_local_shell(window, cx);
+                                    }),
+                                )),
+                        ),
+                ),
+        );
         oxideterm_gpui_ui::modal::staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,

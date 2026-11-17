@@ -569,10 +569,7 @@ impl WorkspaceApp {
                     .flex()
                     .items_center()
                     .border_b_1()
-                    .border_color(file_manager_border(
-                        self.tokens.ui.border,
-                        has_background,
-                    ))
+                    .border_color(file_manager_border(self.tokens.ui.border, has_background))
                     .child(
                         div()
                             .flex_1()

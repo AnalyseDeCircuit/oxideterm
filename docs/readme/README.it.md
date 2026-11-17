@@ -11,6 +11,7 @@ SSH · Mosh · Telnet · seriale · RDP/VNC · SFTP · inoltro porte · editor d
 Nessun account. Nessun abbonamento. Nessuna telemetria. Niente Electron.
 
 [![Ultima versione](https://img.shields.io/github/v/release/AnalyseDeCircuit/oxideterm?label=release)](https://github.com/AnalyseDeCircuit/oxideterm/releases/latest)
+[![Download](https://img.shields.io/github/downloads/AnalyseDeCircuit/oxideterm/total)](https://github.com/AnalyseDeCircuit/oxideterm/releases)
 [![Piattaforme](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-blue)](#install)
 [![Licenza](https://img.shields.io/badge/license-GPL--3.0-blue)](../../LICENSE)
 [![Stelle](https://img.shields.io/github/stars/AnalyseDeCircuit/oxideterm?style=social)](https://github.com/AnalyseDeCircuit/oxideterm/stargazers)

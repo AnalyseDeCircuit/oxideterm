@@ -118,8 +118,7 @@ impl Render for ChoiceDialogView {
                     row.bg(rgba((theme.bg_panel << 8) | 0x2e))
                         .border_color(rgba((theme.border << 8) | 0x66))
                         .hover(move |row| {
-                            row.bg(rgb(theme.bg_hover))
-                                .border_color(rgb(theme.border))
+                            row.bg(rgb(theme.bg_hover)).border_color(rgb(theme.border))
                         })
                 })
                 .child(radio_group_item(tokens, selected, false).flex_none())
@@ -399,7 +398,12 @@ mod tests {
             .unwrap_or_else(|| {
                 let sizes: Vec<_> = quads
                     .iter()
-                    .map(|q| (q.bounds.size.width.0 / scale, q.bounds.size.height.0 / scale))
+                    .map(|q| {
+                        (
+                            q.bounds.size.width.0 / scale,
+                            q.bounds.size.height.0 / scale,
+                        )
+                    })
                     .collect();
                 panic!("compact dialog card quad not found; painted sizes: {sizes:?}")
             });
@@ -440,11 +444,7 @@ mod tests {
             px(option_quads[1].bounds.center().x.0 / scale),
             px(option_quads[1].bounds.center().y.0 / scale),
         );
-        cx.simulate_mouse_down(
-            second_center,
-            MouseButton::Left,
-            gpui::Modifiers::default(),
-        );
+        cx.simulate_mouse_down(second_center, MouseButton::Left, gpui::Modifiers::default());
         cx.run_until_parked();
         view.read_with(cx, |this, _| assert_eq!(this.selected, 1));
 

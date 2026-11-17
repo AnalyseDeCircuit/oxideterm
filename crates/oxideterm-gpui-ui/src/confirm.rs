@@ -102,135 +102,132 @@ pub fn confirm_dialog_with_focus_motion(
 
     let id = id.into();
     let visible = phase == crate::motion::ExitPhase::Visible;
-    let card = crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Dialog)
-        .w(px(CONFIRM_DIALOG_WIDTH))
-                .rounded(px(tokens.radii.lg))
-                .overflow_hidden()
-                .border_1()
-                .border_color(rgba((theme.border << 8) | CONFIRM_BORDER_ALPHA))
-                .shadow(vec![BoxShadow {
-                    color: rgba((TW_BLACK << 8) | CONFIRM_SHADOW_ALPHA).into(),
-                    offset: point(px(0.0), px(16.0)),
-                    blur_radius: px(32.0),
-                    spread_radius: px(0.0),
-                    inset: false,
-                }])
-                .flex()
-                .flex_col()
-                .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .gap(px(CONFIRM_BODY_GAP))
-                        .px(px(CONFIRM_BODY_PAD_X))
-                        .pt(px(CONFIRM_BODY_PAD_TOP))
-                        .pb(px(CONFIRM_BODY_PAD_BOTTOM))
-                        .child(
-                            div()
-                                .size(px(CONFIRM_ICON_WRAPPER_SIZE))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_full()
-                                .border_1()
-                                .border_color(rgba((accent << 8) | CONFIRM_ICON_RING_ALPHA))
-                                .bg(rgba((accent << 8) | CONFIRM_ICON_BG_ALPHA))
-                                .child(
-                                    svg()
-                                        .path(icon_path)
-                                        .size(px(CONFIRM_ICON_SIZE))
-                                        .text_color(rgb(icon_color)),
-                                ),
-                        )
-                        .child(
+    let card =
+        crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Dialog)
+            .w(px(CONFIRM_DIALOG_WIDTH))
+            .rounded(px(tokens.radii.lg))
+            .overflow_hidden()
+            .border_1()
+            .border_color(rgba((theme.border << 8) | CONFIRM_BORDER_ALPHA))
+            .shadow(vec![BoxShadow {
+                color: rgba((TW_BLACK << 8) | CONFIRM_SHADOW_ALPHA).into(),
+                offset: point(px(0.0), px(16.0)),
+                blur_radius: px(32.0),
+                spread_radius: px(0.0),
+                inset: false,
+            }])
+            .flex()
+            .flex_col()
+            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(CONFIRM_BODY_GAP))
+                    .px(px(CONFIRM_BODY_PAD_X))
+                    .pt(px(CONFIRM_BODY_PAD_TOP))
+                    .pb(px(CONFIRM_BODY_PAD_BOTTOM))
+                    .child(
+                        div()
+                            .size(px(CONFIRM_ICON_WRAPPER_SIZE))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .border_1()
+                            .border_color(rgba((accent << 8) | CONFIRM_ICON_RING_ALPHA))
+                            .bg(rgba((accent << 8) | CONFIRM_ICON_BG_ALPHA))
+                            .child(
+                                svg()
+                                    .path(icon_path)
+                                    .size(px(CONFIRM_ICON_SIZE))
+                                    .text_color(rgb(icon_color)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_align(gpui::TextAlign::Center)
+                            .text_size(px(tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(theme.text))
+                            .child(view.title),
+                    )
+                    .when_some(view.description, |body, description| {
+                        body.child(
                             div()
                                 .text_align(gpui::TextAlign::Center)
-                                .text_size(px(tokens.metrics.ui_text_sm))
-                                .font_weight(gpui::FontWeight::SEMIBOLD)
-                                .text_color(rgb(theme.text))
-                                .child(view.title),
+                                .text_size(px(tokens.metrics.ui_text_xs))
+                                .text_color(rgb(theme.text_muted))
+                                .child(description),
                         )
-                        .when_some(view.description, |body, description| {
-                            body.child(
-                                div()
-                                    .text_align(gpui::TextAlign::Center)
-                                    .text_size(px(tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(theme.text_muted))
-                                    .child(description),
-                            )
-                        }),
-                )
-                .child(
-                    div()
-                        .w_full()
-                        .flex()
-                        // Tauri clips split footer button backgrounds through
-                        // DialogContent's rounded overflow-hidden surface.
-                        // GPUI needs the footer row to own that bottom clip too.
-                        .rounded_b(px(rounded_shell_child_radius(tokens.radii.lg)))
-                        .overflow_hidden()
-                        .border_t_1()
-                        .border_color(rgba((theme.border << 8) | CONFIRM_DIVIDER_ALPHA))
-                        .child(
-                            split_footer_button(
-                                tokens,
-                                view.cancel_label,
-                                SplitFooterButtonOptions {
-                                    text_color: rgb(theme.text_muted),
-                                    hover_text_color: rgb(theme.text),
-                                    hover_background: rgb(theme.bg_hover),
-                                    font_weight: gpui::FontWeight::MEDIUM,
-                                    focus_visible: focused_action
-                                        == Some(ConfirmDialogAction::Cancel),
-                                    right_separator: true,
-                                    separator_color: Some(rgba(
-                                        (theme.border << 8) | CONFIRM_DIVIDER_ALPHA,
-                                    )),
-                                    disabled: false,
-                                    loading: false,
-                                    height: Some(CONFIRM_ACTION_HEIGHT),
-                                    padding_y: None,
-                                    font_size: Some(tokens.metrics.ui_text_sm),
-                                    edge: SplitFooterButtonEdge::Left,
-                                },
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                move |event, window, cx| {
-                                    on_cancel(event, window, cx);
-                                },
-                            ),
+                    }),
+            )
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    // Tauri clips split footer button backgrounds through
+                    // DialogContent's rounded overflow-hidden surface.
+                    // GPUI needs the footer row to own that bottom clip too.
+                    .rounded_b(px(rounded_shell_child_radius(tokens.radii.lg)))
+                    .overflow_hidden()
+                    .border_t_1()
+                    .border_color(rgba((theme.border << 8) | CONFIRM_DIVIDER_ALPHA))
+                    .child(
+                        split_footer_button(
+                            tokens,
+                            view.cancel_label,
+                            SplitFooterButtonOptions {
+                                text_color: rgb(theme.text_muted),
+                                hover_text_color: rgb(theme.text),
+                                hover_background: rgb(theme.bg_hover),
+                                font_weight: gpui::FontWeight::MEDIUM,
+                                focus_visible: focused_action == Some(ConfirmDialogAction::Cancel),
+                                right_separator: true,
+                                separator_color: Some(rgba(
+                                    (theme.border << 8) | CONFIRM_DIVIDER_ALPHA,
+                                )),
+                                disabled: false,
+                                loading: false,
+                                height: Some(CONFIRM_ACTION_HEIGHT),
+                                padding_y: None,
+                                font_size: Some(tokens.metrics.ui_text_sm),
+                                edge: SplitFooterButtonEdge::Left,
+                            },
                         )
-                        .child(
-                            split_footer_button(
-                                tokens,
-                                view.confirm_label,
-                                SplitFooterButtonOptions {
-                                    text_color: rgb(confirm_color),
-                                    hover_text_color: rgb(confirm_hover_color),
-                                    hover_background: rgba(
-                                        (accent << 8) | CONFIRM_ACTION_HOVER_ALPHA,
-                                    ),
-                                    font_weight: gpui::FontWeight::SEMIBOLD,
-                                    focus_visible: focused_action
-                                        == Some(ConfirmDialogAction::Confirm),
-                                    right_separator: false,
-                                    separator_color: None,
-                                    disabled: false,
-                                    loading: false,
-                                    height: Some(CONFIRM_ACTION_HEIGHT),
-                                    padding_y: None,
-                                    font_size: Some(tokens.metrics.ui_text_sm),
-                                    edge: SplitFooterButtonEdge::Right,
-                                },
-                            )
-                            .on_mouse_down(MouseButton::Left, on_confirm),
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            move |event, window, cx| {
+                                on_cancel(event, window, cx);
+                            },
                         ),
-                );
+                    )
+                    .child(
+                        split_footer_button(
+                            tokens,
+                            view.confirm_label,
+                            SplitFooterButtonOptions {
+                                text_color: rgb(confirm_color),
+                                hover_text_color: rgb(confirm_hover_color),
+                                hover_background: rgba((accent << 8) | CONFIRM_ACTION_HOVER_ALPHA),
+                                font_weight: gpui::FontWeight::SEMIBOLD,
+                                focus_visible: focused_action == Some(ConfirmDialogAction::Confirm),
+                                right_separator: false,
+                                separator_color: None,
+                                disabled: false,
+                                loading: false,
+                                height: Some(CONFIRM_ACTION_HEIGHT),
+                                padding_y: None,
+                                font_size: Some(tokens.metrics.ui_text_sm),
+                                edge: SplitFooterButtonEdge::Right,
+                            },
+                        )
+                        .on_mouse_down(MouseButton::Left, on_confirm),
+                    ),
+            );
     // Keep scrim dim and foreground card on independent tracks so outside
     // dismissal works on frame 0 while the card rises with un-multiplied shadow.
     staged_overlay_root()

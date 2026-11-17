@@ -421,14 +421,10 @@ fn command_mark_overlays_preserve_boundaries_and_distinguish_selection_from_hove
     }
 
     let mut foldable_mark = test_command_mark("cmd-foldable", 0, Some(3), Some(0));
-    foldable_mark.output_start = Some(oxideterm_terminal::TerminalCommandPosition {
-        line: 1,
-        column: 0,
-    });
-    foldable_mark.output_end = Some(oxideterm_terminal::TerminalCommandPosition {
-        line: 3,
-        column: 0,
-    });
+    foldable_mark.output_start =
+        Some(oxideterm_terminal::TerminalCommandPosition { line: 1, column: 0 });
+    foldable_mark.output_end =
+        Some(oxideterm_terminal::TerminalCommandPosition { line: 3, column: 0 });
     let non_foldable_mark = test_command_mark("cmd-single", 4, Some(4), Some(0));
     let foldable_layout = TerminalElement::new(
         snapshot,

@@ -1,9 +1,8 @@
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnimationExt, AnyElement, App, Bounds, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, point,
-    px,
+    AnimationExt, AnyElement, App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId,
+    IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, point, px,
 };
 use oxideterm_theme::ThemeTokens;
 

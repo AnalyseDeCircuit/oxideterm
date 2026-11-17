@@ -15,7 +15,9 @@ use oxideterm_gpui_editor::{EditorContextMenuLabels, EditorSettings, TextEditorV
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, StatusPillOptions, StatusTone,
     confirm::confirm_dialog,
-    modal::{TauriBackdropRole, overlay_content_boundary, staged_dialog_overlay, staged_overlay_root},
+    modal::{
+        TauriBackdropRole, overlay_content_boundary, staged_dialog_overlay, staged_overlay_root,
+    },
     scroll::ScrollableElement,
     status_pill,
     text_input::{TextInputView, text_input_with_viewport},

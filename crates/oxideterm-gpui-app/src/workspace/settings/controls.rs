@@ -2372,7 +2372,9 @@ impl WorkspaceApp {
                             .position_mode(AnchoredPositionMode::Window)
                             .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
                                 &self.tokens,
-                                SharedString::from(format!("settings-select-popup-{open_select:?}")),
+                                SharedString::from(format!(
+                                    "settings-select-popup-{open_select:?}"
+                                )),
                                 div().child(popup),
                                 -6.0,
                                 point(0.5, 0.0),

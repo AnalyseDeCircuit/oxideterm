@@ -137,9 +137,7 @@ pub fn phase_spring_config(
     tier: MotionDuration,
     phase: MotionPhase,
 ) -> SpringConfig {
-    let seconds = phase_duration(tokens, tier, phase)
-        .as_secs_f32()
-        .max(0.001);
+    let seconds = phase_duration(tokens, tier, phase).as_secs_f32().max(0.001);
     let frequency = SETTLE_RESPONSE / seconds;
     SpringConfig::new(frequency * frequency, 2.0 * frequency, 1.0)
 }
@@ -354,7 +352,10 @@ impl Element for VisualSlideSurface {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let rendered = self.rendered.as_mut().expect("rendered visual slide surface");
+        let rendered = self
+            .rendered
+            .as_mut()
+            .expect("rendered visual slide surface");
         window.with_element_offset(self.offset, |window| {
             rendered.prepaint(window, cx);
         });
