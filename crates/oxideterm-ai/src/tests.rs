@@ -2062,33 +2062,46 @@ fn deepseek_tool_requests_replay_thinking_across_turns() {
         parameters: serde_json::json!({"type": "object"}),
     });
     let converted = openai_chat_messages(&config, &messages);
-    assert_eq!(converted[1]["reasoning_content"], "prior reasoning without tools");
+    assert_eq!(
+        converted[1]["reasoning_content"],
+        "prior reasoning without tools"
+    );
     assert_eq!(converted[3]["reasoning_content"], "old reasoning");
     assert_eq!(converted[6]["reasoning_content"], "");
     assert_eq!(converted[7]["tool_call_id"], "current-call");
 
     config.reasoning_effort = Some("none".into());
     let converted = openai_chat_messages(&config, &messages);
-    assert!(converted.iter().all(|message| message.get("reasoning_content").is_none()));
+    assert!(
+        converted
+            .iter()
+            .all(|message| message.get("reasoning_content").is_none())
+    );
 }
 
 #[tokio::test]
 async fn chat_completions_tool_followup_reports_safe_provider_errors() {
     for (status, content_type, body, expected, http_status) in [
         (
-            "400 Bad Request", "application/json",
+            "400 Bad Request",
+            "application/json",
             r#"{"error":{"message":"The `reasoning_content` in the thinking mode must be passed back to the API. Bearer private-fixture"}}"#,
-            "chat_thinking_context:400", Some(400),
+            "chat_thinking_context:400",
+            Some(400),
         ),
         (
-            "402 Payment Required", "application/json",
+            "402 Payment Required",
+            "application/json",
             r#"{"error":{"message":"Insufficient Balance: private-fixture"}}"#,
-            "chat_balance:402", Some(402),
+            "chat_balance:402",
+            Some(402),
         ),
         (
-            "200 OK", "text/event-stream",
+            "200 OK",
+            "text/event-stream",
             "data: {\"error\":{\"code\":\"server_error\",\"message\":\"terminal-private-output\"}}\n\ndata: [DONE]\n\n",
-            "chat_unavailable", None,
+            "chat_unavailable",
+            None,
         ),
     ] {
         let (url, server) = responses::mock_response(status, body.to_owned(), content_type).await;
@@ -2107,7 +2120,10 @@ async fn chat_completions_tool_followup_reports_safe_provider_errors() {
         assert_eq!(stream_error_http_status(expected), http_status);
         assert!(stream_error_label(expected).is_some());
         let (headers, request) = server.await.unwrap();
-        assert_eq!(headers.lines().next(), Some("POST /v1/chat/completions HTTP/1.1"));
+        assert_eq!(
+            headers.lines().next(),
+            Some("POST /v1/chat/completions HTTP/1.1")
+        );
         assert_eq!(request["messages"][2]["tool_call_id"], "call-1");
     }
 }

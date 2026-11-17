@@ -40,12 +40,12 @@ pub(crate) async fn stream_openai_completion(
                 chat_rejection(&mut response, body.get("tool_choice").is_some()).await;
             if rejection.unsupported_tool_choice {
                 let fallback_body = body_without_tool_choice(&body);
-                response =
-                    match openai_stream_request(&client, url, &config, &fallback_body).await {
-                        Ok(response) => response,
-                        Err(_) if has_fallback => continue,
-                        Err(error) => return Err(error),
-                    };
+                response = match openai_stream_request(&client, url, &config, &fallback_body).await
+                {
+                    Ok(response) => response,
+                    Err(_) if has_fallback => continue,
+                    Err(error) => return Err(error),
+                };
                 super::retry::check_transient_response(&response)?;
                 if !response.status().is_success() {
                     rejection = chat_rejection(&mut response, false).await;
@@ -105,7 +105,9 @@ async fn chat_rejection(response: &mut reqwest::Response, has_tool_choice: bool)
         .ok()
         .and_then(|envelope| envelope.error)
         .or_else(|| serde_json::from_slice::<ProviderError<'_>>(&body).ok());
-    let message = details.as_ref().and_then(|details| details.message.as_deref());
+    let message = details
+        .as_ref()
+        .and_then(|details| details.message.as_deref());
     let code = details.as_ref().and_then(|details| details.code.as_deref());
     let classified = chat_provider_error(code, message);
     let is_html = looks_like_html_response(raw) || message.is_some_and(looks_like_html_response);
