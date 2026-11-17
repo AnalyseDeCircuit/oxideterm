@@ -79,6 +79,7 @@
               "scan_failed": "Error al escanear BLE: {error}",
               "no_device_matched": "Ningún dispositivo BLE en rango coincide con el perfil ({identity})",
               "ambiguous_device": "Varios dispositivos BLE coinciden con {identity}; vuelve a buscar y selecciona un dispositivo.",
+              "device_busy": "Este dispositivo BLE ({device}) ya está abierto; cierra su terminal antes de abrirlo de nuevo.",
               "cancelled": "Conexión BLE cancelada",
               "connect_failed": "Error al conectar el dispositivo BLE: {error}",
               "service_discovery_failed": "Error al descubrir servicios: {error}",

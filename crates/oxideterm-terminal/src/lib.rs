@@ -111,7 +111,7 @@ pub use session::{
     TelnetLoginCredentials, TelnetSessionConfig, TerminalDrainBudget, TerminalDrainReport,
     TerminalMagicKind, TerminalOutputProcessor, TerminalResize, TerminalSession,
     TerminalSessionBackend, TerminalSessionKind, TerminalSessionStatus,
-    ble_resolve_profile_to_session, serial_list_ports,
+    ble_device_reservation_label, ble_resolve_profile_to_session, serial_list_ports,
 };
 pub use shell_completion::{
     TerminalShellParseResult, TerminalShellToken, escape_terminal_path_for_shell,

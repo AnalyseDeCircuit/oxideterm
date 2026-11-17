@@ -337,7 +337,7 @@ pub struct TerminalSerialStatus {
     pub can_reconnect: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct TerminalBleStatus {
     pub config: BleSessionConfig,
     pub lifecycle: TerminalLifecycle,

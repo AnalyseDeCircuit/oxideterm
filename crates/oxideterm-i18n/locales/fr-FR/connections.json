@@ -79,6 +79,7 @@
               "scan_failed": "Échec de l'analyse BLE : {error}",
               "no_device_matched": "Aucun appareil BLE à portée ne correspond au profil ({identity})",
               "ambiguous_device": "Plusieurs appareils BLE correspondent à {identity} ; relancez la recherche et sélectionnez un appareil.",
+              "device_busy": "Cet appareil BLE ({device}) est déjà ouvert ; fermez son terminal avant de le rouvrir.",
               "cancelled": "Connexion BLE annulée",
               "connect_failed": "Échec de la connexion à l'appareil BLE : {error}",
               "service_discovery_failed": "Échec de la découverte des services : {error}",

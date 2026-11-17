@@ -45,9 +45,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // Delivery polls also run with nothing drained; skip the repaint in
+        // that case. Worker results mutate standalone records (bind/mark/
+        // cancel), and the sidebar only refreshes when the workspace entity
+        // notifies.
+        if results.is_empty() {
+            return;
+        }
         for result in results {
             self.handle_ble_worker_result(result, window, cx);
         }
+        cx.notify();
     }
 
     pub(super) fn build_new_connection_config(
