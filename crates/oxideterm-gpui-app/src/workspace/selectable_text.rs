@@ -1047,6 +1047,18 @@ impl SelectableTextRenderState {
     ) -> AnyElement {
         let text = text.into();
         let fragment_id = selectable_text_id(scope, (key, text.as_str()));
+        self.render_display_text_with_id_in_group(role, group_id, fragment_id, order, text, color)
+    }
+
+    pub(super) fn render_display_text_with_id_in_group(
+        &self,
+        role: SelectableTextRole,
+        group_id: u64,
+        fragment_id: u64,
+        order: usize,
+        text: String,
+        color: u32,
+    ) -> AnyElement {
         let run = TextRun {
             len: text.len(),
             font: font(self.ui_font_family.clone()),

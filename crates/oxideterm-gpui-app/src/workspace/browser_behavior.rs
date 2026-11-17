@@ -6,46 +6,6 @@ use gpui::Context;
 pub(crate) use oxideterm_gpui_ui::select::{
     BrowserFocusOrigin, BrowserSelectKeyDirection, browser_focus_visible, browser_select_next_index,
 };
-pub(crate) fn toggle_browser_highlighted_select_from_pointer<T>(
-    open_select: &mut Option<T>,
-    focused_select: &mut Option<T>,
-    focus_origin: &mut Option<BrowserFocusOrigin>,
-    highlighted_option: &mut Option<(T, usize)>,
-    select: T,
-    selected_index: usize,
-) -> bool
-where
-    T: Copy + Eq,
-{
-    // Pointer-opened SelectTrigger keeps DOM focus on the trigger, but the focus
-    // ring stays hidden. Keep the open/highlight state paired with that origin.
-    *focused_select = Some(select);
-    *focus_origin = Some(BrowserFocusOrigin::Pointer);
-    if *open_select == Some(select) {
-        *open_select = None;
-        *highlighted_option = None;
-        return false;
-    }
-
-    *open_select = Some(select);
-    *highlighted_option = Some((select, selected_index));
-    true
-}
-
-pub(crate) fn clear_browser_highlighted_select_focus<T>(
-    open_select: &mut Option<T>,
-    focused_select: &mut Option<T>,
-    focus_origin: &mut Option<BrowserFocusOrigin>,
-    highlighted_option: &mut Option<(T, usize)>,
-) {
-    // Moving focus to a sibling control releases the Select trigger owner and
-    // closes any content, matching browser/Radix focus transfer.
-    *open_select = None;
-    *focused_select = None;
-    *focus_origin = None;
-    *highlighted_option = None;
-}
-
 pub(crate) fn close_browser_trigger_select<T>(
     open_select: &mut Option<T>,
     focus_origin: &mut Option<BrowserFocusOrigin>,
@@ -563,10 +523,9 @@ fn resolve_browser_pointer_capture_owner(
 mod tests {
     use super::{
         BrowserFocusOrigin, BrowserPointerCaptureOwner, BrowserPointerCaptureState, FocusCycle,
-        browser_focus_visible, clamp_context_menu_position, clear_browser_highlighted_select_focus,
-        modal_footer_input_key_action, modal_footer_key_action,
-        pointer_capture_needs_workspace_overlay, preserve_or_move_context_selection,
-        resolve_browser_pointer_capture_owner, toggle_browser_highlighted_select_from_pointer,
+        browser_focus_visible, clamp_context_menu_position, modal_footer_input_key_action,
+        modal_footer_key_action, pointer_capture_needs_workspace_overlay,
+        preserve_or_move_context_selection, resolve_browser_pointer_capture_owner,
     };
     use std::collections::HashSet;
 
@@ -712,53 +671,6 @@ mod tests {
             super::browser_select_next_index(0, 0, super::BrowserSelectKeyDirection::Next),
             0
         );
-    }
-
-    #[test]
-    fn highlighted_select_pointer_toggle_and_focus_clear_release_state() {
-        let mut open_select = None;
-        let mut focused_select = None;
-        let mut focus_origin = None;
-        let mut highlighted_option = None;
-
-        assert!(toggle_browser_highlighted_select_from_pointer(
-            &mut open_select,
-            &mut focused_select,
-            &mut focus_origin,
-            &mut highlighted_option,
-            "backend",
-            1,
-        ));
-        assert_eq!(open_select, Some("backend"));
-        assert_eq!(focused_select, Some("backend"));
-        assert_eq!(focus_origin, Some(BrowserFocusOrigin::Pointer));
-        assert_eq!(highlighted_option, Some(("backend", 1)));
-        assert!(!browser_focus_visible(true, focus_origin));
-
-        assert!(!toggle_browser_highlighted_select_from_pointer(
-            &mut open_select,
-            &mut focused_select,
-            &mut focus_origin,
-            &mut highlighted_option,
-            "backend",
-            1,
-        ));
-        assert_eq!(open_select, None);
-        assert_eq!(focused_select, Some("backend"));
-        assert_eq!(focus_origin, Some(BrowserFocusOrigin::Pointer));
-        assert_eq!(highlighted_option, None);
-
-        clear_browser_highlighted_select_focus(
-            &mut open_select,
-            &mut focused_select,
-            &mut focus_origin,
-            &mut highlighted_option,
-        );
-
-        assert_eq!(open_select, None);
-        assert_eq!(focused_select, None);
-        assert_eq!(focus_origin, None);
-        assert_eq!(highlighted_option, None);
     }
 
     #[test]

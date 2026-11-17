@@ -1,12 +1,7 @@
-// Copyright (C) 2026 AnalyseDeCircuit
-// SPDX-License-Identifier: GPL-3.0-only
-
 use super::*;
-use oxideterm_cloud_sync::operation::{PreparedSync, SyncDirection, SyncOutcome};
-use oxideterm_gpui_cloud_sync::CloudSyncDeliverySink;
 
-impl WorkspaceApp {
-    pub(super) fn start_cloud_sync_password_change(&mut self, cx: &mut Context<Self>) {
+impl CloudSyncRuntime<'_> {
+    pub(super) fn start_cloud_sync_password_change(&mut self, cx: &mut App) {
         if self.cloud_sync.read(cx).operation_in_flight() {
             return;
         }
@@ -51,11 +46,7 @@ impl WorkspaceApp {
             });
         }
     }
-    pub(in crate::workspace) fn start_causal_sync(
-        &mut self,
-        automatic: bool,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn start_causal_sync(&mut self, automatic: bool, cx: &mut App) {
         self.start_causal_sync_with_direction(automatic, SyncDirection::Merge, cx);
     }
 
@@ -63,7 +54,7 @@ impl WorkspaceApp {
         &mut self,
         automatic: bool,
         direction: SyncDirection,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) {
         if self.cloud_sync.read(cx).operation_in_flight() {
             return;
@@ -82,13 +73,15 @@ impl WorkspaceApp {
         let mut provider = CloudSyncKeychainSecretProvider::new(state.secret_hints.clone());
         let previous = self.settings_store.settings().clone();
         match oxideterm_cloud_sync::sync_v3::RecoveryJournal::recover_pending_on_owner(
-            &mut self.connection_store,
-            &mut self.settings_store,
-            self.forwarding_service.registry(),
+            self.connection_store,
+            self.settings_store,
+            self.forwarding_registry,
             &mut provider,
         ) {
             Ok(0) => {}
-            Ok(_) => self.refresh_causal_sync_owners(&previous, cx),
+            Ok(_) => self
+                .effects
+                .push(CloudSyncHostEffect::RefreshOwners(Box::new(previous))),
             Err(error) => {
                 self.finish_cloud_sync_error("sync", error.to_string(), cx);
                 return;
@@ -101,27 +94,26 @@ impl WorkspaceApp {
             cloud_sync.controller.store.state_mut().last_error = None;
             cloud_sync.begin_delivery("sync", cx)
         });
-        self.forwarding_runtime
-            .spawn(oxideterm_gpui_cloud_sync::deliver_causal_sync(
-                tx,
-                service,
-                self.connection_store.clone(),
-                self.forwarding_service.registry().clone(),
-                self.settings_store.clone(),
-                state.settings,
-                provider.hints().clone(),
-                scope,
-                Default::default(),
-                automatic,
-                direction,
-            ));
+        self.forwarding_runtime.spawn(crate::deliver_causal_sync(
+            tx,
+            service,
+            self.connection_store.clone(),
+            self.forwarding_registry.clone(),
+            self.settings_store.clone(),
+            state.settings,
+            provider.hints().clone(),
+            scope,
+            Default::default(),
+            automatic,
+            direction,
+        ));
     }
 
     pub(super) fn receive_causal_plan(
         &mut self,
         mut prepared: PreparedSync,
         automatic: bool,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) {
         let changing_password = self
             .cloud_sync
@@ -170,18 +162,19 @@ impl WorkspaceApp {
             cx.notify();
         });
         if apply_now {
-            let workspace = cx.entity().downgrade();
+            // The prepare worker's disconnect must be handled before publishing.
+            let entity = self.cloud_sync.downgrade();
             cx.defer(move |cx| {
-                let _ = workspace.update(cx, |workspace, cx| workspace.apply_causal_sync(cx));
+                let _ = entity.update(cx, |_, cx| {
+                    cx.emit(CloudSyncWorkspaceEvent::UiIntent(
+                        CloudSyncUiIntent::ApplyCausal,
+                    ));
+                });
             });
         }
     }
 
-    pub(super) fn choose_cloud_sync_direction(
-        &mut self,
-        direction: SyncDirection,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn choose_cloud_sync_direction(&mut self, direction: SyncDirection, cx: &mut App) {
         let result = self
             .cloud_sync
             .update(cx, |cloud_sync, cx| -> anyhow::Result<()> {
@@ -224,7 +217,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn apply_causal_sync(&mut self, cx: &mut Context<Self>) {
+    pub fn apply_causal_sync(&mut self, cx: &mut App) {
         let pending = self.cloud_sync.update(cx, |cloud_sync, _| {
             cloud_sync.controller.causal_pending.take()
         });
@@ -254,9 +247,9 @@ impl WorkspaceApp {
         }
         let previous = self.settings_store.settings().clone();
         let applied = match prepared.apply(
-            &mut self.connection_store,
-            self.forwarding_service.registry(),
-            &mut self.settings_store,
+            self.connection_store,
+            self.forwarding_registry,
+            self.settings_store,
         ) {
             Ok(applied) => applied,
             Err(error) => {
@@ -265,7 +258,8 @@ impl WorkspaceApp {
                 return;
             }
         };
-        self.refresh_causal_sync_owners(&previous, cx);
+        self.effects
+            .push(CloudSyncHostEffect::RefreshOwners(Box::new(previous)));
         let tx = self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.view.causal_summary = None;
             cloud_sync.view.causal_choices.clear();
@@ -296,7 +290,7 @@ impl WorkspaceApp {
             }
             .map_err(|error| error.to_string());
             let _ = tx.send(CloudSyncDelivery::CausalFinished(
-                oxideterm_gpui_cloud_sync::CloudSyncActionResult {
+                crate::CloudSyncActionResult {
                     result,
                     secret_hints: provider.hints().clone(),
                 },
@@ -304,33 +298,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn refresh_causal_sync_owners(
-        &mut self,
-        previous: &oxideterm_settings::PersistedSettings,
-        cx: &mut Context<Self>,
-    ) {
-        let settings = self.settings_store.settings().clone();
-        self.apply_loaded_settings_to_runtime(previous, &settings, cx);
-        self.ai_entity.read(cx).key_store().clear_cache();
-        self.terminal.update(cx, |terminal, _| {
-            terminal.quick_commands.store.reload_from_store()
-        });
-        self.settings_workspace.update(cx, |settings, _| {
-            settings.acknowledge_external_store_state()
-        });
-        self.sync_ssh_config_sync_service();
-        self.refresh_ai_skill_registry();
-        self.emit_native_plugin_settings_events(previous, &settings, cx);
-        self.sync_tab_titles(cx);
-        self.invalidate_cloud_sync_snapshot_caches(cx);
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn finish_causal_sync(
-        &mut self,
-        outcome: &SyncOutcome,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn finish_causal_sync(&mut self, outcome: &SyncOutcome, cx: &mut App) {
         let saved = self.cloud_sync.update(cx, |cloud_sync, _| {
             let previous = cloud_sync.controller.store.state().clone();
             let state = cloud_sync.controller.store.state_mut();
@@ -363,13 +331,13 @@ impl WorkspaceApp {
             self.push_cloud_sync_toast(
                 self.i18n.t("plugin.cloud_sync.toast.pull_success_title"),
                 None,
-                TerminalNoticeVariant::Success,
+                CloudSyncNoticeKind::Success,
                 cx,
             );
         }
     }
 
-    pub(super) fn cancel_causal_sync(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn cancel_causal_sync(&mut self, cx: &mut App) {
         self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.controller.causal_pending = None;
             cloud_sync.controller.password_change = None;
@@ -378,181 +346,5 @@ impl WorkspaceApp {
             cloud_sync.view.causal_conflicts.clear();
             cx.notify();
         });
-    }
-}
-
-impl CloudSyncPageRenderer {
-    pub(super) fn render_causal_preview(
-        &self,
-        summary: &oxideterm_cloud_sync::operation::SyncPlanSummary,
-        previews: &[oxideterm_cloud_sync::operation::SyncConflictPreview],
-        choices: &std::collections::BTreeMap<usize, usize>,
-        changing_password: bool,
-        busy: bool,
-        cx: &mut App,
-    ) -> AnyElement {
-        let mut body = Vec::new();
-        let mut directions = div().flex().flex_wrap().gap(px(8.0));
-        for (direction, key) in [
-            (SyncDirection::Download, "plugin.cloud_sync.causal.download"),
-            (SyncDirection::Merge, "plugin.cloud_sync.causal.merge"),
-            (SyncDirection::Upload, "plugin.cloud_sync.causal.upload"),
-        ] {
-            directions = directions.child(self.render_cloud_sync_action_button(
-                key,
-                if summary.direction == direction {
-                    ButtonVariant::Default
-                } else {
-                    ButtonVariant::Outline
-                },
-                busy || (direction != SyncDirection::Upload && !summary.has_remote),
-                self.intent_listener(CloudSyncUiIntent::ChooseDirection(direction)),
-            ));
-        }
-        if !changing_password {
-            body.push(directions.into_any_element());
-        }
-        let hint_key = match summary.direction {
-            SyncDirection::Download => "plugin.cloud_sync.causal.download_hint",
-            SyncDirection::Merge => "plugin.cloud_sync.causal.merge_hint",
-            SyncDirection::Upload => "plugin.cloud_sync.causal.upload_hint",
-        };
-        body.push(
-            div()
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t(if changing_password {
-                    "plugin.cloud_sync.causal.change_password_description"
-                } else {
-                    hint_key
-                }))
-                .into_any_element(),
-        );
-        for (index, conflict) in summary.conflicts.iter().enumerate() {
-            let preview = previews.get(index);
-            let title = div()
-                .child(
-                    preview
-                        .and_then(|preview| preview.name.clone())
-                        .unwrap_or_else(|| self.i18n.t("plugin.cloud_sync.causal.configuration")),
-                )
-                .into_any_element();
-            let mut buttons = div().flex().flex_wrap().gap(px(8.0));
-            for (candidate, _) in conflict.candidates.iter().enumerate() {
-                let label = format!(
-                    "{} {}{}",
-                    self.i18n.t("plugin.cloud_sync.causal.candidate"),
-                    candidate + 1,
-                    if choices.get(&index) == Some(&candidate) {
-                        " ✓"
-                    } else {
-                        ""
-                    }
-                );
-                let value = preview
-                    .and_then(|preview| preview.candidates.get(candidate))
-                    .and_then(|value| value.as_ref())
-                    .map(|value| {
-                        if conflict.field.is_presence() {
-                            self.i18n.t(if value.as_str() == "true" {
-                                "plugin.cloud_sync.causal.keep"
-                            } else {
-                                "common.delete"
-                            })
-                        } else {
-                            value.to_string()
-                        }
-                    })
-                    .unwrap_or_else(|| self.i18n.t("plugin.cloud_sync.causal.protected"));
-                let label = if preview.is_some_and(|preview| preview.current == Some(candidate)) {
-                    format!(
-                        "{label} · {}",
-                        self.i18n.t("plugin.cloud_sync.causal.current")
-                    )
-                } else {
-                    label
-                };
-                buttons = buttons.child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(4.0))
-                        .child(div().max_w(px(360.0)).child(value))
-                        .child(
-                            self.workspace_toolbar_action_button(
-                                label,
-                                None,
-                                oxideterm_gpui_cloud_sync::cloud_sync_button_options(
-                                    ButtonVariant::Outline,
-                                    busy,
-                                ),
-                                self.intent_listener(CloudSyncUiIntent::ChooseCausal {
-                                    conflict: index,
-                                    candidate,
-                                }),
-                            )
-                            .into_any_element(),
-                        ),
-                );
-            }
-            body.push(cloud_sync_list_item(
-                &self.tokens,
-                title,
-                Some(buttons.into_any_element()),
-                false,
-                None,
-            ));
-        }
-        let actions = div()
-            .flex()
-            .gap(px(8.0))
-            .child(
-                self.render_cloud_sync_action_button(
-                    match summary.direction {
-                        SyncDirection::Download => "plugin.cloud_sync.causal.apply_download",
-                        SyncDirection::Merge => "plugin.cloud_sync.causal.apply",
-                        SyncDirection::Upload => "plugin.cloud_sync.causal.apply_upload",
-                    },
-                    ButtonVariant::Default,
-                    busy || (summary.direction == SyncDirection::Download
-                        && summary
-                            .conflicts
-                            .iter()
-                            .enumerate()
-                            .any(|(index, _)| !choices.contains_key(&index))),
-                    self.intent_listener(CloudSyncUiIntent::ApplyCausal),
-                ),
-            )
-            .child(self.render_cloud_sync_action_button(
-                "plugin.cloud_sync.actions.cancel_preview",
-                ButtonVariant::Outline,
-                busy,
-                self.intent_listener(CloudSyncUiIntent::CancelCausal),
-            ))
-            .into_any_element();
-        cloud_sync_preview_card(
-            &self.tokens,
-            self.has_background,
-            div()
-                .child(self.i18n.t("plugin.cloud_sync.causal.preview"))
-                .into_any_element(),
-            [self.render_cloud_sync_fact(
-                "plugin.cloud_sync.causal.changes",
-                summary.changed_fields.to_string(),
-                cx,
-            )],
-            if !summary.has_remote {
-                Some(self.i18n.t("plugin.cloud_sync.causal.remote_empty"))
-            } else if summary.first_sync && !changing_password {
-                Some(self.i18n.t("plugin.cloud_sync.causal.first_hint"))
-            } else if summary.upgrading {
-                Some(self.i18n.t("plugin.cloud_sync.causal.upgrade"))
-            } else if !summary.conflicts.is_empty() {
-                Some(self.i18n.t("plugin.cloud_sync.causal.conflict_hint"))
-            } else {
-                None
-            },
-            body,
-            actions,
-        )
     }
 }

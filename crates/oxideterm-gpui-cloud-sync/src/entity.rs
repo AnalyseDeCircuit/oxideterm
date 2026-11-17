@@ -66,6 +66,8 @@ pub struct CloudSyncControllerState {
     pub upload_after_current: Option<bool>,
     pub causal_pending: Option<oxideterm_cloud_sync::operation::PreparedSync>,
     pub password_change: Option<zeroize::Zeroizing<String>>,
+    pub(crate) local_file_task: Option<Task<()>>,
+    pub(crate) local_file_result: Option<crate::runtime::LocalFileResult>,
 }
 
 impl CloudSyncControllerState {
@@ -83,6 +85,8 @@ impl CloudSyncControllerState {
             upload_after_current: None,
             causal_pending: None,
             password_change: None,
+            local_file_task: None,
+            local_file_result: None,
         }
     }
 }
@@ -91,7 +95,6 @@ impl CloudSyncControllerState {
 pub struct CloudSyncViewState {
     pub form: CloudSyncFormDraft,
     pub local_file_mode: bool,
-    pub local_file_task: Option<Task<()>>,
     section_rows: Vec<CloudSyncSection>,
     pub section_list_state: ListState,
     pub section_list_cache: RefCell<VirtualListSignatureCache>,
@@ -163,7 +166,6 @@ impl CloudSyncViewState {
         Self {
             form: CloudSyncFormDraft::from_settings(settings),
             local_file_mode: settings.local_file_mode,
-            local_file_task: None,
             section_rows: Vec::new(),
             section_list_state,
             section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
@@ -197,6 +199,7 @@ impl CloudSyncViewState {
 /// Requests root-only adapters without giving long-lived tasks a root handle.
 #[derive(Clone, Debug)]
 pub enum CloudSyncWorkspaceEvent {
+    LocalFileFinished,
     DeliveriesReady,
     AutoUploadDue { generation: u64 },
     DirtyRefreshDue { generation: u64 },
@@ -276,7 +279,7 @@ impl CloudSyncWorkspaceEntity {
     pub fn operation_in_flight(&self) -> bool {
         self.controller.delivery_rx.is_some()
             || self.controller.active_action.is_some()
-            || self.view.local_file_task.is_some()
+            || self.controller.local_file_task.is_some()
     }
 
     pub fn ai_snapshot(&self) -> serde_json::Value {
@@ -730,6 +733,17 @@ impl CloudSyncWorkspaceEntity {
         self.view.select_focus_origin = None;
     }
 
+    pub(crate) fn toggle_pointer_select(&mut self, select: CloudSyncSelect, selected_index: usize) {
+        if self.view.open_select == Some(select) {
+            self.close_select();
+        } else {
+            self.view.open_select = Some(select);
+            self.view.focused_select = Some(select);
+            self.view.select_focus_origin = Some(BrowserFocusOrigin::Pointer);
+            self.view.select_highlighted = Some((select, selected_index));
+        }
+    }
+
     pub fn close_select(&mut self) {
         self.view.open_select = None;
         self.view.select_highlighted = None;
@@ -758,6 +772,59 @@ mod tests {
         assert!(sanitized.contains("%5BREDACTED%5D"));
         assert!(!sanitized.contains("cloud-user"));
         assert!(!sanitized.contains("cloud-password"));
+    }
+
+    #[gpui::test]
+    fn pointer_dropdown_keeps_trigger_focus_until_focus_moves(cx: &mut TestAppContext) {
+        let entity = test_cloud_sync_entity(cx);
+        entity.update(cx, |sync, _cx| {
+            let select = CloudSyncSelect::Backend;
+            sync.toggle_pointer_select(select, 1);
+            assert_eq!(sync.view.open_select, Some(select));
+            assert_eq!(sync.view.select_highlighted, Some((select, 1)));
+            assert!(!oxideterm_gpui_ui::select::browser_focus_visible(
+                true,
+                sync.view.select_focus_origin,
+            ));
+
+            sync.toggle_pointer_select(select, 1);
+            assert_eq!(sync.view.open_select, None);
+            assert_eq!(sync.view.select_highlighted, None);
+            assert_eq!(sync.view.focused_select, Some(select));
+            assert_eq!(
+                sync.view.select_focus_origin,
+                Some(BrowserFocusOrigin::Pointer)
+            );
+
+            sync.clear_select_focus();
+            assert_eq!(sync.view.focused_select, None);
+            assert_eq!(sync.view.select_focus_origin, None);
+        });
+    }
+
+    #[gpui::test]
+    fn keyboard_switches_cloud_sync_backend_to_local_files(cx: &mut TestAppContext) {
+        let entity = test_cloud_sync_entity(cx);
+        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::En);
+        entity.update(cx, |sync, cx| {
+            sync.view.set_active_tab(CloudSyncTab::Configure);
+            sync.view.local_file_mode = false;
+            sync.view.focused_select = Some(CloudSyncSelect::Backend);
+            for key in ["enter", "end", "enter"] {
+                assert!(sync.handle_select_key(
+                    &gpui::KeyDownEvent {
+                        keystroke: gpui::Keystroke::parse(key).unwrap(),
+                        is_held: false,
+                        prefer_character_input: false,
+                    },
+                    &i18n,
+                    cx,
+                ));
+            }
+            assert!(sync.view.local_file_mode);
+            assert_eq!(sync.view.open_select, None);
+            assert_eq!(sync.view.focused_select, Some(CloudSyncSelect::Backend));
+        });
     }
 
     #[gpui::test]

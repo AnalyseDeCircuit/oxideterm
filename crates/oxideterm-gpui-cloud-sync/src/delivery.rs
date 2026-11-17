@@ -3,9 +3,8 @@
 
 //! Cloud Sync operation delivery adapters.
 //!
-//! The GPUI app owns scheduling and rendering, while this module owns the
-//! request/response glue between the Cloud Sync service, local stores, rollback
-//! backup encoding, keychain hints, and UI delivery messages.
+//! Workers translate service results, rollback backups, and keychain hints
+//! into messages consumed by the panel controller.
 
 use std::{
     collections::BTreeMap,
