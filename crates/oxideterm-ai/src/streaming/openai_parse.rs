@@ -47,6 +47,12 @@ pub(crate) fn parse_openai_data_line_with_accumulator(
 
     let mut events = Vec::new();
     if let Ok(json) = serde_json::from_str::<Value>(data) {
+        if let Some(error) = openai_error_event(&json) {
+            return ParsedStreamLine {
+                events: vec![error],
+                saw_frame: true,
+            };
+        }
         if let Some(usage) = json.get("usage") {
             events.push(AiStreamEvent::Usage {
                 input_tokens: usage.get("prompt_tokens").and_then(Value::as_u64),
@@ -86,8 +92,8 @@ pub(crate) fn parse_openai_data_line_with_accumulator(
         {
             events.push(AiStreamEvent::Content(content.to_string()));
         }
-        if matches!(finish_reason, Some("length" | "content_filter")) {
-            events.push(AiStreamEvent::Error("ai_output_incomplete".into()));
+        if let Some(error) = openai_finish_error(finish_reason) {
+            events.push(AiStreamEvent::Error(error.into()));
         }
     }
     ParsedStreamLine {
@@ -153,6 +159,9 @@ impl OpenAiToolAccumulator {
 
 pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<AiStreamEvent>> {
     let json = parse_provider_json(body, context)?;
+    if let Some(error) = openai_error_event(&json) {
+        return Ok(vec![error]);
+    }
     let payload = json
         .get("choices")
         .and_then(Value::as_array)
@@ -190,13 +199,11 @@ pub(crate) fn parse_openai_json_events(body: &str, context: &str) -> Result<Vec<
             output_tokens: usage.get("completion_tokens").and_then(Value::as_u64),
         });
     }
-    if matches!(
-        json.pointer("/choices/0/finish_reason")
-            .and_then(Value::as_str),
-        Some("length" | "content_filter")
+    if let Some(error) = openai_finish_error(
+        json.pointer("/choices/0/finish_reason").and_then(Value::as_str),
     ) {
         events.retain(|event| !matches!(event, AiStreamEvent::ToolCallComplete { .. }));
-        events.push(AiStreamEvent::Error("ai_output_incomplete".into()));
+        events.push(AiStreamEvent::Error(error.into()));
     }
     Ok(events)
 }
@@ -226,21 +233,35 @@ fn openai_tool_call_complete_event(call: &Value, index: usize) -> AiStreamEvent 
     }
 }
 
-pub(crate) fn parse_openai_error(status: u16, body: &str) -> String {
-    let mut fallback = format!("API error: {status}");
-    if let Ok(json) = serde_json::from_str::<Value>(body) {
-        if let Some(message) = json
-            .get("error")
-            .and_then(|error| error.get("message"))
-            .or_else(|| json.get("message"))
-            .and_then(Value::as_str)
-        {
-            return message.to_string();
-        }
-    } else if !body.is_empty() {
-        fallback = body.chars().take(200).collect();
+fn openai_finish_error(reason: Option<&str>) -> Option<&'static str> {
+    match reason? {
+        "length" | "content_filter" => Some("ai_output_incomplete"),
+        "insufficient_system_resource" => Some("chat_unavailable"),
+        "aborted" => Some("chat_aborted"),
+        _ => None,
     }
-    fallback
+}
+
+fn openai_error_event(json: &Value) -> Option<AiStreamEvent> {
+    let error = json.get("error").filter(|error| !error.is_null())?;
+    let code = error.get("code").and_then(Value::as_str);
+    let message = error.get("message").unwrap_or(error).as_str();
+    let reason = chat_provider_error(code, message).unwrap_or("stream_failed");
+    Some(AiStreamEvent::Error(reason.into()))
+}
+
+pub(super) fn chat_provider_error(code: Option<&str>, message: Option<&str>) -> Option<&'static str> {
+    match code {
+        Some("invalid_api_key" | "permission_denied") => Some("chat_auth"),
+        Some("rate_limit_exceeded" | "insufficient_quota") => Some("chat_rate_limit"),
+        Some("model_not_found") => Some("chat_model_unavailable"),
+        Some("context_length_exceeded") => Some("chat_context_limit"),
+        Some("server_error" | "overloaded") => Some("chat_unavailable"),
+        _ if message.is_some_and(|message| {
+            message.starts_with("The `reasoning_content` in the thinking mode must be passed back")
+        }) => Some("chat_thinking_context"),
+        _ => None,
+    }
 }
 
 pub(crate) fn parse_ollama_error(status: u16, body: &str) -> String {

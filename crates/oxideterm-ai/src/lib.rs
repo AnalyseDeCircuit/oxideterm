@@ -168,7 +168,7 @@ pub use slash::{
     resolve_ai_slash_command, slash_task_system_prompt,
 };
 pub use stream_state::*;
-pub use streaming::{stream_chat_completion, stream_error_label};
+pub use streaming::{stream_chat_completion, stream_error_http_status, stream_error_label};
 pub use suggestions::{
     AiSuggestionParseResult, ai_has_partial_suggestions_block, ai_visible_suggestion_content,
     parse_ai_suggestions,

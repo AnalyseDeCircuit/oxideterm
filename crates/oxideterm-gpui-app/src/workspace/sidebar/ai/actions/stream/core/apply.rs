@@ -435,6 +435,14 @@ impl WorkspaceApp {
         true
     }
 
+    pub(in crate::workspace) fn ai_stream_error_text(&self, error: &str) -> Option<String> {
+        let text = self.i18n.t(oxideterm_ai::stream_error_label(error)?);
+        Some(match oxideterm_ai::stream_error_http_status(error) {
+            Some(status) => format!("{text} (HTTP {status})"),
+            None => text,
+        })
+    }
+
     pub(in crate::workspace) fn apply_ai_stream_event(
         &mut self,
         generation: u64,
@@ -445,8 +453,8 @@ impl WorkspaceApp {
     ) {
         let safe_error = match &event {
             AiStreamEvent::Error(error) => Some(
-                self.i18n.t(oxideterm_ai::stream_error_label(error)
-                    .unwrap_or("settings_view.ai.acp_agent_error_unknown")),
+                self.ai_stream_error_text(error)
+                    .unwrap_or_else(|| self.i18n.t("settings_view.ai.acp_agent_error_unknown")),
             ),
             _ => None,
         };

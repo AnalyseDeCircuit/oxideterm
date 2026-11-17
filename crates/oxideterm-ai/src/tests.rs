@@ -2040,22 +2040,76 @@ fn tool_result_message(id: &str, tool_call_id: &str) -> AiChatMessage {
 }
 
 #[test]
-fn deepseek_tool_subturn_preserves_reasoning_only_after_latest_user() {
+fn deepseek_tool_requests_replay_thinking_across_turns() {
+    let mut previous_answer = chat_message("a0", AiChatRole::Assistant, "previous answer");
+    previous_answer.thinking_content = Some("prior reasoning without tools".into());
     let messages = vec![
+        chat_message("u0", AiChatRole::User, "first request"),
+        previous_answer,
         chat_message("u1", AiChatRole::User, "old request"),
         assistant_tool_call_message("a1", "", Some("old reasoning"), "old-call"),
         tool_result_message("t1", "old-call"),
         chat_message("u2", AiChatRole::User, "please open a terminal"),
-        assistant_tool_call_message("a2", "", Some("current reasoning"), "current-call"),
+        assistant_tool_call_message("a2", "", None, "current-call"),
         tool_result_message("t2", "current-call"),
     ];
 
-    let converted = openai_chat_messages(&test_stream_config("deepseek"), &messages);
-    assert!(converted[1].get("reasoning_content").is_none());
-    assert_eq!(
-        converted[4]["reasoning_content"].as_str(),
-        Some("current reasoning")
-    );
+    let mut config = test_stream_config("deepseek");
+    config.model = "deepseek-flash".into();
+    config.tools.push(AiToolDefinition {
+        name: "open_app_surface".into(),
+        description: "Open a workspace surface".into(),
+        parameters: serde_json::json!({"type": "object"}),
+    });
+    let converted = openai_chat_messages(&config, &messages);
+    assert_eq!(converted[1]["reasoning_content"], "prior reasoning without tools");
+    assert_eq!(converted[3]["reasoning_content"], "old reasoning");
+    assert_eq!(converted[6]["reasoning_content"], "");
+    assert_eq!(converted[7]["tool_call_id"], "current-call");
+
+    config.reasoning_effort = Some("none".into());
+    let converted = openai_chat_messages(&config, &messages);
+    assert!(converted.iter().all(|message| message.get("reasoning_content").is_none()));
+}
+
+#[tokio::test]
+async fn chat_completions_tool_followup_reports_safe_provider_errors() {
+    for (status, content_type, body, expected, http_status) in [
+        (
+            "400 Bad Request", "application/json",
+            r#"{"error":{"message":"The `reasoning_content` in the thinking mode must be passed back to the API. Bearer private-fixture"}}"#,
+            "chat_thinking_context:400", Some(400),
+        ),
+        (
+            "402 Payment Required", "application/json",
+            r#"{"error":{"message":"Insufficient Balance: private-fixture"}}"#,
+            "chat_balance:402", Some(402),
+        ),
+        (
+            "200 OK", "text/event-stream",
+            "data: {\"error\":{\"code\":\"server_error\",\"message\":\"terminal-private-output\"}}\n\ndata: [DONE]\n\n",
+            "chat_unavailable", None,
+        ),
+    ] {
+        let (url, server) = responses::mock_response(status, body.to_owned(), content_type).await;
+        let mut config = test_stream_config("deepseek");
+        config.model = "deepseek-flash".into();
+        config.base_url = url;
+        let messages = vec![
+            chat_message("user", AiChatRole::User, "check"),
+            assistant_tool_call_message("assistant", "", Some("think"), "call-1"),
+            tool_result_message("tool", "call-1"),
+        ];
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        stream_chat_completion(config, messages, tx).await;
+        assert_eq!(rx.recv().await, Some(AiStreamEvent::Error(expected.into())));
+        assert_eq!(rx.recv().await, None);
+        assert_eq!(stream_error_http_status(expected), http_status);
+        assert!(stream_error_label(expected).is_some());
+        let (headers, request) = server.await.unwrap();
+        assert_eq!(headers.lines().next(), Some("POST /v1/chat/completions HTTP/1.1"));
+        assert_eq!(request["messages"][2]["tool_call_id"], "call-1");
+    }
 }
 
 #[test]

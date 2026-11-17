@@ -98,12 +98,13 @@ fn function(id: &str, name: &str, arguments: &str) -> Value {
 }
 
 #[test]
-fn responses_stream_interleaves_items_without_duplicate_text_or_early_execution() {
+fn responses_stream_interleaves_reasoning_and_tools_without_losing_completed_calls() {
     let mut parser = ResponsesStream::default();
     let mut events = Vec::new();
     for event in [
         json!({"type":"response.output_item.added","output_index":1,"item":function("wire-a","first","")}),
         json!({"type":"response.output_item.added","output_index":2,"item":function("wire-b","second","")}),
+        json!({"type":"response.reasoning_text.delta","output_index":0,"content_index":0,"delta":"分析"}),
         json!({"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"思考"}),
         json!({"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\"n\":"}),
         json!({"type":"response.function_call_arguments.delta","output_index":1,"delta":"{}"}),
@@ -116,6 +117,7 @@ fn responses_stream_interleaves_items_without_duplicate_text_or_early_execution(
     assert_eq!(
         events,
         vec![
+            AiStreamEvent::Thinking("分析".into()),
             AiStreamEvent::Thinking("思考".into()),
             AiStreamEvent::ToolCall {
                 id: "wire-b".into(),
@@ -136,7 +138,7 @@ fn responses_stream_interleaves_items_without_duplicate_text_or_early_execution(
         ]
     );
     let output = json!([
-        {"type":"reasoning","id":"rs_1","summary":[{"type":"summary_text","text":"思考"}],"encrypted_content":"opaque-content"},
+        {"type":"reasoning","id":"rs_1","content":[{"type":"reasoning_text","text":"分析"}],"summary":[{"type":"summary_text","text":"思考"}],"encrypted_content":"opaque-content"},
         function("wire-a","first","{}"),function("wire-b","second","{\"n\":2}"),
         {"type":"message","id":"msg_1","role":"assistant","status":"completed","content":[{"type":"output_text","text":"你好世界","annotations":[]}]}
     ]);
@@ -357,7 +359,8 @@ async fn read_request(stream: &mut tokio::net::TcpStream) -> (String, Value) {
     (headers, serde_json::from_slice(&body).unwrap())
 }
 
-async fn mock_response(
+pub(super) async fn mock_response(
+    status: &'static str,
     data: String,
     content_type: &'static str,
 ) -> (String, tokio::task::JoinHandle<(String, Value)>) {
@@ -367,7 +370,7 @@ async fn mock_response(
     let task = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
         let request = read_request(&mut stream).await;
-        stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+        stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
         // HTTP chunk boundaries split both SSE fields and multibyte text.
         for chunk in data.as_bytes().chunks(7) {
             if stream
@@ -402,7 +405,7 @@ async fn responses_http_stream_and_json_use_selected_endpoint_and_preserve_refus
                 "event: response.created\ndata: {{\"type\":\"response.created\"}}\n\nevent: response.completed\ndata: {event}\n\n"
             )
         };
-        let (url, server) = mock_response(data, content_type).await;
+        let (url, server) = mock_response("200 OK", data, content_type).await;
         let mut config = config();
         config.base_url = url;
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -440,23 +443,94 @@ async fn responses_http_stream_and_json_use_selected_endpoint_and_preserve_refus
 
 #[tokio::test]
 async fn responses_failure_never_releases_tools_or_marks_partial_output_complete() {
-    for terminal in [
-        json!({"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}).to_string(),
-        json!({"type":"response.failed","response":{"error":{"message":"secret-password=do-not-display"}}}).to_string(),
-        "{invalid".into(),
-        String::new(),
+    for (terminal, expected) in [
+        (
+            json!({"type":"response.incomplete","response":{"incomplete_details":{"reason":"max_output_tokens"}}}).to_string(),
+            "responses_incomplete_limit"
+        ),
+        (
+            json!({"type":"response.failed","response":{"error":{"message":"secret-password=do-not-display"}}}).to_string(),
+            "responses_failed"
+        ),
+        (
+            json!({"type":"error","code":"context_length_exceeded","message":"terminal-private-output"}).to_string(),
+            "responses_context_limit"
+        ),
+        ("{invalid".into(), "responses_invalid_stream"),
+        (String::new(), "responses_disconnected"),
     ] {
-        let mut data=format!("data: {}\n\ndata: {}\n\n",json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"partial"}),json!({"type":"response.output_item.done","output_index":1,"item":function("wire-a","execute","{}")}));
-        if !terminal.is_empty(){data.push_str(&format!("data: {terminal}\n\n"));}
-        let (url,server)=mock_response(data,"text/event-stream").await;
-        let mut config=config();config.base_url=url;
-        let (tx,mut rx)=tokio::sync::mpsc::unbounded_channel();
-        stream_chat_completion(config,vec![],tx).await;
-        assert_eq!(rx.recv().await,Some(AiStreamEvent::Content("partial".into())));
-        let error=rx.recv().await.unwrap();
-        assert!(matches!(&error,AiStreamEvent::Error(message) if !message.contains("do-not-display")),"{error:?}");
-        assert_eq!(rx.recv().await,None,"no complete calls or Done after failure");
+        let mut data = format!(
+            "data: {}\n\ndata: {}\n\n",
+            json!({"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"partial"}),
+            json!({"type":"response.output_item.done","output_index":1,"item":function("wire-a","execute","{}")})
+        );
+        if !terminal.is_empty() {
+            data.push_str(&format!("data: {terminal}\n\n"));
+        }
+        let (url, server) = mock_response("200 OK", data, "text/event-stream").await;
+        let mut config = config();
+        config.base_url = url;
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        stream_chat_completion(config, vec![], tx).await;
+        assert_eq!(rx.recv().await, Some(AiStreamEvent::Content("partial".into())));
+        assert_eq!(rx.recv().await, Some(AiStreamEvent::Error(expected.into())));
+        assert_eq!(rx.recv().await, None, "no complete calls or Done after failure");
         server.await.unwrap();
+    }
+}
+
+#[tokio::test]
+async fn responses_replays_paired_tool_results_and_classifies_gateway_rejections() {
+    let tool_call = function("wire-lookup", "lookup", "{}");
+    let mut result = chat_message("result", AiChatRole::Tool, "finished");
+    result.tool_call_id = Some("local-lookup".into());
+    let ids = HashMap::from([("wire-lookup".into(), "local-lookup".into())]);
+    let round = responses_round_state(&[json!({"output":[tool_call.clone()]})], &ids, &[]).unwrap();
+
+    for (status, error, expected, http_status) in [
+        (
+            "400 Bad Request",
+            json!({"error":{"type":"invalid_request_error","message":
+                "function_call_output requires item_reference ids matching each call_id\nAuthorization: Bearer private-fixture"}}),
+            "responses_tool_context:400",
+            400,
+        ),
+        (
+            "401 Unauthorized",
+            json!({"error":{"message":"Bearer private-fixture"}}),
+            "responses_auth:401",
+            401,
+        ),
+        (
+            "400 Bad Request",
+            json!({"error":{"code":"private-fixture","message":"terminal-private-output"}}),
+            "responses_rejected:400",
+            400,
+        ),
+    ] {
+        let (url, server) = mock_response(status, error.to_string(), "application/json").await;
+        let mut config = config();
+        config.base_url = url;
+        let mut assistant = chat_message("assistant", AiChatRole::Assistant, "");
+        set_ai_provider_parts(
+            &mut assistant,
+            &config.response_state_key(),
+            vec![round.clone()],
+        );
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        stream_chat_completion(config, vec![assistant, result.clone()], tx).await;
+        assert_eq!(rx.recv().await, Some(AiStreamEvent::Error(expected.into())));
+        assert_eq!(rx.recv().await, None);
+        assert_eq!(stream_error_http_status(expected), Some(http_status));
+        let (_, request) = server.await.unwrap();
+        assert_eq!(request["store"], false);
+        assert_eq!(
+            request["input"],
+            json!([
+                tool_call.clone(),
+                {"type":"function_call_output","call_id":"wire-lookup","output":"finished"}
+            ])
+        );
     }
 }
 
@@ -570,7 +644,7 @@ async fn responses_incomplete_json_keeps_text_without_executing_finished_calls()
         {"type":"message","role":"assistant","content":[{"type":"output_text","text":"Partial answer"}]},
         function("wire-a","execute","{}")
     ]});
-    let (url, server) = mock_response(response.to_string(), "application/json").await;
+    let (url, server) = mock_response("200 OK", response.to_string(), "application/json").await;
     let mut config = config();
     config.base_url = url;
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
@@ -628,7 +702,7 @@ async fn xai_stream_uses_responses_and_preserves_reasoning_and_function_calls() 
         json!({"type":"response.reasoning_text.delta","output_index":0,"content_index":0,"delta":"检查配置"}),
         completed(output.clone())
     );
-    let (url, server) = mock_response(data, "text/event-stream").await;
+    let (url, server) = mock_response("200 OK", data, "text/event-stream").await;
     let mut config = config();
     config.provider_type = "xai".into();
     config.model = "grok-4.6".into();

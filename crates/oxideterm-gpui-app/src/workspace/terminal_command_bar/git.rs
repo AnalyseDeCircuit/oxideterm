@@ -1641,8 +1641,8 @@ impl WorkspaceApp {
             TerminalGitAiCommitError::InvalidMessage => {
                 self.i18n.t("terminal.git.ai_commit_failed")
             }
-            TerminalGitAiCommitError::Message(message) => oxideterm_ai::stream_error_label(message)
-                .map(|key| self.i18n.t(key))
+            TerminalGitAiCommitError::Message(message) => self
+                .ai_stream_error_text(message)
                 .unwrap_or_else(|| message.clone()),
         }
     }

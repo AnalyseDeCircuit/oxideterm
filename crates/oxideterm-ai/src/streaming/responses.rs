@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, bail};
-use eventsource_stream::Eventsource;
+use eventsource_stream::{EventStreamError, Eventsource};
 use futures_util::StreamExt;
 
 use super::{
-    CHAT_STREAM_TIMEOUT, responses_parse::ResponsesStream, responses_payload::responses_body,
+    CHAT_STREAM_TIMEOUT, responses_error, responses_parse::ResponsesStream,
+    responses_payload::responses_body,
 };
 use crate::{AiChatMessage, AiChatStreamConfig, AiStreamEvent};
 
@@ -12,8 +13,7 @@ pub(super) async fn stream_responses(
     messages: Vec<AiChatMessage>,
     events: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
 ) -> Result<()> {
-    let client = oxideterm_network_proxy::application_http_client()
-        .context("failed to acquire AI client")?;
+    let client = oxideterm_network_proxy::application_http_client().context("responses_network")?;
     // The serialized request is scoped to this cancellable future and cleared on drop.
     let body = bytes::Bytes::from_owner(zeroize::Zeroizing::new(serde_json::to_vec(
         &responses_body(&config, &messages),
@@ -45,7 +45,7 @@ pub(super) async fn stream_responses(
             if matches!(status.as_u16(), 404 | 405) && index + 1 < urls.len() {
                 continue;
             }
-            bail!("Responses request failed (HTTP {})", status.as_u16());
+            bail!("{}", responses_error::rejected_request(response).await);
         }
         let mut parser = ResponsesStream::default();
         if response
@@ -54,10 +54,13 @@ pub(super) async fn stream_responses(
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.contains("application/json"))
         {
-            let response: serde_json::Value = response
-                .json()
-                .await
-                .context("Responses provider returned invalid JSON")?;
+            let response: serde_json::Value = response.json().await.map_err(|error| {
+                if error.is_decode() {
+                    anyhow::anyhow!("responses_invalid_stream")
+                } else {
+                    anyhow::Error::new(error.without_url())
+                }
+            })?;
             let kind = match response["status"].as_str() {
                 Some("completed") => "response.completed",
                 Some("incomplete") => "response.incomplete",
@@ -75,11 +78,15 @@ pub(super) async fn stream_responses(
         let source = response.bytes_stream().eventsource();
         futures_util::pin_mut!(source);
         while let Some(frame) = source.next().await {
-            let frame = frame.map_err(|_| {
-                anyhow::anyhow!("Responses stream transport or SSE decoding failed")
+            let frame = frame.map_err(|error| match error {
+                EventStreamError::Transport(error) if error.is_timeout() => {
+                    anyhow::anyhow!("responses_timeout")
+                }
+                EventStreamError::Transport(_) => anyhow::anyhow!("responses_disconnected"),
+                _ => anyhow::anyhow!("responses_invalid_stream"),
             })?;
             let value = serde_json::from_str(&frame.data)
-                .map_err(|_| anyhow::anyhow!("Responses provider returned invalid event JSON"))?;
+                .map_err(|_| anyhow::anyhow!("responses_invalid_stream"))?;
             for event in parser.event(value, &scope)? {
                 let done = matches!(event, AiStreamEvent::Done | AiStreamEvent::Error(_));
                 if events.send(event).is_err() || done {
@@ -89,5 +96,5 @@ pub(super) async fn stream_responses(
         }
         bail!("responses_disconnected");
     }
-    bail!("No Responses endpoint configured")
+    bail!("responses_endpoint")
 }

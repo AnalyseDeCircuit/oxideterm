@@ -1,12 +1,55 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    borrow::Cow,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::{Result, anyhow};
 use eventsource_stream::{EventStreamError, Eventsource};
 use futures_util::StreamExt;
+use serde::Deserialize;
+use zeroize::{Zeroize, Zeroizing};
 
 use crate::AiStreamEvent;
 
 const RAW_BODY_PREVIEW_LIMIT: usize = 65_536;
+
+pub(super) async fn read_provider_error_body(response: &mut reqwest::Response) -> Zeroizing<Vec<u8>> {
+    const MAX_ERROR_BODY: usize = 8 * 1024;
+    let mut body = Zeroizing::new(Vec::with_capacity(MAX_ERROR_BODY));
+    while let Ok(Some(chunk)) = response.chunk().await {
+        let remaining = MAX_ERROR_BODY - body.len();
+        body.extend_from_slice(&chunk[..remaining.min(chunk.len())]);
+        if body.len() == MAX_ERROR_BODY {
+            break;
+        }
+    }
+    body
+}
+
+#[derive(Deserialize)]
+pub(super) struct ErrorEnvelope<'a> {
+    #[serde(borrow)]
+    pub(super) error: Option<ProviderError<'a>>,
+}
+
+#[derive(Deserialize)]
+pub(super) struct ProviderError<'a> {
+    #[serde(borrow)]
+    pub(super) code: Option<Cow<'a, str>>,
+    #[serde(borrow)]
+    pub(super) message: Option<Cow<'a, str>>,
+}
+
+impl Drop for ProviderError<'_> {
+    fn drop(&mut self) {
+        // JSON escapes may require a copy of provider text that echoes private input.
+        for field in [&mut self.code, &mut self.message] {
+            if let Some(Cow::Owned(value)) = field {
+                value.zeroize();
+            }
+        }
+    }
+}
 
 pub(crate) enum StreamParseResult {
     Done,

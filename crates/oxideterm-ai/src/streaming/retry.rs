@@ -4,7 +4,7 @@ use std::time::Duration;
 #[derive(Debug, thiserror::Error)]
 #[error("AI provider temporarily unavailable (HTTP {status})")]
 pub(super) struct TransientFailure {
-    status: u16,
+    pub(super) status: u16,
     delay: Option<Duration>,
 }
 
