@@ -73,13 +73,13 @@
     "failedFetchStats": "Falha ao buscar estatísticas",
       "ble": {
         "resolve": {
-              "adapter_enumeration_failed": "Falha ao enumerar adaptadores BLE: {error}",
               "no_adapters": "Nenhum adaptador Bluetooth disponível",
               "adapter_open_failed": "Falha ao abrir o adaptador BLE: {error}",
               "device_enumeration_failed": "Falha ao enumerar dispositivos BLE: {error}",
               "scan_failed": "Falha na varredura BLE: {error}",
               "no_device_matched": "Nenhum dispositivo BLE no alcance corresponde ao perfil ({identity})",
               "ambiguous_device": "Vários dispositivos BLE correspondem a {identity}; faça uma nova busca e selecione um dispositivo.",
+              "device_busy": "Este dispositivo BLE ({device}) já está aberto; feche o terminal dele antes de abri-lo novamente.",
               "cancelled": "Conexão BLE cancelada",
               "connect_failed": "Falha ao conectar o dispositivo BLE: {error}",
               "service_discovery_failed": "Falha na descoberta de serviços: {error}",
