@@ -130,7 +130,7 @@ pub fn toast(tokens: &ThemeTokens, view: ToastView) -> AnyElement {
         tokens,
         animation_id,
         toast,
-        8.0,
+        14.0,
         crate::motion::MotionDuration::Control,
         view.phase == crate::motion::ExitPhase::Visible,
     )

@@ -662,7 +662,11 @@ impl WorkspaceApp {
                 self.tokens.metrics.tab_close_icon_size,
                 rgb(theme.text_muted),
             ));
-        // The strip and the clipping viewport consume the same animated width.
+        let visibility =
+            exiting.exit_visibility(cx.background_executor().now(), self.tokens.motion.enabled);
+        let content_opacity = (visibility * 1.45).clamp(0.0, 1.0);
+        // The strip and the clipping viewport consume the same animated width, while
+        // inner text/icons clear earlier so labels never crush against the edge.
         let tab_id = exiting.tab_id;
         div()
             .id(("workspace-tab-exit", exiting.tab_id.0))
@@ -671,8 +675,8 @@ impl WorkspaceApp {
             .w(px(width))
             .flex_none()
             .overflow_hidden()
-            .opacity(exiting.exit_visibility(&self.tokens))
-            .child(tab)
+            .opacity(visibility)
+            .child(tab.opacity(content_opacity))
             .into_any_element()
     }
 

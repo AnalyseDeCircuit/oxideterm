@@ -52,11 +52,12 @@ impl WorkspaceApp {
             .w(px(expanded_width))
             .h_full()
             .child(self.render_sidebar_region(window, cx));
-        self.sidebar_motion.animate(
+        self.sidebar_motion.animate_drawer(
             &self.tokens,
             "workspace-left-sidebar-motion",
-            div().h_full().flex_none().overflow_hidden().child(content),
-            |viewport, width| viewport.w(px(width)),
+            expanded_width,
+            oxideterm_gpui_ui::motion::DrawerEdge::Left,
+            content.into_any_element(),
         )
     }
 
@@ -76,11 +77,12 @@ impl WorkspaceApp {
             .w(px(expanded_width))
             .h_full()
             .child(self.render_context_right_sidebar_frame(cx));
-        self.context_sidebar_motion.animate(
+        self.context_sidebar_motion.animate_drawer(
             &self.tokens,
             "workspace-right-sidebar-motion",
-            div().h_full().flex_none().overflow_hidden().child(content),
-            |viewport, width| viewport.w(px(width)),
+            expanded_width,
+            oxideterm_gpui_ui::motion::DrawerEdge::Right,
+            content.into_any_element(),
         )
     }
 

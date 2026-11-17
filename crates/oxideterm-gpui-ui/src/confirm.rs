@@ -6,7 +6,9 @@ use oxideterm_theme::ThemeTokens;
 use std::rc::Rc;
 
 use crate::button::{SplitFooterButtonEdge, SplitFooterButtonOptions, split_footer_button};
-use crate::modal::{dismissible_dialog_backdrop, rounded_shell_child_radius};
+use crate::modal::{
+    TauriBackdropRole, rounded_shell_child_radius, staged_overlay_root, staged_overlay_scrim,
+};
 
 const CONFIRM_DIALOG_WIDTH: f32 = 384.0; // Tauri useConfirm max-w-sm
 const CONFIRM_BORDER_ALPHA: u32 = 0x99; // Tauri border-theme-border/60
@@ -98,16 +100,10 @@ pub fn confirm_dialog_with_focus_motion(
     let on_cancel = Rc::new(on_cancel);
     let on_backdrop_cancel = on_cancel.clone();
 
-    let dialog = dismissible_dialog_backdrop()
-        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-            // Tauri useConfirm wraps Radix Dialog and maps onOpenChange(false)
-            // to cancel, so an outside pointer-down must follow the same path.
-            on_backdrop_cancel(event, window, cx);
-            cx.stop_propagation();
-        })
-        .child(
-            crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Dialog)
-                .w(px(CONFIRM_DIALOG_WIDTH))
+    let id = id.into();
+    let visible = phase == crate::motion::ExitPhase::Visible;
+    let card = crate::surface::material_surface(tokens, div(), crate::surface::MaterialRole::Dialog)
+        .w(px(CONFIRM_DIALOG_WIDTH))
                 .rounded(px(tokens.radii.lg))
                 .overflow_hidden()
                 .border_1()
@@ -234,15 +230,29 @@ pub fn confirm_dialog_with_focus_motion(
                             )
                             .on_mouse_down(MouseButton::Left, on_confirm),
                         ),
-                ),
-        );
-    // Confirm dialogs share one event island, so animate the completed island
-    // without changing outside-click or focused-action behavior.
-    crate::motion::fade(
-        tokens,
-        id,
-        dialog,
-        crate::motion::MotionDuration::Control,
-        phase == crate::motion::ExitPhase::Visible,
-    )
+                );
+    // Keep scrim dim and foreground card on independent tracks so outside
+    // dismissal works on frame 0 while the card rises with un-multiplied shadow.
+    staged_overlay_root()
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            // Tauri useConfirm wraps Radix Dialog and maps onOpenChange(false)
+            // to cancel, so an outside pointer-down must follow the same path.
+            on_backdrop_cancel(event, window, cx);
+            cx.stop_propagation();
+        })
+        .child(staged_overlay_scrim(
+            tokens,
+            (id.clone(), "scrim"),
+            TauriBackdropRole::Dialog,
+            visible,
+        ))
+        .child(crate::motion::slide_fade_y(
+            tokens,
+            (id, "card"),
+            div().child(card),
+            10.0,
+            crate::motion::MotionDuration::Control,
+            visible,
+        ))
+        .into_any_element()
 }

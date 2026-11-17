@@ -297,6 +297,7 @@ impl Render for TerminalPane {
             self.clear_terminal_hover(cx);
         }
         self.refresh_command_folding();
+        let _ = self.advance_smooth_scroll_animation(Instant::now());
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
         if self
             .context_menu
@@ -308,7 +309,7 @@ impl Render for TerminalPane {
         }
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
-        if self.snapshot_dirty {
+        if self.snapshot_dirty || self.smooth_scroll_animation.is_some() {
             window.request_animation_frame();
         }
         snapshot.cursor_shape =

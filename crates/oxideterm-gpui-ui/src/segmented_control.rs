@@ -187,7 +187,7 @@ pub fn selection_indicator(
         .child(indicator)
         .with_spring(
             (id, "position"),
-            policy.from(previous_left),
+            policy.from(previous_left).with_epsilon(0.0005),
             |element, left| element.left(relative(left)),
         )
         .into_any_element()
@@ -294,7 +294,7 @@ mod tests {
         cx.executor().advance_clock(Duration::from_millis(50));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let moving = cx.debug_bounds("indicator").unwrap().left();
-        assert!((f32::from(moving) - 107.0).abs() <= 0.6);
+        assert!((f32::from(moving) - 66.3).abs() <= 0.6);
         view.update(cx, |view, cx| {
             view.previous = 3;
             view.index = 1;

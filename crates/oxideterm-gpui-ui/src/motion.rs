@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use gpui::{
-    Animation, AnimationExt, AnyElement, Div, ElementId, IntoElement, ParentElement,
-    SpringAnimation, SpringConfig, SpringPlayback, Styled, Svg, Transformation, radians, size,
+    Animation, AnimationExt, AnyElement, App, Bounds, Div, Element, ElementId, GlobalElementId,
+    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Point, SpringAnimation,
+    SpringConfig, SpringPlayback, Styled, Svg, Transformation, Window, point, px, radians, size,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -10,7 +11,7 @@ mod auto_height;
 pub use auto_height::auto_height;
 
 mod sidebar;
-pub use sidebar::SidebarMotion;
+pub use sidebar::{DrawerEdge, SidebarMotion};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MotionDuration {
@@ -20,14 +21,20 @@ pub enum MotionDuration {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MotionPhase {
+    Enter,
+    Exit,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExitPhase {
     Visible,
     Exiting,
 }
 
 const FORM_ENTER_OFFSET_Y: f32 = 12.0;
-// Ten time constants leave less than 0.1% displacement at the owner's deadline.
-const SETTLE_RESPONSE: f32 = 10.0;
+// Six time constants distribute acceleration and deceleration cleanly over the tier window.
+const SETTLE_RESPONSE: f32 = 6.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ExitPresence {
@@ -79,6 +86,32 @@ pub fn scaled_duration(tokens: &ThemeTokens, normal_baseline_ms: u64) -> Duratio
     Duration::from_millis(tokens.motion.scaled_duration_ms(normal_baseline_ms))
 }
 
+/// Wait slightly past the nominal spring tier before unmounting closing panels so
+/// the softer spring tail settles within a subpixel instead of snapping shut.
+pub fn settle_duration(tokens: &ThemeTokens, tier: MotionDuration) -> Duration {
+    let millis = duration(tokens, tier).as_millis() as u64;
+    Duration::from_millis((millis.saturating_mul(3)).div_ceil(2))
+}
+
+/// Exits should finish noticeably brisker than entrances (~65%) so dismissing
+/// overlays or drawers feels crisp instead of lingering.
+pub fn exit_duration(tokens: &ThemeTokens, tier: MotionDuration) -> Duration {
+    let millis = duration(tokens, tier).as_millis() as u64;
+    Duration::from_millis((millis.saturating_mul(13)).div_ceil(20))
+}
+
+pub fn phase_duration(tokens: &ThemeTokens, tier: MotionDuration, phase: MotionPhase) -> Duration {
+    match phase {
+        MotionPhase::Enter => duration(tokens, tier),
+        MotionPhase::Exit => exit_duration(tokens, tier),
+    }
+}
+
+pub fn exit_settle_duration(tokens: &ThemeTokens, tier: MotionDuration) -> Duration {
+    let millis = exit_duration(tokens, tier).as_millis() as u64;
+    Duration::from_millis((millis.saturating_mul(3)).div_ceil(2))
+}
+
 pub fn ease_out_cubic(progress: f32) -> f32 {
     let progress = progress.clamp(0.0, 1.0);
     1.0 - (1.0 - progress).powi(3)
@@ -96,13 +129,32 @@ pub fn ease_in_out_cubic(progress: f32) -> f32 {
 /// The response follows the existing duration tiers. Critical damping keeps
 /// opacity and clipped geometry bounded while preserving velocity on reversal.
 pub fn spring_config(tokens: &ThemeTokens, tier: MotionDuration) -> SpringConfig {
-    let seconds = duration(tokens, tier).as_secs_f32().max(0.001);
+    phase_spring_config(tokens, tier, MotionPhase::Enter)
+}
+
+pub fn phase_spring_config(
+    tokens: &ThemeTokens,
+    tier: MotionDuration,
+    phase: MotionPhase,
+) -> SpringConfig {
+    let seconds = phase_duration(tokens, tier, phase)
+        .as_secs_f32()
+        .max(0.001);
     let frequency = SETTLE_RESPONSE / seconds;
     SpringConfig::new(frequency * frequency, 2.0 * frequency, 1.0)
 }
 
 pub fn spring(tokens: &ThemeTokens, tier: MotionDuration, target: f32) -> SpringAnimation<f32> {
-    SpringAnimation::new(spring_config(tokens, tier))
+    phase_spring(tokens, tier, MotionPhase::Enter, target)
+}
+
+pub fn phase_spring(
+    tokens: &ThemeTokens,
+    tier: MotionDuration,
+    phase: MotionPhase,
+    target: f32,
+) -> SpringAnimation<f32> {
+    SpringAnimation::new(phase_spring_config(tokens, tier, phase))
         .to(target)
         .playback(if tokens.motion.enabled {
             SpringPlayback::Running
@@ -116,7 +168,16 @@ pub fn spatial_spring(
     tier: MotionDuration,
     target: f32,
 ) -> SpringAnimation<f32> {
-    spring(tokens, tier, target).playback(
+    phase_spatial_spring(tokens, tier, MotionPhase::Enter, target)
+}
+
+pub fn phase_spatial_spring(
+    tokens: &ThemeTokens,
+    tier: MotionDuration,
+    phase: MotionPhase,
+    target: f32,
+) -> SpringAnimation<f32> {
+    phase_spring(tokens, tier, phase, target).playback(
         if tokens.motion.enabled && tokens.motion.spatial_enabled {
             SpringPlayback::Running
         } else {
@@ -141,10 +202,15 @@ pub fn surface_opacity<E: Styled>(mut element: E, visibility: f32) -> E {
 /// releases the old surface. Continuous controls use retained springs instead.
 pub fn ease_settle(progress: f32) -> f32 {
     let progress = progress.clamp(0.0, 1.0);
+    if progress == 0.0 {
+        return 0.0;
+    }
     if progress == 1.0 {
         return 1.0;
     }
-    1.0 - (1.0 + SETTLE_RESPONSE * progress) * (-SETTLE_RESPONSE * progress).exp()
+    let settled = 1.0 - (1.0 + SETTLE_RESPONSE) * (-SETTLE_RESPONSE).exp();
+    ((1.0 - (1.0 + SETTLE_RESPONSE * progress) * (-SETTLE_RESPONSE * progress).exp()) / settled)
+        .clamp(0.0, 1.0)
 }
 
 pub fn lerp(from: f32, to: f32, progress: f32) -> f32 {
@@ -163,6 +229,152 @@ where
     fade(tokens, id, element, tier, true)
 }
 
+struct VisualOffsetElement {
+    child: AnyElement,
+    offset: Point<Pixels>,
+}
+
+impl IntoElement for VisualOffsetElement {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for VisualOffsetElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.child.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.with_element_offset(self.offset, |window| {
+            self.child.prepaint(window, cx);
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
+}
+
+/// Translates an element visually in prepaint without shifting Taffy layout bounds.
+pub fn visual_offset(element: impl IntoElement, offset: Point<Pixels>) -> AnyElement {
+    VisualOffsetElement {
+        child: element.into_any_element(),
+        offset,
+    }
+    .into_any_element()
+}
+
+struct VisualSlideSurface {
+    element: Option<Div>,
+    opacity: f32,
+    offset: Point<Pixels>,
+    rendered: Option<AnyElement>,
+}
+
+impl IntoElement for VisualSlideSurface {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for VisualSlideSurface {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let div = surface_opacity(
+            self.element.take().expect("visual slide surface element"),
+            self.opacity,
+        );
+        let mut rendered = div.into_any_element();
+        let layout = rendered.request_layout(window, cx);
+        self.rendered = Some(rendered);
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let rendered = self.rendered.as_mut().expect("rendered visual slide surface");
+        window.with_element_offset(self.offset, |window| {
+            rendered.prepaint(window, cx);
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.rendered
+            .as_mut()
+            .expect("rendered visual slide surface")
+            .paint(window, cx);
+    }
+}
+
 pub fn fade<E>(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
@@ -173,10 +385,15 @@ pub fn fade<E>(
 where
     E: IntoElement + Styled + 'static,
 {
+    let phase = if visible {
+        MotionPhase::Enter
+    } else {
+        MotionPhase::Exit
+    };
     element
         .with_spring(
             id,
-            spring(tokens, tier, if visible { 1.0 } else { 0.0 }).from(if visible {
+            phase_spring(tokens, tier, phase, if visible { 1.0 } else { 0.0 }).from(if visible {
                 0.0
             } else {
                 1.0
@@ -186,6 +403,59 @@ where
         .into_any_element()
 }
 
+fn slide_fade_axis(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    element: Div,
+    offset: Point<f32>,
+    tier: MotionDuration,
+    visible: bool,
+) -> AnyElement {
+    let spatial = tokens.motion.spatial_enabled;
+    let phase = if visible {
+        MotionPhase::Enter
+    } else {
+        MotionPhase::Exit
+    };
+    VisualSlideSurface {
+        element: Some(element),
+        opacity: if visible { 0.0 } else { 1.0 },
+        offset: point(px(0.0), px(0.0)),
+        rendered: None,
+    }
+    // Give travel its own target so the shorter exit does not rescale an
+    // in-flight offset on the frame when the direction changes.
+    .with_spring(
+        "slide-travel",
+        phase_spatial_spring(
+            tokens,
+            tier,
+            phase,
+            if spatial && !visible { 0.5 } else { 0.0 },
+        )
+        .from(if spatial && visible { 1.0 } else { 0.0 }),
+        move |mut surface, travel| {
+            surface.offset = point(px(offset.x * travel), px(offset.y * travel));
+            surface
+        },
+    )
+    .with_spring(
+        id,
+        phase_spring(tokens, tier, phase, if visible { 1.0 } else { 0.0 }).from(if visible {
+            0.0
+        } else {
+            1.0
+        }),
+        |slide, opacity| {
+            slide.map_element(|mut surface| {
+                surface.opacity = opacity;
+                surface
+            })
+        },
+    )
+    .into_any_element()
+}
+
 pub fn slide_fade_in_y(
     tokens: &ThemeTokens,
     id: impl Into<ElementId>,
@@ -193,21 +463,18 @@ pub fn slide_fade_in_y(
     offset: f32,
     tier: MotionDuration,
 ) -> AnyElement {
-    let spatial = tokens.motion.spatial_enabled;
-    element
-        .with_spring(
-            id,
-            spring(tokens, tier, 1.0).from(0.0),
-            move |element, progress| {
-                let element = surface_opacity(element, progress);
-                if spatial {
-                    element.relative().top(gpui::px(offset * (1.0 - progress)))
-                } else {
-                    element
-                }
-            },
-        )
-        .into_any_element()
+    slide_fade_y(tokens, id, element, offset, tier, true)
+}
+
+pub fn slide_fade_y(
+    tokens: &ThemeTokens,
+    id: impl Into<ElementId>,
+    element: Div,
+    offset: f32,
+    tier: MotionDuration,
+    visible: bool,
+) -> AnyElement {
+    slide_fade_axis(tokens, id, element, point(0.0, offset), tier, visible)
 }
 
 pub fn form_enter(tokens: &ThemeTokens, id: impl Into<ElementId>, form: Div) -> AnyElement {
@@ -220,26 +487,14 @@ pub fn form_transition(
     form: Div,
     visible: bool,
 ) -> AnyElement {
-    let spatial = tokens.motion.spatial_enabled;
-    form.with_spring(
+    slide_fade_y(
+        tokens,
         id,
-        spring(
-            tokens,
-            MotionDuration::Overlay,
-            if visible { 1.0 } else { 0.0 },
-        )
-        .from(if visible { 0.0 } else { 1.0 }),
-        move |form, progress| {
-            let form = surface_opacity(form, progress);
-            if spatial {
-                form.relative()
-                    .top(gpui::px(FORM_ENTER_OFFSET_Y * (1.0 - progress)))
-            } else {
-                form
-            }
-        },
+        form,
+        FORM_ENTER_OFFSET_Y,
+        MotionDuration::Overlay,
+        visible,
     )
-    .into_any_element()
 }
 
 pub fn slide_fade_in_x(
@@ -260,25 +515,7 @@ pub fn slide_fade_x(
     tier: MotionDuration,
     visible: bool,
 ) -> AnyElement {
-    let spatial = tokens.motion.spatial_enabled;
-    element
-        .with_spring(
-            id,
-            spring(tokens, tier, if visible { 1.0 } else { 0.0 }).from(if visible {
-                0.0
-            } else {
-                1.0
-            }),
-            move |element, progress| {
-                let element = surface_opacity(element, progress);
-                if spatial {
-                    element.relative().left(gpui::px(offset * (1.0 - progress)))
-                } else {
-                    element
-                }
-            },
-        )
-        .into_any_element()
+    slide_fade_axis(tokens, id, element, point(offset, 0.0), tier, visible)
 }
 
 pub fn horizontal_reveal(
@@ -442,9 +679,9 @@ mod tests {
         use oxideterm_theme::UiMotionProfile;
         for (profile, expected_opacity, expected_x) in [
             (UiMotionProfile::Off, 1.0, 100.0),
-            (UiMotionProfile::Reduced, 0.9596, 100.0),
-            (UiMotionProfile::Normal, 0.8009, 80.0),
-            (UiMotionProfile::Fast, 0.9724, 97.0),
+            (UiMotionProfile::Reduced, 0.8009, 100.0),
+            (UiMotionProfile::Normal, 0.5372, 53.72),
+            (UiMotionProfile::Fast, 0.8381, 83.81),
         ] {
             let opacity = Rc::new(Cell::new(0.0));
             let (view, cx) = cx.add_window_view(|_, _| {
@@ -633,5 +870,95 @@ mod tests {
         presence.reopen();
         assert_eq!(presence.phase(), ExitPhase::Visible);
         assert!(!presence.finish_exit(generation));
+    }
+
+    #[gpui::test]
+    fn exit_timing_is_faster_than_enter_and_visual_offset_avoids_sibling_reflow(
+        cx: &mut TestAppContext,
+    ) {
+        let tokens = oxideterm_theme::default_tokens();
+        assert!(
+            exit_duration(&tokens, MotionDuration::Control)
+                < duration(&tokens, MotionDuration::Control)
+        );
+        assert!(
+            exit_settle_duration(&tokens, MotionDuration::Control)
+                < settle_duration(&tokens, MotionDuration::Control)
+        );
+        let mut off_tokens = tokens;
+        off_tokens.apply_motion(oxideterm_theme::UiMotionProfile::Off);
+        assert_eq!(
+            exit_duration(&off_tokens, MotionDuration::Control),
+            Duration::ZERO
+        );
+
+        struct VisualSlideView {
+            tokens: ThemeTokens,
+            visible: bool,
+        }
+
+        impl Render for VisualSlideView {
+            fn render(&mut self, _: &mut gpui::Window, _: &mut Context<Self>) -> impl IntoElement {
+                div()
+                    .w(px(300.0))
+                    .flex()
+                    .flex_col()
+                    .child(slide_fade_y(
+                        &self.tokens,
+                        "slide-panel",
+                        div().h(px(40.0)).debug_selector(|| "sliding-panel".into()),
+                        12.0,
+                        MotionDuration::Control,
+                        self.visible,
+                    ))
+                    .child(
+                        div()
+                            .h(px(20.0))
+                            .debug_selector(|| "following-sibling".into()),
+                    )
+            }
+        }
+
+        let (view, cx) = cx.add_window_view(|_, _| VisualSlideView {
+            tokens,
+            visible: true,
+        });
+        cx.simulate_resize(size(px(300.0), px(200.0)));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        // On frame 0, visual offset shifts the sliding panel by +12px without pushing its sibling.
+        assert_eq!(cx.debug_bounds("sliding-panel").unwrap().top(), px(12.0));
+        assert_eq!(
+            cx.debug_bounds("following-sibling").unwrap().top(),
+            px(40.0)
+        );
+
+        for (visible, elapsed) in [(false, 60), (true, 65)] {
+            cx.executor().advance_clock(Duration::from_millis(elapsed));
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            let before = cx.debug_bounds("sliding-panel").unwrap().top();
+            assert!(before > px(0.0) && before < px(12.0));
+            view.update(cx, |view, cx| {
+                view.visible = visible;
+                cx.notify();
+            });
+            cx.update(|window, cx| window.draw(cx).clear(cx));
+            assert_eq!(cx.debug_bounds("sliding-panel").unwrap().top(), before);
+            assert_eq!(
+                cx.debug_bounds("following-sibling").unwrap().top(),
+                px(40.0)
+            );
+        }
+
+        cx.executor().advance_clock(Duration::from_millis(400));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(cx.debug_bounds("sliding-panel").unwrap().top(), px(0.0));
+        view.update(cx, |view, cx| {
+            view.visible = false;
+            cx.notify();
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.executor().advance_clock(Duration::from_millis(195));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert_eq!(cx.debug_bounds("sliding-panel").unwrap().top(), px(6.0));
     }
 }

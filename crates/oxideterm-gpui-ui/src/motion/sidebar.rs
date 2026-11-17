@@ -1,9 +1,104 @@
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{AnimationExt, AnyElement, IntoElement};
+use gpui::{
+    AnimationExt, AnyElement, App, Bounds, Element, ElementId, GlobalElementId,
+    InspectorElementId, IntoElement, LayoutId, ParentElement, Pixels, Styled, Window, div, point,
+    px,
+};
 use oxideterm_theme::ThemeTokens;
 
-use super::{MotionDuration, spatial_spring};
+use super::{MotionDuration, MotionPhase, phase_spatial_spring, visual_offset};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DrawerEdge {
+    Left,
+    Right,
+}
+
+const DRAWER_PARALLAX_RATIO: f32 = 0.25;
+
+struct DrawerViewportElement {
+    content: Option<AnyElement>,
+    width: f32,
+    shift_x: f32,
+    rendered: Option<AnyElement>,
+}
+
+impl IntoElement for DrawerViewportElement {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for DrawerViewportElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        let content = self.content.take().expect("drawer content");
+        let child = if self.shift_x != 0.0 {
+            visual_offset(content, point(px(self.shift_x), px(0.0)))
+        } else {
+            content
+        };
+        let mut rendered = div()
+            .h_full()
+            .flex_none()
+            .overflow_hidden()
+            .w(px(self.width))
+            .child(child)
+            .into_any_element();
+        let layout = rendered.request_layout(window, cx);
+        self.rendered = Some(rendered);
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.rendered
+            .as_mut()
+            .expect("rendered drawer")
+            .prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&GlobalElementId>,
+        _: Option<&InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.rendered
+            .as_mut()
+            .expect("rendered drawer")
+            .paint(window, cx);
+    }
+}
 
 /// Window-owned sidebar position, shared by the clipping viewport and resize edge.
 /// Retargeting starts at the last drawn width, not at the previous endpoint.
@@ -48,10 +143,15 @@ impl SidebarMotion {
         apply_width: impl Fn(E, f32) -> E + 'static,
     ) -> AnyElement {
         let current = self.current.clone();
+        let phase = if self.target < self.from {
+            MotionPhase::Exit
+        } else {
+            MotionPhase::Enter
+        };
         element
             .with_spring(
                 (id, self.generation),
-                spatial_spring(tokens, MotionDuration::Control, self.target)
+                phase_spatial_spring(tokens, MotionDuration::Control, phase, self.target)
                     .from(self.from)
                     .with_epsilon(0.1),
                 move |element, width| {
@@ -60,6 +160,53 @@ impl SidebarMotion {
                 },
             )
             .into_any_element()
+    }
+
+    /// Clips the drawer to the animated width while shifting its fixed-width
+    /// content with `visual_offset` so opening and closing feel like a sliding drawer
+    /// rather than static edge cropping.
+    pub fn animate_drawer(
+        &self,
+        tokens: &ThemeTokens,
+        id: &'static str,
+        expanded_width: f32,
+        edge: DrawerEdge,
+        content: AnyElement,
+    ) -> AnyElement {
+        let current = self.current.clone();
+        let spatial = tokens.motion.enabled && tokens.motion.spatial_enabled;
+        let phase = if self.target < self.from {
+            MotionPhase::Exit
+        } else {
+            MotionPhase::Enter
+        };
+        DrawerViewportElement {
+            content: Some(content),
+            width: self.from,
+            shift_x: 0.0,
+            rendered: None,
+        }
+        .with_spring(
+            (id, self.generation),
+            phase_spatial_spring(tokens, MotionDuration::Control, phase, self.target)
+                .from(self.from)
+                .with_epsilon(0.1),
+            move |mut drawer, width| {
+                current.set(width);
+                let hidden = (expanded_width - width).max(0.0);
+                drawer.width = width;
+                drawer.shift_x = if spatial && hidden > 0.0 {
+                    match edge {
+                        DrawerEdge::Left => -(hidden * DRAWER_PARALLAX_RATIO),
+                        DrawerEdge::Right => hidden * DRAWER_PARALLAX_RATIO,
+                    }
+                } else {
+                    0.0
+                };
+                drawer
+            },
+        )
+        .into_any_element()
     }
 }
 
@@ -134,7 +281,7 @@ mod tests {
             window.draw(cx).clear(cx);
         });
         let closing_width = cx.debug_bounds("sidebar-viewport").unwrap().size.width;
-        assert!((f32::from(closing_width) - 80.4).abs() <= 0.6);
+        assert!((f32::from(closing_width) - 92.1).abs() <= 0.6);
         assert_eq!(
             cx.debug_bounds("sidebar-edge").unwrap().origin.x,
             closing_width

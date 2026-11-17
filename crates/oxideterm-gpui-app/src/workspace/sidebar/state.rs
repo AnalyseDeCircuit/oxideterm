@@ -88,7 +88,19 @@ impl WorkspaceApp {
         if !collapsed {
             self.sidebar_rendered = true;
             if was_collapsed && self.session_manager_sidebar_visible() {
-                self.refresh_session_manager_ssh_config_hosts(cx);
+                // Defer SSH config scan off frame 0 so the expand spring hits VSync without stalling.
+                cx.spawn(async move |weak, cx| {
+                    Timer::after(Duration::from_millis(16)).await;
+                    let _ = weak.update(cx, |this, cx| {
+                        if !this.sidebar_collapsed
+                            && this.sidebar_motion_generation == generation
+                            && this.session_manager_sidebar_visible()
+                        {
+                            this.refresh_session_manager_ssh_config_hosts(cx);
+                        }
+                    });
+                })
+                .detach();
             }
             return;
         }
@@ -100,7 +112,7 @@ impl WorkspaceApp {
             self.sidebar_rendered = false;
             return;
         }
-        let delay = oxideterm_gpui_ui::motion::duration(
+        let delay = oxideterm_gpui_ui::motion::exit_settle_duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
@@ -135,7 +147,7 @@ impl WorkspaceApp {
             self.context_sidebar_rendered = false;
             return;
         }
-        let delay = oxideterm_gpui_ui::motion::duration(
+        let delay = oxideterm_gpui_ui::motion::exit_settle_duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );

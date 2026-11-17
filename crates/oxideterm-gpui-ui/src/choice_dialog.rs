@@ -9,8 +9,8 @@ use crate::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_focus_visible, button_with,
 };
 use crate::modal::{
-    MODAL_KEY_CONTEXT, dialog_content, dialog_footer, dialog_header, dialog_title,
-    dismissible_dialog_backdrop, modal_body,
+    MODAL_KEY_CONTEXT, TauriBackdropRole, dialog_content, dialog_footer, dialog_header,
+    dialog_title, modal_body, staged_overlay_root, staged_overlay_scrim,
 };
 use crate::radio_group::{radio_group, radio_group_item};
 
@@ -206,7 +206,7 @@ impl Render for ChoiceDialogView {
                         ),
                     ),
             );
-        let dialog = dismissible_dialog_backdrop()
+        let dialog = staged_overlay_root()
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|_, _, _, cx| {
@@ -214,13 +214,19 @@ impl Render for ChoiceDialogView {
                     cx.stop_propagation();
                 }),
             )
-            .child(form);
-        let dialog = crate::motion::fade_in(
-            tokens,
-            "choice-dialog",
-            dialog,
-            crate::motion::MotionDuration::Control,
-        );
+            .child(staged_overlay_scrim(
+                tokens,
+                "choice-dialog-scrim",
+                TauriBackdropRole::Dialog,
+                true,
+            ))
+            .child(crate::motion::slide_fade_in_y(
+                tokens,
+                "choice-dialog",
+                div().child(form),
+                12.0,
+                crate::motion::MotionDuration::Control,
+            ));
         div()
             .size_full()
             .font_family(crate::tauri_ui_font_family(tokens.metrics.font_family))

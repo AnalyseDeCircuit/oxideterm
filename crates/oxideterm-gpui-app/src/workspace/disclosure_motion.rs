@@ -19,8 +19,88 @@ struct DisclosureTransition {
     opacity: Rc<Cell<f32>>,
 }
 
+struct VisualDisclosureElement {
+    content: Option<gpui::Div>,
+    opacity: f32,
+    height: Option<f32>,
+    offset_y: f32,
+    rendered: Option<AnyElement>,
+}
+
+impl IntoElement for VisualDisclosureElement {
+    type Element = Self;
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl gpui::Element for VisualDisclosureElement {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<gpui::ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui::LayoutId, ()) {
+        let div = self
+            .content
+            .take()
+            .expect("disclosure content")
+            .opacity(self.opacity)
+            .when_some(self.height, |content, height| content.h(px(height)));
+        let mut rendered = div.into_any_element();
+        let layout = rendered.request_layout(window, cx);
+        self.rendered = Some(rendered);
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        window.with_element_offset(gpui::point(px(0.0), px(self.offset_y)), |window| {
+            self.rendered
+                .as_mut()
+                .expect("rendered disclosure")
+                .prepaint(window, cx);
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.rendered
+            .as_mut()
+            .expect("rendered disclosure")
+            .paint(window, cx);
+    }
+}
+
 impl DisclosureMotions {
-    fn begin(&mut self, key: String, expanded: bool) -> u64 {
+    pub(super) fn begin(&mut self, key: String, expanded: bool) -> u64 {
         self.generation = self.generation.wrapping_add(1);
         let from = self
             .entries
@@ -100,27 +180,39 @@ impl DisclosureMotions {
         let from = entry.from;
         let target = if entry.expanded { 1.0 } else { 0.0 };
         let opacity = entry.opacity.clone();
-        let height = height.filter(|_| tokens.motion.spatial_enabled);
-        content
-            .with_animation(
-                (
-                    gpui::SharedString::from(key.to_owned()),
-                    entry.generation as usize,
-                ),
-                Animation::new(oxideterm_gpui_ui::motion::duration(
-                    tokens,
-                    oxideterm_gpui_ui::motion::MotionDuration::Micro,
-                ))
-                .with_easing(oxideterm_gpui_ui::motion::ease_out_cubic),
-                move |content, progress| {
-                    let value = from + (target - from) * progress;
-                    opacity.set(value);
-                    content
-                        .opacity(value)
-                        .when_some(height, |content, height| content.h(px(height * value)))
-                },
-            )
-            .into_any_element()
+        let spatial = tokens.motion.spatial_enabled;
+        let height = height.filter(|_| spatial);
+        VisualDisclosureElement {
+            content: Some(content),
+            opacity: from,
+            height: height.map(|target_height| target_height * from),
+            offset_y: 0.0,
+            rendered: None,
+        }
+        .with_animation(
+            (
+                gpui::SharedString::from(key.to_owned()),
+                entry.generation as usize,
+            ),
+            Animation::new(oxideterm_gpui_ui::motion::duration(
+                tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Micro,
+            ))
+            .with_easing(oxideterm_gpui_ui::motion::ease_out_cubic),
+            move |mut element, progress| {
+                let value = from + (target - from) * progress;
+                opacity.set(value);
+                element.opacity = value;
+                element.height = height.map(|target_height| target_height * value);
+                element.offset_y = if spatial && height.is_some() {
+                    -6.0 * (1.0 - value)
+                } else {
+                    0.0
+                };
+                element
+            },
+        )
+        .into_any_element()
     }
 }
 

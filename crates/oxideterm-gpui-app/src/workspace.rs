@@ -718,6 +718,7 @@ struct ExitingTabVisual {
     visual_index: usize,
     was_active: bool,
     started_at: Instant,
+    duration: Duration,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -751,6 +752,7 @@ struct WorkspaceWindowTabState {
     scroll_handle: ScrollHandle,
     scrollbar_drag: Option<TabbarScrollbarDragState>,
     scrollbar_hovered: bool,
+    tab_text_width_cache: RefCell<HashMap<(String, u32, String), f32>>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -795,6 +797,7 @@ impl WorkspaceWindowTabState {
             scroll_handle: ScrollHandle::new(),
             scrollbar_drag: None,
             scrollbar_hovered: false,
+            tab_text_width_cache: RefCell::new(HashMap::new()),
         }
     }
 }

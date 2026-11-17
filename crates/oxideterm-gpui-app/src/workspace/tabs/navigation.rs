@@ -1215,7 +1215,11 @@ impl WorkspaceApp {
             width: bounds.end - bounds.start,
             visual_index,
             was_active: Some(tab.id) == self.active_tab_id(cx),
-            started_at: Instant::now(),
+            started_at: cx.background_executor().now(),
+            duration: oxideterm_gpui_ui::motion::exit_duration(
+                &self.tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
+            ),
         })
     }
 
@@ -1224,18 +1228,16 @@ impl WorkspaceApp {
         mut exiting_visual: ExitingTabVisual,
         cx: &mut Context<Self>,
     ) {
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
+        let delay = exiting_visual.duration;
         if !self.tokens.motion.enabled || delay.is_zero() {
             return;
         }
         let tab_id = exiting_visual.tab_id;
-        exiting_visual.started_at = Instant::now();
+        exiting_visual.started_at = cx.background_executor().now();
+        let timer = cx.background_executor().timer(delay);
         self.main_window_tabs.exiting_tabs.push(exiting_visual);
         cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
+            timer.await;
             let _ = weak.update(cx, |this, cx| {
                 let Some(position) = this
                     .main_window_tabs

@@ -169,6 +169,30 @@ fn modal_backdrop_for_policy(policy: OverlayDismissPolicy) -> Div {
     }
 }
 
+pub fn staged_overlay_root() -> Div {
+    modal_backdrop(rgba(TW_BLACK << 8 | TRANSPARENT_BACKDROP_ALPHA))
+}
+
+pub fn staged_overlay_scrim(
+    tokens: &ThemeTokens,
+    id: impl Into<gpui::ElementId>,
+    role: TauriBackdropRole,
+    visible: bool,
+) -> AnyElement {
+    let effect = backdrop_effect(role);
+    let mut scrim = div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .bg(effect.color);
+    if let Some(blur_px) = effect.blur_px {
+        scrim = scrim.backdrop_blur(px(blur_px));
+    }
+    crate::motion::fade(tokens, id, scrim, crate::motion::MotionDuration::Micro, visible)
+}
+
 fn modal_backdrop_with_effect(backdrop: Rgba, blur_px: f32) -> Div {
     modal_backdrop(backdrop).backdrop_blur(px(blur_px))
 }
@@ -241,17 +265,21 @@ pub fn dialog_overlay(tokens: &ThemeTokens, dialog: impl IntoElement) -> AnyElem
         tokens,
         "dialog-content-enter",
         div().child(dialog),
-        6.0,
+        12.0,
         crate::motion::MotionDuration::Overlay,
     );
-    // The backdrop and content retain the existing event island; animation is
-    // applied only to visual wrappers and never delays focus or dismissal.
-    crate::motion::fade_in(
-        tokens,
-        "dialog-backdrop-enter",
-        dialog_backdrop().child(dialog),
-        crate::motion::MotionDuration::Control,
-    )
+    // Keep scrim and foreground surface on independent motion tracks so card
+    // shadow and fill never suffer double opacity multiplication.
+    staged_overlay_root()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .child(staged_overlay_scrim(
+            tokens,
+            "dialog-backdrop-enter",
+            TauriBackdropRole::Dialog,
+            true,
+        ))
+        .child(dialog)
+        .into_any_element()
 }
 
 pub fn modal_container(tokens: &ThemeTokens) -> Div {

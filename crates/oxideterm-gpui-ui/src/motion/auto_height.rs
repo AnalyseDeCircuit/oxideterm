@@ -243,7 +243,7 @@ mod tests {
         assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(0.0));
         cx.executor().advance_clock(Duration::from_millis(60));
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 77.0).abs() <= 0.5);
+        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 64.1).abs() <= 0.5);
         view.update(cx, |view, cx| {
             view.height = None;
             cx.notify();
@@ -253,11 +253,11 @@ mod tests {
             cx.debug_bounds("content").is_none(),
             "removed content must not be retained for exit animation"
         );
-        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 77.0).abs() <= 0.5);
+        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 64.1).abs() <= 0.5);
         cx.executor().advance_clock(Duration::from_millis(60));
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 3.2).abs() <= 0.6);
-        cx.executor().advance_clock(Duration::from_millis(60));
+        assert!((f32::from(cx.debug_bounds("editor").unwrap().origin.y) - 14.5).abs() <= 0.6);
+        cx.executor().advance_clock(Duration::from_millis(120));
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert_eq!(cx.debug_bounds("editor").unwrap().origin.y, px(0.0));
         cx.update(|_, cx| cx.set_reduce_motion(true));
@@ -370,7 +370,7 @@ mod tests {
                 cx.executor().advance_clock(Duration::from_millis(half));
                 cx.update(|window, cx| window.draw(cx).clear(cx));
                 assert!(
-                    (f32::from(cx.debug_bounds("after-sender").unwrap().top()) - 111.0).abs()
+                    (f32::from(cx.debug_bounds("after-sender").unwrap().top()) - 105.6).abs()
                         <= 0.6
                 );
                 view.update(cx, |view, cx| {
@@ -385,14 +385,14 @@ mod tests {
                 cx.executor().advance_clock(Duration::from_millis(half));
                 cx.update(|window, cx| window.draw(cx).clear(cx));
                 let closing_top = cx.debug_bounds("after-sender").unwrap().top();
-                assert!(closing_top > px(80.0) && closing_top < px(111.0));
+                assert!(closing_top > px(80.0) && closing_top < px(105.6));
                 view.update(cx, |view, cx| {
                     view.height = 32.0;
                     cx.notify();
                 });
                 cx.update(|window, cx| window.draw(cx).clear(cx));
                 assert_eq!(cx.debug_bounds("after-sender").unwrap().top(), closing_top);
-                cx.executor().advance_clock(Duration::from_millis(120));
+                cx.executor().advance_clock(Duration::from_millis(200));
                 cx.update(|window, cx| window.draw(cx).clear(cx));
             }
             assert_eq!(cx.debug_bounds("after-sender").unwrap().top(), px(112.0));

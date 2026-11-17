@@ -150,7 +150,7 @@ pub type TerminalInputInterceptor =
 pub type TerminalInputBroadcaster = Rc<dyn Fn(TerminalBroadcastInputKind, &[u8], &mut App)>;
 const PRIVILEGE_PROMPT_DEBUG_ENV: &str = "OXIDETERM_PRIVILEGE_DEBUG";
 const TERMINAL_ANIMATION_INTERVAL: Duration = Duration::from_millis(16);
-const SMOOTH_SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(125);
+const SMOOTH_SCROLL_ANIMATION_DURATION: Duration = Duration::from_millis(165);
 const DRAIN_BOOST_POLL_INTERVAL: Duration = Duration::from_millis(8);
 const SSH_DRAIN_BOOST_POLL_INTERVAL: Duration = Duration::from_millis(1);
 const MAX_UI_TERMINAL_DRAIN_DURATION: Duration = Duration::from_millis(2);
@@ -398,7 +398,9 @@ fn terminal_maintenance_interval(
     }
     [
         startup_pending.then_some(TERMINAL_ANIMATION_INTERVAL),
-        smooth_scroll_active.then_some(TERMINAL_ANIMATION_INTERVAL),
+        // Active visible frames are driven on VSync via window.request_animation_frame();
+        // keep only a coarse deadline so hidden panes expire cleanly.
+        smooth_scroll_active.then_some(SMOOTH_SCROLL_ANIMATION_DURATION),
         cursor_blink_remaining,
         process_refresh_remaining,
         pending_cwd_remaining,

@@ -9,8 +9,8 @@ use entity::{CommandPaletteView, PaletteContent};
 use oxideterm_connections::{resolve_ssh_config_alias, saved_connection_from_ssh_host};
 use oxideterm_gpui_settings_view::{OXIDE_THEME_IDS, built_in_theme_exists, is_oxide_theme};
 use oxideterm_gpui_ui::modal::{
-    dialog_content, dismissible_command_palette_backdrop, dismissible_dialog_backdrop,
-    overlay_content_boundary, rounded_shell_child_radius,
+    TauriBackdropRole, dialog_content, overlay_content_boundary, rounded_shell_child_radius,
+    staged_overlay_root, staged_overlay_scrim,
 };
 use oxideterm_gpui_ui::motion::{ExitPhase, MotionDuration};
 use oxideterm_remote_desktop::{RemoteDesktopConnectionProfile, RemoteDesktopProtocol};
@@ -23,9 +23,15 @@ use std::borrow::Cow;
 
 const COMMAND_PALETTE_MIN_WIDTH: f32 = 560.0;
 const COMMAND_PALETTE_MAX_WIDTH: f32 = 960.0;
+const COMPACT_PALETTE_MIN_WIDTH: f32 = 360.0;
+const COMPACT_PALETTE_MAX_WIDTH: f32 = 480.0;
 const COMMAND_PALETTE_CONNECTION_PREVIEW_HEIGHT: f32 = 80.0;
-const COMMAND_PALETTE_TOP_RATIO: f32 = 0.15; // Tauri DialogContent top-[15%] translate-y-0.
-const COMMAND_PALETTE_LIST_MAX_HEIGHT: f32 = 400.0; // Tauri CommandList max-h-[min(50vh,400px)] cap.
+const COMMAND_PALETTE_TOP_RATIO: f32 = 0.14;
+const COMMAND_PALETTE_VIEWPORT_HEIGHT_RATIO: f32 = 0.58;
+const COMPACT_PALETTE_VIEWPORT_HEIGHT_RATIO: f32 = 0.45;
+const COMMAND_PALETTE_LIST_MAX_HEIGHT: f32 = 640.0; // Up to 20 rows (20 * 32px) on large displays.
+const COMPACT_PALETTE_LIST_MAX_HEIGHT: f32 = 448.0; // Up to 14 rows (14 * 32px) for compact pickers.
+const COMMAND_PALETTE_LIST_PADDING_Y: f32 = 4.0;
 const COMMAND_PALETTE_INPUT_HEIGHT: f32 = 40.0; // Tauri CommandInput h-10.
 const COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT: f32 = 32.0; // Tauri CommandItem py-1.5 + text-sm line height.
 const COMMAND_PALETTE_VIRTUAL_OVERSCAN: usize = 8; // Browser CommandList keeps a small DOM buffer around the viewport.
@@ -59,6 +65,8 @@ struct PaletteItem {
     icon: LucideIcon,
     detail: Option<String>,
     shortcut: Option<String>,
+    count: Option<String>,
+    active: bool,
     value: String,
     action: PaletteAction,
     disabled: bool,
@@ -141,7 +149,10 @@ struct RankedItem {
 
 #[derive(Clone)]
 enum CommandPaletteVirtualRow {
-    Heading(PaletteSection),
+    Heading {
+        section: PaletteSection,
+        show_separator: bool,
+    },
     Item {
         ranked: RankedItem,
         item_index: usize,
@@ -273,8 +284,10 @@ impl WorkspaceApp {
         self.release_active_remote_desktop_inputs(cx);
         self.shortcuts_modal.exit_task = None;
         self.shortcuts_modal.presence.reopen();
-        self.shortcuts_modal.motion_generation =
-            self.shortcuts_modal.motion_generation.wrapping_add(1);
+        if !self.shortcuts_modal.open {
+            self.shortcuts_modal.motion_generation =
+                self.shortcuts_modal.motion_generation.wrapping_add(1);
+        }
         self.shortcuts_modal.open = true;
         self.shortcuts_modal.query.clear();
         self.shortcuts_modal.scroll_handle = UniformListScrollHandle::new();
@@ -284,7 +297,7 @@ impl WorkspaceApp {
 
     fn palette_exit_delay(&self, cx: &App) -> Duration {
         if self.tokens.motion.enabled && !cx.reduce_motion() {
-            oxideterm_gpui_ui::motion::duration(&self.tokens, MotionDuration::Control)
+            oxideterm_gpui_ui::motion::exit_settle_duration(&self.tokens, MotionDuration::Control)
         } else {
             Duration::ZERO
         }
@@ -350,57 +363,22 @@ impl WorkspaceApp {
                 self.execute_selected_command_palette_item(window, cx);
             }
             "arrowdown" | "down" => {
-                let count = self.filtered_command_palette_items(cx).len();
-                let changed = self.command_palette.update(cx, |palette, cx| {
-                    palette.move_selection_forward(count, 1, cx)
-                });
-                if changed {
-                    self.scroll_selected_command_palette_item_into_view(cx);
-                }
+                self.move_command_palette_selection(PaletteStep::Forward(1), cx);
             }
             "arrowup" | "up" => {
-                let count = self.filtered_command_palette_items(cx).len();
-                let changed = self.command_palette.update(cx, |palette, cx| {
-                    palette.move_selection_backward(count, 1, cx)
-                });
-                if changed {
-                    self.scroll_selected_command_palette_item_into_view(cx);
-                }
+                self.move_command_palette_selection(PaletteStep::Backward(1), cx);
             }
             "pagedown" => {
-                let count = self.filtered_command_palette_items(cx).len();
-                let changed = self.command_palette.update(cx, |palette, cx| {
-                    palette.move_selection_forward(count, 8, cx)
-                });
-                if changed {
-                    self.scroll_selected_command_palette_item_into_view(cx);
-                }
+                self.move_command_palette_selection(PaletteStep::Forward(8), cx);
             }
             "pageup" => {
-                let count = self.filtered_command_palette_items(cx).len();
-                let changed = self.command_palette.update(cx, |palette, cx| {
-                    palette.move_selection_backward(count, 8, cx)
-                });
-                if changed {
-                    self.scroll_selected_command_palette_item_into_view(cx);
-                }
+                self.move_command_palette_selection(PaletteStep::Backward(8), cx);
             }
             "home" => {
-                let changed = self
-                    .command_palette
-                    .update(cx, |palette, cx| palette.select_first(cx));
-                if changed {
-                    self.scroll_selected_command_palette_item_into_view(cx);
-                }
+                self.move_command_palette_selection(PaletteStep::First, cx);
             }
             "end" => {
-                let count = self.filtered_command_palette_items(cx).len();
-                let changed = self
-                    .command_palette
-                    .update(cx, |palette, cx| palette.select_last(count, cx));
-                if changed {
-                    self.scroll_selected_command_palette_item_into_view(cx);
-                }
+                self.move_command_palette_selection(PaletteStep::Last, cx);
             }
             "backspace" if !event.keystroke.modifiers.platform => {
                 self.command_palette
@@ -419,11 +397,33 @@ impl WorkspaceApp {
         }
     }
 
+    fn move_command_palette_selection(&mut self, step: PaletteStep, cx: &mut Context<Self>) {
+        let ranked_items = self.ranked_command_palette_items(cx);
+        let current = self.command_palette.read(cx).selected_index();
+        let Some(target) = next_enabled_palette_index(&ranked_items, current, step) else {
+            return;
+        };
+        let changed = self
+            .command_palette
+            .update(cx, |palette, cx| palette.set_selected_index(target, cx));
+        if changed {
+            self.scroll_command_palette_items_into_view(&ranked_items, cx);
+        }
+    }
+
     fn scroll_selected_command_palette_item_into_view(&self, cx: &Context<Self>) {
         let ranked_items = self.ranked_command_palette_items(cx);
+        self.scroll_command_palette_items_into_view(&ranked_items, cx);
+    }
+
+    fn scroll_command_palette_items_into_view(
+        &self,
+        ranked_items: &[RankedItem],
+        cx: &Context<Self>,
+    ) {
         let palette = self.command_palette.read(cx);
         if let Some(child_index) =
-            command_palette_scroll_child_index(&ranked_items, palette.selected_index())
+            command_palette_scroll_child_index(ranked_items, palette.selected_index())
         {
             // Tauri cmdk reveals the selected item automatically; GPUI scroll
             // children include section headings, so we map the selected item
@@ -528,8 +528,15 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let items = self.filtered_command_palette_items(cx);
+        let current = self.command_palette.read(cx).selected_index();
+        let target_index = items
+            .iter()
+            .position(|item| !item.disabled)
+            .filter(|_| items.get(current).is_some_and(|item| item.disabled))
+            .unwrap_or(current);
         let close_delay = self.palette_exit_delay(cx);
         let execution = self.command_palette.update(cx, |palette, cx| {
+            let _ = palette.set_selected_index(target_index, cx);
             palette.take_selected_action(&items, close_delay, cx)
         });
         let Some(execution) = execution else {
@@ -780,7 +787,7 @@ impl WorkspaceApp {
         confirmed: bool,
         cx: &mut Context<Self>,
     ) -> bool {
-        let delay = oxideterm_gpui_ui::motion::duration(
+        let delay = oxideterm_gpui_ui::motion::exit_settle_duration(
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
@@ -1073,6 +1080,8 @@ impl WorkspaceApp {
                             icon,
                             detail: Some(detail),
                             shortcut: None,
+                            count: None,
+                            active: false,
                             value,
                             action: PaletteAction::BackgroundTask(target),
                             disabled: false,
@@ -1083,15 +1092,31 @@ impl WorkspaceApp {
         }
         if self.command_palette.read(cx).is_quick_bar_category_picker() {
             let query = self.command_palette.read(cx).query();
+            let active_category = self
+                .settings_store
+                .settings()
+                .terminal
+                .command_bar
+                .quick_bar_category
+                .as_deref();
+            let quick_commands = &self.terminal.read(cx).quick_commands.store.commands;
             return self
                 .quick_bar_category_choices(cx)
                 .into_iter()
                 .enumerate()
                 .filter_map(|(index, (id, label, icon))| {
                     let matched = command_palette_match(&label, &label, query)?;
+                    let count = match id.as_deref() {
+                        Some(cat_id) => quick_commands
+                            .iter()
+                            .filter(|cmd| cmd.category == cat_id)
+                            .count(),
+                        None => quick_commands.len(),
+                    };
+                    let active = id.as_deref() == active_category;
                     Some(RankedItem {
                         score: matched.score,
-                        highlights: Vec::new(),
+                        highlights: matched.highlights,
                         item: PaletteItem {
                             id: format!("quick-bar-category-{index}"),
                             value: label.clone(),
@@ -1100,6 +1125,8 @@ impl WorkspaceApp {
                             detail: None,
                             section: PaletteSection::Commands,
                             shortcut: None,
+                            count: Some(count.to_string()),
+                            active,
                             action: PaletteAction::SelectQuickBarCategory(id),
                             disabled: false,
                         },
@@ -1109,6 +1136,8 @@ impl WorkspaceApp {
         }
         if self.command_palette.read(cx).is_tab_scope_picker() {
             let query = self.command_palette.read(cx).query();
+            let active_scope = self.tab_host.read(cx).scope().clone();
+            let (total_tabs, scope_counts) = self.tab_scope_counts(cx);
             return self
                 .tab_scope_choices(cx)
                 .into_iter()
@@ -1126,9 +1155,16 @@ impl WorkspaceApp {
                         }
                         _ => LucideIcon::Server,
                     };
+                    let count = match &scope {
+                        tabs::TabScope::All => total_tabs,
+                        tabs::TabScope::Affinity(affinity) => {
+                            scope_counts.get(affinity).copied().unwrap_or(0)
+                        }
+                    };
+                    let active = scope == active_scope;
                     Some(RankedItem {
                         score: matched.score,
-                        highlights: Vec::new(),
+                        highlights: matched.highlights,
                         item: PaletteItem {
                             id: format!("tab-scope-{index}"),
                             label,
@@ -1140,6 +1176,8 @@ impl WorkspaceApp {
                                 PaletteSection::Connections
                             },
                             shortcut: None,
+                            count: Some(count.to_string()),
+                            active,
                             value,
                             action: PaletteAction::SelectTabScope(scope),
                             disabled: false,
@@ -1165,16 +1203,17 @@ impl WorkspaceApp {
             }
         }
 
-        let command_items = self.command_palette_command_items();
-        let session_items = self.command_palette_session_items(cx);
+        let mut command_items = self.command_palette_command_items();
+        let mut session_items = self.command_palette_session_items(cx);
         let mut connection_items = Self::command_palette_connection_items(
             &self.connection_store,
             self.saved_ssh_tunnels(),
         );
         connection_items.extend(self.command_palette_ssh_config_items(&ssh_config_hosts));
-        let plugin_items = self.command_palette_plugin_items(cx);
-        let help_items = self.command_palette_help_items();
+        let mut plugin_items = self.command_palette_plugin_items(cx);
+        let mut help_items = self.command_palette_help_items();
 
+        let mut recent_ids = HashSet::new();
         if mode == PaletteMode::All && query.is_empty() {
             let mut by_id = HashMap::<String, PaletteItem>::new();
             for item in command_items
@@ -1194,6 +1233,7 @@ impl WorkspaceApp {
                 .take(5)
             {
                 if let Some(mut item) = by_id.get(id).cloned() {
+                    recent_ids.insert(item.id.clone());
                     item.section = PaletteSection::Recent;
                     ranked.push(RankedItem {
                         item,
@@ -1201,6 +1241,13 @@ impl WorkspaceApp {
                         highlights: Vec::new(),
                     });
                 }
+            }
+            if !recent_ids.is_empty() {
+                command_items.retain(|item| !recent_ids.contains(&item.id));
+                session_items.retain(|item| !recent_ids.contains(&item.id));
+                connection_items.retain(|item| !recent_ids.contains(&item.id));
+                plugin_items.retain(|item| !recent_ids.contains(&item.id));
+                help_items.retain(|item| !recent_ids.contains(&item.id));
             }
         }
 
@@ -1238,6 +1285,8 @@ impl WorkspaceApp {
                 icon: LucideIcon::Monitor,
                 detail: None,
                 shortcut: None,
+                count: None,
+                active: false,
                 value: format!("quick_remote_desktop {target}"),
                 action: PaletteAction::OpenRemoteDesktopConnection(profile),
                 disabled: false,
@@ -1252,6 +1301,8 @@ impl WorkspaceApp {
                 icon: LucideIcon::Zap,
                 detail: None,
                 shortcut: None,
+                count: None,
+                active: false,
                 value: format!("quick_connect {target}"),
                 action: PaletteAction::QuickConnectHost {
                     username,
@@ -1297,6 +1348,8 @@ impl WorkspaceApp {
             icon: spec.icon,
             detail: None,
             shortcut,
+            count: None,
+            active: false,
             value: format!("{} {}", label, spec.id),
             action: spec.action,
             disabled: false,
@@ -1304,6 +1357,7 @@ impl WorkspaceApp {
     }
 
     fn command_palette_session_items(&self, cx: &App) -> Vec<PaletteItem> {
+        let active_tab_id = self.active_tab_id(cx);
         self.tabs(cx)
             .iter()
             .map(|tab| {
@@ -1338,6 +1392,8 @@ impl WorkspaceApp {
                     icon: tab_kind_icon(&tab.kind),
                     detail: Some(detail),
                     shortcut: None,
+                    count: None,
+                    active: active_tab_id == Some(tab.id),
                     value: tab.title.clone(),
                     action: PaletteAction::ActivateTab(tab.id),
                     disabled: false,
@@ -1446,6 +1502,8 @@ impl WorkspaceApp {
                     icon,
                     detail: Some(detail),
                     shortcut: None,
+                    count: None,
+                    active: false,
                     value: item.search_text(),
                     action,
                     disabled: false,
@@ -1485,6 +1543,8 @@ impl WorkspaceApp {
                     icon: LucideIcon::FileTerminal,
                     detail: Some(detail.clone()),
                     shortcut: None,
+                    count: None,
+                    active: false,
                     value: format!("{alias} {detail}"),
                     action: PaletteAction::QuickConnectAlias(alias),
                     disabled: false,
@@ -1507,6 +1567,8 @@ impl WorkspaceApp {
                 icon: LucideIcon::Puzzle,
                 detail: Some(self.i18n.t("plugin.command_runtime_pending")),
                 shortcut: None,
+                count: None,
+                active: false,
                 value: format!(
                     "{} {} {}",
                     command.plugin_name, command.plugin_id, command.command
@@ -1529,6 +1591,8 @@ impl WorkspaceApp {
                 icon: LucideIcon::Puzzle,
                 detail: Some(self.i18n.t("plugin.command_detail")),
                 shortcut: command.shortcut.clone(),
+                count: None,
+                active: false,
                 value: format!(
                     "{} {} {} {}",
                     command.plugin_name, command.plugin_id, command.command, command.label
@@ -1562,6 +1626,8 @@ impl WorkspaceApp {
                         )
                     })
                     .map(|combo| crate::keybindings::format_combo(&combo)),
+                count: None,
+                active: false,
                 value: format!(
                     "{} {} {} {}",
                     keybinding.plugin_name,
@@ -1590,6 +1656,8 @@ impl WorkspaceApp {
                     icon: LucideIcon::Keyboard,
                     detail: Some(self.i18n.t("plugin.terminal_shortcut_pending")),
                     shortcut: Some(shortcut.definition.key.clone()),
+                    count: None,
+                    active: false,
                     value: format!(
                         "{} {} {} {}",
                         shortcut.plugin_name,
@@ -1623,13 +1691,22 @@ impl WorkspaceApp {
             });
         }
         let palette: CommandPaletteView = self.command_palette.read(cx).view();
-        let selected_connection = ranked_items
-            .get(self.command_palette.read(cx).selected_index())
+        let selected_index = resolve_command_palette_selected_index(
+            &ranked_items,
+            self.command_palette.read(cx).selected_index(),
+        );
+        let selected_connection = selected_index
+            .and_then(|index| ranked_items.get(index))
             .filter(|ranked| {
                 matches!(
                     ranked.item.action,
                     PaletteAction::OpenSavedConnection(_) | PaletteAction::OpenSavedProfile(_)
-                )
+                ) && (ranked.item.label.chars().count() > 40
+                    || ranked
+                        .item
+                        .detail
+                        .as_deref()
+                        .is_some_and(|detail| detail.chars().count() > 56))
             })
             .map(|ranked| &ranked.item);
         let preview =
@@ -1646,12 +1723,12 @@ impl WorkspaceApp {
         } else {
             0.0
         };
-        let list_max_height = (f32::from(viewport.height)
-            - palette_top
-            - COMMAND_PALETTE_INPUT_HEIGHT
-            - preview_height
-            - 48.0)
-            .clamp(0.0, COMMAND_PALETTE_LIST_MAX_HEIGHT);
+        let list_max_height = command_palette_list_max_height(
+            f32::from(viewport.height),
+            palette_top,
+            preview_height,
+            compact,
+        );
         let mode = palette.mode;
         let query_placeholder = self.i18n.t(match palette.content {
             PaletteContent::TabScopes => "sidebar.tab_scope.search",
@@ -1665,21 +1742,37 @@ impl WorkspaceApp {
             (row_count as f32 * COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT).min(list_max_height);
         let virtual_rows = rows;
         let entity = cx.entity();
+        let divider_color = rgba((self.tokens.ui.border << 8) | 0x59);
+        let footer_bg = rgba((self.tokens.ui.bg_panel << 8) | 0x26);
+        let footer_left = self.i18n.t(if compact {
+            "sidebar.tab_scope.hint"
+        } else {
+            "command_palette.mode_hint"
+        });
+        let footer_right = if compact {
+            if palette.content == PaletteContent::TabScopes {
+                let host = self.tab_host.read(cx);
+                let visible = host.main_tabs().count();
+                let total = host.unfiltered_main_tabs().count();
+                Some(format!("{visible}/{total}"))
+            } else {
+                None
+            }
+        } else {
+            Some(self.i18n.t("command_palette.footer_hint"))
+        };
 
         let panel = dialog_content(&self.tokens)
             .w(px(if compact {
-                400.0_f32.min(f32::from(viewport.width) - 16.0)
+                compact_palette_panel_width(f32::from(viewport.width))
             } else {
                 command_palette_panel_width(f32::from(viewport.width))
             }))
-            .rounded(px(self.tokens.radii.lg))
-            .shadow_xl()
             .child(
                 div()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .rounded(px(self.tokens.radii.md))
                     .child(
                         div()
                             .h(px(COMMAND_PALETTE_INPUT_HEIGHT))
@@ -1687,11 +1780,11 @@ impl WorkspaceApp {
                             .flex()
                             .items_center()
                             .border_b_1()
-                            .border_color(rgb(self.tokens.ui.border))
+                            .border_color(divider_color)
                             // The search row is the first painted child inside
                             // the rounded command palette shell; match the
                             // shell's inner curve instead of the outer border.
-                            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
+                            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                             .when(mode != PaletteMode::All, |row| {
                                 row.child(self.render_command_palette_mode_badge(mode))
                             })
@@ -1704,7 +1797,7 @@ impl WorkspaceApp {
                                     WorkspaceImeTarget::CommandPalette,
                                     palette.raw_query,
                                     query_placeholder,
-                                    14.0,
+                                    self.tokens.metrics.ui_text_sm,
                                     20.0,
                                     cx,
                                 ),
@@ -1712,40 +1805,48 @@ impl WorkspaceApp {
                     )
                     .child(
                         div()
-                            .relative()
-                            .id("command-palette-scroll")
-                            .w_full()
-                            .h(px(rows_height))
-                            .max_h(px(list_max_height))
-                            .child(tauri_virtual_uniform_list(
-                                "command-palette-virtual-list",
-                                row_count,
-                                palette.scroll_handle.clone(),
-                                TauriVirtualListSpec::new(
-                                    px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
-                                    COMMAND_PALETTE_VIRTUAL_OVERSCAN,
-                                ),
-                                move |range, _window, cx| {
-                                    range
-                                        .map(|row_index| {
-                                            let row = virtual_rows[row_index].clone();
-                                            entity.update(cx, |this, cx| {
-                                                this.render_command_palette_virtual_row(row, cx)
-                                            })
-                                        })
-                                        .collect::<Vec<_>>()
-                                },
-                            )),
+                            .py(px(COMMAND_PALETTE_LIST_PADDING_Y))
+                            .child(
+                                div()
+                                    .relative()
+                                    .id("command-palette-scroll")
+                                    .w_full()
+                                    .h(px(rows_height))
+                                    .max_h(px(list_max_height))
+                                    .child(tauri_virtual_uniform_list(
+                                        "command-palette-virtual-list",
+                                        row_count,
+                                        palette.scroll_handle.clone(),
+                                        TauriVirtualListSpec::new(
+                                            px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT),
+                                            COMMAND_PALETTE_VIRTUAL_OVERSCAN,
+                                        ),
+                                        move |range, _window, cx| {
+                                            range
+                                                .map(|row_index| {
+                                                    let row = virtual_rows[row_index].clone();
+                                                    entity.update(cx, |this, cx| {
+                                                        this.render_command_palette_virtual_row(
+                                                            row,
+                                                            selected_index,
+                                                            cx,
+                                                        )
+                                                    })
+                                                })
+                                                .collect::<Vec<_>>()
+                                        },
+                                    )),
+                            ),
                     )
                     .when_some(preview, |root, preview| root.child(preview))
                     .when_some(palette.error, |root, error| {
                         root.child(
                             div()
                                 .border_t_1()
-                                .border_color(rgb(self.tokens.ui.border))
+                                .border_color(divider_color)
                                 .px(px(12.0))
                                 .py(px(8.0))
-                                .text_size(px(12.0))
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
                                 .text_color(rgb(self.tokens.ui.error))
                                 .child(error),
                         )
@@ -1753,31 +1854,43 @@ impl WorkspaceApp {
                     .child(
                         div()
                             .border_t_1()
-                            .border_color(rgb(self.tokens.ui.border))
+                            .border_color(divider_color)
+                            .bg(footer_bg)
+                            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
                             .px(px(12.0))
                             .py(px(6.0))
                             .flex()
                             .items_center()
+                            .justify_between()
                             .gap(px(12.0))
-                            .text_size(px(11.0))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
                             .line_height(px(16.0))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.render_display_text_with_role(
                                 SelectableTextRole::NonSelectable,
                                 "command-palette-footer",
                                 "hint",
-                                self.i18n.t(if compact {
-                                    "sidebar.tab_scope.hint"
-                                } else {
-                                    "command_palette.footer_hint"
-                                }),
+                                footer_left,
                                 self.tokens.ui.text_muted,
                                 cx,
-                            )),
+                            ))
+                            .when_some(footer_right, |footer, right_label| {
+                                footer.child(
+                                    div()
+                                        .flex_none()
+                                        .when(compact, |el| {
+                                            el.font_family(settings_mono_font_family(
+                                                self.settings_store.settings(),
+                                            ))
+                                        })
+                                        .child(right_label),
+                                )
+                            }),
                     ),
             );
 
-        let overlay = dismissible_command_palette_backdrop()
+        let visible = palette.phase == ExitPhase::Visible;
+        staged_overlay_root()
             .items_start()
             .justify_center()
             .on_mouse_down(
@@ -1796,31 +1909,33 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
-            .child(
-                div()
-                    .mt(px(palette_top))
-                    .child(overlay_content_boundary(panel)),
-            );
-        oxideterm_gpui_ui::motion::fade(
-            &self.tokens,
-            ("command-palette-motion", palette.motion_generation),
-            overlay,
-            MotionDuration::Control,
-            palette.phase == ExitPhase::Visible,
-        )
+            .child(staged_overlay_scrim(
+                &self.tokens,
+                ("command-palette-scrim", palette.motion_generation),
+                TauriBackdropRole::CommandPalette,
+                visible,
+            ))
+            .child(oxideterm_gpui_ui::motion::slide_fade_y(
+                &self.tokens,
+                ("command-palette-panel-motion", palette.motion_generation),
+                div().mt(px(palette_top)).child(overlay_content_boundary(panel)),
+                -8.0,
+                MotionDuration::Control,
+                visible,
+            ))
+            .into_any_element()
     }
 
     fn render_command_palette_mode_badge(&self, mode: PaletteMode) -> AnyElement {
         div()
-            .ml(px(8.0))
-            .mr(px(2.0))
+            .mr(px(8.0))
             .rounded(px(self.tokens.radii.xs))
             .bg(rgba(
                 (self.tokens.ui.accent << 8) | COMMAND_PALETTE_MODE_BADGE_ALPHA,
             ))
             .px(px(6.0))
             .py(px(2.0))
-            .text_size(px(12.0))
+            .text_size(px(self.tokens.metrics.ui_text_xs))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
             .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(rgb(self.tokens.ui.accent))
@@ -1836,6 +1951,7 @@ impl WorkspaceApp {
     fn render_command_palette_section_heading(
         &self,
         section: PaletteSection,
+        show_separator: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let key = if self.command_palette.read(cx).is_quick_bar_category_picker() {
@@ -1853,12 +1969,17 @@ impl WorkspaceApp {
         div()
             .w_full()
             .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
-            .px(px(12.0))
+            .px(px(14.0))
+            .when(show_separator, |heading| {
+                heading
+                    .border_t_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x40))
+            })
             .flex()
             .items_center()
-            .text_size(px(12.0))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
             .line_height(px(16.0))
-            .font_weight(gpui::FontWeight::MEDIUM)
+            .font_weight(gpui::FontWeight::SEMIBOLD)
             .text_color(rgb(self.tokens.ui.text_muted))
             .child(self.render_display_text_with_role(
                 SelectableTextRole::NonSelectable,
@@ -1871,46 +1992,88 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
+    fn render_shortcut_keycap(
+        &self,
+        shortcut: String,
+        a11y_label: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let content = if let Some(label) = a11y_label {
+            self.render_selectable_display_text(
+                "shortcuts-modal-shortcut",
+                label,
+                shortcut,
+                self.tokens.ui.text_muted,
+                cx,
+            )
+        } else {
+            div().child(shortcut).into_any_element()
+        };
+        div()
+            .flex_none()
+            .rounded(px(self.tokens.radii.sm))
+            .border_1()
+            .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
+            .bg(rgb(self.tokens.ui.bg_panel))
+            .px(px(6.0))
+            .py(px(2.0))
+            .font_family(settings_mono_font_family(self.settings_store.settings()))
+            .text_size(px(self.tokens.metrics.ui_text_2xs))
+            .line_height(px(14.0))
+            .text_color(rgb(self.tokens.ui.text_muted))
+            .child(content)
+            .into_any_element()
+    }
+
     fn render_command_palette_row(
         &self,
         ranked: &RankedItem,
         index: usize,
+        selected_index: Option<usize>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let selected = index == self.command_palette.read(cx).selected_index();
+        let disabled = ranked.item.disabled;
+        let selected = !disabled && selected_index == Some(index);
         let item = ranked.item.clone();
         let mut label_row = div().flex().flex_1().items_center().min_w_0().child(
             self.render_highlighted_palette_text(
                 &ranked.item.label,
                 &ranked.highlights,
                 selected,
+                disabled,
                 false,
             ),
         );
         if let Some(detail) = ranked.item.detail.as_ref() {
             label_row = label_row.child(
                 div()
-                    .ml(px(4.0))
+                    .ml(px(8.0))
                     .min_w_0()
                     .truncate()
-                    .text_size(px(12.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
                     .line_height(px(16.0))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.render_highlighted_palette_text(
                         detail,
                         &palette_detail_highlights(detail, self.command_palette.read(cx).query()),
                         false,
+                        disabled,
                         true,
                     )),
             );
         }
-        div()
+        let hover_bg = self.tokens.ui.bg_hover;
+        let has_trailing = ranked.item.count.is_some()
+            || ranked.item.active
+            || disabled
+            || ranked.item.shortcut.is_some();
+
+        let row_pill = div()
             .id(("command-palette-row", index))
-            // Tauri CommandItem is a full-width flex row; this keeps its
-            // CommandShortcut ml-auto at the panel edge instead of after text.
             .w_full()
-            .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
-            .px(px(12.0))
+            .h_full()
+            .px(px(8.0))
+            .rounded(px(self.tokens.radii.sm))
             .flex()
             .items_center()
             .gap(px(COMMAND_PALETTE_ITEM_GAP))
@@ -1921,23 +2084,34 @@ impl WorkspaceApp {
             })
             .text_color(if selected {
                 rgb(self.tokens.ui.accent)
+            } else if disabled {
+                rgb(self.tokens.ui.text_muted)
             } else {
                 rgb(self.tokens.ui.text)
             })
-            .cursor(CursorStyle::PointingHand)
-            .on_mouse_move(
-                cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
-                    this.command_palette
-                        .update(cx, |palette, cx| palette.set_selected_index(index, cx));
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    this.execute_command_palette_item(item.clone(), window, cx);
-                    cx.stop_propagation();
-                }),
-            )
+            .when(!selected && !disabled, |row| {
+                row.hover(move |row| row.bg(rgb(hover_bg)))
+            })
+            .cursor(if disabled {
+                CursorStyle::Arrow
+            } else {
+                CursorStyle::PointingHand
+            })
+            .when(!disabled, |row| {
+                row.on_mouse_move(
+                    cx.listener(move |this, _event: &MouseMoveEvent, _window, cx| {
+                        this.command_palette
+                            .update(cx, |palette, cx| palette.set_selected_index(index, cx));
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, window, cx| {
+                        this.execute_command_palette_item(item.clone(), window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+            })
             .child(self.render_command_palette_icon_slot(
                 ranked.item.icon,
                 if selected {
@@ -1947,44 +2121,71 @@ impl WorkspaceApp {
                 },
             ))
             .child(label_row)
-            .when(ranked.item.disabled, |row| {
-                row.child(
-                    div()
-                        .ml_auto()
-                        .rounded(px(self.tokens.radii.xs))
-                        .bg(rgb(self.tokens.ui.bg_panel))
-                        .px(px(6.0))
-                        .py(px(3.0))
-                        .text_size(px(11.0))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t("common.disabled")),
-                )
-            })
-            .when_some(ranked.item.shortcut.as_ref(), |row, shortcut| {
-                row.child(
-                    div()
-                        .ml_auto()
-                        .flex_none()
-                        .text_size(px(12.0))
-                        .line_height(px(16.0))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(shortcut.clone()),
-                )
-            })
+            .when(has_trailing, |row| {
+                let mut trailing = div().ml_auto().flex_none().flex().items_center().gap(px(8.0));
+                if let Some(count) = ranked.item.count.as_ref() {
+                    trailing = trailing.child(
+                        div()
+                            .font_family(settings_mono_font_family(self.settings_store.settings()))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
+                            .text_color(rgb(if ranked.item.active {
+                                self.tokens.ui.accent
+                            } else {
+                                self.tokens.ui.text_muted
+                            }))
+                            .child(count.clone()),
+                    );
+                }
+                if ranked.item.active {
+                    trailing = trailing.child(Self::render_lucide_icon(
+                        LucideIcon::Check,
+                        13.0,
+                        rgb(self.tokens.ui.accent),
+                    ));
+                }
+                if disabled {
+                    trailing = trailing.child(
+                        div()
+                            .rounded(px(self.tokens.radii.xs))
+                            .bg(rgb(self.tokens.ui.bg_panel))
+                            .px(px(6.0))
+                            .py(px(2.0))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.i18n.t("common.disabled")),
+                    );
+                }
+                if let Some(shortcut) = ranked.item.shortcut.as_ref() {
+                    trailing = trailing.child(self.render_shortcut_keycap(
+                        shortcut.clone(),
+                        None,
+                        cx,
+                    ));
+                }
+                row.child(trailing)
+            });
+
+        div()
+            .w_full()
+            .h(px(COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT))
+            .px(px(6.0))
+            .child(row_pill)
             .into_any_element()
     }
 
     fn render_command_palette_virtual_row(
         &self,
         row: CommandPaletteVirtualRow,
+        selected_index: Option<usize>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match row {
-            CommandPaletteVirtualRow::Heading(section) => {
-                self.render_command_palette_section_heading(section, cx)
-            }
+            CommandPaletteVirtualRow::Heading {
+                section,
+                show_separator,
+            } => self.render_command_palette_section_heading(section, show_separator, cx),
             CommandPaletteVirtualRow::Item { ranked, item_index } => {
-                self.render_command_palette_row(&ranked, item_index, cx)
+                self.render_command_palette_row(&ranked, item_index, selected_index, cx)
             }
             CommandPaletteVirtualRow::Empty => {
                 let query = self.command_palette.read(cx).query().to_string();
@@ -1994,7 +2195,7 @@ impl WorkspaceApp {
                     .px(px(16.0))
                     .flex()
                     .items_center()
-                    .text_size(px(14.0))
+                    .text_size(px(self.tokens.metrics.ui_text_sm))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.render_selectable_display_text(
                         "command-palette-empty",
@@ -2029,6 +2230,7 @@ impl WorkspaceApp {
         text: &str,
         highlights: &[usize],
         selected: bool,
+        disabled: bool,
         muted: bool,
     ) -> AnyElement {
         let highlight_set = highlights.iter().copied().collect::<HashSet<_>>();
@@ -2061,11 +2263,15 @@ impl WorkspaceApp {
         div()
             .min_w_0()
             .truncate()
-            .text_size(px(if muted { 12.0 } else { 14.0 }))
+            .text_size(px(if muted {
+                self.tokens.metrics.ui_text_xs
+            } else {
+                self.tokens.metrics.ui_text_sm
+            }))
             .line_height(px(if muted { 16.0 } else { 20.0 }))
             .text_color(rgb(if selected {
                 self.tokens.ui.accent
-            } else if muted {
+            } else if muted || disabled {
                 self.tokens.ui.text_muted
             } else {
                 self.tokens.ui.text
@@ -2087,24 +2293,8 @@ impl WorkspaceApp {
             .min(SHORTCUTS_MODAL_LIST_MAX_HEIGHT);
         let virtual_rows = rows;
         let entity = cx.entity();
-        let overlay = dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, window, cx| {
-                    this.close_shortcuts_modal(cx);
-                    window.focus(&this.focus_handle, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_down(
-                MouseButton::Right,
-                cx.listener(|this, _event, window, cx| {
-                    this.close_shortcuts_modal(cx);
-                    window.focus(&this.focus_handle, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(overlay_content_boundary(
+        let visible = self.shortcuts_modal.presence.phase() == ExitPhase::Visible;
+        let card = overlay_content_boundary(
                 dialog_content(&self.tokens)
                     .w(px(600.0))
                     .child(
@@ -2205,17 +2395,45 @@ impl WorkspaceApp {
                                     )),
                             ),
                     ),
-            ));
-        oxideterm_gpui_ui::motion::fade(
-            &self.tokens,
-            (
-                "shortcuts-modal-motion",
-                self.shortcuts_modal.motion_generation,
-            ),
-            overlay,
-            MotionDuration::Control,
-            self.shortcuts_modal.presence.phase() == ExitPhase::Visible,
-        )
+            );
+        staged_overlay_root()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, _event, window, cx| {
+                    this.close_shortcuts_modal(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _event, window, cx| {
+                    this.close_shortcuts_modal(cx);
+                    window.focus(&this.focus_handle, cx);
+                    cx.stop_propagation();
+                }),
+            )
+            .child(staged_overlay_scrim(
+                &self.tokens,
+                (
+                    "shortcuts-modal-scrim",
+                    self.shortcuts_modal.motion_generation,
+                ),
+                TauriBackdropRole::Dialog,
+                visible,
+            ))
+            .child(oxideterm_gpui_ui::motion::slide_fade_y(
+                &self.tokens,
+                (
+                    "shortcuts-modal-motion",
+                    self.shortcuts_modal.motion_generation,
+                ),
+                div().child(card),
+                12.0,
+                MotionDuration::Control,
+                visible,
+            ))
+            .into_any_element()
     }
 
     fn filtered_shortcut_categories(&self) -> Vec<ShortcutModalCategory> {
@@ -2418,27 +2636,7 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .ml_auto()
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.border))
-                    .bg(rgb(self.tokens.ui.bg_panel))
-                    .px(px(8.0))
-                    .py(px(2.0))
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.render_selectable_display_text(
-                        "shortcuts-modal-shortcut",
-                        &row.label,
-                        row.shortcut.clone(),
-                        self.tokens.ui.text_muted,
-                        cx,
-                    )),
-            )
+            .child(self.render_shortcut_keycap(row.shortcut, Some(&row.label), cx))
             .into_any_element()
     }
 
@@ -2529,6 +2727,103 @@ fn command_palette_scroll_child_index(
     None
 }
 
+#[derive(Clone, Copy)]
+enum PaletteStep {
+    Forward(usize),
+    Backward(usize),
+    First,
+    Last,
+}
+
+fn resolve_command_palette_selected_index(
+    ranked_items: &[RankedItem],
+    selected_index: usize,
+) -> Option<usize> {
+    if ranked_items.is_empty() {
+        return None;
+    }
+    if let Some(item) = ranked_items.get(selected_index)
+        && !item.item.disabled
+    {
+        return Some(selected_index);
+    }
+    ranked_items.iter().position(|ranked| !ranked.item.disabled)
+}
+
+fn next_enabled_palette_index(
+    ranked_items: &[RankedItem],
+    current: usize,
+    step: PaletteStep,
+) -> Option<usize> {
+    if ranked_items.is_empty() {
+        return None;
+    }
+    let last = ranked_items.len() - 1;
+    let current = current.min(last);
+    match step {
+        PaletteStep::First => ranked_items.iter().position(|ranked| !ranked.item.disabled),
+        PaletteStep::Last => ranked_items.iter().rposition(|ranked| !ranked.item.disabled),
+        PaletteStep::Forward(delta) => {
+            let start = current.saturating_add(delta).min(last);
+            (start..=last)
+                .find(|&idx| !ranked_items[idx].item.disabled)
+                .or_else(|| {
+                    ((current + 1)..start)
+                        .rev()
+                        .find(|&idx| !ranked_items[idx].item.disabled)
+                })
+        }
+        PaletteStep::Backward(delta) => {
+            let start = current.saturating_sub(delta);
+            (0..=start)
+                .rev()
+                .find(|&idx| !ranked_items[idx].item.disabled)
+                .or_else(|| ((start + 1)..current).find(|&idx| !ranked_items[idx].item.disabled))
+        }
+    }
+}
+
+fn compact_palette_panel_width(viewport_width: f32) -> f32 {
+    (viewport_width * 0.36)
+        .round()
+        .clamp(COMPACT_PALETTE_MIN_WIDTH, COMPACT_PALETTE_MAX_WIDTH)
+        .min((viewport_width - 16.0).max(0.0))
+}
+
+fn command_palette_list_max_height(
+    viewport_height: f32,
+    palette_top: f32,
+    preview_height: f32,
+    compact: bool,
+) -> f32 {
+    let (ratio, cap) = if compact {
+        (
+            COMPACT_PALETTE_VIEWPORT_HEIGHT_RATIO,
+            COMPACT_PALETTE_LIST_MAX_HEIGHT,
+        )
+    } else {
+        (
+            COMMAND_PALETTE_VIEWPORT_HEIGHT_RATIO,
+            COMMAND_PALETTE_LIST_MAX_HEIGHT,
+        )
+    };
+    let proportional_target = viewport_height * ratio;
+    let available = (viewport_height
+        - palette_top
+        - COMMAND_PALETTE_INPUT_HEIGHT
+        - preview_height
+        - COMMAND_PALETTE_LIST_PADDING_Y * 2.0
+        - 48.0)
+        .max(0.0);
+    snap_command_palette_list_height(proportional_target.min(available), cap)
+}
+
+fn snap_command_palette_list_height(available_height: f32, max_height: f32) -> f32 {
+    let capped = available_height.max(0.0).min(max_height);
+    let whole_rows = (capped / COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT).floor();
+    whole_rows * COMMAND_PALETTE_VIRTUAL_ROW_HEIGHT
+}
+
 fn command_palette_virtual_rows(ranked_items: Vec<RankedItem>) -> Vec<CommandPaletteVirtualRow> {
     if ranked_items.is_empty() {
         return vec![CommandPaletteVirtualRow::Empty];
@@ -2538,8 +2833,12 @@ fn command_palette_virtual_rows(ranked_items: Vec<RankedItem>) -> Vec<CommandPal
     let mut previous_section = None;
     for (index, ranked) in ranked_items.into_iter().enumerate() {
         if previous_section != Some(ranked.item.section) {
+            let show_separator = previous_section.is_some();
             previous_section = Some(ranked.item.section);
-            rows.push(CommandPaletteVirtualRow::Heading(ranked.item.section));
+            rows.push(CommandPaletteVirtualRow::Heading {
+                section: ranked.item.section,
+                show_separator,
+            });
         }
         rows.push(CommandPaletteVirtualRow::Item {
             ranked,
@@ -2770,6 +3069,55 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             LucideIcon::Plus,
         ),
         CommandSpec {
+            id: "cmd:open_connection_manager",
+            label_key: "command_palette.cmd_open_connection_manager".into(),
+            icon: LucideIcon::FolderOpen,
+            shortcut_action: None,
+            action: PaletteAction::OpenSessionManager,
+        },
+        keybinding_command(
+            "cmd:settings",
+            "command_palette.cmd_settings",
+            "app.settings",
+            LucideIcon::Settings,
+        ),
+        keybinding_command(
+            "cmd:toggle_sidebar",
+            "command_palette.cmd_toggle_sidebar",
+            "app.toggleSidebar",
+            LucideIcon::PanelLeft,
+        ),
+        keybinding_command(
+            "cmd:split_horizontal",
+            "command_palette.cmd_split_horizontal",
+            "split.horizontal",
+            LucideIcon::SplitSquareHorizontal,
+        ),
+        keybinding_command(
+            "cmd:split_vertical",
+            "command_palette.cmd_split_vertical",
+            "split.vertical",
+            LucideIcon::SplitSquareVertical,
+        ),
+        keybinding_command(
+            "cmd:zen_mode",
+            "command_palette.cmd_zen_mode",
+            "app.zenMode",
+            LucideIcon::AppWindow,
+        ),
+        keybinding_command(
+            "cmd:toggle_ai_sidebar",
+            "command_palette.cmd_toggle_ai_sidebar",
+            "palette.aiSidebar",
+            LucideIcon::PanelLeft,
+        ),
+        keybinding_command(
+            "cmd:toggle_panel",
+            "command_palette.cmd_toggle_panel",
+            "palette.eventLog",
+            LucideIcon::LayoutList,
+        ),
+        CommandSpec {
             id: "cmd:open_telnet_terminal",
             label_key: Cow::Borrowed("command_palette.cmd_open_telnet_terminal"),
             icon: LucideIcon::Network,
@@ -2797,12 +3145,6 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             shortcut_action: None,
             action: PaletteAction::OpenRemoteDesktopPreview(RemoteDesktopProtocol::Vnc),
         },
-        keybinding_command(
-            "cmd:settings",
-            "command_palette.cmd_settings",
-            "app.settings",
-            LucideIcon::Settings,
-        ),
         CommandSpec {
             id: "cmd:manage_terminal_triggers",
             label_key: Cow::Borrowed("command_palette.cmd_manage_terminal_triggers"),
@@ -2810,30 +3152,6 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             shortcut_action: None,
             action: PaletteAction::ManageTerminalTriggers,
         },
-        keybinding_command(
-            "cmd:toggle_sidebar",
-            "command_palette.cmd_toggle_sidebar",
-            "app.toggleSidebar",
-            LucideIcon::PanelLeft,
-        ),
-        keybinding_command(
-            "cmd:zen_mode",
-            "command_palette.cmd_zen_mode",
-            "app.zenMode",
-            LucideIcon::AppWindow,
-        ),
-        keybinding_command(
-            "cmd:toggle_panel",
-            "command_palette.cmd_toggle_panel",
-            "palette.eventLog",
-            LucideIcon::LayoutList,
-        ),
-        keybinding_command(
-            "cmd:toggle_ai_sidebar",
-            "command_palette.cmd_toggle_ai_sidebar",
-            "palette.aiSidebar",
-            LucideIcon::PanelLeft,
-        ),
         CommandSpec {
             id: "cmd:close_tab",
             label_key: "command_palette.cmd_close_tab".into(),
@@ -2841,18 +3159,6 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             shortcut_action: Some("app.closeTab"),
             action: PaletteAction::CloseTab,
         },
-        keybinding_command(
-            "cmd:split_horizontal",
-            "command_palette.cmd_split_horizontal",
-            "split.horizontal",
-            LucideIcon::SplitSquareHorizontal,
-        ),
-        keybinding_command(
-            "cmd:split_vertical",
-            "command_palette.cmd_split_vertical",
-            "split.vertical",
-            LucideIcon::SplitSquareVertical,
-        ),
         keybinding_command(
             "cmd:broadcast_toggle",
             "command_palette.cmd_broadcast_toggle",
@@ -2897,13 +3203,6 @@ fn command_palette_specs() -> Vec<CommandSpec> {
             "app.navForward",
             LucideIcon::ArrowRight,
         ),
-        CommandSpec {
-            id: "cmd:open_connection_manager",
-            label_key: "command_palette.cmd_open_connection_manager".into(),
-            icon: LucideIcon::FolderOpen,
-            shortcut_action: None,
-            action: PaletteAction::OpenSessionManager,
-        },
         CommandSpec {
             id: "cmd:theme_next",
             label_key: "command_palette.cmd_theme_next".into(),
@@ -3395,9 +3694,16 @@ mod panel_layout_tests {
             assert_eq!(form.focused_field, NewConnectionField::Password);
             assert_eq!(form.error.as_deref(), Some(workspace.i18n.t("modals.new_connection.remote_desktop_password_required").as_str()));
             workspace.open_command_palette(window, cx);
-            let recent = workspace.ranked_command_palette_items(cx).into_iter().filter(|result| result.item.section == PaletteSection::Recent).collect::<Vec<_>>();
+            let initial_items = workspace.ranked_command_palette_items(cx);
+            let recent = initial_items.iter().filter(|result| result.item.section == PaletteSection::Recent).collect::<Vec<_>>();
             assert_eq!(recent.iter().map(|r| r.item.id.as_str()).collect::<Vec<_>>(), vec!["remote-desktop-profile:palette-rdp"]);
             assert!(matches!(&recent[0].item.action, PaletteAction::OpenSavedProfile(SessionManagerOpenTarget::RemoteDesktop(id)) if id == "palette-rdp"));
+            assert!(
+                !initial_items
+                    .iter()
+                    .any(|result| result.item.section == PaletteSection::Connections && result.item.id == "remote-desktop-profile:palette-rdp"),
+                "MRU item should not repeat inside its home section when query is empty"
+            );
         }));
     }
 
@@ -3456,6 +3762,8 @@ mod panel_layout_tests {
                 icon: LucideIcon::Terminal,
                 detail: Some("zone-on".into()),
                 shortcut: None,
+                count: None,
+                active: false,
                 value: format!("{label} zone-on"),
                 action: PaletteAction::OpenSavedConnection(id.into()),
                 disabled: false,
@@ -3498,6 +3806,8 @@ mod panel_layout_tests {
                 icon: LucideIcon::Server,
                 detail: Some("operator@db.example:2222".into()),
                 shortcut: None,
+                count: None,
+                active: false,
                 value: String::new(),
                 action: PaletteAction::OpenSavedConnection("long-name".into()),
                 disabled: false,
@@ -3553,5 +3863,82 @@ mod panel_layout_tests {
                 "long text must wrap inside the preview"
             );
         }
+    }
+
+    #[test]
+    fn palette_list_snaps_to_whole_rows_and_navigation_skips_disabled_items() {
+        assert_eq!(
+            command_palette_list_max_height(720.0, 720.0 * COMMAND_PALETTE_TOP_RATIO, 0.0, false),
+            416.0
+        );
+        assert_eq!(
+            command_palette_list_max_height(900.0, 900.0 * COMMAND_PALETTE_TOP_RATIO, 0.0, false),
+            512.0
+        );
+        assert_eq!(
+            command_palette_list_max_height(1200.0, 1200.0 * COMMAND_PALETTE_TOP_RATIO, 0.0, false),
+            640.0
+        );
+        assert_eq!(
+            command_palette_list_max_height(900.0, 40.0, 0.0, true),
+            384.0
+        );
+        assert_eq!(compact_palette_panel_width(1200.0), 432.0);
+
+        let ranked = vec![true, false, true, false]
+            .into_iter()
+            .enumerate()
+            .map(|(index, disabled)| RankedItem {
+                score: 1.0,
+                highlights: Vec::new(),
+                item: PaletteItem {
+                    id: format!("item-{index}"),
+                    label: format!("Item {index}"),
+                    section: if index < 2 {
+                        PaletteSection::Commands
+                    } else {
+                        PaletteSection::Connections
+                    },
+                    icon: LucideIcon::Terminal,
+                    detail: None,
+                    shortcut: None,
+                    count: None,
+                    active: false,
+                    value: String::new(),
+                    action: PaletteAction::CloseTab,
+                    disabled,
+                },
+            })
+            .collect::<Vec<_>>();
+
+        assert_eq!(resolve_command_palette_selected_index(&ranked, 0), Some(1));
+        assert_eq!(
+            next_enabled_palette_index(&ranked, 1, PaletteStep::Forward(1)),
+            Some(3)
+        );
+        assert_eq!(
+            next_enabled_palette_index(&ranked, 3, PaletteStep::Backward(1)),
+            Some(1)
+        );
+        assert_eq!(
+            next_enabled_palette_index(&ranked, 1, PaletteStep::Last),
+            Some(3)
+        );
+
+        let rows = command_palette_virtual_rows(ranked);
+        assert!(matches!(
+            rows.first(),
+            Some(CommandPaletteVirtualRow::Heading {
+                section: PaletteSection::Commands,
+                show_separator: false,
+            })
+        ));
+        assert!(matches!(
+            rows.get(3),
+            Some(CommandPaletteVirtualRow::Heading {
+                section: PaletteSection::Connections,
+                show_separator: true,
+            })
+        ));
     }
 }

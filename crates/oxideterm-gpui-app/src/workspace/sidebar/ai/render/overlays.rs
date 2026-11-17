@@ -180,7 +180,7 @@ impl WorkspaceApp {
                     &self.tokens,
                     "ai-context-popover-enter",
                     div().child(self.render_ai_context_popover(cx)),
-                    6.0,
+                    8.0,
                     oxideterm_gpui_ui::motion::MotionDuration::Control,
                 );
                 (

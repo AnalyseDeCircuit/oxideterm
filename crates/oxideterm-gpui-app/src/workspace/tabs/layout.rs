@@ -104,6 +104,7 @@ impl WorkspaceApp {
                 kind: TabStripItemKind::Returning,
             });
         }
+        let now = cx.background_executor().now();
         let mut exits = self
             .main_window_tabs
             .exiting_tabs
@@ -111,7 +112,7 @@ impl WorkspaceApp {
             .enumerate()
             .map(|(index, tab)| {
                 let width = if self.tokens.motion.spatial_enabled {
-                    tab.width * tab.exit_visibility(&self.tokens)
+                    tab.width * tab.exit_visibility(now, self.tokens.motion.enabled)
                 } else {
                     tab.width
                 };
@@ -181,12 +182,26 @@ impl WorkspaceApp {
         size: f32,
         window: &Window,
     ) -> f32 {
+        let font_family =
+            settings_ui_font_family(&self.settings_store.settings().appearance.ui_font_family);
+        let key = (
+            text.to_string(),
+            size.to_bits(),
+            font_family.as_ref().to_string(),
+        );
+        if let Some(width) = self
+            .main_window_tabs
+            .tab_text_width_cache
+            .borrow()
+            .get(&key)
+            .copied()
+        {
+            return width;
+        }
         let text = SharedString::from(text.to_string());
         let run = TextRun {
             len: text.len(),
-            font: font(settings_ui_font_family(
-                &self.settings_store.settings().appearance.ui_font_family,
-            )),
+            font: font(font_family),
             color: rgb(self.tokens.ui.text).into(),
             background_color: None,
             underline: None,
@@ -194,26 +209,29 @@ impl WorkspaceApp {
             letter_spacing: None,
         };
         // Use the same shaper and font as the label, including fallback glyphs.
-        f32::from(
+        let width = f32::from(
             window
                 .text_system()
                 .shape_line(text, px(size), &[run], None)
                 .width,
-        )
+        );
+        let mut cache = self.main_window_tabs.tab_text_width_cache.borrow_mut();
+        if cache.len() >= 256 {
+            cache.clear();
+        }
+        cache.insert(key, width);
+        width
     }
 }
 
 impl ExitingTabVisual {
-    pub(super) fn exit_visibility(&self, tokens: &oxideterm_theme::ThemeTokens) -> f32 {
-        let duration = oxideterm_gpui_ui::motion::duration(
-            tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
-        if duration.is_zero() {
+    pub(super) fn exit_visibility(&self, now: Instant, motion_enabled: bool) -> f32 {
+        if !motion_enabled || self.duration.is_zero() {
             return 0.0;
         }
+        let elapsed = now.saturating_duration_since(self.started_at);
         1.0 - oxideterm_gpui_ui::motion::ease_in_out_cubic(
-            self.started_at.elapsed().as_secs_f32() / duration.as_secs_f32(),
+            elapsed.as_secs_f32() / self.duration.as_secs_f32(),
         )
     }
 }
@@ -371,6 +389,56 @@ mod tests {
     }
 
     #[gpui::test]
+    fn reduced_motion_releases_tab_width_at_the_end_of_the_fade(cx: &mut gpui::TestAppContext) {
+        let Some((workspace, cx)) = tab_strip_fixture(cx) else {
+            return;
+        };
+        cx.simulate_resize(gpui::size(px(900.0), px(700.0)));
+        workspace.update(cx, |workspace, cx| {
+            workspace
+                .tokens
+                .apply_motion(oxideterm_theme::UiMotionProfile::Reduced);
+            workspace.tab_host.update(cx, |host, _| {
+                host.insert_and_select_main_tab(Tab {
+                    id: TabId(102),
+                    kind: TabKind::SessionManager,
+                    title: "Adjacent tab".into(),
+                    title_source: TabTitleSource::Static,
+                    root_pane: None,
+                    active_pane_id: None,
+                });
+            });
+        });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let closing = cx.debug_bounds("workspace-tab-101").unwrap();
+        let adjacent = cx.debug_bounds("workspace-tab-102").unwrap();
+        cx.update(|window, cx| {
+            workspace.update(cx, |workspace, cx| {
+                workspace.close_tab_by_id(TabId(101), window, cx);
+            });
+        });
+        while cx.executor().tick() {}
+        // The Reduced control tier fades out in 78 ms without shrinking.
+        cx.executor().advance_clock(Duration::from_millis(77));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        let exiting = cx.debug_bounds("workspace-tab-exit-101").unwrap();
+        assert_eq!(exiting.size.width, closing.size.width);
+        assert_eq!(
+            cx.debug_bounds("workspace-tab-102").unwrap().left(),
+            adjacent.left()
+        );
+
+        cx.executor().advance_clock(Duration::from_millis(1));
+        while cx.executor().tick() {}
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        assert!(cx.debug_bounds("workspace-tab-exit-101").is_none());
+        assert_eq!(
+            cx.debug_bounds("workspace-tab-102").unwrap().left(),
+            closing.left()
+        );
+    }
+
+    #[gpui::test]
     fn tab_strip_render_drag_close_and_scroll_use_full_title_widths(cx: &mut gpui::TestAppContext) {
         let Some((workspace, cx)) = tab_strip_fixture(cx) else {
             return;
@@ -445,18 +513,14 @@ mod tests {
                 let index = workspace.tab_index_by_id(TabId(103), cx).unwrap();
                 let exit = workspace.tab_exit_visual(index, window, cx).unwrap();
                 assert!((exit.width - f32::from(closing.size.width)).abs() < 1.0);
-                workspace.tokens.motion.enabled = true;
-                workspace.tokens.motion.spatial_enabled = true;
+                workspace
+                    .tokens
+                    .apply_motion(oxideterm_theme::UiMotionProfile::Normal);
                 workspace.close_tab_by_id(TabId(103), window, cx);
-                let duration = oxideterm_gpui_ui::motion::duration(
-                    &workspace.tokens,
-                    oxideterm_gpui_ui::motion::MotionDuration::Control,
-                );
-                workspace.main_window_tabs.exiting_tabs[0].started_at =
-                    Instant::now() - duration / 2;
             });
-            window.draw(cx).clear(cx);
         });
+        cx.executor().advance_clock(Duration::from_millis(65));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
         let exit = cx.debug_bounds("workspace-tab-exit-103").unwrap();
         let before = cx.debug_bounds("workspace-tab-102").unwrap();
         let after = cx.debug_bounds("workspace-tab-101").unwrap();
@@ -467,11 +531,6 @@ mod tests {
         assert_eq!(after.size.width, single.size.width);
         cx.update(|window, cx| {
             workspace.update(cx, |workspace, cx| {
-                let duration = oxideterm_gpui_ui::motion::duration(
-                    &workspace.tokens,
-                    oxideterm_gpui_ui::motion::MotionDuration::Control,
-                );
-                workspace.main_window_tabs.exiting_tabs[0].started_at = Instant::now() - duration;
                 workspace.tokens.motion.enabled = false;
                 workspace.tab_host.update(cx, |host, _| {
                     host.insert_and_select_main_tab(Tab {

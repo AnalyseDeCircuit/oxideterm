@@ -10,6 +10,21 @@ impl WorkspaceApp {
             .collect()
     }
 
+    pub(in crate::workspace) fn tab_scope_counts(
+        &self,
+        cx: &App,
+    ) -> (usize, HashMap<TabAffinity, usize>) {
+        let affinities = self.collect_tab_affinities(cx);
+        let total = affinities.len();
+        let mut counts = HashMap::new();
+        for values in affinities.values() {
+            for affinity in values {
+                *counts.entry(affinity.clone()).or_insert(0) += 1;
+            }
+        }
+        (total, counts)
+    }
+
     pub(in crate::workspace) fn sync_tab_scope(&mut self, cx: &mut App) {
         if *self.tab_host.read(cx).scope() == TabScope::All {
             return;

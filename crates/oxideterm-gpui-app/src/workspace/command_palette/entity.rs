@@ -139,7 +139,10 @@ impl CommandPaletteEntity {
     ) {
         self.exit_task = None;
         self.presence.reopen();
-        self.motion_generation = self.motion_generation.wrapping_add(1);
+        // Keep the mounted springs when reopening during their exit.
+        if !self.open {
+            self.motion_generation = self.motion_generation.wrapping_add(1);
+        }
         self.open = true;
         self.reset_interaction();
         if auto_load_hosts {
@@ -269,10 +272,6 @@ impl CommandPaletteEntity {
         }
         let next = self.selected_index.min(item_count - 1).saturating_sub(step);
         self.set_selected_index(next, cx)
-    }
-
-    pub(in crate::workspace) fn select_first(&mut self, cx: &mut Context<Self>) -> bool {
-        self.set_selected_index(0, cx)
     }
 
     pub(in crate::workspace) fn select_last(
@@ -427,6 +426,8 @@ mod tests {
             icon: LucideIcon::Search,
             detail: None,
             shortcut: None,
+            count: None,
+            active: false,
             value: "test".to_string(),
             action: PaletteAction::ReloadWindow,
             disabled,
@@ -502,7 +503,7 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         let entity = cx.new(|_| CommandPaletteEntity::new(test_runtime()));
-        entity.update(cx, |entity, cx| {
+        let motion_generation = entity.update(cx, |entity, cx| {
             entity.open(false, HashSet::new(), cx);
             entity.push_query_text("> terminal", cx);
             entity.begin_close(Duration::from_millis(200), cx);
@@ -510,12 +511,14 @@ mod tests {
             assert!(entity.is_closing());
             entity.replace_query_utf16(None, "ignored", cx);
             assert_eq!(entity.query(), "> terminal");
+            entity.view().motion_generation
         });
         cx.run_until_parked();
         cx.executor().advance_clock(Duration::from_millis(100));
         entity.update(cx, |entity, cx| {
             assert_eq!(entity.query(), "> terminal");
             entity.open(false, HashSet::new(), cx);
+            assert_eq!(entity.view().motion_generation, motion_generation);
             entity.push_query_text("new query", cx);
         });
         cx.executor().advance_clock(Duration::from_millis(200));
@@ -533,6 +536,7 @@ mod tests {
             assert!(!entity.is_open());
             assert_eq!(entity.query(), "");
             entity.open(false, HashSet::new(), cx);
+            assert_ne!(entity.view().motion_generation, motion_generation);
             entity.begin_close(Duration::ZERO, cx);
             assert!(!entity.is_open());
         });

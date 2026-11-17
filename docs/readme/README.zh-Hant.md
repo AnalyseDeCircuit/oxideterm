@@ -322,7 +322,11 @@ oxideterm oxide export ./profile.oxide --connection prod --password-stdin
 
 ### macOS
 
-如果 Gatekeeper 阻擋開啟應用程式，請移除隔離屬性：
+```bash
+brew install --cask AnalyseDeCircuit/tap/oxideterm
+```
+
+如果手動安裝 DMG 時 Gatekeeper 阻擋開啟應用程式，請移除隔離屬性：
 
 ```bash
 xattr -cr /Applications/OxideTerm.app
@@ -330,7 +334,12 @@ xattr -cr /Applications/OxideTerm.app
 
 ### Windows
 
-如果 SmartScreen 顯示警告，請選擇 **其他資訊 → 仍要執行**。
+```powershell
+scoop bucket add extras
+scoop install oxideterm
+```
+
+如果手動執行 `.exe` 安裝程式時 SmartScreen 顯示警告，請選擇 **其他資訊 → 仍要執行**。
 
 ### Linux
 
@@ -343,6 +352,9 @@ sudo dpkg -i OxideTerm_*_linux_*.deb && sudo apt-get install -f
 
 # Fedora / RHEL-compatible
 sudo dnf install ./OxideTerm_*_linux_*.rpm
+
+# Arch Linux (AUR)
+yay -S oxideterm-bin
 
 # Nix; updates are managed by Nix
 nix run github:AnalyseDeCircuit/oxideterm
