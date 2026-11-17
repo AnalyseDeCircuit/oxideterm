@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm はロックされています",
       "app_lock_locked_description": "ワークスペースの内容は非表示です。アクティブな接続とバックグラウンドタスクは動作を続けます。",
       "app_lock_unlock": "ロック解除",
+      "app_lock_unlock_placeholder": "パスワードを入力してロック解除",
       "app_lock_unlocking": "ロック解除中...",
       "app_lock_biometric_unlock": "生体認証でロック解除",
       "app_lock_windows_hello_unlock": "Windows Hello を使用",

@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm ist gesperrt",
       "app_lock_locked_description": "Der Inhalt des Arbeitsbereichs ist ausgeblendet. Aktive Verbindungen und Hintergrundaufgaben laufen weiter.",
       "app_lock_unlock": "Entsperren",
+      "app_lock_unlock_placeholder": "Passwort zum Entsperren eingeben",
       "app_lock_unlocking": "Wird entsperrt...",
       "app_lock_biometric_unlock": "Biometrisch entsperren",
       "app_lock_windows_hello_unlock": "Windows Hello verwenden",

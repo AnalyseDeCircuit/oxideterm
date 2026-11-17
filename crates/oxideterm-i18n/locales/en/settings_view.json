@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm is locked",
       "app_lock_locked_description": "Workspace content is hidden. Active connections and background tasks continue running.",
       "app_lock_unlock": "Unlock",
+      "app_lock_unlock_placeholder": "Enter password to unlock",
       "app_lock_unlocking": "Unlocking...",
       "app_lock_biometric_unlock": "Use biometric unlock",
       "app_lock_windows_hello_unlock": "Use Windows Hello",

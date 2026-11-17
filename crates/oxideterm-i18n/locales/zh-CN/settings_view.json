@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm 已锁定",
       "app_lock_locked_description": "工作区内容已隐藏，现有连接和后台任务仍会继续运行。",
       "app_lock_unlock": "解锁",
+      "app_lock_unlock_placeholder": "输入密码解锁",
       "app_lock_unlocking": "正在解锁...",
       "app_lock_biometric_unlock": "使用生物识别解锁",
       "app_lock_windows_hello_unlock": "使用 Windows Hello",

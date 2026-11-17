@@ -1581,6 +1581,9 @@ impl WorkspaceApp {
                 root.child(self.render_mermaid_zoom_modal(window, cx))
             })
             .children(overlay_layers)
+            .when(self.app_lock.unlock_exiting, |root| {
+                root.child(self.render_app_lock_exit_overlay(window, cx))
+            })
             .child(WorkspaceImeElement::new(
                 cx.entity(),
                 self.focus_handle.clone(),

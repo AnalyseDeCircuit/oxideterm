@@ -368,9 +368,9 @@ opt-level = 3
 
 [profile.dev]
 opt-level = 0
-debug = "line-tables-only"
+# Omit dev/test DWARF debug info to cut incremental artifact size and SSD write amplification.
+debug = 0
 incremental = true
-split-debuginfo = "unpacked"
 
 # The refreshed GPUI traverses larger interaction and layout trees. Keep the default development
 # build debuggable while avoiding multi-hundred-millisecond frames in the native GUI.

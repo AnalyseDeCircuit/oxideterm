@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm est verrouillé",
       "app_lock_locked_description": "Le contenu de l’espace de travail est masqué. Les connexions actives et les tâches en arrière-plan continuent de fonctionner.",
       "app_lock_unlock": "Déverrouiller",
+      "app_lock_unlock_placeholder": "Saisissez le mot de passe pour déverrouiller",
       "app_lock_unlocking": "Déverrouillage...",
       "app_lock_biometric_unlock": "Utiliser le déverrouillage biométrique",
       "app_lock_windows_hello_unlock": "Utiliser Windows Hello",

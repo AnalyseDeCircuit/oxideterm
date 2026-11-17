@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm이 잠겼습니다",
       "app_lock_locked_description": "작업 공간 내용이 숨겨졌습니다. 활성 연결과 백그라운드 작업은 계속 실행됩니다.",
       "app_lock_unlock": "잠금 해제",
+      "app_lock_unlock_placeholder": "비밀번호를 입력하여 잠금 해제",
       "app_lock_unlocking": "잠금 해제 중...",
       "app_lock_biometric_unlock": "생체 인증으로 잠금 해제",
       "app_lock_windows_hello_unlock": "Windows Hello 사용",

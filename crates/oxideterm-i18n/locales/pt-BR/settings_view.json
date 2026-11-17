@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm está bloqueado",
       "app_lock_locked_description": "O conteúdo do espaço de trabalho está oculto. As conexões ativas e as tarefas em segundo plano continuam em execução.",
       "app_lock_unlock": "Desbloquear",
+      "app_lock_unlock_placeholder": "Digite a senha para desbloquear",
       "app_lock_unlocking": "Desbloqueando...",
       "app_lock_biometric_unlock": "Usar desbloqueio biométrico",
       "app_lock_windows_hello_unlock": "Usar Windows Hello",

@@ -262,6 +262,7 @@
       "app_lock_locked_title": "OxideTerm đã bị khóa",
       "app_lock_locked_description": "Nội dung không gian làm việc đã được ẩn. Các kết nối đang hoạt động và tác vụ nền vẫn tiếp tục chạy.",
       "app_lock_unlock": "Mở khóa",
+      "app_lock_unlock_placeholder": "Nhập mật khẩu để mở khóa",
       "app_lock_unlocking": "Đang mở khóa...",
       "app_lock_biometric_unlock": "Mở khóa bằng sinh trắc học",
       "app_lock_windows_hello_unlock": "Dùng Windows Hello",

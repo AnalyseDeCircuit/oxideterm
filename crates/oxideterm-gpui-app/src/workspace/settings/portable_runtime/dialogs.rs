@@ -220,6 +220,16 @@ impl WorkspaceApp {
         value: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.portable_password_input_with_placeholder(input, value, String::new(), cx)
+    }
+
+    pub(in crate::workspace) fn portable_password_input_with_placeholder(
+        &self,
+        input: SettingsInput,
+        value: &str,
+        placeholder: String,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let focused = self.focused_settings_input == Some(input);
         let display_value = if focused {
             self.settings_input_draft.as_str()
@@ -233,7 +243,7 @@ impl WorkspaceApp {
                 target,
                 TextInputView {
                     value: display_value,
-                    placeholder: String::new(),
+                    placeholder,
                     focused,
                     caret_visible: self.input_caret.visible(),
                     secret: true,
