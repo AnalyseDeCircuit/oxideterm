@@ -1,6 +1,6 @@
 use gpui::{
-    AnyElement, BoxShadow, CursorStyle, Div, ParentElement, Rgba, Styled, div, point, prelude::*,
-    px, rgb, rgba,
+    AnyElement, App, BoxShadow, CursorStyle, Div, MouseButton, MouseDownEvent, ParentElement, Rgba,
+    Styled, Window, div, point, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_theme::ThemeTokens;
 
@@ -23,6 +23,49 @@ const BUTTON_DESTRUCTIVE_FILL_ALPHA: u32 = 0xe6;
 const TOOLBAR_BUTTON_ICON_GAP: f32 = 6.0; // Tauri toolbar gap-1.5
 const ICON_BUTTON_DISABLED_OPACITY: f32 = 0.35; // Tauri disabled icon button opacity
 const ICON_BUTTON_IDLE_OPACITY: f32 = 0.5; // Tauri muted toolbar icon opacity
+
+/// An icon control with a native tooltip and isolated click handling.
+pub fn icon_button_with_tooltip(
+    tokens: &ThemeTokens,
+    icon_path: &'static str,
+    icon_size: f32,
+    icon_color: Rgba,
+    options: IconButtonOptions,
+    tooltip: String,
+    element_id_prefix: &'static str,
+    flex_none: bool,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> AnyElement {
+    let actionable = !(options.disabled || options.loading);
+    let tooltip_label = tooltip.clone();
+    let tooltip_tokens = *tokens;
+
+    icon_button(
+        tokens,
+        svg()
+            .path(icon_path)
+            .size(px(icon_size))
+            .text_color(icon_color)
+            .into_any_element(),
+        options,
+    )
+    .id((gpui::ElementId::from(element_id_prefix), tooltip))
+    .tooltip(move |_window, cx| {
+        crate::tooltip::tooltip_view(tooltip_tokens, tooltip_label.clone(), None, cx)
+    })
+    .when(actionable, |button| {
+        button.on_mouse_down(MouseButton::Left, listener)
+    })
+    .when(!actionable, |button| {
+        // Disabled and loading buttons still consume the click so parent rows
+        // cannot treat an unavailable action as a selection request.
+        button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+            cx.stop_propagation();
+        })
+    })
+    .when(flex_none, |button| button.flex_none())
+    .into_any_element()
+}
 
 pub fn tauri_focus_visible_ring(tokens: &ThemeTokens) -> Vec<BoxShadow> {
     // Browser :focus-visible is keyboard-owned and shared across shadcn buttons,

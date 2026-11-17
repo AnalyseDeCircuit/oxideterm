@@ -480,7 +480,7 @@ impl CloudSyncWorkspaceEntity {
         &mut self,
         action: &'static str,
         cx: &mut Context<Self>,
-    ) -> crate::workspace::delivery::ActiveDeliverySender<CloudSyncDelivery> {
+    ) -> CloudSyncSender {
         let (sender, receiver) =
             crate::workspace::delivery::ActiveDeliverySender::channel_with_wake(
                 self.delivery_wake.clone(),
@@ -489,7 +489,7 @@ impl CloudSyncWorkspaceEntity {
         self.controller.active_action = Some(action);
         self.delivery_closed = false;
         cx.notify();
-        sender
+        CloudSyncSender(sender)
     }
 
     fn section_list_spec() -> TauriVirtualListSpec {
@@ -724,10 +724,14 @@ fn cloud_sync_location_for_ai(value: &str) -> String {
     sanitized
 }
 
-impl CloudSyncDeliverySink for crate::workspace::delivery::ActiveDeliverySender<CloudSyncDelivery> {
+#[derive(Clone)]
+pub(super) struct CloudSyncSender(
+    crate::workspace::delivery::ActiveDeliverySender<CloudSyncDelivery>,
+);
+
+impl CloudSyncDeliverySink for CloudSyncSender {
     fn send(&self, delivery: CloudSyncDelivery) -> Result<(), Box<CloudSyncDelivery>> {
-        crate::workspace::delivery::ActiveDeliverySender::send(self, delivery)
-            .map_err(|error| Box::new(error.0))
+        self.0.send(delivery).map_err(|error| Box::new(error.0))
     }
 }
 

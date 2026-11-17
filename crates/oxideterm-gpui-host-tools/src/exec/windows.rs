@@ -3,7 +3,7 @@ use windows::Win32::{
     System::{Diagnostics::ToolHelp::*, JobObjects::*, Threading::*},
 };
 
-pub(super) struct CaptureJob(HANDLE);
+pub(crate) struct CaptureJob(HANDLE);
 
 // The capture task is the sole owner of this process-wide kernel handle.
 unsafe impl Send for CaptureJob {}

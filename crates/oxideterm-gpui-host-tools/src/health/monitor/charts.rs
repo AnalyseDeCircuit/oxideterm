@@ -2,7 +2,7 @@ use super::*;
 use gpui::{PathBuilder, point};
 use oxideterm_connection_monitor::MonitorCpuCoreCell;
 
-pub(super) fn usage_value_color(level: MonitorValueLevel, ui: &AppUiColors) -> Rgba {
+pub(crate) fn usage_value_color(level: MonitorValueLevel, ui: &AppUiColors) -> Rgba {
     rgb(match level {
         MonitorValueLevel::Muted => ui.text_muted,
         MonitorValueLevel::Normal => ui.text,
@@ -30,7 +30,7 @@ fn usage_bar_fill(percent: Option<f64>, level: MonitorValueLevel, ui: &AppUiColo
         ))
 }
 
-pub(super) fn render_compact_usage_row(
+pub(crate) fn render_compact_usage_row(
     kind: &MonitorUsageKind,
     detail: Option<&str>,
     percent: Option<f64>,
@@ -49,9 +49,9 @@ pub(super) fn render_compact_usage_row(
             (
                 core_count.map_or_else(|| cpu.clone(), |count| format!("{cpu} · {count}C")),
                 expandable.then_some(if *expanded {
-                    LucideIcon::ChevronDown
+                    "lucide/chevron-down.svg"
                 } else {
-                    LucideIcon::ChevronRight
+                    "lucide/chevron-right.svg"
                 }),
             )
         }
@@ -107,7 +107,7 @@ pub(super) fn render_compact_usage_row(
                         .gap_1()
                         .child(label)
                         .when_some(chevron, |row, icon| {
-                            row.child(div().flex_none().child(WorkspaceApp::render_lucide_icon(
+                            row.child(div().flex_none().child(render_lucide_icon(
                                 icon,
                                 12.0,
                                 rgb(ui.text_muted),
@@ -151,7 +151,7 @@ pub(super) fn render_compact_usage_row(
         )
 }
 
-pub(super) fn render_cpu_core_pair_row(
+pub(crate) fn render_cpu_core_pair_row(
     left: &MonitorCpuCoreCell,
     right: Option<&MonitorCpuCoreCell>,
     render: &CompactMonitorRenderContext,
@@ -230,7 +230,7 @@ fn trend_points(samples: &[(u64, Option<f64>)], maximum: f64) -> Vec<Option<(f32
         .collect()
 }
 
-pub(super) fn render_sparkline(render: &CompactMonitorRenderContext, cpu: bool) -> Div {
+pub(crate) fn render_sparkline(render: &CompactMonitorRenderContext, cpu: bool) -> Div {
     let tokens = render.tokens;
     let ui = tokens.ui;
     // Store `(points, base_hex, stroke_alpha, fill_alpha)` so curve and area tint share series polarity.

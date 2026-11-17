@@ -122,49 +122,7 @@ use gpui::{
     TextLayout, Timer, UniformListScrollHandle, Window, anchored, canvas, deferred, div,
     prelude::*, px, relative, rgb, rgba, svg,
 };
-use oxideterm_connection_monitor::{
-    ConnectionPoolEntryState, ConnectionPoolEntrySummary, ConnectionPoolMonitorStats,
-    DockerActionKind, FilesystemCommandCapability, FilesystemEntrySeverity, FilesystemFilter,
-    GpuDevice, GpuProvider, GpuSamplingTask, GpuSnapshot, GpuSnapshotStatus, GpuUpdate,
-    LogCommandCapability, LogPreset, MetricsSource, MonitorValueLevel, PackageCommandCapability,
-    PackageFilter, PortCommandCapability, PortFilter, ProcessActionKind, ProcessCommandCapability,
-    ProcessFilter, ProcessSort, ProfilerRegistry, ResourceDockerContainer, ResourceDockerStatus,
-    ResourceFilesystemEntry, ResourceFilesystemSnapshot, ResourceFilesystemStatus,
-    ResourceLogEntry, ResourceLogSnapshot, ResourceLogStatus, ResourceMetrics,
-    ResourcePackageEntry, ResourcePackageSnapshot, ResourcePackageStatus, ResourcePortEntry,
-    ResourcePortSnapshot, ResourcePortStatus, ResourceScheduledTask, ResourceScheduledTaskSnapshot,
-    ResourceScheduledTaskStatus, ResourceService, ResourceServiceStatus, ResourceTmuxPane,
-    ResourceTmuxSession, ResourceTmuxSnapshot, ResourceTmuxStatus, ResourceTmuxWindow,
-    ResourceTopProcess, ScheduledTaskActionKind, ScheduledTaskCapability, ScheduledTaskFilter,
-    ServiceActionKind, ServiceCommandCapability, TmuxActionKind, TmuxCommandCapability,
-    build_docker_action_command, build_docker_exec_shell_command, build_docker_follow_logs_command,
-    build_docker_logs_command, build_filesystem_diagnostic_command,
-    build_filesystem_snapshot_command, build_log_follow_command, build_log_snapshot_command,
-    build_package_inspect_command, build_package_snapshot_command, build_package_uninstall_command,
-    build_package_upgrade_command, build_port_diagnostic_command, build_port_snapshot_command,
-    build_process_action_command, build_scheduled_task_action_command,
-    build_scheduled_task_diagnostic_command, build_scheduled_task_logs_command,
-    build_scheduled_task_snapshot_command, build_service_action_command,
-    build_service_follow_logs_command, build_service_logs_command, build_tmux_action_command,
-    build_tmux_attach_command, build_tmux_new_session_command, build_tmux_rename_session_command,
-    build_tmux_rename_window_command, build_tmux_send_pane_command, build_tmux_snapshot_command,
-    docker_action_succeeded, docker_row_signature, docker_state_label_key,
-    filesystem_attention_label_keys, filesystem_entry_severity, filesystem_filter_label_key,
-    filesystem_kind_label_key, filesystem_read_only_label_key, filesystem_row_signature,
-    format_bytes, gpu_device_row_signature, log_level_label_key, log_preset_label_key,
-    log_row_signature, package_filter_label_key, package_filter_manager, package_filter_options,
-    package_row_signature, package_status_label_key, parse_log_snapshot, parse_package_snapshot,
-    parse_port_snapshot, percent_level, port_endpoint, port_filter_label_key,
-    port_is_risky_exposure, port_row_signature, port_state_label_key, process_display_command,
-    process_display_name, process_row_signature, process_state_label_key,
-    scheduled_task_active_label_key, scheduled_task_enabled_label_key,
-    scheduled_task_filter_label_key, scheduled_task_row_signature, scheduled_task_source_label_key,
-    service_action_succeeded, service_enabled_label_key, service_row_signature,
-    service_state_label_key, start_gpu_sampling_on, tmux_session_row_signature,
-    visible_docker_rows, visible_filesystem_rows, visible_log_rows, visible_package_rows,
-    visible_port_rows, visible_process_rows, visible_scheduled_task_rows, visible_service_rows,
-    visible_tmux_session_rows,
-};
+use oxideterm_connection_monitor::{ConnectionPoolEntryState, ConnectionPoolEntrySummary};
 use oxideterm_connections::{
     ConnectionStore, ConnectionTerminalOptions, ConnectionTerminalSessionLogPolicy,
     MoshIpFamily as SavedMoshIpFamily, MoshPredictionMode,
@@ -288,9 +246,9 @@ use self::connection_monitor::{
 use self::file_manager::{FileManagerState, FileManagerWorkspaceEvent};
 use self::graphics::GraphicsWorkspaceEntity;
 use self::ime::{
-    HostToolsPlainTextImeFrame, TextInputAnchorStore, WorkspaceImeDragSelection,
-    WorkspaceImeElement, WorkspaceImeSelection, WorkspaceImeTarget,
-    active_ime_should_defer_input_key, workspace_ime_target_for_plain_host_tools_input,
+    TextInputAnchorStore, WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection,
+    WorkspaceImeTarget, active_ime_should_defer_input_key,
+    workspace_ime_target_for_plain_host_tools_input,
 };
 use self::knowledge::{
     KNOWLEDGE_WORKSPACE_SECTION_COUNT, KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT,
@@ -366,8 +324,8 @@ pub(super) use virtual_list::{
     uniform_list_edge_autoscroll,
 };
 use virtual_list::{
-    VirtualListSignatureCache, expandable_row_signature,
-    sync_tauri_variable_list_state_by_signatures, sync_tauri_virtual_list_state_by_signatures,
+    VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
+    sync_tauri_virtual_list_state_by_signatures,
 };
 
 const SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 4;

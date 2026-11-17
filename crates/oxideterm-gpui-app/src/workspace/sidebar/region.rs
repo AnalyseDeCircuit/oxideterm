@@ -140,7 +140,11 @@ impl WorkspaceApp {
             }
             ContextSidebarPanel::HostTools => {
                 let tool = self.host_tools.read(cx).active_tool();
-                (tool.label_key(), "host-tools", tool.icon())
+                (
+                    tool.label_key(),
+                    "host-tools",
+                    super::tools::context_sidebar_tool_icon(tool),
+                )
             }
         };
         context_sidebar_region_chrome()

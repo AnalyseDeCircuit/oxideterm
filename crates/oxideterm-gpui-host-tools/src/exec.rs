@@ -16,11 +16,11 @@ use tokio::io::AsyncReadExt;
 mod windows;
 
 /// Synthetic Host Tools connection id for the local machine.
-pub(in crate::workspace) const LOCAL_HOST_CONNECTION_ID: &str = "oxide-local-host";
+pub const LOCAL_HOST_CONNECTION_ID: &str = "oxide-local-host";
 
 /// Local OS in the same vocabulary as remote environment detection, so the
 /// existing per-OS command builders select the local dialect unchanged.
-pub(in crate::workspace) fn local_host_os_type() -> &'static str {
+pub fn local_host_os_type() -> &'static str {
     match std::env::consts::OS {
         "windows" => "Windows",
         "macos" => "macOS",
@@ -33,13 +33,13 @@ pub(in crate::workspace) fn local_host_os_type() -> &'static str {
 }
 
 /// Where one Host Tools capture or action runs.
-pub(in crate::workspace) enum HostCommandTarget {
+pub enum HostCommandTarget {
     Ssh(SshConnectionHandle),
     Local,
 }
 
 impl HostCommandTarget {
-    pub(super) async fn run_command_capture(
+    pub async fn run_command_capture(
         &self,
         command: &str,
         timeout: Duration,
@@ -113,7 +113,7 @@ async fn run_local_command_capture(
 /// Runs profiler samples as one-shot local captures. SSH profilers keep a
 /// dedicated shell per connection; the local machine instead pays one process
 /// spawn per sample, which the 10 s sampling interval makes acceptable.
-pub(in crate::workspace) struct LocalResourceSampler;
+pub struct LocalResourceSampler;
 
 impl ResourceSampler for LocalResourceSampler {
     fn open_shell<'a>(
@@ -305,7 +305,7 @@ struct LocalCaptureChild {
 }
 
 impl LocalCaptureChild {
-    fn new(child: tokio::process::Child) -> Result<Self, ()> {
+    pub fn new(child: tokio::process::Child) -> Result<Self, ()> {
         #[cfg(windows)]
         let job = windows::CaptureJob::attach_and_resume(child.id().ok_or(())?).map_err(|_| ())?;
         Ok(Self {

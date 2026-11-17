@@ -1,11 +1,11 @@
 use super::*;
-use crate::workspace::delivery as workspace_delivery;
+use oxideterm_workspace::delivery as workspace_delivery;
 
-pub(super) enum HostToolsSamplerDelivery {
+pub(crate) enum HostToolsSamplerDelivery {
     GpuUpdated(GpuUpdate),
 }
 
-pub(super) enum HostToolsReliableDelivery {
+pub(crate) enum HostToolsReliableDelivery {
     // Command output stays inside the Entity-owned delivery queue and never
     // crosses the typed GPUI event boundary or a Debug formatter.
     ProcessAction(HostProcessActionDelivery),
@@ -29,10 +29,10 @@ pub(super) enum HostToolsReliableDelivery {
     ScheduleAction(HostScheduleActionDelivery),
 }
 
-pub(in crate::workspace) struct HostToolsDeliveryBridges {
-    pub(super) profiler_update_rx: tokio::sync::mpsc::Receiver<()>,
-    pub(super) gpu_update_rx: tokio::sync::mpsc::UnboundedReceiver<GpuUpdate>,
-    pub(super) sampler_delivery_tx:
+pub(crate) struct HostToolsDeliveryBridges {
+    pub(crate) profiler_update_rx: tokio::sync::mpsc::Receiver<()>,
+    pub(crate) gpu_update_rx: tokio::sync::mpsc::UnboundedReceiver<GpuUpdate>,
+    pub(crate) sampler_delivery_tx:
         workspace_delivery::ActiveDeliverySender<HostToolsSamplerDelivery>,
 }
 

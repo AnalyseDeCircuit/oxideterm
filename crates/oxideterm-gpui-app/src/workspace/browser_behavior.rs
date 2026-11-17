@@ -3,47 +3,9 @@ use std::{collections::HashSet, hash::Hash};
 use super::WorkspaceApp;
 use gpui::Context;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum BrowserFocusOrigin {
-    Keyboard,
-    Pointer,
-}
-
-impl BrowserFocusOrigin {
-    pub(crate) fn is_focus_visible(self) -> bool {
-        matches!(self, Self::Keyboard)
-    }
-}
-
-pub(crate) fn browser_focus_visible(focused: bool, origin: Option<BrowserFocusOrigin>) -> bool {
-    // Browser :focus-visible depends on both ownership and input modality:
-    // keyboard focus gets the ring, mouse focus does not.
-    focused && origin.is_some_and(BrowserFocusOrigin::is_focus_visible)
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum BrowserSelectKeyDirection {
-    Previous,
-    Next,
-}
-
-pub(crate) fn browser_select_next_index(
-    current: usize,
-    option_count: usize,
-    direction: BrowserSelectKeyDirection,
-) -> usize {
-    // Radix Select clamps keyboard highlight movement at the first/last item.
-    // Keep the clamp shared so Cloud Sync, new connection, and future native
-    // selects do not each define their own arrow-key boundary behavior.
-    if option_count == 0 {
-        return 0;
-    }
-    match direction {
-        BrowserSelectKeyDirection::Previous => current.saturating_sub(1),
-        BrowserSelectKeyDirection::Next => (current + 1).min(option_count - 1),
-    }
-}
-
+pub(crate) use oxideterm_gpui_ui::select::{
+    BrowserFocusOrigin, BrowserSelectKeyDirection, browser_focus_visible, browser_select_next_index,
+};
 pub(crate) fn toggle_browser_highlighted_select_from_pointer<T>(
     open_select: &mut Option<T>,
     focused_select: &mut Option<T>,

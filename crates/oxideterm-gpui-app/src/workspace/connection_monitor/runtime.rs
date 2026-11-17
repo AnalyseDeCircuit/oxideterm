@@ -1,6 +1,7 @@
 // Hallmark · pre-emit critique: P4 H5 E5 S5 R5 V5
 // Hallmark · macrostructure: Asymmetric Operations Bento · genre: modern-minimal · tone: technical and restrained
 use super::*;
+use oxideterm_connection_monitor::ConnectionPoolMonitorStats;
 
 const RUNTIME_CONTENT_PADDING: f32 = 20.0;
 const RUNTIME_PRIMARY_PANEL_MIN_WIDTH: f32 = 440.0;

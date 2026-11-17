@@ -31,6 +31,7 @@ use super::session_manager::{SessionManagerInput, SessionManagerState};
 use super::sftp::SftpInput;
 use super::sidebar::{ai_input_line_index_for_offset, ai_input_visual_lines};
 use super::terminal_git::TerminalGitPanelSection;
+use oxideterm_gpui_host_tools::HostToolsPlainTextImeFrame;
 use oxideterm_gpui_settings_view::SettingsInput;
 use oxideterm_gpui_ui::{
     tauri_ui_font_family,
@@ -347,79 +348,6 @@ impl WorkspaceInputEntity {
                 }
             }
         }));
-    }
-}
-
-/// Captures non-secret Host Tools IME presentation state for one render frame.
-#[derive(Clone)]
-pub(super) struct HostToolsPlainTextImeFrame {
-    input: HostToolsTextInput,
-    target: WorkspaceImeTarget,
-    caret_visible: bool,
-    selected_range: Option<Range<usize>>,
-    active_offset: Option<usize>,
-    marked_text: Option<String>,
-    anchor_store: TextInputAnchorStore,
-}
-
-impl HostToolsPlainTextImeFrame {
-    pub(super) fn text_input(
-        &self,
-        tokens: &oxideterm_theme::ThemeTokens,
-        view: TextInputView<'_>,
-    ) -> gpui::Div {
-        text_input_with_viewport_and_content_align(
-            tokens,
-            view,
-            TextInputContentAlign::Start,
-            &self.anchor_store.viewport(self.anchor_id()),
-            self.active_offset,
-        )
-    }
-    fn new(
-        input: HostToolsTextInput,
-        caret_visible: bool,
-        selected_range: Option<Range<usize>>,
-        active_offset: Option<usize>,
-        marked_text: Option<String>,
-        anchor_store: TextInputAnchorStore,
-    ) -> Option<Self> {
-        // Dialog commands may contain secrets and must stay on their
-        // zeroizing workspace-owned input path.
-        let target = workspace_ime_target_for_plain_host_tools_input(input)?;
-        Some(Self {
-            input,
-            target,
-            caret_visible,
-            selected_range,
-            active_offset,
-            marked_text,
-            anchor_store,
-        })
-    }
-
-    pub(super) fn input(&self) -> HostToolsTextInput {
-        self.input
-    }
-
-    pub(super) fn anchor_id(&self) -> TextInputAnchorId {
-        self.target.anchor_id()
-    }
-
-    pub(super) fn caret_visible(&self) -> bool {
-        self.caret_visible
-    }
-
-    pub(super) fn selected_range(&self) -> Option<Range<usize>> {
-        self.selected_range.clone()
-    }
-
-    pub(super) fn marked_text(&self) -> Option<&str> {
-        self.marked_text.as_deref()
-    }
-
-    pub(super) fn update_anchor(&self, anchor: TextInputAnchor) {
-        self.anchor_store.update(anchor);
     }
 }
 
@@ -1112,16 +1040,32 @@ impl WorkspaceApp {
         input: HostToolsTextInput,
         cx: &App,
     ) -> Option<HostToolsPlainTextImeFrame> {
+        // Dialog commands may contain secrets and stay on the zeroizing input path.
         let target = workspace_ime_target_for_plain_host_tools_input(input)?;
-        HostToolsPlainTextImeFrame::new(
+        let anchor_id = target.anchor_id();
+        let anchors = self.text_input_anchors.clone();
+        Some(HostToolsPlainTextImeFrame {
             input,
-            self.input_caret.visible(),
-            self.ime_selected_range_for_target(target, cx),
-            self.ime_selection_for_target(target)
+            anchor_id,
+            viewport: anchors.viewport(anchor_id),
+            caret_visible: self.input_caret.visible(),
+            selected_range: self.ime_selected_range_for_target(target, cx),
+            active_offset: self
+                .ime_selection_for_target(target)
                 .map(|selection| selection.active_offset()),
-            self.marked_text_for_target(target, cx).map(str::to_owned),
-            self.text_input_anchors.clone(),
-        )
+            marked_text: self.marked_text_for_target(target, cx).map(str::to_owned),
+            update_anchor: Rc::new(move |anchor| anchors.update(anchor)),
+        })
+    }
+
+    pub(super) fn host_filesystem_search_frame(
+        &self,
+        cx: &App,
+    ) -> oxideterm_gpui_host_tools::FilesystemSearchFrame {
+        let input = HostToolsTextInput::FilesystemSearch;
+        self.host_tools_plain_text_ime_frame(input, cx)
+            .expect("filesystem search is a non-secret Host Tools input")
+            .into_filesystem_search(self.host_tools.read(cx).ui.input_is_focused(input))
     }
 
     pub(super) fn show_active_input_caret(&mut self, cx: &mut Context<Self>) {
@@ -2417,8 +2361,7 @@ impl WorkspaceApp {
             WorkspaceImeTarget::HostFilesystemSearch => self
                 .host_tools
                 .read(cx)
-                .ui
-                .input_value(HostToolsTextInput::FilesystemSearch)
+                .filesystem_search_value()
                 .map(str::to_string),
             WorkspaceImeTarget::HostPackageSearch => self
                 .host_tools
@@ -4330,17 +4273,16 @@ mod tests {
     use zeroize::Zeroizing;
 
     use super::{
-        CopyShortcutOwner, FileManagerInput, HostToolsPlainTextImeFrame, HostToolsTextInput,
-        NewConnectionField, PendingPlatformTextCommit, QuickCommandInput, SettingsInput, SftpInput,
-        TextInputAnchorStore, WorkspaceCaretState, WorkspaceCaretVisibility,
-        WorkspaceImeMarkedText, WorkspaceImeTarget, active_ime_should_defer_input_key,
-        copy_shortcut_owner_for_target, effective_platform_text_replacement_range,
-        host_tools_dialog_input, ime_geometry_uses_secret_mask, ime_target_is_secret,
-        ime_text_snapshot, keystroke_platform_text, keystroke_uses_text_edit_modifier,
-        multiline_ime_line_ranges, normalize_clipboard_text_for_ime_target,
-        path_completion_owns_vertical_navigation, platform_text_commit_is_duplicate,
-        secret_ime_proxy, soft_wrapped_line_ranges_utf16, utf16_offset_for_char_index,
-        workspace_ime_target_for_plain_host_tools_input,
+        CopyShortcutOwner, FileManagerInput, HostToolsTextInput, NewConnectionField,
+        PendingPlatformTextCommit, QuickCommandInput, SettingsInput, SftpInput,
+        WorkspaceCaretState, WorkspaceCaretVisibility, WorkspaceImeMarkedText, WorkspaceImeTarget,
+        active_ime_should_defer_input_key, copy_shortcut_owner_for_target,
+        effective_platform_text_replacement_range, host_tools_dialog_input,
+        ime_geometry_uses_secret_mask, ime_target_is_secret, ime_text_snapshot,
+        keystroke_platform_text, keystroke_uses_text_edit_modifier, multiline_ime_line_ranges,
+        normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
+        platform_text_commit_is_duplicate, secret_ime_proxy, soft_wrapped_line_ranges_utf16,
+        utf16_offset_for_char_index, workspace_ime_target_for_plain_host_tools_input,
     };
 
     #[test]
@@ -4581,17 +4523,6 @@ mod tests {
             HostToolsTextInput::MuxDialog,
         ] {
             assert_eq!(workspace_ime_target_for_plain_host_tools_input(input), None);
-            assert!(
-                HostToolsPlainTextImeFrame::new(
-                    input,
-                    true,
-                    None,
-                    None,
-                    None,
-                    TextInputAnchorStore::default(),
-                )
-                .is_none()
-            );
         }
     }
 

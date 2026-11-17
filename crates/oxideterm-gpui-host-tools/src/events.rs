@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 /// Typed requests that cross from HostToolsEntity into workspace runtime services.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum HostToolsEvent {
+pub enum HostToolsEvent {
     ShowNotice(HostToolsNotice),
     ToolSelected,
 }
@@ -12,18 +12,18 @@ pub(in crate::workspace) enum HostToolsEvent {
 /// Moves a Host Tools request across GPUI's cloneable action boundary exactly once.
 #[derive(gpui::Action)]
 #[action(no_json, no_register)]
-pub(in crate::workspace) struct HostToolsWindowRequest {
+pub struct HostToolsWindowRequest {
     intent: Arc<Mutex<Option<HostToolsWindowIntent>>>,
 }
 
 impl HostToolsWindowRequest {
-    pub(in crate::workspace) fn new(intent: HostToolsWindowIntent) -> Self {
+    pub fn new(intent: HostToolsWindowIntent) -> Self {
         Self {
             intent: Arc::new(Mutex::new(Some(intent))),
         }
     }
 
-    pub(in crate::workspace) fn take(&self) -> Option<HostToolsWindowIntent> {
+    pub fn take(&self) -> Option<HostToolsWindowIntent> {
         self.intent.lock().ok()?.take()
     }
 }
@@ -43,7 +43,7 @@ impl PartialEq for HostToolsWindowRequest {
 }
 
 /// Carries terminal data without exposing it through cloning or debug formatting.
-pub(in crate::workspace) enum HostToolsWindowIntent {
+pub enum HostToolsWindowIntent {
     OpenLocalMultiplexer {
         command: String,
         title: String,
@@ -79,14 +79,14 @@ pub(in crate::workspace) enum HostToolsWindowIntent {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum ScheduleActionNoticeKind {
+pub enum ScheduleActionNoticeKind {
     RunNow,
     Enable,
     Disable,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum HostToolsNotice {
+pub enum HostToolsNotice {
     ProcessActionAlreadyRunning,
     ProcessInvalidNice,
     ProcessConnectionMissing,

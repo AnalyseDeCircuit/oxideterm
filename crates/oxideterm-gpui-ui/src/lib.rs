@@ -45,6 +45,7 @@ pub mod toaster;
 pub mod tooltip;
 pub mod tree;
 pub mod typography;
+pub mod virtual_list;
 
 pub use action_row::{ActionSlotRowAlignment, ActionSlotRowOptions, action_slot_row};
 pub use badge::{

@@ -3,18 +3,18 @@
 use super::*;
 
 impl HostToolsEntity {
-    pub(in crate::workspace::connection_monitor) fn render_host_gpu_panel(
+    pub fn render_host_gpu_panel(
         &self,
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
-        selectable_text: &SelectableTextRenderState,
+        selectable_text: &HostToolsText,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let connections = self.monitor_connections();
         if connections.is_empty() {
             return host_tools_center_state(
-                LucideIcon::WifiOff,
+                "lucide/wifi-off.svg",
                 tokens.ui.text_muted,
                 i18n.t("profiler.panel.no_connection"),
                 selectable_text,
@@ -93,12 +93,12 @@ impl HostToolsEntity {
         snapshot: Option<GpuSnapshot>,
         tokens: &ThemeTokens,
         i18n: &I18n,
-        selectable_text: &SelectableTextRenderState,
+        selectable_text: &HostToolsText,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(snapshot) = snapshot else {
             return host_tools_center_state(
-                LucideIcon::Cpu,
+                "lucide/cpu.svg",
                 tokens.ui.text_muted,
                 i18n.t("sidebar.host_gpu.sampling"),
                 selectable_text,
@@ -108,7 +108,7 @@ impl HostToolsEntity {
         match &snapshot.status {
             GpuSnapshotStatus::Unavailable => {
                 return host_tools_center_state(
-                    LucideIcon::Cpu,
+                    "lucide/cpu.svg",
                     tokens.ui.text_muted,
                     i18n.t("sidebar.host_gpu.unavailable"),
                     selectable_text,
@@ -117,7 +117,7 @@ impl HostToolsEntity {
             }
             GpuSnapshotStatus::Unsupported => {
                 return host_tools_center_state(
-                    LucideIcon::Cpu,
+                    "lucide/cpu.svg",
                     tokens.ui.text_muted,
                     i18n.t("sidebar.host_gpu.unsupported"),
                     selectable_text,
@@ -126,7 +126,7 @@ impl HostToolsEntity {
             }
             GpuSnapshotStatus::NoDevices => {
                 return host_tools_center_state(
-                    LucideIcon::Cpu,
+                    "lucide/cpu.svg",
                     tokens.ui.text_muted,
                     i18n.t("sidebar.host_gpu.no_devices"),
                     selectable_text,
@@ -138,7 +138,7 @@ impl HostToolsEntity {
                     .t("sidebar.host_gpu.error")
                     .replace("{{error}}", message);
                 return host_tools_center_state(
-                    LucideIcon::AlertTriangle,
+                    "lucide/alert-triangle.svg",
                     MONITOR_RED,
                     error,
                     selectable_text,
@@ -147,7 +147,7 @@ impl HostToolsEntity {
             }
             GpuSnapshotStatus::Unknown if devices.is_empty() => {
                 return host_tools_center_state(
-                    LucideIcon::Cpu,
+                    "lucide/cpu.svg",
                     tokens.ui.text_muted,
                     i18n.t("sidebar.host_gpu.sampling"),
                     selectable_text,
@@ -295,7 +295,7 @@ impl HostToolsEntity {
             )))
             .child(host_tools_tooltip_icon_button(
                 tokens,
-                LucideIcon::RefreshCw,
+                "lucide/refresh-cw.svg",
                 13.0,
                 rgb(theme.text),
                 oxideterm_gpui_ui::button::IconButtonOptions {
@@ -459,11 +459,11 @@ impl HostToolsEntity {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(div().flex_none().child(WorkspaceApp::render_lucide_icon(
+                    .child(div().flex_none().child(render_lucide_icon(
                         if expanded {
-                            LucideIcon::ChevronDown
+                            "lucide/chevron-down.svg"
                         } else {
-                            LucideIcon::ChevronRight
+                            "lucide/chevron-right.svg"
                         },
                         13.0,
                         rgb(theme.text_muted),

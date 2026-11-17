@@ -50,7 +50,7 @@
 - **减少磁盘写入与重链接次数**：不要将 `cargo run`、`cargo build` 或 `cargo test` 当作修改过程中的常规检查。中途仅确需校验类型与语法时优先使用 `cargo check -p <crate>`（不做 LLVM 代码生成也不链接数百 MB 的主二进制）；`cargo test` 必须集中在所有代码修改完成后的最后统一跑一次。能通过 `scripts/quality/audit_i18n.py` 等轻量脚本完成的检查，严禁启动 Rust 编译。**如果你是 ChatGPT / Codex**：禁止在未全部改完前顺手跑测试，也禁止为“保险起见”多编一轮主二进制或把 `cargo check` 与 `cargo test` 叠着跑。
 - **锁定测试触发条件与主二进制编译次数**：
   - **纯 UI 样式、间距、颜色、文案微调**（未改动状态逻辑、事件分派、解析、持久化或安全边界）：不新增测试；仅需校验类型时最多在最后跑一次 `cargo check -p <crate>`，**禁止为此重链接运行 `cargo test`**。
-  - **改动逻辑、状态、事件、持久层或修 Bug 时**：修改底层小 crate（如 `oxideterm-gpui-ui`、`oxideterm-gpui-terminal`）时只运行对应小 crate，不得顺带触发 `oxideterm-gpui-app` 链接；若仅校验 `locales/` 键完整性，改用 `python3 scripts/quality/audit_i18n.py`；涉及主应用 `oxideterm-gpui-app` 时，必须把本轮所有改动一次性写完，最后统一编译并执行**一次**带精确过滤条件的聚焦 `cargo test -p oxideterm-gpui-app -- <过滤词>`，非必要不新增测试。
+  - **改动逻辑、状态、事件、持久层或修 Bug 时**：修改底层小 crate（如 `oxideterm-gpui-ui`、`oxideterm-gpui-terminal`）时只运行对应小 crate，不得顺带触发 `oxideterm-gpui-app` 链接；若仅校验 `locales/` 键完整性，改用 `python3 scripts/quality/audit_i18n.py`；涉及主应用 `oxideterm-gpui-app` 时，必须把本轮所有改动一次性写完，最后统一编译，在需要测试前先跑`cargo check`确认没有语法问题，再执行**一次**带精确过滤条件的聚焦 `cargo test -p oxideterm-gpui-app -- <过滤词>`，非必要不新增测试。
 - **严禁全仓与多特征缓存污染**：除非用户明确要求，禁止主动运行 `--workspace`、`--all-targets`、`--all-features` 或全量 `cargo clippy`，所有检查和验证命令必须显式指定 `-p <单一目标 crate>`，避免写入多套独立缓存造成额外磁盘损耗。
 - 复用仍然有效的验证结果。相关代码、依赖、构建配置和验证环境未变化时，不重复构建或运行相同检查；检查失败后先集中修复已发现的问题，再重跑受影响的检查。
 - 验证范围应与风险相称：已运行过对应 crate 的 `cargo test` 时，不再仅为确认编译再补跑一次 `cargo check`。

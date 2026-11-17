@@ -21,37 +21,19 @@ const TOOLS: [ContextSidebarTool; 11] = [
 
 const MONITORING_TOOL_COUNT: usize = 4;
 
-impl ContextSidebarTool {
-    pub(in crate::workspace) fn label_key(self) -> &'static str {
-        match self {
-            Self::Monitor => "sidebar.panels.host_monitor",
-            Self::Gpu => "sidebar.panels.gpu",
-            Self::Processes => "sidebar.panels.processes",
-            Self::Services => "sidebar.panels.services",
-            Self::Logs => "sidebar.panels.logs",
-            Self::Tmux => "sidebar.panels.tmux",
-            Self::Docker => "sidebar.panels.docker",
-            Self::Ports => "sidebar.panels.ports",
-            Self::Schedules => "sidebar.panels.schedules",
-            Self::Filesystems => "sidebar.panels.filesystems",
-            Self::Packages => "sidebar.panels.packages",
-        }
-    }
-
-    pub(in crate::workspace) fn icon(self) -> LucideIcon {
-        match self {
-            Self::Monitor => LucideIcon::Activity,
-            Self::Gpu => LucideIcon::Gpu,
-            Self::Processes => LucideIcon::ListTree,
-            Self::Services => LucideIcon::ServerCog,
-            Self::Logs => LucideIcon::FileText,
-            Self::Tmux => LucideIcon::SplitSquareHorizontal,
-            Self::Docker => LucideIcon::Docker,
-            Self::Ports => LucideIcon::Network,
-            Self::Schedules => LucideIcon::CalendarClock,
-            Self::Filesystems => LucideIcon::HardDrive,
-            Self::Packages => LucideIcon::Package,
-        }
+pub(super) fn context_sidebar_tool_icon(tool: ContextSidebarTool) -> LucideIcon {
+    match tool {
+        ContextSidebarTool::Monitor => LucideIcon::Activity,
+        ContextSidebarTool::Gpu => LucideIcon::Gpu,
+        ContextSidebarTool::Processes => LucideIcon::ListTree,
+        ContextSidebarTool::Services => LucideIcon::ServerCog,
+        ContextSidebarTool::Logs => LucideIcon::FileText,
+        ContextSidebarTool::Tmux => LucideIcon::SplitSquareHorizontal,
+        ContextSidebarTool::Docker => LucideIcon::Docker,
+        ContextSidebarTool::Ports => LucideIcon::Network,
+        ContextSidebarTool::Schedules => LucideIcon::CalendarClock,
+        ContextSidebarTool::Filesystems => LucideIcon::HardDrive,
+        ContextSidebarTool::Packages => LucideIcon::Package,
     }
 }
 
@@ -224,7 +206,7 @@ impl WorkspaceApp {
                     .flex_none()
                     .mb(px(self.tokens.metrics.activity_icon_gap))
                     .child(self.workspace_tooltip_icon_button(
-                        tool.icon(),
+                        context_sidebar_tool_icon(tool),
                         self.tokens.metrics.activity_icon_glyph_size,
                         rgb(context_rail_icon_color_hex(&self.tokens, active, dimmed)),
                         context_rail_icon_button_options(self, active, dimmed),

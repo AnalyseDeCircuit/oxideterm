@@ -79,20 +79,7 @@ pub(super) enum ContextSidebarPanel {
     HostTools,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum ContextSidebarTool {
-    Monitor,
-    Gpu,
-    Processes,
-    Services,
-    Logs,
-    Tmux,
-    Docker,
-    Ports,
-    Schedules,
-    Filesystems,
-    Packages,
-}
+pub(super) use oxideterm_gpui_host_tools::ContextSidebarTool;
 
 #[derive(Clone, Copy)]
 pub(in crate::workspace) struct SessionStatusStyle {

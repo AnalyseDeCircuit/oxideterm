@@ -12,6 +12,47 @@ use crate::{
     menu::{menu_item_chrome, menu_separator, menu_surface_chrome},
 };
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserFocusOrigin {
+    Keyboard,
+    Pointer,
+}
+
+impl BrowserFocusOrigin {
+    pub fn is_focus_visible(self) -> bool {
+        matches!(self, Self::Keyboard)
+    }
+}
+
+pub fn browser_focus_visible(focused: bool, origin: Option<BrowserFocusOrigin>) -> bool {
+    // Browser :focus-visible depends on both ownership and input modality:
+    // keyboard focus gets the ring, mouse focus does not.
+    focused && origin.is_some_and(BrowserFocusOrigin::is_focus_visible)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrowserSelectKeyDirection {
+    Previous,
+    Next,
+}
+
+pub fn browser_select_next_index(
+    current: usize,
+    option_count: usize,
+    direction: BrowserSelectKeyDirection,
+) -> usize {
+    // Radix Select clamps keyboard highlight movement at the first/last item.
+    // Keep the clamp shared so Cloud Sync, new connection, and future native
+    // selects do not each define their own arrow-key boundary behavior.
+    if option_count == 0 {
+        return 0;
+    }
+    match direction {
+        BrowserSelectKeyDirection::Previous => current.saturating_sub(1),
+        BrowserSelectKeyDirection::Next => (current + 1).min(option_count - 1),
+    }
+}
+
 const TAURI_SELECT_TRIGGER_BG_ALPHA: u32 = 0x80;
 const TAURI_INLINE_SELECT_SELECTED_BG_ALPHA: u32 = 0x1f;
 const TAURI_INLINE_SELECT_HIGHLIGHT_BG_ALPHA: u32 = 0x26;
