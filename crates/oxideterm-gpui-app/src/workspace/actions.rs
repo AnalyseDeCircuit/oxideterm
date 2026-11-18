@@ -1255,6 +1255,9 @@ impl WorkspaceApp {
     }
 
     pub(super) fn toggle_zen_mode(&mut self, cx: &mut Context<Self>) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         let settings = self.settings_store.settings_mut();
         let entering = !settings.sidebar_ui.zen_mode;
         settings.sidebar_ui.zen_mode = entering;

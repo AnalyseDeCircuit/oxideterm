@@ -2979,7 +2979,7 @@ impl WorkspaceApp {
         // Authentication waits on user input; background animation would keep
         // repainting the window even when the user has not entered anything.
         if self
-            .connection_flow
+            .connections.flow
             .read(cx)
             .has_keyboard_interactive_challenge()
         {
@@ -3341,7 +3341,7 @@ mod terminal_open_tests {
             let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
             workspace.update(cx, |workspace, cx| {
                 workspace.tokens.motion.enabled = true;
-                workspace.connection_flow.update(cx, |flow, cx| {
+                workspace.connections.flow.update(cx, |flow, cx| {
                     flow.open_keyboard_interactive_challenge(
                         oxideterm_ssh::KeyboardInteractivePromptRequest {
                             flow_id: "authentication-fixture".into(),
@@ -3370,7 +3370,7 @@ mod terminal_open_tests {
         });
         view.update(cx, |view, cx| {
             view.workspace.update(cx, |workspace, cx| {
-                workspace.connection_flow.update(cx, |flow, cx| {
+                workspace.connections.flow.update(cx, |flow, cx| {
                     flow.cancel_keyboard_interactive_challenge(Duration::ZERO, cx);
                 });
             });

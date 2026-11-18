@@ -219,7 +219,13 @@ impl WorkspaceApp {
             forwarding_runtime.clone(),
             i18n.t("ssh.form.single_channel_forwarding_unavailable"),
         );
-        let connection_flow = cx.new(ConnectionFlowEntity::new);
+        let connections = oxideterm_gpui_connections::views::ConnectionsViews::new(
+            Self::connections_view_bindings(cx.weak_entity()),
+            oxideterm_gpui_connections::views::ConnectionsEnvironment { tokens, i18n: i18n.clone() },
+            forwarding_runtime.handle().clone(),
+            cx,
+        );
+        let connection_flow = connections.flow.clone();
         let settings_path = settings_store.path().to_path_buf();
         let connections_path = connection_store.path().to_path_buf();
         let appearance_edit_dark = settings
@@ -372,11 +378,6 @@ impl WorkspaceApp {
                 workspace.handle_workspace_terminal_event(event, cx);
             },
         );
-        let connection_flow_observation =
-            cx.observe(&connection_flow, |_workspace, _connection_flow, cx| {
-                // Connection-flow lifecycle changes repaint mounted dialogs without root mirrors.
-                cx.notify();
-            });
         let connection_flow_subscription = cx.subscribe(
             &connection_flow,
             move |workspace, _connection_flow, event: &ConnectionFlowEvent, cx| {
@@ -387,12 +388,16 @@ impl WorkspaceApp {
                         if workspace.active_pane(cx).is_some() {
                             workspace.needs_active_pane_focus = true;
                         }
+                        cx.notify();
                     }
                     ConnectionFlowEvent::WorkerResultsReady => {
                         workspace.enqueue_connection_flow_window_effect(cx);
                     }
+                    ConnectionFlowEvent::ModalBoundaryChanged => {
+                        // Window shortcuts and connection cards follow modal presence, not prompt edits.
+                        cx.notify();
+                    }
                 }
-                cx.notify();
             },
         );
         let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
@@ -412,12 +417,7 @@ impl WorkspaceApp {
             host_tools.set_messages(host_tools_messages);
             host_tools
         });
-        let session_manager = cx.new(SessionManagerState::new);
-        let session_manager_observation =
-            cx.observe(&session_manager, |_workspace, _session_manager, cx| {
-                // Entity-owned manager state repaints every mounted manager surface.
-                cx.notify();
-            });
+        let session_manager = connections.session_manager.clone();
         let session_manager_subscription = cx.subscribe(
             &session_manager,
             |workspace, _session_manager, event: &SessionManagerWorkspaceEvent, cx| {
@@ -842,8 +842,7 @@ impl WorkspaceApp {
             _window_button_layout_subscription: window_button_layout_subscription,
             window_registry,
             window_effect_delivery_scheduled: false,
-            connection_flow,
-            _connection_flow_observation: connection_flow_observation,
+            connections,
             _connection_flow_subscription: connection_flow_subscription,
             workspace_runtime,
             _workspace_runtime_subscription: workspace_runtime_subscription,
@@ -887,7 +886,6 @@ impl WorkspaceApp {
             dedicated_sftp_connections: Arc::new(parking_lot::Mutex::new(HashMap::new())),
             ssh_consumer_prompt_handler,
             ssh_consumer_managed_key_resolver,
-            pending_standalone_sftp_pair_launches: HashMap::new(),
             embedded_sftp_node_id: None,
             embedded_sftp_pinned: false,
             sftp_presentation_request: None,
@@ -928,8 +926,6 @@ impl WorkspaceApp {
             window_state_save_task: None,
             connection_store,
             ssh_config_sync_service: None,
-            session_manager,
-            _session_manager_observation: session_manager_observation,
             _session_manager_subscription: session_manager_subscription,
             remote_desktop,
             local_shells,
@@ -982,6 +978,9 @@ impl WorkspaceApp {
         workspace.start_audit_delivery(cx);
         workspace.restore_session_tree_snapshot();
         workspace.start_startup_ssh_tunnels(window, cx);
+        if workspace.onboarding.open {
+            workspace.ensure_onboarding_tab(Some(window), cx);
+        }
         workspace.standalone_connections =
             standalone_connections::StandaloneConnectionRegistry::restore(
                 default_session_tree_path().with_file_name("standalone_sessions.json"),

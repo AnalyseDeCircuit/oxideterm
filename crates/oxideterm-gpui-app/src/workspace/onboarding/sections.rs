@@ -7,52 +7,73 @@ use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
 use oxideterm_gpui_ui::checkbox;
+use oxideterm_gpui_ui::tabs::{tabs_list, tabs_trigger};
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn render_onboarding_welcome(
+    pub(in crate::workspace) fn render_onboarding_welcome_stage(
         &self,
+        wide: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        const WELCOME_ICON_SIZE: f32 = 42.0;
+        const WELCOME_ICON_SIZE: f32 = 52.0;
+        const WELCOME_ICON_RADIUS: f32 = 11.5;
         let settings = self.settings_store.settings();
-        let icon_source = crate::app_icon::app_icon_preview_source_sized(
+        let wordmark_size = self.tokens.metrics.welcome_wordmark_font_size;
+        let icon_source = crate::app_icon::app_icon_trimmed_source_sized(
             settings.appearance.app_icon,
             WELCOME_ICON_SIZE,
         );
-        div()
-            .min_w_0()
+        let brand_badge = oxideterm_gpui_ui::theme_card_surface_shadow(
+            div()
+                .size(px(WELCOME_ICON_SIZE))
+                .relative()
+                .flex_none()
+                .rounded(px(WELCOME_ICON_RADIUS))
+                .child(
+                    gpui::img(icon_source)
+                        .size(px(WELCOME_ICON_SIZE))
+                        .object_fit(ObjectFit::Contain),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(px(WELCOME_ICON_RADIUS))
+                        .border_1()
+                        .border_color(rgba((self.tokens.ui.border << 8) | 0x80)),
+                ),
+            &self.tokens,
+        );
+        let hero = div()
+            .min_w(px(0.0))
+            .flex_1()
             .flex()
             .flex_col()
-            .gap(px(16.0))
+            .gap(px(22.0))
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(14.0))
-                    .child(
-                        gpui::img(icon_source)
-                            .size(px(WELCOME_ICON_SIZE))
-                            .flex_none()
-                            .object_fit(ObjectFit::Contain),
-                    )
+                    .gap(px(16.0))
+                    .child(brand_badge)
                     .child(
                         div()
                             .min_w(px(0.0))
                             .flex_1()
                             .flex()
                             .flex_col()
-                            .gap(px(2.0))
+                            .gap(px(4.0))
                             .child(
                                 div()
-                                    .text_size(px(self.tokens.metrics.ui_text_2xl))
-                                    .line_height(px(28.0))
+                                    .text_size(px(wordmark_size))
+                                    .line_height(px(wordmark_size + 4.0))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(self.tokens.ui.text_heading))
                                     .child("OxideTerm"),
                             )
                             .child(
                                 div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                                    .text_size(px(self.tokens.metrics.ui_text_sm))
                                     .text_color(rgb(self.tokens.ui.text_muted))
                                     .child(self.i18n.t("onboarding.subtitle")),
                             ),
@@ -61,35 +82,39 @@ impl WorkspaceApp {
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .line_height(px(self.tokens.metrics.ui_text_sm * 1.6))
+                    .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t("onboarding.project_intro")),
             )
-            .child(div().flex().flex_col().gap(px(10.0)).children([
-                self.onboarding_feature_tile(LucideIcon::Zap, "highlight_performance"),
-                self.onboarding_feature_tile(LucideIcon::Lock, "highlight_security_arch"),
-                self.onboarding_feature_tile(LucideIcon::Cpu, "highlight_crossplatform"),
-                self.onboarding_feature_tile(LucideIcon::Puzzle, "highlight_extensible"),
-            ]))
             .child(
                 div()
-                    .mt(px(2.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
-                    ))
-                    .bg(rgb(self.tokens.ui.bg_panel))
-                    .px(px(12.0))
-                    .py(px(6.0))
-                    .child(self.select_setting_row(
-                        "settings_view.general.language",
-                        "",
-                        SettingsSelect::Language,
-                        self.language_label(settings.general.language),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    )),
+                    .grid()
+                    .grid_cols(if wide { 2 } else { 1 })
+                    .gap_x(px(20.0))
+                    .gap_y(px(14.0))
+                    .children([
+                        self.onboarding_feature_tile(LucideIcon::Zap, "highlight_performance"),
+                        self.onboarding_feature_tile(LucideIcon::Lock, "highlight_security_arch"),
+                        self.onboarding_feature_tile(LucideIcon::Cpu, "highlight_crossplatform"),
+                        self.onboarding_feature_tile(LucideIcon::Puzzle, "highlight_extensible"),
+                    ]),
             )
+            .into_any_element();
+
+        let disclaimer = div()
+            .when(wide, |col| col.w(px(400.0)).flex_none())
+            .when(!wide, |col| col.w_full())
+            .child(self.render_onboarding_disclaimer(cx))
+            .into_any_element();
+
+        div()
+            .w_full()
+            .pt(px(if wide { 12.0 } else { 0.0 }))
+            .flex()
+            .when(wide, |row| row.flex_row().items_start().gap(px(40.0)))
+            .when(!wide, |col| col.flex_col().gap(px(20.0)))
+            .child(hero)
+            .child(disclaimer)
             .into_any_element()
     }
 
@@ -99,25 +124,63 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let accepted = self.onboarding.disclaimer_accepted;
         div()
-            .p(px(18.0))
+            .p(px(22.0))
             .rounded(px(self.tokens.radii.lg))
             .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
-            ))
-            .bg(rgb(self.tokens.ui.bg_panel))
+            .border_color(rgba((
+                self.tokens.ui.border << 8
+            ) | ONBOARDING_CARD_BORDER_ALPHA))
+            .bg(self.onboarding_card_bg())
             .flex()
             .flex_col()
-            .gap(px(12.0))
-            .child(self.onboarding_step_heading(
-                "onboarding.disclaimer_title",
-                "onboarding.disclaimer_desc",
-            ))
+            .gap(px(14.0))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .child(div().flex_1().min_w(px(0.0)).child(
+                        self.onboarding_step_heading(
+                            "onboarding.disclaimer_title",
+                            "onboarding.disclaimer_desc",
+                        ),
+                    ))
+                    .child(
+                        div()
+                            .size(px(28.0))
+                            .flex_none()
+                            .rounded_full()
+                            .bg(rgba((
+                                if accepted {
+                                    self.tokens.ui.accent
+                                } else {
+                                    self.tokens.ui.warning
+                                } << 8
+                            ) | ONBOARDING_ACCENT_SUBTLE_ALPHA))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(Self::render_lucide_icon(
+                                if accepted {
+                                    LucideIcon::Check
+                                } else {
+                                    LucideIcon::Lock
+                                },
+                                13.5,
+                                rgb(if accepted {
+                                    self.tokens.ui.accent
+                                } else {
+                                    self.tokens.ui.warning
+                                }),
+                            )),
+                    ),
+            )
             .child(
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(6.0))
+                    .gap(px(8.0))
                     .child(self.onboarding_info_row(
                         LucideIcon::AlertTriangle,
                         self.tokens.ui.warning,
@@ -150,16 +213,16 @@ impl WorkspaceApp {
                     .border_color(if accepted {
                         rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA)
                     } else {
-                        rgba((self.tokens.ui.accent << 8) | ONBOARDING_HAIRLINE_ALPHA)
+                        rgba((self.tokens.ui.warning << 8) | ONBOARDING_ACCENT_BORDER_ALPHA)
                     })
                     .bg(if accepted {
                         rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
                     } else {
-                        rgb(self.tokens.ui.bg_sunken)
+                        self.onboarding_sunken_bg()
                     })
                     .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
                     .px(px(12.0))
-                    .py(px(10.0))
+                    .py(px(11.0))
                     .cursor(CursorStyle::PointingHand)
                     .child(checkbox::checkbox(
                         &self.tokens,
@@ -181,44 +244,192 @@ impl WorkspaceApp {
     pub(in crate::workspace) fn render_onboarding_appearance(
         &self,
         wide: bool,
-        modal_width: f32,
+        content_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let settings = self.settings_store.settings();
         let control_width = if wide {
-            ((modal_width - 56.0 - 32.0) / 2.0).clamp(240.0, 380.0)
+            368.0
         } else {
-            (modal_width - 32.0).clamp(240.0, 380.0)
+            (content_width - 40.0).clamp(240.0, 420.0)
         };
-        // Pair theme chrome, motion, and radius on the left while keeping
-        // live preview directly above font selection on the right so both
-        // columns stay balanced without clipping the font-size row.
-        self.onboarding_columns(
-            wide,
-            div()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(12.0))
-                .child(self.onboarding_step_heading(
-                    "onboarding.appearance_title",
-                    "onboarding.appearance_desc",
-                ))
-                .children(self.appearance_theme_controls_with_hints(settings, false, cx))
-                .child(self.onboarding_hairline())
-                .child(self.onboarding_animation_picker(control_width, cx))
-                .child(self.onboarding_radius_picker(cx))
-                .into_any_element(),
-            div()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(12.0))
-                .child(self.appearance_theme_preview_compact(settings, cx))
-                .child(self.onboarding_font_picker(cx))
-                .child(self.onboarding_quiet_note("onboarding.background_image_hint", &[]))
-                .into_any_element(),
+        let controls = div()
+            .when(wide, |col| col.w(px(368.0)).flex_none())
+            .when(!wide, |col| col.w_full())
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(self.onboarding_step_heading(
+                "onboarding.appearance_title",
+                "onboarding.appearance_desc",
+            ))
+            .child(self.onboarding_hairline())
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.0))
+                    .children(self.appearance_theme_controls_with_hints(settings, false, cx)),
+            )
+            .child(self.onboarding_hairline())
+            .child(self.onboarding_font_picker(cx))
+            .child(self.onboarding_hairline())
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(14.0))
+                    .child(self.onboarding_corner_style_picker(cx))
+                    .child(self.onboarding_radius_picker(cx))
+                    .child(self.onboarding_animation_picker(control_width, cx)),
+            )
+            .into_any_element();
+
+        let showcase = div()
+            .min_w(px(0.0))
+            .flex_1()
+            .flex()
+            .flex_col()
+            .gap(px(16.0))
+            .child(self.render_onboarding_live_terminal_specimen(settings))
+            .child(self.appearance_theme_preview_compact(settings, cx))
+            .child(self.onboarding_quiet_note("onboarding.background_image_hint", &[]))
+            .into_any_element();
+
+        div()
+            .w_full()
+            .flex()
+            .when(wide, |row| row.flex_row().items_start().gap(px(32.0)))
+            .when(!wide, |col| col.flex_col().gap(px(22.0)))
+            .child(controls)
+            .child(showcase)
+            .into_any_element()
+    }
+
+    fn onboarding_corner_style_picker(&self, cx: &mut Context<Self>) -> AnyElement {
+        use oxideterm_settings::CornerStyle;
+        let selected = self.settings_store.settings().appearance.corner_style;
+        let items = [
+            (
+                CornerStyle::Circular,
+                "settings_view.appearance.corner_circular",
+            ),
+            (
+                CornerStyle::Continuous,
+                "settings_view.appearance.corner_continuous",
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        .map(|(index, (style, key))| {
+            tabs_trigger(&self.tokens, self.i18n.t(key), selected == style)
+                .id(("onboarding-corner-style", index))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.edit_settings(
+                            |settings| settings.appearance.corner_style = style,
+                            cx,
+                        );
+                        cx.stop_propagation();
+                    }),
+                )
+        });
+        self.onboarding_section(
+            "settings_view.appearance.corner_style",
+            None,
+            tabs_list(&self.tokens).children(items).into_any_element(),
         )
+    }
+
+    fn render_onboarding_live_terminal_specimen(&self, settings: &PersistedSettings) -> AnyElement {
+        let term = self.tokens.terminal;
+        let font_family = SharedString::from(settings_mono_font_family(settings));
+        let font_size = (settings.terminal.font_size as f32).clamp(11.0, 20.0);
+        let line_height = (font_size * 1.55).round();
+        let radius = self.tokens.radii.lg;
+        div()
+            .rounded(px(radius))
+            .border_1()
+            .border_color(rgba((
+                self.tokens.ui.border << 8
+            ) | ONBOARDING_CARD_BORDER_ALPHA))
+            .bg(rgb(term.background))
+            .overflow_hidden()
+            .child(
+                div()
+                    .px(px(14.0))
+                    .py(px(8.0))
+                    .border_b_1()
+                    .border_color(rgba((self.tokens.ui.border << 8) | 0x38))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(
+                        div()
+                            .min_w(px(0.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::Terminal,
+                                12.5,
+                                rgb(term.bright_black),
+                            ))
+                            .child(
+                                div()
+                                    .font_family(font_family.clone())
+                                    .text_size(px(self.tokens.metrics.ui_text_2xs))
+                                    .text_color(rgb(term.bright_black))
+                                    .child("oxide@prod:~/services"),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .font_family(font_family.clone())
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
+                            .text_color(rgb(term.bright_black))
+                            .child(format!(
+                                "{} · {}px",
+                                settings
+                                    .terminal
+                                    .font_family
+                                    .terminal_family_name(&settings.terminal.custom_font_family),
+                                settings.terminal.font_size
+                            )),
+                    ),
+            )
+            .child(
+                div()
+                    .p(px(16.0))
+                    .font_family(font_family)
+                    .text_size(px(font_size))
+                    .line_height(px(line_height))
+                    .text_color(rgb(term.foreground))
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.0))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(8.0))
+                            .child(div().text_color(rgb(term.green)).child("oxide@prod"))
+                            .child(div().text_color(rgb(term.cyan)).child("~/services"))
+                            .child(div().text_color(rgb(term.foreground)).child("ssh edge-01 => status --all")),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .gap(px(10.0))
+                            .child(div().text_color(rgb(term.bright_green)).child("● active"))
+                            .child(div().text_color(rgb(term.blue)).child("sftp+tunnel"))
+                            .child(div().text_color(rgb(term.yellow)).child("12ms RTT"))
+                            .child(div().text_color(rgb(term.magenta)).child("Aa 01 => 中文对齐")),
+                    ),
+            )
+            .into_any_element()
     }
 
     pub(in crate::workspace) fn onboarding_font_picker(
@@ -227,7 +438,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let settings = self.settings_store.settings();
         let mut grid = div().grid().grid_cols(2).gap(px(8.0));
-        for (family, label, bundled) in ONBOARDING_FONT_OPTIONS {
+        for (family, label, _bundled) in ONBOARDING_FONT_OPTIONS {
             let selected = settings.terminal.font_family == family;
             let label = if family == FontFamily::Custom {
                 self.i18n.t("settings_view.terminal.custom_font")
@@ -247,7 +458,7 @@ impl WorkspaceApp {
                     .bg(if selected {
                         rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
                     } else {
-                        rgb(self.tokens.ui.bg_panel)
+                        self.onboarding_sunken_bg()
                     })
                     .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
                     .px(px(10.0))
@@ -272,15 +483,11 @@ impl WorkspaceApp {
                             }))
                             .child(label),
                     )
-                    .when(bundled, |row| {
+                    .when(selected, |row| {
                         row.child(Self::render_lucide_icon(
                             LucideIcon::Check,
                             13.0,
-                            rgb(if selected {
-                                self.tokens.ui.accent
-                            } else {
-                                self.tokens.ui.text_muted
-                            }),
+                            rgb(self.tokens.ui.accent),
                         ))
                     })
                     .on_mouse_down(
@@ -441,6 +648,7 @@ impl WorkspaceApp {
                 ONBOARDING_ANIMATION_MOTION_ID,
                 SegmentedControlOptions::new(active, previous, speeds.len())
                     .compact(compact_width)
+                    .has_background_image(self.window_background_preferences().is_some())
                     .user_transition_active(self.segmented_control_user_transition_active(
                         ONBOARDING_ANIMATION_MOTION_ID,
                         active,
@@ -471,65 +679,32 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn render_onboarding_workflow(
+    pub(in crate::workspace) fn render_onboarding_launch_stage(
         &self,
-        _cx: &mut Context<Self>,
+        wide: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        let workflows = [
-            "workflow_connect",
-            "workflow_terminal",
-            "workflow_sftp",
-            "workflow_forwarding",
-            "workflow_ide",
-        ];
-        let mut list = div().flex().flex_col().gap(px(14.0));
-        for (index, key) in workflows.into_iter().enumerate() {
-            list = list.child(self.onboarding_timeline_item(index + 1, key));
-        }
-        div()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(16.0))
-            .child(
-                self.onboarding_step_heading(
-                    "onboarding.workflow_title",
-                    "onboarding.workflow_desc",
-                ),
-            )
-            .child(list)
-            .into_any_element()
-    }
+        let is_mac = cfg!(target_os = "macos");
+        let mod_key = if is_mac { "⌘" } else { "Ctrl" };
+        let setup_band = div()
+            .w_full()
+            .grid()
+            .grid_cols(if wide { 2 } else { 1 })
+            .gap(px(if wide { 28.0 } else { 20.0 }))
+            .child(self.render_onboarding_ai_intro(cx))
+            .child(self.render_onboarding_cli_companion(window, cx));
 
-    pub(in crate::workspace) fn render_onboarding_features(
-        &self,
-        _wide: bool,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mod_key = if cfg!(target_os = "macos") {
-            "⌘K"
-        } else {
-            "Ctrl+K"
-        };
-        let features = [
-            (LucideIcon::Terminal, "cmd_palette", Some(mod_key)),
-            (LucideIcon::Activity, "host_tools", None),
-            (LucideIcon::RefreshCw, "reconnect", None),
-            (LucideIcon::Cloud, "cloud_sync", None),
-            (LucideIcon::Monitor, "remote_desktop", None),
-            (LucideIcon::Puzzle, "plugin_system", None),
-        ];
-        let mut list = div().flex().flex_col().gap(px(4.0));
-        for (icon, key, badge) in features {
-            list = list.child(self.onboarding_feature_row(icon, key, badge));
-        }
         div()
-            .min_w_0()
+            .w_full()
             .flex()
             .flex_col()
-            .gap(px(12.0))
-            .child(self.onboarding_step_heading("onboarding.features", "onboarding.features_desc"))
-            .child(list)
+            .gap(px(20.0))
+            .child(setup_band)
+            .child(self.onboarding_hairline())
+            .child(self.render_onboarding_quick_start(wide, window, cx))
+            .child(self.onboarding_hairline())
+            .child(self.onboarding_shortcut_strip(mod_key, is_mac))
             .into_any_element()
     }
 
@@ -549,17 +724,6 @@ impl WorkspaceApp {
                 ),
             )
             .child(self.render_onboarding_ai_setup(cx))
-            .child(self.onboarding_hairline())
-            .child(self.onboarding_capability_grid(
-                "onboarding.ai_tools_capabilities",
-                &[
-                    (LucideIcon::Terminal, "ai_tools_cap_sidebar"),
-                    (LucideIcon::Zap, "ai_tools_cap_inline"),
-                    (LucideIcon::Bot, "ai_tools_cap_agent"),
-                    (LucideIcon::Key, "ai_tools_cap_byok"),
-                ],
-            ))
-            .child(self.onboarding_hairline())
             .child(self.onboarding_capability_list(
                 "onboarding.ai_tools_privacy",
                 &[
@@ -658,7 +822,7 @@ impl WorkspaceApp {
                     .border_color(rgba(
                         (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
                     ))
-                    .bg(rgb(self.tokens.ui.bg_panel))
+                    .bg(self.onboarding_card_bg())
                     .px(px(14.0))
                     .py(px(12.0))
                     .flex()
@@ -749,13 +913,11 @@ impl WorkspaceApp {
         _window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let is_mac = cfg!(target_os = "macos");
-        let mod_key = if is_mac { "⌘" } else { "Ctrl" };
         div()
             .min_w_0()
             .flex()
             .flex_col()
-            .gap(px(16.0))
+            .gap(px(12.0))
             .child(
                 self.onboarding_step_heading(
                     "onboarding.quick_start",
@@ -791,130 +953,79 @@ impl WorkspaceApp {
                         cx,
                     )),
             )
-            .child(self.onboarding_hairline())
-            .child(self.onboarding_shortcut_grid(mod_key, is_mac, wide))
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn onboarding_shortcut_grid(
+    pub(in crate::workspace) fn onboarding_shortcut_strip(
         &self,
         mod_key: &str,
         is_mac: bool,
-        wide: bool,
     ) -> AnyElement {
-        let copy = if is_mac { "⌘⇧C" } else { "Ctrl+Shift+C" };
-        let split_right = if is_mac { "⌘E" } else { "Ctrl+E" };
-        let split_down = if is_mac { "⌘D" } else { "Ctrl+D" };
-        let close_tab = if is_mac { "⌘W" } else { "Ctrl+W" };
-        let groups: [(&str, &[(&str, &str)]); 3] = [
+        let items = [
+            ("shortcut_command_palette", format!("{mod_key}K")),
+            ("shortcut_new_connection", format!("{mod_key}N")),
+            ("shortcut_new_tab", format!("{mod_key}T")),
+            ("shortcut_search", format!("{mod_key}F")),
             (
-                "shortcuts_navigation",
-                &[
-                    ("shortcut_command_palette", "K"),
-                    ("shortcut_new_connection", "N"),
-                    ("shortcut_new_tab", "T"),
-                    ("shortcut_search", "F"),
-                ],
+                "shortcut_ai_chat",
+                if is_mac { "⌘⇧A" } else { "Ctrl+Shift+A" }.to_string(),
             ),
             (
-                "shortcuts_terminal",
-                &[
-                    (
-                        "shortcut_ai_chat",
-                        if is_mac { "⌘⇧A" } else { "Ctrl+Shift+A" },
-                    ),
-                    ("shortcut_copy", copy),
-                    ("shortcut_split_right", split_right),
-                    ("shortcut_split_down", split_down),
-                ],
+                "shortcut_split_right",
+                if is_mac { "⌘E" } else { "Ctrl+E" }.to_string(),
             ),
             (
-                "shortcuts_window",
-                &[
-                    ("shortcut_close_tab", close_tab),
-                    (
-                        "shortcut_zoom",
-                        if is_mac { "⌘=/⌘-" } else { "Ctrl+=/Ctrl+-" },
-                    ),
-                ],
+                "shortcut_split_down",
+                if is_mac { "⌘D" } else { "Ctrl+D" }.to_string(),
+            ),
+            (
+                "shortcut_close_tab",
+                if is_mac { "⌘W" } else { "Ctrl+W" }.to_string(),
             ),
         ];
-        let mut grid = div()
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
-            ))
-            .bg(rgb(self.tokens.ui.bg_panel))
-            .p(px(14.0))
-            .grid()
-            .grid_cols(if wide { 3 } else { 1 })
-            .gap(px(20.0));
-        for (title, rows) in groups {
-            let mut column = div().flex().flex_col().gap(px(6.0)).child(
-                div()
-                    .pb(px(2.0))
-                    .text_size(px(self.tokens.metrics.ui_text_2xs))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(&format!("onboarding.{title}")).to_uppercase()),
-            );
-            for (desc, key) in rows {
-                let key_text = if key.len() == 1 {
-                    format!("{mod_key}{key}")
-                } else {
-                    key.to_string()
-                };
-                column = column.child(self.onboarding_shortcut_row(&key_text, desc));
-            }
-            grid = grid.child(column);
-        }
-        self.onboarding_section(
-            "onboarding.shortcuts_title",
-            Some("onboarding.shortcuts_hint"),
-            grid.into_any_element(),
-        )
-    }
-
-    pub(in crate::workspace) fn onboarding_shortcut_row(
-        &self,
-        key: &str,
-        desc_key: &str,
-    ) -> AnyElement {
-        div()
-            .min_w_0()
+        let label_color = if self.window_background_preferences().is_some() {
+            self.tokens.ui.text
+        } else {
+            self.tokens.ui.text_muted
+        };
+        let mut strip = div()
             .flex()
+            .flex_wrap()
             .items_center()
-            .justify_between()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(&format!("onboarding.{desc_key}"))),
-            )
-            .child(
+            .gap_x(px(18.0))
+            .gap_y(px(8.0));
+        for (desc_key, shortcut) in items {
+            strip = strip.child(
                 div()
                     .flex_none()
-                    .rounded(px(self.tokens.radii.xs))
-                    .border_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
-                    ))
-                    .bg(rgb(self.tokens.ui.bg_sunken))
-                    .px(px(6.0))
-                    .py(px(2.0))
-                    .font_family(SharedString::from(
-                        FontFamily::Jetbrains.terminal_family_name(""),
-                    ))
-                    .text_size(px(self.tokens.metrics.ui_text_2xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(key.to_string()),
-            )
-            .into_any_element()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(
+                        div()
+                            .rounded(px(self.tokens.radii.xs))
+                            .border_1()
+                            .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
+                            .bg(self.onboarding_sunken_bg())
+                            .px(px(5.0))
+                            .py(px(1.5))
+                            .font_family(SharedString::from(
+                                FontFamily::Jetbrains.terminal_family_name(""),
+                            ))
+                            .text_size(px(self.tokens.metrics.ui_text_2xs))
+                            .line_height(px(14.0))
+                            .text_color(rgb(self.tokens.ui.text))
+                            .child(shortcut),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(label_color))
+                            .child(self.i18n.t(&format!("onboarding.{desc_key}"))),
+                    ),
+            );
+        }
+        self.onboarding_section("onboarding.shortcuts_title", None, strip.into_any_element())
     }
 
     pub(in crate::workspace) fn onboarding_import_card(
@@ -1000,7 +1111,7 @@ impl WorkspaceApp {
             .border_color(rgba(
                 (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
             ))
-            .bg(rgb(self.tokens.ui.bg_panel))
+            .bg(self.onboarding_card_bg())
             .px(px(14.0))
             .py(px(10.0))
             .flex()
@@ -1028,7 +1139,7 @@ impl WorkspaceApp {
                     .border_color(rgba(
                         (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
                     ))
-                    .bg(rgb(self.tokens.ui.bg_sunken))
+                    .bg(self.onboarding_sunken_bg())
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1038,6 +1149,8 @@ impl WorkspaceApp {
                             16.0,
                             rgb(self.tokens.ui.text_muted),
                         )
+                    } else if matches!(icon, LucideIcon::Check) {
+                        Self::render_lucide_icon(icon, 16.0, rgb(self.tokens.ui.success))
                     } else {
                         Self::render_lucide_icon(icon, 16.0, rgb(self.tokens.ui.accent))
                     }),

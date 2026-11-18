@@ -618,6 +618,7 @@ pub(in crate::workspace) fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
         TabKind::CloudSync => "cloud_sync",
         TabKind::Knowledge => "knowledge",
         TabKind::RemoteDesktop => "remote_desktop",
+        TabKind::Onboarding => "onboarding",
     }
 }
 

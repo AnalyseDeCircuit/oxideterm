@@ -27,8 +27,10 @@ float quarter_ellipse_sdf(float2 point, float2 radii);
 float pick_corner_radius(float2 center_to_point, Corners_ScaledPixels corner_radii);
 float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
                Corners_ScaledPixels corner_radii, uint corner_shape);
-float quad_sdf_impl(float2 center_to_point, float corner_radius, uint corner_shape);
-float continuous_corner_sdf(float2 point, float2 radii);
+float2 continuous_corner_spec(float corner_radius, float2 half_size, uint corner_shape);
+float quad_sdf_impl(float2 center_to_point, float corner_radius, uint corner_shape,
+                    float exponent);
+float superellipse_corner_sdf(float2 point, float2 radii, float exponent);
 float gaussian(float x, float sigma);
 float2 erf(float2 x);
 float blur_along_x(float x, float y, float sigma, float corner,
@@ -151,10 +153,20 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
   // mirrored into bottom right quadrant.
   float2 corner_center_to_point = corner_to_point + corner_radius;
 
-  // Whether the nearest point on the border is rounded
+  // Whether the nearest point on the circular border is rounded (also used by dashed borders).
   bool is_near_rounded_corner =
     corner_center_to_point.x >= 0.0 &&
     corner_center_to_point.y >= 0.0;
+
+  // Continuous superellipse corners extend smoothly along the straight edge so curvature
+  // eases in without shrinking the diagonal corner profile.
+  float2 corner_spec = continuous_corner_spec(corner_radius, half_size, quad.corner_shape);
+  float eff_corner_radius = corner_spec.x;
+  float corner_exponent = corner_spec.y;
+  float2 corner_sdf_point = corner_to_point + eff_corner_radius;
+  bool is_near_contour_corner =
+    corner_sdf_point.x >= 0.0 &&
+    corner_sdf_point.y >= 0.0;
 
   // Vector from straight border inner corner to point.
   //
@@ -175,12 +187,13 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
     straight_border_inner_corner_to_point.y < -antialias_threshold;
 
   // Fast path for points that must be part of the background
-  if (is_within_inner_straight_border && !is_near_rounded_corner) {
+  if (is_within_inner_straight_border && !is_near_contour_corner) {
     return background_color;
   }
 
   // Signed distance of the point to the outside edge of the quad's border
-  float outer_sdf = quad_sdf_impl(corner_center_to_point, corner_radius, quad.corner_shape);
+  float outer_sdf = quad_sdf_impl(corner_sdf_point, eff_corner_radius, quad.corner_shape,
+                                  corner_exponent);
 
   // Approximate signed distance of the point to the inside edge of the quad's
   // border. It is negative outside this edge (within the border), and
@@ -191,7 +204,7 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
   //   nearest-point-on-ellipse.
   // * When it is quickly known to be outside the edge, -1.0 is used.
   float inner_sdf = 0.0;
-  if (corner_center_to_point.x <= 0.0 || corner_center_to_point.y <= 0.0) {
+  if (corner_sdf_point.x <= 0.0 || corner_sdf_point.y <= 0.0) {
     // Fast paths for straight borders
     inner_sdf = -max(straight_border_inner_corner_to_point.x,
                      straight_border_inner_corner_to_point.y);
@@ -202,10 +215,10 @@ fragment float4 quad_fragment(QuadFragmentInput input [[stage_in]],
     // Fast path for circular inner edge.
     inner_sdf = -(outer_sdf + reduced_border.x);
   } else {
-    float2 ellipse_radii = max(float2(0.0), float2(corner_radius) - reduced_border);
-    inner_sdf = quad.corner_shape != 0u
-            ? -continuous_corner_sdf(corner_center_to_point, ellipse_radii)
-            : quarter_ellipse_sdf(corner_center_to_point, ellipse_radii);
+    float2 ellipse_radii = max(float2(0.0), float2(eff_corner_radius) - reduced_border);
+    inner_sdf = (quad.corner_shape != 0u && corner_exponent > 2.001)
+            ? -superellipse_corner_sdf(corner_sdf_point, ellipse_radii, corner_exponent)
+            : quarter_ellipse_sdf(corner_sdf_point, ellipse_radii);
   }
 
   // Negative when inside the border
@@ -1118,51 +1131,46 @@ float pick_corner_radius(float2 center_to_point, Corners_ScaledPixels corner_rad
   }
 }
 
-// Two mirrored cubics join at (0.78, 0.78). The first half has control points
-// (0,1), (0.5,1), (0.56,1), (0.78,0.78), giving zero curvature at the edge.
-float2 continuous_corner(float t) {
-    return float2(t * (1.5 + t * (-1.32 + 0.6 * t)), 1.0 - 0.22 * t * t * t);
+inline float safe_pow(float x, float e) {
+    return x > 1e-6 ? pow(max(x, 1e-6), e) : 0.0;
 }
 
-float continuous_half_sdf(float2 point, float2 radii) {
-    float2 p = point;
-    float2 r = max(radii, float2(0.0001, 0.0001));
-    float t = clamp(p.x / (0.78 * r.x), 0.0, 1.0);
-    // Only rounded-corner fragments reach this bounded closest-point solve.
-    for (int i = 0; i < 6; i++) {
-        float2 b = continuous_corner(t) * r;
-        float2 d = float2(1.5 + t * (-2.64 + 1.8 * t), -0.66 * t * t) * r;
-        float2 dd = float2(-2.64 + 3.6 * t, -1.32 * t) * r;
-        t = clamp(t - dot(b - p, d) / max(dot(d, d) + dot(b - p, dd), 0.0001), 0.0, 1.0);
+// Resolve effective corner box extension and superellipse exponent so continuous
+// corners ease in from the straight edge and smoothly converge back to a circle
+// as the available straight span approaches zero.
+float2 continuous_corner_spec(float corner_radius, float2 half_size, uint corner_shape) {
+    if (corner_shape == 0u || corner_radius <= 0.0) {
+        return float2(corner_radius, 2.0);
     }
-    float2 b = continuous_corner(t) * r;
-    float2 d = float2(1.5 + t * (-2.64 + 1.8 * t), -0.66 * t * t) * r;
-    float distance = min(length(p - b), min(length(p - float2(0.0, r.y)), length(p - 0.78 * r)));
-    return dot(p - b, float2(-d.y, d.x)) < 0.0 ? -distance : distance;
+    float max_radius = min(half_size.x, half_size.y);
+    float scale = max_radius / corner_radius;
+    float blend = clamp((scale - 1.0) / 0.5, 0.0, 1.0);
+    float extension = mix(1.0, 1.5, blend);
+    float exponent = mix(2.0, 4.0, blend);
+    return float2(corner_radius * extension, exponent);
 }
 
-float continuous_corner_sdf(float2 p, float2 radii) {
-    if (radii.x == radii.y) {
-        return continuous_half_sdf(float2(min(p.x, p.y), max(p.x, p.y)), radii);
+// Gradient-normalized superellipse signed distance in the positive corner quadrant.
+float superellipse_corner_sdf(float2 p, float2 radii, float exponent) {
+    if (radii.x <= 0.0001 || radii.y <= 0.0001) {
+        float2 d_box = p - max(radii, float2(0.0, 0.0));
+        return length(max(d_box, float2(0.0, 0.0))) + min(0.0, max(d_box.x, d_box.y));
     }
-    float a = continuous_half_sdf(p, radii);
-    float b = continuous_half_sdf(p.yx, radii.yx);
-    return abs(a) < abs(b) ? a : b;
-}
-
-// Horizontal intersection of the same contour, used by the shadow integral.
-float continuous_corner_x(float y) {
-    y = clamp(y, 0.0, 1.0);
-    if (y >= 0.78) {
-        return continuous_corner(pow((1.0 - y) / 0.22, 1.0 / 3.0)).x;
+    float2 u = p / radii;
+    float m = max(u.x, u.y);
+    if (m <= 1e-5) {
+        return -min(radii.x, radii.y);
     }
-    float t = y / 0.78;
-    for (int i = 0; i < 5; i++) {
-        float x = continuous_corner(t).x;
-        float dx = 1.5 + t * (-2.64 + 1.8 * t);
-        t = clamp(t - (x - y) / dx, 0.0, 1.0);
-    }
-    return continuous_corner(t).y;
+    float2 w = u / m;
+    float sum = safe_pow(w.x, exponent) + safe_pow(w.y, exponent);
+    float s = m * pow(max(sum, 1.0), 1.0 / exponent);
+    float2 ratio = u / max(s, 1e-5);
+    float2 grad = float2(
+        safe_pow(ratio.x, exponent - 1.0) / radii.x,
+        safe_pow(ratio.y, exponent - 1.0) / radii.y
+    );
+    float grad_len = max(length(grad), 1e-5);
+    return (s - 1.0) / grad_len;
 }
 
 // Signed distance of the point to the quad's border - positive outside the
@@ -1173,15 +1181,21 @@ float quad_sdf(float2 point, Bounds_ScaledPixels bounds,
     float2 center = float2(bounds.origin.x, bounds.origin.y) + half_size;
     float2 center_to_point = point - center;
     float corner_radius = pick_corner_radius(center_to_point, corner_radii);
+    float2 corner_spec = continuous_corner_spec(corner_radius, half_size, corner_shape);
+    float eff_corner_radius = corner_spec.x;
+    float corner_exponent = corner_spec.y;
     float2 corner_to_point = fabs(center_to_point) - half_size;
-    float2 corner_center_to_point = corner_to_point + corner_radius;
-    return quad_sdf_impl(corner_center_to_point, corner_radius, corner_shape);
+    float2 corner_center_to_point = corner_to_point + eff_corner_radius;
+    return quad_sdf_impl(corner_center_to_point, eff_corner_radius, corner_shape, corner_exponent);
 }
 
 // Implementation of quad signed distance field
-float quad_sdf_impl(float2 corner_center_to_point, float corner_radius, uint corner_shape) {
-    if (corner_shape != 0u && corner_radius > 0.0 && min(corner_center_to_point.x, corner_center_to_point.y) > 0.0) {
-        return continuous_corner_sdf(corner_center_to_point, float2(corner_radius, corner_radius));
+float quad_sdf_impl(float2 corner_center_to_point, float corner_radius, uint corner_shape,
+                    float exponent) {
+    if (corner_shape != 0u && exponent > 2.001 && corner_radius > 0.0 &&
+        min(corner_center_to_point.x, corner_center_to_point.y) > 0.0) {
+        return superellipse_corner_sdf(corner_center_to_point,
+                                       float2(corner_radius, corner_radius), exponent);
     }
     if (corner_radius == 0.0) {
         // Fast path for unrounded corners
@@ -1215,11 +1229,16 @@ float2 erf(float2 x) {
 
 float blur_along_x(float x, float y, float sigma, float corner,
                    float2 half_size, uint corner_shape) {
-  float delta = min(half_size.y - corner - abs(y), 0.);
+  float2 corner_spec = continuous_corner_spec(corner, half_size, corner_shape);
+  float eff_corner = corner_spec.x;
+  float n = corner_spec.y;
+  float delta = min(half_size.y - eff_corner - abs(y), 0.);
   float curved =
-      half_size.x - corner + sqrt(max(0., corner * corner - delta * delta));
-  if (corner_shape != 0u && corner > 0.0) {
-      curved = half_size.x - corner + corner * continuous_corner_x(-delta / corner);
+      half_size.x - eff_corner + sqrt(max(0., eff_corner * eff_corner - delta * delta));
+  if (corner_shape != 0u && eff_corner > 0.0 && n > 2.001) {
+      float u = clamp(-delta / eff_corner, 0.0, 1.0);
+      float rem = max(1.0 - safe_pow(u, n), 0.0);
+      curved = half_size.x - eff_corner + eff_corner * safe_pow(rem, 1.0 / n);
   }
   float2 integral =
       0.5 + 0.5 * erf((x + float2(-curved, curved)) * (sqrt(0.5) / sigma));

@@ -1,5 +1,6 @@
 use super::*;
 use oxideterm_connections::SavedUpstreamProxyPolicy;
+use oxideterm_gpui_connections::ble::BleConnectionClues;
 mod persistence;
 use crate::workspace::new_connection::{
     BleOpenRequest, BleStandaloneTarget, BleTraceTarget, MoshConnectionOptions,
@@ -18,22 +19,6 @@ pub(super) enum StandaloneConnectionKind {
     Ble,
     Rdp,
     Vnc,
-}
-
-/// Device identity carried by a BLE session record.
-///
-/// A BLE peripheral handle is assigned by the OS at scan time and cannot be
-/// restored, so the record keeps the discovery clues the resolver matches
-/// against instead of the runtime id.
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
-pub(super) struct BleConnectionClues {
-    pub adapter_mac: Option<String>,
-    pub device_mac: Option<String>,
-    pub device_name: Option<String>,
-    /// Platform-local identity for the cache-based direct connect; sync and
-    /// restarts carry it as host-local metadata.
-    pub platform_identifier: Option<String>,
-    pub service_uuid: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

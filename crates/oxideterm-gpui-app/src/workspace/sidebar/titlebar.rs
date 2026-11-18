@@ -394,6 +394,7 @@ impl WorkspaceApp {
             Some(_) => "sidebar.tooltips.switch_to_dark",
         });
         let theme_toggle_workspace = cx.entity().downgrade();
+        let disclaimer_locked = self.onboarding_disclaimer_locked();
 
         div()
             .w_full()
@@ -448,7 +449,8 @@ impl WorkspaceApp {
                                 .px(px(action_button_padding))
                                 .role(gpui::Role::Button)
                                 .aria_label(background_label.clone())
-                                .cursor_pointer()
+                                .when(!disclaimer_locked, |el| el.cursor_pointer())
+                                .when(disclaimer_locked, |el| el.opacity(0.42))
                                 .on_a11y_action(
                                     gpui::AccessibleAction::Click,
                                     move |_, window, cx| {
@@ -468,10 +470,13 @@ impl WorkspaceApp {
                                     LucideIcon::ListChecks,
                                     self.tokens.metrics.sidebar_action_icon_size,
                                     rgb(text_color),
-                                    IconButtonOptions::opaque_toolbar(
-                                        action_button_size,
-                                        ButtonRadius::Md,
-                                    ),
+                                    IconButtonOptions {
+                                        disabled: disclaimer_locked,
+                                        ..IconButtonOptions::opaque_toolbar(
+                                            action_button_size,
+                                            ButtonRadius::Md,
+                                        )
+                                    },
                                     background_label.clone(),
                                     "titlebar-background-tasks",
                                     true,
@@ -501,10 +506,13 @@ impl WorkspaceApp {
                                 LucideIcon::Search,
                                 self.tokens.metrics.sidebar_action_icon_size,
                                 rgb(text_color),
-                                IconButtonOptions::opaque_toolbar(
-                                    action_button_size,
-                                    ButtonRadius::Md,
-                                ),
+                                IconButtonOptions {
+                                    disabled: disclaimer_locked,
+                                    ..IconButtonOptions::opaque_toolbar(
+                                        action_button_size,
+                                        ButtonRadius::Md,
+                                    )
+                                },
                                 palette_tooltip.clone(),
                                 "titlebar-command-palette",
                                 true,
@@ -531,10 +539,13 @@ impl WorkspaceApp {
                                 LucideIcon::EyeOff,
                                 self.tokens.metrics.sidebar_action_icon_size,
                                 rgb(text_color),
-                                IconButtonOptions::opaque_toolbar(
-                                    action_button_size,
-                                    ButtonRadius::Md,
-                                ),
+                                IconButtonOptions {
+                                    disabled: disclaimer_locked,
+                                    ..IconButtonOptions::opaque_toolbar(
+                                        action_button_size,
+                                        ButtonRadius::Md,
+                                    )
+                                },
                                 zen_tooltip.clone(),
                                 "titlebar-zen",
                                 true,
@@ -567,7 +578,7 @@ impl WorkspaceApp {
                                 self.tokens.metrics.sidebar_action_icon_size,
                                 rgb(text_color),
                                 IconButtonOptions {
-                                    disabled: self.theme_transition.is_some(),
+                                    disabled: disclaimer_locked || self.theme_transition.is_some(),
                                     ..IconButtonOptions::opaque_toolbar(
                                         action_button_size,
                                         ButtonRadius::Md,

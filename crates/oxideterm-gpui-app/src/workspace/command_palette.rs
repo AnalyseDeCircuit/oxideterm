@@ -230,6 +230,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         self.prepare_modal_interaction_boundary(cx);
         self.command_palette
             .update(cx, |palette, cx| palette.open_background_tasks(cx));
@@ -241,6 +244,9 @@ impl WorkspaceApp {
     }
 
     pub(super) fn open_command_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         self.bootstrap_native_plugin_runtime(cx);
         self.prepare_modal_interaction_boundary(cx);
         let auto_load_hosts = self.settings_store.settings().ssh_config.auto_load_hosts;
@@ -680,7 +686,7 @@ impl WorkspaceApp {
                     cx,
                 );
             }
-            PaletteAction::ShowWelcome => self.open_onboarding_from_palette(cx),
+            PaletteAction::ShowWelcome => self.open_onboarding_from_palette(Some(window), cx),
             PaletteAction::ShowVersionMigration => self.open_version_migration_from_palette(cx),
             PaletteAction::RuntimePluginCommand { plugin_id, command } => {
                 self.dispatch_native_plugin_command(plugin_id, command, cx);
@@ -1367,6 +1373,7 @@ impl WorkspaceApp {
                     TabKind::SshTerminal => self.i18n.t("command_palette.session_ssh_terminal"),
                     TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
                     TabKind::Settings => self.i18n.t("settings_view.title"),
+                    TabKind::Onboarding => self.i18n.t("onboarding.step_welcome"),
                     TabKind::SessionManager => self.i18n.t("sidebar.panels.saved_connections"),
                     TabKind::Runtime => self.i18n.t("sidebar.panels.runtime"),
                     TabKind::ConnectionPool => self.i18n.t("sidebar.panels.runtime_overview"),
@@ -3043,6 +3050,7 @@ fn tab_kind_icon(kind: &TabKind) -> LucideIcon {
         TabKind::Knowledge => LucideIcon::BookOpen,
         TabKind::RemoteDesktop => LucideIcon::Monitor,
         TabKind::Settings => LucideIcon::Settings,
+        TabKind::Onboarding => LucideIcon::Sparkles,
         TabKind::SessionManager => LucideIcon::LayoutList,
     }
 }

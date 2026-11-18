@@ -4,36 +4,16 @@ use super::WorkspaceApp;
 use gpui::Context;
 
 pub(crate) use oxideterm_gpui_ui::select::{
-    BrowserFocusOrigin, BrowserSelectKeyDirection, browser_focus_visible, browser_select_next_index,
+    BrowserFocusOrigin, BrowserSelectKeyDirection, browser_focus_visible,
+    browser_select_next_index, close_browser_trigger_select,
 };
-pub(crate) fn close_browser_trigger_select<T>(
-    open_select: &mut Option<T>,
-    focus_origin: &mut Option<BrowserFocusOrigin>,
-) -> bool {
-    let had_open_select = open_select.take().is_some();
-    if had_open_select {
-        // Trigger-owned selects model ordinary DOM/Radix form controls: closing
-        // the popup also releases the transient focus-origin owner, so a stale
-        // pointer/keyboard source cannot leak into the next open.
-        *focus_origin = None;
-    }
-    had_open_select
-}
 
-pub(crate) use oxideterm_gpui_ui::confirm::{
-    ModalFooterKeyAction, modal_footer_key_action, modal_footer_key_moves_forward,
-    next_required_modal_footer_focus,
-};
 #[cfg(test)]
 use oxideterm_gpui_ui::confirm::FocusCycle;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ModalFooterInputKeyAction<T> {
-    Cancel,
-    FocusInput,
-    FocusFooter(T),
-    Activate(T),
-}
+pub(crate) use oxideterm_gpui_ui::confirm::{
+    ModalFooterInputKeyAction, ModalFooterKeyAction, modal_footer_input_key_action,
+    modal_footer_key_action, next_required_modal_footer_focus,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum InlineFooterInputKeyAction<T> {
@@ -43,72 +23,10 @@ pub(crate) enum InlineFooterInputKeyAction<T> {
     Activate(T),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum ModalFooterBodyInputKeyAction<T, I> {
-    Cancel,
-    FocusInput(I),
-    FocusFooter(T),
-    Activate(T),
-}
-
-
-pub(crate) fn modal_footer_input_key_action<T>(
-    key: &str,
-    shift: bool,
-    actions: &[T],
-    input_available: bool,
-    input_focused: bool,
-    current: Option<T>,
-    fallback: T,
-    activation_fallback: Option<T>,
-) -> Option<ModalFooterInputKeyAction<T>>
-where
-    T: Copy + Eq,
-{
-    // Some Tauri dialogs place a real input before the footer buttons. GPUI has
-    // no DOM tab order, so keep the "input, cancel, primary" focus loop here
-    // instead of reimplementing it in each dialog key handler.
-    match key {
-        "escape" => Some(ModalFooterInputKeyAction::Cancel),
-        "tab" => {
-            let forward = modal_footer_key_moves_forward(key, shift);
-            if input_available && input_focused {
-                return Some(ModalFooterInputKeyAction::FocusFooter(
-                    next_required_modal_footer_focus(actions, None, forward, fallback),
-                ));
-            }
-
-            if input_available {
-                let first = actions.first().copied().unwrap_or(fallback);
-                let last = actions.last().copied().unwrap_or(fallback);
-                if (current == Some(first) && !forward) || (current == Some(last) && forward) {
-                    return Some(ModalFooterInputKeyAction::FocusInput);
-                }
-            }
-
-            Some(ModalFooterInputKeyAction::FocusFooter(
-                next_required_modal_footer_focus(actions, current, forward, fallback),
-            ))
-        }
-        "arrowleft" | "left" | "arrowright" | "right" | "home" | "end" => {
-            modal_footer_key_action(key, shift, actions, current, fallback).map(|action| {
-                match action {
-                    ModalFooterKeyAction::Cancel => ModalFooterInputKeyAction::Cancel,
-                    ModalFooterKeyAction::Focus(action) => {
-                        ModalFooterInputKeyAction::FocusFooter(action)
-                    }
-                    ModalFooterKeyAction::Activate(action) => {
-                        ModalFooterInputKeyAction::Activate(action)
-                    }
-                }
-            })
-        }
-        "enter" | "space" | " " => current
-            .or(activation_fallback)
-            .map(ModalFooterInputKeyAction::Activate),
-        _ => None,
-    }
-}
+#[cfg(test)]
+pub(crate) use oxideterm_gpui_ui::confirm::{
+    ModalFooterBodyInputKeyAction, modal_footer_body_input_key_action,
+};
 
 pub(crate) fn inline_footer_input_key_action<T>(
     key: &str,
@@ -158,87 +76,6 @@ where
         _ => None,
     }
 }
-
-pub(crate) fn modal_footer_body_input_key_action<T, I>(
-    key: &str,
-    shift: bool,
-    actions: &[T],
-    current_footer: Option<T>,
-    inputs: &[I],
-    current_input: Option<I>,
-    fallback: T,
-    activation_fallback: Option<T>,
-) -> Option<ModalFooterBodyInputKeyAction<T, I>>
-where
-    T: Copy + Eq,
-    I: Copy + Eq,
-{
-    // Dialogs with several body inputs need browser focus edges, not a single
-    // "input vs footer" bit: Tab from the last body input enters the footer,
-    // Shift+Tab from the first footer action returns to the last body input,
-    // and inner body-to-body movement is left to the owning input group.
-    match key {
-        "escape" => Some(ModalFooterBodyInputKeyAction::Cancel),
-        "tab" => {
-            let forward = modal_footer_key_moves_forward(key, shift);
-            if let Some(input) = current_input {
-                let Some(index) = inputs.iter().position(|candidate| *candidate == input) else {
-                    return None;
-                };
-                if forward {
-                    if let Some(next_input) = inputs.get(index + 1).copied() {
-                        return Some(ModalFooterBodyInputKeyAction::FocusInput(next_input));
-                    }
-                    return Some(ModalFooterBodyInputKeyAction::FocusFooter(
-                        next_required_modal_footer_focus(actions, None, forward, fallback),
-                    ));
-                }
-
-                if let Some(previous) = index.checked_sub(1).and_then(|i| inputs.get(i).copied()) {
-                    return Some(ModalFooterBodyInputKeyAction::FocusInput(previous));
-                }
-                return Some(ModalFooterBodyInputKeyAction::FocusFooter(
-                    next_required_modal_footer_focus(actions, None, forward, fallback),
-                ));
-            }
-
-            if let (Some(first), Some(last)) = (inputs.first().copied(), inputs.last().copied()) {
-                let first_action = actions.first().copied().unwrap_or(fallback);
-                let last_action = actions.last().copied().unwrap_or(fallback);
-                if current_footer == Some(first_action) && !forward {
-                    return Some(ModalFooterBodyInputKeyAction::FocusInput(last));
-                }
-                if current_footer == Some(last_action) && forward {
-                    return Some(ModalFooterBodyInputKeyAction::FocusInput(first));
-                }
-            }
-
-            Some(ModalFooterBodyInputKeyAction::FocusFooter(
-                next_required_modal_footer_focus(actions, current_footer, forward, fallback),
-            ))
-        }
-        "arrowleft" | "left" | "arrowright" | "right" | "home" | "end"
-            if current_input.is_none() =>
-        {
-            modal_footer_key_action(key, shift, actions, current_footer, fallback).map(|action| {
-                match action {
-                    ModalFooterKeyAction::Cancel => ModalFooterBodyInputKeyAction::Cancel,
-                    ModalFooterKeyAction::Focus(action) => {
-                        ModalFooterBodyInputKeyAction::FocusFooter(action)
-                    }
-                    ModalFooterKeyAction::Activate(action) => {
-                        ModalFooterBodyInputKeyAction::Activate(action)
-                    }
-                }
-            })
-        }
-        "enter" | "space" | " " if current_input.is_none() => current_footer
-            .or(activation_fallback)
-            .map(ModalFooterBodyInputKeyAction::Activate),
-        _ => None,
-    }
-}
-
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum BrowserPointerCaptureOwner {

@@ -1,6 +1,6 @@
 use super::*;
 
-pub(in crate::workspace) const ONBOARDING_TOTAL_STEPS: usize = 5;
+pub(in crate::workspace) const ONBOARDING_TOTAL_STEPS: usize = 3;
 pub(in crate::workspace) const ONBOARDING_STEPS_MOTION_ID: &str = "onboarding-steps";
 pub(in crate::workspace) const ONBOARDING_ANIMATION_MOTION_ID: &str = "onboarding-animation";
 pub(in crate::workspace) const ONBOARDING_ACCENT_SUBTLE_ALPHA: u32 = 0x14;
@@ -20,9 +20,7 @@ pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool
 pub(in crate::workspace) enum OnboardingStep {
     Welcome,
     Appearance,
-    Workflow,
-    Tools,
-    QuickStart,
+    Launch,
 }
 
 impl OnboardingStep {
@@ -30,9 +28,7 @@ impl OnboardingStep {
         match index {
             0 => Self::Welcome,
             1 => Self::Appearance,
-            2 => Self::Workflow,
-            3 => Self::Tools,
-            _ => Self::QuickStart,
+            _ => Self::Launch,
         }
     }
 
@@ -40,9 +36,7 @@ impl OnboardingStep {
         match self {
             Self::Welcome => "onboarding.step_welcome",
             Self::Appearance => "onboarding.step_appearance",
-            Self::Workflow => "onboarding.step_workflow",
-            Self::Tools => "onboarding.step_tools",
-            Self::QuickStart => "onboarding.step_start",
+            Self::Launch => "onboarding.step_start",
         }
     }
 }

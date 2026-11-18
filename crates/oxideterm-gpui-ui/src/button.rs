@@ -680,6 +680,25 @@ pub fn context_chip(
     chip
 }
 
+pub fn toolbar_action_button(
+    tokens: &ThemeTokens,
+    label: String,
+    icon: Option<AnyElement>,
+    options: ToolbarButtonOptions,
+    listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
+) -> Div {
+    let actionable = !(options.button.disabled || options.loading);
+    toolbar_button(tokens, label, icon, options)
+        .when(actionable, |button| {
+            button.on_mouse_down(MouseButton::Left, listener)
+        })
+        .when(!actionable, |button| {
+            button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
+                cx.stop_propagation();
+            })
+        })
+}
+
 pub fn toolbar_button(
     tokens: &ThemeTokens,
     label: String,

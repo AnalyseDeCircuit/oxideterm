@@ -332,56 +332,58 @@ fn erf(v: vec2<f32>) -> vec2<f32> {
 
 // Two mirrored cubics join at (0.78, 0.78). The first half has control points
 // (0,1), (0.5,1), (0.56,1), (0.78,0.78), giving zero curvature at the edge.
-fn continuous_corner(t: f32) -> vec2<f32> {
-    return vec2<f32>(t * (1.5 + t * (-1.32 + 0.6 * t)), 1.0 - 0.22 * t * t * t);
+fn safe_pow(x: f32, e: f32) -> f32 {
+    return select(0.0, pow(max(x, 1e-6), e), x > 1e-6);
 }
 
-fn continuous_half_sdf(point: vec2<f32>, radii: vec2<f32>) -> f32 {
-    var p = point;
-    var r = max(radii, vec2<f32>(0.0001, 0.0001));
-    var t = clamp(p.x / (0.78 * r.x), 0.0, 1.0);
-    // Only rounded-corner fragments reach this bounded closest-point solve.
-    for (var i = 0; i < 6; i += 1) {
-        var b = continuous_corner(t) * r;
-        var d = vec2<f32>(1.5 + t * (-2.64 + 1.8 * t), -0.66 * t * t) * r;
-        var dd = vec2<f32>(-2.64 + 3.6 * t, -1.32 * t) * r;
-        t = clamp(t - dot(b - p, d) / max(dot(d, d) + dot(b - p, dd), 0.0001), 0.0, 1.0);
+// Resolve effective corner box extension and superellipse exponent so continuous
+// corners ease in from the straight edge and smoothly converge back to a circle
+// as the available straight span approaches zero.
+fn continuous_corner_spec(corner_radius: f32, half_size: vec2<f32>, corner_shape: u32) -> vec2<f32> {
+    if (corner_shape == 0u || corner_radius <= 0.0) {
+        return vec2<f32>(corner_radius, 2.0);
     }
-    var b = continuous_corner(t) * r;
-    var d = vec2<f32>(1.5 + t * (-2.64 + 1.8 * t), -0.66 * t * t) * r;
-    var distance = min(length(p - b), min(length(p - vec2<f32>(0.0, r.y)), length(p - 0.78 * r)));
-    return select(distance, -distance, dot(p - b, vec2<f32>(-d.y, d.x)) < 0.0);
+    let max_radius = min(half_size.x, half_size.y);
+    let scale = max_radius / corner_radius;
+    let blend = clamp((scale - 1.0) / 0.5, 0.0, 1.0);
+    let extension = mix(1.0, 1.5, blend);
+    let exponent = mix(2.0, 4.0, blend);
+    return vec2<f32>(corner_radius * extension, exponent);
 }
 
-fn continuous_corner_sdf(p: vec2<f32>, radii: vec2<f32>) -> f32 {
-    if (radii.x == radii.y) {
-        return continuous_half_sdf(vec2<f32>(min(p.x, p.y), max(p.x, p.y)), radii);
+// Gradient-normalized superellipse signed distance in the positive corner quadrant.
+fn superellipse_corner_sdf(p: vec2<f32>, radii: vec2<f32>, exponent: f32) -> f32 {
+    if (radii.x <= 0.0001 || radii.y <= 0.0001) {
+        let d_box = p - max(radii, vec2<f32>(0.0));
+        return length(max(d_box, vec2<f32>(0.0))) + min(0.0, max(d_box.x, d_box.y));
     }
-    var a = continuous_half_sdf(p, radii);
-    var b = continuous_half_sdf(p.yx, radii.yx);
-    return select(b, a, abs(a) < abs(b));
-}
-
-// Horizontal intersection of the same contour, used by the shadow integral.
-fn continuous_corner_x(input_y: f32) -> f32 {
-    let y = clamp(input_y, 0.0, 1.0);
-    if (y >= 0.78) {
-        return continuous_corner(pow((1.0 - y) / 0.22, 1.0 / 3.0)).x;
+    let u = p / radii;
+    let m = max(u.x, u.y);
+    if (m <= 1e-5) {
+        return -min(radii.x, radii.y);
     }
-    var t = y / 0.78;
-    for (var i = 0; i < 5; i += 1) {
-        var x = continuous_corner(t).x;
-        var dx = 1.5 + t * (-2.64 + 1.8 * t);
-        t = clamp(t - (x - y) / dx, 0.0, 1.0);
-    }
-    return continuous_corner(t).y;
+    let w = u / m;
+    let sum = safe_pow(w.x, exponent) + safe_pow(w.y, exponent);
+    let s = m * pow(max(sum, 1.0), 1.0 / exponent);
+    let ratio = u / max(s, 1e-5);
+    let grad = vec2<f32>(
+        safe_pow(ratio.x, exponent - 1.0) / radii.x,
+        safe_pow(ratio.y, exponent - 1.0) / radii.y,
+    );
+    let grad_len = max(length(grad), 1e-5);
+    return (s - 1.0) / grad_len;
 }
 
 fn blur_along_x(x: f32, y: f32, sigma: f32, corner: f32, half_size: vec2<f32>, corner_shape: u32) -> f32 {
-  let delta = min(half_size.y - corner - abs(y), 0.0);
-  var curved = half_size.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
-  if (corner_shape != 0u && corner > 0.0) {
-      curved = half_size.x - corner + corner * continuous_corner_x(-delta / corner);
+  let corner_spec = continuous_corner_spec(corner, half_size, corner_shape);
+  let eff_corner = corner_spec.x;
+  let n = corner_spec.y;
+  let delta = min(half_size.y - eff_corner - abs(y), 0.0);
+  var curved = half_size.x - eff_corner + sqrt(max(0.0, eff_corner * eff_corner - delta * delta));
+  if (corner_shape != 0u && eff_corner > 0.0 && n > 2.001) {
+      let u = clamp(-delta / eff_corner, 0.0, 1.0);
+      let rem = max(1.0 - safe_pow(u, n), 0.0);
+      curved = half_size.x - eff_corner + eff_corner * safe_pow(rem, 1.0 / n);
   }
   let integral = 0.5 + 0.5 * erf((x + vec2<f32>(-curved, curved)) * (sqrt(0.5) / sigma));
   return integral.y - integral.x;
@@ -414,14 +416,17 @@ fn quad_sdf(point: vec2<f32>, bounds: Bounds, corner_radii: Corners, corner_shap
     let center = bounds.origin + half_size;
     let center_to_point = point - center;
     let corner_radius = pick_corner_radius(center_to_point, corner_radii);
+    let corner_spec = continuous_corner_spec(corner_radius, half_size, corner_shape);
+    let eff_corner_radius = corner_spec.x;
+    let corner_exponent = corner_spec.y;
     let corner_to_point = abs(center_to_point) - half_size;
-    let corner_center_to_point = corner_to_point + corner_radius;
-    return quad_sdf_impl(corner_center_to_point, corner_radius, corner_shape);
+    let corner_center_to_point = corner_to_point + eff_corner_radius;
+    return quad_sdf_impl(corner_center_to_point, eff_corner_radius, corner_shape, corner_exponent);
 }
 
-fn quad_sdf_impl(corner_center_to_point: vec2<f32>, corner_radius: f32, corner_shape: u32) -> f32 {
-    if (corner_shape != 0u && corner_radius > 0.0 && min(corner_center_to_point.x, corner_center_to_point.y) > 0.0) {
-        return continuous_corner_sdf(corner_center_to_point, vec2<f32>(corner_radius));
+fn quad_sdf_impl(corner_center_to_point: vec2<f32>, corner_radius: f32, corner_shape: u32, exponent: f32) -> f32 {
+    if (corner_shape != 0u && exponent > 2.001 && corner_radius > 0.0 && min(corner_center_to_point.x, corner_center_to_point.y) > 0.0) {
+        return superellipse_corner_sdf(corner_center_to_point, vec2<f32>(corner_radius), exponent);
     }
     if (corner_radius == 0.0) {
         // Fast path for unrounded corners.
@@ -705,10 +710,20 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     // mirrored into bottom right quadrant.
     let corner_center_to_point = corner_to_point + corner_radius;
 
-    // Whether the nearest point on the border is rounded
+    // Whether the nearest point on the circular border is rounded (also used by dashed borders).
     let is_near_rounded_corner =
             corner_center_to_point.x >= 0 &&
             corner_center_to_point.y >= 0;
+
+    // Continuous superellipse corners extend smoothly along the straight edge so curvature
+    // eases in without shrinking the diagonal corner profile.
+    let corner_spec = continuous_corner_spec(corner_radius, half_size, quad.corner_shape);
+    let eff_corner_radius = corner_spec.x;
+    let corner_exponent = corner_spec.y;
+    let corner_sdf_point = corner_to_point + eff_corner_radius;
+    let is_near_contour_corner =
+            corner_sdf_point.x >= 0 &&
+            corner_sdf_point.y >= 0;
 
     // Vector from straight border inner corner to point.
     let straight_border_inner_corner_to_point = corner_to_point + reduced_border;
@@ -730,13 +745,13 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     // points in an inscribed rectangle, or some other quick linear check.
     // However, that might negatively impact performance in the case of
     // reasonable sizes for rounded corners.
-    if (is_within_inner_straight_border && !is_near_rounded_corner) {
+    if (is_within_inner_straight_border && !is_near_contour_corner) {
         return blend_color(background_color, 1.0);
     }
 
     // Signed distance of the point to the outside edge of the quad's border. It
     // is positive outside this edge, and negative inside.
-    let outer_sdf = quad_sdf_impl(corner_center_to_point, corner_radius, quad.corner_shape);
+    let outer_sdf = quad_sdf_impl(corner_sdf_point, eff_corner_radius, quad.corner_shape, corner_exponent);
 
     // Approximate signed distance of the point to the inside edge of the quad's
     // border. It is negative outside this edge (within the border), and
@@ -747,7 +762,7 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     //   nearest-point-on-ellipse.
     // * When it is quickly known to be outside the edge, -1.0 is used.
     var inner_sdf = 0.0;
-    if (corner_center_to_point.x <= 0 || corner_center_to_point.y <= 0) {
+    if (corner_sdf_point.x <= 0 || corner_sdf_point.y <= 0) {
         // Fast paths for straight borders.
         inner_sdf = -max(straight_border_inner_corner_to_point.x,
                          straight_border_inner_corner_to_point.y);
@@ -758,11 +773,11 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
         // Fast path for circular inner edge.
         inner_sdf = -(outer_sdf + reduced_border.x);
     } else {
-        let ellipse_radii = max(vec2<f32>(0.0), corner_radius - reduced_border);
-        if (quad.corner_shape != 0u) {
-            inner_sdf = -continuous_corner_sdf(corner_center_to_point, ellipse_radii);
+        let ellipse_radii = max(vec2<f32>(0.0), eff_corner_radius - reduced_border);
+        if (quad.corner_shape != 0u && corner_exponent > 2.001) {
+            inner_sdf = -superellipse_corner_sdf(corner_sdf_point, ellipse_radii, corner_exponent);
         } else {
-            inner_sdf = quarter_ellipse_sdf(corner_center_to_point, ellipse_radii);
+            inner_sdf = quarter_ellipse_sdf(corner_sdf_point, ellipse_radii);
         }
     }
 

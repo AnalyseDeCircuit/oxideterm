@@ -253,8 +253,8 @@ use self::knowledge::{
     KNOWLEDGE_WORKSPACE_SECTION_OVERSCAN,
 };
 use self::new_connection::{
-    ConnectionFlowEntity, ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
-    NewConnectionForm, SavedConnectionPromptAction, SshAuthTab, SshConnectionIntent,
+    ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
+    NewConnectionForm, SavedConnectionPromptAction, SshConnectionIntent,
 };
 use self::onboarding::OnboardingState;
 use self::overlay::{
@@ -266,7 +266,7 @@ pub(crate) use self::root::helpers::tokens_from_settings as portable_bootstrap_t
 use self::root::state::{ReconnectWorkerResult, WorkspaceSshNode, WorkspaceSshNodeEndpoint};
 use self::root::{background::*, helpers::*};
 use self::session_manager::{
-    SessionManagerInput, SessionManagerState, SessionManagerWorkspaceEvent,
+    SessionManagerInput, SessionManagerWorkspaceEvent,
 };
 use self::sidebar::AiInlinePanelState;
 #[cfg(test)]
@@ -352,24 +352,6 @@ const DETACHED_LOCAL_TERMINAL_LIST_OVERSCAN: usize = 4;
 const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 40.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
-const OXIDE_EXPORT_CONNECTION_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const OXIDE_EXPORT_CONNECTION_LIST_ESTIMATED_HEIGHT: f32 = 58.0;
-const OXIDE_EXPORT_CONNECTION_LIST_OVERSCAN: usize = 8;
-const OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_ESTIMATED_HEIGHT: f32 = 22.0;
-const OXIDE_IMPORT_CONNECTION_PREVIEW_LIST_OVERSCAN: usize = 8;
-const OXIDE_EXPORT_FORWARD_GROUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const OXIDE_EXPORT_FORWARD_GROUP_LIST_ESTIMATED_HEIGHT: f32 = 84.0;
-const OXIDE_EXPORT_FORWARD_GROUP_LIST_OVERSCAN: usize = 4;
-const OXIDE_EXPORT_SUMMARY_LINE_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const OXIDE_EXPORT_SUMMARY_LINE_LIST_ESTIMATED_HEIGHT: f32 = 18.0;
-const OXIDE_EXPORT_SUMMARY_LINE_LIST_OVERSCAN: usize = 6;
-const OXIDE_IMPORT_FORWARD_DETAIL_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT: f32 = 36.0;
-const OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN: usize = 6;
-const OXIDE_IMPORT_NAME_GROUP_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT: f32 = 28.0;
-const OXIDE_IMPORT_NAME_GROUP_LIST_OVERSCAN: usize = 6;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum AiCompactionNoticePhase {
@@ -927,8 +909,7 @@ pub(crate) struct WorkspaceApp {
     _window_button_layout_subscription: Subscription,
     window_registry: window_registry::WorkspaceWindowRegistry,
     window_effect_delivery_scheduled: bool,
-    connection_flow: Entity<ConnectionFlowEntity>,
-    _connection_flow_observation: Subscription,
+    connections: oxideterm_gpui_connections::views::ConnectionsViews,
     _connection_flow_subscription: Subscription,
     workspace_runtime: Entity<runtime_entity::WorkspaceRuntimeEntity>,
     _workspace_runtime_subscription: Subscription,
@@ -968,8 +949,6 @@ pub(crate) struct WorkspaceApp {
         Arc<parking_lot::Mutex<HashMap<NodeId, sftp::DedicatedSftpConnectionSlot>>>,
     ssh_consumer_prompt_handler: Arc<dyn SshPromptHandler>,
     ssh_consumer_managed_key_resolver: ManagedKeyResolver,
-    pending_standalone_sftp_pair_launches:
-        HashMap<String, new_connection::PendingStandaloneSftpPairLaunch>,
     embedded_sftp_node_id: Option<NodeId>,
     embedded_sftp_pinned: bool,
     sftp_presentation_request: Option<sftp::SftpPresentationRequest>,
@@ -1009,8 +988,6 @@ pub(crate) struct WorkspaceApp {
     connection_store: ConnectionStore,
     // The connection-layer worker owns SSH config parsing and persistence.
     ssh_config_sync_service: Option<SshConfigSyncService>,
-    session_manager: Entity<SessionManagerState>,
-    _session_manager_observation: Subscription,
     _session_manager_subscription: Subscription,
     remote_desktop: Entity<remote_desktop::RemoteDesktopWorkspaceEntity>,
     local_shells: Vec<ShellInfo>,

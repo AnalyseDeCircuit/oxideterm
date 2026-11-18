@@ -456,7 +456,7 @@ impl WorkspaceApp {
             SidebarSection::Extensions => "sidebar.panels.plugins",
             SidebarSection::CloudSync => "plugin.cloud_sync.panel_title",
             SidebarSection::Notifications => "sidebar.panels.event_log",
-            SidebarSection::Connections => "sidebar.panels.session_manager",
+            SidebarSection::Connections => "sidebar.panels.connections.session_manager",
             _ => "sidebar.panels.sessions",
         };
         let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key));
@@ -544,7 +544,7 @@ impl WorkspaceApp {
             let workspace = cx.entity();
             // Match the tab form's sort trigger, which reflects the current
             // sort direction instead of a static glyph.
-            let sort_direction = self.session_manager.read(cx).sort_direction;
+            let sort_direction = self.connections.session_manager.read(cx).sort_direction;
             let sort_action = self.render_sidebar_action(
                 sort_direction.icon(),
                 SidebarActionKind::ToggleSessionSort,
@@ -694,7 +694,7 @@ impl WorkspaceApp {
                     this.selected_ime_target = Some(ime::WorkspaceImeTarget::SessionManager(
                         SessionManagerInput::Search,
                     ));
-                    this.session_manager.update(cx, |manager, cx| {
+                    this.connections.session_manager.update(cx, |manager, cx| {
                         manager.focused_input = Some(SessionManagerInput::Search);
                         cx.notify();
                     });
@@ -710,53 +710,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn render_session_manager_search_input(
-        &self,
-        cx: &mut Context<Self>,
+        &self, _cx: &mut Context<Self>,
     ) -> AnyElement {
-        let (query, active) = {
-            let manager = self.session_manager.read(cx);
-            (
-                manager.search_query.clone(),
-                manager.focused_input() == Some(SessionManagerInput::Search),
-            )
-        };
-        let target = ime::WorkspaceImeTarget::SessionManager(SessionManagerInput::Search);
-        let marked = self.marked_text_for_target(target, cx);
-        self.sidebar_search_row(self.workspace_sidebar_background(self.tokens.ui.shell_bg()))
-            .child(
-                self.text_input_with_workspace_ime(
-                    target,
-                    self.workspace_text_input(
-                        target,
-                        oxideterm_gpui_ui::text_input::TextInputView {
-                            value: &query,
-                            placeholder: self.i18n.t("sessionManager.toolbar.search_placeholder"),
-                            focused: active,
-                            caret_visible: self.input_caret.visible(),
-                            secret: false,
-                            selected_all: false,
-                            selected_range: self.ime_selected_range_for_target(target, cx),
-                            marked_text: marked,
-                        },
-                    )
-                    .flex_1()
-                    .min_w_0()
-                    .border_0()
-                    .bg(rgba(0x00000000))
-                    .px(px(0.0))
-                    .text_size(px(self.tokens.metrics.sidebar_title_font_size))
-                    .line_height(px(20.0)),
-                    move |this, cx| {
-                        this.session_manager.update(cx, |manager, cx| {
-                            manager.focused_input = Some(SessionManagerInput::Search);
-                            cx.notify();
-                        });
-                        this.needs_active_pane_focus = false;
-                    },
-                    cx,
-                ),
-            )
-            .into_any_element()
+        self.connections.session_manager_sidebar_search()
     }
 
     pub(in crate::workspace) fn render_sidebar_content(

@@ -1,0 +1,1279 @@
+use super::*;
+
+pub(super) fn oxide_import_forward_detail_signature(detail: &ForwardDetail) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Forward detail rows are read-only preview records; all fields are visible
+    // in the row text or source identity.
+    detail.owner_connection_name.hash(&mut hasher);
+    detail.direction.hash(&mut hasher);
+    detail.description.hash(&mut hasher);
+    hasher.finish()
+}
+
+pub(super) fn oxide_import_name_group_signature(name: &str, label: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    // Name-group rows are short read-only labels plus a checkbox state owned by
+    // the dialog; identity is the source name and the visible conflict label.
+    name.hash(&mut hasher);
+    label.hash(&mut hasher);
+    hasher.finish()
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum OxideImportNameGroup {
+    Unchanged,
+    Rename,
+    Merge,
+    Replace,
+    Skip,
+}
+
+impl OxideImportNameGroup {
+    fn item_count(self, preview: &ImportPreview) -> usize {
+        match self {
+            Self::Unchanged => preview.unchanged.len(),
+            Self::Rename => preview.will_rename.len(),
+            Self::Merge => preview.will_merge.len(),
+            Self::Replace => preview.will_replace.len(),
+            Self::Skip => preview.will_skip.len(),
+        }
+    }
+
+    fn item(self, preview: &ImportPreview, index: usize) -> Option<(String, String)> {
+        match self {
+            Self::Unchanged => preview
+                .unchanged
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+            Self::Rename => preview.will_rename.get(index).map(|(original, renamed)| {
+                (original.clone(), format!("\"{original}\" → \"{renamed}\""))
+            }),
+            Self::Merge => preview
+                .will_merge
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+            Self::Replace => preview
+                .will_replace
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+            Self::Skip => preview
+                .will_skip
+                .get(index)
+                .map(|name| (name.clone(), name.clone())),
+        }
+    }
+}
+
+#[derive(Clone)]
+struct OxideImportNameGroupRenderer {
+    // ImportPreview is already shared by the dialog, so rows borrow one Arc-backed snapshot.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+    preview: Arc<ImportPreview>,
+    group: OxideImportNameGroup,
+}
+
+impl OxideImportNameGroupRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        let Some((name, label)) = self.group.item(&self.preview, index) else {
+            return div().into_any_element();
+        };
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.selected_names.contains(&name));
+        let session_manager = self.session_manager.clone();
+        div()
+            .pb(px(4.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .cursor_pointer()
+                    .hover({
+                        let text = self.tokens.ui.text;
+                        move |row| row.text_color(rgb(text))
+                    })
+                    .child(OxideDialogs::render_lucide_icon(
+                        if checked {
+                            LucideIcon::CheckSquare
+                        } else {
+                            LucideIcon::Square
+                        },
+                        14.0,
+                        if checked {
+                            rgb(self.tokens.ui.accent)
+                        } else {
+                            rgb(self.tokens.ui.text_muted)
+                        },
+                    ))
+                    .child(label)
+                    .on_mouse_down(MouseButton::Left, move |_event, _window, cx| {
+                        session_manager.update(cx, |manager, cx| {
+                            if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                if !dialog.selected_names.remove(&name) {
+                                    dialog.selected_names.insert(name.clone());
+                                }
+                                cx.notify();
+                            }
+                        });
+                        cx.stop_propagation();
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
+#[derive(Clone)]
+struct OxideImportForwardDetailRenderer {
+    // Selection and preview lifetime stay with SessionManagerState.
+    session_manager: Entity<SessionManagerState>,
+    tokens: ThemeTokens,
+}
+
+impl OxideImportForwardDetailRenderer {
+    fn render(&self, index: usize, cx: &App) -> AnyElement {
+        let detail = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.preview.as_ref())
+            .and_then(|preview| preview.forward_details.get(index))
+            .cloned();
+        detail
+            .map(|detail| {
+                div()
+                    .pb(px(4.0))
+                    .child(
+                        div()
+                            .rounded(px(self.tokens.radii.md))
+                            .bg(rgba((self.tokens.ui.bg << 8) | OXIDE_SUBCARD_BG_ALPHA))
+                            .px_2()
+                            .py(px(6.0))
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(format!(
+                                "{} · {}",
+                                detail.owner_connection_name, detail.description
+                            )),
+                    )
+                    .into_any_element()
+            })
+            .unwrap_or_else(|| div().into_any_element())
+    }
+}
+
+impl OxideDialogs {
+    pub(super) fn render_oxide_import_preview(
+        &self,
+        preview: Arc<ImportPreview>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let theme = self.tokens.ui;
+        let selected_count = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .map(|dialog| dialog.selected_names.len())
+            .unwrap_or_default();
+        let total_selectable = import_preview_selectable_name_count(&preview);
+        let all_selected = total_selectable > 0 && selected_count == total_selectable;
+        let select_all_preview = Arc::clone(&preview);
+
+        let mut children = vec![
+            div()
+                .flex()
+                .items_center()
+                .justify_between()
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .child(Self::render_lucide_icon(
+                            LucideIcon::CheckCircle,
+                            20.0,
+                            rgb(OXIDE_GREEN_500),
+                        ))
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(rgb(theme.text))
+                                .child(self.render_selectable_text_scoped(
+                                    "oxide-import-preview-heading",
+                                    (),
+                                    "导入预览",
+                                    theme.text,
+                                    cx,
+                                )),
+                        ),
+                )
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .text_color(rgb(theme.accent))
+                        .cursor_pointer()
+                        .child(if all_selected {
+                            "取消全选"
+                        } else {
+                            "全选"
+                        })
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _event, _window, cx| {
+                                this.session_manager.update(cx, |manager, cx| {
+                                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                        if dialog.selected_names.len()
+                                            == import_preview_selectable_name_count(
+                                                &select_all_preview,
+                                            )
+                                        {
+                                            dialog.selected_names.clear();
+                                        } else {
+                                            dialog.selected_names = import_preview_selectable_names(
+                                                &select_all_preview,
+                                            );
+                                        }
+                                        cx.notify();
+                                    }
+                                });
+                                cx.stop_propagation();
+                            }),
+                        ),
+                )
+                .into_any_element(),
+            div()
+                .text_size(px(self.tokens.metrics.ui_text_sm))
+                .text_color(rgb(theme.text))
+                .child(self.render_selectable_text_scoped(
+                    "oxide-import-preview-summary",
+                    (),
+                    format!(
+                        "将导入 {} 个连接 — 已选 {} 个",
+                        preview.total_connections, selected_count
+                    ),
+                    theme.text,
+                    cx,
+                ))
+                .into_any_element(),
+        ];
+
+        children.extend(self.render_oxide_import_connection_groups(Arc::clone(&preview), cx));
+        if preview.has_app_settings {
+            children.push(self.render_oxide_import_app_settings(&preview, cx));
+        }
+        if preview.has_quick_commands {
+            children.push(self.render_oxide_import_quick_commands(&preview, cx));
+        }
+        if preview.serial_profiles_count > 0 {
+            children.push(self.render_oxide_import_serial_profiles(&preview, cx));
+        }
+        if preview.telnet_profiles_count > 0 {
+            children.push(self.render_oxide_import_telnet_profiles(&preview, cx));
+        }
+        if preview.mosh_profiles_count > 0 {
+            children.push(self.render_oxide_import_mosh_profiles(&preview, cx));
+        }
+        if preview.plugin_settings_count > 0 {
+            children.push(self.render_oxide_import_plugins(&preview, cx));
+        }
+        if self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.metadata.as_ref())
+            .and_then(|metadata| metadata.managed_key_count)
+            .is_some_and(|count| count > 0)
+        {
+            children.push(self.render_oxide_import_managed_keys(cx));
+        }
+        if preview.portable_secret_count > 0 {
+            children.push(self.render_oxide_import_portable_secrets(&preview, cx));
+        }
+        if preview.total_forwards > 0 {
+            children.push(self.render_oxide_import_forwards(&preview, cx));
+        }
+        if preview.has_embedded_keys {
+            children.push(self.render_oxide_tone_notice(
+                OXIDE_BLUE_500,
+                "包含嵌入私钥".to_string(),
+                vec!["私钥将被提取到 ~/.ssh/imported/ 目录".to_string()],
+                cx,
+            ));
+        }
+
+        self.render_oxide_padded_card(16.0, None, children, cx)
+    }
+
+    pub(super) fn render_oxide_import_connection_groups(
+        &self,
+        preview: Arc<ImportPreview>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let mut groups = Vec::new();
+        if !preview.unchanged.is_empty() {
+            groups.push(self.render_oxide_import_name_group(
+                "unchanged",
+                format!("✓ {} 个连接将原样导入:", preview.unchanged.len()),
+                OXIDE_GREEN_500,
+                None,
+                Arc::clone(&preview),
+                OxideImportNameGroup::Unchanged,
+                cx,
+            ));
+        }
+        if !preview.will_rename.is_empty() {
+            groups.push(self.render_oxide_import_name_group(
+                "rename",
+                format!("{} 个连接因名称冲突将被重命名:", preview.will_rename.len()),
+                OXIDE_YELLOW_500,
+                Some(LucideIcon::AlertTriangle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Rename,
+                cx,
+            ));
+        }
+        if !preview.will_merge.is_empty() {
+            groups.push(self.render_oxide_import_name_group(
+                "merge",
+                format!("{} 个连接将合并到现有连接:", preview.will_merge.len()),
+                OXIDE_BLUE_500,
+                Some(LucideIcon::CheckCircle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Merge,
+                cx,
+            ));
+        }
+        if !preview.will_replace.is_empty() {
+            groups.push(self.render_oxide_import_name_group(
+                "replace",
+                format!("{} 个连接将替换现有连接:", preview.will_replace.len()),
+                OXIDE_ORANGE_500,
+                Some(LucideIcon::AlertTriangle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Replace,
+                cx,
+            ));
+        }
+        if !preview.will_skip.is_empty() {
+            groups.push(self.render_oxide_import_name_group(
+                "skip",
+                format!("{} 个连接将因冲突被跳过:", preview.will_skip.len()),
+                OXIDE_SLATE_400,
+                Some(LucideIcon::AlertTriangle),
+                Arc::clone(&preview),
+                OxideImportNameGroup::Skip,
+                cx,
+            ));
+        }
+        groups
+    }
+
+    pub(super) fn render_oxide_import_name_group(
+        &self,
+        group_key: &'static str,
+        title: String,
+        color: u32,
+        icon: Option<LucideIcon>,
+        preview: Arc<ImportPreview>,
+        group: OxideImportNameGroup,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let item_count = group.item_count(&preview);
+        let signatures = (0..item_count)
+            .filter_map(|index| group.item(&preview, index))
+            .map(|(name, label)| oxide_import_name_group_signature(&name, &label))
+            .collect::<Vec<_>>();
+        let state = self.sync_oxide_import_name_group_list_state(group_key, &signatures, cx);
+        let spec = self.oxide_import_name_group_list_spec();
+        let list_height =
+            (item_count as f32 * OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT).min(96.0);
+        let renderer = OxideImportNameGroupRenderer {
+            session_manager: self.session_manager.clone(),
+            tokens: self.tokens,
+            preview,
+            group,
+        };
+        let list = div()
+            .id((
+                "oxide-import-preview-section",
+                oxide_import_name_group_signature(group_key, group_key),
+            ))
+            .h(px(list_height))
+            .child(tauri_virtual_list(
+                state,
+                spec,
+                move |index, _window, cx| renderer.render(index, cx),
+            ));
+
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .when_some(icon, |header, icon| {
+                        header.child(Self::render_lucide_icon(icon, 16.0, rgb(color)))
+                    })
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(color))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::PlainDocument,
+                                "oxide-import-preview-section-title",
+                                title.clone(),
+                                title,
+                                color,
+                                cx,
+                            )),
+                    ),
+            )
+            .child(list)
+            .into_any_element()
+    }
+
+    pub(super) fn sync_oxide_import_name_group_list_state(
+        &self,
+        group_key: &'static str,
+        signatures: &[u64],
+        cx: &App,
+    ) -> ListState {
+        let state = {
+            let manager = self.session_manager.read(cx);
+            let mut states = manager.oxide_import_name_group_list_states.borrow_mut();
+            states
+                .entry(group_key.to_string())
+                .or_insert_with(|| {
+                    // Name groups are nested preview rows, so each conflict
+                    // category owns a small variable-height ListState.
+                    ListState::new(
+                        OXIDE_IMPORT_NAME_GROUP_LIST_INITIAL_ITEM_COUNT,
+                        ListAlignment::Top,
+                        self.oxide_import_name_group_list_spec().overdraw(),
+                    )
+                    .measure_all()
+                })
+                .clone()
+        };
+        {
+            let manager = self.session_manager.read(cx);
+            let mut caches = manager.oxide_import_name_group_list_caches.borrow_mut();
+            let cache = caches.entry(group_key.to_string()).or_default();
+            sync_tauri_variable_list_state_by_signatures(
+                &state,
+                cache,
+                group_key,
+                signatures,
+                self.oxide_import_name_group_list_spec(),
+            );
+        }
+        state
+    }
+
+    pub(super) fn oxide_import_name_group_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_IMPORT_NAME_GROUP_LIST_ESTIMATED_HEIGHT),
+            OXIDE_IMPORT_NAME_GROUP_LIST_OVERSCAN,
+        )
+    }
+
+    pub(super) fn render_oxide_import_app_settings(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let import_app_settings = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_app_settings);
+        let all_section_ids = preview
+            .app_settings_sections
+            .iter()
+            .map(|section| section.id.clone())
+            .collect::<HashSet<_>>();
+        let mut children = vec![self.render_oxide_option_row(
+            "import-app-settings",
+            "应用设置".to_string(),
+            "导入应用设置".to_string(),
+            import_app_settings,
+            cx.listener(move |this, _event, _window, cx| {
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        if dialog.import_app_settings {
+                            dialog.import_app_settings = false;
+                            dialog.selected_app_settings_sections.clear();
+                        } else {
+                            dialog.import_app_settings = true;
+                            dialog.selected_app_settings_sections = all_section_ids.clone();
+                        }
+                    }
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }),
+            cx,
+        )];
+
+        if !preview.app_settings_sections.is_empty() {
+            let mut sections = div()
+                .mt(px(4.0))
+                .pt(px(12.0))
+                .border_t_1()
+                .border_color(rgb(self.tokens.ui.border))
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .child(
+                    div()
+                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(rgb(self.tokens.ui.text))
+                        .child(self.render_display_text_with_role(
+                            SelectableTextRole::PlainDocument,
+                            "oxide-import-app-settings",
+                            "group-count",
+                            format!("设置分组（{}）", preview.app_settings_sections.len()),
+                            self.tokens.ui.text,
+                            cx,
+                        )),
+                );
+            for section in &preview.app_settings_sections {
+                sections =
+                    sections.child(self.render_oxide_import_app_settings_section(section, cx));
+            }
+            children.push(sections.into_any_element());
+        }
+        self.render_oxide_import_preview_subcard(children)
+    }
+
+    pub(super) fn render_oxide_import_managed_keys(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some((count, restore_managed_keys, restore_passphrases)) = ({
+            self.session_manager
+                .read(cx)
+                .oxide_import_dialog
+                .as_ref()
+                .map(|dialog| {
+                    (
+                        dialog
+                            .metadata
+                            .as_ref()
+                            .and_then(|metadata| metadata.managed_key_count)
+                            .unwrap_or(0),
+                        dialog.restore_managed_keys,
+                        dialog.restore_managed_key_passphrases,
+                    )
+                })
+        }) else {
+            return div().into_any_element();
+        };
+        self.render_oxide_import_preview_subcard(vec![
+            self.render_oxide_option_row(
+                "import-managed-keys",
+                self.i18n
+                    .t("modals.import.section_managed_keys")
+                    .replace("{{count}}", &count.to_string()),
+                if restore_managed_keys {
+                    self.i18n.t("modals.import.toggle_managed_keys_restore")
+                } else {
+                    self.i18n.t("modals.import.toggle_managed_keys_extract")
+                },
+                restore_managed_keys,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.restore_managed_keys = !dialog.restore_managed_keys;
+                            if !dialog.restore_managed_keys {
+                                dialog.restore_managed_key_passphrases = false;
+                            }
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+                cx,
+            ),
+            div()
+                .opacity(if restore_managed_keys { 1.0 } else { 0.45 })
+                .child(
+                    self.render_oxide_option_row(
+                        "import-key-passphrases",
+                        self.i18n.t("modals.import.restore_managed_key_passphrases"),
+                        self.i18n
+                            .t("modals.import.restore_managed_key_passphrases_description"),
+                        restore_passphrases,
+                        cx.listener(|this, _event, _window, cx| {
+                            this.session_manager.update(cx, |manager, cx| {
+                                if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                    if dialog.restore_managed_keys {
+                                        dialog.restore_managed_key_passphrases =
+                                            !dialog.restore_managed_key_passphrases;
+                                    }
+                                }
+                                cx.notify();
+                            });
+                            cx.stop_propagation();
+                        }),
+                        cx,
+                    ),
+                )
+                .into_any_element(),
+        ])
+    }
+
+    pub(super) fn render_oxide_import_app_settings_section(
+        &self,
+        section: &oxideterm_connections::oxide_file::AppSettingsSectionPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let section_id = section.id.clone();
+        let selected = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.selected_app_settings_sections.contains(&section_id));
+        let expanded = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.expanded_app_settings_sections.contains(&section_id));
+        let key_summary = if section.id == "legacy" {
+            self.i18n.t("modals.import.app_settings_legacy_description")
+        } else {
+            self.i18n.t("modals.import.app_settings_keys").replace(
+                "{{keys}}",
+                section
+                    .field_keys
+                    .iter()
+                    .map(|key| oxide_settings_field_label(key, &self.i18n))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+                    .as_str(),
+            )
+        };
+        let mut card = div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.render_oxide_subcard_bg(false))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .child(
+                div()
+                    .flex()
+                    .items_start()
+                    .justify_between()
+                    .gap(px(12.0))
+                    .cursor_pointer()
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .gap(px(8.0))
+                            .child(Self::render_lucide_icon(
+                                if selected {
+                                    LucideIcon::CheckSquare
+                                } else {
+                                    LucideIcon::Square
+                                },
+                                16.0,
+                                if selected {
+                                    rgb(self.tokens.ui.accent)
+                                } else {
+                                    rgb(self.tokens.ui.text_muted)
+                                },
+                            ))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(px(4.0))
+                                    .child(
+                                        div()
+                                            .text_size(px(self.tokens.metrics.ui_text_sm))
+                                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                                            .text_color(rgb(self.tokens.ui.text))
+                                            .child(oxide_settings_section_label(
+                                                &section.id, &self.i18n,
+                                            )),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                                            .line_height(px(16.0))
+                                            .text_color(rgb(self.tokens.ui.text_muted))
+                                            .child(key_summary),
+                                    )
+                                    .when(section.contains_env_vars, |body| {
+                                        body.child(
+                                            div()
+                                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                                .text_color(rgb(OXIDE_YELLOW_500))
+                                                .child(self.render_display_text_with_role(
+                                                    SelectableTextRole::PlainDocument,
+                                                    "oxide-import-env-warning",
+                                                    section.id.as_str(),
+                                                    self.i18n
+                                                        .t("modals.import.app_settings_contains_env_vars"),
+                                                    OXIDE_YELLOW_500,
+                                                    cx,
+                                                )),
+                                        )
+                                    }),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.text_muted))
+                            .child(self.render_display_text_with_role(
+                                SelectableTextRole::NonSelectable,
+                                "oxide-import-section-count",
+                                section.id.as_str(),
+                                self.i18n
+                                    .t("modals.import.plugin_settings_items")
+                                    .replace("{{count}}", &section.field_keys.len().to_string()),
+                                self.tokens.ui.text_muted,
+                                cx,
+                            )),
+                    )
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, _event, _window, cx| {
+                            this.session_manager.update(cx, |manager, cx| {
+                                if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                    if dialog.selected_app_settings_sections.contains(&section_id) {
+                                        dialog.selected_app_settings_sections.remove(&section_id);
+                                    } else {
+                                        dialog
+                                            .selected_app_settings_sections
+                                            .insert(section_id.clone());
+                                    }
+                                    dialog.import_app_settings =
+                                        !dialog.selected_app_settings_sections.is_empty();
+                                }
+                                cx.notify();
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ),
+            );
+
+        if section.id != "legacy" && !section.field_values.is_empty() {
+            let toggle_id = section.id.clone();
+            card = card.child(
+                div()
+                    .border_t_1()
+                    .border_color(rgb(self.tokens.ui.border))
+                    .pt(px(8.0))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.0))
+                    .child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(self.tokens.ui.accent))
+                            .cursor_pointer()
+                            .child(if expanded {
+                                self.i18n.t("modals.import.app_settings_hide_changes")
+                            } else {
+                                self.i18n.t("modals.import.app_settings_view_changes")
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, _window, cx| {
+                                    this.session_manager.update(cx, |manager, cx| {
+                                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                                            if dialog
+                                                .expanded_app_settings_sections
+                                                .contains(&toggle_id)
+                                            {
+                                                dialog
+                                                    .expanded_app_settings_sections
+                                                    .remove(&toggle_id);
+                                            } else {
+                                                dialog
+                                                    .expanded_app_settings_sections
+                                                    .insert(toggle_id.clone());
+                                            }
+                                        }
+                                        cx.notify();
+                                    });
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                    .when(expanded, |values| {
+                        let mut values = values.child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(rgb(self.tokens.ui.text))
+                                .child(self.render_selectable_text_scoped(
+                                    "oxide-import-app-settings-changes-heading",
+                                    &section.id,
+                                    self.i18n.t("modals.import.app_settings_diff_title"),
+                                    self.tokens.ui.text,
+                                    cx,
+                                )),
+                        );
+                        for key in &section.field_keys {
+                            if let Some(value) = section.field_values.get(key) {
+                                let line = format!(
+                                    "{}: {}",
+                                    oxide_settings_field_label(key, &self.i18n),
+                                    value
+                                );
+                                values = values.child(
+                                    div()
+                                        .rounded(px(self.tokens.radii.sm))
+                                        .bg(self.render_oxide_subcard_bg(true))
+                                        .px_2()
+                                        .py(px(6.0))
+                                        .text_size(px(self.tokens.metrics.ui_text_xs))
+                                        .text_color(rgb(self.tokens.ui.text_muted))
+                                        .child(self.render_selectable_text_scoped(
+                                            "oxide-import-app-settings-change",
+                                            key,
+                                            line,
+                                            self.tokens.ui.text_muted,
+                                            cx,
+                                        )),
+                                );
+                            }
+                        }
+                        values
+                    }),
+            );
+        }
+        card.into_any_element()
+    }
+
+    pub(super) fn render_oxide_import_quick_commands(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_quick_commands);
+        self.render_oxide_import_preview_subcard(vec![self.render_oxide_option_row(
+            "import-quick-commands",
+            format!("快捷命令（{} 条命令）", preview.quick_commands_count),
+            format!(
+                "导入 {} 个快捷命令组。已有冲突会按当前冲突策略处理；替换只替换冲突项。",
+                preview.quick_command_categories_count
+            ),
+            checked,
+            cx.listener(|this, _event, _window, cx| {
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        dialog.import_quick_commands = !dialog.import_quick_commands;
+                    }
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }),
+            cx,
+        )])
+    }
+
+    pub(super) fn render_oxide_import_serial_profiles(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_serial_profiles);
+        self.render_oxide_import_preview_subcard(vec![
+            self.render_oxide_option_row(
+                "import-serial",
+                self.i18n
+                    .t("modals.import.section_serial_profiles")
+                    .replace("{{count}}", &preview.serial_profiles_count.to_string()),
+                self.i18n.t("modals.import.toggle_serial_profiles"),
+                checked,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.import_serial_profiles = !dialog.import_serial_profiles;
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+                cx,
+            ),
+        ])
+    }
+
+    pub(super) fn render_oxide_import_mosh_profiles(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_mosh_profiles);
+        self.render_oxide_import_preview_subcard(vec![
+            self.render_oxide_option_row(
+                "import-mosh",
+                self.i18n
+                    .t("modals.import.section_mosh_profiles")
+                    .replace("{{count}}", &preview.mosh_profiles_count.to_string()),
+                self.i18n.t("modals.import.toggle_mosh_profiles"),
+                checked,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.import_mosh_profiles = !dialog.import_mosh_profiles;
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+                cx,
+            ),
+        ])
+    }
+
+    pub(super) fn render_oxide_import_telnet_profiles(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_telnet_profiles);
+        self.render_oxide_import_preview_subcard(vec![
+            self.render_oxide_option_row(
+                "import-telnet",
+                self.i18n
+                    .t("modals.import.section_telnet_profiles")
+                    .replace("{{count}}", &preview.telnet_profiles_count.to_string()),
+                self.i18n.t("modals.import.toggle_telnet_profiles"),
+                checked,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.import_telnet_profiles = !dialog.import_telnet_profiles;
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+                cx,
+            ),
+        ])
+    }
+
+    pub(super) fn render_oxide_import_plugins(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let import_plugin_settings = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_plugin_settings);
+        let mut children = vec![self.render_oxide_option_row(
+            "import-plugin-settings",
+            format!(
+                "插件偏好设置（{} 个插件）",
+                preview.plugin_settings_by_plugin.len()
+            ),
+            "导入插件偏好设置".to_string(),
+            import_plugin_settings,
+            cx.listener(|this, _event, _window, cx| {
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        dialog.import_plugin_settings = !dialog.import_plugin_settings;
+                    }
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }),
+            cx,
+        )];
+        let mut entries = preview
+            .plugin_settings_by_plugin
+            .iter()
+            .map(|(plugin_id, count)| (plugin_id.clone(), *count))
+            .collect::<Vec<_>>();
+        entries.sort_by(|left, right| left.0.cmp(&right.0));
+        if !entries.is_empty() {
+            let mut list = div().flex().flex_col().gap(px(4.0));
+            for (plugin_id, count) in entries {
+                let checked = self
+                    .session_manager
+                    .read(cx)
+                    .oxide_import_dialog
+                    .as_ref()
+                    .is_some_and(|dialog| dialog.selected_plugin_ids.contains(&plugin_id));
+                list =
+                    list.child(self.render_oxide_import_plugin_row(plugin_id, count, checked, cx));
+            }
+            children.push(list.into_any_element());
+        } else {
+            children.push(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.render_selectable_text_scoped(
+                        "oxide-import-plugin-settings-summary",
+                        (),
+                        format!(
+                            "此文件还会恢复 {} 项插件偏好设置。",
+                            preview.plugin_settings_count
+                        ),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    ))
+                    .into_any_element(),
+            );
+        }
+        self.render_oxide_import_preview_subcard(children)
+    }
+
+    pub(super) fn render_oxide_import_plugin_row(
+        &self,
+        plugin_id: String,
+        count: usize,
+        checked: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        div()
+            .flex()
+            .items_center()
+            .justify_between()
+            .rounded(px(self.tokens.radii.md))
+            .px_2()
+            .py(px(6.0))
+            .hover(|row| row.bg(rgb(self.tokens.ui.bg)))
+            .cursor_pointer()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .child(Self::render_lucide_icon(
+                        if checked {
+                            LucideIcon::CheckSquare
+                        } else {
+                            LucideIcon::Square
+                        },
+                        14.0,
+                        if checked {
+                            rgb(self.tokens.ui.accent)
+                        } else {
+                            rgb(self.tokens.ui.text_muted)
+                        },
+                    ))
+                    .child(plugin_id.clone()),
+            )
+            .child(
+                div()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.render_display_text_with_role(
+                        SelectableTextRole::NonSelectable,
+                        "oxide-import-plugin-settings-count",
+                        plugin_id.as_str(),
+                        format!("{count} 项设置"),
+                        self.tokens.ui.text_muted,
+                        cx,
+                    )),
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            if dialog.selected_plugin_ids.contains(&plugin_id) {
+                                dialog.selected_plugin_ids.remove(&plugin_id);
+                            } else {
+                                dialog.selected_plugin_ids.insert(plugin_id.clone());
+                                dialog.import_plugin_settings = true;
+                            }
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn render_oxide_import_portable_secrets(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_portable_secrets);
+        self.render_oxide_import_preview_subcard(vec![
+            self.render_oxide_option_row(
+                "import-secrets",
+                self.i18n
+                    .t("modals.import.section_portable_secrets")
+                    .replace("{{count}}", &preview.portable_secret_count.to_string()),
+                self.i18n.t("modals.import.toggle_portable_secrets"),
+                checked,
+                cx.listener(|this, _event, _window, cx| {
+                    this.session_manager.update(cx, |manager, cx| {
+                        if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                            dialog.import_portable_secrets = !dialog.import_portable_secrets;
+                        }
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+                cx,
+            ),
+            self.render_oxide_tone_notice(
+                OXIDE_BLUE_500,
+                self.i18n.t("modals.import.preview_portable_secrets"),
+                Vec::new(),
+                cx,
+            ),
+        ])
+    }
+
+    pub(super) fn render_oxide_import_forwards(
+        &self,
+        preview: &ImportPreview,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let checked = self
+            .session_manager
+            .read(cx)
+            .oxide_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.import_forwards);
+        let mut children = vec![self.render_oxide_option_row(
+            "import-forwards",
+            format!("已保存的端口转发（{}）", preview.total_forwards),
+            "导入已保存的端口转发".to_string(),
+            checked,
+            cx.listener(|this, _event, _window, cx| {
+                this.session_manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_import_dialog.as_mut() {
+                        dialog.import_forwards = !dialog.import_forwards;
+                    }
+                    cx.notify();
+                });
+                cx.stop_propagation();
+            }),
+            cx,
+        )];
+        if !preview.forward_details.is_empty() {
+            self.sync_oxide_import_forward_detail_list_state(&preview.forward_details, cx);
+            let state = self
+                .session_manager
+                .read(cx)
+                .oxide_import_forward_detail_list_state
+                .clone();
+            let spec = self.oxide_import_forward_detail_list_spec();
+            let renderer = OxideImportForwardDetailRenderer {
+                session_manager: self.session_manager.clone(),
+                tokens: self.tokens,
+            };
+            let list_height = (preview.forward_details.len() as f32
+                * OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT)
+                .min(112.0);
+            let list = div()
+                .id("oxide-import-preview-forwards")
+                .h(px(list_height))
+                .child(tauri_virtual_list(
+                    state,
+                    spec,
+                    move |index, _window, cx| renderer.render(index, cx),
+                ));
+            children.push(list.into_any_element());
+        }
+        self.render_oxide_import_preview_subcard(children)
+    }
+
+    pub(super) fn sync_oxide_import_forward_detail_list_state(
+        &self,
+        details: &[ForwardDetail],
+        cx: &App,
+    ) {
+        let signatures = details
+            .iter()
+            .map(oxide_import_forward_detail_signature)
+            .collect::<Vec<_>>();
+        let manager = self.session_manager.read(cx);
+        sync_tauri_variable_list_state_by_signatures(
+            &manager.oxide_import_forward_detail_list_state,
+            &mut manager.oxide_import_forward_detail_list_cache.borrow_mut(),
+            "oxide-import-forward-details",
+            &signatures,
+            self.oxide_import_forward_detail_list_spec(),
+        );
+    }
+
+    pub(super) fn oxide_import_forward_detail_list_spec(&self) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(
+            px(OXIDE_IMPORT_FORWARD_DETAIL_LIST_ESTIMATED_HEIGHT),
+            OXIDE_IMPORT_FORWARD_DETAIL_LIST_OVERSCAN,
+        )
+    }
+
+    pub(super) fn render_oxide_import_preview_subcard(
+        &self,
+        children: Vec<AnyElement>,
+    ) -> AnyElement {
+        div()
+            .rounded(px(self.tokens.radii.md))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .bg(self.render_oxide_subcard_bg(true))
+            .p(px(12.0))
+            .flex()
+            .flex_col()
+            .gap(px(8.0))
+            .children(children)
+            .into_any_element()
+    }
+}

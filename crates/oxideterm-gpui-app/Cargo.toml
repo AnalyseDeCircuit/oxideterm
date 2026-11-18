@@ -42,6 +42,7 @@ oxideterm-desktop-presence = { path = "../oxideterm-desktop-presence" }
 oxideterm-editor-core = { path = "../oxideterm-editor-core" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding" }
 oxideterm-gpui-cloud-sync = { path = "../oxideterm-gpui-cloud-sync" }
+oxideterm-gpui-connections = { path = "../oxideterm-gpui-connections" }
 oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-host-tools = { path = "../oxideterm-gpui-host-tools" }
 oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }

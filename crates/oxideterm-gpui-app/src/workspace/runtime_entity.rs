@@ -1792,6 +1792,10 @@ impl WorkspaceRuntimeEntity {
         Some((position, run.trace_plan.node_ids.len()))
     }
 
+    pub(in crate::workspace) fn connecting_node_locks(&self) -> &HashSet<NodeId> {
+        &self.connecting_node_locks
+    }
+
     pub(in crate::workspace) fn any_connecting_node_is_locked(&self, node_ids: &[NodeId]) -> bool {
         node_ids
             .iter()

@@ -629,9 +629,11 @@ impl WorkspaceTabHostEntity {
         self.tab_by_id(source)
             .zip(self.tab_by_id(target))
             .is_some_and(|(a, b)| {
-                a.root_pane.as_ref().map_or(1, PaneNode::pane_count)
-                    + b.root_pane.as_ref().map_or(1, PaneNode::pane_count)
-                    <= MAX_PANES_PER_TAB
+                a.kind != TabKind::Onboarding
+                    && b.kind != TabKind::Onboarding
+                    && a.root_pane.as_ref().map_or(1, PaneNode::pane_count)
+                        + b.root_pane.as_ref().map_or(1, PaneNode::pane_count)
+                        <= MAX_PANES_PER_TAB
             })
     }
 

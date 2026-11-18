@@ -34,8 +34,8 @@ pub(in crate::workspace) struct SshTunnels {
 pub(in crate::workspace) struct TunnelForm {
     pub(in crate::workspace) saved: Option<PersistedForward>,
     pub(in crate::workspace) host_id: Option<String>,
-    kind: ForwardType,
-    startup: bool,
+    pub(in crate::workspace) kind: ForwardType,
+    pub(in crate::workspace) startup: bool,
 }
 
 impl WorkspaceApp {
@@ -614,61 +614,4 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn move_ssh_tunnels_to_group(
-        &self,
-        ids: &[String],
-        group: Option<&str>,
-    ) -> Result<Vec<(String, Option<String>)>, String> {
-        let groups = self
-            .saved_ssh_tunnels()
-            .into_iter()
-            .filter(|saved| ids.contains(&saved.id))
-            .map(|saved| (saved.id, group.map(str::to_string)))
-            .collect::<Vec<_>>();
-        self.apply_tunnel_groups(&groups)
-    }
-
-    pub(in crate::workspace) fn change_tunnel_group_path(
-        &self,
-        old: &str,
-        new: Option<&str>,
-    ) -> Result<Vec<(String, Option<String>)>, String> {
-        let groups = self
-            .saved_ssh_tunnels()
-            .into_iter()
-            .filter_map(|saved| {
-                let group = saved.tunnel?.group?;
-                let suffix = group.strip_prefix(old)?;
-                if !suffix.is_empty() && !suffix.starts_with('/') {
-                    return None;
-                }
-                Some((saved.id, new.map(|new| format!("{new}{suffix}"))))
-            })
-            .collect::<Vec<_>>();
-        self.apply_tunnel_groups(&groups)
-    }
-
-    pub(in crate::workspace) fn apply_tunnel_groups(
-        &self,
-        groups: &[(String, Option<String>)],
-    ) -> Result<Vec<(String, Option<String>)>, String> {
-        if groups.is_empty() {
-            return Ok(Vec::new());
-        }
-        let store = self
-            .forwarding_service
-            .registry()
-            .saved_store()
-            .ok_or_else(|| self.i18n.t("ssh_tunnel.save_failed"))?;
-        let before = self
-            .saved_ssh_tunnels()
-            .into_iter()
-            .filter(|saved| groups.iter().any(|(id, _)| id == &saved.id))
-            .map(|saved| (saved.id, saved.tunnel.and_then(|profile| profile.group)))
-            .collect();
-        store
-            .update_tunnel_groups(groups)
-            .map_err(|_| self.i18n.t("ssh_tunnel.save_failed"))?;
-        Ok(before)
-    }
 }

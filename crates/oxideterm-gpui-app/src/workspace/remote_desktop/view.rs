@@ -292,7 +292,7 @@ impl WorkspaceApp {
             TerminalNoticeVariant::Error,
             cx,
         );
-        self.session_manager.update(cx, |session_manager, cx| {
+        self.connections.session_manager.update(cx, |session_manager, cx| {
             session_manager.set_status(Some(detail), cx);
         });
         cx.notify();

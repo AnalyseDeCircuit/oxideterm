@@ -15,54 +15,6 @@ use crate::workspace::standalone_connections::{
 };
 
 impl WorkspaceApp {
-    pub(super) fn request_delete_ble_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        let Some(profile) = self
-            .connection_store
-            .ble_profiles()
-            .iter()
-            .find(|profile| profile.id == id)
-            .cloned()
-        else {
-            return;
-        };
-        self.session_manager.update(cx, |session_manager, cx| {
-            close_session_menu_state(session_manager);
-            session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::BleProfile {
-                id: profile.id,
-                name: profile.name,
-            });
-            cx.notify();
-        });
-    }
-
-    pub(super) fn delete_ble_profile(&mut self, id: &str, cx: &mut Context<Self>) {
-        let (status, changed) = match self.connection_store.delete_ble_profile(id) {
-            Ok(true) => (self.i18n.t("sessionManager.ble_profiles.delete"), true),
-            Ok(false) => (
-                self.i18n.t("sessionManager.ble_profiles.delete_failed"),
-                false,
-            ),
-            Err(error) => (
-                format!(
-                    "{}: {error}",
-                    self.i18n.t("sessionManager.ble_profiles.delete_failed")
-                ),
-                false,
-            ),
-        };
-        self.session_manager.update(cx, |session_manager, cx| {
-            if changed {
-                session_manager
-                    .selected_items
-                    .remove(&SessionManagerSelectionTarget::Ble(id.to_string()));
-            }
-            session_manager.set_status(Some(status), cx)
-        });
-        if changed {
-            self.queue_cloud_sync_dirty_refresh(cx);
-        }
-    }
-
     pub(super) fn open_saved_ble_profile(
         &mut self,
         id: &str,
@@ -176,9 +128,11 @@ impl WorkspaceApp {
                     &[("device", &device)],
                 );
                 self.standalone_connections.mark_attempt_error(&attempt_id);
-                self.session_manager.update(cx, |session_manager, cx| {
-                    session_manager.set_status(Some(status), cx)
-                });
+                self.connections
+                    .session_manager
+                    .update(cx, |session_manager, cx| {
+                        session_manager.set_status(Some(status), cx)
+                    });
                 return;
             }
         }

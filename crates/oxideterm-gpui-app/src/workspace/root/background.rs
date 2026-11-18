@@ -179,6 +179,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn toggle_titlebar_theme(&mut self, cx: &mut Context<Self>) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         if self.settle_expired_theme_transition(cx) {
             return;
         }

@@ -1,139 +1,16 @@
-use gpui::{
-    AnyElement, Context, KeyDownEvent, MouseButton, ParentElement, Styled, Window, div, prelude::*,
-    px, rgb, rgba,
-};
+use gpui::{Context, KeyDownEvent, Window};
 use oxideterm_ssh::{
-    KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPasswordResponse,
-    SshPromptError,
+    KeyboardInteractivePromptRequest, KeyboardInteractiveResponses, SshPromptError,
 };
-use std::time::{Duration, Instant};
 use tokio::sync::oneshot;
 
 use crate::workspace::WorkspaceApp;
-use crate::workspace::ime::{WorkspaceImeTarget, keystroke_uses_text_edit_modifier};
+use crate::workspace::ime::keystroke_uses_text_edit_modifier;
 use crate::workspace::new_connection::entity::{
     KeyboardInteractiveKeyAction, KeyboardInteractiveSubmitResult,
 };
-use oxideterm_gpui_ui::{
-    TextInputView,
-    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
-    form_field,
-    modal::{modal_container, rounded_shell_child_radius},
-    text_input_anchor_probe,
-};
 
-const KBI_PROMPT_TIMEOUT_SECS: u64 = 60;
-
-pub(in crate::workspace) enum NativeSshPromptSender {
-    Interactive(oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>),
-    Password {
-        response_tx: oneshot::Sender<Result<SshPasswordResponse, SshPromptError>>,
-        on_authenticated: Option<Box<dyn FnOnce(zeroize::Zeroizing<String>) + Send>>,
-    },
-}
-
-impl From<oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>>
-    for NativeSshPromptSender
-{
-    fn from(sender: oneshot::Sender<Result<KeyboardInteractiveResponses, SshPromptError>>) -> Self {
-        Self::Interactive(sender)
-    }
-}
-
-impl NativeSshPromptSender {
-    pub(super) fn is_closed(&self) -> bool {
-        match self {
-            Self::Interactive(sender) => sender.is_closed(),
-            Self::Password { response_tx, .. } => response_tx.is_closed(),
-        }
-    }
-
-    pub(super) fn can_remember(&self) -> bool {
-        matches!(
-            self,
-            Self::Password {
-                on_authenticated: Some(_),
-                ..
-            }
-        )
-    }
-
-    pub(super) fn send(
-        self,
-        result: Result<KeyboardInteractiveResponses, SshPromptError>,
-    ) -> Result<(), ()> {
-        self.send_with_remember(result, false)
-    }
-
-    pub(super) fn send_with_remember(
-        self,
-        result: Result<KeyboardInteractiveResponses, SshPromptError>,
-        remember: bool,
-    ) -> Result<(), ()> {
-        match self {
-            Self::Interactive(sender) => sender.send(result).map_err(|_| ()),
-            Self::Password {
-                response_tx,
-                on_authenticated,
-            } => {
-                let result = result.and_then(|mut responses| {
-                    if responses.len() != 1 {
-                        return Err(SshPromptError::Failed("Invalid password response".into()));
-                    }
-                    Ok(SshPasswordResponse {
-                        password: zeroize::Zeroizing::new(std::mem::take(&mut responses[0])),
-                        on_authenticated: if remember { on_authenticated } else { None },
-                    })
-                });
-                response_tx.send(result).map_err(|_| ())
-            }
-        }
-    }
-}
-pub(in crate::workspace) struct KeyboardInteractiveChallenge {
-    pub(super) presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pub(super) request: KeyboardInteractivePromptRequest,
-    pub(in crate::workspace) responses: KeyboardInteractiveResponses,
-    pub(in crate::workspace) focused_prompt: usize,
-    pub(super) remember_password: bool,
-    pub(super) external_wait: bool,
-    pub(super) expires_at: Instant,
-    pub(super) response_tx: Option<NativeSshPromptSender>,
-}
-
-impl KeyboardInteractiveChallenge {
-    pub(super) fn new(
-        request: KeyboardInteractivePromptRequest,
-        response_tx: NativeSshPromptSender,
-    ) -> Self {
-        let responses =
-            KeyboardInteractiveResponses::new(vec![String::new(); request.prompts.len()]);
-        Self {
-            presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            request,
-            responses,
-            focused_prompt: 0,
-            remember_password: false,
-            external_wait: false,
-            expires_at: Instant::now() + Duration::from_secs(KBI_PROMPT_TIMEOUT_SECS),
-            response_tx: Some(response_tx),
-        }
-    }
-
-    pub(in crate::workspace) fn timed_out(&self) -> bool {
-        Instant::now() >= self.expires_at
-    }
-
-    pub(in crate::workspace) fn seconds_left(&self) -> u64 {
-        self.expires_at
-            .saturating_duration_since(Instant::now())
-            .as_secs()
-    }
-
-    pub(super) fn all_responses_filled(&self) -> bool {
-        !self.external_wait && self.responses.iter().all(|response| !response.is_empty())
-    }
-}
+pub(in crate::workspace) use oxideterm_gpui_connections::prompts::NativeSshPromptSender;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_keyboard_interactive_challenge(
@@ -143,7 +20,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let opened = self.connection_flow.update(cx, |connection_flow, cx| {
+        let opened = self.connections.flow.update(cx, |connection_flow, cx| {
             connection_flow.open_keyboard_interactive_challenge(request, response_tx, cx)
         });
         if !opened {
@@ -164,7 +41,7 @@ impl WorkspaceApp {
     ) -> bool {
         let key = event.keystroke.key.as_str();
         let modifiers = event.keystroke.modifiers;
-        let action = self.connection_flow.update(cx, |connection_flow, cx| {
+        let action = self.connections.flow.update(cx, |connection_flow, cx| {
             connection_flow.handle_keyboard_interactive_key(
                 key,
                 modifiers.shift,
@@ -188,33 +65,23 @@ impl WorkspaceApp {
             }
             KeyboardInteractiveKeyAction::Handled => {
                 self.show_active_input_caret(cx);
-                cx.notify();
                 true
             }
         }
     }
 
     fn paste_into_keyboard_interactive_field(&mut self, cx: &mut Context<Self>) {
-        let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) else {
-            return;
-        };
-        let normalized = text.replace("\r\n", "\n").replace('\r', "\n");
-        let single_line = normalized.lines().collect::<Vec<_>>().join(" ");
-        let pasted = self.connection_flow.update(cx, |connection_flow, cx| {
-            connection_flow.paste_keyboard_interactive_response(&single_line, cx)
-        });
-        if pasted {
+        if self.connections.flow.update(cx, |flow, cx| flow.paste_interactive_clipboard(cx)) {
             self.show_active_input_caret(cx);
-            cx.notify();
         }
     }
 
-    fn submit_keyboard_interactive_challenge(
+    pub(in crate::workspace) fn submit_keyboard_interactive_challenge(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let result = self.connection_flow.update(cx, |connection_flow, cx| {
+        let result = self.connections.flow.update(cx, |connection_flow, cx| {
             connection_flow.submit_keyboard_interactive_challenge(cx)
         });
         if matches!(result, KeyboardInteractiveSubmitResult::Submitted)
@@ -232,7 +99,7 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        let cancelled = self.connection_flow.update(cx, |connection_flow, cx| {
+        let cancelled = self.connections.flow.update(cx, |connection_flow, cx| {
             connection_flow.cancel_keyboard_interactive_challenge(delay, cx)
         });
         if cancelled {
@@ -245,304 +112,5 @@ impl WorkspaceApp {
             });
             cx.notify();
         }
-    }
-
-    pub(in crate::workspace) fn render_keyboard_interactive_dialog(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let connection_flow = self.connection_flow.read(cx);
-        let Some(challenge) = connection_flow.keyboard_interactive_challenge() else {
-            return div().into_any_element();
-        };
-        let dialog_visible =
-            challenge.presence.phase() == oxideterm_gpui_ui::motion::ExitPhase::Visible;
-        let theme = self.tokens.ui;
-        let title = if challenge.request.name.trim().is_empty() {
-            self.i18n.t("ssh.kbi.title")
-        } else {
-            challenge.request.name.clone()
-        };
-        let timed_out = challenge.timed_out();
-        let seconds_left = challenge.seconds_left();
-        let can_submit = !timed_out && challenge.all_responses_filled();
-        let external_wait = challenge.external_wait;
-
-        let mut prompt_list = div()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.modal_section_gap));
-        for (index, prompt) in challenge.request.prompts.iter().enumerate() {
-            let target = WorkspaceImeTarget::KeyboardInteractive(index);
-            let workspace = cx.entity();
-            let focused = challenge.focused_prompt == index;
-            let value = challenge
-                .responses
-                .get(index)
-                .map(String::as_str)
-                .unwrap_or_default();
-            prompt_list = prompt_list.child(form_field(
-                &self.tokens,
-                if prompt.prompt == "ssh.form.password" {
-                    self.i18n.t("ssh.form.password")
-                } else {
-                    prompt.prompt.clone()
-                },
-                text_input_anchor_probe(
-                    target.anchor_id(),
-                    self.workspace_text_input(
-                        target,
-                        TextInputView {
-                            value,
-                            placeholder: String::new(),
-                            focused,
-                            caret_visible: self.input_caret.visible(),
-                            secret: !prompt.echo,
-                            selected_all: false,
-                            selected_range: self.ime_selected_range_for_target(target, cx),
-                            marked_text: self.marked_text_for_target(target, cx),
-                        },
-                    )
-                    .id(("kbi-prompt", index))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                            this.connection_flow.update(cx, |connection_flow, cx| {
-                                connection_flow.focus_keyboard_interactive_prompt(index, cx);
-                            });
-                            this.ime_marked_text = None;
-                            this.show_active_input_caret(cx);
-                            window.focus(&this.focus_handle, cx);
-                            this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(
-                        |this, event: &gpui::MouseMoveEvent, window, cx| {
-                            this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                        },
-                    )),
-                    move |anchor, _window, cx| {
-                        let _ = workspace.update(cx, |this, cx| {
-                            this.update_text_input_anchor(anchor, cx);
-                        });
-                    },
-                ),
-            ));
-        }
-
-        if challenge
-            .response_tx
-            .as_ref()
-            .is_some_and(NativeSshPromptSender::can_remember)
-        {
-            prompt_list = prompt_list.child(
-                oxideterm_gpui_ui::checkbox_with(
-                    &self.tokens,
-                    "ssh-prompt-save-password",
-                    self.i18n.t("ssh.kbi.save_password_after_login"),
-                    challenge.remember_password,
-                    oxideterm_gpui_ui::CheckboxOptions {
-                        disabled: timed_out,
-                        ..Default::default()
-                    },
-                )
-                .id("ssh-prompt-save-password")
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _, _, cx| {
-                        this.connection_flow.update(cx, |flow, cx| {
-                            flow.toggle_prompt_password_remember(cx);
-                        });
-                        cx.stop_propagation();
-                    }),
-                ),
-            );
-        }
-
-        // Authentication fields redraw while waiting and typing. Avoid sampling
-        // the entire window for blur on each of those frames.
-        oxideterm_gpui_ui::modal::staged_overlay_root()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    // Tauri GlobalKbiDialog maps Radix outside-close to
-                    // handleCancel(), which rejects the pending KBI prompt.
-                    this.cancel_keyboard_interactive_challenge(cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(oxideterm_gpui_ui::modal::staged_overlay_scrim(
-                &self.tokens,
-                "keyboard-interactive-dialog-scrim",
-                oxideterm_gpui_ui::modal::TauriBackdropRole::Dialog,
-                true,
-            ))
-            .child(oxideterm_gpui_ui::motion::form_transition(
-                &self.tokens,
-                "keyboard-interactive-dialog-transition",
-                modal_container(&self.tokens)
-                    .bg(rgb(theme.bg_elevated))
-                    .w(px(self.tokens.metrics.modal_width))
-                    .rounded(px(self.tokens.radii.md))
-                    .overflow_hidden()
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        div()
-                            .px(px(self.tokens.metrics.modal_header_padding_x))
-                            .py(px(self.tokens.metrics.modal_header_padding_y))
-                            .bg(rgb(theme.bg_panel))
-                            // Browser DialogContent clips the painted header
-                            // into the shell radius; keep native KBI prompts
-                            // from exposing square top-corner pixels.
-                            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.md)))
-                            .border_b_1()
-                            .border_color(rgb(theme.border))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.modal_title_font_size))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(theme.text_heading))
-                                    .child(title),
-                            )
-                            .when(
-                                !challenge.request.instructions.trim().is_empty(),
-                                |header| {
-                                    header.child(
-                                        div()
-                                            .mt_1()
-                                            .text_size(px(self
-                                                .tokens
-                                                .metrics
-                                                .modal_description_font_size))
-                                            .text_color(rgb(theme.text_muted))
-                                            .child(challenge.request.instructions.clone()),
-                                    )
-                                },
-                            ),
-                    )
-                    .child(
-                        div()
-                            .p(px(self.tokens.metrics.modal_body_padding))
-                            .flex()
-                            .flex_col()
-                            .gap(px(self.tokens.metrics.modal_body_gap))
-                            .child(
-                                div()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .border_1()
-                                    .border_color(if seconds_left <= 15 {
-                                        rgba((theme.error << 8) | 0x80)
-                                    } else {
-                                        rgb(theme.border)
-                                    })
-                                    .bg(if seconds_left <= 15 {
-                                        rgba((theme.error << 8) | 0x18)
-                                    } else {
-                                        rgba((theme.bg_hover << 8) | 0x80)
-                                    })
-                                    .px(px(12.0))
-                                    .py(px(8.0))
-                                    .text_size(px(self.tokens.metrics.form_text_font_size))
-                                    .text_color(if seconds_left <= 15 {
-                                        rgb(theme.error)
-                                    } else {
-                                        rgb(theme.text_muted)
-                                    })
-                                    .child(if timed_out {
-                                        self.i18n.t("modals.kbi.timeout")
-                                    } else {
-                                        self.i18n_replace(
-                                            "modals.kbi.time_remaining",
-                                            &[("seconds", seconds_left.to_string())],
-                                        )
-                                    }),
-                            )
-                            .child(prompt_list),
-                    )
-                    .child(
-                        div()
-                            .h(px(self.tokens.metrics.modal_footer_height))
-                            .px(px(self.tokens.metrics.modal_footer_padding_x))
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .justify_end()
-                            .gap_2()
-                            .border_t_1()
-                            .border_color(rgb(theme.border))
-                            .bg(rgb(theme.bg_panel))
-                            // Footer chrome is flush with the dialog bottom,
-                            // so it owns the inner bottom corners too.
-                            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.md)))
-                            .child(self.render_keyboard_interactive_button(
-                                self.i18n.t("ssh.form.cancel"),
-                                false,
-                                false,
-                                false,
-                                cx,
-                            ))
-                            .when(!external_wait, |footer| {
-                                footer.child(self.render_keyboard_interactive_button(
-                                    self.i18n.t("ssh.kbi.continue"),
-                                    true,
-                                    true,
-                                    !can_submit,
-                                    cx,
-                                ))
-                            }),
-                    ),
-                dialog_visible,
-            ))
-            .into_any_element()
-    }
-
-    fn render_keyboard_interactive_button(
-        &self,
-        label: String,
-        _primary: bool,
-        submit: bool,
-        disabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let variant = if submit {
-            ButtonVariant::Default
-        } else {
-            ButtonVariant::Ghost
-        };
-        // Keyboard-interactive prompts are authentication-protected dialogs, so
-        // keep submit/cancel ownership here while sharing the Tauri Button
-        // variant chrome.
-        self.workspace_toolbar_action_button(
-            label,
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                height: Some(self.tokens.metrics.form_button_height),
-                padding_x: Some(self.tokens.metrics.form_button_padding_x),
-                font_size: Some(self.tokens.metrics.form_text_font_size),
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(move |this, _event, window, cx| {
-                if disabled {
-                    return;
-                }
-                if submit {
-                    this.submit_keyboard_interactive_challenge(window, cx);
-                } else {
-                    this.cancel_keyboard_interactive_challenge(cx);
-                }
-            }),
-        )
-        .into_any_element()
     }
 }

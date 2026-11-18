@@ -23,6 +23,13 @@
 - 不允许通过削弱测试、吞掉错误、增加测试专用分支或静默降级来获得通过结果。
 - 修改产生的未使用导入、变量、函数或文件应一并清理；不要清理修改前已存在的无关问题。
 
+### Crate 边界与新功能落位
+
+- **新功能默认进子 crate，禁止直接往 `oxideterm-gpui-app` 堆业务**：纯协议、持久化、解析与无界面逻辑放进对应 `oxideterm-*` 后端 crate（禁止引入 `gpui`）；独立功能面板、弹窗、设置页或向导放进已有或新建的 `oxideterm-gpui-*` 功能界面 crate。
+- **主包只留窗口骨架与运行时桥接**：`oxideterm-gpui-app` 只负责窗口外壳、标签页与窗格树调度、`ime` 与全局快捷键、节点/会话运行态注册表以及对子包的窄 `HostBridge`；不得再向 `WorkspaceApp` 直接堆业务字段和大段界面渲染。
+- **独立 `Render` 与局部刷新红线**：`oxideterm-gpui-*` 功能 crate 必须自己拥有状态实体、`impl Render` 视图、列表缓存和局部 `cx.notify()`，多弹窗句柄优先收拢成单一聚合结构；禁止反向依赖 `oxideterm-gpui-app`，禁止图省事在 `workspace/root/init.rs` 增加全窗口 `cx.observe(..., |_, _, cx| cx.notify())`。
+- **落位与拆包门禁**：新增独立功能模块、新建 crate 或重构主包代码前，先阅读 `.agents/skills/split-crate-by-responsibility/SKILL.md` 按规范划清边界。
+
 ## 修改前检查
 
 开始编码前回答以下问题：

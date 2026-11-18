@@ -30,6 +30,18 @@ pub fn browser_focus_visible(focused: bool, origin: Option<BrowserFocusOrigin>) 
     focused && origin.is_some_and(BrowserFocusOrigin::is_focus_visible)
 }
 
+pub fn close_browser_trigger_select<T>(
+    open_select: &mut Option<T>,
+    focus_origin: &mut Option<BrowserFocusOrigin>,
+) -> bool {
+    let had_open_select = open_select.take().is_some();
+    if had_open_select {
+        // Release the transient input modality before the next trigger opens.
+        *focus_origin = None;
+    }
+    had_open_select
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BrowserSelectKeyDirection {
     Previous,

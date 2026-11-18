@@ -23,6 +23,7 @@ pub(in crate::workspace) fn tab_background_key(kind: &TabKind) -> &'static str {
         TabKind::Knowledge => "knowledge",
         TabKind::RemoteDesktop => "remote_desktop",
         TabKind::Settings => "settings",
+        TabKind::Onboarding => "onboarding",
     }
 }
 
@@ -345,20 +346,7 @@ impl WorkspaceApp {
         options: oxideterm_gpui_ui::button::ToolbarButtonOptions,
         listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
     ) -> gpui::Div {
-        let actionable = !(options.button.disabled || options.loading);
-
-        // Tauri Button activation always goes through the native disabled
-        // attribute. GPUI callers still own the action body, but the shared
-        // wrapper keeps disabled/loading activation guards out of feature code.
-        oxideterm_gpui_ui::button::toolbar_button(&self.tokens, label, icon, options)
-            .when(actionable, |button| {
-                button.on_mouse_down(MouseButton::Left, listener)
-            })
-            .when(!actionable, |button| {
-                button.on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                    cx.stop_propagation();
-                })
-            })
+        oxideterm_gpui_ui::button::toolbar_action_button(&self.tokens, label, icon, options, listener)
     }
 
     pub(in crate::workspace) fn workspace_confirm_footer_action_button(
@@ -970,7 +958,7 @@ impl WorkspaceApp {
         {
             changed = true;
         }
-        if self.session_manager.update(cx, |session_manager, cx| {
+        if self.connections.session_manager.update(cx, |session_manager, cx| {
             if !session_manager.show_batch_move {
                 return false;
             }
@@ -980,7 +968,7 @@ impl WorkspaceApp {
         }) {
             changed = true;
         }
-        if self.session_manager.update(cx, |session_manager, cx| {
+        if self.connections.session_manager.update(cx, |session_manager, cx| {
             let Some(dialog) = session_manager.batch_add.as_mut() else {
                 return false;
             };

@@ -57,11 +57,44 @@ mod tests {
             let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
             WorkspaceWindowShell::new(workspace, window, cx)
         });
-        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
+        let (window_handle, workspace) = (
+            shell.window_handle(),
+            shell.read_with(cx, |shell, _| shell.session_entity()),
+        );
         cx.run_until_parked();
-        workspace.read_with(cx, |this, _| {
+        workspace.read_with(cx, |this, cx| {
             assert!(this.onboarding.open);
             assert!(!this.version_migration.open);
+            assert!(this.onboarding_disclaimer_locked());
+            assert!(
+                this.tabs(cx)
+                    .iter()
+                    .any(|tab| tab.kind == TabKind::Onboarding),
+                "startup onboarding must mount as a dedicated tab"
+            );
+        });
+        let onboarding_tab_id = workspace.read_with(cx, |this, cx| {
+            this.tabs(cx)
+                .iter()
+                .find(|tab| tab.kind == TabKind::Onboarding)
+                .unwrap()
+                .id
+        });
+        let _ = cx.update_window(window_handle, |_, window, cx| {
+            workspace.update(cx, |this, cx| {
+                // Closing or opening other surfaces must stay blocked until disclaimer acceptance.
+                this.request_close_tab_by_id(onboarding_tab_id, window, cx);
+                this.open_settings(window, cx);
+                let _ = this.create_local_terminal_tab(window, cx);
+                this.onboarding_go_to_step(1, cx);
+                assert_eq!(this.onboarding.step, 0);
+                assert!(
+                    this.tabs(cx)
+                        .iter()
+                        .all(|tab| tab.kind == TabKind::Onboarding),
+                    "no unrelated tab may open before accepting the disclaimer"
+                );
+            });
         });
         let unreadable = b"unreadable settings fixture";
         std::fs::write(&settings_path, unreadable).unwrap();
@@ -70,6 +103,7 @@ mod tests {
         workspace.update(cx, |this, cx| {
             this.settings_store = recovered;
             this.onboarding.disclaimer_accepted = true;
+            assert!(!this.onboarding_disclaimer_locked());
             this.onboarding.step = ONBOARDING_TOTAL_STEPS - 1;
             this.onboarding.ai_opt_in = true;
             this.onboarding.tool_use_opt_in = true;
@@ -81,6 +115,11 @@ mod tests {
             assert!(this.onboarding.save_failed);
             assert_eq!(this.onboarding.step, ONBOARDING_TOTAL_STEPS - 1);
             assert_eq!(this.settings_store.settings(), &previous_settings);
+            assert!(
+                this.tabs(cx)
+                    .iter()
+                    .any(|tab| tab.kind == TabKind::Onboarding)
+            );
         });
         assert_eq!(std::fs::read(&settings_path).unwrap(), unreadable);
         // Recover the isolated fixture and retry the same user choices.
@@ -91,6 +130,12 @@ mod tests {
             this.complete_onboarding(cx);
             assert!(!this.onboarding.open);
             assert!(!this.onboarding.save_failed);
+            assert!(
+                this.tabs(cx)
+                    .iter()
+                    .all(|tab| tab.kind != TabKind::Onboarding),
+                "completing onboarding must remove the onboarding tab"
+            );
         });
         let restarted = SettingsStore::load_from_path(&settings_path).unwrap();
         assert!(restarted.settings().onboarding_completed);
@@ -106,7 +151,67 @@ mod tests {
 }
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn open_onboarding_from_palette(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn onboarding_disclaimer_locked(&self) -> bool {
+        self.onboarding.open
+            && !self.onboarding.disclaimer_accepted
+            && !self.version_migration.open
+    }
+
+    pub(in crate::workspace) fn ensure_onboarding_tab(
+        &mut self,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
+        let tab_id = if let Some(tab) = self
+            .tabs(cx)
+            .iter()
+            .find(|tab| tab.kind == TabKind::Onboarding)
+        {
+            tab.id
+        } else {
+            let tab_id = self.alloc_tab_id(cx);
+            self.insert_tab(
+                Tab {
+                    id: tab_id,
+                    kind: TabKind::Onboarding,
+                    title: self.i18n.t("onboarding.step_welcome"),
+                    title_source: TabTitleSource::I18nKey("onboarding.step_welcome"),
+                    root_pane: None,
+                    active_pane_id: None,
+                },
+                cx,
+            );
+            tab_id
+        };
+        self.set_main_window_active_tab(Some(tab_id), cx);
+        self.sync_active_tab_surface(cx);
+        self.needs_active_pane_focus = false;
+        if let Some(window) = window {
+            self.reveal_active_tab(window, cx);
+        }
+    }
+
+    fn remove_onboarding_tab(&mut self, cx: &mut Context<Self>) {
+        while let Some(index) = self
+            .tabs(cx)
+            .iter()
+            .position(|tab| tab.kind == TabKind::Onboarding)
+        {
+            let Some(transition) = self
+                .tab_host
+                .update(cx, |tab_host, _cx| tab_host.remove_tab_at(index))
+            else {
+                break;
+            };
+            self.finish_tab_removal(transition, None, None, cx);
+        }
+    }
+
+    pub(in crate::workspace) fn open_onboarding_from_palette(
+        &mut self,
+        window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) {
         self.close_settings_select();
         self.blur_text_inputs(cx);
         self.finish_settings_slider_drag(cx);
@@ -126,6 +231,7 @@ impl WorkspaceApp {
         );
         self.onboarding
             .reset_for_open(self.settings_store.settings());
+        self.ensure_onboarding_tab(window, cx);
         cx.notify();
     }
 
@@ -155,6 +261,7 @@ impl WorkspaceApp {
                 self.sync_tab_titles(cx);
                 self.onboarding.save_failed = false;
                 self.onboarding.open = false;
+                self.remove_onboarding_tab(cx);
                 self.close_settings_select();
                 self.blur_text_inputs(cx);
                 self.finish_settings_slider_drag(cx);
@@ -201,18 +308,17 @@ impl WorkspaceApp {
         self.blur_text_inputs(cx);
         self.finish_settings_slider_drag(cx);
         self.onboarding.scroll_handle = ScrollHandle::new();
-        if OnboardingStep::from_index(step) == OnboardingStep::Tools
-            && self
+        if OnboardingStep::from_index(step) == OnboardingStep::Launch {
+            if self
                 .settings_workspace
                 .read(cx)
                 .cli_companion_needs_refresh()
-        {
-            self.refresh_cli_companion_status(cx);
-        }
-        if OnboardingStep::from_index(step) == OnboardingStep::QuickStart
-            && self.onboarding.host_count.is_none()
-        {
-            self.refresh_onboarding_ssh_host_count(cx);
+            {
+                self.refresh_cli_companion_status(cx);
+            }
+            if self.onboarding.host_count.is_none() {
+                self.refresh_onboarding_ssh_host_count(cx);
+            }
         }
         cx.notify();
     }

@@ -701,7 +701,7 @@ impl WorkspaceApp {
                 .then_some(plugins.confirm_phase())
         };
         let (oxide_import_phase, oxide_export_phase, batch_add_phase) = {
-            let session_manager = self.session_manager.read(cx);
+            let session_manager = self.connections.session_manager.read(cx);
             (
                 session_manager
                     .oxide_import_dialog
@@ -721,9 +721,9 @@ impl WorkspaceApp {
             new_connection_open,
             local_shell_launcher_open: self.local_shell_launcher_open,
             jump_server_open,
-            host_key_challenge_open: self.connection_flow.read(cx).has_host_key_challenge(),
+            host_key_challenge_open: self.connections.flow.read(cx).has_host_key_challenge(),
             keyboard_interactive_challenge_open: self
-                .connection_flow
+                .connections.flow
                 .read(cx)
                 .has_keyboard_interactive_challenge(),
             ai_enable_phase,
@@ -806,7 +806,11 @@ impl WorkspaceApp {
             batch_add_phase,
             command_palette_open: self.command_palette.read(cx).is_open(),
             version_migration_open: self.version_migration.open,
-            onboarding_open: self.onboarding.open,
+            onboarding_open: self.onboarding.open
+                && (!self.onboarding.disclaimer_accepted
+                    || self
+                        .active_content_tab(cx)
+                        .is_some_and(|tab| tab.kind == TabKind::Onboarding)),
             shortcuts_open: self.shortcuts_modal.open,
             app_lock_dialog_open: self.app_lock.dialog.is_some(),
             mermaid_zoom_open: self.mermaid_zoom.as_ref().is_some_and(|state| {
@@ -982,7 +986,7 @@ impl WorkspaceApp {
     }
 
     fn session_manager_modal_owner(&self, cx: &App) -> Option<ActiveTabWindowModalSnapshot> {
-        let manager = self.session_manager.read(cx);
+        let manager = self.connections.session_manager.read(cx);
         let kind = if manager.delete_confirm.is_some() {
             ActiveTabWindowModalKind::SessionManagerDelete
         } else if manager.show_group_manager {
@@ -1358,7 +1362,7 @@ impl WorkspaceApp {
             ActiveWindowModalOwner::BatchAdd { .. } => {
                 if event.keystroke.key.as_str() == "escape" {
                     // Esc cancels inline naming, then the dropdowns, then the dialog.
-                    let consumed = self.session_manager.update(cx, |session_manager, cx| {
+                    let consumed = self.connections.session_manager.update(cx, |session_manager, cx| {
                         let Some(dialog) = session_manager.batch_add.as_mut() else {
                             return false;
                         };
@@ -1468,7 +1472,7 @@ impl WorkspaceApp {
                     return true;
                 }
                 if event.keystroke.key.as_str() == "escape" {
-                    if self.session_manager.read(cx).row_action_menu.is_some() {
+                    if self.connections.session_manager.read(cx).row_action_menu.is_some() {
                         self.close_session_row_menus(cx);
                     } else {
                         self.close_session_group_manager(cx);

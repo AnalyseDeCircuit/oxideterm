@@ -149,21 +149,9 @@ impl WorkspaceApp {
     }
 
     fn render_session_manager_window_modals(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        &self, _window: &Window, _cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let manager = self.session_manager.read(cx);
-        let show_group_manager = manager.show_group_manager;
-        let show_delete_confirm = manager.delete_confirm.is_some();
-        let mut modals = Vec::new();
-        if show_group_manager {
-            modals.push(self.render_group_manager_dialog(window, cx));
-        }
-        if show_delete_confirm {
-            modals.push(self.render_session_manager_delete_confirm(cx));
-        }
-        modals
+        vec![self.connections.session_manager_dialogs()]
     }
 }
 
@@ -234,6 +222,7 @@ impl WorkspaceApp {
                         | TabKind::CloudSync
                         | TabKind::Knowledge
                         | TabKind::RemoteDesktop
+                        | TabKind::Onboarding
                 )
             })
             && self.focused_search_pane(cx).is_none()
@@ -261,6 +250,7 @@ impl WorkspaceApp {
         let content = if let Some((tab_id, tab_kind, root_pane)) = &active_tab_projection {
             match (tab_kind, root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(),
+                (TabKind::Onboarding, _) => self.render_onboarding_tab(window, cx),
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(),
                 (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
@@ -348,7 +338,7 @@ impl WorkspaceApp {
         let has_window_background = window_background_layer.is_some();
         let native_update_notification = self.settings_views.native_update_notice.clone().into_any_element();
         let show_connection_cards = !self
-            .connection_flow
+            .connections.flow
             .read(cx)
             .has_keyboard_interactive_challenge();
         let overlay_layers = {
@@ -377,6 +367,7 @@ impl WorkspaceApp {
         let sidebar_resize_cursor_active =
             self.sidebar_resizing || self.ai_entity.read(cx).chat_ui().sidebar_resizing;
         let embedded_sftp_resize_cursor_active = self.embedded_sftp_sidebar_resizing;
+        let disclaimer_locked = self.onboarding_disclaimer_locked();
         let read_only_selection_workspace = cx.entity();
         self.update_main_window_tabbar_drop_bounds(window, titlebar_visible, zen_mode, cx);
 
@@ -892,190 +883,11 @@ impl WorkspaceApp {
                     this.finish_workspace_pointer_captures(event, window, cx);
                 }),
             )
-            .on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
-                let _ = this.create_local_terminal_tab(window, cx);
-            }))
-            .on_action(cx.listener(
-                |this, action: &oxideterm_gpui_editor::ManageLanguagePlugin, window, cx| {
-                    this.open_language_plugin(&action.plugin_id, window, cx);
-                },
-            ))
-            .on_action(cx.listener(|this, _: &ShellLauncher, _window, cx| {
-                this.open_local_shell_launcher(cx);
-            }))
-            .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
-                this.request_close_active_tab(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &CloseOtherTabs, window, cx| {
-                this.request_close_other_tabs_or_active_pane(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &NewConnection, window, cx| {
-                this.open_new_connection_form(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ToggleSidebar, _window, cx| {
-                this.toggle_sidebar(cx);
-            }))
-            .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
-                this.open_command_palette(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ZenMode, _window, cx| {
-                this.toggle_zen_mode(cx);
-            }))
             .on_action(cx.listener(|_this, _: &ToggleFullscreen, window, cx| {
                 // Full-screen transitions stay owned by the native window and
                 // must not fall through as terminal input.
                 window.toggle_fullscreen();
                 cx.stop_propagation();
-            }))
-            .on_action(cx.listener(|this, _: &NextTab, window, cx| {
-                this.next_tab(true, window, cx);
-                // GPUI dispatches the action before the raw key event. Stop here so the
-                // workspace keybinding capture does not advance the tab a second time.
-                cx.stop_propagation();
-            }))
-            .on_action(cx.listener(|this, _: &PrevTab, window, cx| {
-                this.next_tab(false, window, cx);
-                // Keep previous-tab navigation on the same single-dispatch path.
-                cx.stop_propagation();
-            }))
-            .on_action(cx.listener(|this, _: &SplitHorizontal, window, cx| {
-                this.split_active_pane(SplitDirection::Horizontal, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SplitVertical, window, cx| {
-                this.split_active_pane(SplitDirection::Vertical, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &ClosePane, window, cx| {
-                this.close_active_pane(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SplitNavLeft, window, cx| {
-                this.focus_adjacent_pane(false, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &SplitNavRight, window, cx| {
-                this.focus_adjacent_pane(true, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &Copy, window, cx| {
-                if this.handle_ide_modal_edit_action("c", window, cx) {
-                    return;
-                }
-                if this.copy_active_text_input(cx) {
-                    return;
-                }
-                if this.copy_active_ide_selection(cx) {
-                    return;
-                }
-                if this.connection_form_state(cx).form.is_none() {
-                    this.copy(cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &Cut, window, cx| {
-                if this.handle_ide_modal_edit_action("x", window, cx) {
-                    return;
-                }
-                if this.cut_active_text_input(cx) {
-                    return;
-                }
-                if this.cut_active_ide_selection(cx) {
-                    return;
-                }
-                if this.connection_form_state(cx).form.is_none() {
-                    let _ = this.cut(cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &Paste, window, cx| {
-                if this.handle_ide_modal_edit_action("v", window, cx) {
-                    return;
-                }
-                if this.paste_active_text_input(cx) {
-                    return;
-                }
-                if this.paste_into_active_ide_editor(cx) {
-                    return;
-                }
-                if this.connection_form_state(cx).form.is_some() {
-                    this.paste_into_new_connection_field(cx);
-                } else {
-                    this.paste(cx);
-                }
-            }))
-            .on_action(cx.listener(|this, _: &Find, window, cx| {
-                if this.open_active_ide_search(cx) {
-                    return;
-                }
-                this.open_search(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FindNext, _window, cx| {
-                if this.select_next_active_ide_search_match(cx) {
-                    return;
-                }
-                this.search_next(true, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FindPrev, _window, cx| {
-                if this.select_previous_active_ide_search_match(cx) {
-                    return;
-                }
-                this.search_next(false, cx);
-            }))
-            .on_action(cx.listener(|this, _: &CloseSearch, window, cx| {
-                this.close_search(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
-                this.open_settings(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FontIncrease, _window, cx| {
-                this.adjust_terminal_font_size(1, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FontDecrease, _window, cx| {
-                this.adjust_terminal_font_size(-1, cx);
-            }))
-            .on_action(cx.listener(|this, _: &FontReset, _window, cx| {
-                this.reset_terminal_font_size(cx);
-            }))
-            .on_action(cx.listener(|this, _: &ShowShortcuts, _window, cx| {
-                this.open_shortcuts_modal(cx);
-            }))
-            .on_action(cx.listener(|this, _: &TerminalAiPanel, _window, cx| {
-                this.toggle_terminal_ai_inline_panel(_window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &TerminalClearScreen, _window, cx| {
-                this.clear_active_terminal_screen(cx);
-            }))
-            .on_action(cx.listener(|this, _: &TerminalRecording, _window, cx| {
-                this.toggle_active_terminal_recording(cx);
-            }))
-            .on_action(cx.listener(|this, _: &TerminalFreeTypeMode, _window, cx| {
-                this.toggle_free_type_mode(cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteEventLog, window, cx| {
-                this.open_notification_center_tab(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteAiSidebar, _window, cx| {
-                let _ = this.toggle_ai_sidebar(cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteBroadcast, _window, cx| {
-                this.toggle_terminal_broadcast(cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteDisconnectAll, window, cx| {
-                this.disconnect_all_ssh_nodes_from_palette(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteReconnectAll, _window, cx| {
-                this.reconnect_all_link_down_nodes_from_palette(cx);
-            }))
-            .on_action(
-                cx.listener(|this, _: &PaletteCancelReconnect, _window, cx| {
-                    this.cancel_all_reconnects_from_palette(cx);
-                }),
-            )
-            .on_action(cx.listener(|this, _: &PaletteHealthCheck, _window, cx| {
-                this.run_connection_health_check_from_palette(cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteResetPanes, window, cx| {
-                this.reset_active_tab_to_single_pane(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteDetachTerminal, window, cx| {
-                this.detach_active_local_terminal_from_palette(window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &PaletteCleanupDead, _window, cx| {
-                this.cleanup_dead_local_terminal_sessions_from_palette(cx);
             }))
             .on_action(cx.listener(|this, _: &SwitchLocaleEnglish, _window, cx| {
                 this.switch_locale(Locale::En, cx);
@@ -1116,33 +928,214 @@ impl WorkspaceApp {
                     this.switch_locale(Locale::Vi, cx);
                 }),
             )
-            .on_action(cx.listener(|this, _: &GoToTab1, window, cx| {
-                this.go_to_tab(0, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab2, window, cx| {
-                this.go_to_tab(1, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab3, window, cx| {
-                this.go_to_tab(2, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab4, window, cx| {
-                this.go_to_tab(3, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab5, window, cx| {
-                this.go_to_tab(4, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab6, window, cx| {
-                this.go_to_tab(5, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab7, window, cx| {
-                this.go_to_tab(6, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab8, window, cx| {
-                this.go_to_tab(7, window, cx);
-            }))
-            .on_action(cx.listener(|this, _: &GoToTab9, window, cx| {
-                this.go_to_tab(8, window, cx);
-            }))
+            .when(!disclaimer_locked, |root| {
+                root.on_action(cx.listener(|this, _: &NewTerminal, window, cx| {
+                    let _ = this.create_local_terminal_tab(window, cx);
+                }))
+                .on_action(cx.listener(
+                    |this, action: &oxideterm_gpui_editor::ManageLanguagePlugin, window, cx| {
+                        this.open_language_plugin(&action.plugin_id, window, cx);
+                    },
+                ))
+                .on_action(cx.listener(|this, _: &ShellLauncher, _window, cx| {
+                    this.open_local_shell_launcher(cx);
+                }))
+                .on_action(cx.listener(|this, _: &CloseTab, window, cx| {
+                    this.request_close_active_tab(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &CloseOtherTabs, window, cx| {
+                    this.request_close_other_tabs_or_active_pane(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &NewConnection, window, cx| {
+                    this.open_new_connection_form(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &ToggleSidebar, _window, cx| {
+                    this.toggle_sidebar(cx);
+                }))
+                .on_action(cx.listener(|this, _: &CommandPalette, window, cx| {
+                    this.open_command_palette(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &ZenMode, _window, cx| {
+                    this.toggle_zen_mode(cx);
+                }))
+                .on_action(cx.listener(|this, _: &NextTab, window, cx| {
+                    this.next_tab(true, window, cx);
+                    // GPUI dispatches the action before the raw key event. Stop here so the
+                    // workspace keybinding capture does not advance the tab a second time.
+                    cx.stop_propagation();
+                }))
+                .on_action(cx.listener(|this, _: &PrevTab, window, cx| {
+                    this.next_tab(false, window, cx);
+                    // Keep previous-tab navigation on the same single-dispatch path.
+                    cx.stop_propagation();
+                }))
+                .on_action(cx.listener(|this, _: &SplitHorizontal, window, cx| {
+                    this.split_active_pane(SplitDirection::Horizontal, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &SplitVertical, window, cx| {
+                    this.split_active_pane(SplitDirection::Vertical, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &ClosePane, window, cx| {
+                    this.close_active_pane(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &SplitNavLeft, window, cx| {
+                    this.focus_adjacent_pane(false, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &SplitNavRight, window, cx| {
+                    this.focus_adjacent_pane(true, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &Copy, window, cx| {
+                    if this.handle_ide_modal_edit_action("c", window, cx) {
+                        return;
+                    }
+                    if this.copy_active_text_input(cx) {
+                        return;
+                    }
+                    if this.copy_active_ide_selection(cx) {
+                        return;
+                    }
+                    if this.connection_form_state(cx).form.is_none() {
+                        this.copy(cx);
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &Cut, window, cx| {
+                    if this.handle_ide_modal_edit_action("x", window, cx) {
+                        return;
+                    }
+                    if this.cut_active_text_input(cx) {
+                        return;
+                    }
+                    if this.cut_active_ide_selection(cx) {
+                        return;
+                    }
+                    if this.connection_form_state(cx).form.is_none() {
+                        let _ = this.cut(cx);
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &Paste, window, cx| {
+                    if this.handle_ide_modal_edit_action("v", window, cx) {
+                        return;
+                    }
+                    if this.paste_active_text_input(cx) {
+                        return;
+                    }
+                    if this.paste_into_active_ide_editor(cx) {
+                        return;
+                    }
+                    if this.connection_form_state(cx).form.is_some() {
+                        this.paste_into_new_connection_field(cx);
+                    } else {
+                        this.paste(cx);
+                    }
+                }))
+                .on_action(cx.listener(|this, _: &Find, window, cx| {
+                    if this.open_active_ide_search(cx) {
+                        return;
+                    }
+                    this.open_search(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &FindNext, _window, cx| {
+                    if this.select_next_active_ide_search_match(cx) {
+                        return;
+                    }
+                    this.search_next(true, cx);
+                }))
+                .on_action(cx.listener(|this, _: &FindPrev, _window, cx| {
+                    if this.select_previous_active_ide_search_match(cx) {
+                        return;
+                    }
+                    this.search_next(false, cx);
+                }))
+                .on_action(cx.listener(|this, _: &CloseSearch, window, cx| {
+                    this.close_search(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
+                    this.open_settings(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &FontIncrease, _window, cx| {
+                    this.adjust_terminal_font_size(1, cx);
+                }))
+                .on_action(cx.listener(|this, _: &FontDecrease, _window, cx| {
+                    this.adjust_terminal_font_size(-1, cx);
+                }))
+                .on_action(cx.listener(|this, _: &FontReset, _window, cx| {
+                    this.reset_terminal_font_size(cx);
+                }))
+                .on_action(cx.listener(|this, _: &ShowShortcuts, _window, cx| {
+                    this.open_shortcuts_modal(cx);
+                }))
+                .on_action(cx.listener(|this, _: &TerminalAiPanel, _window, cx| {
+                    this.toggle_terminal_ai_inline_panel(_window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &TerminalClearScreen, _window, cx| {
+                    this.clear_active_terminal_screen(cx);
+                }))
+                .on_action(cx.listener(|this, _: &TerminalRecording, _window, cx| {
+                    this.toggle_active_terminal_recording(cx);
+                }))
+                .on_action(cx.listener(|this, _: &TerminalFreeTypeMode, _window, cx| {
+                    this.toggle_free_type_mode(cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteEventLog, window, cx| {
+                    this.open_notification_center_tab(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteAiSidebar, _window, cx| {
+                    let _ = this.toggle_ai_sidebar(cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteBroadcast, _window, cx| {
+                    this.toggle_terminal_broadcast(cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteDisconnectAll, window, cx| {
+                    this.disconnect_all_ssh_nodes_from_palette(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteReconnectAll, _window, cx| {
+                    this.reconnect_all_link_down_nodes_from_palette(cx);
+                }))
+                .on_action(
+                    cx.listener(|this, _: &PaletteCancelReconnect, _window, cx| {
+                        this.cancel_all_reconnects_from_palette(cx);
+                    }),
+                )
+                .on_action(cx.listener(|this, _: &PaletteHealthCheck, _window, cx| {
+                    this.run_connection_health_check_from_palette(cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteResetPanes, window, cx| {
+                    this.reset_active_tab_to_single_pane(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteDetachTerminal, window, cx| {
+                    this.detach_active_local_terminal_from_palette(window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &PaletteCleanupDead, _window, cx| {
+                    this.cleanup_dead_local_terminal_sessions_from_palette(cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab1, window, cx| {
+                    this.go_to_tab(0, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab2, window, cx| {
+                    this.go_to_tab(1, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab3, window, cx| {
+                    this.go_to_tab(2, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab4, window, cx| {
+                    this.go_to_tab(3, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab5, window, cx| {
+                    this.go_to_tab(4, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab6, window, cx| {
+                    this.go_to_tab(5, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab7, window, cx| {
+                    this.go_to_tab(6, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab8, window, cx| {
+                    this.go_to_tab(7, window, cx);
+                }))
+                .on_action(cx.listener(|this, _: &GoToTab9, window, cx| {
+                    this.go_to_tab(8, window, cx);
+                }))
+            })
             .when_some(window_background_layer, |root, background| {
                 // Window scope paints exactly one absolute image behind all persistent chrome.
                 root.child(background)
@@ -1157,10 +1150,18 @@ impl WorkspaceApp {
                     .flex_row()
                     .overflow_hidden()
                     .when(!zen_mode, |layout| {
-                        layout.child(self.render_activity_bar(cx))
+                        let activity = self.render_activity_bar(cx);
+                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
+                            activity,
+                            disclaimer_locked,
+                        ))
                     })
                     .when(!zen_mode && self.sidebar_rendered, |layout| {
-                        layout.child(self.render_animated_sidebar_region(window, cx))
+                        let sidebar = self.render_animated_sidebar_region(window, cx);
+                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
+                            sidebar,
+                            disclaimer_locked,
+                        ))
                     })
                     .child(
                         div()
@@ -1188,16 +1189,23 @@ impl WorkspaceApp {
                         // Keep the right sidebar as one root child. Splitting
                         // the gutter and content here makes resize hit-testing
                         // easy to regress on scroll-heavy Host Tools pages.
-                        layout.child(self.render_animated_context_sidebar_frame(cx))
+                        let sidebar = self.render_animated_context_sidebar_frame(cx);
+                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
+                            sidebar,
+                            disclaimer_locked,
+                        ))
                     })
                     .when(!zen_mode, |layout| {
-                        layout.child(self.render_context_activity_bar(window, cx))
+                        layout.child(self.lock_workspace_chrome_when_onboarding_locked(
+                            self.render_context_activity_bar(window, cx),
+                            disclaimer_locked,
+                        ))
                     }),
             )
-            .when(!zen_mode && !self.sidebar_collapsed, |root| {
+            .when(!zen_mode && !self.sidebar_collapsed && !disclaimer_locked, |root| {
                 root.child(self.render_left_sidebar_resize_hotzone(effective_titlebar_height, cx))
             })
-            .when(!zen_mode && self.context_sidebar_visible(), |root| {
+            .when(!zen_mode && self.context_sidebar_visible() && !disclaimer_locked, |root| {
                 root.child(
                     self.render_context_right_sidebar_resize_hotzone(effective_titlebar_height, cx),
                 )
@@ -1248,55 +1256,20 @@ impl WorkspaceApp {
             .when_some(self.render_context_tools_menu(window, cx), |root, menu| {
                 root.child(menu)
             })
-            .when(
-                self.connection_form_state(cx).form.is_some() && self.ssh_tunnels.form.is_none(),
-                |root| root.child(self.render_new_connection_modal(window, cx)),
-            )
-            .when_some(self.render_ssh_tunnel_form(window, cx), |root, dialog| {
-                root.child(dialog)
-            })
+            .child(self.connections.form_body())
             .when_some(
                 self.render_plugin_connection_form(window, cx),
                 |root, form| root.child(form),
             )
-            .when_some(self.render_ssh_algorithm_context_menu(cx), |root, menu| {
-                root.child(menu)
-            })
             .when_some(self.render_sftp_presentation_dialog(cx), |root, dialog| {
                 root.child(dialog)
             })
             .when(self.local_shell_launcher_open, |root| {
                 root.child(self.render_local_shell_launcher(window, cx))
             })
-            .when(
-                self.connection_form_state(cx)
-                    .form
-                    .as_ref()
-                    .is_some_and(|form| form.jump_server_form.is_some()),
-                |root| root.child(self.render_add_jump_server_modal(window, cx)),
-            )
-            .when_some(
-                self.render_new_connection_select_overlay(window, cx),
-                |root, overlay| root.child(overlay),
-            )
-            .when_some(
-                self.render_batch_add_template_overlay(window, cx),
-                |root, overlay| root.child(overlay),
-            )
-            .when_some(
-                self.render_batch_add_key_overlay(window, cx),
-                |root, overlay| root.child(overlay),
-            )
-            .when(
-                self.connection_flow.read(cx).has_host_key_challenge(),
-                |root| root.child(self.render_host_key_dialog(cx)),
-            )
-            .when(
-                self.connection_flow
-                    .read(cx)
-                    .has_keyboard_interactive_challenge(),
-                |root| root.child(self.render_keyboard_interactive_dialog(cx)),
-            )
+            .child(self.connections.form_overlays())
+            .child(self.connections.batch_menus())
+            .child(self.connections.authentication())
             .when(
                 self.ai_entity.read(cx).settings_confirm_is_enable(),
                 |root| root.child(self.render_ai_enable_confirm_dialog(cx)),
@@ -1515,37 +1488,14 @@ impl WorkspaceApp {
                 // settings list keeps compact, independently measured cards.
                 root.child(self.render_ai_text_editor_modal(cx))
             })
-            .when(
-                self.session_manager.read(cx).oxide_import_dialog.is_some(),
-                |root| {
-                    // .oxide dialogs are application-level import flows. Portal
-                    // them beside the command palette so their backdrop covers
-                    // activity, session, tab, content, and companion sidebars.
-                    root.child(self.render_oxide_import_dialog(cx))
-                },
-            )
-            .when(
-                self.session_manager.read(cx).oxide_export_dialog.is_some(),
-                |root| {
-                    // Export uses the same workspace-wide modal ownership as import.
-                    root.child(self.render_oxide_export_dialog(cx))
-                },
-            )
-            .when(self.session_manager.read(cx).batch_add.is_some(), |root| {
-                // Batch add is a workspace-level dialog: its backdrop must
-                // cover activity, session, tab, content, and companion sidebars.
-                root.child(self.render_batch_add_dialog(cx))
-            })
+            .child(self.connections.oxide_dialogs())
+            .child(self.connections.batch_dialog())
             .when(self.command_palette.read(cx).is_open(), |root| {
                 root.child(self.render_command_palette(window, cx))
             })
             .when(self.version_migration.open, |root| {
                 root.child(self.render_version_migration_modal(window, cx))
             })
-            .when(
-                self.onboarding.open && !self.version_migration.open,
-                |root| root.child(self.render_onboarding_modal(window, cx)),
-            )
             .when(
                 overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(

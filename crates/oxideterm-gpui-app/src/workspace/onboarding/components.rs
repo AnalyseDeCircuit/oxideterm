@@ -1,13 +1,37 @@
 use super::*;
-use oxideterm_gpui_ui::{ActionSlotRowOptions, action_slot_row, checkbox};
+use oxideterm_gpui_ui::checkbox;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn onboarding_card_bg(&self) -> Rgba {
+        let theme = self.tokens.ui;
+        let base = if theme.is_light() {
+            theme.bg_panel
+        } else {
+            theme.bg_card
+        };
+        if self.window_background_preferences().is_some() {
+            rgba((base << 8) | oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens))
+        } else {
+            rgb(base)
+        }
+    }
+
+    pub(in crate::workspace) fn onboarding_sunken_bg(&self) -> Rgba {
+        let theme = self.tokens.ui;
+        if self.window_background_preferences().is_some() {
+            self.workspace_chrome_background(theme.bg_sunken)
+        } else {
+            rgb(theme.bg_sunken)
+        }
+    }
+
     pub(in crate::workspace) fn onboarding_step_heading(
         &self,
         title_key: &str,
         desc_key: &str,
     ) -> AnyElement {
         div()
+            .min_w(px(0.0))
             .flex()
             .flex_col()
             .gap(px(4.0))
@@ -21,6 +45,7 @@ impl WorkspaceApp {
             .child(
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .line_height(px(self.tokens.metrics.ui_text_xs * 1.45))
                     .text_color(rgb(self.tokens.ui.text_muted))
                     .child(self.i18n.t(desc_key)),
             )
@@ -82,25 +107,23 @@ impl WorkspaceApp {
             .flex()
             .items_start()
             .gap(px(10.0))
-            .py(px(2.0))
+            .py(px(4.0))
             .child(
                 div()
-                    .size(px(26.0))
+                    .size(px(28.0))
                     .mt(px(1.0))
                     .flex_none()
                     .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
+                    .bg(rgba(
+                        (self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA,
                     ))
-                    .bg(rgb(self.tokens.ui.bg_sunken))
                     .flex()
                     .items_center()
                     .justify_center()
                     .child(Self::render_lucide_icon(
                         icon,
-                        13.5,
-                        rgb(self.tokens.ui.text_muted),
+                        14.0,
+                        rgb(self.tokens.ui.accent),
                     )),
             )
             .child(
@@ -109,151 +132,18 @@ impl WorkspaceApp {
                     .flex_1()
                     .flex()
                     .flex_col()
-                    .gap(px(1.5))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(self.i18n.t(&format!("onboarding.{key}"))),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .line_height(px(self.tokens.metrics.ui_text_xs * 1.4))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn onboarding_feature_row(
-        &self,
-        icon: LucideIcon,
-        key: &str,
-        badge: Option<&str>,
-    ) -> AnyElement {
-        let trailing = badge
-            .map(|badge| {
-                div()
-                    .rounded(px(self.tokens.radii.xs))
-                    .border_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
-                    ))
-                    .bg(rgb(self.tokens.ui.bg_sunken))
-                    .px(px(6.0))
-                    .py(px(1.5))
-                    .font_family(SharedString::from(
-                        FontFamily::Jetbrains.terminal_family_name(""),
-                    ))
-                    .text_size(px(self.tokens.metrics.ui_text_2xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(badge.to_string())
-                    .into_any_element()
-            })
-            .into_iter()
-            .collect::<Vec<_>>();
-        let content = div()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(2.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(&format!("onboarding.{key}"))),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .line_height(px(self.tokens.metrics.ui_text_xs * 1.35))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
-            )
-            .into_any_element();
-        let leading_icon = div()
-            .size(px(26.0))
-            .flex_none()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba(
-                (self.tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA,
-            ))
-            .bg(rgb(self.tokens.ui.bg_sunken))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(Self::render_lucide_icon(
-                icon,
-                13.5,
-                rgb(self.tokens.ui.text_muted),
-            ))
-            .into_any_element();
-        div()
-            .py(px(5.0))
-            .child(action_slot_row(
-                &self.tokens,
-                ActionSlotRowOptions::new().align_start().gap(10.0),
-                Some(leading_icon),
-                content,
-                trailing,
-            ))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn onboarding_timeline_item(
-        &self,
-        number: usize,
-        key: &str,
-    ) -> AnyElement {
-        div()
-            .min_w(px(0.0))
-            .flex()
-            .items_start()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .size(px(22.0))
-                    .mt(px(1.0))
-                    .flex_none()
-                    .rounded_full()
-                    .border_1()
-                    .border_color(rgba(
-                        (self.tokens.ui.border << 8) | ONBOARDING_CARD_BORDER_ALPHA,
-                    ))
-                    .bg(rgb(self.tokens.ui.bg_sunken))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .font_family(SharedString::from(
-                        FontFamily::Jetbrains.terminal_family_name(""),
-                    ))
-                    .text_size(px(self.tokens.metrics.ui_text_2xs))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(number.to_string()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
                     .gap(px(2.0))
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
                             .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
+                            .text_color(rgb(self.tokens.ui.text_heading))
                             .child(self.i18n.t(&format!("onboarding.{key}"))),
                     )
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .line_height(px(self.tokens.metrics.ui_text_xs * 1.45))
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child(self.i18n.t(&format!("onboarding.{key}_desc"))),
                     ),
@@ -357,7 +247,7 @@ impl WorkspaceApp {
             .bg(if checked {
                 rgba((self.tokens.ui.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
             } else {
-                rgb(self.tokens.ui.bg_panel)
+                self.onboarding_card_bg()
             })
             .when(enabled, |card| {
                 card.hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
@@ -465,12 +355,9 @@ impl WorkspaceApp {
             .flex()
             .items_center()
             .gap(px(7.0))
-            .px(px(8.0))
-            .py(px(5.0))
+            .px(px(6.0))
+            .py(px(4.0))
             .rounded(px(self.tokens.radii.sm))
-            .border_1()
-            .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
-            .bg(rgb(theme.bg_sunken))
             .hover(move |style| style.bg(rgb(theme.bg_hover)))
             .cursor(CursorStyle::PointingHand)
             .child(Self::render_lucide_icon(icon, 13.0, rgb(theme.accent)))
@@ -497,6 +384,11 @@ impl WorkspaceApp {
         replacements: &[(&str, String)],
     ) -> AnyElement {
         let text = self.onboarding_i18n_with(key, replacements);
+        let note_color = if self.window_background_preferences().is_some() {
+            self.tokens.ui.text
+        } else {
+            self.tokens.ui.text_muted
+        };
         div()
             .flex()
             .items_start()
@@ -509,7 +401,7 @@ impl WorkspaceApp {
                     .child(Self::render_lucide_icon(
                         LucideIcon::Info,
                         13.0,
-                        rgb(self.tokens.ui.text_muted),
+                        rgb(note_color),
                     )),
             )
             .child(
@@ -517,7 +409,7 @@ impl WorkspaceApp {
                     .flex_1()
                     .min_w_0()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .text_color(rgb(note_color))
                     .child(text),
             )
             .into_any_element()

@@ -66,10 +66,48 @@ fn tab_kind_icon(
         TabKind::CloudSync => LucideIcon::Cloud,
         TabKind::Knowledge => LucideIcon::BookOpen,
         TabKind::Settings => LucideIcon::Settings,
+        TabKind::Onboarding => LucideIcon::Sparkles,
     }
 }
 
 impl WorkspaceApp {
+    fn render_tab_bar_icon(
+        &self,
+        kind: &TabKind,
+        icon_color: Rgba,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let size = self.tokens.metrics.tab_icon_size;
+        if *kind == TabKind::Onboarding {
+            let icon_source = crate::app_icon::app_icon_trimmed_source_sized(
+                self.settings_store.settings().appearance.app_icon,
+                size,
+            );
+            let radius = (size * 0.22).round().max(2.5);
+            return div()
+                .size(px(size))
+                .relative()
+                .flex_none()
+                .rounded(px(radius))
+                .overflow_hidden()
+                .child(
+                    gpui::img(icon_source)
+                        .size(px(size))
+                        .object_fit(ObjectFit::Contain),
+                )
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .rounded(px(radius))
+                        .border_1()
+                        .border_color(rgba((self.tokens.ui.border << 8) | 0x66)),
+                )
+                .into_any_element();
+        }
+        Self::render_lucide_icon(tab_kind_icon(self, kind, cx), size, icon_color)
+    }
+
     pub(super) fn tab_reconnect_controls_width(
         &self,
         job: &ReconnectProgress,
@@ -204,7 +242,6 @@ impl WorkspaceApp {
                     .read(cx)
                     .reconnect_active_progress(node_id)
             });
-            let icon = tab_kind_icon(self, &tab.kind, cx);
             let current_visible_index = visible_tab_index;
             visible_tab_index += 1;
             let active = Some(tab_id) == active_tab_id;
@@ -215,6 +252,8 @@ impl WorkspaceApp {
             let after_last = insertion_slot == Some(live_tab_count)
                 && current_visible_index + 1 == live_tab_count;
             let show_reconnect_progress = reconnect_job.is_some();
+            let hide_close_button = show_reconnect_progress
+                || (tab.kind == TabKind::Onboarding && self.onboarding_disclaimer_locked());
             let tab_tooltip_label = tab_text.clone();
             let tab_tooltip_id = format!("workspace-tab-title-{}", tab_id.0);
             let middle_click_tooltip_id = tab_tooltip_id.clone();
@@ -322,11 +361,7 @@ impl WorkspaceApp {
                             })),
                     )
                 })
-                .child(Self::render_lucide_icon(
-                    icon,
-                    self.tokens.metrics.tab_icon_size,
-                    tab_text_color,
-                ))
+                .child(self.render_tab_bar_icon(&tab.kind, tab_text_color, cx))
                 .child(
                     div()
                         .id(("workspace-tab-title", tab_id.0))
@@ -342,7 +377,7 @@ impl WorkspaceApp {
                         tab.child(self.render_tab_reconnect_indicator(&job, node_id, cx))
                     },
                 )
-                .when(!show_reconnect_progress, |tab| {
+                .when(!hide_close_button, |tab| {
                     tab.child(
                         div()
                             .size(px(self.tokens.metrics.tab_close_button_size))
@@ -434,11 +469,7 @@ impl WorkspaceApp {
             .border_color(rgba((accent << 8) | 0x88))
             .bg(rgba((accent << 8) | 0x18))
             .text_color(rgba((theme.text << 8) | 0xcc))
-            .child(Self::render_lucide_icon(
-                tab_kind_icon(self, tab_kind, cx),
-                self.tokens.metrics.tab_icon_size,
-                rgba((accent << 8) | 0xcc),
-            ))
+            .child(self.render_tab_bar_icon(tab_kind, rgba((accent << 8) | 0xcc), cx))
             .child(
                 div()
                     .flex_1()
@@ -642,14 +673,14 @@ impl WorkspaceApp {
                         .bg(rgb(theme.accent)),
                 )
             })
-            .child(Self::render_lucide_icon(
-                tab_kind_icon(self, &exiting.kind, cx),
-                self.tokens.metrics.tab_icon_size,
+            .child(self.render_tab_bar_icon(
+                &exiting.kind,
                 rgb(if exiting.was_active {
                     theme.text
                 } else {
                     theme.text_muted
                 }),
+                cx,
             ))
             .child(
                 div()

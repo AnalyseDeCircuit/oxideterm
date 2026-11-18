@@ -47,6 +47,7 @@ pub enum TabKind {
     Knowledge,
     RemoteDesktop,
     Settings,
+    Onboarding,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

@@ -1,17 +1,20 @@
 ---
 name: split-crate-by-responsibility
-description: Use when refactoring Rust monoliths by extracting crates or modules, especially when a user asks to split a huge .rs file, move responsibilities out of an app crate, reduce crate scope, avoid one-file crates, or verify that a new crate owns real behavior rather than becoming a lib.rs bucket.
+description: Use when deciding where new domain or GPUI feature code belongs (avoiding dumping new features into oxideterm-gpui-app or WorkspaceApp), and when refactoring Rust monoliths by extracting crates or modules, avoiding one-file crates, or verifying that an extracted crate owns real state, rendering, and behavior.
 ---
 
 # Split Crate By Responsibility
 
 ## Non-Negotiables
 
-Treat a new crate as a responsibility boundary, not as a storage folder.
+Treat every crate as a responsibility boundary, not a dumping folder—and do not grow `oxideterm-gpui-app` / `WorkspaceApp` by default when adding or refactoring features.
 
+- Place new pure logic, protocols, storage, validation, and runtime services in non-UI domain crates (`oxideterm-*` without `gpui`). Never import GPUI into a domain crate.
+- Place new self-contained feature panels, dialogs, editors, and settings pages in an existing or new `oxideterm-gpui-*` feature UI crate—not directly in `oxideterm-gpui-app`.
 - Do not create a crate whose only meaningful file is `lib.rs`, unless it is a tiny facade under 200 lines and all behavior lives in other modules.
 - Do not move structs into a crate while leaving all behavior in the old crate. Move the state transitions, validation, storage, protocol conversion, workers, or runtime services that make the data meaningful.
-- Do not mix UI concerns into a domain crate. GPUI rendering, focus handles, `ListState`, scroll state, anchors, popover booleans, and visual caches stay in the GPUI app.
+- For `oxideterm-gpui-*` feature UI crates, move UI state AND rendering together (`Entity` state, drafts, `ListState`/virtual-list caches, `impl Render` views, localized `cx.notify()`, and UI tests). Do not export stateless `render()` shims driven by full-window `cx.observe(..., |_, _, cx| cx.notify())` hooks in `oxideterm-gpui-app`.
+- Keep `oxideterm-gpui-app` (`WorkspaceApp`) limited to window chrome, tab/pane orchestration, global IME/focus/shortcut routing, active runtime registries, and narrow `HostBridge` / `*WindowRequest` adapters.
 - Do not leave the source crate compiling only because the new crate re-exports everything. Re-exports are allowed as a migration shim, not as the destination design.
 - Do not claim success until file sizes, module boundaries, dependency direction, and tests have been checked.
 
@@ -51,22 +54,27 @@ Treat a new crate as a responsibility boundary, not as a storage folder.
    - protocol conversion,
    - tests that prove the behavior.
 
-5. **Keep the app crate thin**
-   The app crate should retain:
-   - GPUI rendering and layout,
-   - focus/selection/list/scroll/popover state,
-   - window and action wiring,
-   - adapters that need live UI handles.
+5. **Keep the app crate thin by crate type**
+   `oxideterm-gpui-app` should retain only:
+   - window chrome, tab/pane orchestration, and active session/node registries,
+   - window-level IME, focus, and global shortcut routing,
+   - narrow `*WindowRequest` / `HostBridge` adapters for OS dialogs, secret store, terminal/tab launch, and notifications.
 
-   The extracted crate should own:
+   Domain crates (`oxideterm-*` without `gpui`) should own:
    - domain state and transitions,
    - validation and normalization,
    - stores and registries,
    - protocol DTOs,
-   - background service coordination that does not need GPUI types.
+   - background service coordination without GPUI dependencies.
+
+   Feature UI crates (`oxideterm-gpui-*`) should own:
+   - feature state entities, drafts, `ListState`/virtual-list caches, and local timers,
+   - self-contained `impl Render` views/dialogs and localized `cx.notify()` (never full-window root `cx.observe -> cx.notify()`),
+   - bundled child view handles (e.g., `*Views`) rather than adding one `WorkspaceApp` field per dialog,
+   - read-only `*Environment` / frame inputs + unified `*WindowRequest` dispatch back to `oxideterm-gpui-app`.
 
 6. **Replace broad field sprawl**
-   When moving business state out of an app root struct, replace many fields with one focused state object, then update methods to access that object. Do not leave duplicate old fields.
+   When moving business state out of an app root struct, replace many fields with one focused state/views handle, then update methods to access that handle. Do not leave duplicate old fields or add a new `WorkspaceApp` field per sub-dialog.
 
 7. **Validate**
    Run the narrow crate checks first, then the dependent app:
@@ -91,11 +99,11 @@ Use these gates unless the repo has stricter local standards:
 
 Stop immediately when you see:
 
-- `lib.rs` contains most implementation.
-- A crate is mostly `pub use`.
-- Types moved but methods stayed behind.
-- The old root struct still owns most business fields.
-- The new crate imports UI rendering dependencies for non-UI work.
+- New feature panels, dialogs, or domain logic dumped directly into `oxideterm-gpui-app` / `WorkspaceApp` instead of an appropriate domain or `oxideterm-gpui-*` crate.
+- `lib.rs` contains most implementation, or a crate is mostly `pub use`.
+- Types moved but methods stayed behind, or the old root struct still owns most business fields (or grows one new field per dialog).
+- A `oxideterm-gpui-*` UI crate leaves `impl Render` in `WorkspaceApp` or relies on root `cx.observe(..., |_, _, cx| cx.notify())` repaints for local edits/streams/frames.
+- A non-UI domain crate imports GPUI or app-local UI modules.
 - Tests only prove compilation, not moved behavior.
 
-If any of these happen, do not present the refactor as complete. Either continue splitting or explicitly call it a partial migration.
+If any of these happen, do not present the work as complete. Either continue splitting or explicitly call it a partial migration.

@@ -31,6 +31,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         self.open_settings_tab(window, cx);
     }
 

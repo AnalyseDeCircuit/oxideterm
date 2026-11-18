@@ -310,6 +310,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         self.set_sidebar_collapsed_with_motion(!self.sidebar_collapsed, cx);
         self.sidebar_resizing = false;
         self.persist_sidebar_settings(cx);

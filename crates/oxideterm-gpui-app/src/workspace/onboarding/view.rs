@@ -2,54 +2,62 @@ use super::*;
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with,
 };
-use oxideterm_gpui_ui::modal::{
-    TauriBackdropRole, rounded_shell_child_radius, staged_overlay_root, staged_overlay_scrim,
-};
 use oxideterm_gpui_ui::motion::{self, MotionDuration};
 use oxideterm_gpui_ui::scroll::ScrollableElement;
-use oxideterm_gpui_ui::{SegmentedControlOptions, segmented_control, segmented_control_item};
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn render_onboarding_modal(
+    pub(in crate::workspace) fn lock_workspace_chrome_when_onboarding_locked(
+        &self,
+        element: AnyElement,
+        locked: bool,
+    ) -> AnyElement {
+        if !locked {
+            return element;
+        }
+        div()
+            .relative()
+            .flex_none()
+            .child(div().opacity(0.42).child(element))
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .cursor(CursorStyle::OperationNotAllowed)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+                    .on_mouse_down(MouseButton::Middle, |_, _, cx| cx.stop_propagation())
+                    .on_scroll(|_, _, cx| cx.stop_propagation()),
+            )
+            .into_any_element()
+    }
+
+    pub(in crate::workspace) fn render_onboarding_tab(
         &self,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let viewport = window.viewport_size();
-        let margin = if f32::from(viewport.width) < 700.0 {
-            12.0
+        let viewport_width = f32::from(window.viewport_size().width);
+        let sidebar_occupied = if self.sidebar_collapsed {
+            self.tokens.metrics.activity_bar_width
         } else {
-            28.0
+            self.sidebar_width
         };
-        let width = (f32::from(viewport.width) - margin * 2.0).clamp(320.0, 900.0);
-        let height = (f32::from(viewport.height) - margin * 2.0).clamp(380.0, 560.0);
-        let wide = width >= 760.0;
+        let content_width = (viewport_width - sidebar_occupied).max(360.0);
+        let wide = content_width >= 820.0;
+        let horizontal_padding = if wide { 40.0 } else { 20.0 };
         let step = OnboardingStep::from_index(self.onboarding.step);
-        let content = match step {
-            OnboardingStep::Welcome => self.onboarding_columns(
-                wide,
-                self.render_onboarding_welcome(cx),
-                self.render_onboarding_disclaimer(cx),
-            ),
-            OnboardingStep::Appearance => self.render_onboarding_appearance(wide, width, cx),
-            OnboardingStep::Workflow => self.onboarding_columns(
-                wide,
-                self.render_onboarding_workflow(cx),
-                self.render_onboarding_features(wide, cx),
-            ),
-            OnboardingStep::Tools => self.onboarding_columns(
-                wide,
-                self.render_onboarding_ai_intro(cx),
-                self.render_onboarding_cli_companion(window, cx),
-            ),
-            OnboardingStep::QuickStart => div()
-                .w_full()
-                .child(self.render_onboarding_quick_start(wide, window, cx))
-                .into_any_element(),
+        let has_background = self.window_background_preferences().is_some();
+
+        let body = match step {
+            OnboardingStep::Welcome => self.render_onboarding_welcome_stage(wide, cx),
+            OnboardingStep::Appearance => {
+                self.render_onboarding_appearance(wide, content_width, cx)
+            }
+            OnboardingStep::Launch => self.render_onboarding_launch_stage(wide, window, cx),
         };
 
-        let content = if let Some((generation, _)) =
+        let animated_body = if let Some((generation, _)) =
             self.segmented_control_user_transition(ONBOARDING_STEPS_MOTION_ID, self.onboarding.step)
         {
             let previous = self
@@ -61,46 +69,44 @@ impl WorkspaceApp {
             motion::slide_fade_in_x(
                 &self.tokens,
                 (ONBOARDING_STEPS_MOTION_ID, generation as usize),
-                div().w_full().child(content),
+                div().w_full().child(body),
                 if self.onboarding.step > previous {
-                    12.0
+                    14.0
                 } else {
-                    -12.0
+                    -14.0
                 },
                 MotionDuration::Control,
             )
         } else {
-            content
+            body
         };
 
-        staged_overlay_root()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(staged_overlay_scrim(
-                &self.tokens,
-                "onboarding-dialog-scrim",
-                TauriBackdropRole::Dialog,
-                true,
-            ))
-            .child(motion::form_enter(
-                &self.tokens,
-                "onboarding-dialog",
-                oxideterm_gpui_ui::modal_container(&self.tokens)
-                    .w(px(width))
-                    .h(px(height))
-                    // Keep an opaque primary surface over the backdrop scrim for crisp copy legibility.
-                    .bg(rgb(theme.bg))
+        div()
+            .id("onboarding-workspace-tab")
+            .size_full()
+            .when(!has_background, |view| view.bg(rgb(theme.bg)))
+            .flex()
+            .flex_col()
+            .items_center()
+            .overflow_hidden()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(1080.0))
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .px(px(horizontal_padding))
+                    .pt(px(if wide { 24.0 } else { 16.0 }))
+                    .pb(px(16.0))
                     .flex()
                     .flex_col()
-                    .overflow_hidden()
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(self.onboarding_progress(wide, width, cx))
+                    .child(self.onboarding_progress(wide, cx))
                     .child(
                         div()
                             .id(("onboarding-body", self.onboarding.step))
                             .flex_1()
                             .min_h(px(0.0))
-                            .px(px(if wide { 28.0 } else { 16.0 }))
-                            .py(px(20.0))
+                            .py(px(if wide { 24.0 } else { 16.0 }))
                             .overflow_y_scroll()
                             .track_scroll(&self.onboarding.scroll_handle)
                             .vertical_scrollbar(&self.onboarding.scroll_handle)
@@ -111,12 +117,11 @@ impl WorkspaceApp {
                                     cx.notify();
                                 }
                             }))
-                            .child(div().w_full().flex().flex_col().child(content)),
+                            .child(div().w_full().flex().flex_col().child(animated_body)),
                     )
                     .when(self.onboarding.save_failed, |panel| {
                         panel.child(
                             div()
-                                .px(px(if wide { 28.0 } else { 16.0 }))
                                 .py(px(8.0))
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .text_color(rgb(theme.error))
@@ -124,126 +129,172 @@ impl WorkspaceApp {
                         )
                     })
                     .child(self.onboarding_footer(
-                        wide,
                         self.onboarding.step > 0,
                         self.onboarding.step + 1 < ONBOARDING_TOTAL_STEPS,
                         !self.onboarding.disclaimer_accepted,
                         cx,
                     )),
-            ))
-            .into_any_element()
-    }
-
-    pub(super) fn onboarding_columns(
-        &self,
-        wide: bool,
-        first: AnyElement,
-        second: AnyElement,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .grid()
-            .grid_cols(if wide { 2 } else { 1 })
-            .gap(px(if wide { 32.0 } else { 20.0 }))
-            .child(div().min_w(px(0.0)).child(first))
-            .child(div().min_w(px(0.0)).child(second))
+            )
             .into_any_element()
     }
 
     pub(in crate::workspace) fn onboarding_progress(
         &self,
         wide: bool,
-        modal_width: f32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let mut items = Vec::new();
+        let settings = self.settings_store.settings();
+        let mut rail = div().flex().items_center().gap(px(if wide { 8.0 } else { 4.0 }));
         for index in 0..ONBOARDING_TOTAL_STEPS {
             let step = OnboardingStep::from_index(index);
             let selected = index == self.onboarding.step;
+            let completed = index < self.onboarding.step && self.onboarding.disclaimer_accepted;
             let locked = !self.onboarding.disclaimer_accepted && index > 0;
-            items.push(
-                segmented_control_item(&self.tokens, self.i18n.t(step.title_key()), selected)
-                    .whitespace_normal()
-                    .opacity(if locked {
-                        ONBOARDING_DISABLED_OPACITY
-                    } else {
-                        1.0
-                    })
-                    .cursor(if locked {
-                        CursorStyle::OperationNotAllowed
-                    } else {
-                        CursorStyle::PointingHand
-                    })
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _, _, cx| {
-                            if !locked {
-                                this.onboarding_go_to_step(index, cx);
-                            }
-                            cx.stop_propagation();
-                        }),
+            let pill_bg = if selected {
+                rgba((theme.accent << 8) | ONBOARDING_ACCENT_SUBTLE_ALPHA)
+            } else {
+                rgba(0x00000000)
+            };
+            let badge_bg = if selected || completed {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.bg_sunken)
+            };
+            let badge_fg = if selected || completed {
+                rgb(theme.accent_text)
+            } else {
+                rgb(theme.text_muted)
+            };
+            rail = rail
+                .child(
+                    div()
+                        .id(("onboarding-step-pill", index))
+                        .rounded(px(self.tokens.radii.md))
+                        .bg(pill_bg)
+                        .when(!locked && !selected, |pill| {
+                            pill.hover(move |style| style.bg(rgb(theme.bg_hover)))
+                        })
+                        .px(px(if wide { 10.0 } else { 7.0 }))
+                        .py(px(5.0))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.0))
+                        .opacity(if locked {
+                            ONBOARDING_DISABLED_OPACITY
+                        } else {
+                            1.0
+                        })
+                        .cursor(if locked {
+                            CursorStyle::OperationNotAllowed
+                        } else {
+                            CursorStyle::PointingHand
+                        })
+                        .child(
+                            div()
+                                .size(px(20.0))
+                                .rounded_full()
+                                .bg(badge_bg)
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_size(px(self.tokens.metrics.ui_text_2xs))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(badge_fg)
+                                .child(if completed {
+                                    Self::render_lucide_icon(LucideIcon::Check, 11.0, badge_fg)
+                                        .into_any_element()
+                                } else if locked {
+                                    Self::render_lucide_icon(LucideIcon::Lock, 10.0, badge_fg)
+                                        .into_any_element()
+                                } else {
+                                    div().child(format!("{}", index + 1)).into_any_element()
+                                }),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_xs))
+                                .font_weight(if selected {
+                                    gpui::FontWeight::SEMIBOLD
+                                } else {
+                                    gpui::FontWeight::MEDIUM
+                                })
+                                .text_color(rgb(if selected {
+                                    theme.text_heading
+                                } else {
+                                    theme.text_muted
+                                }))
+                                .child(self.i18n.t(step.title_key())),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, _, _, cx| {
+                                if !locked {
+                                    this.onboarding_go_to_step(index, cx);
+                                }
+                                cx.stop_propagation();
+                            }),
+                        ),
+                )
+                .when(index + 1 < ONBOARDING_TOTAL_STEPS, |row| {
+                    row.child(
+                        div()
+                            .w(px(if wide { 24.0 } else { 10.0 }))
+                            .h(px(1.5))
+                            .rounded_full()
+                            .bg(if completed {
+                                rgba((theme.accent << 8) | ONBOARDING_ACCENT_BORDER_ALPHA)
+                            } else {
+                                rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA)
+                            }),
                     )
-                    .into_any_element(),
-            );
+                });
         }
-        let previous = self
-            .segmented_control_user_previous_index(ONBOARDING_STEPS_MOTION_ID, self.onboarding.step)
-            .unwrap_or(self.onboarding.step);
-        let horizontal_padding = if wide { 28.0 } else { 16.0 };
-        let steps_width = (modal_width - horizontal_padding * 2.0 - 52.0).max(200.0);
-        let steps = segmented_control(
-            &self.tokens,
-            ONBOARDING_STEPS_MOTION_ID,
-            SegmentedControlOptions::new(self.onboarding.step, previous, ONBOARDING_TOTAL_STEPS)
-                .underline(steps_width)
-                .user_transition_active(self.segmented_control_user_transition_active(
-                    ONBOARDING_STEPS_MOTION_ID,
-                    self.onboarding.step,
-                )),
-            items,
-        );
+
+        let trailing = if self.onboarding.step == 0 {
+            div()
+                .flex_none()
+                .child(self.select_setting_row(
+                    "",
+                    "",
+                    SettingsSelect::Language,
+                    self.language_label(settings.general.language),
+                    156.0,
+                    cx,
+                ))
+                .into_any_element()
+        } else if self.onboarding.step + 1 < ONBOARDING_TOTAL_STEPS
+            && self.onboarding.disclaimer_accepted
+        {
+            self.onboarding_button(
+                self.i18n.t("onboarding.skip"),
+                None,
+                ButtonVariant::Ghost,
+                false,
+                |this, _window, cx| this.onboarding_skip_to_quick_start(cx),
+                cx,
+            )
+        } else {
+            div().into_any_element()
+        };
+
         div()
             .flex_none()
-            .px(px(horizontal_padding))
-            .pt(px(14.0))
-            .pb(px(10.0))
-            .rounded_t(px(rounded_shell_child_radius(self.tokens.radii.lg)))
-            .bg(rgb(theme.bg))
+            .pb(px(14.0))
             .border_b_1()
             .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
             .flex()
-            .flex_row()
+            .flex_wrap()
             .items_center()
             .justify_between()
             .gap(px(12.0))
-            .child(div().flex_1().min_w(px(0.0)).child(steps))
-            .child(
-                div()
-                    .flex_none()
-                    .rounded(px(self.tokens.radii.sm))
-                    .border_1()
-                    .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
-                    .bg(rgb(theme.bg_sunken))
-                    .px(px(8.0))
-                    .py(px(2.0))
-                    .font_family(SharedString::from(
-                        FontFamily::Jetbrains.terminal_family_name(""),
-                    ))
-                    .text_size(px(self.tokens.metrics.ui_text_2xs))
-                    .text_color(rgb(theme.text_muted))
-                    .child(format!(
-                        "{} / {}",
-                        self.onboarding.step + 1,
-                        ONBOARDING_TOTAL_STEPS
-                    )),
-            )
+            .child(rail)
+            .child(trailing)
             .into_any_element()
     }
 
     pub(in crate::workspace) fn onboarding_footer(
         &self,
-        wide: bool,
         can_go_back: bool,
         can_go_next: bool,
         next_disabled: bool,
@@ -256,13 +307,9 @@ impl WorkspaceApp {
             .flex_row()
             .items_center()
             .justify_between()
-            .px(px(if wide { 28.0 } else { 16.0 }))
-            .py(px(12.0))
+            .pt(px(14.0))
             .border_t_1()
             .border_color(rgba((theme.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
-            .bg(rgb(theme.bg))
-            // Keep bottom footer clipping aligned with modal_container's outer radii.lg shell.
-            .rounded_b(px(rounded_shell_child_radius(self.tokens.radii.lg)))
             .child(if can_go_back {
                 self.onboarding_button(
                     self.i18n.t("onboarding.back"),
@@ -275,42 +322,25 @@ impl WorkspaceApp {
             } else {
                 div().into_any_element()
             })
-            .child(
-                div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .when(can_go_next && self.onboarding.disclaimer_accepted, |row| {
-                        row.child(self.onboarding_button(
-                            self.i18n.t("onboarding.skip"),
-                            None,
-                            ButtonVariant::Ghost,
-                            false,
-                            |this, _window, cx| this.onboarding_skip_to_quick_start(cx),
-                            cx,
-                        ))
-                    })
-                    .child(if can_go_next {
-                        self.onboarding_button(
-                            self.i18n.t("onboarding.next"),
-                            Some((LucideIcon::ChevronRight, false)),
-                            ButtonVariant::Default,
-                            next_disabled,
-                            |this, _window, cx| this.onboarding_next(cx),
-                            cx,
-                        )
-                    } else {
-                        self.onboarding_button(
-                            self.i18n.t("onboarding.start_exploring"),
-                            Some((LucideIcon::ArrowRight, false)),
-                            ButtonVariant::Default,
-                            !self.onboarding.disclaimer_accepted,
-                            |this, _window, cx| this.complete_onboarding(cx),
-                            cx,
-                        )
-                    }),
-            )
+            .child(if can_go_next {
+                self.onboarding_button(
+                    self.i18n.t("onboarding.next"),
+                    Some((LucideIcon::ChevronRight, false)),
+                    ButtonVariant::Default,
+                    next_disabled,
+                    |this, _window, cx| this.onboarding_next(cx),
+                    cx,
+                )
+            } else {
+                self.onboarding_button(
+                    self.i18n.t("onboarding.start_exploring"),
+                    Some((LucideIcon::ArrowRight, false)),
+                    ButtonVariant::Default,
+                    !self.onboarding.disclaimer_accepted,
+                    |this, _window, cx| this.complete_onboarding(cx),
+                    cx,
+                )
+            })
             .into_any_element()
     }
 

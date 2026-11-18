@@ -109,19 +109,12 @@ impl FtpRuntime {
             atomic_write: false,
         })
     }
-    pub async fn connect(
-        options: ConnectOptions,
-        attempt: CancellationToken,
-    ) -> Result<Self, String> {
-        let cancel = CancellationToken::new();
-        let session = FtpSession::connect(&options, &attempt)
-            .await
-            .map_err(|error| error.to_string())?;
-        Ok(Self {
+    pub fn adopt(options: ConnectOptions, session: FtpSession) -> Self {
+        Self {
             options: Arc::new(options),
-            cancel,
+            cancel: CancellationToken::new(),
             browse: tokio::sync::Mutex::new(Some(session)),
-        })
+        }
     }
 
     async fn browsing(&self) -> Result<tokio::sync::MappedMutexGuard<'_, FtpSession>, String> {

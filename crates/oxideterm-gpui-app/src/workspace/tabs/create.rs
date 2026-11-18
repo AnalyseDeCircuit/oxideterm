@@ -418,6 +418,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<()> {
+        if self.onboarding_disclaimer_locked() {
+            return Ok(());
+        }
         let terminal_config = self.local_terminal_config();
         let title = self.local_terminal_tab_title();
         self.create_local_terminal_tab_with_config(terminal_config, title, window, cx)

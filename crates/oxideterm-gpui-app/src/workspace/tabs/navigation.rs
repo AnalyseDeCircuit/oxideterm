@@ -159,6 +159,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         self.audit.open_filter = None;
         for input in [
             super::super::audit::AuditPolicyInput::Retention,
@@ -663,9 +666,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         let Some(index) = self.tabs(cx).iter().position(|tab| tab.id == tab_id) else {
             return;
         };
+        if self.tabs(cx)[index].kind == TabKind::Onboarding {
+            self.complete_onboarding(cx);
+            return;
+        }
         if self.terminal_tab_has_kind(tab_id, oxideterm_terminal::TerminalSessionKind::SshPty, cx) {
             if !self.ssh_close_confirmation_enabled() {
                 self.request_local_terminal_close_check(
@@ -718,6 +728,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         let Some(active_tab_id) = self.active_tab_id(cx) else {
             return;
         };
@@ -1006,6 +1019,17 @@ impl WorkspaceApp {
     }
 
     fn close_tab_at_index(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(tab) = self.tabs(cx).get(index)
+            && tab.kind == TabKind::Onboarding
+        {
+            if self.onboarding_disclaimer_locked() {
+                return;
+            }
+            if self.onboarding.open {
+                self.complete_onboarding(cx);
+                return;
+            }
+        }
         if let Some(tab_id) = self.tabs(cx).get(index).map(|tab| tab.id)
             && self.guard_shell_ide_close(tab_id, cx)
         {
@@ -1026,7 +1050,7 @@ impl WorkspaceApp {
         self.finish_tab_removal(transition, exiting_visual, Some(window), cx);
     }
 
-    pub(super) fn finish_tab_removal(
+    pub(in crate::workspace) fn finish_tab_removal(
         &mut self,
         transition: TabRemovalTransition,
         exiting_visual: Option<ExitingTabVisual>,
@@ -1309,6 +1333,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         let visible_tabs = self
             .main_tabs(cx)
             .map(|(_, tab)| tab.id)
@@ -1343,6 +1370,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         let tab_id = self.main_tabs(cx).nth(index).map(|(_, tab)| tab.id);
         if let Some(tab_id) = tab_id {
             self.set_main_window_active_tab(Some(tab_id), cx);
@@ -1558,9 +1588,16 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         if index >= self.tabs(cx).len()
             || self.tabs(cx).get(index).is_none_or(|tab| tab.id != tab_id)
         {
+            return;
+        }
+        if self.tabs(cx)[index].kind == TabKind::Onboarding {
+            self.set_active_tab(tab_id, window, cx);
             return;
         }
         let start_x = f32::from(event.position.x);

@@ -313,7 +313,7 @@ impl WorkspaceApp {
             }
             Err(error) => {
                 let message = error.to_string();
-                self.session_manager.update(cx, |manager, cx| {
+                self.connections.session_manager.update(cx, |manager, cx| {
                     manager.set_status(Some(message.clone()), cx)
                 });
                 // Palette and sidebar launches may have no Session Manager surface.

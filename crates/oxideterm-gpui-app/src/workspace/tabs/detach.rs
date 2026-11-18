@@ -157,6 +157,9 @@ impl WorkspaceApp {
         event: &MouseDownEvent,
         cx: &mut Context<Self>,
     ) {
+        if self.onboarding_disclaimer_locked() {
+            return;
+        }
         self.main_window_tabs.context_menu = Some(TabContextMenu {
             tab_id,
             x: f32::from(event.position.x),

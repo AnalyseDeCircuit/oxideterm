@@ -834,7 +834,7 @@ impl WorkspaceApp {
         let shared_session = match TerminalPane::local_shared_session(local_config, &preferences) {
             Ok(session) => session,
             Err(error) => {
-                self.session_manager.update(cx, |manager, cx| {
+                self.connections.session_manager.update(cx, |manager, cx| {
                     manager.set_status(Some(error.to_string()), cx)
                 });
                 return;

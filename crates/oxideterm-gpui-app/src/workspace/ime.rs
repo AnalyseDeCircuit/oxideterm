@@ -22,7 +22,6 @@ use super::forwards::ForwardInput;
 use super::graphics::GraphicsInput;
 use super::new_connection::{
     CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField,
-    refresh_connection_timeout_seconds, refresh_identity_agent_availability,
 };
 use super::quick_commands::{
     QUICK_COMMAND_TEXTAREA_LINE_HEIGHT, QUICK_COMMAND_TEXTAREA_VERTICAL_PADDING, QuickCommandInput,
@@ -903,6 +902,39 @@ impl InputHandler for WorkspaceInputHandler {
 }
 
 impl WorkspaceApp {
+    pub(super) fn connections_ime_frame(
+        &self,
+        input: oxideterm_gpui_connections::views::ConnectionsInput,
+        cx: &App,
+    ) -> oxideterm_gpui_connections::views::ConnectionImeFrame {
+        use oxideterm_gpui_connections::views::ConnectionsInput;
+
+        let target = match input {
+            ConnectionsInput::Form(field) => WorkspaceImeTarget::NewConnection(field),
+            ConnectionsInput::KeyboardInteractive(index) => WorkspaceImeTarget::KeyboardInteractive(index),
+        };
+        self.connection_ime_frame_for_target(target, cx)
+    }
+
+    pub(super) fn connection_ime_frame_for_target(&self, target: WorkspaceImeTarget, cx: &App) -> oxideterm_gpui_connections::views::ConnectionImeFrame {
+        use oxideterm_gpui_connections::views::ConnectionImeFrame;
+        let anchor_id = target.anchor_id();
+        let anchors = self.text_input_anchors.clone();
+        ConnectionImeFrame {
+            anchor_id,
+            viewport: anchors.viewport(anchor_id),
+            caret_visible: self.input_caret.visible(),
+            selected_range: self.ime_selected_range_for_target(target, cx),
+            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
+            marked_text: self.marked_text_for_target(target, cx)
+                .map(|text| zeroize::Zeroizing::new(text.to_owned())),
+            marked_range: self.ime_marked_virtual_range_for_target(target, cx),
+            notes_with_composition: matches!(target, WorkspaceImeTarget::NewConnection(NewConnectionField::Notes))
+                .then(|| self.ime_text_with_marked_text_for_target(target, cx)).flatten(),
+            update_anchor: Rc::new(move |anchor| anchors.update(anchor)),
+        }
+    }
+
     pub(super) fn settings_ime_frame<'a>(
         &'a self,
         input: SettingsInput,
@@ -1099,6 +1131,18 @@ impl WorkspaceApp {
     }
 
     pub(super) fn notify_ime_target(&self, target: WorkspaceImeTarget, cx: &mut Context<Self>) {
+        if let WorkspaceImeTarget::SessionManager(input) = target {
+            self.connections.notify_manager_input(input, cx);
+            return;
+        }
+        if matches!(target, WorkspaceImeTarget::NewConnection(_)) {
+            self.connections.notify_form_input(cx);
+            return;
+        }
+        if matches!(target, WorkspaceImeTarget::KeyboardInteractive(_)) {
+            self.connections.notify_input(cx);
+            return;
+        }
         if let WorkspaceImeTarget::Settings(input) = target
             && self.settings_views.notify_input(input, cx)
         {
@@ -1132,7 +1176,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::TabRename);
         }
         if let Some(focused_prompt) = self
-            .connection_flow
+            .connections.flow
             .read(cx)
             .focused_keyboard_interactive_prompt()
         {
@@ -1156,11 +1200,16 @@ impl WorkspaceApp {
         let settings_tab_visible = self
             .keyboard_content_tab(cx)
             .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Settings);
+        let onboarding_tab_visible = self
+            .keyboard_content_tab(cx)
+            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::Onboarding);
+        let onboarding_input_visible =
+            self.onboarding.open && (!self.onboarding.disclaimer_accepted || onboarding_tab_visible);
         // Knowledge dialogs may be owned by a detached Knowledge or Settings window. The focused
         // window's WorkspaceImeElement decides which native window receives the shared draft.
         let knowledge_dialog_visible = self.ai_entity.read(cx).knowledge_create_dialog_open()
             || self.ai_entity.read(cx).knowledge_document_dialog_open();
-        if (settings_tab_visible || self.onboarding.open)
+        if (settings_tab_visible || onboarding_input_visible)
             && let Some(input) = self
                 .settings_workspace
                 .read(cx)
@@ -1231,7 +1280,7 @@ impl WorkspaceApp {
         }
 
         let legacy_settings_input_visible = settings_tab_visible
-            || self.onboarding.open
+            || onboarding_input_visible
             || knowledge_dialog_visible
             || self.keyboard_content_tab(cx).is_some_and(|tab| {
                 matches!(
@@ -2429,7 +2478,7 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::SessionManager(input) => {
-                session_manager_ime_text(self.session_manager.read(cx), input)
+                session_manager_ime_text(self.connections.session_manager.read(cx), input)
             }
             WorkspaceImeTarget::Forwards(page, input) => {
                 if !self.forwarding.read(cx).has_page(page) {
@@ -2525,13 +2574,11 @@ impl WorkspaceApp {
                     None
                 }
             }
-            WorkspaceImeTarget::NewConnection(field) => {
-                let form = self.connection_form_state(cx).form.as_ref()?;
-                new_connection_field_value(form, field)
-                    .map(|value| ime_text_snapshot(target, value))
-            }
+            WorkspaceImeTarget::NewConnection(field) => self.connections.flow.read(cx)
+                .form_input_value(field)
+                .map(|value| ime_text_snapshot(target, value)),
             WorkspaceImeTarget::KeyboardInteractive(index) => self
-                .connection_flow
+                .connections.flow
                 .read(cx)
                 .keyboard_interactive_response(index)
                 .map(|value| ime_text_snapshot(target, value)),
@@ -3464,7 +3511,7 @@ impl WorkspaceApp {
             }
             WorkspaceImeTarget::SessionManager(input) => {
                 let mut batch_input_changed = false;
-                let search_changed = self.session_manager.update(cx, |session_manager, cx| {
+                let search_changed = self.connections.session_manager.update(cx, |session_manager, cx| {
                     if session_manager.focused_input() != Some(input) {
                         return false;
                     }
@@ -3612,42 +3659,15 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::NewConnection(field) => {
-                let changed = self.update_connection_form_state(cx, |state| {
-                    let editing_saved = state.saved_connection_source_id().is_some()
-                        && state.saved_connection_prompt_action.is_none();
-                    let Some(form) = state.form.as_mut() else {
-                        return false;
-                    };
-                    if form.selected_field == Some(field) && replacement_range.is_none() {
-                        // A revealed password may own the old allocation; scrub before replacement.
-                        zeroize::Zeroize::zeroize(connection_field_value_mut(form, field));
-                    }
-                    replace_utf16(
-                        connection_field_value_mut(form, field),
-                        replacement_range,
-                        text,
-                    );
-                    if field == NewConnectionField::Password {
-                        super::new_connection::restore_saved_password_placeholder_if_empty(
-                            form,
-                            editing_saved,
-                        );
-                    }
-                    form.selected_field = None;
-                    form.error = None;
-                    refresh_connection_timeout_seconds(form, field);
-                    if field == NewConnectionField::IdentityAgent {
-                        refresh_identity_agent_availability(form);
-                    }
-                    true
+                let changed = self.connections.flow.update(cx, |flow, cx| {
+                    flow.replace_form_input(field, replacement_range, text, cx)
                 });
                 if changed {
                     self.show_active_input_caret(cx);
-                    cx.notify();
                 }
             }
             WorkspaceImeTarget::KeyboardInteractive(index) => {
-                let replaced = self.connection_flow.update(cx, |connection_flow, cx| {
+                let replaced = self.connections.flow.update(cx, |connection_flow, cx| {
                     connection_flow.replace_keyboard_interactive_response(
                         index,
                         replacement_range,
@@ -3657,7 +3677,6 @@ impl WorkspaceApp {
                 });
                 if replaced {
                     self.show_active_input_caret(cx);
-                    cx.notify();
                 }
             }
         }
@@ -3671,278 +3690,6 @@ fn is_terminal_tab(tab: &oxideterm_workspace::Tab) -> bool {
             | oxideterm_workspace::TabKind::SshTerminal
             | oxideterm_workspace::TabKind::MoshTerminal
     )
-}
-
-fn new_connection_field_value(
-    form: &super::new_connection::NewConnectionForm,
-    field: NewConnectionField,
-) -> Option<&str> {
-    Some(match field {
-        NewConnectionField::Name => &form.name,
-        NewConnectionField::LocalCwd => &form.local_cwd,
-        NewConnectionField::Host => &form.host,
-        NewConnectionField::TunnelTargetHost => &form.tunnel_target_host,
-        NewConnectionField::TunnelTargetPort => &form.tunnel_target_port,
-        NewConnectionField::Port => &form.port,
-        NewConnectionField::Username => &form.username,
-        NewConnectionField::Password => &form.password,
-        NewConnectionField::KeyPath => &form.key_path,
-        NewConnectionField::ManagedKeyId => &form.managed_key_id,
-        NewConnectionField::CertPath => &form.cert_path,
-        NewConnectionField::Passphrase => &form.passphrase,
-        NewConnectionField::GssapiServerIdentity => &form.gssapi_server_identity,
-        NewConnectionField::IdentityAgent => &form.identity_agent,
-        NewConnectionField::Group => &form.group,
-        NewConnectionField::Notes => &form.notes,
-        NewConnectionField::PostConnectCommand => &form.post_connect_command,
-        NewConnectionField::ProxyCommand => &form.proxy_command,
-        NewConnectionField::UpstreamProxyHost => &form.upstream_proxy_host,
-        NewConnectionField::UpstreamProxyPort => &form.upstream_proxy_port,
-        NewConnectionField::UpstreamProxyNoProxy => &form.upstream_proxy_no_proxy,
-        NewConnectionField::UpstreamProxyUsername => &form.upstream_proxy_username,
-        NewConnectionField::UpstreamProxyPassword => &form.upstream_proxy_password,
-        NewConnectionField::Color => &form.color,
-        NewConnectionField::IconBackgroundColor => &form.icon_background_color,
-        NewConnectionField::SerialPortPath => &form.serial_port_path,
-        NewConnectionField::SerialBaudRate => &form.serial_baud_rate,
-        NewConnectionField::SerialProfileName => &form.serial_profile_name,
-        NewConnectionField::TelnetProfileName => &form.telnet_profile_name,
-        NewConnectionField::BleProfileName => &form.ble.profile_name,
-        NewConnectionField::BleMtu => &form.ble.mtu,
-        NewConnectionField::MoshServerExecutable => &form.mosh_server_executable,
-        NewConnectionField::MoshUdpHost => &form.mosh_udp_host,
-        NewConnectionField::MoshUdpPort => &form.mosh_udp_port,
-        NewConnectionField::MoshLocale => &form.mosh_locale,
-        NewConnectionField::InitialRemotePath => &form.sftp_initial_remote_path,
-        NewConnectionField::ConnectTimeoutSeconds => &form.connect_timeout_seconds_text,
-        NewConnectionField::StandaloneSftpSecondaryHost => &form.standalone_sftp_secondary.host,
-        NewConnectionField::StandaloneSftpSecondaryPort => &form.standalone_sftp_secondary.port,
-        NewConnectionField::StandaloneSftpSecondaryUsername => {
-            &form.standalone_sftp_secondary.username
-        }
-        NewConnectionField::StandaloneSftpSecondaryPassword => {
-            &form.standalone_sftp_secondary.password
-        }
-        NewConnectionField::StandaloneSftpSecondaryKeyPath => {
-            &form.standalone_sftp_secondary.key_path
-        }
-        NewConnectionField::StandaloneSftpSecondaryManagedKeyId => {
-            &form.standalone_sftp_secondary.managed_key_id
-        }
-        NewConnectionField::StandaloneSftpSecondaryCertPath => {
-            &form.standalone_sftp_secondary.cert_path
-        }
-        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
-            &form.standalone_sftp_secondary.passphrase
-        }
-        NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity => {
-            &form.standalone_sftp_secondary.gssapi_server_identity
-        }
-        NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
-            &form.standalone_sftp_secondary.identity_agent
-        }
-        NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
-            &form.standalone_sftp_secondary.initial_remote_path
-        }
-        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
-            &form.standalone_sftp_secondary.connect_timeout_seconds_text
-        }
-        NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
-            &form.standalone_sftp_secondary.proxy_command
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyHost => {
-            &form.standalone_sftp_secondary.upstream_proxy_host
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPort => {
-            &form.standalone_sftp_secondary.upstream_proxy_port
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyNoProxy => {
-            &form.standalone_sftp_secondary.upstream_proxy_no_proxy
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyUsername => {
-            &form.standalone_sftp_secondary.upstream_proxy_username
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword => {
-            &form.standalone_sftp_secondary.upstream_proxy_password
-        }
-        NewConnectionField::JumpHost => &form.jump_server_form.as_ref()?.host,
-        NewConnectionField::JumpPort => &form.jump_server_form.as_ref()?.port,
-        NewConnectionField::JumpUsername => &form.jump_server_form.as_ref()?.username,
-        NewConnectionField::JumpPassword => &form.jump_server_form.as_ref()?.password,
-        NewConnectionField::JumpKeyPath => &form.jump_server_form.as_ref()?.key_path,
-        NewConnectionField::JumpManagedKeyId => &form.jump_server_form.as_ref()?.managed_key_id,
-        NewConnectionField::JumpCertPath => &form.jump_server_form.as_ref()?.cert_path,
-        NewConnectionField::JumpPassphrase => &form.jump_server_form.as_ref()?.passphrase,
-        NewConnectionField::JumpGssapiServerIdentity => {
-            &form.jump_server_form.as_ref()?.gssapi_server_identity
-        }
-        NewConnectionField::JumpIdentityAgent => &form.jump_server_form.as_ref()?.identity_agent,
-    })
-}
-
-fn connection_field_value_mut(
-    form: &mut super::new_connection::NewConnectionForm,
-    field: NewConnectionField,
-) -> &mut String {
-    match field {
-        NewConnectionField::Name => &mut form.name,
-        NewConnectionField::LocalCwd => &mut form.local_cwd,
-        NewConnectionField::Host => &mut form.host,
-        NewConnectionField::TunnelTargetHost => &mut form.tunnel_target_host,
-        NewConnectionField::TunnelTargetPort => &mut form.tunnel_target_port,
-        NewConnectionField::Port => &mut form.port,
-        NewConnectionField::Username => &mut form.username,
-        NewConnectionField::Password => super::new_connection::password_draft_mut(form),
-        NewConnectionField::KeyPath => &mut form.key_path,
-        NewConnectionField::ManagedKeyId => &mut form.managed_key_id,
-        NewConnectionField::CertPath => &mut form.cert_path,
-        NewConnectionField::Passphrase => &mut form.passphrase,
-        NewConnectionField::GssapiServerIdentity => &mut form.gssapi_server_identity,
-        NewConnectionField::IdentityAgent => &mut form.identity_agent,
-        NewConnectionField::Group => &mut form.group,
-        NewConnectionField::Notes => &mut form.notes,
-        NewConnectionField::PostConnectCommand => &mut form.post_connect_command,
-        NewConnectionField::ProxyCommand => &mut form.proxy_command,
-        NewConnectionField::UpstreamProxyHost => &mut form.upstream_proxy_host,
-        NewConnectionField::UpstreamProxyPort => &mut form.upstream_proxy_port,
-        NewConnectionField::UpstreamProxyNoProxy => &mut form.upstream_proxy_no_proxy,
-        NewConnectionField::UpstreamProxyUsername => &mut form.upstream_proxy_username,
-        NewConnectionField::UpstreamProxyPassword => &mut form.upstream_proxy_password,
-        NewConnectionField::Color => &mut form.color,
-        NewConnectionField::IconBackgroundColor => &mut form.icon_background_color,
-        NewConnectionField::SerialPortPath => &mut form.serial_port_path,
-        NewConnectionField::SerialBaudRate => &mut form.serial_baud_rate,
-        NewConnectionField::SerialProfileName => &mut form.serial_profile_name,
-        NewConnectionField::TelnetProfileName => &mut form.telnet_profile_name,
-        NewConnectionField::BleProfileName => &mut form.ble.profile_name,
-        NewConnectionField::BleMtu => &mut form.ble.mtu,
-        NewConnectionField::MoshServerExecutable => &mut form.mosh_server_executable,
-        NewConnectionField::MoshUdpHost => &mut form.mosh_udp_host,
-        NewConnectionField::MoshUdpPort => &mut form.mosh_udp_port,
-        NewConnectionField::MoshLocale => &mut form.mosh_locale,
-        NewConnectionField::InitialRemotePath => &mut form.sftp_initial_remote_path,
-        NewConnectionField::ConnectTimeoutSeconds => &mut form.connect_timeout_seconds_text,
-        NewConnectionField::StandaloneSftpSecondaryHost => &mut form.standalone_sftp_secondary.host,
-        NewConnectionField::StandaloneSftpSecondaryPort => &mut form.standalone_sftp_secondary.port,
-        NewConnectionField::StandaloneSftpSecondaryUsername => {
-            &mut form.standalone_sftp_secondary.username
-        }
-        NewConnectionField::StandaloneSftpSecondaryPassword => {
-            &mut form.standalone_sftp_secondary.password
-        }
-        NewConnectionField::StandaloneSftpSecondaryKeyPath => {
-            &mut form.standalone_sftp_secondary.key_path
-        }
-        NewConnectionField::StandaloneSftpSecondaryManagedKeyId => {
-            &mut form.standalone_sftp_secondary.managed_key_id
-        }
-        NewConnectionField::StandaloneSftpSecondaryCertPath => {
-            &mut form.standalone_sftp_secondary.cert_path
-        }
-        NewConnectionField::StandaloneSftpSecondaryPassphrase => {
-            &mut form.standalone_sftp_secondary.passphrase
-        }
-        NewConnectionField::StandaloneSftpSecondaryGssapiServerIdentity => {
-            &mut form.standalone_sftp_secondary.gssapi_server_identity
-        }
-        NewConnectionField::StandaloneSftpSecondaryIdentityAgent => {
-            &mut form.standalone_sftp_secondary.identity_agent
-        }
-        NewConnectionField::StandaloneSftpSecondaryInitialRemotePath => {
-            &mut form.standalone_sftp_secondary.initial_remote_path
-        }
-        NewConnectionField::StandaloneSftpSecondaryConnectTimeoutSeconds => {
-            &mut form.standalone_sftp_secondary.connect_timeout_seconds_text
-        }
-        NewConnectionField::StandaloneSftpSecondaryProxyCommand => {
-            &mut form.standalone_sftp_secondary.proxy_command
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyHost => {
-            &mut form.standalone_sftp_secondary.upstream_proxy_host
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPort => {
-            &mut form.standalone_sftp_secondary.upstream_proxy_port
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyNoProxy => {
-            &mut form.standalone_sftp_secondary.upstream_proxy_no_proxy
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyUsername => {
-            &mut form.standalone_sftp_secondary.upstream_proxy_username
-        }
-        NewConnectionField::StandaloneSftpSecondaryUpstreamProxyPassword => {
-            &mut form.standalone_sftp_secondary.upstream_proxy_password
-        }
-        NewConnectionField::JumpHost => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump host field without jump form")
-                .host
-        }
-        NewConnectionField::JumpPort => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump port field without jump form")
-                .port
-        }
-        NewConnectionField::JumpUsername => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump username field without jump form")
-                .username
-        }
-        NewConnectionField::JumpPassword => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump password field without jump form")
-                .password
-        }
-        NewConnectionField::JumpKeyPath => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump key path field without jump form")
-                .key_path
-        }
-        NewConnectionField::JumpManagedKeyId => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump managed key field without jump form")
-                .managed_key_id
-        }
-        NewConnectionField::JumpCertPath => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump cert path field without jump form")
-                .cert_path
-        }
-        NewConnectionField::JumpPassphrase => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump passphrase field without jump form")
-                .passphrase
-        }
-        NewConnectionField::JumpGssapiServerIdentity => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump Kerberos server field without jump form")
-                .gssapi_server_identity
-        }
-        NewConnectionField::JumpIdentityAgent => {
-            &mut form
-                .jump_server_form
-                .as_mut()
-                .expect("jump identity agent field without jump form")
-                .identity_agent
-        }
-    }
 }
 
 fn normalize_clipboard_text_for_ime_target(

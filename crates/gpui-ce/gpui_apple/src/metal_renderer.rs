@@ -2628,13 +2628,34 @@ mod tests {
                     assert_eq!(image.get_pixel(56, 48).0, [255; 4]);
                 }
                 // At 1/4 radius from both edges the circle is outside, while the
-                // continuous corner (diagonal intercept 0.22r) is inside.
+                // extended continuous superellipse (diagonal intercept ~0.24r) is inside.
                 for (x, y) in [(14, 14), (97, 14), (14, 81), (97, 81)] {
                     assert_eq!(
                         image.get_pixel(x, y).0[3],
                         if corner_shape == 0 { 0 } else { 255 },
                         "shape={corner_shape}, path={path}, pixel={x},{y}"
                     );
+                }
+                // Check the extended shoulder entry outside the circular R box
+                // (`dx = 16.5, dy = 0.5` at `(24, 8)` and `dx = 24.5, dy = 0.5` at `(32, 8)`):
+                // the circle is outside `(24, 8)` (`alpha == 0`) and already flat at `(32, 8)`
+                // (`alpha == 255`), whereas extended continuous curvature eases in from `1.5r`.
+                if path != 5 {
+                    let shoulder_outer = image.get_pixel(24, 8).0[3];
+                    let shoulder_entry = image.get_pixel(32, 8).0[3];
+                    if corner_shape == 0 {
+                        assert_eq!(shoulder_outer, 0, "path={path}, shoulder_outer={shoulder_outer}");
+                        assert_eq!(shoulder_entry, 255, "path={path}, shoulder_entry={shoulder_entry}");
+                    } else {
+                        assert!(
+                            (1..=128).contains(&shoulder_outer),
+                            "path={path}, shoulder_outer={shoulder_outer}"
+                        );
+                        assert!(
+                            shoulder_entry < 255 && shoulder_entry > 180,
+                            "path={path}, shoulder_entry={shoulder_entry}"
+                        );
+                    }
                 }
                 assert_eq!(
                     image.get_pixel(8, 8).0[3],

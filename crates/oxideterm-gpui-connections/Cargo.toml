@@ -1,0 +1,46 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-connections"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+gpui.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-ble = { path = "../oxideterm-ble" }
+oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-ftp = { path = "../oxideterm-ftp" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
+oxideterm-secret-store = { path = "../oxideterm-secret-store" }
+oxideterm-session-adapter = { path = "../oxideterm-session-adapter" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3.23"

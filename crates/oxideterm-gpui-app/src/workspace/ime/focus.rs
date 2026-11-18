@@ -282,7 +282,7 @@ impl WorkspaceApp {
         if self.close_terminal_git_branch_picker(cx) {
             changed = true;
         }
-        if self.session_manager.update(cx, |session_manager, cx| {
+        if self.connections.session_manager.update(cx, |session_manager, cx| {
             session_manager.clear_input_focus(cx)
         }) {
             self.ime_marked_text = None;

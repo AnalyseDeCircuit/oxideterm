@@ -78,7 +78,7 @@ impl WorkspaceApp {
             || (anchor.id == SelectAnchorId::TerminalProjectMenu
                 && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
-                && self.session_manager.read(cx).view_mode_menu_open)
+                && self.connections.session_manager.read(cx).view_mode_menu_open)
             || (matches!(
                 anchor.id,
                 SelectAnchorId::AuditCategory
@@ -90,12 +90,12 @@ impl WorkspaceApp {
             ) && self.audit.open_filter.is_some())
             || (anchor.id == SelectAnchorId::ActiveSessionSort && self.session_sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
-                && self.session_manager.read(cx).sort_menu_open)
+                && self.connections.session_manager.read(cx).sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerBatchMove
-                && self.session_manager.read(cx).show_batch_move)
+                && self.connections.session_manager.read(cx).show_batch_move)
             || (anchor.id == SelectAnchorId::SessionManagerBatchTemplate
                 && self
-                    .session_manager
+                    .connections.session_manager
                     .read(cx)
                     .batch_add
                     .as_ref()
@@ -103,7 +103,7 @@ impl WorkspaceApp {
             || (anchor.id == SelectAnchorId::SessionManagerBatchKeyAuth && {
                 // The key menu only owns a trigger while it is open; a
                 // closed menu must not claim the anchor.
-                let session_manager = self.session_manager.read(cx);
+                let session_manager = self.connections.session_manager.read(cx);
                 session_manager.batch_add_uses_key_auth()
                     && session_manager
                         .batch_add
