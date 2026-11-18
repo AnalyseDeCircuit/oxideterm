@@ -1,492 +1,109 @@
 use super::*;
+#[cfg(not(target_os = "macos"))]
+use oxideterm_gpui_settings_view::entity::LaunchAtLoginError;
+use oxideterm_gpui_settings_view::general_page::{GeneralPage, GeneralRequest};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum TerminalCommandSpecsAction {
-    Format,
-    Example,
-    Save,
-}
-
-pub(in crate::workspace) const SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH: f32 = 300.0; // Tauri TerminalTab custom font input w-[300px].
-// The command-spec document needs enough room for structured editing while
-// remaining bounded by the workspace viewport.
-const TERMINAL_COMMAND_SPECS_MODAL_WIDTH: f32 = 880.0;
-const TERMINAL_COMMAND_SPECS_MODAL_HEIGHT: f32 = 720.0;
-const TERMINAL_COMMAND_SPECS_EDITOR_MIN_HEIGHT: f32 = 520.0;
-const TERMINAL_COMMAND_SPECS_ACTION_ICON_SIZE: f32 = 12.0;
+use oxideterm_gpui_settings_view::command_specs::{
+    CommandSpecsBindings, CommandSpecsDialog, CommandSpecsFrame, TerminalCommandSpecsAction,
+};
+use oxideterm_gpui_settings_view::components::SettingsWindowRequest;
+use zeroize::Zeroizing;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn settings_general_section(
+    fn with_general_page<R>(
         &self,
         section: SettingsSectionId,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let settings = self.settings_store.settings();
-        match section {
-            SettingsSectionId::GeneralLanguage => self.settings_card(
-                "settings_view.general.language",
-                "",
-                vec![self.language_select_row(settings.general.language, cx)],
-            ),
-            SettingsSectionId::GeneralExternalConnectionUris => self.settings_card(
-                "settings_view.general.connection_uri_integration",
-                "settings_view.general.connection_uri_integration_hint",
-                vec![self.bool_row(
-                    "settings_view.general.external_connection_uris",
-                    "settings_view.general.external_connection_uris_hint",
-                    settings.general.external_connection_uris_enabled,
-                    |settings, enabled| settings.general.external_connection_uris_enabled = enabled,
-                    cx,
-                )],
-            ),
-            SettingsSectionId::GeneralDataDirectory => {
-                let data_dir_info = self.settings_data_directory_info();
-                let data_dir = data_dir_info.path.display().to_string();
-                self.settings_card(
-                    "settings_view.general.data_directory",
-                    "settings_view.general.data_directory_hint",
-                    vec![
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .items_center()
-                            .gap(px(16.0))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.0))
-                                    .text_size(px(self.tokens.metrics.ui_text_base))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .truncate()
-                                    .child(data_dir),
-                            )
-                            .when(data_dir_info.can_change, |row| {
-                                row.child(self.settings_data_directory_change_button(cx))
-                            })
-                            .when(data_dir_info.can_change && data_dir_info.is_custom, |row| {
-                                row.child(self.settings_data_directory_reset_button(cx))
-                            })
-                            .into_any_element(),
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.warning))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.general.data_directory_restart_notice"),
-                            )
-                            .into_any_element(),
-                    ],
-                )
-            }
-            SettingsSectionId::GeneralCliCompanion => {
-                let cli = self.settings_workspace.read(cx).cli_companion_snapshot();
-                let cli_status = cli.status.as_ref();
-                let cli_loading = cli.loading;
-                let cli_installed = cli_status.is_some_and(|status| status.installed);
-                let cli_bundled = cli_status.is_some_and(|status| status.bundled);
-                let cli_needs_reinstall = cli_status.is_some_and(|status| status.needs_reinstall);
-                let legacy_cli_installed = cli_status.is_some_and(|status| status.legacy_installed);
-                let legacy_cli_path = cli_status
-                    .and_then(|status| status.legacy_install_path.clone())
-                    .unwrap_or_default();
-                let cli_path = cli_status
-                    .and_then(|status| status.install_path.clone())
-                    .unwrap_or_else(|| cli_install_path().display().to_string());
-                let (badge_label, badge_color) = if cli.error.is_some() {
-                    (
-                        self.i18n.t("settings_view.general.cli_status_error"),
-                        self.tokens.ui.error,
-                    )
-                } else if cli_loading {
-                    (
-                        self.i18n.t("settings_view.general.cli_checking"),
-                        self.tokens.ui.warning,
-                    )
-                } else if cli_installed && cli_needs_reinstall {
-                    (
-                        self.i18n.t("settings_view.general.cli_reinstall_required"),
-                        self.tokens.ui.warning,
-                    )
-                } else if cli_installed {
-                    (
-                        self.i18n.t("settings_view.general.cli_installed"),
-                        self.tokens.ui.success,
-                    )
-                } else {
-                    (
-                        self.i18n.t("settings_view.general.cli_not_installed"),
-                        self.tokens.ui.text_muted,
-                    )
-                };
-                let reinstall_hint = cli_status
-                    .filter(|status| status.installed && status.needs_reinstall)
-                    .map(|status| {
-                        self.i18n_with(
-                            "settings_view.general.cli_reinstall_hint",
-                            &[("version", status.app_version.clone())],
-                        )
-                    });
-                let mut rows = vec![
-                    self.card_subsection_header(
-                        self.i18n.t("settings_view.general.cli_tool"),
-                        Some(self.i18n.t("settings_view.general.cli_tool_hint")),
-                    ),
-                    div()
-                        .w_full()
-                        .flex()
-                        .flex_row()
-                        .items_end()
-                        .justify_between()
-                        .gap(px(16.0))
-                        .child(
-                            div()
-                                .flex_1()
-                                .flex()
-                                .flex_col()
-                                .gap(px(10.0))
-                                .min_w(px(0.0))
-                                .child(
-                                    div()
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .gap(px(10.0))
-                                        .child(Self::render_lucide_icon(
-                                            LucideIcon::Terminal,
-                                            16.0,
-                                            rgb(self.tokens.ui.text_muted),
-                                        ))
-                                        .child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                                .font_family(settings_mono_font_family(
-                                                    self.settings_store.settings(),
-                                                ))
-                                                .text_color(rgb(self.tokens.ui.text))
-                                                .child(CLI_COMPANION_COMMAND_NAME),
-                                        )
-                                        .child(self.text_badge(badge_label, badge_color)),
-                                )
-                                .child(
-                                    div()
-                                        .w_full()
-                                        .min_w(px(0.0))
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .font_family(settings_mono_font_family(
-                                            self.settings_store.settings(),
-                                        ))
-                                        .text_color(rgb(self.tokens.ui.text_muted))
-                                        .truncate()
-                                        .child(cli_path),
-                                )
-                                .when_some(reinstall_hint, |column, hint| {
-                                    column.child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                                            .text_color(rgb(self.tokens.ui.warning))
-                                            .child(hint),
-                                    )
-                                })
-                                .when_some(cli.error.clone(), |column, error| {
-                                    column.child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                                            .text_color(rgb(self.tokens.ui.error))
-                                            .child(error),
-                                    )
-                                })
-                                .when(
-                                    !cli_loading && cli_status.is_some() && !cli_bundled,
-                                    |column| {
-                                        column.child(
-                                            div()
-                                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                .text_color(rgb(self.tokens.ui.text_muted))
-                                                .child(
-                                                    self.i18n
-                                                        .t("settings_view.general.cli_not_bundled"),
-                                                ),
-                                        )
-                                    },
-                                ),
-                        )
-                        .when(
-                            cli_bundled && (!cli_installed || cli_needs_reinstall),
-                            |row| {
-                                row.child(self.cli_companion_action_button(
-                                    if cli_needs_reinstall {
-                                        self.i18n.t("settings_view.general.cli_reinstall")
-                                    } else {
-                                        self.i18n.t("settings_view.general.cli_install")
-                                    },
-                                    LucideIcon::Download,
-                                    ButtonVariant::Outline,
-                                    cli_loading,
-                                    |this, _event, _window, cx| this.install_cli_companion(cx),
-                                    cx,
-                                ))
-                            },
-                        )
-                        .when(cli_installed, |row| {
-                            row.child(self.cli_companion_action_button(
-                                self.i18n.t("settings_view.general.cli_uninstall"),
-                                LucideIcon::Trash2,
-                                ButtonVariant::Ghost,
-                                cli_loading,
-                                |this, _event, _window, cx| this.uninstall_cli_companion(cx),
-                                cx,
-                            ))
-                        })
-                        .when(!cli_loading && cli.error.is_some(), |row| {
-                            row.child(self.cli_companion_action_button(
-                                self.i18n.t("settings_view.help.retry"),
-                                LucideIcon::RefreshCw,
-                                ButtonVariant::Ghost,
-                                false,
-                                |this, _event, _window, cx| this.refresh_cli_companion_status(cx),
-                                cx,
-                            ))
-                        })
-                        .into_any_element(),
-                ];
-                if legacy_cli_installed {
-                    rows.push(self.card_separator());
-                    rows.push(self.settings_callout(
-                        SettingsCalloutTone::Warning,
-                        Some(LucideIcon::AlertTriangle),
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(12.0))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(220.0))
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(4.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(self.tokens.ui.text))
-                                            .child(self.i18n.t("migration.cli_legacy_found")),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                                            .text_color(rgb(self.tokens.ui.text_muted))
-                                            .child(self.i18n.t("migration.cli_legacy_settings_hint")),
-                                    )
-                                    .child(
-                                        div()
-                                            .min_w(px(0.0))
-                                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                                            .font_family(settings_mono_font_family(
-                                                self.settings_store.settings(),
-                                            ))
-                                            .text_color(rgb(self.tokens.ui.text_muted))
-                                            .truncate()
-                                            .child(format!(
-                                                "{LEGACY_CLI_COMPANION_COMMAND_NAME} · {legacy_cli_path}"
-                                            )),
-                                    ),
-                            )
-                            .child(self.cli_companion_action_button(
-                                self.i18n.t("migration.cli_uninstall_legacy"),
-                                LucideIcon::Trash2,
-                                ButtonVariant::Ghost,
-                                cli_loading,
-                                |this, _event, _window, cx| {
-                                    this.uninstall_legacy_cli_companion(cx)
-                                },
-                                cx,
-                            ))
-                            .into_any_element(),
-                    ));
+        render: impl FnOnce(GeneralPage<'_>, &App) -> R,
+    ) -> R {
+        let owner = cx.entity().downgrade();
+        let dispatch = Rc::new(move |request, window: &mut Window, cx: &mut App| {
+            let _ = owner.update(cx, |app, cx| match request {
+                GeneralRequest::Cli(operation) => app.start_cli_companion_operation(operation, cx),
+                GeneralRequest::OpenLoginItems => {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let result =
+                            oxideterm_gpui_platform::autostart::open_login_items_settings()
+                                .map_err(|error| error.to_string());
+                        app.settings_workspace.update(cx, |settings, cx| {
+                            settings.finish_launch_at_login_settings_handoff(result, cx)
+                        });
+                    }
                 }
-                self.settings_card("settings_view.general.cli_companion", "", rows)
-            }
-            SettingsSectionId::GeneralStartup => self.launch_at_login_settings_card(cx),
-            SettingsSectionId::GeneralWindowBehavior
-                if cfg!(any(target_os = "windows", target_os = "macos")) =>
-            {
-                let (label_key, hint_key) = close_to_background_label_keys();
-                self.settings_card(
-                    "settings_view.general.window_behavior",
-                    "settings_view.general.window_behavior_hint",
-                    vec![self.bool_row(
-                        label_key,
-                        hint_key,
-                        settings.general.minimize_to_tray_on_close,
-                        |settings, enabled| settings.general.minimize_to_tray_on_close = enabled,
-                        cx,
-                    )],
-                )
-            }
-            SettingsSectionId::GeneralAppLock => self.render_app_lock_settings_card(cx),
-            _ => div().into_any_element(),
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    pub(in crate::workspace) fn launch_at_login_settings_card(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let launch_at_login = self.settings_workspace.read(cx).launch_at_login_snapshot();
-        // TODO(signing): Once every macOS artifact is Developer ID signed and
-        // notarized, replace this system-settings handoff with an in-app
-        // SMAppService register/unregister toggle and remove the manual copy.
-        let mut description = div().min_w(px(0.0)).flex().flex_col().gap(px(4.0)).child(
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(
-                    self.i18n
-                        .t("settings_view.general.launch_at_login_macos_hint"),
-                ),
-        );
-        if let Some(error) = launch_at_login.error {
-            let error = match error {
-                LaunchAtLoginError::OperationFailed(error) => error,
-            };
-            description = description.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.error))
-                    .child(
-                        self.i18n
-                            .t("settings_view.general.launch_at_login_failed")
-                            .replace("{{error}}", error.as_ref()),
-                    ),
-            );
-        }
-        let manage_button = self.workspace_toolbar_action_button(
-            self.i18n.t("settings_view.general.manage_login_items"),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Outline,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(|this, _event, _window, cx| {
-                let result = oxideterm_gpui_platform::autostart::open_login_items_settings()
-                    .map_err(|error| error.to_string());
-                this.settings_workspace.update(cx, |settings, cx| {
-                    settings.finish_launch_at_login_settings_handoff(result, cx);
-                });
-                cx.stop_propagation();
-            }),
-        );
-
-        self.settings_card(
-            "settings_view.general.startup",
-            "settings_view.general.startup_hint",
-            vec![settings_row(
-                &self.tokens,
-                div()
-                    .child(self.i18n.t("settings_view.general.launch_at_login"))
-                    .into_any_element(),
-                Some(description.into_any_element()),
-                manage_button.into_any_element(),
-            )],
-        )
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub(in crate::workspace) fn launch_at_login_settings_card(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let launch_at_login = self.settings_workspace.read(cx).launch_at_login_snapshot();
-        let loading = launch_at_login.pending;
-        let enabled = launch_at_login.enabled;
-        let error = launch_at_login.error;
-        let control = div().flex_none().child(
-            switch_with(
-                &self.tokens,
-                "launch-at-login",
-                String::new(),
-                enabled,
-                SwitchOptions::default().disabled(loading),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    if !this
+                GeneralRequest::SetLaunchAtLogin(enabled) => {
+                    #[cfg(not(target_os = "macos"))]
+                    if !app
                         .settings_workspace
                         .read(cx)
                         .launch_at_login_snapshot()
                         .pending
                     {
-                        this.set_launch_at_login_enabled(!enabled, cx);
+                        app.set_launch_at_login_enabled(enabled, cx);
                     }
-                    cx.stop_propagation();
-                }),
-            ),
-        );
-        let mut label = div().min_w(px(0.0)).flex().flex_col().gap(px(4.0)).child(
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.general.launch_at_login_hint")),
-        );
-        if loading {
-            label = label.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(
-                        self.i18n
-                            .t("settings_view.general.launch_at_login_updating"),
-                    ),
-            );
-        }
-        if let Some(error) = error {
-            let error = match error {
-                LaunchAtLoginError::ApprovalRequired => self
-                    .i18n
-                    .t("settings_view.general.launch_at_login_approval_required"),
-                LaunchAtLoginError::OperationFailed(error)
-                | LaunchAtLoginError::TaskFailed(error) => error.to_string(),
+                    #[cfg(target_os = "macos")]
+                    let _ = enabled;
+                }
+                GeneralRequest::PickDataDirectory => app.pick_settings_data_directory(cx),
+                GeneralRequest::ResetDataDirectory => {
+                    app.settings_workspace.update(cx, |settings, cx| {
+                        settings.open_data_directory_reset_confirm(cx)
+                    });
+                    app.reset_standard_confirm_focus();
+                    cx.notify();
+                }
+                GeneralRequest::ClearCommandHistory => {
+                    app.open_command_history_clear_confirm(true, cx)
+                }
+                GeneralRequest::OpenCommandSpecs => {
+                    app.open_terminal_command_specs_editor(window, cx)
+                }
+            });
+        });
+        let focus_handoff = (section == SettingsSectionId::TerminalCommandBarFocusHandoff)
+            .then(|| self.focus_handoff_commands_row(self.settings_store.settings(), cx));
+        let (command_specs_path, command_specs_summary) =
+            if section == SettingsSectionId::TerminalCommandBarQuickCommands {
+                (
+                    super::terminal_command_bar::completion::terminal_command_specs_path(
+                        self.settings_store.path(),
+                    )
+                    .display()
+                    .to_string(),
+                    self.terminal_command_specs_summary(),
+                )
+            } else {
+                (String::new(), String::new())
             };
-            label = label.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.error))
-                    .child(
-                        self.i18n
-                            .t("settings_view.general.launch_at_login_failed")
-                            .replace("{{error}}", error.as_ref()),
-                    ),
-            );
-        }
+        self.with_settings_controls(cx, |controls, cx| {
+            render(
+                GeneralPage {
+                    controls,
+                    state: &self.settings_workspace,
+                    data_dir: (section == SettingsSectionId::GeneralDataDirectory)
+                        .then(|| self.settings_data_directory_info()),
+                    history_failed: self.terminal_history_store.failed(),
+                    focus_handoff,
+                    command_specs_path,
+                    command_specs_summary,
+                    dispatch,
+                },
+                cx,
+            )
+        })
+    }
 
-        self.settings_card(
-            "settings_view.general.startup",
-            "settings_view.general.startup_hint",
-            vec![settings_row(
-                &self.tokens,
-                div()
-                    .child(self.i18n.t("settings_view.general.launch_at_login"))
-                    .into_any_element(),
-                Some(label.into_any_element()),
-                control.into_any_element(),
-            )],
-        )
+    pub(in crate::workspace) fn settings_general_section(
+        &self,
+        section: SettingsSectionId,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        if section == SettingsSectionId::GeneralAppLock {
+            return self.render_app_lock_settings_card(cx);
+        }
+        self.with_general_page(section, cx, |page, cx| {
+            page.settings_general_section(section, cx)
+        })
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -566,58 +183,6 @@ impl WorkspaceApp {
                 can_change: false,
             }
         })
-    }
-
-    pub(in crate::workspace) fn settings_data_directory_change_button(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.workspace_toolbar_action_button(
-            self.i18n.t("settings_view.general.change"),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Outline,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(|this, _event, _window, cx| {
-                this.pick_settings_data_directory(cx);
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
-    }
-
-    pub(in crate::workspace) fn settings_data_directory_reset_button(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.workspace_toolbar_action_button(
-            self.i18n.t("settings_view.general.reset_to_default"),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(|this, _event, _window, cx| {
-                this.settings_workspace.update(cx, |settings, cx| {
-                    settings.open_data_directory_reset_confirm(cx);
-                });
-                this.reset_standard_confirm_focus();
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        )
-        .into_any_element()
     }
 
     pub(in crate::workspace) fn pick_settings_data_directory(&mut self, cx: &mut Context<Self>) {
@@ -720,652 +285,63 @@ impl WorkspaceApp {
         section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        use oxideterm_gpui_settings_view::terminal_page::TerminalSettingsSection;
         let settings = self.settings_store.settings();
-        match section {
-            SettingsSectionId::TerminalPageSwitcher => self.terminal_page_switcher(cx),
-            SettingsSectionId::TerminalDisplayFont => {
-                let custom_cjk = self.settings_workspace.read(cx).terminal_cjk_font_custom
-                    || cjk_font_is_custom(&settings.terminal.cjk_font_family);
-                let mut rows = vec![self.select_setting_row(
-                    "settings_view.terminal.font_family",
-                    "settings_view.terminal.font_family_hint",
-                    SettingsSelect::TerminalFontFamily,
-                    font_family_label(settings.terminal.font_family),
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                )];
-                if settings.terminal.font_family == oxideterm_settings::FontFamily::Custom {
-                    rows.push(self.setting_row(
-                        "settings_view.terminal.custom_font_stack",
-                        "settings_view.terminal.custom_font_stack_hint",
-                        self.settings_text_input_control(
-                            SettingsInput::TerminalCustomFontFamily,
-                            settings.terminal.custom_font_family.clone(),
-                            "'Sarasa Fixed SC', 'Fira Code', monospace".to_string(),
-                            SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
-                            cx,
-                        ),
-                        cx,
-                    ));
-                }
-                rows.push(self.card_separator());
-                rows.push(self.select_setting_row(
-                    "settings_view.terminal.cjk_font_family",
-                    "settings_view.terminal.cjk_font_family_hint",
-                    SettingsSelect::TerminalCjkFontFamily,
-                    if custom_cjk {
-                        self.i18n.t("settings_view.terminal.cjk_font_custom")
-                    } else {
-                        terminal_cjk_font_label(&settings.terminal.cjk_font_family, &self.i18n)
-                    },
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                ));
-                if custom_cjk {
-                    rows.push(self.setting_row(
-                        "settings_view.terminal.custom_cjk_font",
-                        "settings_view.terminal.custom_cjk_font_hint",
-                        self.settings_text_input_control(
-                            SettingsInput::TerminalCjkFontFamily,
-                            settings.terminal.cjk_font_family.clone(),
-                            "PingFang SC".to_string(),
-                            SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
-                            cx,
-                        ),
-                        cx,
-                    ));
-                }
-                rows.extend([
-                    self.card_separator(),
-                    self.decimal_row(
-                        "settings_view.terminal.font_weight",
-                        "settings_view.terminal.font_weight_hint",
-                        SettingsInput::TerminalFontWeight,
-                        settings.terminal.font_weight.to_string(),
-                        cx,
-                    ),
-                    self.terminal_preview(settings, cx),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.font_ligatures",
-                        "settings_view.terminal.font_ligatures_hint",
-                        settings.terminal.font_ligatures,
-                        set_font_ligatures,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.font_size_row(settings, cx),
-                    self.card_separator(),
-                    self.decimal_row(
-                        "settings_view.terminal.character_spacing",
-                        "settings_view.terminal.character_spacing_hint",
-                        SettingsInput::TerminalCharacterSpacing,
-                        compact_decimal(settings.terminal.character_spacing),
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.decimal_row(
-                        "settings_view.terminal.line_height",
-                        "settings_view.terminal.line_height_hint",
-                        SettingsInput::TerminalLineHeight,
-                        compact_decimal(settings.terminal.line_height),
-                        cx,
-                    ),
-                ]);
-                self.settings_card(
-                    "settings_view.terminal.font",
-                    "settings_view.terminal.font_hint",
-                    rows,
+        let section = match section {
+            SettingsSectionId::TerminalDisplayFont => TerminalSettingsSection::Font {
+                custom_cjk: self.settings_workspace.read(cx).terminal_cjk_font_custom,
+                preview: Self::settings_terminal_preview_font(settings, cx),
+            },
+            SettingsSectionId::TerminalDisplayBehavior => TerminalSettingsSection::DisplayBehavior,
+            SettingsSectionId::TerminalDisplayCursor => TerminalSettingsSection::Cursor,
+            SettingsSectionId::TerminalDisplayCommandMarks => TerminalSettingsSection::CommandMarks,
+            SettingsSectionId::TerminalDisplayBuffer => TerminalSettingsSection::Buffer,
+            SettingsSectionId::TerminalInputClipboard => TerminalSettingsSection::Clipboard,
+            SettingsSectionId::TerminalInputMouseLinks => TerminalSettingsSection::MouseLinks,
+            SettingsSectionId::TerminalInputKeyboard => TerminalSettingsSection::Keyboard,
+            SettingsSectionId::TerminalTransferInBand => TerminalSettingsSection::InBandTransfer,
+            SettingsSectionId::TerminalTransferXmodem => TerminalSettingsSection::Xmodem,
+            SettingsSectionId::TerminalLoggingSession => TerminalSettingsSection::SessionLogging {
+                default_directory: settings::terminal_session_log_root_directory(
+                    self.settings_store.path(),
+                    None,
                 )
-            }
-            SettingsSectionId::TerminalDisplayBehavior => self.settings_card(
-                "settings_view.terminal.display_behavior",
-                "settings_view.terminal.display_behavior_hint",
-                vec![
-                    self.decimal_row(
-                        "settings_view.terminal.padding_horizontal",
-                        "settings_view.terminal.padding_horizontal_hint",
-                        SettingsInput::TerminalPaddingHorizontal,
-                        settings.terminal.padding_horizontal.to_string(),
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.decimal_row(
-                        "settings_view.terminal.padding_vertical",
-                        "settings_view.terminal.padding_vertical_hint",
-                        SettingsInput::TerminalPaddingVertical,
-                        settings.terminal.padding_vertical.to_string(),
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.smooth_scroll",
-                        "settings_view.terminal.smooth_scroll_hint",
-                        settings.terminal.smooth_scroll,
-                        set_terminal_smooth_scroll,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.select_setting_row(
-                        "settings_view.terminal.encoding",
-                        "settings_view.terminal.encoding_hint",
-                        SettingsSelect::TerminalEncoding,
-                        terminal_encoding_label(settings.terminal.terminal_encoding),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
-                ],
-            ),
-            SettingsSectionId::TerminalDisplayCursor => self.settings_card(
-                "settings_view.terminal.cursor",
-                "",
-                vec![
-                    self.select_setting_row(
-                        "settings_view.terminal.cursor_style",
-                        "settings_view.terminal.cursor_style_hint",
-                        SettingsSelect::TerminalCursorStyle,
-                        cursor_style_label(settings.terminal.cursor_style, &self.i18n),
-                        self.tokens.metrics.settings_select_narrow_width,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.cursor_blink",
-                        "settings_view.terminal.cursor_blink_hint",
-                        settings.terminal.cursor_blink,
-                        set_terminal_cursor_blink,
-                        cx,
-                    ),
-                ],
-            ),
-            SettingsSectionId::TerminalDisplayCommandMarks => self.settings_card(
-                "settings_view.terminal.command_marks",
-                "",
-                vec![
-                    self.bool_row(
-                        "settings_view.terminal.command_marks",
-                        "settings_view.terminal.command_marks_hint",
-                        settings.terminal.command_marks.enabled,
-                        set_command_marks_enabled,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.command_folding",
-                        "settings_view.terminal.command_folding_hint",
-                        settings.terminal.command_marks.folding_enabled,
-                        set_command_folding_enabled,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.command_marks_hover_actions",
-                        "settings_view.terminal.command_marks_hover_actions_hint",
-                        settings.terminal.command_marks.show_hover_actions,
-                        set_command_marks_hover_actions,
-                        cx,
-                    ),
-                ],
-            ),
-            SettingsSectionId::TerminalDisplayBuffer => self.settings_card(
-                "settings_view.terminal.buffer",
-                "",
-                vec![
-                    self.number_row(
-                        "settings_view.terminal.scrollback",
-                        "settings_view.terminal.scrollback_hint",
-                        SettingsInput::TerminalScrollback,
-                        settings.terminal.scrollback,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.highlight_tab_on_new_output",
-                        "settings_view.terminal.highlight_tab_on_new_output_hint",
-                        settings.terminal.highlight_tab_on_new_output,
-                        set_highlight_tab_on_new_output,
-                        cx,
-                    ),
-                ],
-            ),
-            SettingsSectionId::TerminalInputClipboard
-            | SettingsSectionId::TerminalInputMouseLinks
-            | SettingsSectionId::TerminalInputKeyboard => {
-                self.terminal_input_settings_card(section, settings, cx)
-            }
+                .to_string_lossy()
+                .into_owned(),
+            },
             SettingsSectionId::TerminalLocalShell
             | SettingsSectionId::TerminalLocalShellProfile
             | SettingsSectionId::TerminalLocalPrivilegeCredentials => {
-                self.settings_local_section(section, cx)
+                return self.settings_local_section(section, cx);
             }
-            SettingsSectionId::TerminalCommandBarControls => {
-                let mut rows = vec![
-                    self.bool_row(
-                        "settings_view.terminal.command_bar",
-                        "settings_view.terminal.command_bar_hint",
-                        settings.terminal.command_bar.enabled,
-                        set_command_bar_enabled,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.command_bar_git_status",
-                        "settings_view.terminal.command_bar_git_status_hint",
-                        settings.terminal.command_bar.git_status,
-                        set_command_bar_git_status,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.command_bar_project_tasks",
-                        "settings_view.terminal.command_bar_project_tasks_hint",
-                        settings.terminal.command_bar.project_tasks,
-                        set_command_bar_project_tasks,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.command_bar_ssh_latency",
-                        "settings_view.terminal.command_bar_ssh_latency_hint",
-                        settings.terminal.command_bar.ssh_latency,
-                        set_command_bar_ssh_latency,
-                        cx,
-                    ),
-                    self.select_setting_row(
-                        "settings_view.terminal.ssh_latency_interval",
-                        "settings_view.terminal.ssh_latency_interval_hint",
-                        SettingsSelect::SshLatencyInterval,
-                        settings
-                            .terminal
-                            .command_bar
-                            .ssh_latency_interval_secs
-                            .to_string(),
-                        self.tokens.metrics.settings_select_narrow_width,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.command_bar_current_directory_awareness",
-                        "settings_view.terminal.command_bar_current_directory_awareness_hint",
-                        settings.terminal.command_bar.show_current_directory,
-                        set_command_bar_show_current_directory,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.autosuggest_local_history",
-                        "settings_view.terminal.autosuggest_local_history_hint",
-                        settings.terminal.autosuggest.local_shell_history,
-                        set_autosuggest_local_history,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "terminal.history.save",
-                        "terminal.history.save_hint",
-                        settings.terminal.autosuggest.save_history,
-                        set_save_command_history,
-                        cx,
-                    ),
-                    self.number_row(
-                        "terminal.history.retention",
-                        "terminal.history.retention_hint",
-                        SettingsInput::CommandHistoryRetention,
-                        i64::from(settings.terminal.autosuggest.history_retention_days),
-                        cx,
-                    ),
-                    self.workspace_toolbar_action_button(
-                        self.i18n.t("terminal.history.clear_all"),
-                        None,
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
-                            },
-                            ..Default::default()
-                        },
-                        cx.listener(|this, _, _, cx| {
-                            this.open_command_history_clear_confirm(true, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .into_any_element(),
-                ];
-                if self.terminal_history_store.failed() {
-                    rows.push(
-                        self.settings_callout(
-                            SettingsCalloutTone::Error,
-                            Some(LucideIcon::AlertCircle),
-                            div()
-                                .child(self.i18n.t("terminal.history.error"))
-                                .into_any_element(),
-                        ),
-                    );
-                }
-                self.settings_card(
-                    "settings_view.terminal.command_bar",
-                    "",
-                    self.separated_settings_rows(rows),
-                )
+            SettingsSectionId::TerminalCommandBarControls
+            | SettingsSectionId::TerminalCommandBarFocusHandoff
+            | SettingsSectionId::TerminalCommandBarQuickCommands
+            | SettingsSectionId::TerminalAwarenessControls => {
+                return self.with_general_page(section, cx, |page, cx| {
+                    page.terminal_awareness_section(section, cx)
+                });
             }
-            SettingsSectionId::TerminalCommandBarFocusHandoff => self.settings_card(
-                "settings_view.terminal.command_bar_focus_handoff",
-                "settings_view.terminal.command_bar_focus_handoff_hint",
-                vec![self.focus_handoff_commands_row(settings, cx)],
-            ),
-            SettingsSectionId::TerminalCommandBarQuickCommands => self.settings_card(
-                "settings_view.terminal.quick_commands",
-                "",
-                vec![
-                    self.bool_row(
-                        "settings_view.terminal.quick_commands",
-                        "settings_view.terminal.quick_commands_hint",
-                        settings.terminal.command_bar.quick_commands_enabled,
-                        set_quick_commands_enabled,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.quick_bar",
-                        "settings_view.terminal.quick_bar_hint",
-                        settings.terminal.command_bar.quick_bar_enabled,
-                        set_quick_bar_enabled,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.quick_commands_confirm",
-                        "settings_view.terminal.quick_commands_confirm_hint",
-                        settings
-                            .terminal
-                            .command_bar
-                            .quick_commands_confirm_before_run,
-                        set_quick_commands_confirm,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.quick_commands_toast",
-                        "settings_view.terminal.quick_commands_toast_hint",
-                        settings.terminal.command_bar.quick_commands_show_toast,
-                        set_quick_commands_toast,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.terminal_command_specs_editor_row(cx),
-                ],
-            ),
-            SettingsSectionId::TerminalAwarenessControls => self.settings_card(
-                "settings_view.terminal.awareness_title",
-                "settings_view.terminal.awareness_description",
-                vec![
-                    self.bool_row(
-                        "settings_view.terminal.awareness_enabled",
-                        "settings_view.terminal.awareness_enabled_hint",
-                        settings.terminal.command_bar.current_directory_awareness,
-                        set_command_bar_current_directory_awareness,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.select_setting_row(
-                        "settings_view.connections.shell_integration.mode_label",
-                        "settings_view.connections.shell_integration.mode_hint",
-                        SettingsSelect::RemoteShellIntegrationMode,
-                        remote_shell_integration_mode_label(
-                            settings.terminal.remote_shell_integration_mode,
-                            &self.i18n,
-                        ),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
-                ],
-            ),
             SettingsSectionId::TerminalAwarenessShellIntegration => {
-                self.remote_shell_integration_card(cx)
+                return self.remote_shell_integration_card(cx);
             }
             SettingsSectionId::TerminalAwarenessTriggers => {
-                self.terminal_triggers_settings_card(cx)
-            }
-            SettingsSectionId::TerminalTransferInBand => self.settings_card(
-                "settings_view.terminal.in_band_transfer.title",
-                "",
-                vec![
-                    self.bool_row(
-                        "settings_view.terminal.in_band_transfer.enabled",
-                        "settings_view.terminal.in_band_transfer.enabled_hint",
-                        settings.terminal.in_band_transfer.enabled,
-                        set_in_band_transfer_enabled,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.bool_row(
-                        "settings_view.terminal.in_band_transfer.allow_directory",
-                        "settings_view.terminal.in_band_transfer.allow_directory_hint",
-                        settings.terminal.in_band_transfer.allow_directory,
-                        set_in_band_transfer_allow_directory,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.in_band_transfer_number_row(
-                        "settings_view.terminal.in_band_transfer.max_chunk_bytes",
-                        "settings_view.terminal.in_band_transfer.max_chunk_bytes_hint",
-                        SettingsInput::InBandTransferMaxChunkBytes,
-                        settings.terminal.in_band_transfer.max_chunk_bytes,
-                        128.0,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.in_band_transfer_number_row(
-                        "settings_view.terminal.in_band_transfer.max_file_count",
-                        "settings_view.terminal.in_band_transfer.max_file_count_hint",
-                        SettingsInput::InBandTransferMaxFileCount,
-                        settings.terminal.in_band_transfer.max_file_count,
-                        128.0,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.in_band_transfer_number_row(
-                        "settings_view.terminal.in_band_transfer.max_total_bytes",
-                        "settings_view.terminal.in_band_transfer.max_total_bytes_hint",
-                        SettingsInput::InBandTransferMaxTotalBytes,
-                        settings.terminal.in_band_transfer.max_total_bytes,
-                        160.0,
-                        cx,
-                    ),
-                    self.card_separator(),
-                    self.in_band_transfer_runtime_note(),
-                ],
-            ),
-            SettingsSectionId::TerminalTransferXmodem => self.settings_card(
-                "settings_view.terminal.xmodem.title",
-                "",
-                vec![self.select_setting_row(
-                    "settings_view.terminal.xmodem.block_size",
-                    "settings_view.terminal.xmodem.block_size_hint",
-                    SettingsSelect::XmodemBlockSize,
-                    xmodem_block_size_label(settings.terminal.xmodem_block_size, &self.i18n),
-                    self.tokens.metrics.settings_select_width,
-                    cx,
-                )],
-            ),
-            SettingsSectionId::TerminalLoggingSession => {
-                let default_directory =
-                    settings::terminal_session_log_root_directory(self.settings_store.path(), None);
-                let configured_directory = settings
-                    .terminal
-                    .session_log
-                    .directory
-                    .as_deref()
-                    .unwrap_or_default();
-                let directory_control = div()
-                    .flex()
-                    .flex_row()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(self.settings_text_input_control(
-                        SettingsInput::TerminalSessionLogDirectory,
-                        configured_directory,
-                        default_directory.to_string_lossy().to_string(),
-                        420.0,
-                        cx,
-                    ))
-                    .child(self.terminal_session_log_directory_change_button(cx))
-                    .when(settings.terminal.session_log.directory.is_some(), |row| {
-                        row.child(self.terminal_session_log_directory_reset_button(cx))
-                    })
-                    .into_any_element();
-                self.settings_card(
-                    "settings_view.terminal.session_log_title",
-                    "settings_view.terminal.session_log_description",
-                    vec![
-                        self.bool_row(
-                            "settings_view.terminal.session_log_automatic",
-                            "settings_view.terminal.session_log_automatic_hint",
-                            settings.terminal.session_log.automatic,
-                            set_terminal_session_log_automatic,
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.setting_row(
-                            "settings_view.terminal.session_log_directory",
-                            "settings_view.terminal.session_log_directory_hint",
-                            directory_control,
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.setting_row(
-                            "settings_view.terminal.session_log_directory_template",
-                            "settings_view.terminal.session_log_directory_template_hint",
-                            self.settings_text_input_control(
-                                SettingsInput::TerminalSessionLogDirectoryTemplate,
-                                &settings.terminal.session_log.directory_template,
-                                "{session}/{date}".to_string(),
-                                420.0,
-                                cx,
-                            ),
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.setting_row(
-                            "settings_view.terminal.session_log_file_name_template",
-                            "settings_view.terminal.session_log_file_name_template_hint",
-                            self.settings_text_input_control(
-                                SettingsInput::TerminalSessionLogFileNameTemplate,
-                                &settings.terminal.session_log.file_name_template,
-                                "{date}_{time}_{protocol}_{session}.log".to_string(),
-                                420.0,
-                                cx,
-                            ),
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.select_setting_row(
-                            "settings_view.terminal.session_log_file_mode",
-                            "settings_view.terminal.session_log_file_mode_hint",
-                            SettingsSelect::TerminalSessionLogFileMode,
-                            terminal_session_log_file_mode_label(
-                                settings.terminal.session_log.file_mode,
-                                &self.i18n,
-                            ),
-                            self.tokens.metrics.settings_select_width,
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.setting_row(
-                            "settings_view.terminal.session_log_content_template",
-                            "settings_view.terminal.session_log_content_template_hint",
-                            self.settings_text_input_control(
-                                SettingsInput::TerminalSessionLogContentTemplate,
-                                &settings.terminal.session_log.content_template,
-                                "[{timestamp}] {text}".to_string(),
-                                420.0,
-                                cx,
-                            ),
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.bool_row(
-                            "settings_view.terminal.session_log_control_sequences",
-                            "settings_view.terminal.session_log_control_sequences_hint",
-                            settings.terminal.session_log.include_control_sequences,
-                            set_terminal_session_log_include_control_sequences,
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.number_row(
-                            "settings_view.terminal.session_log_retention_days",
-                            "settings_view.terminal.session_log_retention_days_hint",
-                            SettingsInput::TerminalSessionLogRetentionDays,
-                            settings.terminal.session_log.retention_days,
-                            cx,
-                        ),
-                        self.card_separator(),
-                        self.number_row(
-                            "settings_view.terminal.session_log_max_file_size",
-                            "settings_view.terminal.session_log_max_file_size_hint",
-                            SettingsInput::TerminalSessionLogMaxFileSizeMib,
-                            settings.terminal.session_log.max_file_size_mib,
-                            cx,
-                        ),
-                    ],
-                )
+                return self.terminal_triggers_settings_card(cx);
             }
             SettingsSectionId::TerminalHighlightSelection => {
-                self.highlight_selection_card(settings, cx)
+                return self.highlight_selection_card(settings, cx);
             }
             SettingsSectionId::TerminalHighlightSemantic => {
-                self.highlight_semantic_card(settings, cx)
+                return self.highlight_semantic_card(settings, cx);
             }
-            SettingsSectionId::TerminalHighlightRules => self.highlight_rules_card(settings, cx),
-            _ => div().into_any_element(),
-        }
-    }
-
-    pub(in crate::workspace) fn terminal_session_log_directory_change_button(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.workspace_toolbar_action_button(
-            self.i18n.t("settings_view.general.change"),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Outline,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(|this, _event, _window, cx| {
-                this.pick_terminal_session_log_directory(cx);
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
-    }
-
-    pub(in crate::workspace) fn terminal_session_log_directory_reset_button(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.workspace_toolbar_action_button(
-            self.i18n.t("settings_view.general.reset_to_default"),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Ghost,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(|this, _event, _window, cx| {
-                this.edit_settings(
-                    |settings| settings.terminal.session_log.directory = None,
-                    cx,
-                );
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
+            SettingsSectionId::TerminalHighlightRules => {
+                return self.highlight_rules_card(settings, cx);
+            }
+            _ => return div().into_any_element(),
+        };
+        self.with_settings_controls(cx, |controls, cx| {
+            controls.terminal_settings_section(section, cx)
+        })
     }
 
     pub(in crate::workspace) fn pick_terminal_session_log_directory(
@@ -1598,215 +574,64 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn terminal_command_specs_editor_row(
-        &self,
+    pub(in crate::workspace) fn mount_command_specs_dialog(
+        settings: &Entity<SettingsWorkspaceEntity>,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let path = super::terminal_command_bar::completion::terminal_command_specs_path(
-            self.settings_store.path(),
-        );
-        let theme = self.tokens.ui;
-
-        div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .gap(px(self.tokens.metrics.modal_section_gap))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(self.tokens.spacing.one))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(theme.text))
-                            .child(self.i18n.t("settings_view.terminal.command_specs")),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("settings_view.terminal.command_specs_hint")),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(self.tokens.metrics.modal_field_gap))
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex_1()
-                                    .font_family(settings_mono_font_family(
-                                        self.settings_store.settings(),
-                                    ))
-                                    .truncate()
-                                    .child(path.display().to_string()),
-                            )
-                            .child(self.terminal_command_specs_summary()),
-                    ),
-            )
-            .child(self.workspace_toolbar_action_button(
-                self.i18n.t("settings_view.terminal.command_specs_edit"),
-                Some(Self::render_lucide_icon(
-                    LucideIcon::Pencil,
-                    TERMINAL_COMMAND_SPECS_ACTION_ICON_SIZE,
-                    rgb(theme.text),
-                )),
-                ToolbarButtonOptions {
-                    button: ButtonOptions {
-                        variant: ButtonVariant::Outline,
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: false,
-                    },
-                    ..ToolbarButtonOptions::default()
-                },
-                cx.listener(|this, _event, window, cx| {
-                    this.open_terminal_command_specs_editor(window, cx);
-                    cx.stop_propagation();
-                }),
-            ))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_terminal_command_specs_editor_modal(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let path = super::terminal_command_bar::completion::terminal_command_specs_path(
-            self.settings_store.path(),
-        );
-        let theme = self.tokens.ui;
-        let dialog = oxideterm_gpui_ui::modal_container(&self.tokens)
-            .w(px(TERMINAL_COMMAND_SPECS_MODAL_WIDTH))
-            .max_w_full()
-            .h(px(TERMINAL_COMMAND_SPECS_MODAL_HEIGHT))
-            .max_h_full()
-            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
-            .flex()
-            .flex_col()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
-                dialog_header(&self.tokens)
-                    .child(dialog_title(
-                        &self.tokens,
-                        self.i18n.t("settings_view.terminal.command_specs"),
-                    ))
-                    .child(dialog_description(
-                        &self.tokens,
-                        self.i18n.t("settings_view.terminal.command_specs_hint"),
-                    ))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_color(rgb(theme.text_muted))
-                            .truncate()
-                            .child(path.display().to_string()),
-                    ),
-            )
-            .child(
-                // The modal body is the sole scroll owner. The editor grows with
-                // its JSON document instead of introducing a nested scroll view.
-                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
-                    .id("terminal-command-specs-editor-scroll")
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("terminal-command-specs-editor-scroll"),
-                    )
-                    .bg(rgb(theme.bg_elevated))
-                    .child(self.terminal_command_specs_editor_control(cx)),
-            )
-            .child(
-                dialog_footer(&self.tokens)
-                    .justify_between()
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.terminal_command_specs_summary()),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(self.tokens.metrics.modal_field_gap))
-                            .child(self.terminal_command_specs_button(
-                                "settings_view.terminal.command_specs_format",
-                                TerminalCommandSpecsAction::Format,
-                                cx,
-                            ))
-                            .child(self.terminal_command_specs_button(
-                                "settings_view.terminal.command_specs_example",
-                                TerminalCommandSpecsAction::Example,
-                                cx,
-                            ))
-                            .child(self.workspace_toolbar_action_button(
-                                self.i18n.t("settings_view.terminal.command_specs_close"),
-                                None,
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Outline,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: false,
-                                    },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.close_terminal_command_specs_editor(cx);
-                                    cx.stop_propagation();
-                                }),
-                            ))
-                            .child(self.terminal_command_specs_button(
-                                "settings_view.terminal.command_specs_save",
-                                TerminalCommandSpecsAction::Save,
-                                cx,
-                            )),
-                    ),
-            );
-
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_terminal_command_specs_editor(cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(overlay_content_boundary(dialog))
-            .into_any_element()
-    }
-
-    fn terminal_command_specs_editor_control(&self, cx: &mut Context<Self>) -> AnyElement {
-        let input = SettingsInput::TerminalCommandSpecsJson;
-        let focused = self.focused_settings_input == Some(input);
-        let value = if focused {
-            self.settings_input_draft.clone()
-        } else {
-            self.terminal_command_specs_editor_initial_value()
+    ) -> Entity<CommandSpecsDialog> {
+        let owner = cx.entity().downgrade();
+        let bindings = CommandSpecsBindings {
+            frame: Rc::new({
+                let owner = owner.clone();
+                move |cx| {
+                    let owner = owner.upgrade()?;
+                    let app = owner.read(cx);
+                    Some(CommandSpecsFrame {
+                        tokens: app.tokens,
+                        i18n: app.i18n.clone(),
+                        mono_font: settings_mono_font_family(app.settings_store.settings()),
+                        scroll: app
+                            .selectable_text_scroll_handle("terminal-command-specs-editor-scroll"),
+                    })
+                }
+            }),
+            editor: Rc::new({
+                let owner = owner.clone();
+                move |value, cx| {
+                    let Some(owner) = owner.upgrade() else {
+                        return div().into_any_element();
+                    };
+                    owner
+                        .read(cx)
+                        .terminal_command_specs_editor_control(value, owner, cx)
+                }
+            }),
+            dispatch: Rc::new(move |action, window, cx| {
+                let _ = owner.update(cx, |app, cx| {
+                    app.handle_terminal_command_specs_action(action, window, cx)
+                });
+            }),
         };
+        cx.new(|cx| CommandSpecsDialog::new(settings, bindings, cx))
+    }
+
+    fn terminal_command_specs_editor_control(
+        &self,
+        value: &str,
+        owner: Entity<Self>,
+        cx: &App,
+    ) -> AnyElement {
+        let input = SettingsInput::TerminalCommandSpecsJson;
+        let focused = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input()
+            == Some(input);
         let target = WorkspaceImeTarget::Settings(input);
-        let workspace = cx.entity();
         let theme = self.tokens.ui;
         let line_height = input.textarea_line_height();
         let mut textarea = div()
             .w_full()
-            .min_h(px(TERMINAL_COMMAND_SPECS_EDITOR_MIN_HEIGHT))
+            .min_h(px(520.0))
             .rounded(px(self.tokens.radii.md))
             .border_1()
             .border_color(if focused {
@@ -1825,28 +650,12 @@ impl WorkspaceApp {
             .text_size(px(self.tokens.metrics.ui_text_sm))
             .line_height(px(line_height))
             .font_family(settings_mono_font_family(self.settings_store.settings()))
-            .text_color(rgb(theme.text))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    let current = this.current_settings_input_value(input, cx);
-                    this.focus_settings_input(input, current, cx);
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(
-                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                }),
-            );
+            .text_color(rgb(theme.text));
 
         textarea = self.render_settings_multiline_textarea_lines(
             textarea,
             target,
-            &value,
+            value,
             false,
             line_height,
             cx,
@@ -1859,13 +668,28 @@ impl WorkspaceApp {
                     .child(marked.to_string()),
             );
         }
-        let control =
-            text_input_anchor_probe(target.anchor_id(), textarea, move |anchor, _window, cx| {
-                let _ = workspace.update(cx, |this, cx| {
-                    this.update_text_input_anchor(anchor, cx);
-                });
+        let dispatch = Self::settings_window_dispatch_for(owner.downgrade());
+        let select = dispatch.clone();
+        let textarea = textarea
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                select(
+                    SettingsWindowRequest::BeginInputSelection(input, event.clone()),
+                    window,
+                    cx,
+                );
+                cx.stop_propagation();
+            })
+            .on_mouse_move(move |event, window, cx| {
+                dispatch(
+                    SettingsWindowRequest::DragInputSelection(event.clone()),
+                    window,
+                    cx,
+                )
             });
-
+        let anchors = self.text_input_anchors.clone();
+        let control = text_input_anchor_probe(target.anchor_id(), textarea, move |anchor, _, _| {
+            anchors.update(anchor)
+        });
         self.settings_multiline_input_viewport(target, control.into_any_element())
     }
 
@@ -1876,24 +700,28 @@ impl WorkspaceApp {
     ) {
         let value = self.terminal_command_specs_editor_initial_value();
         self.prepare_modal_interaction_boundary(cx);
-        self.terminal_command_specs_editor_open = true;
-        self.focus_settings_input(SettingsInput::TerminalCommandSpecsJson, value, cx);
+        let path = super::terminal_command_bar::completion::terminal_command_specs_path(
+            self.settings_store.path(),
+        );
+        let summary = self.terminal_command_specs_summary();
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.open_command_specs(path.display().to_string(), summary, value, cx);
+        });
+        self.show_active_input_caret(cx);
         window.focus(&self.focus_handle, cx);
-        cx.notify();
     }
 
     pub(in crate::workspace) fn close_terminal_command_specs_editor(
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.terminal_command_specs_editor_open = false;
-        if self.focused_settings_input == Some(SettingsInput::TerminalCommandSpecsJson) {
-            self.focused_settings_input = None;
-            self.clear_settings_input_draft(SettingsInput::TerminalCommandSpecsJson);
+        if self
+            .settings_workspace
+            .update(cx, |settings, cx| settings.close_command_specs(cx))
+        {
             self.clear_ime_selection();
+            self.ime_marked_text = None;
         }
-        self.ime_marked_text = None;
-        cx.notify();
     }
 
     pub(in crate::workspace) fn render_settings_multiline_textarea_lines(
@@ -1981,39 +809,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn terminal_command_specs_button(
-        &self,
-        label_key: &'static str,
-        action: TerminalCommandSpecsAction,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        // Command-spec editor actions behave like Tauri Button onClick handlers:
-        // disabled/loading guards live at the shared workspace boundary, not in
-        // each feature listener.
-        self.workspace_toolbar_action_button(
-            self.i18n.t(label_key),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: if action == TerminalCommandSpecsAction::Save {
-                        ButtonVariant::Secondary
-                    } else {
-                        ButtonVariant::Outline
-                    },
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(move |this, _event, window, cx| {
-                this.handle_terminal_command_specs_action(action, window, cx);
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
-    }
-
     pub(in crate::workspace) fn load_terminal_command_specs_editor_value(&self) -> String {
         let path = super::terminal_command_bar::completion::terminal_command_specs_path(
             self.settings_store.path(),
@@ -2039,35 +834,38 @@ impl WorkspaceApp {
             .replace("{custom}", &custom_count.to_string())
     }
 
-    pub(in crate::workspace) fn current_terminal_command_specs_editor_value(&self) -> String {
-        if self.focused_settings_input == Some(SettingsInput::TerminalCommandSpecsJson) {
-            self.settings_input_draft.clone()
-        } else {
-            self.terminal_command_specs_editor_initial_value()
-        }
-    }
-
     pub(in crate::workspace) fn handle_terminal_command_specs_action(
         &mut self,
         action: TerminalCommandSpecsAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let input = SettingsInput::TerminalCommandSpecsJson;
         match action {
+            TerminalCommandSpecsAction::Close => self.close_terminal_command_specs_editor(cx),
             TerminalCommandSpecsAction::Example => {
                 let example =
                     super::terminal_command_bar::completion::terminal_command_specs_example_json();
-                self.focus_settings_input(input, example, cx);
+                self.set_terminal_command_specs_draft(Zeroizing::new(example), None, true, cx);
                 window.focus(&self.focus_handle, cx);
             }
             TerminalCommandSpecsAction::Format => {
-                let value = self.current_terminal_command_specs_editor_value();
+                let Some(value) = self
+                    .settings_workspace
+                    .read(cx)
+                    .settings_entity_input_value(SettingsInput::TerminalCommandSpecsJson)
+                else {
+                    return;
+                };
                 match super::terminal_command_bar::completion::normalize_terminal_command_specs_json(
-                    &value,
+                    value,
                 ) {
                     Ok(pretty) => {
-                        self.focus_settings_input(input, pretty, cx);
+                        self.set_terminal_command_specs_draft(
+                            Zeroizing::new(pretty),
+                            None,
+                            true,
+                            cx,
+                        );
                         window.focus(&self.focus_handle, cx);
                     }
                     Err(error) => self.push_ai_settings_toast(
@@ -2082,11 +880,18 @@ impl WorkspaceApp {
                 }
             }
             TerminalCommandSpecsAction::Save => {
-                let value = self.current_terminal_command_specs_editor_value();
+                let Some(value) = self
+                    .settings_workspace
+                    .read(cx)
+                    .settings_entity_input_value(SettingsInput::TerminalCommandSpecsJson)
+                else {
+                    return;
+                };
                 match super::terminal_command_bar::completion::normalize_terminal_command_specs_json(
-                    &value,
+                    value,
                 ) {
                     Ok(pretty) => {
+                        let pretty = Zeroizing::new(pretty);
                         let path =
                             super::terminal_command_bar::completion::terminal_command_specs_path(
                                 self.settings_store.path(),
@@ -2098,9 +903,13 @@ impl WorkspaceApp {
                             .and_then(|_| std::fs::write(&path, pretty.as_bytes()));
                         match result {
                             Ok(()) => {
-                                if self.focused_settings_input == Some(input) {
-                                    self.settings_input_draft = pretty;
-                                }
+                                let summary = self.terminal_command_specs_summary();
+                                self.set_terminal_command_specs_draft(
+                                    pretty,
+                                    Some(summary),
+                                    false,
+                                    cx,
+                                );
                                 self.push_ai_settings_toast(
                                     self.i18n.t("settings_view.terminal.command_specs_saved"),
                                     TerminalNoticeVariant::Success,
@@ -2129,48 +938,20 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn in_band_transfer_number_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        input: SettingsInput,
-        value: i64,
-        width: f32,
+    fn set_terminal_command_specs_draft(
+        &mut self,
+        value: Zeroizing<String>,
+        summary: Option<String>,
+        focus: bool,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.setting_row(
-            label_key,
-            hint_key,
-            self.number_input(input, value.to_string(), width, cx),
-            cx,
-        )
-    }
-
-    pub(in crate::workspace) fn in_band_transfer_runtime_note(&self) -> AnyElement {
-        self.settings_callout(
-            SettingsCalloutTone::Warning,
-            Some(LucideIcon::Info),
-            div()
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(
-                    self.i18n
-                        .t("settings_view.terminal.in_band_transfer.runtime_note"),
-                )
-                .into_any_element(),
-        )
-    }
-}
-
-pub(in crate::workspace) fn close_to_background_label_keys() -> (&'static str, &'static str) {
-    if cfg!(target_os = "macos") {
-        (
-            "settings_view.general.keep_running_on_close",
-            "settings_view.general.keep_running_on_close_hint",
-        )
-    } else {
-        (
-            "settings_view.general.minimize_to_tray_on_close",
-            "settings_view.general.minimize_to_tray_on_close_hint",
-        )
+    ) {
+        self.settings_workspace.update(cx, |settings, cx| {
+            settings.update_command_specs(value, summary, focus, cx)
+        });
+        if focus {
+            self.clear_ime_selection();
+            self.ime_marked_text = None;
+            self.show_active_input_caret(cx);
+        }
     }
 }

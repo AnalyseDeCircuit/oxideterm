@@ -852,6 +852,94 @@ fn established_network_failure_preserves_frame_until_retry_is_cancelled(cx: &mut
 }
 
 #[gpui::test]
+fn connected_frames_notify_the_panel_without_notifying_session_observers(cx: &mut TestAppContext) {
+    use std::{cell::Cell, rc::Rc};
+
+    let window = cx.add_window(|_, _| RemoteDesktopSessionTestRoot);
+    let desktops = cx.new(|_| RemoteDesktopWorkspaceEntity::new());
+    let directory = tempfile::tempdir().unwrap();
+    let frame_slot = RemoteDesktopFrameDeliverySlot::new();
+    let protocol = RemoteDesktopProtocol::Vnc;
+    let provider = builtin_preview_provider_registry()
+        .unwrap()
+        .get_for_protocol(protocol)
+        .unwrap()
+        .clone();
+    let size = RemoteDesktopSize {
+        width: 2,
+        height: 1,
+    };
+    let session = cx.new(|_| {
+        let mut session = RemoteDesktopSessionEntity::new(
+            TabId(40),
+            preview_remote_desktop_profile(protocol),
+            provider,
+            None,
+            directory.path().join("certificates.json"),
+            frame_slot.clone(),
+            window.into(),
+        );
+        session.worker_generation = 1;
+        session
+            .state
+            .apply_event(RemoteDesktopHelperEvent::Connected { size });
+        session
+    });
+    let session_updates = Rc::new(Cell::new(0));
+    let panel_updates = Rc::new(Cell::new(0));
+    let _observers = cx.update(|app| {
+        RemoteDesktopPanelView::mount(
+            &session,
+            &desktops,
+            |_| {
+                Some((
+                    oxideterm_theme::default_tokens(),
+                    oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::En),
+                ))
+            },
+            |_, _, _, _| None,
+            |_, _, _| {},
+            app,
+        );
+        let panel = session.read(app).panel().unwrap();
+        let session_updates = session_updates.clone();
+        let panel_updates = panel_updates.clone();
+        (
+            app.observe(&session, move |_, _| {
+                session_updates.set(session_updates.get() + 1)
+            }),
+            app.observe(&panel, move |_, _| {
+                panel_updates.set(panel_updates.get() + 1)
+            }),
+        )
+    });
+
+    let pixels = vec![1, 2, 3, 255, 4, 5, 6, 255];
+    window
+        .update(cx, |_, window, app| {
+            session.update(app, |session, cx| {
+                session.set_frame_visibility(true, cx);
+                assert!(
+                    frame_slot
+                        .push(RemoteDesktopHelperEvent::Frame {
+                            frame: RemoteDesktopFrame::new(
+                                size,
+                                RemoteDesktopFrameFormat::Bgra8,
+                                pixels.clone()
+                            ),
+                        })
+                        .frame_ready
+                );
+                assert!(session.apply_frame_ready(1, window, cx));
+                assert_eq!(session.state.frame_snapshot().unwrap().bgra_bytes, pixels);
+            });
+        })
+        .unwrap();
+    assert_eq!(session_updates.get(), 0);
+    assert_eq!(panel_updates.get(), 1);
+}
+
+#[gpui::test]
 fn hidden_rdp_and_vnc_sessions_resume_with_latest_frame(cx: &mut TestAppContext) {
     let window = cx.add_window(|_window, _cx| RemoteDesktopSessionTestRoot);
     let frame_size = RemoteDesktopSize {

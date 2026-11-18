@@ -165,7 +165,7 @@ impl WorkspaceApp {
             return;
         }
         let Some(trigger) = self
-            .terminal_triggers
+            .settings_workspace.read(cx).terminal_triggers
             .snapshot
             .triggers
             .iter()
@@ -316,7 +316,7 @@ impl WorkspaceApp {
         cx: &App,
     ) -> bool {
         let globally_enabled = self
-            .terminal_triggers
+            .settings_workspace.read(cx).terminal_triggers
             .snapshot
             .triggers
             .iter()
@@ -422,9 +422,9 @@ impl WorkspaceApp {
             return;
         };
         let mut snapshot = TerminalTriggersSnapshot {
-            version: self.terminal_triggers.snapshot.version,
+            version: self.settings_workspace.read(cx).terminal_triggers.snapshot.version,
             triggers: self
-                .terminal_triggers
+                .settings_workspace.read(cx).terminal_triggers
                 .snapshot
                 .triggers
                 .iter()
@@ -435,7 +435,7 @@ impl WorkspaceApp {
                 })
                 .cloned()
                 .collect(),
-            updated_at: self.terminal_triggers.snapshot.updated_at,
+            updated_at: self.settings_workspace.read(cx).terminal_triggers.snapshot.updated_at,
         };
         // Session overrides only filter validated global rules; they never mutate persistence.
         for trigger in &mut snapshot.triggers {
@@ -604,7 +604,7 @@ impl WorkspaceApp {
                     && command.updated_at == pending.quick_command_updated_at
             });
         let current_trigger = self
-            .terminal_triggers
+            .settings_workspace.read(cx).terminal_triggers
             .snapshot
             .triggers
             .iter()

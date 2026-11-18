@@ -1,4 +1,5 @@
 use super::*;
+use oxideterm_gpui_cloud_sync::panel::CloudSyncPanelView;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_cloud_sync_tab(
@@ -70,30 +71,40 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn render_cloud_sync_surface(
-        &mut self,
+    pub(in crate::workspace) fn render_cloud_sync_surface(&self) -> AnyElement {
+        self.cloud_sync_panel.clone().into_any_element()
+    }
+
+    pub(in crate::workspace) fn mount_cloud_sync_panel(
+        sync: &Entity<CloudSyncWorkspaceEntity>,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let anchor = self
-            .cloud_sync
-            .read(cx)
-            .view
-            .open_select
-            .and_then(|select| {
-                self.select_anchors
-                    .get(&cloud_sync_select_anchor_id(select))
-                    .copied()
-            });
-        let owner = cx.entity().downgrade();
-        self.cloud_sync_page_renderer(cx).render_panel(
-            anchor,
-            move |window, cx| {
-                let _ = owner.update(cx, |app, cx| {
-                    app.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-                });
-            },
-            cx,
-        )
+    ) -> Entity<CloudSyncPanelView> {
+        let owner = cx.weak_entity();
+        let for_frame = owner.clone();
+        cx.new(|cx| {
+            CloudSyncPanelView::new(
+                sync,
+                move |cx| {
+                    for_frame
+                        .update(cx, |app, cx| {
+                            let anchor =
+                                app.cloud_sync.read(cx).view.open_select.and_then(|select| {
+                                    app.select_anchors
+                                        .get(&cloud_sync_select_anchor_id(select))
+                                        .copied()
+                                });
+                            (app.cloud_sync_page_renderer(cx), anchor)
+                        })
+                        .ok()
+                },
+                move |window, cx| {
+                    let _ = owner.update(cx, |app, cx| {
+                        app.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                    });
+                },
+                cx,
+            )
+        })
     }
 
     fn cloud_sync_sources(&self) -> CloudSyncSources<'_> {

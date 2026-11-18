@@ -1,16 +1,27 @@
-use super::*;
+use gpui::{AnyElement, App, div, prelude::*, px, rgb, rgba};
+use oxideterm_gpui_ui::text_input::TextInputContentAlign;
+use oxideterm_settings::PersistedSettings;
+use oxideterm_settings_model::SettingsSectionId;
 
-pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_SIZE: f32 = 4.0; // Tauri w-1 h-1.
-pub(in crate::workspace) const IDE_SETTINGS_AGENT_DOT_TOP_MARGIN: f32 = 6.0; // Tauri mt-1.5.
-pub(in crate::workspace) const IDE_SETTINGS_AGENT_SUBTLE_BORDER_ALPHA: u8 = 0x80; // Tauri border/50.
+use crate::{
+    SettingsInput, SettingsSelect, cjk_font_is_custom, compact_decimal,
+    components::{SettingsCalloutTone, SettingsControls},
+    font_family_label, set_ide_auto_save, set_ide_word_wrap, terminal_cjk_font_label,
+    terminal_page::SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH,
+};
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn settings_ide_section(
+const IDE_SETTINGS_AGENT_DOT_SIZE: f32 = 4.0; // Tauri w-1 h-1.
+const IDE_SETTINGS_AGENT_DOT_TOP_MARGIN: f32 = 6.0; // Tauri mt-1.5.
+const IDE_SETTINGS_AGENT_SUBTLE_BORDER_ALPHA: u8 = 0x80; // Tauri border/50.
+
+impl SettingsControls<'_> {
+    pub fn settings_ide_section(
         &self,
         section: SettingsSectionId,
-        cx: &mut Context<Self>,
+        custom_cjk: bool,
+        cx: &App,
     ) -> AnyElement {
-        let settings = self.settings_store.settings();
+        let settings = self.settings;
         match section {
             SettingsSectionId::IdeEditing => self.settings_card(
                 "settings_view.ide.editing",
@@ -32,19 +43,20 @@ impl WorkspaceApp {
                     ),
                 ]),
             ),
-            SettingsSectionId::IdeTypography => self.ide_typography_card(settings, cx),
-            SettingsSectionId::IdeAgent => self.ide_agent_card(settings, cx),
+            SettingsSectionId::IdeTypography => self.ide_typography_card(settings, custom_cjk, cx),
+            SettingsSectionId::IdeAgent => self.ide_agent_card(),
             SettingsSectionId::IdeAgentPrivacy => self.ide_agent_privacy_card(),
             _ => div().into_any_element(),
         }
     }
 
-    pub(in crate::workspace) fn ide_typography_card(
+    fn ide_typography_card(
         &self,
         settings: &PersistedSettings,
-        cx: &mut Context<Self>,
+        custom_cjk: bool,
+        cx: &App,
     ) -> AnyElement {
-        let custom_cjk = self.settings_workspace.read(cx).ide_cjk_font_custom
+        let custom_cjk = custom_cjk
             || settings
                 .ide
                 .cjk_font_family
@@ -102,7 +114,7 @@ impl WorkspaceApp {
                         .ide
                         .cjk_font_family
                         .as_deref()
-                        .map(|family| terminal_cjk_font_label(family, &self.i18n))
+                        .map(|family| terminal_cjk_font_label(family, self.i18n))
                         .unwrap_or_else(|| self.i18n.t("settings_view.ide.follow_terminal"))
                 },
                 self.tokens.metrics.settings_select_width,
@@ -182,11 +194,7 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ide_agent_card(
-        &self,
-        _settings: &PersistedSettings,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
+    fn ide_agent_card(&self) -> AnyElement {
         self.settings_card(
             "settings_view.ide.agent_title",
             "settings_view.ide.agent_description",
@@ -254,15 +262,17 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ide_agent_privacy_card(&self) -> AnyElement {
+    fn ide_agent_privacy_card(&self) -> AnyElement {
         self.settings_card_with_header(
             "settings_view.ide.agent_transparency_title",
             "",
-            Some(Self::render_lucide_icon(
-                LucideIcon::Shield,
-                16.0,
-                rgb(self.tokens.ui.info),
-            )),
+            Some(
+                gpui::svg()
+                    .path("lucide/shield.svg")
+                    .size(px(16.0))
+                    .text_color(rgb(self.tokens.ui.info))
+                    .into_any_element(),
+            ),
             None,
             vec![
                 self.settings_callout(
@@ -294,27 +304,31 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ide_number_input_with_suffix(
+    fn ide_number_input_with_suffix(
         &self,
         input: SettingsInput,
         value: String,
         placeholder: String,
         suffix: Option<&'static str>,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> AnyElement {
-        let mut control = div().flex_none().flex().items_center().gap(px(4.0)).child(
-            self.settings_text_input_control_with_align(
+        let mut control = div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(4.0))
+            .child((self.field)(
                 input,
-                value,
+                &value,
                 placeholder,
-                self.tokens.metrics.settings_number_input_width,
+                Some(self.tokens.metrics.settings_number_input_width),
                 // Tauri renders IDE typography overrides as number inputs. Keep
                 // their placeholder/value centered like the terminal numeric
                 // controls while ordinary text settings remain start-aligned.
                 TextInputContentAlign::Center,
+                false,
                 cx,
-            ),
-        );
+            ));
         if let Some(suffix) = suffix {
             control = control.child(
                 div()
@@ -326,18 +340,14 @@ impl WorkspaceApp {
         control.into_any_element()
     }
 
-    pub(in crate::workspace) fn ide_feature_row(&self, label_key: &str) -> AnyElement {
+    fn ide_feature_row(&self, label_key: &str) -> AnyElement {
         self.ide_dot_row(
             self.tokens.ui.success,
             div().child(self.i18n.t(label_key)).into_any_element(),
         )
     }
 
-    pub(in crate::workspace) fn ide_privacy_row(
-        &self,
-        label_key: &str,
-        detail_key: &str,
-    ) -> AnyElement {
+    fn ide_privacy_row(&self, label_key: &str, detail_key: &str) -> AnyElement {
         self.ide_dot_row(
             self.tokens.ui.info,
             div()
@@ -357,7 +367,7 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ide_dot_row(&self, color: u32, content: AnyElement) -> AnyElement {
+    fn ide_dot_row(&self, color: u32, content: AnyElement) -> AnyElement {
         div()
             .flex()
             .items_start()

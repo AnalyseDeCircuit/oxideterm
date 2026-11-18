@@ -1,83 +1,83 @@
-use super::highlight::{semantic_class_label, semantic_context_label};
+use oxideterm_gpui_settings_view::select_menu::{LocalShellOption, SelectMenuRequest, SettingsSelectMenu};
 use super::*;
-use oxideterm_terminal_triggers::{
-    LocalProcessSpec, TerminalTriggerAction, TerminalTriggerDispatch, TerminalTriggerMatchMode,
-    TerminalTriggerScope,
-};
+use oxideterm_gpui_settings_view::components::{SettingsWindowDispatch, SettingsWindowRequest};
+use oxideterm_gpui_settings_view::theme_picker::{SettingsThemePicker, SettingsThemePickerFrame};
 
 const KNOWLEDGE_SCOPE_SELECT_MAX_HEIGHT: f32 = 320.0;
 
-enum ThemeSelectEntry {
-    Group(&'static str),
-    Theme(String),
-}
-
-fn appearance_theme_entries(settings: &PersistedSettings) -> Vec<ThemeSelectEntry> {
-    let mut entries = Vec::new();
-    if !settings.custom_themes.is_empty() {
-        entries.push(ThemeSelectEntry::Group(
-            "settings_view.appearance.theme_group_custom",
-        ));
-        let mut ids: Vec<_> = settings.custom_themes.keys().cloned().collect();
-        ids.sort();
-        entries.extend(ids.into_iter().map(ThemeSelectEntry::Theme));
-    }
-    entries.push(ThemeSelectEntry::Group(
-        "settings_view.appearance.theme_group_oxide",
-    ));
-    entries.extend(
-        OXIDE_THEME_IDS
-            .iter()
-            .filter(|id| built_in_theme_exists(id))
-            .map(|id| ThemeSelectEntry::Theme((*id).to_string())),
-    );
-    entries.push(ThemeSelectEntry::Group(
-        "settings_view.appearance.theme_group_classic",
-    ));
-    let mut classic: Vec<_> = BUILT_IN_THEMES
-        .iter()
-        .filter(|theme| !is_oxide_theme(theme.id))
-        .collect();
-    classic.sort_by_key(|theme| theme.id);
-    entries.extend(
-        classic
-            .into_iter()
-            .map(|theme| ThemeSelectEntry::Theme(theme.id.to_string())),
-    );
-    entries
-}
-
-fn next_theme_option<'a>(
-    entries: &'a [ThemeSelectEntry],
-    current: Option<&str>,
-    key: &str,
-) -> Option<(usize, &'a str)> {
-    let options: Vec<_> = entries
-        .iter()
-        .enumerate()
-        .filter_map(|(index, entry)| {
-            if let ThemeSelectEntry::Theme(id) = entry {
-                Some((index, id.as_str()))
-            } else {
-                None
-            }
-        })
-        .collect();
-    let current = options
-        .iter()
-        .position(|(_, id)| Some(*id) == current)
-        .unwrap_or(0);
-    let next = match key {
-        "up" | "arrowup" => current.saturating_sub(1),
-        "home" => 0,
-        "end" => options.len().saturating_sub(1),
-        "down" | "arrowdown" => (current + 1).min(options.len().saturating_sub(1)),
-        _ => return None,
-    };
-    options.get(next).copied()
-}
-
 impl WorkspaceApp {
+    pub(in crate::workspace) fn mount_settings_theme_picker(cx: &mut Context<Self>) -> Entity<SettingsThemePicker> {
+        let owner = cx.entity().downgrade();
+        let frame = Rc::new({
+            let owner = owner.clone();
+            move |window: &Window, cx: &App| {
+                let owner = owner.upgrade()?;
+                let app = owner.read(cx);
+                let select = app.open_settings_select?;
+                select.theme_target()?;
+                let window_id = window.window_handle().window_id();
+                if app.open_settings_select_owner_window_id != Some(window_id) {
+                    return None;
+                }
+                let anchor = app.settings_select_anchors.get(&(window_id, select.anchor_id()))?;
+                Some(SettingsThemePickerFrame {
+                    tokens: app.tokens,
+                    i18n: app.i18n.clone(),
+                    width: f32::from(anchor.bounds.size.width).max(app.tokens.metrics.ui_select_min_width),
+                    select,
+                })
+            }
+        });
+        let apply = Rc::new(move |select: SettingsSelect, id, cx: &mut App| {
+            let _ = owner.update(cx, |app, cx| {
+                if app.open_settings_select == Some(select) && let Some(target) = select.theme_target() {
+                    app.close_settings_select();
+                    app.edit_settings(|settings| target.apply_for_scheme(settings, select.theme_system_dark(), id), cx);
+                }
+            });
+        });
+        cx.new(|_| SettingsThemePicker::new(frame, apply))
+    }
+
+    pub(super) fn settings_window_dispatch(cx: &Context<Self>) -> SettingsWindowDispatch {
+        Self::settings_window_dispatch_for(cx.entity().downgrade())
+    }
+
+    pub(super) fn settings_window_dispatch_for(owner: gpui::WeakEntity<Self>) -> SettingsWindowDispatch {
+        Rc::new(move |request, window, cx| {
+            let _ = owner.update(cx, |app, cx| match request {
+                SettingsWindowRequest::Edit(edit) => app.edit_settings(edit, cx),
+                SettingsWindowRequest::OpenSelect(select) => {
+                    app.open_settings_select_from_pointer(select, window.window_handle().window_id(), cx);
+                    cx.notify();
+                }
+                SettingsWindowRequest::SelectAnchor(anchor) => {
+                    app.update_settings_select_anchor(window.window_handle().window_id(), anchor, cx);
+                }
+                SettingsWindowRequest::BeginInputSelection(input, event) => {
+                    let current = app.current_settings_input_value(input, cx);
+                    app.focus_settings_input(input, current, cx);
+                    app.ime_marked_text = None;
+                    window.focus(&app.focus_handle, cx);
+                    app.begin_ime_selection_from_mouse_down(WorkspaceImeTarget::Settings(input), &event, window, cx);
+                }
+                SettingsWindowRequest::DragInputSelection(event) => {
+                    app.update_ime_selection_drag_from_mouse_move(&event, window, cx);
+                }
+                SettingsWindowRequest::SliderAnchor(anchor) => app.update_select_anchor(anchor, cx),
+                SettingsWindowRequest::BeginSlider(slider, position) => {
+                    app.close_settings_select();
+                    app.focused_settings_input = None;
+                    app.settings_slider_drag = Some(slider);
+                    app.apply_settings_slider_from_position(slider, position, cx);
+                }
+                SettingsWindowRequest::MoveSlider(event) => app.update_settings_slider_drag(&event, cx),
+                SettingsWindowRequest::FinishSlider => app.finish_settings_slider_drag(cx),
+                SettingsWindowRequest::PickSessionLogDirectory => app.pick_terminal_session_log_directory(cx),
+            });
+        })
+    }
+
     pub(in crate::workspace) fn render_settings_select_overlay(
         &self,
         window: &Window,
@@ -96,6 +96,61 @@ impl WorkspaceApp {
             .copied()?;
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
+        let popup = if open_select.theme_target().is_some() {
+            self.settings_theme_picker.clone().into_any_element()
+        } else {
+            self.render_settings_select_popup(open_select, window_id, width, cx)?
+        };
+
+        Some(
+            popover_backdrop()
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_down(
+                    MouseButton::Right,
+                    cx.listener(|this, _event, window, cx| {
+                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(
+                    deferred(
+                        anchored()
+                            .anchor(Corner::TopLeft)
+                            .position(anchor.bounds.bottom_left())
+                            .offset(point(
+                                px(0.0),
+                                px(self.tokens.metrics.settings_select_popup_gap),
+                            ))
+                            .position_mode(AnchoredPositionMode::Window)
+                            .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                                &self.tokens,
+                                SharedString::from(format!(
+                                    "settings-select-popup-{open_select:?}"
+                                )),
+                                div().child(popup),
+                                -6.0,
+                                point(0.5, 0.0),
+                            )),
+                    )
+                    .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn render_settings_select_popup(
+        &self,
+        open_select: SettingsSelect,
+        window_id: gpui::WindowId,
+        width: f32,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let settings = self.settings_store.settings();
         let knowledge_dialog_visible = self
             .ai_entity
@@ -106,6 +161,58 @@ impl WorkspaceApp {
         } else {
             self.settings_workspace.read(cx).route_snapshot().active_tab
         };
+
+        let owner = cx.entity().downgrade();
+        let dispatch = Rc::new(move |request, window: &mut Window, cx: &mut App| {
+            let _ = owner.update(cx, |app, cx| match request {
+                SelectMenuRequest::Close => {
+                    app.close_settings_select();
+                    cx.notify();
+                }
+                SelectMenuRequest::Blur => app.blur_text_inputs(cx),
+                SelectMenuRequest::Focus(input) => {
+                    let value = app.current_settings_input_value(input, cx);
+                    app.focus_settings_input(input, value, cx);
+                    window.focus(&app.focus_handle, cx);
+                }
+                SelectMenuRequest::Edit(edit) => app.edit_settings(edit, cx),
+                SelectMenuRequest::Background(edit) => app.edit_background_style(edit, cx),
+                SelectMenuRequest::RemoteShell(mode) => app.remote_shell_integration_mode_changed(mode, cx),
+                SelectMenuRequest::Trigger(clear_input, edit) => app.edit_terminal_trigger(clear_input, edit, cx),
+                SelectMenuRequest::CloseSemantic => app.close_semantic_scheme_editor(cx),
+                SelectMenuRequest::CloseHighlight => app.close_highlight_rule_editor(cx),
+                SelectMenuRequest::Highlight(index, edit) => app.edit_highlight_rule(index, edit, cx),
+                SelectMenuRequest::HighlightPreset(rules) => app.add_highlight_preset(rules, cx),
+            });
+        });
+        let shells = if matches!(open_select, SettingsSelect::LocalShell | SettingsSelect::LocalShellSemanticScheme(_)) {
+            self.effective_local_shells_for_settings(settings).into_iter().map(|shell| LocalShellOption {
+                id: shell.id, label: shell.label,
+            }).collect()
+        } else {
+            Vec::new()
+        };
+        let commands = &self.terminal.read(cx).quick_commands.store.commands;
+        let trigger_commands = if open_select == SettingsSelect::TerminalTriggerQuickCommand {
+            commands.iter()
+                .filter(|command| oxideterm_quick_commands::quick_command_can_run_non_interactively(command))
+                .map(|command| (command.id.clone(), command.name.clone())).collect()
+        } else {
+            Vec::new()
+        };
+        let select_menu = SettingsSelectMenu {
+            settings,
+            i18n: &self.i18n,
+            tokens: &self.tokens,
+            settings_workspace: &self.settings_workspace,
+            shells,
+            first_command: commands.first().map(|command| command.id.clone()).unwrap_or_default(),
+            trigger_commands,
+            dispatch,
+        };
+        if let Some(popup) = select_menu.render(active_tab, open_select, width, cx) {
+            return Some(popup);
+        }
 
         let popup = match (active_tab, open_select) {
             (_, SettingsSelect::PluginMarketplaceSort) => {
@@ -133,694 +240,6 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (_, SettingsSelect::Language) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for language in language_options() {
-                    let label = self.language_label(language);
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, label, language == settings.general.language),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(|settings| settings.general.language = language, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Help, SettingsSelect::UpdateChannel) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for channel in [UpdateChannel::Stable, UpdateChannel::Beta] {
-                    let label = update_channel_label(channel, &self.i18n);
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            channel == settings.general.update_channel,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.general.update_channel = channel,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::UpdateProxyMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings.general.update_proxy.mode;
-                for mode in [
-                    UpdateProxyMode::Direct,
-                    UpdateProxyMode::Application,
-                    UpdateProxyMode::System,
-                    UpdateProxyMode::Custom,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            update_proxy_mode_label(mode, &self.i18n),
-                            mode == current,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.general.update_proxy.mode = mode,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::UpdateProxyProtocol) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings.general.update_proxy.protocol;
-                for protocol in [
-                    UpdateProxyProtocol::Http,
-                    UpdateProxyProtocol::Https,
-                    UpdateProxyProtocol::Socks5,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            update_proxy_protocol_label(protocol, &self.i18n),
-                            protocol == current,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.general.update_proxy.protocol = protocol,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::NetworkApplicationProxyMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings.network.application_proxy_mode;
-                for mode in [
-                    SettingsApplicationProxyMode::System,
-                    SettingsApplicationProxyMode::Direct,
-                    SettingsApplicationProxyMode::Shared,
-                ] {
-                    // A missing shared profile is shown but cannot become an
-                    // active route, keeping the runtime policy fail-closed.
-                    let shared_proxy_missing = mode == SettingsApplicationProxyMode::Shared
-                        && settings.network.upstream_proxy.is_none();
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            network_application_proxy_mode_label(mode, &self.i18n),
-                            mode == current,
-                        ),
-                        shared_proxy_missing,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if shared_proxy_missing {
-                                return;
-                            }
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.network.application_proxy_mode = mode,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (
-                _,
-                select @ (SettingsSelect::AppearanceTheme
-                | SettingsSelect::AppearanceTerminalTheme
-                | SettingsSelect::AppearanceThemeLight
-                | SettingsSelect::AppearanceThemeDark
-                | SettingsSelect::AppearanceTerminalThemeLight
-                | SettingsSelect::AppearanceTerminalThemeDark),
-            ) => {
-                let target = select.theme_target().expect("theme selector");
-                let mut popup = select_panel_overlay_popup_with_max_height(
-                    &self.tokens,
-                    width,
-                    self.tokens.metrics.settings_theme_select_popup_max_height,
-                )
-                .w(px(width))
-                .track_scroll(&self.settings_theme_scroll);
-                for entry in appearance_theme_entries(settings) {
-                    match entry {
-                        ThemeSelectEntry::Group(key) => {
-                            popup = popup.child(select_label(&self.tokens, self.i18n.t(key)));
-                        }
-                        ThemeSelectEntry::Theme(theme_id) => {
-                            let label = custom_theme_display_name(settings, &theme_id);
-                            let preview_id = theme_id.clone();
-                            let palette =
-                                super::appearance::appearance_theme_palette(settings, &theme_id);
-                            let row = oxideterm_gpui_ui::select::select_option_highlighted(
-                                &self.tokens,
-                                "",
-                                Some(theme_id.as_str()) == select.selected_theme_id(settings),
-                                self.settings_theme_preview.as_deref() == Some(theme_id.as_str()),
-                            )
-                            .h_auto()
-                            .min_h(px(self.tokens.metrics.ui_control_height))
-                            .flex_none()
-                            .child(
-                                div()
-                                    .w_full()
-                                    .min_w_0()
-                                    .pr(px(self.tokens.metrics.ui_select_check_size))
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(4.0))
-                                    .child(div().truncate().child(label))
-                                    .child(
-                                        match target {
-                                            ThemeTarget::Application => {
-                                                let ui = oxideterm_settings_model::theme_ui_colors(settings, &theme_id);
-                                                div()
-                                                    .min_w_0()
-                                                    .flex()
-                                                    .flex_col()
-                                                    .gap(px(self.tokens.spacing.one))
-                                                    .child(
-                                                        div()
-                                                            .whitespace_normal()
-                                                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                            .text_color(rgb(self.tokens.ui.text_muted))
-                                                            .child(oxideterm_gpui_settings_view::application_theme_description(&theme_id, ui, &self.i18n)),
-                                                    )
-                                                    .child(oxideterm_gpui_settings_view::settings_application_palette_swatch(&self.tokens, ui))
-                                                    .into_any_element()
-                                            }
-                                            ThemeTarget::Terminal => oxideterm_gpui_settings_view::settings_theme_palette_swatch(&self.tokens, palette).into_any_element(),
-                                        },
-                                    ),
-                            )
-                            .on_mouse_move(cx.listener(
-                                move |this, _, _, cx| {
-                                    if this.settings_theme_preview.as_ref() != Some(&preview_id) {
-                                        this.settings_theme_preview = Some(preview_id.clone());
-                                        cx.notify();
-                                    }
-                                },
-                            ));
-                            popup = popup.child(select_option_action(
-                                row,
-                                false,
-                                false,
-                                cx.listener(move |this, _, _, cx| {
-                                    this.close_settings_select();
-                                    this.edit_settings(
-                                        |settings| {
-                                            target.apply_for_scheme(
-                                                settings,
-                                                select.theme_system_dark(),
-                                                theme_id.clone(),
-                                            )
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            ));
-                        }
-                    }
-                }
-                Some(popup)
-            }
-            (SettingsTab::Appearance, SettingsSelect::CustomThemeDuplicate) => {
-                let mut popup = select_panel_overlay_popup_with_max_height(
-                    &self.tokens,
-                    width,
-                    self.tokens.metrics.settings_theme_select_popup_max_height,
-                );
-                let mut themes: Vec<_> = BUILT_IN_THEMES.iter().collect();
-                themes.sort_by_key(|theme| theme.id);
-                for theme in themes {
-                    let theme_id = theme.id.to_string();
-                    let selected = self
-                        .settings_workspace
-                        .read(cx)
-                        .theme_editor()
-                        .is_some_and(|editor| editor.duplicate_theme == theme_id);
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, theme_display_name(theme.id), selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.settings_workspace.update(cx, |settings, cx| {
-                                settings.duplicate_theme_editor_from(&theme_id, cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Appearance, SettingsSelect::AppearanceDensity) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &density in density_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            density_label(density, &self.i18n),
-                            density == settings.appearance.ui_density,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.appearance.ui_density = density,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Appearance, SettingsSelect::AppearanceAnimation) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &speed in animation_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            animation_label(speed, &self.i18n),
-                            speed == settings.appearance.animation_speed,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            // Apply the selected profile before starting the
-                            // exit so choosing Off closes in this same event.
-                            this.edit_settings(
-                                |settings| settings.appearance.animation_speed = speed,
-                                cx,
-                            );
-                            this.close_settings_select();
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Appearance, SettingsSelect::AppearanceRenderProfile) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &profile in render_profile_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            render_profile_label(profile, &self.i18n),
-                            profile == settings.appearance.render_profile,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.appearance.render_profile = profile,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Appearance, SettingsSelect::AppearanceFrostedGlass) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                // The selector lists platform window materials only. Legacy
-                // WebView CSS/native values are normalized to the system entry.
-                let selected_mode = match settings.appearance.frosted_glass {
-                    FrostedGlassMode::Css | FrostedGlassMode::Native => FrostedGlassMode::System,
-                    mode => mode,
-                };
-                for mode in available_modes()
-                    .iter()
-                    .copied()
-                    .map(frosted_glass_mode_from_native)
-                {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            frosted_glass_label(mode, &self.i18n),
-                            selected_mode == mode,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.appearance.frosted_glass = mode,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Appearance, SettingsSelect::AppearanceBackgroundFit) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &fit in background_fit_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            background_fit_label(fit, &self.i18n),
-                            fit == settings.terminal.background_fit,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_background_style(|style| style.fit = fit, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ide, SettingsSelect::IdeFontFamily) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for family in
-                    std::iter::once(None).chain(font_family_options().iter().copied().map(Some))
-                {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            family.map(font_family_label).unwrap_or_else(|| {
-                                self.i18n.t("settings_view.ide.follow_terminal")
-                            }),
-                            family == settings.ide.font_family,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(|settings| settings.ide.font_family = family, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ide, SettingsSelect::IdeCjkFontFamily) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current_family = settings.ide.cjk_font_family.as_deref().map(str::trim);
-                let custom = self.settings_workspace.read(cx).ide_cjk_font_custom
-                    || current_family.is_some_and(cjk_font_is_custom);
-                for family in std::iter::once(None)
-                    .chain(terminal_cjk_font_options().iter().copied().map(Some))
-                {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            family
-                                .map(|family| terminal_cjk_font_label(family, &self.i18n))
-                                .unwrap_or_else(|| {
-                                    self.i18n.t("settings_view.ide.follow_terminal")
-                                }),
-                            !custom && family == current_family,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.settings_workspace.update(cx, |state, _| {
-                                state.ide_cjk_font_custom = false;
-                            });
-                            this.edit_settings(
-                                |settings| {
-                                    settings.ide.cjk_font_family = family.map(str::to_string)
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                popup = popup.child(select_option_action(
-                    select_option(
-                        &self.tokens,
-                        self.i18n.t("settings_view.terminal.cjk_font_custom"),
-                        custom,
-                    ),
-                    false,
-                    false,
-                    cx.listener(|this, _, window, cx| {
-                        this.settings_workspace.update(cx, |state, _| {
-                            state.ide_cjk_font_custom = true;
-                        });
-                        let value = this
-                            .settings_store
-                            .settings()
-                            .ide
-                            .cjk_font_family
-                            .clone()
-                            .unwrap_or_default();
-                        this.focus_settings_input(SettingsInput::IdeCjkFontFamily, value, cx);
-                        window.focus(&this.focus_handle, cx);
-                        cx.stop_propagation();
-                    }),
-                ));
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalFontFamily) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &family in font_family_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            font_family_label(family),
-                            family == settings.terminal.font_family,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.font_family = family,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalCjkFontFamily) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current_family = settings.terminal.cjk_font_family.trim();
-                let custom = self.settings_workspace.read(cx).terminal_cjk_font_custom
-                    || cjk_font_is_custom(current_family);
-                for &family in terminal_cjk_font_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            terminal_cjk_font_label(family, &self.i18n),
-                            !custom && family == current_family,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.settings_workspace.update(cx, |state, _| {
-                                state.terminal_cjk_font_custom = false;
-                            });
-                            this.edit_settings(
-                                |settings| settings.terminal.cjk_font_family = family.to_string(),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                popup = popup.child(select_option_action(
-                    select_option(
-                        &self.tokens,
-                        self.i18n.t("settings_view.terminal.cjk_font_custom"),
-                        custom,
-                    ),
-                    false,
-                    false,
-                    cx.listener(|this, _, window, cx| {
-                        this.settings_workspace.update(cx, |state, _| {
-                            state.terminal_cjk_font_custom = true;
-                        });
-                        let value = this
-                            .settings_store
-                            .settings()
-                            .terminal
-                            .cjk_font_family
-                            .clone();
-                        this.focus_settings_input(SettingsInput::TerminalCjkFontFamily, value, cx);
-                        window.focus(&this.focus_handle, cx);
-                        cx.stop_propagation();
-                    }),
-                ));
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::SshLatencyInterval) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for seconds in [5, 10, 15, 30, 60] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            seconds.to_string(),
-                            seconds == settings.terminal.command_bar.ssh_latency_interval_secs,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| {
-                                    settings.terminal.command_bar.ssh_latency_interval_secs =
-                                        seconds
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalEncoding) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &encoding in terminal_encoding_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            terminal_encoding_label(encoding),
-                            encoding == settings.terminal.terminal_encoding,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.terminal_encoding = encoding,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalSessionLogFileMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &mode in terminal_session_log_file_mode_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            terminal_session_log_file_mode_label(mode, &self.i18n),
-                            mode == settings.terminal.session_log.file_mode,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.session_log.file_mode = mode,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalBackspaceSequence) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &sequence in terminal_backspace_sequence_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            terminal_backspace_sequence_label(sequence),
-                            sequence == settings.terminal.backspace_sequence,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.backspace_sequence = sequence,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalDeleteSequence) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &sequence in terminal_delete_sequence_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            terminal_delete_sequence_label(sequence),
-                            sequence == settings.terminal.delete_sequence,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.delete_sequence = sequence,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalCursorStyle) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &style in cursor_style_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            cursor_style_label(style, &self.i18n),
-                            style == settings.terminal.cursor_style,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.cursor_style = style,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
             (SettingsTab::Ai, SettingsSelect::IdeAgentMode) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for mode in [
@@ -842,719 +261,6 @@ impl WorkspaceApp {
                             cx.stop_propagation();
                         }),
                     ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::XmodemBlockSize) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for size in [
-                    oxideterm_settings::XmodemBlockSize::Bytes128,
-                    oxideterm_settings::XmodemBlockSize::Bytes1024,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            xmodem_block_size_label(size, &self.i18n),
-                            size == settings.terminal.xmodem_block_size,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.xmodem_block_size = size,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::RemoteShellIntegrationMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for mode in [
-                    RemoteShellIntegrationMode::Ask,
-                    RemoteShellIntegrationMode::Enabled,
-                    RemoteShellIntegrationMode::Disabled,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            remote_shell_integration_mode_label(mode, &self.i18n),
-                            mode == settings.terminal.remote_shell_integration_mode,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.terminal.remote_shell_integration_mode = mode,
-                                cx,
-                            );
-                            this.remote_shell_integration_mode_changed(mode, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalTriggerMatchMode) => {
-                let draft = self.terminal_trigger_draft()?;
-                let current = draft.matcher.mode;
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for mode in [
-                    TerminalTriggerMatchMode::Literal,
-                    TerminalTriggerMatchMode::Regex,
-                ] {
-                    let label = self.i18n.t(match mode {
-                        TerminalTriggerMatchMode::Literal => {
-                            "settings_view.terminal.triggers.literal"
-                        }
-                        TerminalTriggerMatchMode::Regex => "settings_view.terminal.triggers.regex",
-                    });
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, label, mode == current),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.select_terminal_trigger_match_mode(mode);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (
-                SettingsTab::Terminal,
-                SettingsSelect::TerminalTriggerAction | SettingsSelect::TerminalTriggerClickAction,
-            ) => {
-                let draft = self.terminal_trigger_draft()?;
-                let nested = open_select == SettingsSelect::TerminalTriggerClickAction;
-                let action = if nested {
-                    self.terminal_trigger_draft_action()?
-                } else {
-                    &draft.action
-                };
-                let current = match action {
-                    TerminalTriggerAction::SendText { .. } => 0,
-                    TerminalTriggerAction::RunQuickCommand { .. } => 1,
-                    TerminalTriggerAction::LaunchLocalProcess { .. } => 2,
-                    TerminalTriggerAction::OpenUrl { .. } => 3,
-                    TerminalTriggerAction::CustomLink { .. } => 4,
-                    TerminalTriggerAction::CustomMenu { .. } => 5,
-                    TerminalTriggerAction::ShowTooltip { .. } => 6,
-                };
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for action_index in if nested {
-                    vec![0, 1, 2, 3]
-                } else {
-                    vec![0, 1, 2, 4, 5, 6]
-                } {
-                    let label_key = match action_index {
-                        0 => "settings_view.terminal.triggers.action_send_text",
-                        1 => "settings_view.terminal.triggers.action_quick_command",
-                        2 => "settings_view.terminal.triggers.action_local_process",
-                        3 => "settings_view.terminal.triggers.open_url",
-                        4 => "settings_view.terminal.triggers.custom_link",
-                        5 => "settings_view.terminal.triggers.custom_menu",
-                        _ => "settings_view.terminal.triggers.show_tooltip",
-                    };
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.i18n.t(label_key),
-                            action_index == current,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            let action = match action_index {
-                                0 => TerminalTriggerAction::SendText {
-                                    text: String::new(),
-                                    append_enter: false,
-                                },
-                                1 => {
-                                    let quick_command_id = this
-                                        .terminal
-                                        .read(cx)
-                                        .quick_commands
-                                        .store
-                                        .commands
-                                        .first()
-                                        .map(|command| command.id.clone())
-                                        .unwrap_or_default();
-                                    TerminalTriggerAction::RunQuickCommand { quick_command_id }
-                                }
-                                2 => TerminalTriggerAction::LaunchLocalProcess {
-                                    process: LocalProcessSpec::DirectProgram {
-                                        executable: String::new(),
-                                        arguments: Vec::new(),
-                                        working_directory: None,
-                                    },
-                                },
-                                3 => TerminalTriggerAction::OpenUrl { url: String::new() },
-                                4 => TerminalTriggerAction::CustomLink {
-                                    action: Box::new(TerminalTriggerAction::OpenUrl {
-                                        url: String::new(),
-                                    }),
-                                },
-                                5 => TerminalTriggerAction::CustomMenu {
-                                    items: vec![
-                                        oxideterm_terminal_triggers::TerminalTriggerMenuItem {
-                                            label: String::new(),
-                                            action: TerminalTriggerAction::OpenUrl {
-                                                url: String::new(),
-                                            },
-                                        },
-                                    ],
-                                },
-                                _ => TerminalTriggerAction::ShowTooltip {
-                                    text: String::new(),
-                                },
-                            };
-                            if nested {
-                                this.select_terminal_trigger_click_action(action);
-                            } else {
-                                this.select_terminal_trigger_action(action);
-                            }
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalTriggerProcessMode) => {
-                let action = self.terminal_trigger_draft_action()?;
-                let current_shell = matches!(
-                    action,
-                    TerminalTriggerAction::LaunchLocalProcess {
-                        process: LocalProcessSpec::ExplicitShell { .. }
-                    }
-                );
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for shell in [false, true] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.i18n.t(if shell {
-                                "settings_view.terminal.triggers.explicit_shell"
-                            } else {
-                                "settings_view.terminal.triggers.direct_program"
-                            }),
-                            shell == current_shell,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.select_terminal_trigger_process_mode(shell);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalTriggerQuickCommand) => {
-                let current = match self.terminal_trigger_draft_action()? {
-                    TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
-                        quick_command_id.clone()
-                    }
-                    _ => String::new(),
-                };
-                let mut popup = select_panel_overlay_popup_with_max_height(
-                    &self.tokens,
-                    width,
-                    self.tokens.metrics.settings_theme_select_popup_max_height,
-                );
-                for command in self
-                    .terminal
-                    .read(cx)
-                    .quick_commands
-                    .store
-                    .commands
-                    .iter()
-                    .filter(|command| {
-                        oxideterm_quick_commands::quick_command_can_run_non_interactively(command)
-                    })
-                {
-                    let id = command.id.clone();
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, command.name.clone(), id == current),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.select_terminal_trigger_quick_command(id.clone());
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalTriggerTiming) => {
-                let draft = self.terminal_trigger_draft()?;
-                let current = draft.timing.dispatch;
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for dispatch in [
-                    TerminalTriggerDispatch::Immediate,
-                    TerminalTriggerDispatch::AfterNextLineBreak,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.i18n.t(match dispatch {
-                                TerminalTriggerDispatch::Immediate => {
-                                    "settings_view.terminal.triggers.immediate"
-                                }
-                                TerminalTriggerDispatch::AfterNextLineBreak => {
-                                    "settings_view.terminal.triggers.after_next_line_break"
-                                }
-                            }),
-                            dispatch == current,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.select_terminal_trigger_timing(dispatch);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalTriggerScope) => {
-                let draft = self.terminal_trigger_draft()?;
-                let current = match &draft.scope {
-                    TerminalTriggerScope::AllTerminals => 0,
-                    TerminalTriggerScope::LocalTerminals => 1,
-                    TerminalTriggerScope::SavedConnections { .. } => 2,
-                };
-                let saved_connections = match &draft.scope {
-                    TerminalTriggerScope::SavedConnections { connections } => connections.clone(),
-                    _ => Vec::new(),
-                };
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for scope_index in 0..3 {
-                    let label_key = match scope_index {
-                        0 => "settings_view.terminal.triggers.all_terminals",
-                        1 => "settings_view.terminal.triggers.local_terminals",
-                        _ => "settings_view.terminal.triggers.saved_connections",
-                    };
-                    let existing_connections = saved_connections.clone();
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, self.i18n.t(label_key), scope_index == current),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            let scope = match scope_index {
-                                0 => TerminalTriggerScope::AllTerminals,
-                                1 => TerminalTriggerScope::LocalTerminals,
-                                _ => TerminalTriggerScope::SavedConnections {
-                                    connections: existing_connections.clone(),
-                                },
-                            };
-                            this.select_terminal_trigger_scope(scope);
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::TerminalSemanticScheme) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &scheme in terminal_semantic_scheme_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            terminal_semantic_scheme_label(scheme, &self.i18n),
-                            scheme == settings.terminal.semantic_scheme,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.close_semantic_scheme_editor(cx);
-                            this.edit_settings(
-                                |settings| {
-                                    settings.terminal.semantic_scheme = scheme;
-                                    settings.terminal.semantic_custom_scheme = None;
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                if !settings.terminal.custom_semantic_schemes.is_empty() {
-                    popup = popup
-                        .child(select_separator(&self.tokens))
-                        .child(select_label(
-                            &self.tokens,
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.semantic_scheme_custom"),
-                        ));
-                    for custom in &settings.terminal.custom_semantic_schemes {
-                        let id = custom.id.clone();
-                        let selected = settings.terminal.semantic_custom_scheme.as_deref()
-                            == Some(id.as_str());
-                        popup = popup.child(select_option_action(
-                            select_option(&self.tokens, custom.name.clone(), selected),
-                            false,
-                            false,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.close_settings_select();
-                                this.edit_settings(
-                                    |settings| {
-                                        settings.terminal.semantic_custom_scheme = Some(id.clone());
-                                    },
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        ));
-                    }
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::HighlightRuleSet) => {
-                let mut popup =
-                    select_overlay_popup(&self.tokens, width).child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.rule_set_global_base"),
-                            settings.terminal.default_highlight_rule_set.is_none(),
-                        ),
-                        false,
-                        false,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.close_highlight_rule_editor(cx);
-                            this.edit_settings(
-                                |settings| settings.terminal.default_highlight_rule_set = None,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                if !settings.terminal.highlight_rule_sets.is_empty() {
-                    popup = popup.child(select_separator(&self.tokens));
-                    for rule_set in &settings.terminal.highlight_rule_sets {
-                        let id = rule_set.id.clone();
-                        let selected = settings.terminal.default_highlight_rule_set.as_deref()
-                            == Some(id.as_str());
-                        popup = popup.child(select_option_action(
-                            select_option(&self.tokens, rule_set.name.clone(), selected),
-                            false,
-                            false,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.close_settings_select();
-                                this.close_highlight_rule_editor(cx);
-                                this.edit_settings(
-                                    |settings| {
-                                        settings.terminal.default_highlight_rule_set =
-                                            Some(id.clone());
-                                    },
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        ));
-                    }
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::SemanticSchemeRuleClass(index)) => {
-                let selected = settings
-                    .terminal
-                    .active_custom_semantic_scheme()
-                    .and_then(|scheme| scheme.rules.get(index))
-                    .map(|rule| rule.class)?;
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &class in SEMANTIC_CLASSES {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            semantic_class_label(class, &self.i18n),
-                            class == selected,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| {
-                                    let _ = edit_custom_semantic_scheme(settings, |scheme| {
-                                        if let Some(rule) = scheme.rules.get_mut(index) {
-                                            rule.class = class;
-                                        }
-                                    });
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::SemanticSchemeRuleContext(index)) => {
-                let selected = settings
-                    .terminal
-                    .active_custom_semantic_scheme()
-                    .and_then(|scheme| scheme.rules.get(index))
-                    .map(|rule| rule.context)?;
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for context in [
-                    SemanticRuleContext::Any,
-                    SemanticRuleContext::Command,
-                    SemanticRuleContext::Output,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            semantic_context_label(context, &self.i18n),
-                            context == selected,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| {
-                                    let _ = edit_custom_semantic_scheme(settings, |scheme| {
-                                        if let Some(rule) = scheme.rules.get_mut(index) {
-                                            rule.context = context;
-                                        }
-                                    });
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::HighlightPreset) => {
-                let mut popup = select_overlay_popup(&self.tokens, width.max(288.0));
-                for (group_index, group) in
-                    highlight_preset_groups(&self.i18n).into_iter().enumerate()
-                {
-                    if group_index > 0 {
-                        popup = popup.child(select_separator(&self.tokens));
-                    }
-                    popup = popup.child(select_label(&self.tokens, group.label));
-                    for preset in group.items {
-                        popup = popup.child(select_option_action(
-                            select_option(&self.tokens, preset.label.clone(), false),
-                            false,
-                            false,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.close_settings_select();
-                                this.add_highlight_preset(preset.rules.clone(), cx);
-                                cx.stop_propagation();
-                            }),
-                        ));
-                    }
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::HighlightRenderMode(index)) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let selected = settings
-                    .terminal
-                    .highlight_rules
-                    .get(index)
-                    .map(|rule| rule.render_mode)
-                    .unwrap_or_default();
-                for &mode in highlight_render_mode_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            highlight_render_mode_label(mode, &self.i18n),
-                            mode == selected,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_highlight_rule(index, |rule| rule.render_mode = mode, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::HighlightMatchScope(index)) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let selected = settings
-                    .terminal
-                    .highlight_rules
-                    .get(index)
-                    .map(|rule| rule.match_scope)
-                    .unwrap_or_default();
-                for &scope in highlight_match_scope_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            highlight_match_scope_label(scope, &self.i18n),
-                            scope == selected,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_highlight_rule(index, |rule| rule.match_scope = scope, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::LocalShell) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let selected = settings.local_terminal.default_shell_id.as_deref();
-                for shell in self.effective_local_shells_for_settings(settings) {
-                    let shell_id = shell.id.clone();
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            shell.label,
-                            selected == Some(shell_id.as_str()),
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.blur_text_inputs(cx);
-                            this.edit_settings(
-                                |settings| {
-                                    settings.local_terminal.default_shell_id =
-                                        Some(shell_id.clone())
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Terminal, SettingsSelect::LocalShellSemanticScheme(index)) => {
-                let shell = self
-                    .effective_local_shells_for_settings(settings)
-                    .into_iter()
-                    .nth(index)?;
-                let selected = settings.local_terminal.semantic_scheme_for_shell(&shell.id);
-                let shell_id = shell.id.clone();
-                let inherited_label = self
-                    .i18n
-                    .t("ssh.form.terminal_use_application_default")
-                    .replace(
-                        "{{value}}",
-                        &application_semantic_scheme_label(settings, &self.i18n),
-                    );
-                let mut popup =
-                    select_overlay_popup(&self.tokens, width).child(select_option_action(
-                        select_option(&self.tokens, inherited_label, selected.is_none()),
-                        false,
-                        false,
-                        cx.listener({
-                            let shell_id = shell_id.clone();
-                            move |this, _event, _window, cx| {
-                                this.close_settings_select();
-                                this.edit_settings(
-                                    |settings| {
-                                        settings
-                                            .local_terminal
-                                            .semantic_scheme_by_shell
-                                            .remove(&shell_id);
-                                    },
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }
-                        }),
-                    ));
-                for (scheme_id, scheme) in [
-                    ("balanced", TerminalSemanticScheme::Balanced),
-                    ("conservative", TerminalSemanticScheme::Conservative),
-                ] {
-                    let scheme_id = scheme_id.to_string();
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            terminal_semantic_scheme_label(scheme, &self.i18n),
-                            selected == Some(scheme_id.as_str()),
-                        ),
-                        false,
-                        false,
-                        cx.listener({
-                            let shell_id = shell_id.clone();
-                            move |this, _event, _window, cx| {
-                                this.close_settings_select();
-                                this.edit_settings(
-                                    |settings| {
-                                        settings
-                                            .local_terminal
-                                            .semantic_scheme_by_shell
-                                            .insert(shell_id.clone(), scheme_id.clone());
-                                    },
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }
-                        }),
-                    ));
-                }
-                if !settings.terminal.custom_semantic_schemes.is_empty() {
-                    popup = popup
-                        .child(select_separator(&self.tokens))
-                        .child(select_label(
-                            &self.tokens,
-                            self.i18n
-                                .t("settings_view.terminal.highlight_rules.semantic_scheme_custom"),
-                        ));
-                    for custom in &settings.terminal.custom_semantic_schemes {
-                        let scheme_id = custom.id.clone();
-                        popup = popup.child(select_option_action(
-                            select_option(
-                                &self.tokens,
-                                custom.name.clone(),
-                                selected == Some(scheme_id.as_str()),
-                            ),
-                            false,
-                            false,
-                            cx.listener({
-                                let shell_id = shell_id.clone();
-                                move |this, _event, _window, cx| {
-                                    this.close_settings_select();
-                                    this.edit_settings(
-                                        |settings| {
-                                            settings
-                                                .local_terminal
-                                                .semantic_scheme_by_shell
-                                                .insert(shell_id.clone(), scheme_id.clone());
-                                        },
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }
-                            }),
-                        ));
-                    }
                 }
                 Some(popup)
             }
@@ -1667,29 +373,6 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Connections, SettingsSelect::ConnectionIdleTimeout) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for (seconds, label) in connection_idle_timeout_options(&self.i18n) {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            seconds == settings.connection_pool.idle_timeout_secs,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.connection_pool.idle_timeout_secs = seconds,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
             (SettingsTab::Connections, SettingsSelect::ConnectionImportSource) => {
                 let selected_source = self.settings_workspace.read(cx).connection_import_source();
                 let mut popup = select_overlay_popup(&self.tokens, width);
@@ -1734,111 +417,6 @@ impl WorkspaceApp {
                             this.settings_workspace.update(cx, |settings, cx| {
                                 settings.set_connection_import_duplicate_strategy(strategy, cx);
                             });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Connections, SettingsSelect::ReconnectMaxAttempts) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for attempts in reconnect_max_attempt_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            attempts.to_string(),
-                            attempts == settings.reconnect.max_attempts,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| set_reconnect_max_attempts(settings, attempts),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Connections, SettingsSelect::ReconnectBaseDelay) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for (delay_ms, label) in reconnect_base_delay_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            delay_ms == settings.reconnect.base_delay_ms,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| set_reconnect_base_delay(settings, delay_ms),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Connections, SettingsSelect::ReconnectMaxDelay) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for (delay_ms, label) in reconnect_max_delay_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            delay_ms == settings.reconnect.max_delay_ms,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| set_reconnect_max_delay(settings, delay_ms),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::NetworkProxyProtocol) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings
-                    .network
-                    .upstream_proxy
-                    .as_ref()
-                    .map(|proxy| proxy.protocol)
-                    .unwrap_or(SettingsUpstreamProxyProtocol::Socks5);
-                for protocol in [
-                    SettingsUpstreamProxyProtocol::Socks5,
-                    SettingsUpstreamProxyProtocol::HttpConnect,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            network_proxy_protocol_label(protocol, &self.i18n),
-                            protocol == current,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                move |settings| {
-                                    if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
-                                        proxy.protocol = protocol;
-                                    }
-                                },
-                                cx,
-                            );
                             cx.stop_propagation();
                         }),
                     ));
@@ -2217,7 +795,7 @@ impl WorkspaceApp {
                     popup = popup.child(select_option_action(
                         select_option(
                             &self.tokens,
-                            sftp_page::sftp_presentation_label(preference, &self.i18n),
+                            oxideterm_gpui_settings_view::sftp_page::sftp_presentation_label(preference, &self.i18n),
                             preference == settings.sftp.presentation,
                         ),
                         false,
@@ -2239,151 +817,9 @@ impl WorkspaceApp {
                 }
                 Some(popup)
             }
-            (SettingsTab::Sftp, SettingsSelect::SftpProtocol) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for protocol in [
-                    oxideterm_settings::FileTransferProtocolPreference::Auto,
-                    oxideterm_settings::FileTransferProtocolPreference::Sftp,
-                    oxideterm_settings::FileTransferProtocolPreference::Scp,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            file_transfer_protocol_label(protocol, &self.i18n),
-                            protocol == settings.sftp.transfer_protocol,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.sftp.transfer_protocol = protocol,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Sftp, SettingsSelect::SftpConcurrent) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &count in sftp_concurrent_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            sftp_transfer_count_label(&self.i18n, count),
-                            count == settings.sftp.max_concurrent_transfers,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.sftp.max_concurrent_transfers = count,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Sftp, SettingsSelect::SftpDirectoryParallelism) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for &count in sftp_directory_parallelism_options() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            sftp_transfer_count_label(&self.i18n, count),
-                            count == settings.sftp.directory_parallelism,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.sftp.directory_parallelism = count,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Sftp, SettingsSelect::SftpConflict) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for action in [
-                    oxideterm_settings::ConflictAction::Ask,
-                    oxideterm_settings::ConflictAction::Overwrite,
-                    oxideterm_settings::ConflictAction::Skip,
-                    oxideterm_settings::ConflictAction::Rename,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            conflict_label(action, &self.i18n),
-                            action == settings.sftp.conflict_action,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.sftp.conflict_action = action,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
             _ => None,
         }?;
-        let popup = overlay_content_boundary(popup).into_any_element();
-
-        Some(
-            popover_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, window, cx| {
-                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|this, _event, window, cx| {
-                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(
-                    deferred(
-                        anchored()
-                            .anchor(Corner::TopLeft)
-                            .position(anchor.bounds.bottom_left())
-                            .offset(point(
-                                px(0.0),
-                                px(self.tokens.metrics.settings_select_popup_gap),
-                            ))
-                            .position_mode(AnchoredPositionMode::Window)
-                            .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
-                                &self.tokens,
-                                SharedString::from(format!(
-                                    "settings-select-popup-{open_select:?}"
-                                )),
-                                div().child(popup),
-                                -6.0,
-                                point(0.5, 0.0),
-                            )),
-                    )
-                    .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
-                )
-                .into_any_element(),
-        )
+        Some(overlay_content_boundary(popup).into_any_element())
     }
 
     pub(in crate::workspace) fn open_settings_select_from_pointer(
@@ -2395,6 +831,8 @@ impl WorkspaceApp {
         // Browser select triggers opened by pointer do not show a focus-visible
         // ring. Keep the origin and open/toggle rule in one place so settings,
         // AI provider, and knowledge selects do not drift apart.
+        self.clear_terminal_trigger_input_focus(cx);
+        self.blur_highlight_input(oxideterm_gpui_settings_view::highlight_page::is_highlight_input, cx);
         self.focused_settings_input = None;
         self.ai_entity.update(cx, |entity, cx| {
             entity.blur_settings_input(cx);
@@ -2405,16 +843,9 @@ impl WorkspaceApp {
             self.close_settings_select();
             return;
         }
-        self.settings_theme_preview = None;
-        if let Some(selected) = select_id.selected_theme_id(self.settings_store.settings()) {
-            self.settings_theme_preview = Some(selected.to_string());
-            self.settings_theme_scroll = ScrollHandle::new();
-            if let Some(row) = appearance_theme_entries(self.settings_store.settings())
-                .iter()
-                .position(|entry| matches!(entry, ThemeSelectEntry::Theme(id) if id == selected))
-            {
-                self.settings_theme_scroll.scroll_to_item(row);
-            }
+        if select_id.theme_target().is_some() {
+            let settings = self.settings_store.settings();
+            self.settings_theme_picker.update(cx, |picker, cx| picker.open(select_id, settings, cx));
         }
         self.open_settings_select = Some(select_id);
         self.open_settings_select_owner_window_id = Some(owner_window_id);
@@ -2448,7 +879,7 @@ impl WorkspaceApp {
                 true
             }
             "enter" | "space" | " " => {
-                if let Some(id) = self.settings_theme_preview.clone() {
+                if let Some(id) = self.settings_theme_picker.read(cx).preview().map(str::to_owned) {
                     self.close_settings_select();
                     self.edit_settings(
                         |settings| target.apply_for_scheme(settings, system_dark, id),
@@ -2458,42 +889,11 @@ impl WorkspaceApp {
                 true
             }
             "up" | "arrowup" | "down" | "arrowdown" | "home" | "end" => {
-                let entries = appearance_theme_entries(self.settings_store.settings());
-                if let Some((row, id)) = next_theme_option(
-                    &entries,
-                    self.settings_theme_preview.as_deref(),
-                    &event.keystroke.key,
-                ) {
-                    self.settings_theme_preview = Some(id.to_string());
-                    self.settings_theme_scroll.scroll_to_item(row);
-                    cx.notify();
-                }
+                self.settings_theme_picker.update(cx, |picker, cx| picker.navigate(&event.keystroke.key, cx));
                 true
             }
             _ => false,
         }
-    }
-
-    pub(in crate::workspace) fn language_select_row(
-        &self,
-        selected: Language,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let control_width = self.tokens.metrics.settings_select_width;
-        let control = self.settings_select_control(
-            SettingsSelect::Language,
-            self.language_label(selected),
-            false,
-            Some(control_width),
-            cx,
-        );
-
-        self.setting_row(
-            "settings_view.general.language",
-            "settings_view.general.language_hint",
-            control,
-            cx,
-        )
     }
 
     pub(in crate::workspace) fn select_setting_row(
@@ -2518,20 +918,10 @@ impl WorkspaceApp {
         setter: fn(&mut PersistedSettings, bool),
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.setting_row(
-            label_key,
-            hint_key,
-            switch(&self.tokens, label_key.to_owned(), String::new(), checked)
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.edit_settings(|settings| setter(settings, !checked), cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .into_any_element(),
-            cx,
-        )
+        let control = self.settings_components().toggle_control(
+            label_key, checked, setter, Self::settings_window_dispatch(cx),
+        );
+        self.setting_row(label_key, hint_key, control, cx)
     }
 
     pub(in crate::workspace) fn number_row(
@@ -2577,36 +967,5 @@ impl WorkspaceApp {
             )
         });
         settings_row(&self.tokens, label, hint, control)
-    }
-}
-
-#[cfg(test)]
-mod theme_select_tests {
-    use super::*;
-
-    #[test]
-    fn theme_navigation_skips_groups_and_scrolls_to_the_actual_row() {
-        let entries = [
-            ThemeSelectEntry::Group("custom"),
-            ThemeSelectEntry::Theme("custom:one".into()),
-            ThemeSelectEntry::Group("oxide"),
-            ThemeSelectEntry::Theme("azurite".into()),
-            ThemeSelectEntry::Group("classic"),
-            ThemeSelectEntry::Theme("tokyo-night".into()),
-        ];
-        for (current, key, expected) in [
-            ("custom:one", "down", (3, "azurite")),
-            ("azurite", "up", (1, "custom:one")),
-            ("azurite", "end", (5, "tokyo-night")),
-            ("tokyo-night", "home", (1, "custom:one")),
-            ("custom:one", "up", (1, "custom:one")),
-            ("tokyo-night", "down", (5, "tokyo-night")),
-        ] {
-            assert_eq!(
-                next_theme_option(&entries, Some(current), key),
-                Some(expected),
-                "{current}: {key}"
-            );
-        }
     }
 }

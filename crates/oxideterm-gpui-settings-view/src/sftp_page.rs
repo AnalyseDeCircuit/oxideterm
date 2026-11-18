@@ -1,15 +1,19 @@
-use super::*;
+use gpui::{AnyElement, App, div, prelude::*};
+use oxideterm_i18n::I18n;
+use oxideterm_settings::SftpPresentationPreference;
+use oxideterm_settings_model::SettingsSectionId;
+
+use crate::{
+    SettingsInput, SettingsSelect, components::SettingsControls, conflict_label,
+    file_transfer_protocol_label, sftp_transfer_count_label,
+};
 
 // Leave room for large transfer rates and the localized unlimited placeholder.
 const SFTP_SPEED_LIMIT_INPUT_WIDTH: f32 = 180.0;
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn settings_sftp_section(
-        &self,
-        section: SettingsSectionId,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let settings = self.settings_store.settings();
+impl SettingsControls<'_> {
+    pub fn settings_sftp_section(&self, section: SettingsSectionId, cx: &App) -> AnyElement {
+        let settings = self.settings;
         if section == SettingsSectionId::SftpOpening {
             return self.settings_card(
                 "settings_view.sftp.opening",
@@ -20,7 +24,7 @@ impl WorkspaceApp {
                         "settings_view.sftp.presentation_hint",
                         self.sftp_select_control(
                             SettingsSelect::SftpPresentation,
-                            sftp_presentation_label(settings.sftp.presentation, &self.i18n),
+                            sftp_presentation_label(settings.sftp.presentation, self.i18n),
                             cx,
                         ),
                         cx,
@@ -32,7 +36,7 @@ impl WorkspaceApp {
                             SettingsSelect::SftpProtocol,
                             file_transfer_protocol_label(
                                 settings.sftp.transfer_protocol,
-                                &self.i18n,
+                                self.i18n,
                             ),
                             cx,
                         ),
@@ -51,7 +55,7 @@ impl WorkspaceApp {
                     "settings_view.sftp.conflict_hint",
                     self.sftp_select_control(
                         SettingsSelect::SftpConflict,
-                        conflict_label(settings.sftp.conflict_action, &self.i18n),
+                        conflict_label(settings.sftp.conflict_action, self.i18n),
                         cx,
                     ),
                     cx,
@@ -69,7 +73,7 @@ impl WorkspaceApp {
                 "settings_view.sftp.concurrent_hint",
                 self.sftp_select_control(
                     SettingsSelect::SftpConcurrent,
-                    sftp_transfer_count_label(&self.i18n, settings.sftp.max_concurrent_transfers),
+                    sftp_transfer_count_label(self.i18n, settings.sftp.max_concurrent_transfers),
                     cx,
                 ),
                 cx,
@@ -79,7 +83,7 @@ impl WorkspaceApp {
                 "settings_view.sftp.directory_parallelism_hint",
                 self.sftp_select_control(
                     SettingsSelect::SftpDirectoryParallelism,
-                    sftp_transfer_count_label(&self.i18n, settings.sftp.directory_parallelism),
+                    sftp_transfer_count_label(self.i18n, settings.sftp.directory_parallelism),
                     cx,
                 ),
                 cx,
@@ -115,11 +119,11 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn sftp_select_control(
+    fn sftp_select_control(
         &self,
         select_id: SettingsSelect,
         value: String,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> AnyElement {
         self.settings_select_control(
             select_id,
@@ -131,20 +135,14 @@ impl WorkspaceApp {
     }
 }
 
-pub(in crate::workspace) fn sftp_presentation_label(
+pub fn sftp_presentation_label(
     preference: oxideterm_settings::SftpPresentationPreference,
     i18n: &I18n,
 ) -> String {
     let key = match preference {
-        oxideterm_settings::SftpPresentationPreference::Ask => {
-            "settings_view.sftp.presentation_ask"
-        }
-        oxideterm_settings::SftpPresentationPreference::Tab => {
-            "settings_view.sftp.presentation_tab"
-        }
-        oxideterm_settings::SftpPresentationPreference::Sidebar => {
-            "settings_view.sftp.presentation_sidebar"
-        }
+        SftpPresentationPreference::Ask => "settings_view.sftp.presentation_ask",
+        SftpPresentationPreference::Tab => "settings_view.sftp.presentation_tab",
+        SftpPresentationPreference::Sidebar => "settings_view.sftp.presentation_sidebar",
     };
     i18n.t(key)
 }

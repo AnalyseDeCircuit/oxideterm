@@ -11,6 +11,8 @@ mod auto_height;
 pub use auto_height::auto_height;
 
 mod sidebar;
+mod segmented_state;
+pub use segmented_state::UserSegmentedControlMotionState;
 pub use sidebar::{DrawerEdge, SidebarMotion};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

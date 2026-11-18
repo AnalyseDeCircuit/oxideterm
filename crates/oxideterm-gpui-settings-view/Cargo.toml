@@ -8,16 +8,39 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+anyhow.workspace = true
+chrono.workspace = true
 gpui.workspace = true
 oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-background-media = { path = "../oxideterm-background-media" }
+oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-gpui-background = { path = "../oxideterm-gpui-background" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
+oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
 oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
+oxideterm-public-mcp = { path = "../oxideterm-public-mcp" }
 oxideterm-render-policy = { path = "../oxideterm-render-policy" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+oxideterm-skills = { path = "../oxideterm-skills" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+oxideterm-terminal-semantic = { path = "../oxideterm-terminal-semantic", default-features = false }
+oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-update = { path = "../oxideterm-update" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
 regex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+zeroize.workspace = true
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3.23"

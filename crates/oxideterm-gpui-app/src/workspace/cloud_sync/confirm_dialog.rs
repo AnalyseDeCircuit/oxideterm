@@ -4,6 +4,57 @@
 //! Cloud Sync confirm dialog event bridge.
 
 use super::*;
+use oxideterm_gpui_ui::motion::ExitPhase;
+
+pub(in crate::workspace) struct CloudSyncConfirmPortal {
+    workspace: gpui::WeakEntity<WorkspaceApp>,
+    phase: Option<ExitPhase>,
+    _sync_changed: Subscription,
+}
+
+impl CloudSyncConfirmPortal {
+    pub(in crate::workspace) fn new(
+        sync: &Entity<CloudSyncWorkspaceEntity>,
+        workspace: gpui::WeakEntity<WorkspaceApp>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        fn phase(sync: &CloudSyncWorkspaceEntity) -> Option<ExitPhase> {
+            sync.view
+                .confirm
+                .as_ref()
+                .map(|_| sync.view.confirm_presence.phase())
+        }
+        let sync_changed = cx.observe(sync, |portal, sync, cx| {
+            let next = phase(sync.read(cx));
+            if portal.phase.is_some() || next.is_some() {
+                portal.phase = next;
+                cx.notify();
+            }
+        });
+        Self {
+            workspace,
+            phase: phase(sync.read(cx)),
+            _sync_changed: sync_changed,
+        }
+    }
+
+    pub(in crate::workspace) fn phase(&self) -> Option<ExitPhase> {
+        self.phase
+    }
+}
+
+impl Render for CloudSyncConfirmPortal {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A closed portal must not register the background sync controller as
+        // a render dependency of the main window.
+        if self.phase.is_none() {
+            return gpui::Empty.into_any_element();
+        }
+        self.workspace
+            .update(cx, |app, cx| app.render_cloud_sync_confirm_dialog(cx))
+            .unwrap_or_else(|_| gpui::Empty.into_any_element())
+    }
+}
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn handle_cloud_sync_confirm_key(
@@ -36,7 +87,6 @@ impl WorkspaceApp {
         ) {
             Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
                 self.cancel_cloud_sync_confirm(cx);
-                cx.notify();
                 true
             }
             Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
@@ -51,7 +101,6 @@ impl WorkspaceApp {
                     ConfirmDialogAction::Cancel => self.cancel_cloud_sync_confirm(cx),
                     ConfirmDialogAction::Confirm => self.confirm_cloud_sync_confirm(cx),
                 }
-                cx.notify();
                 true
             }
             None => false,
@@ -163,14 +212,12 @@ impl WorkspaceApp {
                 |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                     this.cancel_cloud_sync_confirm(cx);
                     cx.stop_propagation();
-                    cx.notify();
                 },
             ),
             cx.listener(
                 |this: &mut WorkspaceApp, _event, _window, cx: &mut Context<WorkspaceApp>| {
                     this.confirm_cloud_sync_confirm(cx);
                     cx.stop_propagation();
-                    cx.notify();
                 },
             ),
         )

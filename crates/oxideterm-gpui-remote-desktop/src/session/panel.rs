@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use gpui::{
     AnchoredPositionMode, AnyElement, Corner, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ScrollEvent, anchored, deferred, svg,
+    MouseUpEvent, Render, ScrollEvent, WeakEntity, anchored, deferred, svg,
 };
 use oxideterm_gpui_ui::{
     button::{
@@ -51,27 +51,78 @@ pub(super) struct DesktopChrome<'a> {
     window_action: WindowActionHandler,
 }
 
-pub fn render_remote_desktop_panel(
-    session: &Entity<RemoteDesktopSessionEntity>,
-    desktops: &Entity<RemoteDesktopWorkspaceEntity>,
-    tokens: &ThemeTokens,
-    i18n: &I18n,
-    window: &mut Window,
-    cx: &mut App,
-    certificate_dialog: Option<AnyElement>,
-    window_action: impl Fn(DesktopWindowAction, &mut Window, &mut App) + 'static,
-) -> AnyElement {
-    let chrome = DesktopChrome {
-        tokens,
-        i18n,
-        desktops: desktops.clone(),
-        window_action: Rc::new(window_action),
-    };
-    let resize_menu_open = desktops.read(cx).resize_menu_open(session.read(cx).tab_id);
-    session.update(cx, |session, cx| {
-        session.bind_file_clipboard(window, cx);
-        chrome.render(session, window, cx, resize_menu_open, certificate_dialog)
-    })
+type DesktopAppearance = Box<dyn Fn(&App) -> Option<(ThemeTokens, I18n)>>;
+type DesktopCertificate =
+    Box<dyn Fn(TabId, u64, RemoteDesktopCertificateChallengeState, &mut App) -> Option<AnyElement>>;
+
+pub struct RemoteDesktopPanelView {
+    session: WeakEntity<RemoteDesktopSessionEntity>,
+    desktops: WeakEntity<RemoteDesktopWorkspaceEntity>,
+    appearance: DesktopAppearance,
+    certificate: DesktopCertificate,
+    window_action: WindowActionHandler,
+    _session_changed: Subscription,
+}
+
+impl RemoteDesktopPanelView {
+    pub fn mount(
+        session: &Entity<RemoteDesktopSessionEntity>,
+        desktops: &Entity<RemoteDesktopWorkspaceEntity>,
+        appearance: impl Fn(&App) -> Option<(ThemeTokens, I18n)> + 'static,
+        certificate: impl Fn(
+            TabId,
+            u64,
+            RemoteDesktopCertificateChallengeState,
+            &mut App,
+        ) -> Option<AnyElement>
+        + 'static,
+        window_action: impl Fn(DesktopWindowAction, &mut Window, &mut App) + 'static,
+        cx: &mut App,
+    ) {
+        let panel = cx.new(|cx: &mut Context<Self>| {
+            let session_changed = cx.observe(session, |_, _, cx| cx.notify());
+            Self {
+                session: session.downgrade(),
+                desktops: desktops.downgrade(),
+                appearance: Box::new(appearance),
+                certificate: Box::new(certificate),
+                window_action: Rc::new(window_action),
+                _session_changed: session_changed,
+            }
+        });
+        session.update(cx, |session, _| session.panel = Some(panel));
+    }
+}
+
+impl Render for RemoteDesktopPanelView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (Some(session), Some(desktops), Some((tokens, i18n))) = (
+            self.session.upgrade(),
+            self.desktops.upgrade(),
+            (self.appearance)(cx),
+        ) else {
+            return div().into_any_element();
+        };
+        let tab_id = session.read(cx).tab_id;
+        let resize_menu_open = desktops.read(cx).resize_menu_open(tab_id);
+        let certificate_dialog =
+            session
+                .read(cx)
+                .certificate_prompt()
+                .and_then(|(generation, challenge)| {
+                    (self.certificate)(tab_id, generation, challenge, cx)
+                });
+        let chrome = DesktopChrome {
+            tokens: &tokens,
+            i18n: &i18n,
+            desktops,
+            window_action: self.window_action.clone(),
+        };
+        session.update(cx, |session, cx| {
+            session.bind_file_clipboard(window, cx);
+            chrome.render(session, window, cx, resize_menu_open, certificate_dialog)
+        })
+    }
 }
 
 impl DesktopChrome<'_> {

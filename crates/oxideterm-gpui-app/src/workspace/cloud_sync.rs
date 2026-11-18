@@ -25,6 +25,7 @@ use oxideterm_settings_model::cloud_sync_form_input_value_ref;
 
 mod config;
 mod confirm_dialog;
+pub(super) use confirm_dialog::CloudSyncConfirmPortal;
 mod delivery;
 mod local_file;
 mod surface;

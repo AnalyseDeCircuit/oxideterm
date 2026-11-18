@@ -160,7 +160,7 @@ impl WorkspaceApp {
             ),
             AppearanceSchemeError::Identical => (
                 self.i18n.t("settings_view.appearance.schemes_identical"),
-                self.appearance_edit_dark,
+                self.settings_workspace.read(cx).appearance_edit_dark,
             ),
             AppearanceSchemeError::Unavailable(scheme) => (
                 self.i18n

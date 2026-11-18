@@ -56,8 +56,15 @@ impl WorkspaceApp {
             .knowledge_document_dialog_owned_by(window_id);
         match tab_kind {
             TabKind::Settings => {
-                if let Some(modal) = self.render_settings_navigation_editor(cx) {
-                    modals.push(modal);
+                let chrome = &self.settings_window_chrome.read(cx).state;
+                let (navigation, reset, managed_key, portable_password) = (
+                    chrome.navigation_editor,
+                    chrome.keybinding_reset.is_some(),
+                    chrome.managed_key.is_some(),
+                    chrome.portable_password.is_some(),
+                );
+                if navigation {
+                    modals.push(self.settings_navigation_editor.clone().into_any_element());
                 }
                 if let Some(modal) = self.render_ai_mcp_add_server_dialog(cx) {
                     modals.push(modal);
@@ -73,19 +80,14 @@ impl WorkspaceApp {
                 if let Some(modal) = self.render_knowledge_delete_confirm_dialog(cx) {
                     modals.push(modal);
                 }
-                if self
-                    .settings_workspace
-                    .read(cx)
-                    .keybinding_reset_confirm_snapshot()
-                    .is_some()
-                {
+                if reset {
                     modals.push(self.render_keybinding_reset_all_confirm_dialog(cx));
                 }
-                if let Some(modal) = self.render_settings_managed_key_dialog(cx) {
+                if managed_key && let Some(modal) = self.render_settings_managed_key_dialog(cx) {
                     modals.push(modal);
                 }
-                if let Some(modal) = self.render_portable_password_change_dialog(cx) {
-                    modals.push(modal);
+                if portable_password {
+                    modals.push(self.portable_password_dialog.clone().into_any_element());
                 }
             }
             TabKind::Knowledge => {
@@ -188,7 +190,6 @@ impl WorkspaceApp {
         self.sync_ai_workspace_visibility(cx);
         self.sync_knowledge_cache_visibility(cx);
         self.sync_terminal_render_caches(cx);
-        let cloud_sync_confirm_open = self.cloud_sync.read(cx).view.confirm.is_some();
         if self.app_lock.locked {
             window.set_window_title(&SharedString::from(
                 self.i18n.t("settings_view.general.app_lock_window_title"),
@@ -258,9 +259,9 @@ impl WorkspaceApp {
         self.split_drop_regions.borrow_mut().clear();
         let content = if let Some((tab_id, tab_kind, root_pane)) = &active_tab_projection {
             match (tab_kind, root_pane) {
-                (TabKind::Settings, _) => self.render_settings_surface(cx),
+                (TabKind::Settings, _) => self.render_settings_surface(),
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
-                (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
+                (TabKind::Graphics, _) => self.render_graphics_surface(),
                 (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
                 (TabKind::ConnectionPool, _) => {
                     // Old workspaces may restore the retired connection-pool tab.
@@ -282,7 +283,7 @@ impl WorkspaceApp {
                     let tab_id = tab_id.clone();
                     self.render_native_plugin_tab_surface(&plugin_id, &tab_id, cx)
                 }
-                (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
+                (TabKind::CloudSync, _) => self.render_cloud_sync_surface(),
                 (TabKind::Knowledge, _) => self.render_knowledge_workspace_surface(
                     KnowledgeWorkspaceLayout::MainWindow,
                     window,
@@ -381,12 +382,7 @@ impl WorkspaceApp {
         let mut key_context = gpui::KeyContext::new_with_defaults(cx.platform_info().os);
         key_context.add("Workspace");
         #[cfg(target_os = "macos")]
-        if self
-            .settings_workspace
-            .read(cx)
-            .keybinding_recording_action_id()
-            .is_some()
-        {
+        if self.settings_window_chrome.read(cx).state.recording_keybinding {
             key_context.add("KeybindingRecording");
         }
         if self.active_window_modal_owner(cx).is_some() && !self.ide_modal_owns_input(cx) {
@@ -1351,7 +1347,8 @@ impl WorkspaceApp {
                 |root| root.child(self.render_settings_reset_confirm_dialog(cx)),
             )
             .when_some(
-                self.render_settings_data_directory_confirm_dialog(cx),
+                self.settings_window_chrome.read(cx).state.data_directory
+                    .and_then(|_| self.render_settings_data_directory_confirm_dialog(cx)),
                 |root, dialog| root.child(dialog),
             )
             .when_some(
@@ -1362,9 +1359,7 @@ impl WorkspaceApp {
                 self.render_terminal_trigger_quick_command_confirm(cx),
                 |root, dialog| root.child(dialog),
             )
-            .when(cloud_sync_confirm_open, |root| {
-                root.child(self.render_cloud_sync_confirm_dialog(cx))
-            })
+            .child(self.cloud_sync_confirm.clone())
             .when(
                 matches!(
                     overlay_confirm_snapshot
@@ -1475,37 +1470,35 @@ impl WorkspaceApp {
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
             })
-            .when_some(self.render_theme_editor_modal(cx), |root, modal| {
+            .when(self.settings_window_chrome.read(cx).state.theme_editor.is_some(), |root| {
                 // Theme editing is a workspace modal, not a settings-pane overlay.
                 // Mount it here so the backdrop covers every persistent chrome region.
-                root.child(modal)
+                root.child(self.theme_editor_dialog.clone())
             })
             .when_some(
-                self.render_settings_ssh_config_import_dialog(cx),
+                self.settings_window_chrome.read(cx).state.ssh_import
+                    .and_then(|_| self.render_settings_ssh_config_import_dialog(cx)),
                 |root, modal| {
                     // Both Settings and Connections launch the same workspace
                     // import flow, so its modal cannot be owned by either page.
                     root.child(modal)
                 },
             )
-            .when(self.terminal_command_specs_editor_open, |root| {
+            .when(self.settings_window_chrome.read(cx).state.command_specs, |root| {
                 // Structured command specs use the same workspace-wide modal
                 // ownership so the settings list never contains a nested editor.
-                root.child(self.render_terminal_command_specs_editor_modal(cx))
+                root.child(self.command_specs_dialog.clone())
             })
-            .when(self.terminal_triggers.editor_open, |root| {
-                root.child(self.render_terminal_trigger_editor_modal(cx))
+            .when(self.settings_window_chrome.read(cx).state.terminal_trigger_editor, |root| {
+                root.child(self.terminal_trigger_editor.clone())
             })
+            .when({
+                let settings = &self.settings_window_chrome.read(cx).state;
+                settings.semantic_scheme_editor || settings.highlight_rule_editor_index.is_some()
+            }, |root| root.child(self.highlight_editor.clone()))
             .when_some(
-                self.render_semantic_scheme_editor_modal(cx),
-                |root, modal| root.child(modal),
-            )
-            .when_some(
-                self.render_highlight_rule_editor_modal(cx),
-                |root, modal| root.child(modal),
-            )
-            .when_some(
-                self.render_public_mcp_client_editor_modal(cx),
+                self.settings_window_chrome.read(cx).state.public_mcp_client.is_some()
+                    .then(|| self.render_public_mcp_client_editor_modal(cx)).flatten(),
                 |root, modal| root.child(modal),
             )
             .when(

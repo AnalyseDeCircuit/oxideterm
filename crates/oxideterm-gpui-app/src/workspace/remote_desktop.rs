@@ -1,9 +1,9 @@
 use super::*;
 use oxideterm_gpui_remote_desktop::{
     DesktopWindowAction, PendingRemoteDesktopSshTunnel, RemoteDesktopCertificateAcceptance,
-    RemoteDesktopCertificateChallengeState, RemoteDesktopSessionEvent, desktop_connection_audit,
-    preview_remote_desktop_profile, remote_desktop_audit_context, remote_desktop_tab_visible,
-    render_remote_desktop_panel, resize::remote_desktop_scale_factor_percent,
+    RemoteDesktopCertificateChallengeState, RemoteDesktopPanelView, RemoteDesktopSessionEvent,
+    desktop_connection_audit, preview_remote_desktop_profile, remote_desktop_audit_context,
+    remote_desktop_tab_visible, resize::remote_desktop_scale_factor_percent,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopConnectionProfile, RemoteDesktopFileTransferFailureKind,

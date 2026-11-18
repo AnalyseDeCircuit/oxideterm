@@ -198,6 +198,7 @@ pub(in crate::workspace) use titlebar::{
 };
 
 pub(in crate::workspace) use ai::{
+    AiAssistantSidebarView,
     AcpApplicationToolTurn, AiChatPromptKeyAction, AiCompactionDelivery,
     AiCompactionDeliverySender, AiInlinePanelState, AiInputVisualLine, AiStreamDelivery,
     AiStreamDeliveryEvent, AiStreamDeliverySender, ai_chat_prompt_key_action,

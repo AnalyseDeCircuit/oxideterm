@@ -1,357 +1,18 @@
 use super::*;
-use gpui::{ClipboardItem, FontWeight, ScrollHandle, Task};
-use oxideterm_ssh::{KnownHostEntry, KnownHostsSnapshot, list_known_hosts, remove_host_key};
-
-#[derive(Default)]
-pub(super) struct KnownHostsState {
-    pub snapshot: Option<KnownHostsSnapshot>,
-    pub error: Option<String>,
-    pub query: String,
-    pub pending_delete: Option<KnownHostEntry>,
-    pub task: Option<Task<()>>,
-    pub scroll: ScrollHandle,
-}
-
-impl SettingsWorkspaceEntity {
-    pub(super) fn refresh_known_hosts(&mut self, cx: &mut Context<Self>) {
-        if self.known_hosts.task.is_some() {
-            return;
-        }
-        self.known_hosts.pending_delete = None;
-        self.known_hosts.error = None;
-        let read = cx
-            .background_executor()
-            .spawn(async { list_known_hosts().map_err(|error| error.to_string()) });
-        self.known_hosts.task = Some(cx.spawn(async move |settings, cx| {
-            let result = read.await;
-            let _ = settings.update(cx, |settings, cx| {
-                settings.known_hosts.task = None;
-                match result {
-                    Ok(snapshot) => settings.known_hosts.snapshot = Some(snapshot),
-                    Err(error) => settings.known_hosts.error = Some(error),
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
-    }
-
-    fn delete_known_host(&mut self, cx: &mut Context<Self>) {
-        if self.known_hosts.task.is_some() {
-            return;
-        }
-        let Some(entry) = self
-            .known_hosts
-            .pending_delete
-            .take()
-            .filter(|entry| entry.can_remove)
-        else {
-            return;
-        };
-        let Some(port) = entry.port else {
-            return;
-        };
-        self.known_hosts.error = None;
-        // The captured identity is the row confirmed by the user, not its current list index.
-        let remove = cx.background_executor().spawn(async move {
-            remove_host_key(&entry.host, port, &entry.key_type, &entry.fingerprint)
-                .and_then(|()| list_known_hosts())
-                .map_err(|error| error.to_string())
-        });
-        self.known_hosts.task = Some(cx.spawn(async move |settings, cx| {
-            let result = remove.await;
-            let _ = settings.update(cx, |settings, cx| {
-                settings.known_hosts.task = None;
-                match result {
-                    Ok(snapshot) => settings.known_hosts.snapshot = Some(snapshot),
-                    Err(error) => settings.known_hosts.error = Some(error),
-                }
-                cx.notify();
-            });
-        }));
-        cx.notify();
-    }
-}
 
 impl WorkspaceApp {
-    fn known_hosts_button(
-        &self,
-        label: &'static str,
-        icon: LucideIcon,
-        danger: bool,
-        disabled: bool,
-        cx: &mut Context<Self>,
-        action: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
-    ) -> AnyElement {
-        self.workspace_toolbar_action_button(
-            self.i18n.t(label),
-            Some(Self::render_lucide_icon(
-                icon,
-                14.0,
-                rgb(self.tokens.ui.text),
-            )),
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: if danger {
-                        ButtonVariant::Destructive
-                    } else {
-                        ButtonVariant::Outline
-                    },
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                font_size: Some(self.tokens.metrics.ui_text_sm),
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(move |this, _, window, cx| {
-                if !disabled {
-                    action(this, window, cx);
-                }
-                cx.stop_propagation();
-            }),
-        )
-        .debug_selector(|| label.to_string())
-        .into_any_element()
-    }
-
-    pub(super) fn settings_known_hosts_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let state = &self.settings_workspace.read(cx).known_hosts;
-        let busy = state.task.is_some();
-        let query = state.query.to_lowercase();
-        let entries: Vec<_> = state
-            .snapshot
-            .as_ref()
-            .map(|snapshot| {
-                snapshot
-                    .entries
-                    .iter()
-                    .filter(|entry| {
-                        query.is_empty()
-                            || entry.host.to_lowercase().contains(&query)
-                            || entry.fingerprint.to_lowercase().contains(&query)
-                            || entry.key_type.to_lowercase().contains(&query)
-                            || entry
-                                .port
-                                .is_some_and(|port| port.to_string().contains(&query))
-                    })
-                    .cloned()
-                    .collect()
-            })
-            .unwrap_or_default();
-        let pending_delete = state.pending_delete.clone();
-        let scroll = state.scroll.clone();
-        let file = state
-            .snapshot
-            .as_ref()
-            .map(|snapshot| (snapshot.path.clone(), snapshot.exists));
-        let error = state.error.clone();
-        let has_error = error.is_some();
-        let query_value = state.query.clone();
-        let mut toolbar =
-            div()
-                .w_full()
-                .min_w_0()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(8.0))
-                .child(div().flex_1().min_w(px(180.0)).child(
-                    self.settings_text_input_control_fill(
-                        SettingsInput::KnownHostsSearch,
-                        query_value,
-                        self.i18n.t("settings_view.known_hosts.search"),
-                        cx,
-                    ),
-                ))
-                .child(self.known_hosts_button(
-                    "settings_view.known_hosts.refresh",
-                    LucideIcon::RefreshCw,
-                    false,
-                    busy,
-                    cx,
-                    |this, _, cx| {
-                        this.settings_workspace
-                            .update(cx, |settings, cx| settings.refresh_known_hosts(cx));
-                    },
-                ));
-        if let Some((path, exists)) = &file {
-            let path = path.clone();
-            toolbar = toolbar.child(self.known_hosts_button(
-                "settings_view.known_hosts.open_file",
-                LucideIcon::ExternalLink,
-                false,
-                !exists,
-                cx,
-                move |_, _, cx| {
-                    if let Ok(url) = url::Url::from_file_path(&path) {
+    pub(super) fn settings_known_hosts_section(&self, cx: &Context<Self>) -> AnyElement {
+        self.with_settings_controls(cx, |controls, cx| {
+            controls.settings_known_hosts_section(
+                &self.settings_workspace,
+                |path, cx| {
+                    if let Ok(url) = url::Url::from_file_path(path) {
                         cx.open_url(url.as_str());
                     }
                 },
-            ));
-        }
-        let mut body = div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(toolbar);
-        if let Some((path, _)) = file {
-            body = body.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(
-                        self.i18n
-                            .t("settings_view.known_hosts.source")
-                            .replace("{{path}}", &path.display().to_string()),
-                    ),
-            );
-        }
-        if let Some(error) = error {
-            body = body.child(
-                self.connection_status_row(
-                    self.i18n
-                        .t("settings_view.known_hosts.error")
-                        .replace("{{error}}", &error),
-                ),
-            );
-        }
-        if busy {
-            body = body.child(
-                self.connection_status_row(self.i18n.t("settings_view.known_hosts.loading")),
-            );
-        }
-        if entries.is_empty() && !busy && !has_error {
-            body = body.child(self.connection_status_row(self.i18n.t(if query.is_empty() {
-                "settings_view.known_hosts.empty"
-            } else {
-                "settings_view.known_hosts.no_matches"
-            })));
-        }
-        let mut list = div().w_full().min_w_0().flex().flex_col();
-        for (index, entry) in entries.into_iter().enumerate() {
-            if index != 0 {
-                list = list.child(self.card_separator());
-            }
-            let endpoint = match entry.port {
-                Some(22) | None => entry.host.clone(),
-                Some(port) => format!("[{}]:{port}", entry.host),
-            };
-            let fingerprint = entry.fingerprint.clone();
-            let mut row = div()
-                .id(("known-host-row", index))
-                .debug_selector(|| format!("known-host-{endpoint}"))
-                .w_full()
-                .min_w_0()
-                .py(px(12.0))
-                .flex()
-                .flex_col()
-                .gap(px(8.0))
-                .child(
-                    div()
-                        .min_w_0()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(endpoint),
-                )
-                .child(
-                    div()
-                        .min_w_0()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .child(format!("{} · {}", entry.key_type, entry.fingerprint)),
-                );
-            let mut actions = div().flex().flex_wrap().items_center().gap(px(8.0)).child(
-                self.known_hosts_button(
-                    "settings_view.known_hosts.copy",
-                    LucideIcon::Copy,
-                    false,
-                    false,
-                    cx,
-                    move |_, _, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(fingerprint.clone()));
-                    },
-                ),
-            );
-            if pending_delete.as_ref() == Some(&entry) {
-                row = row.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(self.tokens.ui.warning))
-                        .child(self.i18n.t("settings_view.known_hosts.confirm_delete")),
-                );
-                actions = actions
-                    .child(self.known_hosts_button(
-                        "settings_view.known_hosts.cancel",
-                        LucideIcon::X,
-                        false,
-                        busy,
-                        cx,
-                        |this, _, cx| {
-                            this.settings_workspace.update(cx, |settings, cx| {
-                                settings.known_hosts.pending_delete = None;
-                                cx.notify();
-                            });
-                        },
-                    ))
-                    .child(self.known_hosts_button(
-                        "settings_view.known_hosts.confirm",
-                        LucideIcon::Trash2,
-                        true,
-                        busy,
-                        cx,
-                        |this, _, cx| {
-                            this.settings_workspace
-                                .update(cx, |settings, cx| settings.delete_known_host(cx));
-                        },
-                    ));
-            } else if entry.can_remove {
-                actions = actions.child(self.known_hosts_button(
-                    "settings_view.known_hosts.delete",
-                    LucideIcon::Trash2,
-                    false,
-                    busy,
-                    cx,
-                    move |this, _, cx| {
-                        this.settings_workspace.update(cx, |settings, cx| {
-                            settings.known_hosts.pending_delete = Some(entry.clone());
-                            cx.notify();
-                        });
-                    },
-                ));
-            } else {
-                actions = actions.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(self.i18n.t("settings_view.known_hosts.read_only")),
-                );
-            }
-            list = list.child(row.child(actions));
-        }
-        body = body.child(
-            div()
-                .id("known-hosts-list")
-                .relative()
-                .w_full()
-                .max_h(px(360.0))
-                .child(
-                    div()
-                        .id("known-hosts-scroll")
-                        .w_full()
-                        .max_h(px(360.0))
-                        .selectable_overflow_y_scroll(&scroll)
-                        .on_scroll(|_, _, cx| cx.stop_propagation())
-                        .child(list),
-                )
-                .vertical_scrollbar(&scroll),
-        );
-        self.settings_card(
-            "settings_view.known_hosts.title",
-            "settings_view.known_hosts.description",
-            vec![body.into_any_element()],
-        )
+                cx,
+            )
+        })
     }
 }
 
@@ -360,6 +21,7 @@ mod tests {
     use super::*;
     use crate::workspace::window_shell::WorkspaceWindowShell;
     use gpui::TestAppContext;
+    use oxideterm_ssh::list_known_hosts;
 
     #[gpui::test]
     fn known_hosts_search_and_confirmed_delete_use_the_selected_endpoint(cx: &mut TestAppContext) {
@@ -418,7 +80,10 @@ mod tests {
                 this.settings_dynamic_section_counts(cx),
             )
             .unwrap();
-            this.settings_section_list_state
+            this.settings_workspace
+                .read(cx)
+                .section_list
+                .state()
                 .scroll_to(gpui::ListOffset {
                     item_ix,
                     offset_in_item: px(0.0),
@@ -440,7 +105,11 @@ mod tests {
         cx.update(|window, cx| {
             workspace.update(cx, |this, cx| {
                 this.sync_settings_section_list_state(cx);
-                this.settings_section_list_state.scroll_to_end();
+                this.settings_workspace
+                    .read(cx)
+                    .section_list
+                    .state()
+                    .scroll_to_end();
             });
             window.draw(cx).clear(cx);
         });

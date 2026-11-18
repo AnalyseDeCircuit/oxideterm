@@ -2681,19 +2681,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn activate_keybinding_recording_footer_action(
-        &mut self,
-        action: settings::KeybindingRecordingFooterAction,
-        cx: &mut Context<Self>,
-    ) {
-        let should_confirm = self.settings_workspace.update(cx, |settings, cx| {
-            settings.activate_keybinding_recording_footer(action, cx)
-        });
-        if should_confirm {
-            self.confirm_keybinding_recording(cx);
-        }
-    }
-
     pub(super) fn confirm_keybinding_recording(&mut self, cx: &mut Context<Self>) {
         let Some(commit) = self.settings_workspace.update(cx, |settings, cx| {
             settings.take_keybinding_recording_commit(cx)
@@ -2852,7 +2839,7 @@ impl WorkspaceApp {
         };
         let runtime = self.forwarding_runtime.handle().clone();
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.start_keybinding_import(selection, runtime, cx);
+            settings.start_keybinding_import(selection, runtime, crate::keybindings::sanitize_imported_overrides, cx);
         });
     }
 

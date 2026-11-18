@@ -1,0 +1,565 @@
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+use gpui::{
+    AnyElement, App, Context, Entity, ListAlignment, ListState, Pixels, Point, Render, Rgba,
+    ScrollHandle, SharedString, Subscription, Task, Window, div, prelude::*, px, rgb, rgba,
+};
+use oxideterm_gpui_ui::virtual_list::{
+    TauriVirtualListSpec, VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
+    tauri_virtual_list,
+};
+use oxideterm_i18n::I18n;
+use oxideterm_settings_model::{
+    AiSettingsPage, SETTINGS_SECTION_HEADER_ITEM_COUNT, SettingsDynamicSectionCounts,
+    SettingsSectionId, settings_section_list_identity, settings_section_list_item_count,
+    settings_tab_section_at,
+};
+use oxideterm_theme::ThemeTokens;
+
+use crate::{
+    SettingsSearchResult, SettingsTab, TerminalSettingsPage, entity::SettingsWorkspaceEntity,
+};
+use oxideterm_gpui_ui::motion::UserSegmentedControlMotionState;
+
+pub(crate) mod nav;
+mod search_filter;
+mod section_cache;
+
+pub use section_cache::hash_settings_section_layout;
+
+/// Shared by the surface and commands that scroll to a semantic settings section.
+pub struct SettingsSectionList {
+    state: ListState,
+    cache: RefCell<VirtualListSignatureCache>,
+}
+
+impl Default for SettingsSectionList {
+    fn default() -> Self {
+        Self {
+            state: ListState::new(
+                4,
+                ListAlignment::Top,
+                Self::spec(SettingsTab::General).overdraw(),
+            )
+            .measure_all(),
+            cache: RefCell::new(VirtualListSignatureCache::default()),
+        }
+    }
+}
+
+impl SettingsSectionList {
+    pub fn state(&self) -> &ListState {
+        &self.state
+    }
+
+    pub fn spec(tab: SettingsTab) -> TauriVirtualListSpec {
+        TauriVirtualListSpec::new(px(if tab == SettingsTab::Ai { 360.0 } else { 260.0 }), 2)
+    }
+
+    pub fn sync(&self, tab: SettingsTab, counts: SettingsDynamicSectionCounts, signatures: &[u64]) {
+        let identity = settings_section_list_identity(tab, counts.terminal_page, counts.ai_page);
+        sync_tauri_variable_list_state_by_signatures(
+            &self.state,
+            &mut self.cache.borrow_mut(),
+            &identity,
+            signatures,
+            Self::spec(tab),
+        );
+    }
+}
+
+pub struct SettingsSurfaceFrame {
+    pub tokens: ThemeTokens,
+    pub i18n: I18n,
+    pub has_background: bool,
+    pub ui_font: SharedString,
+    pub counts: SettingsDynamicSectionCounts,
+    pub signatures: Vec<u64>,
+    pub divider: Rgba,
+    pub groups: Vec<Vec<SettingsTab>>,
+}
+
+/// The application publishes a render frame and supplies the content of page
+/// sections it still owns. The surface owns GPUI view identity and layout.
+pub struct SettingsSurfaceBindings {
+    pub frame: Rc<dyn Fn(&App) -> Option<SettingsSurfaceFrame>>,
+    pub section: Rc<dyn Fn(SettingsTab, SettingsSectionId, &mut App) -> Option<AnyElement>>,
+    pub scrolled: Rc<dyn Fn(&mut App)>,
+    pub keybinding_note: Rc<dyn Fn(String, u32, &mut App) -> Option<AnyElement>>,
+    pub dispatch: Rc<dyn Fn(SettingsSurfaceRequest, &mut Window, &mut App)>,
+    pub search_field: Rc<dyn Fn(&str, bool, &App) -> Option<AnyElement>>,
+    pub knowledge_available: Rc<dyn Fn(&App) -> bool>,
+}
+
+pub enum SettingsSurfaceRequest {
+    ToggleSearch,
+    ClearSearch,
+    SearchResult(SettingsSearchResult),
+    OpenNavigationEditor,
+    SelectedTab(SettingsTab),
+    Tooltip(String, Option<Point<Pixels>>),
+}
+
+pub struct SettingsSurfaceView {
+    settings: Entity<SettingsWorkspaceEntity>,
+    bindings: SettingsSurfaceBindings,
+    _settings_changed: Subscription,
+    nav_scroll: ScrollHandle,
+    search_scroll: ScrollHandle,
+    search_filter: search_filter::SettingsSearchFilter,
+    nav_motion: UserSegmentedControlMotionState,
+    route_motion_tasks: HashMap<&'static str, Task<()>>,
+}
+
+impl SettingsSurfaceView {
+    pub fn new(
+        settings: Entity<SettingsWorkspaceEntity>,
+        bindings: SettingsSurfaceBindings,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let settings_changed = cx.observe(&settings, |view, settings, cx| {
+            let state = settings.read(cx);
+            let query = if state.settings_search_open() {
+                state.settings_search_query().trim()
+            } else {
+                ""
+            };
+            if query != view.search_filter.observed_query() {
+                view.queue_search_filter(query.to_owned(), cx);
+            }
+            cx.notify();
+        });
+        Self {
+            settings,
+            bindings,
+            _settings_changed: settings_changed,
+            nav_scroll: ScrollHandle::new(),
+            search_scroll: ScrollHandle::new(),
+            search_filter: Default::default(),
+            nav_motion: UserSegmentedControlMotionState::default(),
+            route_motion_tasks: HashMap::new(),
+        }
+    }
+
+    fn animate_route(
+        &mut self,
+        id: &'static str,
+        tokens: &ThemeTokens,
+        target_index: usize,
+        offset: Option<f32>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(tokens) else {
+            self.nav_motion.clear(id);
+            self.route_motion_tasks.remove(id);
+            return;
+        };
+        let generation = self
+            .nav_motion
+            .begin_with_vertical_offset(id, target_index, offset);
+        let task = cx.spawn(async move |view, cx| {
+            cx.background_executor().timer(motion.duration).await;
+            let _ = view.update(cx, |view, cx| {
+                if view.nav_motion.finish(id, generation) {
+                    cx.notify();
+                }
+            });
+        });
+        self.route_motion_tasks.insert(id, task);
+    }
+
+    fn page_switcher<Page: Copy + Eq + 'static>(
+        &self,
+        frame: &SettingsSurfaceFrame,
+        id: &'static str,
+        pages: &'static [Page],
+        current: Page,
+        previous: Page,
+        label: impl Fn(Page) -> &'static str,
+        set_page: fn(
+            &mut SettingsWorkspaceEntity,
+            Page,
+            &mut Context<SettingsWorkspaceEntity>,
+        ) -> bool,
+        view: &gpui::WeakEntity<Self>,
+    ) -> AnyElement {
+        let active_index = pages.iter().position(|page| *page == current).unwrap_or(0);
+        let previous_index = pages
+            .iter()
+            .position(|page| *page == previous)
+            .unwrap_or(active_index);
+        let tokens = frame.tokens;
+        let items = pages
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(index, page)| {
+                let view = view.clone();
+                let title = label(page);
+                oxideterm_gpui_ui::segmented_control_item(
+                    &tokens,
+                    frame.i18n.t(title),
+                    page == current,
+                )
+                .debug_selector(move || title.into())
+                .on_mouse_down(gpui::MouseButton::Left, move |_, _, cx| {
+                    let _ = view.update(cx, |view, cx| {
+                        if view
+                            .settings
+                            .update(cx, |settings, cx| set_page(settings, page, cx))
+                        {
+                            view.animate_route(id, &tokens, index, None, cx);
+                        }
+                    });
+                })
+                .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        oxideterm_gpui_ui::segmented_control(
+            &tokens,
+            id,
+            oxideterm_gpui_ui::SegmentedControlOptions::new(
+                active_index,
+                previous_index,
+                pages.len(),
+            )
+            .user_transition_active(self.nav_motion.is_active_for(id, active_index))
+            .has_background_image(frame.has_background),
+            items,
+        )
+        .into_any_element()
+    }
+}
+
+impl Render for SettingsSurfaceView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(frame) = (self.bindings.frame)(cx) else {
+            return div().into_any_element();
+        };
+        let settings = self.settings.read(cx);
+        let tab = settings.route_snapshot().active_tab;
+        settings
+            .section_list
+            .sync(tab, frame.counts, &frame.signatures);
+        let state = settings.section_list.state().clone();
+        let navigation = self.render_settings_nav(&frame, cx);
+        let section = self.bindings.section.clone();
+        let scrolled = self.bindings.scrolled.clone();
+        let keybinding_note = self.bindings.keybinding_note.clone();
+        let view = cx.entity().downgrade();
+        let tokens = frame.tokens;
+        let has_background = frame.has_background;
+        let count = settings_section_list_item_count(tab, frame.counts);
+        let rows = tauri_virtual_list(
+            state,
+            SettingsSectionList::spec(tab),
+            move |index, _, cx| {
+                let row = if index == 0 {
+                    page_header(&frame, tab, &*keybinding_note, cx)
+                } else {
+                    match settings_tab_section_at(
+                        tab,
+                        index - SETTINGS_SECTION_HEADER_ITEM_COUNT,
+                        frame.counts,
+                    ) {
+                        Some(
+                            id @ (SettingsSectionId::TerminalPageSwitcher
+                            | SettingsSectionId::AiPageSwitcher),
+                        ) => {
+                            let Some(owner) = view.upgrade() else {
+                                return div().into_any_element();
+                            };
+                            let surface = owner.read(cx);
+                            let route = surface.settings.read(cx).route_snapshot();
+                            if id == SettingsSectionId::TerminalPageSwitcher {
+                                surface.page_switcher(
+                                    &frame,
+                                    "terminal-settings-page-switcher",
+                                    TerminalSettingsPage::all(),
+                                    route.terminal_page,
+                                    route.previous_terminal_page,
+                                    TerminalSettingsPage::label_key,
+                                    SettingsWorkspaceEntity::set_terminal_page,
+                                    &view,
+                                )
+                            } else {
+                                surface.page_switcher(
+                                    &frame,
+                                    "ai-settings-page-switcher",
+                                    AiSettingsPage::all(),
+                                    route.ai_page,
+                                    route.previous_ai_page,
+                                    AiSettingsPage::label_key,
+                                    SettingsWorkspaceEntity::set_ai_page,
+                                    &view,
+                                )
+                            }
+                        }
+                        Some(id) => {
+                            section(tab, id, cx).unwrap_or_else(|| div().into_any_element())
+                        }
+                        None => div().into_any_element(),
+                    }
+                };
+                let padding = tokens.metrics.settings_content_padding;
+                div()
+                    .w_full()
+                    .min_w(px(0.0))
+                    .px(px(padding))
+                    .pb(px(if index + 1 == count {
+                        padding
+                    } else {
+                        tokens.metrics.settings_page_gap
+                    }))
+                    .when(index == 0, |item| item.pt(px(padding)))
+                    .child(row)
+                    .into_any_element()
+            },
+        );
+        let body = div()
+            .id("settings-content-scroll")
+            .size_full()
+            .min_w(px(0.0))
+            .min_h(px(0.0))
+            .on_scroll(move |_, _, cx| scrolled(cx))
+            .child(rows);
+        div()
+            .size_full()
+            .relative()
+            .flex()
+            .flex_row()
+            .bg(if has_background {
+                rgba(0x00000000)
+            } else {
+                rgb(tokens.ui.bg)
+            })
+            .text_color(rgb(tokens.ui.text))
+            .child(navigation)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .min_h(px(0.0))
+                    .relative()
+                    .child(oxideterm_gpui_ui::motion::fade_in(
+                        &tokens,
+                        SharedString::from(format!("settings-page-{tab:?}")),
+                        body,
+                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                    )),
+            )
+            .into_any_element()
+    }
+}
+
+fn page_header(
+    frame: &SettingsSurfaceFrame,
+    tab: SettingsTab,
+    keybinding_note: &dyn Fn(String, u32, &mut App) -> Option<AnyElement>,
+    cx: &mut App,
+) -> AnyElement {
+    let tokens = frame.tokens;
+    let size = tokens.metrics.ui_text_2xl;
+    let description_size = tokens.metrics.ui_text_sm;
+    let header = div()
+        .w_full()
+        .min_w(px(0.0))
+        .flex()
+        .flex_col()
+        .gap(px(tokens.spacing.two))
+        .font_family(frame.ui_font.clone())
+        .child(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .text_size(px(size))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(rgb(tokens.ui.text_heading))
+                .line_height(px(size + 6.0))
+                .child(frame.i18n.t(tab.title_key())),
+        )
+        .child(
+            div()
+                .w_full()
+                .min_w(px(0.0))
+                .text_size(px(description_size))
+                .text_color(rgb(tokens.ui.text_muted))
+                .line_height(px(description_size + 6.0))
+                .child(frame.i18n.t(tab.description_key())),
+        )
+        .when(tab == SettingsTab::Keybindings, |header| {
+            let note = keybinding_note(
+                frame.i18n.t("settings_view.keybindings.intl_keyboard_note"),
+                tokens.ui.text_muted,
+                cx,
+            );
+            header.child(
+                div()
+                    .mt(px(2.0))
+                    .w_full()
+                    .min_w(px(0.0))
+                    .text_size(px(tokens.metrics.ui_text_xs))
+                    .text_color(rgba((tokens.ui.text_muted << 8) | 0xb3))
+                    .line_height(px((tokens.metrics.ui_text_xs + 4.0).max(16.0)))
+                    .children(note),
+            )
+        });
+    div()
+        .w_full()
+        .relative()
+        .flex()
+        .flex_col()
+        .gap(px(tokens.spacing.three + tokens.spacing.one))
+        .child(header)
+        .child(
+            div()
+                .h(px(1.0))
+                .w_full()
+                .bg(rgba((tokens.ui.border << 8) | 0x66)),
+        )
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::AppContext;
+    use oxideterm_i18n::Locale;
+    use std::time::Duration;
+
+    #[gpui::test]
+    fn settings_search_filters_only_the_latest_query_after_the_delay(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        let surface = cx.new(|cx| {
+            SettingsSurfaceView::new(
+                settings.clone(),
+                SettingsSurfaceBindings {
+                    frame: Rc::new(|_| None),
+                    section: Rc::new(|_, _, _| None),
+                    scrolled: Rc::new(|_| {}),
+                    keybinding_note: Rc::new(|_, _, _| None),
+                    dispatch: Rc::new(|_, _, _| {}),
+                    search_field: Rc::new(|_, _, _| None),
+                    knowledge_available: Rc::new(|_| false),
+                },
+                cx,
+            )
+        });
+        let input = crate::SettingsInput::SettingsSearch;
+        settings.update(cx, |settings, cx| {
+            settings.open_settings_search(cx);
+            assert!(settings.focus_settings_entity_input(input, cx));
+            assert!(settings.replace_settings_entity_input(input, None, "Semantic Search", cx));
+        });
+        cx.run_until_parked();
+        cx.executor().advance_clock(Duration::from_millis(80));
+        settings.update(cx, |settings, cx| {
+            assert!(settings.replace_settings_entity_input(
+                input,
+                Some(0.."Semantic Search".len()),
+                "MCP Servers",
+                cx,
+            ));
+        });
+        cx.run_until_parked();
+        let locale = I18n::new(Locale::En);
+        let first = |cx: &mut gpui::TestAppContext| {
+            surface.read_with(cx, |view, _| {
+                view.search_filter
+                    .results(&locale)
+                    .first()
+                    .map(|result| result.section)
+            })
+        };
+        cx.executor().advance_clock(Duration::from_millis(50));
+        cx.run_until_parked();
+        assert_eq!(first(cx), None);
+        cx.executor().advance_clock(Duration::from_millis(80));
+        cx.run_until_parked();
+        assert_eq!(first(cx), Some(SettingsSectionId::AiToolsMcpServers));
+
+        settings.update(cx, |settings, cx| {
+            settings.clear_settings_search_query(cx);
+        });
+        assert_eq!(first(cx), None);
+    }
+
+    #[gpui::test]
+    fn terminal_subpage_click_replaces_rows_without_dispatching_to_the_host(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let settings = cx.new(SettingsWorkspaceEntity::new);
+        settings.update(cx, |state, cx| {
+            state.set_active_tab(SettingsTab::Terminal, cx)
+        });
+        let (_, cx) = cx.add_window_view(|_, cx| {
+            let state = settings.clone();
+            SettingsSurfaceView::new(
+                settings.clone(),
+                SettingsSurfaceBindings {
+                    frame: Rc::new(move |cx| {
+                        let route = state.read(cx).route_snapshot();
+                        let counts = SettingsDynamicSectionCounts {
+                            terminal_page: route.terminal_page,
+                            ai_page: route.ai_page,
+                            visible_keybinding_scope_count: 0,
+                            knowledge_has_error: false,
+                            knowledge_has_selected_collection: false,
+                        };
+                        Some(SettingsSurfaceFrame {
+                            tokens: oxideterm_theme::default_tokens(),
+                            i18n: I18n::new(Locale::En),
+                            has_background: false,
+                            ui_font: ".SystemUIFont".into(),
+                            counts,
+                            signatures: (0..settings_section_list_item_count(
+                                route.active_tab,
+                                counts,
+                            ) as u64)
+                                .collect(),
+                            divider: rgb(0xcccccc),
+                            groups: vec![vec![SettingsTab::Terminal]],
+                        })
+                    }),
+                    section: Rc::new(|_, section, _| {
+                        assert_ne!(section, SettingsSectionId::TerminalPageSwitcher);
+                        Some(
+                            div()
+                                .h(px(44.0))
+                                .debug_selector(move || format!("{section:?}"))
+                                .into_any_element(),
+                        )
+                    }),
+                    scrolled: Rc::new(|_| {}),
+                    keybinding_note: Rc::new(|_, _, _| None),
+                    dispatch: Rc::new(|request, _, _| {
+                        assert!(matches!(request, SettingsSurfaceRequest::Tooltip(..)));
+                    }),
+                    search_field: Rc::new(|_, _, _| None),
+                    knowledge_available: Rc::new(|_| false),
+                },
+                cx,
+            )
+        });
+        cx.simulate_resize(gpui::size(px(1280.0), px(750.0)));
+        cx.update(|window, app| window.draw(app).clear(app));
+        assert!(cx.debug_bounds("TerminalDisplayFont").is_some());
+        let logging = cx
+            .debug_bounds(TerminalSettingsPage::Logging.label_key())
+            .unwrap();
+        cx.simulate_mouse_down(
+            logging.center(),
+            gpui::MouseButton::Left,
+            gpui::Modifiers::default(),
+        );
+        cx.update(|window, app| window.draw(app).clear(app));
+        assert_eq!(
+            settings.read_with(cx, |state, _| state.route_snapshot().terminal_page),
+            TerminalSettingsPage::Logging
+        );
+        assert!(cx.debug_bounds("TerminalLoggingSession").is_some());
+        assert!(cx.debug_bounds("TerminalDisplayFont").is_none());
+    }
+}

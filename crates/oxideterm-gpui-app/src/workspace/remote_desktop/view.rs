@@ -475,10 +475,15 @@ impl WorkspaceApp {
                 workspace.handle_remote_desktop_session_event(&session, event, cx);
             },
         );
-        let session_observation = cx.observe(&session, |_workspace, _session, cx| {
-            // Session-owned state changes repaint every mounted workspace view,
-            // including a detached window, without copying state back to root.
-            cx.notify();
+        Self::mount_remote_desktop_panel(&session, &self.remote_desktop, cx);
+        let mut previous_status = session.read(cx).active_session_status();
+        let sidebar_observation = cx.observe(&session, move |_, session, cx| {
+            // Only liveness is shown outside the desktop tab.
+            let status = session.read(cx).active_session_status();
+            if status != previous_status {
+                previous_status = status;
+                cx.notify();
+            }
         });
 
         if let Some(previous_tab_id) = self.active_tab_id(cx) {
@@ -488,7 +493,7 @@ impl WorkspaceApp {
             remote_desktop.insert(
                 tab_id,
                 session,
-                vec![session_subscription, session_observation],
+                vec![session_subscription, sidebar_observation],
             );
         });
         self.insert_tab(
@@ -549,7 +554,10 @@ impl WorkspaceApp {
     ) -> AnyElement {
         self.bind_remote_desktop_window(tab_id, window.window_handle(), cx);
         self.sync_remote_desktop_frame_visibility(tab_id, cx);
-        let Some(session) = self.remote_desktop_session_entity(tab_id, cx) else {
+        let Some(panel) = self
+            .remote_desktop_session_entity(tab_id, cx)
+            .and_then(|session| session.read(cx).panel())
+        else {
             return div()
                 .size_full()
                 .flex()
@@ -559,22 +567,34 @@ impl WorkspaceApp {
                 .child(self.i18n.t("remote_desktop.session_missing"))
                 .into_any_element();
         };
-        let certificate_dialog =
-            session
-                .read(cx)
-                .certificate_prompt()
-                .map(|(generation, challenge)| {
-                    self.render_remote_desktop_certificate_dialog(tab_id, generation, challenge, cx)
-                });
+        panel.into_any_element()
+    }
+
+    fn mount_remote_desktop_panel(
+        session: &Entity<RemoteDesktopSessionEntity>,
+        desktops: &Entity<RemoteDesktopWorkspaceEntity>,
+        cx: &mut Context<Self>,
+    ) {
         let owner = cx.entity().downgrade();
-        render_remote_desktop_panel(
-            &session,
-            &self.remote_desktop,
-            &self.tokens,
-            &self.i18n,
-            window,
-            cx,
-            certificate_dialog,
+        let appearance_owner = owner.clone();
+        let certificate_owner = owner.clone();
+        RemoteDesktopPanelView::mount(
+            session,
+            desktops,
+            move |cx| {
+                let owner = appearance_owner.upgrade()?;
+                let app = owner.read(cx);
+                Some((app.tokens, app.i18n.clone()))
+            },
+            move |tab_id, generation, challenge, cx| {
+                certificate_owner
+                    .update(cx, |app, cx| {
+                        app.render_remote_desktop_certificate_dialog(
+                            tab_id, generation, challenge, cx,
+                        )
+                    })
+                    .ok()
+            },
             move |action, window, cx| {
                 let _ = owner.update(cx, |app, cx| match action {
                     DesktopWindowAction::FocusKeyboard(tab_id) => {
@@ -607,6 +627,7 @@ impl WorkspaceApp {
                     }
                 });
             },
+            cx,
         )
     }
 }

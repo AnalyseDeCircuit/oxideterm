@@ -1,17 +1,8 @@
 use super::*;
-
-pub(in crate::workspace) const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0; // Desktop preference for normal proxy fields.
-pub(in crate::workspace) const SETTINGS_NETWORK_PORT_FIELD_WIDTH: f32 = 140.0; // Ports should stay compact instead of sharing a full row.
-// External MCP rows use compact settings-card spacing rather than terminal layout metrics.
-const SETTINGS_PUBLIC_MCP_ENDPOINT_GAP: f32 = 12.0;
-const SETTINGS_PUBLIC_MCP_ROW_GAP: f32 = 10.0;
-const SETTINGS_PUBLIC_MCP_STATUS_GAP: f32 = 2.0;
-const SETTINGS_PUBLIC_MCP_DETAIL_GAP: f32 = 4.0;
-const SETTINGS_PUBLIC_MCP_COMMAND_PADDING_X: f32 = 8.0;
-const SETTINGS_PUBLIC_MCP_COMMAND_PADDING_Y: f32 = 6.0;
-const SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE: f32 = 14.0;
-const PUBLIC_MCP_CLIENT_MODAL_WIDTH: f32 = 680.0;
-const PUBLIC_MCP_CLIENT_MODAL_MAX_HEIGHT: f32 = 660.0;
+use oxideterm_gpui_settings_view::mcp_page::{
+    McpClientDialog, McpSettingsFrame, McpSettingsPage, McpSettingsRequest,
+};
+use oxideterm_gpui_settings_view::proxy_page::{ProxyPage, ProxyRequest};
 
 #[derive(serde::Serialize)]
 struct PublicMcpStdioEnvironment<'a> {
@@ -38,223 +29,9 @@ fn public_mcp_stdio_json(credential: &str) -> zeroize::Zeroizing<String> {
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum NetworkProxyAuthMode {
-    None,
-    Password,
-}
-
-pub(in crate::workspace) fn default_settings_upstream_proxy_config() -> SettingsUpstreamProxyConfig
-{
-    SettingsUpstreamProxyConfig {
-        protocol: SettingsUpstreamProxyProtocol::Socks5,
-        host: "127.0.0.1".to_string(),
-        port: 1080,
-        auth: SettingsUpstreamProxyAuth::None,
-        remote_dns: true,
-        no_proxy: String::new(),
-    }
-}
-
-pub(in crate::workspace) fn network_proxy_protocol_label(
-    protocol: SettingsUpstreamProxyProtocol,
-    i18n: &I18n,
-) -> String {
-    match protocol {
-        SettingsUpstreamProxyProtocol::Socks5 => i18n.t("settings_view.network.protocol_socks5"),
-        SettingsUpstreamProxyProtocol::HttpConnect => {
-            i18n.t("settings_view.network.protocol_http_connect")
-        }
-    }
-}
-
-pub(in crate::workspace) fn network_proxy_auth_label(
-    mode: NetworkProxyAuthMode,
-    i18n: &I18n,
-) -> String {
-    match mode {
-        NetworkProxyAuthMode::None => i18n.t("settings_view.network.auth_none"),
-        NetworkProxyAuthMode::Password => i18n.t("settings_view.network.auth_password"),
-    }
-}
-
-pub(in crate::workspace) fn network_application_proxy_mode_label(
-    mode: SettingsApplicationProxyMode,
-    i18n: &oxideterm_i18n::I18n,
-) -> String {
-    match mode {
-        SettingsApplicationProxyMode::System => {
-            i18n.t("settings_view.network.application_mode_system")
-        }
-        SettingsApplicationProxyMode::Direct => {
-            i18n.t("settings_view.network.application_mode_direct")
-        }
-        SettingsApplicationProxyMode::Shared => {
-            i18n.t("settings_view.network.application_mode_shared")
-        }
-    }
-}
-
-fn public_mcp_tool_group_label_key(tool_group: oxideterm_public_mcp::ToolGroup) -> &'static str {
-    match tool_group {
-        oxideterm_public_mcp::ToolGroup::Basic => "settings_view.network.mcp_group_basic",
-        oxideterm_public_mcp::ToolGroup::ConnectionDirectory => {
-            "settings_view.network.mcp_group_connection_directory"
-        }
-        oxideterm_public_mcp::ToolGroup::ConnectionRead => {
-            "settings_view.network.mcp_group_connection_read"
-        }
-        oxideterm_public_mcp::ToolGroup::ConnectionManage => {
-            "settings_view.network.mcp_group_connection_manage"
-        }
-        oxideterm_public_mcp::ToolGroup::CredentialManage => {
-            "settings_view.network.mcp_group_credential_manage"
-        }
-        oxideterm_public_mcp::ToolGroup::NodeSession => {
-            "settings_view.network.mcp_group_node_session"
-        }
-        oxideterm_public_mcp::ToolGroup::TerminalSession => {
-            "settings_view.network.mcp_group_terminal_session"
-        }
-        oxideterm_public_mcp::ToolGroup::TerminalObserve => {
-            "settings_view.network.mcp_group_terminal_observe"
-        }
-        oxideterm_public_mcp::ToolGroup::TerminalInput => {
-            "settings_view.network.mcp_group_terminal_input"
-        }
-        oxideterm_public_mcp::ToolGroup::RecordingControl => {
-            "settings_view.network.mcp_group_recording_control"
-        }
-        oxideterm_public_mcp::ToolGroup::RecordingContent => {
-            "settings_view.network.mcp_group_recording_content"
-        }
-        oxideterm_public_mcp::ToolGroup::DesktopSession => {
-            "settings_view.network.mcp_group_desktop_session"
-        }
-        oxideterm_public_mcp::ToolGroup::DesktopObserve => {
-            "settings_view.network.mcp_group_desktop_observe"
-        }
-        oxideterm_public_mcp::ToolGroup::DesktopInput => {
-            "settings_view.network.mcp_group_desktop_input"
-        }
-        oxideterm_public_mcp::ToolGroup::DesktopClipboard => {
-            "settings_view.network.mcp_group_desktop_clipboard"
-        }
-        oxideterm_public_mcp::ToolGroup::CommandObserve => {
-            "settings_view.network.mcp_group_command_observe"
-        }
-        oxideterm_public_mcp::ToolGroup::CommandExecute => {
-            "settings_view.network.mcp_group_command_execute"
-        }
-        oxideterm_public_mcp::ToolGroup::AuditRead => "settings_view.network.mcp_group_audit_read",
-        oxideterm_public_mcp::ToolGroup::ArtifactTransfer => {
-            "settings_view.network.mcp_group_artifact_transfer"
-        }
-        oxideterm_public_mcp::ToolGroup::HostToolsObserve => {
-            "settings_view.network.mcp_group_host_tools_observe"
-        }
-        oxideterm_public_mcp::ToolGroup::HostToolsOperate => {
-            "settings_view.network.mcp_group_host_tools_operate"
-        }
-        oxideterm_public_mcp::ToolGroup::QuickCommandRead => {
-            "settings_view.network.mcp_group_quick_command_read"
-        }
-        oxideterm_public_mcp::ToolGroup::QuickCommandContentRead => {
-            "settings_view.network.mcp_group_quick_command_content_read"
-        }
-        oxideterm_public_mcp::ToolGroup::QuickCommandManage => {
-            "settings_view.network.mcp_group_quick_command_manage"
-        }
-        oxideterm_public_mcp::ToolGroup::QuickCommandExecute => {
-            "settings_view.network.mcp_group_quick_command_execute"
-        }
-        oxideterm_public_mcp::ToolGroup::AddonRead => "settings_view.network.mcp_group_addon_read",
-        oxideterm_public_mcp::ToolGroup::AddonManage => {
-            "settings_view.network.mcp_group_addon_manage"
-        }
-        oxideterm_public_mcp::ToolGroup::ForwardRead => {
-            "settings_view.network.mcp_group_forward_read"
-        }
-        oxideterm_public_mcp::ToolGroup::ForwardManage => {
-            "settings_view.network.mcp_group_forward_manage"
-        }
-        oxideterm_public_mcp::ToolGroup::FileRead => "settings_view.network.mcp_group_file_read",
-        oxideterm_public_mcp::ToolGroup::FileWrite => "settings_view.network.mcp_group_file_write",
-        oxideterm_public_mcp::ToolGroup::WorkspaceRead => {
-            "settings_view.network.mcp_group_workspace_read"
-        }
-        oxideterm_public_mcp::ToolGroup::WorkspaceEdit => {
-            "settings_view.network.mcp_group_workspace_edit"
-        }
-        oxideterm_public_mcp::ToolGroup::CloudSync => "settings_view.network.mcp_group_cloud_sync",
-    }
-}
-
-// These are display families only; each checkbox retains its original ToolGroup authority.
-fn public_mcp_permission_sections()
--> [(&'static str, &'static [oxideterm_public_mcp::ToolGroup]); 6] {
-    use oxideterm_public_mcp::ToolGroup::*;
-    [
-        (
-            "settings_view.network.mcp_family_connections",
-            &[
-                ConnectionDirectory,
-                ConnectionRead,
-                ConnectionManage,
-                CredentialManage,
-                NodeSession,
-            ],
-        ),
-        (
-            "settings_view.network.mcp_family_terminal",
-            &[
-                TerminalSession,
-                TerminalObserve,
-                TerminalInput,
-                RecordingControl,
-                RecordingContent,
-                CommandObserve,
-                CommandExecute,
-                QuickCommandRead,
-                QuickCommandContentRead,
-                QuickCommandManage,
-                QuickCommandExecute,
-            ],
-        ),
-        (
-            "settings_view.network.mcp_family_desktop",
-            &[
-                DesktopSession,
-                DesktopObserve,
-                DesktopInput,
-                DesktopClipboard,
-            ],
-        ),
-        (
-            "settings_view.network.mcp_family_files",
-            &[
-                ArtifactTransfer,
-                FileRead,
-                FileWrite,
-                WorkspaceRead,
-                WorkspaceEdit,
-            ],
-        ),
-        (
-            "settings_view.network.mcp_family_host",
-            &[
-                HostToolsObserve,
-                HostToolsOperate,
-                ForwardRead,
-                ForwardManage,
-            ],
-        ),
-        (
-            "settings_view.network.mcp_family_other",
-            &[AddonRead, AddonManage, AuditRead, CloudSync],
-        ),
-    ]
-}
+pub(in crate::workspace) use oxideterm_gpui_settings_view::proxy_page::{
+    NetworkProxyAuthMode, default_settings_upstream_proxy_config, network_proxy_auth_label,
+};
 
 fn schedule_settings_network_proxy_test(
     runtime: &tokio::runtime::Runtime,
@@ -274,697 +51,19 @@ fn schedule_settings_network_proxy_test(
     })
 }
 
-impl SettingsWorkspaceEntity {
-    pub(in crate::workspace) fn network_proxy_layout_flags(&self) -> (bool, bool, bool) {
-        (
-            self.network_proxy_password_status.is_some(),
-            self.network_proxy_test_pending,
-            self.network_proxy_test_result.is_some(),
-        )
-    }
-
-    pub(in crate::workspace) fn network_proxy_password_snapshot(
-        &self,
-    ) -> NetworkProxyPasswordSnapshot {
-        NetworkProxyPasswordSnapshot {
-            // The input control borrows plaintext directly from the Entity.
-            password_present: !self.network_proxy_password.is_empty(),
-            password_status: self.network_proxy_password_status.clone(),
-        }
-    }
-
-    pub(in crate::workspace) fn network_proxy_test_snapshot(&self) -> NetworkProxyTestSnapshot {
-        NetworkProxyTestSnapshot {
-            test_host: self.network_proxy_test_host.clone(),
-            test_port: self.network_proxy_test_port.clone(),
-            test_pending: self.network_proxy_test_pending,
-            test_result: self.network_proxy_test_result.clone(),
-        }
-    }
-
-    pub(in crate::workspace) fn take_network_proxy_password(&mut self) -> Option<SecretString> {
-        if self.network_proxy_password.is_empty() {
-            return None;
-        }
-        self.settings_focused_input = None;
-        let password = std::mem::replace(
-            &mut self.network_proxy_password,
-            zeroize::Zeroizing::new(String::new()),
-        );
-        Some(SecretString::from(password))
-    }
-
-    pub(in crate::workspace) fn restore_network_proxy_password(
-        &mut self,
-        password: SecretString,
-        status: String,
-        cx: &mut Context<Self>,
-    ) {
-        zeroize::Zeroize::zeroize(&mut *self.network_proxy_password);
-        self.network_proxy_password = password.into_zeroizing();
-        self.network_proxy_password_status = Some(status);
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn finish_network_proxy_password_action(
-        &mut self,
-        status: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        zeroize::Zeroize::zeroize(&mut *self.network_proxy_password);
-        if self.settings_focused_input == Some(SettingsInput::NetworkProxyPassword) {
-            self.settings_focused_input = None;
-        }
-        self.network_proxy_password_status = status;
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn set_network_proxy_password_status(
-        &mut self,
-        status: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        self.network_proxy_password_status = status;
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn set_network_proxy_test_error(
-        &mut self,
-        error: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.network_proxy_test_result = Some(Err(error));
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn start_network_proxy_test(
-        &mut self,
-        runtime: std::sync::Arc<tokio::runtime::Runtime>,
-        upstream_proxy: UpstreamProxyConfig,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.network_proxy_test_pending {
-            return false;
-        }
-        let host = self.network_proxy_test_host.trim().to_string();
-        if host.is_empty() {
-            self.set_network_proxy_test_error("host is required".to_string(), cx);
-            return false;
-        }
-        let Ok(port) = self.network_proxy_test_port.trim().parse::<u16>() else {
-            self.set_network_proxy_test_error("invalid port".to_string(), cx);
-            return false;
-        };
-
-        if let Some(abort) = self.network_proxy_test_abort.take() {
-            abort.abort();
-        }
-        let started_at = std::time::Instant::now();
-        let worker =
-            schedule_settings_network_proxy_test(runtime.as_ref(), host, port, upstream_proxy);
-        self.network_proxy_test_abort = Some(worker.abort_handle());
-        self.network_proxy_test_pending = true;
-        self.network_proxy_test_result = None;
-        self.network_proxy_test_task = Some(cx.spawn(async move |settings, cx| {
-            // Keep the shared runtime alive until this Entity-owned worker completes.
-            let _runtime_owner = runtime;
-            let status = worker.await.unwrap_or_else(|_| HostKeyStatus::Error {
-                message: "proxy route test task stopped unexpectedly".to_string(),
-            });
-            let elapsed = started_at.elapsed().as_millis();
-            let _ = settings.update(cx, |settings, cx| {
-                settings.network_proxy_test_task = None;
-                settings.network_proxy_test_abort = None;
-                settings.network_proxy_test_pending = false;
-                settings.network_proxy_test_result = Some(match status {
-                    HostKeyStatus::Error { message } => Err(message),
-                    _ => Ok(elapsed),
-                });
-                cx.notify();
-            });
-        }));
-        cx.notify();
-        true
-    }
-}
-
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_network_section(
         &self,
         section: SettingsSectionId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let settings = self.settings_store.settings();
-        let proxy = settings.network.upstream_proxy.as_ref();
         match section {
-            SettingsSectionId::NetworkSharedProxy => {
-                self.settings_network_shared_proxy_section(proxy, cx)
+            SettingsSectionId::NetworkSharedProxy | SettingsSectionId::NetworkRouting => {
+                self.render_settings_proxy_section(section, cx.entity(), cx)
             }
-            SettingsSectionId::NetworkRouting => self.settings_network_routing_section(cx),
-            SettingsSectionId::NetworkPublicMcp => self.settings_public_mcp_section(cx),
+            SettingsSectionId::NetworkPublicMcp => self.render_mcp_settings_page(cx.entity(), cx),
             _ => div().into_any_element(),
         }
-    }
-
-    fn public_mcp_create_client_controls(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mode = self.settings_workspace.read(cx).new_mcp_client_mode;
-        let mut picker = div().flex().flex_wrap().gap(px(4.0));
-        for (value, label) in [
-            (
-                oxideterm_public_mcp::ClientApprovalMode::Standard,
-                "settings_view.network.client_mode_standard",
-            ),
-            (
-                oxideterm_public_mcp::ClientApprovalMode::Unattended,
-                "settings_view.network.client_mode_full",
-            ),
-        ] {
-            picker = picker.child(
-                oxideterm_gpui_ui::segmented_control_item(
-                    &self.tokens,
-                    self.i18n.t(label),
-                    mode == value,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.settings_workspace.update(cx, |state, cx| {
-                            state.new_mcp_client_mode = value;
-                            cx.notify();
-                        });
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                ),
-            );
-        }
-        div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.network.mcp_new_client_mode")),
-            )
-            .child(picker)
-            .child(self.workspace_toolbar_action_button(
-                self.i18n.t("settings_view.network.mcp_create_client"),
-                Some(Self::render_lucide_icon(
-                    LucideIcon::Plus,
-                    SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                    rgb(self.tokens.ui.bg),
-                )),
-                ToolbarButtonOptions {
-                    button: ButtonOptions {
-                        variant: ButtonVariant::Default,
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-                cx.listener(|this, _event, _window, cx| {
-                    let mode = this.settings_workspace.read(cx).new_mcp_client_mode;
-                    let label = format!(
-                        "{} {}",
-                        this.i18n.t("settings_view.network.external_client_name"),
-                        this.public_mcp.clients().len() + 1
-                    );
-                    if let Err(error) = this.public_mcp.create_client(label, mode) {
-                        this.public_mcp.record_action_error(error);
-                    }
-                    cx.notify();
-                    cx.stop_propagation();
-                }),
-            ))
-            .into_any_element()
-    }
-
-    fn settings_public_mcp_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        let endpoint = self.public_mcp.endpoint_url().map(str::to_owned);
-        let startup_error = self.public_mcp.startup_error().map(str::to_owned);
-        let clients = self.public_mcp.clients();
-        let client_labels = clients
-            .iter()
-            .map(|client| (client.client_ref.clone(), client.label.clone()))
-            .collect::<HashMap<_, _>>();
-        let approvals = self.public_mcp.approvals();
-        let credential_ready = self.public_mcp.revealed_credential().is_some();
-
-        let mut content = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap));
-
-        if let Some(error) = startup_error {
-            content = content.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.error))
-                    .child(error),
-            );
-        }
-        if let Some(endpoint) = endpoint {
-            let endpoint_for_copy = endpoint.clone();
-            content = content.child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(SETTINGS_PUBLIC_MCP_ENDPOINT_GAP))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(endpoint),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.success))
-                            .child(self.i18n.t("settings_view.network.mcp_running")),
-                    )
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.copy_endpoint"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Copy,
-                            SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                            rgb(self.tokens.ui.text),
-                        )),
-                        ToolbarButtonOptions::default(),
-                        cx.listener(move |_this, _event, _window, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                endpoint_for_copy.clone(),
-                            ));
-                            cx.stop_propagation();
-                        }),
-                    )),
-            );
-        }
-
-        content = content.child(
-            self.setting_row(
-                "settings_view.network.public_mcp_port",
-                "settings_view.network.public_mcp_port_hint",
-                div()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .items_end()
-                    .gap(px(SETTINGS_PUBLIC_MCP_ENDPOINT_GAP))
-                    .child(
-                        div()
-                            .w(px(SETTINGS_NETWORK_PORT_FIELD_WIDTH))
-                            .max_w_full()
-                            .child(self.settings_text_input_control_fill(
-                                SettingsInput::PublicMcpPort,
-                                self.current_settings_input_value(SettingsInput::PublicMcpPort, cx),
-                                "0".to_string(),
-                                cx,
-                            )),
-                    )
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.apply_public_mcp_port"),
-                        None,
-                        ToolbarButtonOptions::default(),
-                        cx.listener(move |this, _event, _window, cx| {
-                            let draft = this.public_mcp.port_draft().trim().to_owned();
-                            let Ok(port) = draft.parse::<u16>() else {
-                                let error =
-                                    this.i18n.t("settings_view.network.invalid_public_mcp_port");
-                                this.public_mcp.record_action_error(error);
-                                cx.notify();
-                                return;
-                            };
-                            let runtime = this.forwarding_runtime.handle().clone();
-                            if let Err(error) = this.public_mcp.apply_preferred_port(&runtime, port)
-                            {
-                                this.public_mcp.record_action_error(error.to_string());
-                            }
-                            cx.notify();
-                        }),
-                    ))
-                    .into_any_element(),
-                cx,
-            ),
-        );
-
-        content = content.child(
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(
-                    self.i18n
-                        .t("settings_view.network.public_mcp_security_hint"),
-                ),
-        );
-
-        let pending = approvals
-            .into_iter()
-            .filter(|approval| approval.status == oxideterm_public_mcp::ApprovalStatus::Pending)
-            .collect::<Vec<_>>();
-        content = content.child(self.card_separator()).child(
-            self.card_subsection_header(
-                format!(
-                    "{} · {}",
-                    self.i18n.t("settings_view.network.pending_approvals"),
-                    pending.len()
-                ),
-                (!pending.is_empty())
-                    .then(|| self.i18n.t("settings_view.network.pending_approvals_hint")),
-            ),
-        );
-        if !pending.is_empty() {
-            for approval in pending {
-                let approval_ref_for_accept = approval.approval_ref.clone();
-                let approval_ref_for_reject = approval.approval_ref.clone();
-                let client_label = client_labels
-                    .get(&approval.client_ref)
-                    .cloned()
-                    .unwrap_or_else(|| approval.client_ref.to_string());
-                let client_summary = self
-                    .i18n
-                    .t("settings_view.network.approval_client")
-                    .replace("{{client}}", &client_label);
-                let target_label =
-                    self.public_mcp_target_label(&approval.client_ref, &approval.target, cx);
-                let mut approval_details = div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex()
-                    .flex_col()
-                    .gap(px(SETTINGS_PUBLIC_MCP_DETAIL_GAP))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(approval.tool_name),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(client_summary),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(target_label),
-                    );
-                if let Some(command) = approval.review.command() {
-                    let command_summary = self
-                        .i18n
-                        .t("settings_view.network.approval_command")
-                        .replace("{{command}}", command);
-                    approval_details = approval_details.child(
-                        div()
-                            .w_full()
-                            .min_w(px(0.0))
-                            .rounded(px(self.tokens.radii.sm))
-                            .bg(rgb(self.tokens.ui.bg_hover))
-                            .px(px(SETTINGS_PUBLIC_MCP_COMMAND_PADDING_X))
-                            .py(px(SETTINGS_PUBLIC_MCP_COMMAND_PADDING_Y))
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text))
-                            .whitespace_normal()
-                            .child(command_summary),
-                    );
-                }
-                if let Some(working_directory) = approval.review.working_directory() {
-                    approval_details = approval_details.child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.network.approval_working_directory")
-                                    .replace("{{directory}}", working_directory),
-                            ),
-                    );
-                }
-                content = content.child(
-                    div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
-                        .child(approval_details)
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.approve_action"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::Check,
-                                SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                                rgb(self.tokens.ui.bg),
-                            )),
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Default,
-                                    ..ButtonOptions::default()
-                                },
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) = this.public_mcp.set_approval_status(
-                                    &approval_ref_for_accept,
-                                    oxideterm_public_mcp::ApprovalStatus::Approved,
-                                ) {
-                                    this.public_mcp.record_action_error(error);
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.reject_action"),
-                            None,
-                            ToolbarButtonOptions::default(),
-                            cx.listener(move |this, _event, _window, cx| {
-                                if let Err(error) = this.public_mcp.set_approval_status(
-                                    &approval_ref_for_reject,
-                                    oxideterm_public_mcp::ApprovalStatus::Rejected,
-                                ) {
-                                    this.public_mcp.record_action_error(error);
-                                }
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        )),
-                );
-            }
-        }
-
-        content = content
-            .child(self.card_separator())
-            .child(self.network_subsection_heading(
-                "settings_view.network.external_clients",
-                "settings_view.network.external_clients_hint",
-            ));
-
-        content = content.child(self.public_mcp_create_client_controls(cx));
-
-        if credential_ready {
-            content = content.child(
-                self.settings_callout(
-                    SettingsCalloutTone::Warning,
-                    Some(LucideIcon::AlertTriangle),
-                    div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
-                        .child(
-                            div()
-                                .min_w(px(0.0))
-                                .flex_1()
-                                .flex()
-                                .flex_col()
-                                .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .text_color(rgb(self.tokens.ui.text))
-                                        .child(
-                                            self.i18n.t("settings_view.network.credential_once"),
-                                        ),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(self.tokens.ui.warning))
-                                        .child(
-                                            self.i18n.t("settings_view.network.stdio_json_hint"),
-                                        ),
-                                ),
-                        )
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.copy_credential"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::Copy,
-                                SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                                rgb(self.tokens.ui.bg),
-                            )),
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Default,
-                                    ..ButtonOptions::default()
-                                },
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Some(credential) = this.public_mcp.revealed_credential() {
-                                    cx.write_to_clipboard(ClipboardItem::new_string(
-                                        credential.to_owned(),
-                                    ));
-                                }
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.copy_stdio_json"),
-                            Some(Self::render_lucide_icon(
-                                LucideIcon::Copy,
-                                SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                                rgb(self.tokens.ui.text),
-                            )),
-                            ToolbarButtonOptions::default(),
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Some(credential) = this.public_mcp.revealed_credential() {
-                                    let mut config = public_mcp_stdio_json(credential);
-                                    // The clipboard is the explicit external boundary; app state never retains the JSON.
-                                    let clipboard_config = std::mem::take(&mut *config);
-                                    cx.write_to_clipboard(ClipboardItem::new_string(
-                                        clipboard_config,
-                                    ));
-                                }
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.dismiss_credential"),
-                            None,
-                            ToolbarButtonOptions::default(),
-                            cx.listener(|this, _event, _window, cx| {
-                                this.public_mcp.dismiss_revealed_credential();
-                                cx.notify();
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .into_any_element(),
-                ),
-            );
-        }
-
-        if clients.is_empty() {
-            content = content.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.network.no_external_clients")),
-            );
-        } else {
-            let mut client_rows = Vec::with_capacity(clients.len());
-            for client in clients {
-                let client_ref_for_edit = client.client_ref.as_str().to_string();
-                let status_key = if client.enabled {
-                    "settings_view.network.client_enabled"
-                } else {
-                    "settings_view.network.client_disabled"
-                };
-                let mode_key = match client.approval_mode {
-                    oxideterm_public_mcp::ClientApprovalMode::Standard => {
-                        "settings_view.network.client_mode_standard"
-                    }
-                    oxideterm_public_mcp::ClientApprovalMode::Unattended => {
-                        "settings_view.network.client_mode_full"
-                    }
-                };
-                let permission_count = client
-                    .tool_groups
-                    .iter()
-                    .filter(|group| **group != oxideterm_public_mcp::ToolGroup::Basic)
-                    .count();
-                client_rows.push(
-                    div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .gap(px(SETTINGS_PUBLIC_MCP_ROW_GAP))
-                        .child(
-                            div()
-                                .min_w(px(0.0))
-                                .flex_1()
-                                .flex()
-                                .flex_col()
-                                .gap(px(SETTINGS_PUBLIC_MCP_STATUS_GAP))
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_sm))
-                                        .text_color(rgb(self.tokens.ui.text))
-                                        .child(client.label),
-                                )
-                                .child(
-                                    div()
-                                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                                        .text_color(rgb(self.tokens.ui.text_muted))
-                                        .child(format!(
-                                            "{} · {} · {}",
-                                            self.i18n.t(status_key),
-                                            self.i18n.t(mode_key),
-                                            self.i18n
-                                                .t("settings_view.network.mcp_permission_count")
-                                                .replace(
-                                                    "{{count}}",
-                                                    &permission_count.to_string()
-                                                )
-                                        )),
-                                ),
-                        )
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.show_permissions"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Outline,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: false,
-                                },
-                                ..Default::default()
-                            },
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.open_public_mcp_client_editor(client_ref_for_edit.clone(), cx);
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .into_any_element(),
-                );
-            }
-            content = content.children(self.separated_settings_rows(client_rows));
-        }
-
-        self.settings_card(
-            "settings_view.network.public_mcp",
-            "settings_view.network.public_mcp_hint",
-            vec![content.into_any_element()],
-        )
     }
 
     pub(in crate::workspace) fn open_public_mcp_client_editor(
@@ -997,1063 +96,209 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(in crate::workspace) fn mount_mcp_client_dialog(
+        settings: &Entity<SettingsWorkspaceEntity>,
+        cx: &mut Context<Self>,
+    ) -> Entity<McpClientDialog> {
+        let owner = cx.entity().downgrade();
+        let body = Rc::new(move |cx: &App| {
+            let owner = owner.upgrade()?;
+            owner
+                .read(cx)
+                .with_mcp_settings_page(owner, cx, |page, cx| {
+                    page.render_public_mcp_client_editor_modal(cx)
+                })
+        });
+        cx.new(|cx| McpClientDialog::new(settings, body, cx))
+    }
+
+    fn with_mcp_settings_page<R>(
+        &self,
+        owner: Entity<Self>,
+        cx: &App,
+        render: impl FnOnce(McpSettingsPage<'_>, &App) -> R,
+    ) -> R {
+        let weak = owner.downgrade();
+        let dispatch = Rc::new(move |request, cx: &mut App| {
+            let _ = weak.update(cx, |app, cx| app.handle_mcp_settings_request(request, cx));
+        });
+        let target_label = |client: &oxideterm_public_mcp::ClientRef, target: &str, cx: &App| {
+            self.public_mcp_target_label(client, target, cx)
+        };
+        let scroll = self.selectable_text_scroll_handle("public-mcp-client-editor-scroll");
+        self.with_settings_controls_for(owner, cx, |controls, cx| {
+            render(
+                McpSettingsPage {
+                    controls,
+                    state: &self.settings_workspace,
+                    dispatch,
+                    target_label: &target_label,
+                    scroll: &scroll,
+                    frame: McpSettingsFrame {
+                        endpoint: self.public_mcp.endpoint_url(),
+                        startup_error: self.public_mcp.startup_error(),
+                        clients: self.public_mcp.clients(),
+                        approvals: self.public_mcp.approvals(),
+                        port_draft: self.public_mcp.port_draft(),
+                        credential_ready: self.public_mcp.revealed_credential().is_some(),
+                    },
+                },
+                cx,
+            )
+        })
+    }
+
+    pub(super) fn render_mcp_settings_page(&self, owner: Entity<Self>, cx: &App) -> AnyElement {
+        self.with_mcp_settings_page(owner, cx, |page, cx| page.settings_public_mcp_section(cx))
+    }
+
     pub(in crate::workspace) fn render_public_mcp_client_editor_modal(
         &self,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<AnyElement> {
-        let target_ref = self
-            .settings_workspace
+        self.settings_workspace
             .read(cx)
             .public_mcp_client_editor
-            .clone()?;
-        let client = self
-            .public_mcp
-            .clients()
-            .into_iter()
-            .find(|client| client.client_ref.as_str() == target_ref)?;
+            .is_some()
+            .then(|| self.mcp_client_dialog.clone().into_any_element())
+    }
 
-        let client_ref_for_toggle = client.client_ref.clone();
-        let client_ref_for_remove = client.client_ref.clone();
-        let client_ref_for_mode = client.client_ref.clone();
-        let next_enabled = !client.enabled;
-        let next_approval_mode = match client.approval_mode {
-            oxideterm_public_mcp::ClientApprovalMode::Standard => {
-                oxideterm_public_mcp::ClientApprovalMode::Unattended
+    fn handle_mcp_settings_request(&mut self, request: McpSettingsRequest, cx: &mut Context<Self>) {
+        match request {
+            McpSettingsRequest::CreateClient => {
+                let mode = self.settings_workspace.read(cx).new_mcp_client_mode;
+                let label = format!(
+                    "{} {}",
+                    self.i18n.t("settings_view.network.external_client_name"),
+                    self.public_mcp.clients().len() + 1
+                );
+                if let Err(error) = self.public_mcp.create_client(label, mode) {
+                    self.public_mcp.record_action_error(error);
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
             }
-            oxideterm_public_mcp::ClientApprovalMode::Unattended => {
-                oxideterm_public_mcp::ClientApprovalMode::Standard
+            McpSettingsRequest::ApplyPort => {
+                let draft = self.public_mcp.port_draft().trim().to_owned();
+                let Ok(port) = draft.parse::<u16>() else {
+                    let error = self.i18n.t("settings_view.network.invalid_public_mcp_port");
+                    self.public_mcp.record_action_error(error);
+                    self.settings_workspace.update(cx, |_, cx| cx.notify());
+                    return;
+                };
+                let runtime = self.forwarding_runtime.handle().clone();
+                if let Err(error) = self.public_mcp.apply_preferred_port(&runtime, port) {
+                    self.public_mcp.record_action_error(error.to_string());
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
             }
-        };
-        let toggle_key = if client.enabled {
-            "settings_view.network.disable_client"
-        } else {
-            "settings_view.network.enable_client"
-        };
-        let mode_toggle_key = match client.approval_mode {
-            oxideterm_public_mcp::ClientApprovalMode::Standard => {
-                "settings_view.network.switch_to_full_mode"
+            McpSettingsRequest::Approve(approval_ref_for_accept) => {
+                if let Err(error) = self.public_mcp.set_approval_status(
+                    &approval_ref_for_accept,
+                    oxideterm_public_mcp::ApprovalStatus::Approved,
+                ) {
+                    self.public_mcp.record_action_error(error);
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
             }
-            oxideterm_public_mcp::ClientApprovalMode::Unattended => {
-                "settings_view.network.switch_to_standard_mode"
+            McpSettingsRequest::Reject(approval_ref_for_reject) => {
+                if let Err(error) = self.public_mcp.set_approval_status(
+                    &approval_ref_for_reject,
+                    oxideterm_public_mcp::ApprovalStatus::Rejected,
+                ) {
+                    self.public_mcp.record_action_error(error);
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
             }
-        };
-
-        let mut families = div().w_full().min_w_0().flex().flex_wrap();
-        for (title_key, groups) in public_mcp_permission_sections() {
-            let selected = groups
-                .iter()
-                .filter(|group| client.tool_groups.contains(group))
-                .count();
-            let mut items = Vec::new();
-            for &tool_group in groups {
-                let checked = client.tool_groups.contains(&tool_group);
-                let client_ref = client.client_ref.clone();
-                let control = checkbox(
-                    &self.tokens,
-                    format!("mcp-permission-{client_ref}-{tool_group:?}"),
-                    String::new(),
-                    checked,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        if let Err(error) = this.set_public_mcp_client_tool_group(
-                            &client_ref,
-                            tool_group,
-                            !checked,
-                            cx,
-                        ) {
-                            this.public_mcp.record_action_error(error);
-                        }
-                        cx.notify();
-                        cx.stop_propagation();
-                    }),
-                )
-                .into_any_element();
-                items.push(settings_ai_tool_policy_item(
-                    &self.tokens,
-                    self.i18n.t(public_mcp_tool_group_label_key(tool_group)),
-                    control,
-                ));
+            McpSettingsRequest::CopyCredential => {
+                if let Some(credential) = self.public_mcp.revealed_credential() {
+                    cx.write_to_clipboard(ClipboardItem::new_string(credential.to_owned()));
+                }
             }
-            families = families.child(
-                div()
-                    .flex_basis(gpui::relative(0.5))
-                    .flex_grow(1.0)
-                    .min_w(px(280.0))
-                    .max_w_full()
-                    .pr(px(12.0))
-                    .pb(px(12.0))
-                    .child(settings_ai_tool_policy_group(
-                        &self.tokens,
-                        self.i18n.t(title_key),
-                        String::new(),
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(format!("{selected}/{}", groups.len()))
-                            .into_any_element(),
-                        items,
-                    )),
-            );
+            McpSettingsRequest::CopyStdio => {
+                if let Some(credential) = self.public_mcp.revealed_credential() {
+                    let mut config = public_mcp_stdio_json(credential);
+                    // The clipboard is the explicit external boundary; app state never retains the JSON.
+                    let clipboard_config = std::mem::take(&mut *config);
+                    cx.write_to_clipboard(ClipboardItem::new_string(clipboard_config));
+                }
+            }
+            McpSettingsRequest::DismissCredential => {
+                self.public_mcp.dismiss_revealed_credential();
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
+            }
+            McpSettingsRequest::OpenEditor(client_ref_for_edit) => {
+                self.open_public_mcp_client_editor(client_ref_for_edit, cx);
+            }
+            McpSettingsRequest::SetToolGroup(client_ref, tool_group, enabled) => {
+                if let Err(error) =
+                    self.set_public_mcp_client_tool_group(&client_ref, tool_group, enabled, cx)
+                {
+                    self.public_mcp.record_action_error(error);
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
+            }
+            McpSettingsRequest::SetMode(client_ref_for_mode, next_approval_mode) => {
+                if let Err(error) = self.set_public_mcp_client_approval_mode(
+                    &client_ref_for_mode,
+                    next_approval_mode,
+                    cx,
+                ) {
+                    self.public_mcp.record_action_error(error);
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
+            }
+            McpSettingsRequest::SetEnabled(client_ref_for_toggle, next_enabled) => {
+                if let Err(error) =
+                    self.set_public_mcp_client_enabled(&client_ref_for_toggle, next_enabled, cx)
+                {
+                    self.public_mcp.record_action_error(error);
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
+            }
+            McpSettingsRequest::RemoveClient(client_ref_for_remove) => {
+                match self.remove_public_mcp_client(&client_ref_for_remove, cx) {
+                    Ok(()) => self.close_public_mcp_client_editor(cx),
+                    Err(error) => self.public_mcp.record_action_error(error),
+                }
+                self.settings_workspace.update(cx, |_, cx| cx.notify());
+            }
+            McpSettingsRequest::CloseEditor => {
+                self.close_public_mcp_client_editor(cx);
+            }
         }
-
-        let body_content = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(12.0))
-            .child(
-                self.setting_row(
-                    "settings_view.network.mcp_approval_mode",
-                    "settings_view.network.mcp_approval_mode_hint",
-                    self.workspace_toolbar_action_button(
-                        self.i18n.t(mode_toggle_key),
-                        None,
-                        ToolbarButtonOptions::default(),
-                        cx.listener(move |this, _event, _window, cx| {
-                            if let Err(error) = this.set_public_mcp_client_approval_mode(
-                                &client_ref_for_mode,
-                                next_approval_mode,
-                                cx,
-                            ) {
-                                this.public_mcp.record_action_error(error);
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .into_any_element(),
-                    cx,
-                ),
-            )
-            .child(self.card_separator())
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t("settings_view.network.mcp_group_basic")),
-            )
-            .child(families);
-
-        let dialog = oxideterm_gpui_ui::modal_container(&self.tokens)
-            .w(px(PUBLIC_MCP_CLIENT_MODAL_WIDTH))
-            .max_w_full()
-            .max_h(px(PUBLIC_MCP_CLIENT_MODAL_MAX_HEIGHT))
-            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
-            .flex()
-            .flex_col()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
-                dialog_header(&self.tokens)
-                    .child(dialog_title(&self.tokens, client.label))
-                    .child(dialog_description(
-                        &self.tokens,
-                        self.i18n.t("settings_view.network.external_clients_hint"),
-                    )),
-            )
-            .child(
-                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
-                    .id("public-mcp-client-editor-body")
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .min_w(px(0.0))
-                    .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("public-mcp-client-editor-scroll"),
-                    )
-                    .child(body_content),
-            )
-            .child(
-                dialog_footer(&self.tokens)
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t(toggle_key),
-                        None,
-                        ToolbarButtonOptions::default(),
-                        cx.listener(move |this, _event, _window, cx| {
-                            if let Err(error) = this.set_public_mcp_client_enabled(
-                                &client_ref_for_toggle,
-                                next_enabled,
-                                cx,
-                            ) {
-                                this.public_mcp.record_action_error(error);
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.revoke_client"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Trash2,
-                            SETTINGS_PUBLIC_MCP_ACTION_ICON_SIZE,
-                            rgb(self.tokens.ui.error),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Ghost,
-                                ..Default::default()
-                            },
-                            text_color: Some(rgb(self.tokens.ui.error)),
-                            ..Default::default()
-                        },
-                        cx.listener(move |this, _event, _window, cx| {
-                            match this.remove_public_mcp_client(&client_ref_for_remove, cx) {
-                                Ok(()) => this.close_public_mcp_client_editor(cx),
-                                Err(error) => this.public_mcp.record_action_error(error),
-                            }
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(div().flex_1())
-                    .child(self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.terminal.command_specs_close"),
-                        None,
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Default,
-                                ..ButtonOptions::default()
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.close_public_mcp_client_editor(cx);
-                            cx.stop_propagation();
-                        }),
-                    )),
-            );
-
-        Some(
-            dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_public_mcp_client_editor(cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(dialog)
-                .into_any_element(),
-        )
     }
 
-    fn settings_network_shared_proxy_section(
+    pub(super) fn render_settings_proxy_section(
         &self,
-        proxy: Option<&SettingsUpstreamProxyConfig>,
-        cx: &mut Context<Self>,
+        section: SettingsSectionId,
+        owner: Entity<Self>,
+        cx: &App,
     ) -> AnyElement {
-        let Some(proxy) = proxy else {
-            let disclaimer_accepted = self
-                .settings_store
-                .settings()
-                .network
-                .upstream_proxy_disclaimer_accepted;
-            let empty_state = div()
-                .w_full()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(self.tokens.metrics.settings_card_gap))
-                .child(self.network_checkbox_row(
-                    "settings_view.network.disclaimer",
-                    "settings_view.network.disclaimer_hint",
-                    disclaimer_accepted,
-                    true,
-                    Self::toggle_settings_network_disclaimer,
-                    cx,
-                ))
-                .child(
-                    div()
-                        .flex_none()
-                        .child(self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.network.add_shared_proxy"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Default,
-                                    size: ButtonSize::Default,
-                                    radius: ButtonRadius::Md,
-                                    disabled: !disclaimer_accepted,
-                                },
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(|this, _event, _window, cx| {
-                                this.toggle_settings_network_enabled(cx);
-                                cx.stop_propagation();
-                            }),
-                        )),
-                )
-                .into_any_element();
-            return self.settings_card(
-                "settings_view.network.shared_proxy",
-                "settings_view.network.shared_proxy_empty_hint",
-                vec![empty_state],
-            );
-        };
-
-        let content =
-            div()
-                .w_full()
-                .min_w(px(0.0))
-                .flex()
-                .flex_col()
-                .gap(px(self.tokens.metrics.settings_card_gap))
-                .child(
-                    div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .flex()
-                        .flex_wrap()
-                        .items_start()
-                        .gap(px(16.0))
-                        .child(self.network_responsive_field(
-                            SETTINGS_NETWORK_FIELD_WIDTH,
-                            self.network_select_field(
-                                "settings_view.network.protocol",
-                                "settings_view.network.protocol_hint",
-                                SettingsSelect::NetworkProxyProtocol,
-                                network_proxy_protocol_label(proxy.protocol, &self.i18n),
-                                true,
-                                cx,
-                            ),
-                        ))
-                        .child(self.network_compact_field(
-                            SETTINGS_NETWORK_PORT_FIELD_WIDTH,
-                            self.network_input_field(
-                                "settings_view.network.port",
-                                "settings_view.network.port_hint",
-                                SettingsInput::NetworkProxyPort,
-                                proxy.port.to_string(),
-                                "1080".to_string(),
-                                true,
-                                cx,
-                            ),
-                        )),
-                )
-                .child(self.network_full_width_input(
-                    "settings_view.network.host",
-                    "settings_view.network.host_hint",
-                    SettingsInput::NetworkProxyHost,
-                    proxy.host.clone(),
-                    "127.0.0.1".to_string(),
-                    true,
-                    cx,
-                ))
-                .child(self.network_full_width_input(
-                    "settings_view.network.no_proxy",
-                    "settings_view.network.no_proxy_hint",
-                    SettingsInput::NetworkProxyNoProxy,
-                    proxy.no_proxy.clone(),
-                    "localhost,127.0.0.1,*.internal".to_string(),
-                    true,
-                    cx,
-                ))
-                .child(self.network_checkbox_row(
-                    "settings_view.network.remote_dns",
-                    "settings_view.network.remote_dns_hint",
-                    proxy.remote_dns,
-                    true,
-                    Self::toggle_settings_network_remote_dns,
-                    cx,
-                ))
-                .child(self.card_separator())
-                .child(self.settings_network_auth_content(Some(proxy), cx))
-                .child(self.card_separator())
-                .child(self.settings_network_test_content(true, cx))
-                .child(self.card_separator())
-                .child(div().w_full().flex().justify_end().child(
-                    self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.network.remove_shared_proxy"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Trash2,
-                            16.0,
-                            rgb(self.tokens.ui.error),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Destructive,
-                                size: ButtonSize::Default,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.toggle_settings_network_enabled(cx);
-                            cx.stop_propagation();
-                        }),
-                    ),
-                ))
-                .into_any_element();
-
-        self.settings_card(
-            "settings_view.network.shared_proxy",
-            "settings_view.network.shared_proxy_hint",
-            vec![content],
-        )
-    }
-
-    fn settings_network_auth_content(
-        &self,
-        proxy: Option<&SettingsUpstreamProxyConfig>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let auth_mode = proxy
-            .map(|proxy| match &proxy.auth {
-                SettingsUpstreamProxyAuth::None => NetworkProxyAuthMode::None,
-                SettingsUpstreamProxyAuth::Password { .. } => NetworkProxyAuthMode::Password,
-            })
-            .unwrap_or(NetworkProxyAuthMode::None);
-        let auth_username = proxy
-            .and_then(|proxy| match &proxy.auth {
-                SettingsUpstreamProxyAuth::Password { username, .. } => Some(username.clone()),
-                SettingsUpstreamProxyAuth::None => None,
-            })
-            .unwrap_or_default();
-        let auth_has_saved_password = proxy.is_some_and(|proxy| match &proxy.auth {
-            SettingsUpstreamProxyAuth::Password { keychain_id, .. } => keychain_id.is_some(),
-            SettingsUpstreamProxyAuth::None => false,
+        let owner_weak = owner.downgrade();
+        let dispatch = Rc::new(move |request, cx: &mut App| {
+            let _ = owner_weak.update(cx, |app, cx| match request {
+                ProxyRequest::Disclaimer => app.toggle_settings_network_disclaimer(cx),
+                ProxyRequest::Enabled => app.toggle_settings_network_enabled(cx),
+                ProxyRequest::RemoteDns => app.toggle_settings_network_remote_dns(cx),
+                ProxyRequest::Test => app.start_settings_network_proxy_test(cx),
+                ProxyRequest::SavePassword => app.save_settings_network_proxy_password(cx),
+                ProxyRequest::RemovePassword => app.remove_settings_network_proxy_password(cx),
+            });
         });
-
-        let mut section = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_row_gap))
-            .opacity(if proxy.is_some() { 1.0 } else { 0.4 })
-            .child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .gap(px(16.0))
-                    .child(self.network_responsive_field(
-                        SETTINGS_NETWORK_FIELD_WIDTH,
-                        self.network_select_field(
-                            "settings_view.network.auth",
-                            "settings_view.network.auth_hint",
-                            SettingsSelect::NetworkProxyAuth,
-                            network_proxy_auth_label(auth_mode, &self.i18n),
-                            proxy.is_some(),
-                            cx,
-                        ),
-                    )),
-            );
-
-        if auth_mode == NetworkProxyAuthMode::Password {
-            section = section
-                .child(self.network_full_width_input(
-                    "settings_view.network.username",
-                    "settings_view.network.username_hint",
-                    SettingsInput::NetworkProxyUsername,
-                    auth_username,
-                    String::new(),
-                    proxy.is_some(),
-                    cx,
-                ))
-                .child(self.network_password_field(auth_has_saved_password, proxy.is_some(), cx));
-        }
-
-        section.into_any_element()
-    }
-
-    fn settings_network_test_content(
-        &self,
-        proxy_enabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let snapshot = self
-            .settings_workspace
-            .read(cx)
-            .network_proxy_test_snapshot();
-        let host_value = snapshot.test_host;
-        let port_value = snapshot.test_port;
-        let test_disabled = !proxy_enabled
-            || snapshot.test_pending
-            || host_value.trim().is_empty()
-            || port_value.trim().parse::<u16>().is_err();
-        let status = snapshot.test_result.map(|result| match result {
-            Ok(elapsed) => self
-                .i18n
-                .t("settings_view.network.test_success")
-                .replace("{{elapsed}}", &elapsed.to_string()),
-            Err(error) => self
-                .i18n
-                .t("settings_view.network.test_error")
-                .replace("{{error}}", &error),
-        });
-
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
-            .opacity(if proxy_enabled { 1.0 } else { 0.4 })
-            .child(self.network_subsection_heading(
-                "settings_view.network.test_title",
-                "settings_view.network.test_hint",
-            ))
-            .child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(16.0))
-                    .child(self.network_responsive_field(
-                        SETTINGS_NETWORK_FIELD_WIDTH,
-                        self.network_input_field(
-                            "settings_view.network.test_host",
-                            "settings_view.network.test_host_hint",
-                            SettingsInput::NetworkProxyTestHost,
-                            host_value,
-                            "server.example.com".to_string(),
-                            proxy_enabled,
-                            cx,
-                        ),
-                    ))
-                    .child(self.network_compact_field(
-                        SETTINGS_NETWORK_PORT_FIELD_WIDTH,
-                        self.network_input_field(
-                            "settings_view.network.test_port",
-                            "settings_view.network.test_port_hint",
-                            SettingsInput::NetworkProxyTestPort,
-                            port_value,
-                            "22".to_string(),
-                            proxy_enabled,
-                            cx,
-                        ),
-                    )),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .flex_none()
-                            .child(self.workspace_toolbar_action_button(
-                                if snapshot.test_pending {
-                                    self.i18n.t("settings_view.network.testing")
-                                } else {
-                                    self.i18n.t("settings_view.network.test_button")
-                                },
-                                None,
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Default,
-                                        size: ButtonSize::Default,
-                                        radius: ButtonRadius::Md,
-                                        disabled: test_disabled,
-                                    },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.start_settings_network_proxy_test(cx);
-                                    cx.stop_propagation();
-                                }),
-                            )),
-                    )
-                    .when_some(status, |row, status| {
-                        row.child(
-                            div()
-                                .min_w(px(0.0))
-                                .flex_1()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(status),
-                        )
-                    }),
-            )
-            .into_any_element()
-    }
-
-    fn settings_network_routing_section(&self, cx: &mut Context<Self>) -> AnyElement {
-        // Routing policy is distinct from the reusable proxy definition above.
-        // SSH remains connection-owned while app and updater routes are global.
-        let settings = self.settings_store.settings();
-        let application_mode = settings.network.application_proxy_mode;
-        let update_proxy = &settings.general.update_proxy;
-        let mut content = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
-            .child(self.network_static_route_row(
-                "settings_view.network.ssh_route",
-                "settings_view.network.ssh_route_hint",
-                "settings_view.network.per_connection",
-            ))
-            .child(self.card_separator())
-            .child(self.network_route_select_row(
-                "settings_view.network.application_route",
-                "settings_view.network.application_route_hint",
-                SettingsSelect::NetworkApplicationProxyMode,
-                network_application_proxy_mode_label(application_mode, &self.i18n),
-                cx,
-            ))
-            .child(self.card_separator())
-            .child(self.network_route_select_row(
-                "settings_view.network.update_route",
-                "settings_view.network.update_route_hint",
-                SettingsSelect::UpdateProxyMode,
-                update_proxy_mode_label(update_proxy.mode, &self.i18n),
-                cx,
-            ));
-
-        if update_proxy.mode == UpdateProxyMode::Custom {
-            content = content.child(self.settings_network_custom_update_proxy(cx));
-        }
-
-        content = content.child(
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.network.legal_hint")),
-        );
-
-        self.settings_card(
-            "settings_view.network.routing",
-            "settings_view.network.routing_hint",
-            vec![content.into_any_element()],
-        )
-    }
-
-    fn settings_network_custom_update_proxy(&self, cx: &mut Context<Self>) -> AnyElement {
-        let proxy = &self.settings_store.settings().general.update_proxy;
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .pt(px(self.tokens.metrics.settings_row_gap))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_row_gap))
-            .child(self.network_subsection_heading(
-                "settings_view.network.custom_update_proxy",
-                "settings_view.network.custom_update_proxy_hint",
-            ))
-            .child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .items_start()
-                    .gap(px(16.0))
-                    .child(self.network_responsive_field(
-                        SETTINGS_NETWORK_FIELD_WIDTH,
-                        self.network_select_field(
-                            "settings_view.network.update_protocol",
-                            "settings_view.network.update_protocol_hint",
-                            SettingsSelect::UpdateProxyProtocol,
-                            update_proxy_protocol_label(proxy.protocol, &self.i18n),
-                            true,
-                            cx,
-                        ),
-                    ))
-                    .child(self.network_compact_field(
-                        SETTINGS_NETWORK_PORT_FIELD_WIDTH,
-                        self.network_input_field(
-                            "settings_view.network.update_port",
-                            "settings_view.network.update_port_hint",
-                            SettingsInput::UpdateProxyPort,
-                            self.current_settings_input_value(SettingsInput::UpdateProxyPort, cx),
-                            "7890".to_string(),
-                            true,
-                            cx,
-                        ),
-                    )),
-            )
-            .child(self.network_full_width_input(
-                "settings_view.network.update_host",
-                "settings_view.network.update_host_hint",
-                SettingsInput::UpdateProxyHost,
-                self.current_settings_input_value(SettingsInput::UpdateProxyHost, cx),
-                "127.0.0.1".to_string(),
-                true,
-                cx,
-            ))
-            .child(self.network_full_width_input(
-                "settings_view.network.update_no_proxy",
-                "settings_view.network.update_no_proxy_hint",
-                SettingsInput::UpdateProxyNoProxy,
-                self.current_settings_input_value(SettingsInput::UpdateProxyNoProxy, cx),
-                "localhost,127.0.0.1".to_string(),
-                true,
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    fn network_subsection_heading(&self, label_key: &str, hint_key: &str) -> AnyElement {
-        self.card_subsection_header(
-            self.i18n.t(label_key),
-            (!hint_key.is_empty()).then(|| self.i18n.t(hint_key)),
-        )
-    }
-
-    fn network_static_route_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        value_key: &str,
-    ) -> AnyElement {
-        settings_appearance_row(
-            &self.tokens,
-            &self.i18n,
-            label_key,
-            hint_key,
-            div()
-                .max_w_full()
-                .text_size(px(self.tokens.metrics.ui_text_sm))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t(value_key))
-                .into_any_element(),
-        )
-    }
-
-    fn network_route_select_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        select_id: SettingsSelect,
-        value: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.select_setting_row(
-            label_key,
-            hint_key,
-            select_id,
-            value,
-            self.tokens.metrics.settings_select_width,
-            cx,
-        )
-    }
-
-    pub(in crate::workspace) fn network_responsive_field(
-        &self,
-        preferred_width: f32,
-        field: AnyElement,
-    ) -> AnyElement {
-        // Field slots grow with the card and wrap once their preferred width
-        // no longer fits, avoiding a fixed-width cluster on wide panes.
-        div()
-            .max_w_full()
-            .min_w(px(0.0))
-            .flex_1()
-            .flex_basis(px(preferred_width))
-            .child(field)
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn network_compact_field(
-        &self,
-        preferred_width: f32,
-        field: AnyElement,
-    ) -> AnyElement {
-        // Compact numeric fields keep their natural width while larger peers
-        // consume the remaining row; max-width still permits narrow panes.
-        div()
-            .w(px(preferred_width))
-            .max_w_full()
-            .min_w(px(0.0))
-            .flex_initial()
-            .child(field)
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn network_checkbox_row(
-        &self,
-        label_key: &'static str,
-        hint_key: &'static str,
-        checked: bool,
-        enabled: bool,
-        on_toggle: fn(&mut WorkspaceApp, &mut Context<Self>),
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut control = switch_with(
-            &self.tokens,
-            label_key,
-            String::new(),
-            checked,
-            SwitchOptions::default().disabled(!enabled),
-        );
-        if enabled {
-            control = control.on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    on_toggle(this, cx);
-                    cx.stop_propagation();
-                }),
-            );
-        }
-        self.setting_row(label_key, hint_key, control.into_any_element(), cx)
-    }
-
-    pub(in crate::workspace) fn network_select_field(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        select_id: SettingsSelect,
-        value: String,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .max_w_full()
-            .min_w(px(0.0))
-            .grid()
-            .gap(px(8.0))
-            .child(self.network_field_label(label_key, hint_key))
-            .child(self.settings_select_control(select_id, value, !enabled, None, cx))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn network_input_field(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        input: SettingsInput,
-        value: String,
-        placeholder: String,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .max_w_full()
-            .min_w(px(0.0))
-            .grid()
-            .gap(px(8.0))
-            .child(self.network_field_label(label_key, hint_key))
-            .child(
-                self.settings_text_input_control_fill(input, value, placeholder, cx)
-                    .into_any_element(),
-            )
-            .when(!enabled, |field| field.opacity(0.5))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn network_full_width_input(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        input: SettingsInput,
-        value: String,
-        placeholder: String,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .grid()
-            .gap(px(8.0))
-            .child(self.network_field_label(label_key, hint_key))
-            .child(self.network_full_width_text_input_control(input, value, placeholder, cx))
-            .when(!enabled, |field| field.opacity(0.5))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn network_full_width_text_input_control(
-        &self,
-        input: SettingsInput,
-        value: String,
-        placeholder: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let focused = self.focused_settings_input == Some(input);
-        let display_value = if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            value.as_str()
-        };
-        let target = WorkspaceImeTarget::Settings(input);
-        self.text_input_with_workspace_ime(
-            target,
-            self.workspace_text_input(
-                target,
-                TextInputView {
-                    value: display_value,
-                    placeholder,
-                    focused,
-                    caret_visible: self.input_caret.visible(),
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .w_full()
-            // Full-width proxy fields must size from their parent column, not
-            // from the desktop max width used by other settings controls.
-            .min_w(px(0.0)),
-            move |this, cx| {
-                let current = this.current_settings_input_value(input, cx);
-                this.focus_settings_input(input, current, cx);
-            },
-            cx,
-        )
-        .into_any_element()
-    }
-
-    pub(in crate::workspace) fn network_password_field(
-        &self,
-        has_saved_password: bool,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let password_input = SettingsInput::NetworkProxyPassword;
-        let snapshot = self
-            .settings_workspace
-            .read(cx)
-            .network_proxy_password_snapshot();
-        let save_disabled = !snapshot.password_present || !enabled;
-        let remove_disabled = !has_saved_password && !snapshot.password_present;
-        let mut row = div()
-            .w_full()
-            .min_w(px(0.0))
-            .grid()
-            .gap(px(8.0))
-            .child(self.network_field_label(
-                "settings_view.network.password",
-                if has_saved_password {
-                    "settings_view.network.password_saved_hint"
-                } else {
-                    "settings_view.network.password_hint"
-                },
-            ))
-            .child(
-                div()
-                    .w_full()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex_basis(px(SETTINGS_NETWORK_FIELD_WIDTH))
-                            .child(self.settings_secret_text_input_control_fill(
-                                password_input,
-                                String::new(),
-                                if has_saved_password {
-                                    self.i18n
-                                        .t("settings_view.network.password_saved_placeholder")
-                                } else {
-                                    String::new()
-                                },
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .child(self.workspace_toolbar_action_button(
-                                self.i18n.t("settings_view.network.save_password"),
-                                Some(Self::render_lucide_icon(
-                                    LucideIcon::KeyRound,
-                                    16.0,
-                                    rgb(if save_disabled {
-                                        self.tokens.ui.text_muted
-                                    } else {
-                                        self.tokens.ui.bg
-                                    }),
-                                )),
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Default,
-                                        size: ButtonSize::Default,
-                                        radius: ButtonRadius::Md,
-                                        disabled: save_disabled,
-                                    },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.save_settings_network_proxy_password(cx);
-                                    cx.stop_propagation();
-                                }),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .child(self.workspace_toolbar_action_button(
-                                self.i18n.t("settings_view.network.remove_password"),
-                                Some(Self::render_lucide_icon(
-                                    LucideIcon::Trash2,
-                                    16.0,
-                                    rgb(self.tokens.ui.text),
-                                )),
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Ghost,
-                                        size: ButtonSize::Default,
-                                        radius: ButtonRadius::Md,
-                                        disabled: remove_disabled,
-                                    },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.remove_settings_network_proxy_password(cx);
-                                    cx.stop_propagation();
-                                }),
-                            )),
-                    ),
-            )
-            .when(!enabled, |field| field.opacity(0.5));
-
-        if let Some(status) = snapshot.password_status {
-            row = row.child(
-                div()
-                    .min_w(px(0.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(status),
-            );
-        }
-
-        row.into_any_element()
-    }
-
-    pub(in crate::workspace) fn network_field_label(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-    ) -> AnyElement {
-        div()
-            .min_w(px(0.0))
-            .grid()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::MEDIUM)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(label_key)),
-            )
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(hint_key)),
-            )
-            .into_any_element()
+        self.with_settings_controls_for(owner, cx, |controls, cx| {
+            let page = ProxyPage {
+                controls,
+                state: &self.settings_workspace,
+                dispatch,
+            };
+            match section {
+                SettingsSectionId::NetworkSharedProxy => {
+                    page.shared_proxy(page.settings.network.upstream_proxy.as_ref(), cx)
+                }
+                SettingsSectionId::NetworkRouting => page.routing(cx),
+                _ => div().into_any_element(),
+            }
+        })
     }
 
     pub(in crate::workspace) fn toggle_settings_network_disclaimer(
@@ -2242,7 +487,12 @@ impl WorkspaceApp {
         };
         let runtime = self.forwarding_runtime.clone();
         self.settings_workspace.update(cx, |settings, cx| {
-            settings.start_network_proxy_test(runtime, upstream_proxy, cx);
+            settings.start_network_proxy_test(
+                runtime,
+                upstream_proxy,
+                schedule_settings_network_proxy_test,
+                cx,
+            );
         });
     }
 }
@@ -2251,17 +501,6 @@ impl WorkspaceApp {
 mod tests {
     use super::*;
 
-    #[test]
-    fn mcp_permission_sections_preserve_every_selectable_group_once() {
-        let mut displayed = public_mcp_permission_sections()
-            .into_iter()
-            .flat_map(|(_, groups)| groups.iter().copied())
-            .collect::<Vec<_>>();
-        displayed.sort();
-        let mut selectable = oxideterm_public_mcp::ToolGroup::selectable().to_vec();
-        selectable.sort();
-        assert_eq!(displayed, selectable);
-    }
     use gpui::{AppContext, TestAppContext};
     use oxideterm_ssh::{UpstreamProxyAuth, UpstreamProxyProtocol};
 
@@ -2345,6 +584,7 @@ mod tests {
                     remote_dns: true,
                     no_proxy: String::new(),
                 },
+                schedule_settings_network_proxy_test,
                 cx,
             ));
             assert!(settings.network_proxy_test_pending);

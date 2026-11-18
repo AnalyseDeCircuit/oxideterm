@@ -1710,7 +1710,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         match detached_tab_surface_route(tab_id, kind) {
-            DetachedTabSurfaceRoute::Settings => return self.render_settings_surface(cx),
+            DetachedTabSurfaceRoute::Settings => return self.render_settings_surface(),
             DetachedTabSurfaceRoute::Ide(tab_id) => {
                 return self.render_ide_surface_for_tab(tab_id, cx);
             }
@@ -1736,7 +1736,7 @@ impl WorkspaceApp {
         }
         match (kind, root_pane) {
             (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
-            (TabKind::Graphics, _) => self.render_graphics_surface(window, cx),
+            (TabKind::Graphics, _) => self.render_graphics_surface(),
             (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
             (TabKind::ConnectionPool, _) => {
                 // Detached windows can outlive the UI route that created them.
@@ -1753,7 +1753,7 @@ impl WorkspaceApp {
             (TabKind::Plugin { plugin_id, tab_id }, _) => {
                 self.render_native_plugin_tab_surface(plugin_id, tab_id, cx)
             }
-            (TabKind::CloudSync, _) => self.render_cloud_sync_surface(cx),
+            (TabKind::CloudSync, _) => self.render_cloud_sync_surface(),
             (TabKind::RemoteDesktop, _) => self.render_remote_desktop_surface(tab_id, window, cx),
             (_, Some(root_pane)) => {
                 self.render_detached_terminal_surface(tab_id, root_pane, window, cx)

@@ -1,176 +1,7 @@
 use super::*;
-use oxideterm_settings::{BackgroundAlignment, BackgroundStyle};
+use oxideterm_settings::BackgroundStyle;
 
 impl WorkspaceApp {
-    pub(super) fn appearance_background_interaction_rows(
-        &self,
-        settings: &PersistedSettings,
-        animated: bool,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let terminal = &settings.terminal;
-        let has_active_interaction = terminal.background_parallax
-            || terminal.background_camera.is_some()
-            || terminal.background_day_cycle;
-        let expanded = self
-            .settings_workspace
-            .read(cx)
-            .background_interactions_expanded
-            .unwrap_or(has_active_interaction);
-        let mut rows = vec![self.appearance_collapsible_subsection_header(
-            "appearance-bg-interactions-toggle",
-            "settings_view.terminal.bg_interactions",
-            None,
-            expanded,
-            cx.listener(move |this, _event, _window, cx| {
-                this.settings_workspace.update(cx, |entity, cx| {
-                    let current = entity
-                        .background_interactions_expanded
-                        .unwrap_or(has_active_interaction);
-                    entity.background_interactions_expanded = Some(!current);
-                    cx.notify();
-                });
-                cx.stop_propagation();
-            }),
-        )];
-        if !expanded {
-            return rows;
-        }
-        for (index, key, enabled, visible) in [
-            (
-                1,
-                "bg_parallax",
-                terminal.background_parallax,
-                (terminal.background_image.is_some() && !animated)
-                    || terminal.background_effect.as_ref().is_some_and(|effect| {
-                        matches!(
-                            effect.kind,
-                            oxideterm_settings::GeneratedBackgroundKind::Particles
-                                | oxideterm_settings::GeneratedBackgroundKind::TideParticles
-                        )
-                    }),
-            ),
-            (
-                3,
-                "bg_camera",
-                terminal.background_camera.is_some(),
-                terminal.background_image.is_some() && !animated,
-            ),
-            (
-                0,
-                "bg_pause_input",
-                terminal.background_pause_on_input,
-                animated
-                    || terminal.background_parallax
-                    || terminal.background_camera.is_some()
-                    || terminal
-                        .background_effect
-                        .as_ref()
-                        .is_some_and(|effect| effect.has_motion()),
-            ),
-            (2, "bg_day_cycle", terminal.background_day_cycle, true),
-        ] {
-            if !visible {
-                continue;
-            }
-            rows.push(
-                self.appearance_row(
-                    &format!("settings_view.terminal.{key}"),
-                    &format!("settings_view.terminal.{key}_hint"),
-                    switch(&self.tokens, key, String::new(), enabled)
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _, _, cx| {
-                                this.edit_background_style(
-                                    |style| match index {
-                                        0 => style.pause_on_input = !enabled,
-                                        1 => style.parallax = !enabled,
-                                        3 => style.camera = (!enabled).then(Default::default),
-                                        _ => style.day_cycle = !enabled,
-                                    },
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        )
-                        .into_any_element(),
-                ),
-            );
-            if index == 3
-                && let Some(camera) = terminal.background_camera
-            {
-                use oxideterm_settings::BackgroundCameraMotion;
-                rows.push(
-                    self.appearance_row(
-                        "settings_view.terminal.bg_camera_motion",
-                        "settings_view.terminal.bg_camera_motion_hint",
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap(px(self.tokens.spacing.two))
-                            .children(
-                                [
-                                    (BackgroundCameraMotion::Pan, "bg_camera_pan"),
-                                    (BackgroundCameraMotion::ZoomIn, "bg_camera_zoom_in"),
-                                    (BackgroundCameraMotion::ZoomOut, "bg_camera_zoom_out"),
-                                ]
-                                .into_iter()
-                                .map(|(motion, key)| {
-                                    self.appearance_option_pill(
-                                        self.i18n.t(&format!("settings_view.terminal.{key}")),
-                                        camera.motion == motion,
-                                        cx.listener(move |this, _, _, cx| {
-                                            this.edit_background_style(
-                                                |style| {
-                                                    if let Some(camera) = &mut style.camera {
-                                                        camera.motion = motion;
-                                                    }
-                                                },
-                                                cx,
-                                            );
-                                            cx.stop_propagation();
-                                        }),
-                                    )
-                                }),
-                            )
-                            .into_any_element(),
-                    ),
-                );
-                for (slider, key, min, max, value) in [
-                    (
-                        SettingsSlider::BackgroundCameraAmount,
-                        "bg_camera_amount",
-                        0.0,
-                        100.0,
-                        camera.amount * 100.0,
-                    ),
-                    (
-                        SettingsSlider::BackgroundCameraSpeed,
-                        "bg_camera_speed",
-                        10.0,
-                        200.0,
-                        camera.speed * 100.0,
-                    ),
-                ] {
-                    rows.push(self.appearance_row(
-                        &format!("settings_view.terminal.{key}"),
-                        "settings_view.terminal.bg_camera_hint",
-                        self.appearance_slider_value_control(
-                            slider,
-                            settings_slider_anchor_id(slider),
-                            min,
-                            max,
-                            value,
-                            "%",
-                            cx,
-                        ),
-                    ));
-                }
-            }
-        }
-        rows
-    }
-
     pub(super) fn appearance_daylight_preview_control(
         &self,
         preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
@@ -199,22 +30,32 @@ impl WorkspaceApp {
                 .into_iter()
                 .map(|(hour, key)| {
                     let preview = preview.clone();
-                    self.appearance_option_pill(
+                    oxideterm_gpui_settings_view::background_page::appearance_option_pill(
+                        &self.tokens,
                         self.i18n.t(&format!("settings_view.terminal.{key}")),
                         selected == hour,
-                        cx.listener(move |_, _, _, cx| {
-                            preview.update(cx, |preview, cx| preview.set_preview_hour(hour, cx));
-                            cx.notify();
-                            cx.stop_propagation();
-                        }),
+                        {
+                            let settings = self.settings_workspace.downgrade();
+                            move |_, _, cx| {
+                                preview
+                                    .update(cx, |preview, cx| preview.set_preview_hour(hour, cx));
+                                let _ = settings.update(cx, |_, cx| cx.notify());
+                                cx.stop_propagation();
+                            }
+                        },
                     )
                 }),
             )
             .into_any_element()
     }
 
-    pub(super) fn appearance_edit_scheme(&self) -> Option<bool> {
-        Some(self.appearance_edit_dark.unwrap_or(false))
+    pub(super) fn appearance_edit_scheme(&self, cx: &App) -> Option<bool> {
+        Some(
+            self.settings_workspace
+                .read(cx)
+                .appearance_edit_dark
+                .unwrap_or(false),
+        )
     }
     pub(in crate::workspace) fn background_settings_for_controls(
         &self,
@@ -229,7 +70,7 @@ impl WorkspaceApp {
             .unwrap_or_else(|| {
                 settings
                     .terminal
-                    .background_for_scheme(self.appearance_edit_scheme())
+                    .background_for_scheme(self.appearance_edit_scheme(cx))
             });
         settings.terminal.apply_background_style(style);
         settings
@@ -245,7 +86,7 @@ impl WorkspaceApp {
                 settings.edit_theme_editor_background(edit, cx);
             });
         } else {
-            let dark = self.appearance_edit_scheme();
+            let dark = self.appearance_edit_scheme(cx);
             self.edit_settings(
                 |settings| {
                     let mut style = settings.terminal.background_for_scheme(dark);
@@ -255,44 +96,5 @@ impl WorkspaceApp {
                 cx,
             );
         }
-    }
-
-    pub(super) fn appearance_background_alignment_control(
-        &self,
-        selected: BackgroundAlignment,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let labels = [
-            "bg_align_top_left",
-            "bg_align_top",
-            "bg_align_top_right",
-            "bg_align_left",
-            "bg_align_center",
-            "bg_align_right",
-            "bg_align_bottom_left",
-            "bg_align_bottom",
-            "bg_align_bottom_right",
-        ];
-        self.appearance_row(
-            "settings_view.terminal.bg_alignment",
-            "settings_view.terminal.bg_alignment_hint",
-            div()
-                .grid()
-                .grid_cols(3)
-                .gap(px(self.tokens.spacing.one))
-                .children(BackgroundAlignment::ALL.into_iter().zip(labels).map(
-                    |(alignment, key)| {
-                        self.appearance_option_pill(
-                            self.i18n.t(&format!("settings_view.terminal.{key}")),
-                            selected == alignment,
-                            cx.listener(move |this, _, _, cx| {
-                                this.edit_background_style(|style| style.alignment = alignment, cx);
-                                cx.stop_propagation();
-                            }),
-                        )
-                    },
-                ))
-                .into_any_element(),
-        )
     }
 }

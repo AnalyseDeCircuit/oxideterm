@@ -200,7 +200,7 @@ impl WorkspaceApp {
                             .child({
                                 let content = match self.active_context_sidebar_panel {
                                     ContextSidebarPanel::Assistant => {
-                                        self.render_ai_sidebar_content(cx)
+                                        self.ai_sidebar_view.clone().into_any_element()
                                     }
                                     ContextSidebarPanel::HostTools => {
                                         self.render_host_tools_context_panel(cx)

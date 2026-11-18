@@ -1,517 +1,34 @@
 use super::*;
-use oxideterm_terminal_triggers::{
-    LocalProcessSpec, SavedConnectionKind, SavedConnectionRef, TerminalTrigger,
-    TerminalTriggerAction, TerminalTriggerDispatch, TerminalTriggerMatch, TerminalTriggerMatchMode,
-    TerminalTriggerMenuItem, TerminalTriggerScope, TerminalTriggerTiming, TerminalTriggersSnapshot,
-    default_snapshot, load_snapshot, new_trigger_id, now_ms, save_snapshot, validate_snapshot,
+pub(in crate::workspace) use oxideterm_gpui_settings_view::terminal_triggers::TerminalTriggersSettingsState;
+pub(super) use oxideterm_gpui_settings_view::terminal_triggers::is_terminal_trigger_input;
+use oxideterm_gpui_settings_view::terminal_triggers::{
+    TerminalTriggerEditor, TerminalTriggerPage as TriggerPage,
+    TerminalTriggerRequest as TriggerRequest,
 };
-
-const TERMINAL_TRIGGER_DEFAULT_COOLDOWN_MS: u64 = 1_000;
-const TERMINAL_TRIGGER_EDITOR_MAX_WIDTH: f32 = 1_120.0;
-const TERMINAL_TRIGGER_FIELD_BASIS: f32 = 280.0;
-const TERMINAL_TRIGGER_COMPACT_FIELD_BASIS: f32 = 220.0;
-const TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT: f32 = 520.0;
-const TERMINAL_TRIGGER_MODAL_WIDTH: f32 = 760.0;
-const TERMINAL_TRIGGER_MODAL_MAX_HEIGHT: f32 = 760.0;
-
-fn editable_trigger_action(action: &TerminalTriggerAction, index: usize) -> &TerminalTriggerAction {
-    match action {
-        TerminalTriggerAction::CustomLink { action } => action,
-        TerminalTriggerAction::CustomMenu { items } if !items.is_empty() => {
-            &items[index.min(items.len() - 1)].action
-        }
-        _ => action,
-    }
-}
-
-fn editable_trigger_action_mut(
-    action: &mut TerminalTriggerAction,
-    index: usize,
-) -> &mut TerminalTriggerAction {
-    match action {
-        TerminalTriggerAction::CustomLink { action } => action,
-        TerminalTriggerAction::CustomMenu { items } => {
-            let index = index.min(items.len() - 1);
-            &mut items[index].action
-        }
-        _ => action,
-    }
-}
-
-fn trigger_action_label(action: &TerminalTriggerAction) -> &'static str {
-    match action {
-        TerminalTriggerAction::SendText { .. } => {
-            "settings_view.terminal.triggers.action_send_text"
-        }
-        TerminalTriggerAction::RunQuickCommand { .. } => {
-            "settings_view.terminal.triggers.action_quick_command"
-        }
-        TerminalTriggerAction::LaunchLocalProcess { .. } => {
-            "settings_view.terminal.triggers.action_local_process"
-        }
-        TerminalTriggerAction::OpenUrl { .. } => "settings_view.terminal.triggers.open_url",
-        TerminalTriggerAction::CustomLink { .. } => "settings_view.terminal.triggers.custom_link",
-        TerminalTriggerAction::CustomMenu { .. } => "settings_view.terminal.triggers.custom_menu",
-        TerminalTriggerAction::ShowTooltip { .. } => "settings_view.terminal.triggers.show_tooltip",
-    }
-}
-
-fn terminal_trigger_connection_list(
-    rows: Vec<AnyElement>,
-    scroll: &gpui::ScrollHandle,
-) -> AnyElement {
-    div()
-        .id("terminal-trigger-connections")
-        .relative()
-        .w_full()
-        .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
-        // The adjacent rule list must not share this viewport's element state or scroll handle.
-        .child(
-            div()
-                .id("terminal-trigger-connections-scroll")
-                .w_full()
-                .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
-                .overflow_y_scroll()
-                .track_scroll(scroll)
-                .on_scroll(|_, _, cx| cx.stop_propagation())
-                .child(div().w_full().flex().flex_col().gap(px(4.0)).children(rows)),
-        )
-        .vertical_scrollbar(scroll)
-        .into_any_element()
-}
-
-fn filter_terminal_trigger_connections(
-    options: Vec<(SavedConnectionRef, String)>,
-    query: &str,
-) -> Vec<(SavedConnectionRef, String)> {
-    let query = query.trim().to_lowercase();
-    options
-        .into_iter()
-        .filter(|(_, label)| label.to_lowercase().contains(&query))
-        .collect()
-}
-
-pub(in crate::workspace) fn is_terminal_trigger_input(input: SettingsInput) -> bool {
-    matches!(
-        input,
-        SettingsInput::TerminalTriggerName
-            | SettingsInput::TerminalTriggerDescription
-            | SettingsInput::TerminalTriggerPattern
-            | SettingsInput::TerminalTriggerActionValue
-            | SettingsInput::TerminalTriggerMenuLabel
-            | SettingsInput::TerminalTriggerTooltipText
-            | SettingsInput::TerminalTriggerExecutable
-            | SettingsInput::TerminalTriggerArguments
-            | SettingsInput::TerminalTriggerWorkingDirectory
-            | SettingsInput::TerminalTriggerDelayMs
-            | SettingsInput::TerminalTriggerCooldownMs
-            | SettingsInput::TerminalTriggerConnectionSearch
-    )
-}
-
-pub(in crate::workspace) struct TerminalTriggersSettingsState {
-    settings_path: PathBuf,
-    pub(in crate::workspace) snapshot: TerminalTriggersSnapshot,
-    editor: Option<TerminalTrigger>,
-    pub(in crate::workspace) editor_open: bool,
-    menu_item: usize,
-    pub(in crate::workspace) scope_picker_open: bool,
-    scope_picker_query: String,
-    scope_picker_scroll: gpui::ScrollHandle,
-    error_key: Option<&'static str>,
-}
-
-impl TerminalTriggersSettingsState {
-    pub(in crate::workspace) fn load(settings_path: &Path) -> Self {
-        match load_snapshot(settings_path) {
-            Ok(snapshot) => {
-                let editor = snapshot.triggers.first().cloned();
-                Self {
-                    settings_path: settings_path.to_path_buf(),
-                    snapshot,
-                    editor,
-                    editor_open: false,
-                    menu_item: 0,
-                    scope_picker_open: false,
-                    scope_picker_query: String::new(),
-                    scope_picker_scroll: gpui::ScrollHandle::new(),
-                    error_key: None,
-                }
-            }
-            Err(_error) => Self {
-                settings_path: settings_path.to_path_buf(),
-                snapshot: default_snapshot(),
-                editor: None,
-                editor_open: false,
-                menu_item: 0,
-                scope_picker_open: false,
-                scope_picker_query: String::new(),
-                scope_picker_scroll: gpui::ScrollHandle::new(),
-                error_key: Some("settings_view.terminal.triggers.load_failed"),
-            },
-        }
-    }
-
-    fn new_rule(&mut self) {
-        self.menu_item = 0;
-        let timestamp = now_ms();
-        self.editor = Some(TerminalTrigger {
-            id: new_trigger_id(),
-            name: String::new(),
-            description: None,
-            enabled: true,
-            matcher: TerminalTriggerMatch {
-                pattern: String::new(),
-                mode: TerminalTriggerMatchMode::Literal,
-                case_sensitive: false,
-                whole_word: false,
-            },
-            action: TerminalTriggerAction::SendText {
-                text: String::new(),
-                append_enter: false,
-            },
-            timing: TerminalTriggerTiming {
-                dispatch: TerminalTriggerDispatch::Immediate,
-                delay_ms: 0,
-                cooldown_ms: TERMINAL_TRIGGER_DEFAULT_COOLDOWN_MS,
-            },
-            scope: TerminalTriggerScope::AllTerminals,
-            created_at: timestamp,
-            updated_at: timestamp,
-        });
-        self.editor_open = true;
-        self.scope_picker_open = false;
-        self.error_key = None;
-    }
-
-    fn edit_rule(&mut self, trigger_id: &str) {
-        self.menu_item = 0;
-        self.editor = self
-            .snapshot
-            .triggers
-            .iter()
-            .find(|trigger| trigger.id == trigger_id)
-            .cloned();
-        self.editor_open = self.editor.is_some();
-        self.scope_picker_open = false;
-        self.error_key = None;
-    }
-
-    fn duplicate_rule(&mut self, trigger_id: &str, copy_suffix: &str) {
-        self.menu_item = 0;
-        let Some(mut trigger) = self
-            .snapshot
-            .triggers
-            .iter()
-            .find(|trigger| trigger.id == trigger_id)
-            .cloned()
-        else {
-            return;
-        };
-        let timestamp = now_ms();
-        trigger.id = new_trigger_id();
-        trigger.name = format!("{} ({copy_suffix})", trigger.name);
-        trigger.created_at = timestamp;
-        trigger.updated_at = timestamp;
-        self.editor = Some(trigger);
-        self.editor_open = true;
-        self.scope_picker_open = false;
-        self.error_key = None;
-    }
-
-    pub(in crate::workspace) fn cancel_edit(&mut self) {
-        self.menu_item = 0;
-        self.editor = self
-            .editor
-            .as_ref()
-            .and_then(|editor| {
-                self.snapshot
-                    .triggers
-                    .iter()
-                    .find(|trigger| trigger.id == editor.id)
-            })
-            .cloned()
-            .or_else(|| self.snapshot.triggers.first().cloned());
-        self.editor_open = false;
-        self.scope_picker_open = false;
-        self.error_key = None;
-    }
-
-    fn persist_snapshot(&mut self, snapshot: TerminalTriggersSnapshot) -> bool {
-        if validate_snapshot(&snapshot).is_err() {
-            self.error_key = Some("settings_view.terminal.triggers.validation_failed");
-            return false;
-        }
-        match save_snapshot(&self.settings_path, &snapshot) {
-            Ok(()) => {
-                self.snapshot = snapshot;
-                self.error_key = None;
-                true
-            }
-            Err(_error) => {
-                self.error_key = Some("settings_view.terminal.triggers.save_failed");
-                false
-            }
-        }
-    }
-
-    fn save_editor(&mut self, explicit_shell_enabled: bool) -> bool {
-        let Some(mut trigger) = self.editor.clone() else {
-            return false;
-        };
-        if trigger.action.uses_explicit_shell() && !explicit_shell_enabled {
-            self.error_key = Some("settings_view.terminal.triggers.shell_execution_hint");
-            return false;
-        }
-
-        let timestamp = now_ms();
-        trigger.updated_at = timestamp;
-        let trigger_id = trigger.id.clone();
-        let mut snapshot = self.snapshot.clone();
-        snapshot.updated_at = timestamp;
-        if let Some(existing) = snapshot
-            .triggers
-            .iter_mut()
-            .find(|candidate| candidate.id == trigger.id)
-        {
-            *existing = trigger;
-        } else {
-            snapshot.triggers.push(trigger);
-        }
-        if self.persist_snapshot(snapshot) {
-            self.editor = self
-                .snapshot
-                .triggers
-                .iter()
-                .find(|trigger| trigger.id == trigger_id)
-                .cloned();
-            self.editor_open = false;
-            self.scope_picker_open = false;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn delete_rule(&mut self, trigger_id: &str) -> bool {
-        let mut snapshot = self.snapshot.clone();
-        snapshot.triggers.retain(|trigger| trigger.id != trigger_id);
-        snapshot.updated_at = now_ms();
-        let changed = self.persist_snapshot(snapshot);
-        if changed {
-            if self
-                .editor
-                .as_ref()
-                .is_some_and(|editor| editor.id == trigger_id)
-            {
-                self.editor_open = false;
-            }
-            self.editor = self.snapshot.triggers.first().cloned();
-            self.scope_picker_open = false;
-        }
-        changed
-    }
-
-    fn toggle_rule(&mut self, trigger_id: &str) -> bool {
-        let mut snapshot = self.snapshot.clone();
-        let Some(trigger) = snapshot
-            .triggers
-            .iter_mut()
-            .find(|trigger| trigger.id == trigger_id)
-        else {
-            return false;
-        };
-        trigger.enabled = !trigger.enabled;
-        trigger.updated_at = now_ms();
-        snapshot.updated_at = trigger.updated_at;
-        let changed = self.persist_snapshot(snapshot);
-        if changed
-            && self
-                .editor
-                .as_ref()
-                .is_some_and(|editor| editor.id == trigger_id)
-        {
-            let enabled = self
-                .snapshot
-                .triggers
-                .iter()
-                .find(|trigger| trigger.id == trigger_id)
-                .map(|trigger| trigger.enabled);
-            if let (Some(editor), Some(enabled)) = (self.editor.as_mut(), enabled) {
-                // Keep unsaved field edits while applying the independently persisted toggle.
-                editor.enabled = enabled;
-            }
-        }
-        changed
-    }
-
-    fn editor_input_value(&self, input: SettingsInput) -> Option<String> {
-        if input == SettingsInput::TerminalTriggerConnectionSearch {
-            return Some(self.scope_picker_query.clone());
-        }
-        let trigger = self.editor.as_ref()?;
-        let action = editable_trigger_action(&trigger.action, self.menu_item);
-        match input {
-            SettingsInput::TerminalTriggerMenuLabel => match &trigger.action {
-                TerminalTriggerAction::CustomMenu { items } => {
-                    items.get(self.menu_item).map(|item| item.label.clone())
-                }
-                _ => None,
-            },
-            SettingsInput::TerminalTriggerName => Some(trigger.name.clone()),
-            SettingsInput::TerminalTriggerDescription => {
-                Some(trigger.description.clone().unwrap_or_default())
-            }
-            SettingsInput::TerminalTriggerPattern => Some(trigger.matcher.pattern.clone()),
-            SettingsInput::TerminalTriggerActionValue
-            | SettingsInput::TerminalTriggerTooltipText => match action {
-                TerminalTriggerAction::SendText { text, .. } => Some(text.clone()),
-                TerminalTriggerAction::ShowTooltip { text } => Some(text.clone()),
-                TerminalTriggerAction::OpenUrl { url } => Some(url.clone()),
-                TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
-                    Some(quick_command_id.clone())
-                }
-                _ => Some(String::new()),
-            },
-            SettingsInput::TerminalTriggerExecutable => match action {
-                TerminalTriggerAction::LaunchLocalProcess { process } => match process {
-                    LocalProcessSpec::DirectProgram { executable, .. } => Some(executable.clone()),
-                    LocalProcessSpec::ExplicitShell {
-                        shell_executable, ..
-                    } => Some(shell_executable.clone()),
-                },
-                _ => Some(String::new()),
-            },
-            SettingsInput::TerminalTriggerArguments => match action {
-                TerminalTriggerAction::LaunchLocalProcess { process } => match process {
-                    LocalProcessSpec::DirectProgram { arguments, .. }
-                    | LocalProcessSpec::ExplicitShell { arguments, .. } => {
-                        Some(arguments.join("\n"))
-                    }
-                },
-                _ => Some(String::new()),
-            },
-            SettingsInput::TerminalTriggerWorkingDirectory => match action {
-                TerminalTriggerAction::LaunchLocalProcess { process } => match process {
-                    LocalProcessSpec::DirectProgram {
-                        working_directory, ..
-                    }
-                    | LocalProcessSpec::ExplicitShell {
-                        working_directory, ..
-                    } => Some(working_directory.clone().unwrap_or_default()),
-                },
-                _ => Some(String::new()),
-            },
-            SettingsInput::TerminalTriggerDelayMs => Some(trigger.timing.delay_ms.to_string()),
-            SettingsInput::TerminalTriggerCooldownMs => {
-                Some(trigger.timing.cooldown_ms.to_string())
-            }
-            _ => None,
-        }
-    }
-
-    fn apply_editor_input(&mut self, input: SettingsInput, value: &str) -> bool {
-        if input == SettingsInput::TerminalTriggerConnectionSearch {
-            if self.scope_picker_query != value {
-                self.scope_picker_query = value.to_string();
-                self.scope_picker_scroll
-                    .set_offset(gpui::point(px(0.0), px(0.0)));
-            }
-            return true;
-        }
-        let Some(trigger) = self.editor.as_mut() else {
-            return false;
-        };
-        if input == SettingsInput::TerminalTriggerMenuLabel {
-            if let TerminalTriggerAction::CustomMenu { items } = &mut trigger.action
-                && let Some(item) = items.get_mut(self.menu_item)
-            {
-                item.label = value.to_string();
-                return true;
-            }
-            return false;
-        }
-        let action = editable_trigger_action_mut(&mut trigger.action, self.menu_item);
-        match input {
-            SettingsInput::TerminalTriggerName => trigger.name = value.to_string(),
-            SettingsInput::TerminalTriggerDescription => {
-                trigger.description = (!value.is_empty()).then(|| value.to_string());
-            }
-            SettingsInput::TerminalTriggerPattern => trigger.matcher.pattern = value.to_string(),
-            SettingsInput::TerminalTriggerActionValue
-            | SettingsInput::TerminalTriggerTooltipText => match action {
-                TerminalTriggerAction::SendText { text, .. } => *text = value.to_string(),
-                TerminalTriggerAction::ShowTooltip { text } => *text = value.to_string(),
-                TerminalTriggerAction::OpenUrl { url } => *url = value.to_string(),
-                TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
-                    *quick_command_id = value.to_string();
-                }
-                _ => return false,
-            },
-            SettingsInput::TerminalTriggerExecutable => match action {
-                TerminalTriggerAction::LaunchLocalProcess { process } => match process {
-                    LocalProcessSpec::DirectProgram { executable, .. } => {
-                        *executable = value.to_string()
-                    }
-                    LocalProcessSpec::ExplicitShell {
-                        shell_executable, ..
-                    } => *shell_executable = value.to_string(),
-                },
-                _ => return false,
-            },
-            SettingsInput::TerminalTriggerArguments => match action {
-                TerminalTriggerAction::LaunchLocalProcess { process } => {
-                    let arguments = value.lines().map(str::to_string).collect();
-                    match process {
-                        LocalProcessSpec::DirectProgram {
-                            arguments: current, ..
-                        }
-                        | LocalProcessSpec::ExplicitShell {
-                            arguments: current, ..
-                        } => *current = arguments,
-                    }
-                }
-                _ => return false,
-            },
-            SettingsInput::TerminalTriggerWorkingDirectory => match action {
-                TerminalTriggerAction::LaunchLocalProcess { process } => {
-                    let directory = (!value.trim().is_empty()).then(|| value.to_string());
-                    match process {
-                        LocalProcessSpec::DirectProgram {
-                            working_directory, ..
-                        }
-                        | LocalProcessSpec::ExplicitShell {
-                            working_directory, ..
-                        } => *working_directory = directory,
-                    }
-                }
-                _ => return false,
-            },
-            SettingsInput::TerminalTriggerDelayMs => {
-                let Ok(delay_ms) = value.parse() else {
-                    return false;
-                };
-                trigger.timing.delay_ms = delay_ms;
-            }
-            SettingsInput::TerminalTriggerCooldownMs => {
-                let Ok(cooldown_ms) = value.parse() else {
-                    return false;
-                };
-                trigger.timing.cooldown_ms = cooldown_ms;
-            }
-            _ => return false,
-        }
-        true
-    }
-}
+use oxideterm_terminal_triggers::TerminalTrigger;
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn mount_terminal_trigger_editor(
+        settings: &Entity<SettingsWorkspaceEntity>,
+        cx: &mut Context<Self>,
+    ) -> Entity<TerminalTriggerEditor> {
+        let owner = cx.entity().downgrade();
+        let render_body = Rc::new(move |cx: &App| {
+            let owner = owner.upgrade()?;
+            let app = owner.read(cx);
+            Some(app.with_terminal_trigger_page(owner, cx, |page, cx| {
+                page.render_terminal_trigger_editor_modal(cx)
+            }))
+        });
+        cx.new(|cx| TerminalTriggerEditor::new(settings, render_body, cx))
+    }
+
     pub(in crate::workspace) fn open_terminal_trigger_settings(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.terminal_trigger_settings_pane = None;
+        self.edit_terminal_trigger(false, |state| state.pane = None, cx);
         self.open_terminal_trigger_settings_page(window, cx);
     }
 
@@ -521,7 +38,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.terminal_trigger_settings_pane = Some(pane_id);
+        self.edit_terminal_trigger(false, |state| state.pane = Some(pane_id), cx);
         self.open_terminal_trigger_settings_page(window, cx);
     }
 
@@ -536,7 +53,10 @@ impl WorkspaceApp {
             SettingsSectionId::TerminalAwarenessTriggers,
             self.settings_dynamic_section_counts(cx),
         ) {
-            self.settings_section_list_state
+            self.settings_workspace
+                .read(cx)
+                .section_list
+                .state()
                 .scroll_to(gpui::ListOffset {
                     item_ix,
                     offset_in_item: px(0.0),
@@ -545,138 +65,50 @@ impl WorkspaceApp {
         self.open_settings(window, cx);
     }
 
-    pub(in crate::workspace) fn terminal_trigger_settings_input_value(
-        &self,
-        input: SettingsInput,
-    ) -> Option<String> {
-        self.terminal_triggers.editor_input_value(input)
-    }
-
-    pub(in crate::workspace) fn apply_terminal_trigger_settings_input(
+    pub(in crate::workspace) fn clear_terminal_trigger_input_focus(
         &mut self,
-        input: SettingsInput,
-        value: &str,
-    ) -> bool {
-        self.terminal_triggers.apply_editor_input(input, value)
-    }
-
-    pub(in crate::workspace) fn clear_terminal_trigger_input_focus(&mut self) {
-        if let Some(input) = self
-            .focused_settings_input
-            .filter(|input| is_terminal_trigger_input(*input))
-        {
-            self.focused_settings_input = None;
-            self.clear_settings_input_draft(input);
+        cx: &mut Context<Self>,
+    ) {
+        let input = self
+            .settings_workspace
+            .read(cx)
+            .settings_entity_focused_input();
+        if input.is_some_and(is_terminal_trigger_input) {
+            self.settings_workspace.update(cx, |settings, cx| {
+                settings.blur_settings_entity_input(cx);
+            });
             self.clear_ime_selection();
+            self.ime_marked_text = None;
         }
     }
 
-    // Settings dropdowns update only the active trigger draft; persistence still happens on Save.
-    pub(in crate::workspace) fn terminal_trigger_draft(&self) -> Option<&TerminalTrigger> {
-        self.terminal_triggers.editor.as_ref()
-    }
-
-    pub(in crate::workspace) fn terminal_trigger_draft_action(
-        &self,
-    ) -> Option<&TerminalTriggerAction> {
-        self.terminal_trigger_draft().map(|trigger| {
-            editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item)
+    pub(in crate::workspace) fn edit_terminal_trigger<R>(
+        &mut self,
+        clear_input: bool,
+        edit: impl FnOnce(&mut TerminalTriggersSettingsState) -> R,
+        cx: &mut Context<Self>,
+    ) -> R {
+        if clear_input {
+            self.clear_terminal_trigger_input_focus(cx);
+        }
+        self.settings_workspace.update(cx, |settings, cx| {
+            let result = edit(&mut settings.terminal_triggers);
+            cx.notify();
+            result
         })
     }
 
-    pub(in crate::workspace) fn select_terminal_trigger_click_action(
+    pub(in crate::workspace) fn close_terminal_trigger_scope_picker(
         &mut self,
-        action: TerminalTriggerAction,
+        cx: &mut Context<Self>,
     ) {
-        self.clear_terminal_trigger_input_focus();
-        if let Some(trigger) = self.terminal_triggers.editor.as_mut() {
-            let current =
-                editable_trigger_action_mut(&mut trigger.action, self.terminal_triggers.menu_item);
-            if std::mem::discriminant(current) != std::mem::discriminant(&action) {
-                *current = action;
-            }
-        }
-    }
-
-    pub(in crate::workspace) fn select_terminal_trigger_match_mode(
-        &mut self,
-        mode: TerminalTriggerMatchMode,
-    ) {
-        if let Some(trigger) = self.terminal_triggers.editor.as_mut() {
-            trigger.matcher.mode = mode;
-        }
-    }
-
-    pub(in crate::workspace) fn select_terminal_trigger_action(
-        &mut self,
-        action: TerminalTriggerAction,
-    ) {
-        self.clear_terminal_trigger_input_focus();
-        let Some(trigger) = self.terminal_triggers.editor.as_mut() else {
-            return;
-        };
-        let same_kind = std::mem::discriminant(&trigger.action) == std::mem::discriminant(&action);
-        if !same_kind {
-            trigger.action = action;
-            self.terminal_triggers.menu_item = 0;
-        }
-    }
-
-    pub(in crate::workspace) fn select_terminal_trigger_process_mode(&mut self, shell: bool) {
-        let current_shell = self.terminal_trigger_draft_action().is_some_and(|action| {
-            matches!(
-                action,
-                TerminalTriggerAction::LaunchLocalProcess {
-                    process: LocalProcessSpec::ExplicitShell { .. }
-                }
-            )
-        });
-        if current_shell != shell {
-            self.toggle_terminal_trigger_process_mode();
-        }
-    }
-
-    pub(in crate::workspace) fn select_terminal_trigger_quick_command(
-        &mut self,
-        quick_command_id: String,
-    ) {
-        if let Some(trigger) = self.terminal_triggers.editor.as_mut()
-            && let TerminalTriggerAction::RunQuickCommand {
-                quick_command_id: selected_id,
-            } =
-                editable_trigger_action_mut(&mut trigger.action, self.terminal_triggers.menu_item)
-        {
-            *selected_id = quick_command_id;
-        }
-    }
-
-    pub(in crate::workspace) fn select_terminal_trigger_timing(
-        &mut self,
-        dispatch: TerminalTriggerDispatch,
-    ) {
-        if let Some(trigger) = self.terminal_triggers.editor.as_mut() {
-            trigger.timing.dispatch = dispatch;
-        }
-    }
-
-    pub(in crate::workspace) fn select_terminal_trigger_scope(
-        &mut self,
-        scope: TerminalTriggerScope,
-    ) {
-        let open_picker = matches!(scope, TerminalTriggerScope::SavedConnections { .. });
-        if let Some(trigger) = self.terminal_triggers.editor.as_mut() {
-            trigger.scope = scope;
-            self.terminal_triggers.scope_picker_open = open_picker;
-            self.terminal_triggers.scope_picker_query.clear();
-            self.terminal_triggers.scope_picker_scroll = gpui::ScrollHandle::new();
-        }
+        self.edit_terminal_trigger(true, |state| state.scope_picker_open = false, cx);
     }
 
     fn persist_terminal_trigger_change(&mut self, changed: bool, cx: &mut Context<Self>) {
         if changed {
             self.refresh_terminal_trigger_runtime(cx);
         }
-        cx.notify();
     }
 
     fn persist_terminal_trigger_shell_execution(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -685,8 +117,14 @@ impl WorkspaceApp {
         set_terminal_trigger_shell_execution(&mut next_settings, enabled);
         match self.settings_store.replace_and_save(next_settings) {
             Ok(saved) => {
-                self.terminal_trigger_shell_confirmation_pending = false;
-                self.terminal_triggers.error_key = None;
+                self.edit_terminal_trigger(
+                    false,
+                    |state| {
+                        state.shell_confirmation_pending = false;
+                        state.error_key = None;
+                    },
+                    cx,
+                );
                 self.apply_loaded_settings_to_runtime(&previous_settings, &saved.settings, cx);
                 self.settings_workspace.update(cx, |settings, _cx| {
                     settings.acknowledge_external_store_state()
@@ -696,9 +134,14 @@ impl WorkspaceApp {
                 self.sync_tab_titles(cx);
             }
             Err(_error) => {
-                self.terminal_trigger_shell_confirmation_pending = false;
-                self.terminal_triggers.error_key =
-                    Some("settings_view.terminal.triggers.save_failed");
+                self.edit_terminal_trigger(
+                    false,
+                    |state| {
+                        state.shell_confirmation_pending = false;
+                        state.error_key = Some("settings_view.terminal.triggers.save_failed");
+                    },
+                    cx,
+                );
             }
         }
         cx.notify();
@@ -708,7 +151,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(pane_id) = self.terminal_trigger_settings_pane {
+        if let Some(pane_id) = self.settings_workspace.read(cx).terminal_triggers.pane {
             return self.terminal_trigger_session_card(pane_id, cx);
         }
         self.terminal_trigger_global_card(cx)
@@ -716,8 +159,7 @@ impl WorkspaceApp {
 
     fn open_new_terminal_trigger_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.prepare_modal_interaction_boundary(cx);
-        self.clear_terminal_trigger_input_focus();
-        self.terminal_triggers.new_rule();
+        self.edit_terminal_trigger(true, TerminalTriggersSettingsState::new_rule, cx);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -729,8 +171,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.prepare_modal_interaction_boundary(cx);
-        self.clear_terminal_trigger_input_focus();
-        self.terminal_triggers.edit_rule(trigger_id);
+        self.edit_terminal_trigger(true, |state| state.edit_rule(trigger_id), cx);
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
@@ -743,32 +184,34 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.prepare_modal_interaction_boundary(cx);
-        self.clear_terminal_trigger_input_focus();
-        self.terminal_triggers
-            .duplicate_rule(trigger_id, copy_suffix);
+        self.edit_terminal_trigger(
+            true,
+            |state| state.duplicate_rule(trigger_id, copy_suffix),
+            cx,
+        );
         window.focus(&self.focus_handle, cx);
         cx.notify();
     }
 
     pub(in crate::workspace) fn close_terminal_trigger_editor(&mut self, cx: &mut Context<Self>) {
-        self.clear_terminal_trigger_input_focus();
-        self.terminal_triggers.cancel_edit();
+        self.edit_terminal_trigger(true, TerminalTriggersSettingsState::cancel_edit, cx);
         self.ime_marked_text = None;
         cx.notify();
     }
 
     fn save_terminal_trigger_editor(&mut self, cx: &mut Context<Self>) {
-        if let Some(input) = self
-            .focused_settings_input
-            .filter(|input| is_terminal_trigger_input(*input))
-        {
-            let input_draft = self.settings_input_draft.clone();
-            if !self.apply_terminal_trigger_settings_input(input, &input_draft) {
-                self.terminal_triggers.error_key =
-                    Some("settings_view.terminal.triggers.validation_failed");
-                cx.notify();
-                return;
-            }
+        let input_valid = self
+            .settings_workspace
+            .update(cx, |settings, _| settings.apply_active_trigger_input());
+        if !input_valid {
+            self.edit_terminal_trigger(
+                false,
+                |state| {
+                    state.error_key = Some("settings_view.terminal.triggers.validation_failed");
+                },
+                cx,
+            );
+            return;
         }
         let shell_enabled = self
             .settings_store
@@ -776,1709 +219,137 @@ impl WorkspaceApp {
             .terminal
             .triggers
             .explicit_shell_enabled;
-        let changed = self.terminal_triggers.save_editor(shell_enabled);
+        let changed =
+            self.edit_terminal_trigger(false, |state| state.save_editor(shell_enabled), cx);
         if changed {
-            self.clear_terminal_trigger_input_focus();
+            self.clear_terminal_trigger_input_focus(cx);
             self.ime_marked_text = None;
         }
         self.persist_terminal_trigger_change(changed, cx);
     }
 
-    pub(in crate::workspace) fn render_terminal_trigger_editor_modal(
+    fn with_terminal_trigger_page(
         &self,
-        cx: &mut Context<Self>,
+        workspace: Entity<Self>,
+        cx: &App,
+        render: impl FnOnce(TriggerPage<'_>, &App) -> AnyElement,
     ) -> AnyElement {
-        let Some(trigger) = self.terminal_triggers.editor.as_ref() else {
-            return div().into_any_element();
+        let owner = workspace.downgrade();
+        let pane_exists = |pane, cx: &App| self.tab_host.read(cx).panes().contains_key(&pane);
+        let applies_to_pane = |pane, trigger: &TerminalTrigger, cx: &App| {
+            self.terminal_trigger_applies_to_pane(pane, trigger, cx)
         };
-        let theme = self.tokens.ui;
-        let modal_title = if trigger.name.trim().is_empty() {
-            self.i18n.t("settings_view.terminal.triggers.add_rule")
-        } else {
-            trigger.name.clone()
+        let enabled_for_pane = |pane, trigger: &str, cx: &App| {
+            self.terminal_trigger_effective_enabled_for_pane(pane, trigger, cx)
         };
-        let mut body_content = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(12.0));
-        if self.terminal_triggers.scope_picker_open {
-            body_content = body_content.child(self.terminal_trigger_scope_picker(cx));
-        } else {
-            body_content = body_content.child(self.terminal_trigger_editor(trigger, cx));
-            if let Some(error_key) = self.terminal_triggers.error_key {
-                body_content = body_content.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(theme.error))
-                        .child(self.i18n.t(error_key)),
+        let quick_command_label = |selected: &str, cx: &App| {
+            self.terminal
+                .read(cx)
+                .quick_commands
+                .store
+                .commands
+                .iter()
+                .find(|command| command.id == selected)
+                .map(|command| command.name.clone())
+        };
+        self.with_settings_controls_for(workspace, cx, |controls, cx| {
+            render(
+                TriggerPage {
+                    controls,
+                    terminal_triggers: &self.settings_workspace.read(cx).terminal_triggers,
+                    connection_store: &self.connection_store,
+                    terminal_trigger_shell_confirmation_pending: self
+                        .settings_workspace
+                        .read(cx)
+                        .terminal_triggers
+                        .shell_confirmation_pending,
+                    modal_scroll: self
+                        .settings_workspace
+                        .read(cx)
+                        .terminal_triggers
+                        .modal_scroll
+                        .clone(),
+                    pane_exists: &pane_exists,
+                    applies_to_pane: &applies_to_pane,
+                    enabled_for_pane: &enabled_for_pane,
+                    quick_command_label: &quick_command_label,
+                    dispatch_trigger: Rc::new(move |request, window, cx| {
+                        let _ = owner.update(cx, |app, cx| {
+                            app.handle_terminal_trigger_request(request, window, cx)
+                        });
+                    }),
+                },
+                cx,
+            )
+        })
+    }
+
+    fn handle_terminal_trigger_request(
+        &mut self,
+        request: TriggerRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match request {
+            TriggerRequest::OpenNew => self.open_new_terminal_trigger_editor(window, cx),
+            TriggerRequest::OpenEdit(id) => self.open_edit_terminal_trigger_editor(&id, window, cx),
+            TriggerRequest::OpenDuplicate(id, suffix) => {
+                self.open_duplicate_terminal_trigger_editor(&id, &suffix, window, cx)
+            }
+            TriggerRequest::CloseEditor => self.close_terminal_trigger_editor(cx),
+            TriggerRequest::SaveEditor => self.save_terminal_trigger_editor(cx),
+            TriggerRequest::CloseScopePicker => self.close_terminal_trigger_scope_picker(cx),
+            TriggerRequest::ShowGlobal => {
+                self.edit_terminal_trigger(false, |state| state.pane = None, cx)
+            }
+            TriggerRequest::ToggleShellTrust(enabled) => {
+                if enabled {
+                    self.persist_terminal_trigger_shell_execution(false, cx);
+                } else {
+                    self.edit_terminal_trigger(
+                        false,
+                        |state| state.shell_confirmation_pending = true,
+                        cx,
+                    );
+                }
+            }
+            TriggerRequest::CancelShellTrust => {
+                self.edit_terminal_trigger(
+                    false,
+                    |state| state.shell_confirmation_pending = false,
+                    cx,
                 );
             }
+            TriggerRequest::ConfirmShellTrust => {
+                self.persist_terminal_trigger_shell_execution(true, cx)
+            }
+            TriggerRequest::ToggleRule(id) => {
+                let changed = self.edit_terminal_trigger(false, |state| state.toggle_rule(&id), cx);
+                self.persist_terminal_trigger_change(changed, cx);
+            }
+            TriggerRequest::DeleteRule(id) => {
+                let changed = self.edit_terminal_trigger(false, |state| state.delete_rule(&id), cx);
+                self.persist_terminal_trigger_change(changed, cx);
+            }
+            TriggerRequest::ToggleForPane(pane, id) => {
+                self.toggle_terminal_trigger_for_pane(pane, &id, cx);
+                cx.notify();
+            }
+            TriggerRequest::EditDraft { clear_input, edit } => {
+                self.edit_terminal_trigger(clear_input, edit, cx)
+            }
         }
-
-        let footer = if self.terminal_triggers.scope_picker_open {
-            dialog_footer(&self.tokens).justify_end().child(
-                self.terminal_trigger_button(
-                    self.i18n
-                        .t("settings_view.terminal.triggers.scope_picker_done"),
-                    ButtonVariant::Default,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.terminal_triggers.scope_picker_open = false;
-                        this.clear_terminal_trigger_input_focus();
-                        cx.notify();
-                    }),
-                ),
-            )
-        } else {
-            dialog_footer(&self.tokens)
-                .justify_end()
-                .child(self.terminal_trigger_button(
-                    self.i18n.t("settings_view.terminal.triggers.cancel"),
-                    ButtonVariant::Outline,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_terminal_trigger_editor(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-                .child(self.terminal_trigger_button(
-                    self.i18n.t("settings_view.terminal.triggers.save"),
-                    ButtonVariant::Default,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.save_terminal_trigger_editor(cx);
-                        cx.stop_propagation();
-                    }),
-                ))
-        };
-
-        let dialog = oxideterm_gpui_ui::modal_container(&self.tokens)
-            .w(px(TERMINAL_TRIGGER_MODAL_WIDTH))
-            .max_w_full()
-            .max_h(px(TERMINAL_TRIGGER_MODAL_MAX_HEIGHT))
-            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
-            .flex()
-            .flex_col()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
-                dialog_header(&self.tokens)
-                    .child(dialog_title(&self.tokens, modal_title))
-                    .child(dialog_description(
-                        &self.tokens,
-                        self.i18n.t("settings_view.terminal.triggers.description"),
-                    )),
-            )
-            .child(
-                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
-                    .id("terminal-trigger-editor-modal-scroll")
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .selectable_overflow_y_scrollbar(
-                        &self.selectable_text_scroll_handle("terminal-trigger-editor-modal-scroll"),
-                    )
-                    .child(body_content),
-            )
-            .child(footer);
-
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_terminal_trigger_editor(cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(overlay_content_boundary(dialog))
-            .into_any_element()
     }
 
     fn terminal_trigger_global_card(&self, cx: &mut Context<Self>) -> AnyElement {
-        let add_button = self
-            .workspace_toolbar_action_button(
-                self.i18n.t("settings_view.terminal.triggers.add_rule"),
-                Some(Self::render_lucide_icon(
-                    LucideIcon::Plus,
-                    14.0,
-                    rgb(self.tokens.ui.accent_text),
-                )),
-                ToolbarButtonOptions {
-                    button: ButtonOptions {
-                        variant: ButtonVariant::Default,
-                        size: ButtonSize::Sm,
-                        radius: ButtonRadius::Md,
-                        disabled: false,
-                    },
-                    ..ToolbarButtonOptions::default()
-                },
-                cx.listener(|this, _event, window, cx| {
-                    this.open_new_terminal_trigger_editor(window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .into_any_element();
-        let mut rows = vec![
-            self.card_separator(),
-            self.terminal_trigger_shell_trust_row(cx),
-            self.card_separator(),
-            self.terminal_trigger_rules_summary_list(cx),
-        ];
-        if !self.terminal_triggers.editor_open
-            && let Some(error_key) = self.terminal_triggers.error_key
-        {
-            rows.push(self.card_separator());
-            rows.push(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.error))
-                    .child(self.i18n.t(error_key))
-                    .into_any_element(),
-            );
-        }
-        rows.push(self.card_separator());
-        rows.push(
-            div()
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(
-                    self.i18n
-                        .t("settings_view.terminal.triggers.secrets_warning"),
-                )
-                .into_any_element(),
-        );
-        self.settings_card_with_header(
-            "settings_view.terminal.triggers.global_title",
-            "settings_view.terminal.triggers.description",
-            None,
-            Some(add_button),
-            rows,
-        )
-    }
-
-    fn terminal_trigger_rules_summary_list(&self, cx: &mut Context<Self>) -> AnyElement {
-        if self.terminal_triggers.snapshot.triggers.is_empty() {
-            return div()
-                .w_full()
-                .px(px(12.0))
-                .py(px(18.0))
-                .text_size(px(self.tokens.metrics.ui_text_xs))
-                .text_color(rgb(self.tokens.ui.text_muted))
-                .child(self.i18n.t("settings_view.terminal.triggers.no_rules"))
-                .into_any_element();
-        }
-        let rows = self
-            .terminal_triggers
-            .snapshot
-            .triggers
-            .iter()
-            .map(|trigger| self.terminal_trigger_rule_row(trigger, cx))
-            .collect::<Vec<_>>();
-        div()
-            .w_full()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
-            .px(px(12.0))
-            .py(px(10.0))
-            .flex()
-            .flex_col()
-            .children(self.separated_settings_rows(rows))
-            .into_any_element()
-    }
-
-    fn terminal_trigger_session_card(&self, pane_id: PaneId, cx: &mut Context<Self>) -> AnyElement {
-        let pane_exists = self.tab_host.read(cx).panes().contains_key(&pane_id);
-        let mut rows = Vec::new();
-        if !pane_exists {
-            rows.push(
-                div()
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(
-                        self.i18n
-                            .t("settings_view.terminal.triggers.session_closed"),
-                    )
-                    .into_any_element(),
-            );
-        } else {
-            let applicable_triggers = self
-                .terminal_triggers
-                .snapshot
-                .triggers
-                .iter()
-                .filter(|trigger| {
-                    trigger.enabled && self.terminal_trigger_applies_to_pane(pane_id, trigger, cx)
-                })
-                .collect::<Vec<_>>();
-            if applicable_triggers.is_empty() {
-                rows.push(
-                    div()
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(
-                            self.i18n
-                                .t("settings_view.terminal.triggers.no_applicable_rules"),
-                        )
-                        .into_any_element(),
-                );
-            } else {
-                for trigger in applicable_triggers {
-                    rows.push(self.terminal_trigger_session_rule_row(pane_id, trigger, cx));
-                    rows.push(self.card_separator());
-                }
-            }
-        }
-        rows.push(
-            div()
-                .w_full()
-                .flex()
-                .justify_end()
-                .child(self.terminal_trigger_button(
-                    self.i18n.t("settings_view.terminal.triggers.manage_global"),
-                    ButtonVariant::Outline,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.terminal_trigger_settings_pane = None;
-                        cx.notify();
-                    }),
-                ))
-                .into_any_element(),
-        );
-        self.settings_card(
-            "settings_view.terminal.triggers.session_title",
-            "settings_view.terminal.triggers.session_description",
-            rows,
-        )
-    }
-
-    fn terminal_trigger_button(
-        &self,
-        label: String,
-        variant: ButtonVariant,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-    ) -> Div {
-        // Shared button styling keeps primary, secondary, and destructive actions distinct.
-        self.workspace_toolbar_action_button(
-            label,
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: false,
-                },
-                has_background: true,
-                height: Some(30.0),
-                padding_x: Some(12.0),
-                ..ToolbarButtonOptions::default()
-            },
-            listener,
-        )
-    }
-
-    fn terminal_trigger_shell_trust_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let enabled = self
-            .settings_store
-            .settings()
-            .terminal
-            .triggers
-            .explicit_shell_enabled;
-        let mut row = div()
-            .w_full()
-            .max_w(px(TERMINAL_TRIGGER_EDITOR_MAX_WIDTH))
-            .rounded(px(self.tokens.radii.md))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
-            .p(px(12.0))
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(
-                self.setting_row(
-                    "settings_view.terminal.triggers.shell_execution",
-                    "settings_view.terminal.triggers.shell_execution_hint",
-                    checkbox(
-                        &self.tokens,
-                        "terminal-trigger-shell-execution",
-                        String::new(),
-                        enabled,
-                    )
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, _window, cx| {
-                            if enabled {
-                                this.persist_terminal_trigger_shell_execution(false, cx);
-                            } else {
-                                this.terminal_trigger_shell_confirmation_pending = true;
-                                cx.notify();
-                            }
-                        }),
-                    )
-                    .into_any_element(),
-                    cx,
-                ),
-            );
-        if self.terminal_trigger_shell_confirmation_pending && !enabled {
-            row = row.child(
-                div()
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgb(self.tokens.ui.error))
-                    .p(px(10.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(rgb(self.tokens.ui.error))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.terminal.triggers.shell_confirm_title"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.terminal.triggers.shell_confirm_description"),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .justify_end()
-                            .gap(px(8.0))
-                            .child(self.terminal_trigger_button(
-                                self.i18n.t("settings_view.terminal.triggers.cancel"),
-                                ButtonVariant::Outline,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.terminal_trigger_shell_confirmation_pending = false;
-                                    cx.notify();
-                                }),
-                            ))
-                            .child(self.terminal_trigger_button(
-                                self.i18n.t("settings_view.terminal.triggers.shell_confirm"),
-                                ButtonVariant::Destructive,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.persist_terminal_trigger_shell_execution(true, cx);
-                                }),
-                            )),
-                    ),
-            );
-        }
-        row.into_any_element()
-    }
-
-    fn terminal_trigger_rule_row(
-        &self,
-        trigger: &TerminalTrigger,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let edit_id = trigger.id.clone();
-        let edit_button_id = trigger.id.clone();
-        let duplicate_id = trigger.id.clone();
-        let delete_id = trigger.id.clone();
-        let toggle_id = trigger.id.clone();
-        let copy_suffix = self
-            .i18n
-            .t("settings_view.terminal.triggers.duplicate_rule");
-        let action_label = self.i18n.t(trigger_action_label(&trigger.action));
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .items_center()
-            .gap(px(10.0))
-            .child(
-                switch(
-                    &self.tokens,
-                    format!("trigger-enabled-{}", trigger.id),
-                    String::new(),
-                    trigger.enabled,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        let changed = this.terminal_triggers.toggle_rule(&toggle_id);
-                        this.persist_terminal_trigger_change(changed, cx);
-                        cx.stop_propagation();
-                    }),
-                ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .cursor_pointer()
-                    .rounded(px(self.tokens.radii.sm))
-                    .px(px(6.0))
-                    .py(px(4.0))
-                    .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.open_edit_terminal_trigger_editor(&edit_id, window, cx);
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(trigger.name.clone()),
-                            )
-                            .child(self.text_badge(action_label, self.tokens.ui.text_muted)),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .font_family(settings_mono_font_family(self.settings_store.settings()))
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(trigger.matcher.pattern.clone()),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .child(self.terminal_trigger_button(
-                        self.i18n.t("settings_view.terminal.triggers.edit_rule"),
-                        ButtonVariant::Outline,
-                        cx.listener(move |this, _event, window, cx| {
-                            this.open_edit_terminal_trigger_editor(&edit_button_id, window, cx);
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(
-                        self.terminal_trigger_button(
-                            self.i18n
-                                .t("settings_view.terminal.triggers.duplicate_rule"),
-                            ButtonVariant::Outline,
-                            cx.listener(move |this, _event, window, cx| {
-                                this.open_duplicate_terminal_trigger_editor(
-                                    &duplicate_id,
-                                    &copy_suffix,
-                                    window,
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                        ),
-                    )
-                    .child(self.terminal_trigger_button(
-                        self.i18n.t("settings_view.terminal.triggers.delete_rule"),
-                        ButtonVariant::Ghost,
-                        cx.listener(move |this, _event, _window, cx| {
-                            let changed = this.terminal_triggers.delete_rule(&delete_id);
-                            this.persist_terminal_trigger_change(changed, cx);
-                            cx.stop_propagation();
-                        }),
-                    )),
-            )
-            .into_any_element()
-    }
-
-    fn terminal_trigger_session_rule_row(
-        &self,
-        pane_id: PaneId,
-        trigger: &TerminalTrigger,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let trigger_id = trigger.id.clone();
-        let checked = self.terminal_trigger_effective_enabled_for_pane(pane_id, &trigger.id, cx);
-        div()
-            .w_full()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(3.0))
-                    .child(
-                        div()
-                            .text_color(rgb(self.tokens.ui.text))
-                            .child(trigger.name.clone()),
-                    )
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(trigger.matcher.pattern.clone()),
-                    ),
-            )
-            .child(
-                checkbox(
-                    &self.tokens,
-                    format!("pane-trigger-{pane_id:?}-{}", trigger.id),
-                    String::new(),
-                    checked,
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.toggle_terminal_trigger_for_pane(pane_id, &trigger_id, cx);
-                        cx.notify();
-                    }),
-                ),
-            )
-            .into_any_element()
-    }
-
-    fn terminal_trigger_editor(
-        &self,
-        trigger: &TerminalTrigger,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let action_label = trigger_action_label(&trigger.action);
-        let details = div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .gap(px(12.0))
-            .child(self.terminal_trigger_responsive_field(
-                TERMINAL_TRIGGER_FIELD_BASIS,
-                self.terminal_trigger_labeled_input(
-                    "settings_view.terminal.triggers.name",
-                    SettingsInput::TerminalTriggerName,
-                    trigger.name.clone(),
-                    cx,
-                ),
-            ))
-            .child(self.terminal_trigger_responsive_field(
-                TERMINAL_TRIGGER_FIELD_BASIS,
-                self.terminal_trigger_labeled_input(
-                    "settings_view.terminal.triggers.description_label",
-                    SettingsInput::TerminalTriggerDescription,
-                    trigger.description.clone().unwrap_or_default(),
-                    cx,
-                ),
-            ));
-
-        let match_options = div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .items_end()
-            .gap(px(12.0))
-            .child(self.terminal_trigger_compact_field(
-                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                self.terminal_trigger_select_field(
-                    self.i18n.t("settings_view.terminal.triggers.match_mode"),
-                    self.i18n.t(match trigger.matcher.mode {
-                        TerminalTriggerMatchMode::Literal => {
-                            "settings_view.terminal.triggers.literal"
-                        }
-                        TerminalTriggerMatchMode::Regex => "settings_view.terminal.triggers.regex",
-                    }),
-                    SettingsSelect::TerminalTriggerMatchMode,
-                    cx,
-                ),
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(220.0))
-                    .flex()
-                    .flex_row()
-                    .flex_wrap()
-                    .gap(px(8.0))
-                    .child(self.terminal_trigger_bool_option(
-                        "settings_view.terminal.triggers.case_sensitive",
-                        trigger.matcher.case_sensitive,
-                        cx.listener(|this, _event, _window, cx| {
-                            if let Some(trigger) = this.terminal_triggers.editor.as_mut() {
-                                trigger.matcher.case_sensitive = !trigger.matcher.case_sensitive;
-                            }
-                            cx.notify();
-                        }),
-                    ))
-                    .child(self.terminal_trigger_bool_option(
-                        "settings_view.terminal.triggers.whole_word",
-                        trigger.matcher.whole_word,
-                        cx.listener(|this, _event, _window, cx| {
-                            if let Some(trigger) = this.terminal_triggers.editor.as_mut() {
-                                trigger.matcher.whole_word = !trigger.matcher.whole_word;
-                            }
-                            cx.notify();
-                        }),
-                    )),
-            );
-
-        let mut action_header = div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .items_end()
-            .gap(px(12.0))
-            .child(self.terminal_trigger_compact_field(
-                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                self.terminal_trigger_select_field(
-                    self.i18n.t("settings_view.terminal.triggers.action"),
-                    self.i18n.t(action_label),
-                    SettingsSelect::TerminalTriggerAction,
-                    cx,
-                ),
-            ));
-
-        if matches!(
-            trigger.action,
-            TerminalTriggerAction::CustomLink { .. } | TerminalTriggerAction::CustomMenu { .. }
-        ) {
-            action_header = action_header.child(self.terminal_trigger_compact_field(
-                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                self.terminal_trigger_select_field(
-                    self.i18n.t("settings_view.terminal.triggers.click_action"),
-                    self.i18n.t(trigger_action_label(editable_trigger_action(
-                        &trigger.action,
-                        self.terminal_triggers.menu_item,
-                    ))),
-                    SettingsSelect::TerminalTriggerClickAction,
-                    cx,
-                ),
-            ));
-        }
-
-        if let TerminalTriggerAction::RunQuickCommand { .. } =
-            editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item)
-        {
-            action_header = action_header.child(self.terminal_trigger_quick_command_option(cx));
-        }
-
-        if let TerminalTriggerAction::LaunchLocalProcess { process } =
-            editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item)
-        {
-            let shell_mode = matches!(process, LocalProcessSpec::ExplicitShell { .. });
-            action_header = action_header.child(
-                self.terminal_trigger_compact_field(
-                    TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                    self.terminal_trigger_select_field(
-                        self.i18n
-                            .t("settings_view.terminal.triggers.action_local_process"),
-                        self.i18n.t(if shell_mode {
-                            "settings_view.terminal.triggers.explicit_shell"
-                        } else {
-                            "settings_view.terminal.triggers.direct_program"
-                        }),
-                        SettingsSelect::TerminalTriggerProcessMode,
-                        cx,
-                    ),
-                ),
-            );
-        }
-
-        let mut action_fields = div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(10.0))
-            .child(action_header);
-
-        if let TerminalTriggerAction::CustomMenu { items } = &trigger.action {
-            action_fields = action_fields.child(self.terminal_trigger_menu_editor(items, cx));
-        }
-        action_fields =
-            match editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item) {
-                TerminalTriggerAction::OpenUrl { url } => {
-                    action_fields.child(self.terminal_trigger_labeled_input(
-                        "settings_view.terminal.triggers.url",
-                        SettingsInput::TerminalTriggerActionValue,
-                        url.clone(),
-                        cx,
-                    ))
-                }
-                TerminalTriggerAction::ShowTooltip { text } => {
-                    action_fields.child(self.terminal_trigger_labeled_input(
-                        "settings_view.terminal.triggers.tooltip_text",
-                        SettingsInput::TerminalTriggerTooltipText,
-                        text.clone(),
-                        cx,
-                    ))
-                }
-                TerminalTriggerAction::CustomLink { .. }
-                | TerminalTriggerAction::CustomMenu { .. }
-                | TerminalTriggerAction::RunQuickCommand { .. } => action_fields,
-                TerminalTriggerAction::SendText { append_enter, .. } => action_fields
-                    .child(
-                        self.terminal_trigger_labeled_input(
-                            "settings_view.terminal.triggers.text",
-                            SettingsInput::TerminalTriggerActionValue,
-                            self.terminal_triggers
-                                .editor_input_value(SettingsInput::TerminalTriggerActionValue)
-                                .unwrap_or_default(),
-                            cx,
-                        ),
-                    )
-                    .child(
-                        // Wrap single checkboxes in a horizontal flex row so the pill
-                        // keeps its intrinsic content width instead of stretching full width.
-                        div().w_full().flex().flex_row().flex_wrap().child(
-                            self.terminal_trigger_bool_option(
-                                "settings_view.terminal.triggers.append_enter",
-                                *append_enter,
-                                cx.listener(|this, _event, _window, cx| {
-                                    if let Some(trigger) = this.terminal_triggers.editor.as_mut()
-                                        && let TerminalTriggerAction::SendText {
-                                            append_enter, ..
-                                        } = editable_trigger_action_mut(
-                                            &mut trigger.action,
-                                            this.terminal_triggers.menu_item,
-                                        )
-                                    {
-                                        *append_enter = !*append_enter;
-                                    }
-                                    cx.notify();
-                                }),
-                            ),
-                        ),
-                    ),
-                TerminalTriggerAction::LaunchLocalProcess { .. } => action_fields
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_row()
-                            .flex_wrap()
-                            .gap(px(12.0))
-                            .child(
-                                self.terminal_trigger_responsive_field(
-                                    TERMINAL_TRIGGER_FIELD_BASIS,
-                                    self.terminal_trigger_labeled_input(
-                                        "settings_view.terminal.triggers.executable",
-                                        SettingsInput::TerminalTriggerExecutable,
-                                        self.terminal_triggers
-                                            .editor_input_value(
-                                                SettingsInput::TerminalTriggerExecutable,
-                                            )
-                                            .unwrap_or_default(),
-                                        cx,
-                                    ),
-                                ),
-                            )
-                            .child(
-                                self.terminal_trigger_responsive_field(
-                                    TERMINAL_TRIGGER_FIELD_BASIS,
-                                    self.terminal_trigger_labeled_input(
-                                        "settings_view.terminal.triggers.working_directory",
-                                        SettingsInput::TerminalTriggerWorkingDirectory,
-                                        self.terminal_triggers
-                                            .editor_input_value(
-                                                SettingsInput::TerminalTriggerWorkingDirectory,
-                                            )
-                                            .unwrap_or_default(),
-                                        cx,
-                                    ),
-                                ),
-                            ),
-                    )
-                    .child(
-                        self.terminal_trigger_labeled_input(
-                            "settings_view.terminal.triggers.arguments",
-                            SettingsInput::TerminalTriggerArguments,
-                            self.terminal_triggers
-                                .editor_input_value(SettingsInput::TerminalTriggerArguments)
-                                .unwrap_or_default(),
-                            cx,
-                        ),
-                    ),
-            };
-
-        let timing_fields = div()
-            .w_full()
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .items_end()
-            .gap(px(12.0))
-            .child(self.terminal_trigger_responsive_field(
-                TERMINAL_TRIGGER_FIELD_BASIS,
-                self.terminal_trigger_select_field(
-                    self.i18n.t("settings_view.terminal.triggers.timing"),
-                    self.i18n.t(match trigger.timing.dispatch {
-                        TerminalTriggerDispatch::Immediate => {
-                            "settings_view.terminal.triggers.immediate"
-                        }
-                        TerminalTriggerDispatch::AfterNextLineBreak => {
-                            "settings_view.terminal.triggers.after_next_line_break"
-                        }
-                    }),
-                    SettingsSelect::TerminalTriggerTiming,
-                    cx,
-                ),
-            ))
-            .child(self.terminal_trigger_responsive_field(
-                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                self.terminal_trigger_labeled_input(
-                    "settings_view.terminal.triggers.delay_ms",
-                    SettingsInput::TerminalTriggerDelayMs,
-                    trigger.timing.delay_ms.to_string(),
-                    cx,
-                ),
-            ))
-            .child(self.terminal_trigger_responsive_field(
-                TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-                self.terminal_trigger_labeled_input(
-                    "settings_view.terminal.triggers.cooldown_ms",
-                    SettingsInput::TerminalTriggerCooldownMs,
-                    trigger.timing.cooldown_ms.to_string(),
-                    cx,
-                ),
-            ));
-
-        div()
-            .w_full()
-            .max_w(px(TERMINAL_TRIGGER_EDITOR_MAX_WIDTH))
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(14.0))
-            .child(details)
-            .child(self.card_separator())
-            .child(self.terminal_trigger_labeled_input(
-                "settings_view.terminal.triggers.pattern",
-                SettingsInput::TerminalTriggerPattern,
-                trigger.matcher.pattern.clone(),
-                cx,
-            ))
-            .child(match_options)
-            .child(self.card_separator())
-            .child(action_fields)
-            .when(!trigger.action.is_interactive(), |editor| {
-                editor.child(self.card_separator()).child(timing_fields)
-            })
-            .when(trigger.action.is_interactive(), |editor| {
-                editor.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(
-                            self.i18n
-                                .t("settings_view.terminal.triggers.interaction_hint"),
-                        ),
-                )
-            })
-            .child(self.terminal_trigger_scope_editor(trigger, cx))
-            .into_any_element()
-    }
-
-    fn terminal_trigger_labeled_input(
-        &self,
-        label_key: &'static str,
-        input: SettingsInput,
-        value: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(5.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(label_key)),
-            )
-            .child(self.settings_text_input_control_fill(input, value, self.i18n.t(label_key), cx))
-            .into_any_element()
-    }
-
-    fn terminal_trigger_menu_editor(
-        &self,
-        items: &[TerminalTriggerMenuItem],
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let selected = self
-            .terminal_triggers
-            .menu_item
-            .min(items.len().saturating_sub(1));
-        let mut choices = div().w_full().flex().flex_wrap().gap(px(6.0));
-        for (index, item) in items.iter().enumerate() {
-            let label = if item.label.is_empty() {
-                format!(
-                    "{} {}",
-                    self.i18n.t("settings_view.terminal.triggers.menu_item"),
-                    index + 1
-                )
-            } else {
-                item.label.clone()
-            };
-            choices = choices.child(self.terminal_trigger_button(
-                label,
-                if index == selected {
-                    ButtonVariant::Default
-                } else {
-                    ButtonVariant::Outline
-                },
-                cx.listener(move |this, _, _, cx| {
-                    this.clear_terminal_trigger_input_focus();
-                    this.terminal_triggers.menu_item = index;
-                    cx.notify();
-                }),
-            ));
-        }
-        let mut tools = div().flex().flex_wrap().gap(px(6.0));
-        if items.len() < 16 {
-            tools = tools.child(self.terminal_trigger_button(
-                self.i18n.t("settings_view.terminal.triggers.add_item"),
-                ButtonVariant::Outline,
-                cx.listener(|this, _, _, cx| {
-                    this.clear_terminal_trigger_input_focus();
-                    if let Some(trigger) = this.terminal_triggers.editor.as_mut()
-                        && let TerminalTriggerAction::CustomMenu { items } = &mut trigger.action
-                        && items.len() < 16
-                    {
-                        items.push(TerminalTriggerMenuItem {
-                            label: String::new(),
-                            action: TerminalTriggerAction::OpenUrl { url: String::new() },
-                        });
-                        this.terminal_triggers.menu_item = items.len() - 1;
-                    }
-                    cx.notify();
-                }),
-            ));
-        }
-        if items.len() > 1 {
-            tools = tools.child(self.terminal_trigger_button(
-                self.i18n.t("settings_view.terminal.triggers.remove_item"),
-                ButtonVariant::Outline,
-                cx.listener(move |this, _, _, cx| {
-                    this.clear_terminal_trigger_input_focus();
-                    if let Some(trigger) = this.terminal_triggers.editor.as_mut()
-                        && let TerminalTriggerAction::CustomMenu { items } = &mut trigger.action
-                        && items.len() > 1
-                        && selected < items.len()
-                    {
-                        items.remove(selected);
-                        this.terminal_triggers.menu_item = selected.min(items.len() - 1);
-                    }
-                    cx.notify();
-                }),
-            ));
-        }
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(choices)
-            .child(tools)
-            .child(
-                self.terminal_trigger_labeled_input(
-                    "settings_view.terminal.triggers.menu_label",
-                    SettingsInput::TerminalTriggerMenuLabel,
-                    items
-                        .get(selected)
-                        .map(|item| item.label.clone())
-                        .unwrap_or_default(),
-                    cx,
-                ),
-            )
-            .into_any_element()
-    }
-
-    fn terminal_trigger_responsive_field(
-        &self,
-        preferred_width: f32,
-        field: AnyElement,
-    ) -> AnyElement {
-        // Responsive field slots stay compact on wide panes and wrap cleanly on narrow panes.
-        div()
-            .max_w_full()
-            .min_w(px(0.0))
-            .flex_1()
-            .flex_basis(px(preferred_width))
-            .child(field)
-            .into_any_element()
-    }
-
-    fn terminal_trigger_compact_field(
-        &self,
-        preferred_width: f32,
-        field: AnyElement,
-    ) -> AnyElement {
-        // Standalone choice fields keep their labels close to the control on wide panes.
-        div()
-            .w(px(preferred_width))
-            .max_w_full()
-            .min_w(px(0.0))
-            .child(field)
-            .into_any_element()
-    }
-
-    fn terminal_trigger_select_field(
-        &self,
-        label: String,
-        value: String,
-        select_id: SettingsSelect,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .items_start()
-            .gap(px(5.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(label),
-            )
-            .child(self.settings_select_control(select_id, value, false, None, cx))
-            .into_any_element()
-    }
-
-    fn terminal_trigger_bool_option(
-        &self,
-        label_key: &'static str,
-        checked: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-    ) -> AnyElement {
-        div()
-            .h(px(30.0))
-            .px(px(8.0))
-            .flex()
-            .items_center()
-            .gap(px(7.0))
-            .rounded(px(self.tokens.radii.md))
-            .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
-            .child(
-                checkbox(&self.tokens, label_key, String::new(), checked)
-                    .on_mouse_down(MouseButton::Left, listener),
-            )
-            .child(
-                div()
-                    .whitespace_nowrap()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.i18n.t(label_key)),
-            )
-            .into_any_element()
-    }
-
-    fn toggle_terminal_trigger_process_mode(&mut self) {
-        let Some(trigger) = self.terminal_triggers.editor.as_mut() else {
-            return;
-        };
-        let TerminalTriggerAction::LaunchLocalProcess { process } =
-            editable_trigger_action_mut(&mut trigger.action, self.terminal_triggers.menu_item)
-        else {
-            return;
-        };
-        let replacement = match &mut *process {
-            LocalProcessSpec::DirectProgram {
-                executable,
-                arguments,
-                working_directory,
-            } => LocalProcessSpec::ExplicitShell {
-                shell_executable: std::mem::take(executable),
-                arguments: std::mem::take(arguments),
-                working_directory: working_directory.take(),
-            },
-            LocalProcessSpec::ExplicitShell {
-                shell_executable,
-                arguments,
-                working_directory,
-            } => LocalProcessSpec::DirectProgram {
-                executable: std::mem::take(shell_executable),
-                arguments: std::mem::take(arguments),
-                working_directory: working_directory.take(),
-            },
-        };
-        *process = replacement;
-    }
-
-    fn terminal_trigger_quick_command_option(&self, cx: &mut Context<Self>) -> AnyElement {
-        let quick_commands = &self.terminal.read(cx).quick_commands.store.commands;
-        let selected_id = self
-            .terminal_triggers
-            .editor
-            .as_ref()
-            .and_then(|trigger| {
-                match editable_trigger_action(&trigger.action, self.terminal_triggers.menu_item) {
-                    TerminalTriggerAction::RunQuickCommand { quick_command_id } => {
-                        Some(quick_command_id.as_str())
-                    }
-                    _ => None,
-                }
-            })
-            .unwrap_or_default();
-        let selected_label = quick_commands
-            .iter()
-            .find(|command| command.id == selected_id)
-            .map(|command| command.name.clone())
-            .unwrap_or_else(|| self.i18n.t("settings_view.terminal.triggers.quick_command"));
-        self.terminal_trigger_compact_field(
-            TERMINAL_TRIGGER_FIELD_BASIS,
-            self.terminal_trigger_select_field(
-                self.i18n.t("settings_view.terminal.triggers.quick_command"),
-                selected_label,
-                SettingsSelect::TerminalTriggerQuickCommand,
-                cx,
-            ),
-        )
-    }
-
-    fn terminal_trigger_scope_editor(
-        &self,
-        trigger: &TerminalTrigger,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let scope_label = match &trigger.scope {
-            TerminalTriggerScope::AllTerminals => "settings_view.terminal.triggers.all_terminals",
-            TerminalTriggerScope::LocalTerminals => {
-                "settings_view.terminal.triggers.local_terminals"
-            }
-            TerminalTriggerScope::SavedConnections { .. } => {
-                "settings_view.terminal.triggers.saved_connections"
-            }
-        };
-        self.terminal_trigger_compact_field(
-            TERMINAL_TRIGGER_COMPACT_FIELD_BASIS,
-            self.terminal_trigger_select_field(
-                self.i18n.t("settings_view.terminal.triggers.scope"),
-                self.i18n.t(scope_label),
-                SettingsSelect::TerminalTriggerScope,
-                cx,
-            ),
-        )
-    }
-
-    fn terminal_trigger_scope_picker(&self, cx: &mut Context<Self>) -> AnyElement {
-        let options = self.terminal_trigger_saved_connection_options();
-        let total_count = options.len();
-        let options = filter_terminal_trigger_connections(
-            options,
-            &self.terminal_triggers.scope_picker_query,
-        );
-        let selected_count = self
-            .terminal_triggers
-            .editor
-            .as_ref()
-            .and_then(|trigger| match &trigger.scope {
-                TerminalTriggerScope::SavedConnections { connections } => Some(connections.len()),
-                _ => None,
-            })
-            .unwrap_or(0);
-        let mut rows = Vec::new();
-        if options.is_empty() {
-            rows.push(
-                div()
-                    .py(px(20.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(if total_count == 0 {
-                        "settings_view.terminal.triggers.no_saved_connections"
-                    } else {
-                        "settings_view.terminal.triggers.no_matching_connections"
-                    }))
-                    .into_any_element(),
-            );
-        } else {
-            for (reference, label) in options {
-                let checked = self
-                    .terminal_triggers
-                    .editor
-                    .as_ref()
-                    .is_some_and(|trigger| match &trigger.scope {
-                        TerminalTriggerScope::SavedConnections { connections } => {
-                            connections.contains(&reference)
-                        }
-                        _ => false,
-                    });
-                let toggled = reference.clone();
-                rows.push(
-                    div()
-                        .w_full()
-                        .min_w(px(0.0))
-                        .p(px(10.0))
-                        .rounded(px(self.tokens.radii.md))
-                        .bg(self.settings_panel_background(self.tokens.ui.bg_panel))
-                        .flex()
-                        .items_center()
-                        .justify_between()
-                        .gap(px(12.0))
-                        .child(
-                            div()
-                                .min_w(px(0.0))
-                                .truncate()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(label),
-                        )
-                        .child(
-                            checkbox(
-                                &self.tokens,
-                                format!("trigger-scope-{reference:?}"),
-                                String::new(),
-                                checked,
-                            )
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    let Some(TerminalTriggerScope::SavedConnections {
-                                        connections,
-                                    }) = this
-                                        .terminal_triggers
-                                        .editor
-                                        .as_mut()
-                                        .map(|trigger| &mut trigger.scope)
-                                    else {
-                                        return;
-                                    };
-                                    if let Some(index) = connections
-                                        .iter()
-                                        .position(|candidate| candidate == &toggled)
-                                    {
-                                        connections.remove(index);
-                                    } else {
-                                        connections.push(toggled.clone());
-                                    }
-                                    cx.notify();
-                                }),
-                            ),
-                        )
-                        .into_any_element(),
-                );
-            }
-        }
-
-        div()
-            .w_full()
-            .max_w(px(TERMINAL_TRIGGER_EDITOR_MAX_WIDTH))
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(14.0))
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(
-                                        self.i18n
-                                            .t("settings_view.terminal.triggers.saved_connections"),
-                                    ),
-                            )
-                            .child(self.text_badge(
-                                format!("{selected_count} / {total_count}"),
-                                self.tokens.ui.accent,
-                            )),
-                    )
-                    .child(
-                        self.terminal_trigger_button(
-                            self.i18n
-                                .t("settings_view.terminal.triggers.scope_picker_done"),
-                            ButtonVariant::Default,
-                            cx.listener(|this, _event, _window, cx| {
-                                this.terminal_triggers.scope_picker_open = false;
-                                this.clear_terminal_trigger_input_focus();
-                                cx.notify();
-                            }),
-                        ),
-                    ),
-            )
-            .child(self.terminal_trigger_labeled_input(
-                "settings_view.terminal.triggers.search_connections",
-                SettingsInput::TerminalTriggerConnectionSearch,
-                self.terminal_triggers.scope_picker_query.clone(),
-                cx,
-            ))
-            .child(self.card_separator())
-            .child(terminal_trigger_connection_list(
-                rows,
-                &self.terminal_triggers.scope_picker_scroll,
-            ))
-            .into_any_element()
-    }
-
-    fn terminal_trigger_saved_connection_options(&self) -> Vec<(SavedConnectionRef, String)> {
-        let mut options = Vec::new();
-        options.extend(
-            self.connection_store
-                .connections()
-                .iter()
-                .map(|connection| {
-                    (
-                        SavedConnectionRef {
-                            kind: SavedConnectionKind::Ssh,
-                            id: connection.id.clone(),
-                        },
-                        format!("SSH · {}", connection.name),
-                    )
-                }),
-        );
-        options.extend(
-            self.connection_store
-                .telnet_profiles()
-                .iter()
-                .map(|profile| {
-                    (
-                        SavedConnectionRef {
-                            kind: SavedConnectionKind::Telnet,
-                            id: profile.id.clone(),
-                        },
-                        format!("Telnet · {}", profile.name),
-                    )
-                }),
-        );
-        options.extend(self.connection_store.mosh_profiles().iter().map(|profile| {
-            (
-                SavedConnectionRef {
-                    kind: SavedConnectionKind::Mosh,
-                    id: profile.id.clone(),
-                },
-                format!("Mosh · {}", profile.name),
-            )
-        }));
-        options.extend(
-            self.connection_store
-                .serial_profiles()
-                .iter()
-                .map(|profile| {
-                    (
-                        SavedConnectionRef {
-                            kind: SavedConnectionKind::Serial,
-                            id: profile.id.clone(),
-                        },
-                        format!("Serial · {}", profile.name),
-                    )
-                }),
-        );
-        options
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct ConnectionListFixture {
-        page: gpui::ListState,
-        connections_scroll: gpui::ScrollHandle,
-    }
-
-    impl ConnectionListFixture {
-        fn new() -> Self {
-            Self {
-                page: tauri_virtual_list_state(
-                    1,
-                    gpui::ListAlignment::Top,
-                    TauriVirtualListSpec::new(px(260.0), 2),
-                ),
-                connections_scroll: gpui::ScrollHandle::new(),
-            }
-        }
-    }
-
-    impl Render for ConnectionListFixture {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            let connections_scroll = self.connections_scroll.clone();
-            tauri_virtual_list(
-                self.page.clone(),
-                TauriVirtualListSpec::new(px(260.0), 2),
-                move |_, _, _| {
-                    let rows = (0..29)
-                        .map(|index| {
-                            div()
-                                .w_full()
-                                .p(px(10.0))
-                                .flex()
-                                .items_center()
-                                .child(div().h(px(20.0)).child(format!("Connection {index}")))
-                                .debug_selector(move || format!("connection-{index}"))
-                                .into_any_element()
-                        })
-                        .collect();
-                    div()
-                        .w_full()
-                        .flex()
-                        .items_start()
-                        .gap(px(20.0))
-                        .child(
-                            div().w(px(120.0)).flex_none().child(
-                                div()
-                                    .max_h(px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT))
-                                    .overflow_y_scrollbar()
-                                    .child(div().h(px(80.0)).child("Rules")),
-                            ),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .child(terminal_trigger_connection_list(rows, &connections_scroll)),
-                        )
-                },
-            )
-        }
-    }
-
-    #[gpui::test]
-    fn saved_connection_picker_scrolls_to_last_connection(cx: &mut gpui::TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_, _| ConnectionListFixture::new());
-        cx.simulate_resize(gpui::size(px(600.0), px(700.0)));
-        cx.update(|window, app| {
-            window.draw(app).clear(app);
-        });
-        let first = cx.debug_bounds("connection-0").unwrap();
-        cx.simulate_event(gpui::ScrollEvent {
-            position: gpui::point(px(300.0), px(250.0)),
-            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(-2_000.0))),
-            ..Default::default()
-        });
-        cx.update(|window, app| {
-            window.draw(app).clear(app);
-        });
-        let last = cx.debug_bounds("connection-28").unwrap();
-        assert!(cx.debug_bounds("connection-0").unwrap().top() < first.top());
-        assert!(last.top() >= px(0.0));
-        assert!(last.bottom() <= px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT));
-        assert_eq!(last.size.height, px(40.0));
-    }
-
-    #[gpui::test]
-    fn saved_connection_picker_scrollbar_drags_to_last_connection(cx: &mut gpui::TestAppContext) {
-        let (_, cx) = cx.add_window_view(|_, _| ConnectionListFixture::new());
-        cx.simulate_resize(gpui::size(px(600.0), px(700.0)));
-        for _ in 0..2 {
-            cx.update(|window, app| {
-                window.refresh();
-                window.draw(app).clear(app);
-            });
-        }
-        let grab = gpui::point(px(596.0), px(10.0));
-        cx.simulate_mouse_down(grab, MouseButton::Left, gpui::Modifiers::default());
-        cx.simulate_mouse_move(
-            gpui::point(grab.x, px(30.0)),
-            MouseButton::Left,
-            gpui::Modifiers::default(),
-        );
-        let end = gpui::point(grab.x, px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT));
-        cx.simulate_mouse_move(end, MouseButton::Left, gpui::Modifiers::default());
-        cx.simulate_mouse_up(end, MouseButton::Left, gpui::Modifiers::default());
-        cx.update(|window, app| {
-            window.draw(app).clear(app);
-        });
-        let last = cx.debug_bounds("connection-28").unwrap();
-        assert!(last.top() >= px(0.0));
-        assert!(
-            last.bottom() <= px(TERMINAL_TRIGGER_RULE_LIST_MAX_HEIGHT),
-            "last connection: {last:?}"
-        );
-        assert_eq!(last.size.height, px(40.0));
-    }
-
-    fn state() -> (tempfile::TempDir, TerminalTriggersSettingsState) {
-        let directory = tempfile::tempdir().expect("trigger settings directory");
-        let settings_path = directory.path().join("settings.json");
-        let state = TerminalTriggersSettingsState::load(&settings_path);
-        (directory, state)
-    }
-
-    #[test]
-    fn connection_search_filters_names_and_protocols_without_changing_selection() {
-        let options = [
-            (SavedConnectionKind::Ssh, "production", "SSH · Production"),
-            (SavedConnectionKind::Mosh, "staging", "Mosh · Staging"),
-            (SavedConnectionKind::Serial, "console", "Serial · 控制台"),
-        ]
-        .into_iter()
-        .map(|(kind, id, label)| {
-            (
-                SavedConnectionRef {
-                    kind,
-                    id: id.into(),
-                },
-                label.to_string(),
-            )
+        self.with_terminal_trigger_page(cx.entity(), cx, |page, cx| {
+            page.terminal_trigger_global_card(cx)
         })
-        .collect::<Vec<_>>();
-        let (_directory, mut state) = state();
-        state.new_rule();
-        let selected = TerminalTriggerScope::SavedConnections {
-            connections: vec![options[0].0.clone(), options[2].0.clone()],
-        };
-        state.editor.as_mut().unwrap().scope = selected.clone();
-        for (query, expected) in [
-            (" PROD ", vec!["production"]),
-            ("mosh", vec!["staging"]),
-            ("控制", vec!["console"]),
-            ("missing", vec![]),
-            ("", vec!["production", "staging", "console"]),
-        ] {
-            state
-                .scope_picker_scroll
-                .set_offset(gpui::point(px(0.0), px(-400.0)));
-            assert!(
-                state.apply_editor_input(SettingsInput::TerminalTriggerConnectionSearch, query)
-            );
-            let matches =
-                filter_terminal_trigger_connections(options.clone(), &state.scope_picker_query);
-            assert_eq!(
-                matches
-                    .iter()
-                    .map(|(reference, _)| reference.id.as_str())
-                    .collect::<Vec<_>>(),
-                expected,
-                "query: {query}"
-            );
-            assert_eq!(state.editor.as_ref().unwrap().scope, selected);
-            assert_eq!(
-                state.scope_picker_scroll.offset(),
-                gpui::point(px(0.0), px(0.0))
-            );
-        }
     }
 
-    #[test]
-    fn editor_saves_only_after_validation_succeeds() {
-        let (_directory, mut state) = state();
-        state.new_rule();
-        let trigger = state.editor.as_mut().expect("trigger editor");
-        trigger.name = "Prompt ready".to_string();
-        trigger.matcher.pattern = "ready> ".to_string();
-        trigger.action = TerminalTriggerAction::SendText {
-            text: "status".to_string(),
-            append_enter: true,
-        };
-
-        assert!(state.save_editor(false));
-        assert_eq!(state.snapshot.triggers.len(), 1);
-        assert_eq!(
-            state.editor.as_ref().map(|trigger| trigger.name.as_str()),
-            Some("Prompt ready")
-        );
-        let saved = load_snapshot(&state.settings_path).expect("saved trigger snapshot");
-        assert_eq!(saved.triggers.len(), 1);
-        assert_eq!(saved.triggers[0].name, "Prompt ready");
-        assert_eq!(saved.triggers[0].matcher.pattern, "ready> ");
-        assert_eq!(
-            saved.triggers[0].action,
-            TerminalTriggerAction::SendText {
-                text: "status".to_string(),
-                append_enter: true,
-            }
-        );
-    }
-
-    #[test]
-    fn invalid_editor_keeps_the_last_saved_snapshot() {
-        let (_directory, mut state) = state();
-        state.new_rule();
-        let trigger = state.editor.as_mut().expect("trigger editor");
-        trigger.name = "Broken regex".to_string();
-        trigger.matcher.mode = TerminalTriggerMatchMode::Regex;
-        trigger.matcher.pattern = "(".to_string();
-        trigger.action = TerminalTriggerAction::SendText {
-            text: "ignored".to_string(),
-            append_enter: false,
-        };
-
-        assert!(!state.save_editor(false));
-        assert!(state.snapshot.triggers.is_empty());
-        assert!(state.editor.is_some());
-        assert_eq!(
-            state.error_key,
-            Some("settings_view.terminal.triggers.validation_failed")
-        );
-    }
-
-    #[test]
-    fn explicit_shell_editor_requires_the_separate_trust_setting() {
-        let (_directory, mut state) = state();
-        state.new_rule();
-        let trigger = state.editor.as_mut().expect("trigger editor");
-        trigger.name = "Trusted shell".to_string();
-        trigger.matcher.pattern = "deploy".to_string();
-        trigger.action = TerminalTriggerAction::LaunchLocalProcess {
-            process: LocalProcessSpec::ExplicitShell {
-                shell_executable: "/bin/sh".to_string(),
-                arguments: vec!["-c".to_string(), "echo ok".to_string()],
-                working_directory: None,
-            },
-        };
-
-        assert!(!state.save_editor(false));
-        assert!(state.snapshot.triggers.is_empty());
-        assert_eq!(
-            state.error_key,
-            Some("settings_view.terminal.triggers.shell_execution_hint")
-        );
-    }
-
-    #[test]
-    fn modal_state_opens_closes_and_closes_after_valid_save() {
-        let (_directory, mut state) = state();
-        assert!(!state.editor_open);
-
-        state.new_rule();
-        assert!(state.editor_open);
-
-        assert!(!state.save_editor(false));
-        assert!(state.editor_open);
-
-        let trigger = state.editor.as_mut().expect("trigger editor");
-        trigger.name = "Alert".to_string();
-        trigger.matcher.pattern = "ERROR".to_string();
-        trigger.action = TerminalTriggerAction::SendText {
-            text: "status".to_string(),
-            append_enter: true,
-        };
-        assert!(state.save_editor(false));
-        assert!(!state.editor_open);
-
-        let saved_id = state.snapshot.triggers[0].id.clone();
-        state.edit_rule(&saved_id);
-        assert!(state.editor_open);
-        state.cancel_edit();
-        assert!(!state.editor_open);
-
-        state.duplicate_rule(&saved_id, "copy");
-        assert!(state.editor_open);
-        assert!(state.save_editor(false));
-        assert!(!state.editor_open);
-        assert_eq!(state.snapshot.triggers.len(), 2);
-
-        state.edit_rule(&saved_id);
-        assert!(state.editor_open);
-        assert!(state.delete_rule(&saved_id));
-        assert!(!state.editor_open);
-        assert_eq!(state.snapshot.triggers.len(), 1);
+    fn terminal_trigger_session_card(&self, pane: PaneId, cx: &mut Context<Self>) -> AnyElement {
+        self.with_terminal_trigger_page(cx.entity(), cx, |page, cx| {
+            page.terminal_trigger_session_card(pane, cx)
+        })
     }
 }

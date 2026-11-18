@@ -758,8 +758,8 @@ impl InputHandler for WorkspaceInputHandler {
         };
         let _ = self.view.update(cx, |view, cx| {
             if new_text.is_empty() {
-                if view.ime_marked_text.take().is_some() {
-                    cx.notify();
+                if let Some(marked) = view.ime_marked_text.take() {
+                    view.notify_ime_target(marked.target, cx);
                 }
                 return;
             }
@@ -785,14 +785,14 @@ impl InputHandler for WorkspaceInputHandler {
                 replacement_range.start,
                 replacement_range.end,
             );
-            cx.notify();
+            view.notify_ime_target(target, cx);
         });
     }
 
     fn unmark_text(&mut self, _window: &mut Window, cx: &mut App) {
         let _ = self.view.update(cx, |view, cx| {
-            if view.ime_marked_text.take().is_some() {
-                cx.notify();
+            if let Some(marked) = view.ime_marked_text.take() {
+                view.notify_ime_target(marked.target, cx);
             }
         });
     }
@@ -902,6 +902,30 @@ impl InputHandler for WorkspaceInputHandler {
 }
 
 impl WorkspaceApp {
+    pub(super) fn settings_ime_frame<'a>(
+        &'a self,
+        input: SettingsInput,
+        value: &'a str,
+        focused: bool,
+        cx: &App,
+    ) -> oxideterm_gpui_settings_view::components::SettingsImeFrame<'a> {
+        let target = WorkspaceImeTarget::Settings(input);
+        let anchor_id = target.anchor_id();
+        let anchors = self.text_input_anchors.clone();
+        oxideterm_gpui_settings_view::components::SettingsImeFrame {
+            input,
+            value,
+            focused,
+            caret_visible: self.input_caret.visible(),
+            selected_range: self.ime_selected_range_for_target(target, cx),
+            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
+            marked_text: self.marked_text_for_target(target, cx),
+            anchor_id,
+            viewport: anchors.viewport(anchor_id),
+            update_anchor: Rc::new(move |anchor| anchors.update(anchor)),
+        }
+    }
+
     pub(in crate::workspace) fn workspace_text_input(
         &self,
         target: WorkspaceImeTarget,
@@ -1071,6 +1095,54 @@ impl WorkspaceApp {
     pub(super) fn show_active_input_caret(&mut self, cx: &mut Context<Self>) {
         self.workspace_input
             .update(cx, |input, cx| input.show_caret(cx));
+    }
+
+    pub(super) fn notify_ime_target(&self, target: WorkspaceImeTarget, cx: &mut Context<Self>) {
+        if matches!(
+            target,
+            WorkspaceImeTarget::Settings(input)
+                if oxideterm_gpui_settings_view::terminal_triggers::is_terminal_trigger_input(input)
+        ) {
+            self.terminal_trigger_editor.update(cx, |_, cx| cx.notify());
+        } else if matches!(
+            target,
+            WorkspaceImeTarget::Settings(input)
+                if oxideterm_gpui_settings_view::highlight_page::is_highlight_input(input)
+        ) {
+            self.highlight_editor.update(cx, |_, cx| cx.notify());
+            self.settings_surface.update(cx, |_, cx| cx.notify());
+        } else if matches!(
+            target,
+            WorkspaceImeTarget::Settings(input)
+                if oxideterm_gpui_settings_view::theme_editor::is_theme_editor_input(input)
+        ) {
+            self.theme_editor_dialog.update(cx, |_, cx| cx.notify());
+        } else if matches!(
+            target,
+            WorkspaceImeTarget::Settings(input)
+                if oxideterm_gpui_settings_view::components::is_connection_key_input(input)
+        ) {
+            self.managed_key_dialog_view.update(cx, |_, cx| cx.notify());
+        } else if target == WorkspaceImeTarget::Settings(SettingsInput::TerminalCommandSpecsJson) {
+            self.command_specs_dialog.update(cx, |_, cx| cx.notify());
+        } else if matches!(
+            target,
+            WorkspaceImeTarget::Settings(input)
+                if oxideterm_gpui_settings_view::components::is_surface_input(input)
+        ) {
+            self.settings_surface.update(cx, |_, cx| cx.notify());
+        } else if matches!(
+            target,
+            WorkspaceImeTarget::Settings(
+                SettingsInput::PortableCurrentPassword
+                    | SettingsInput::PortableNewPassword
+                    | SettingsInput::PortableConfirmPassword
+            )
+        ) {
+            self.portable_password_dialog.update(cx, |_, cx| cx.notify());
+        } else {
+            cx.notify();
+        }
     }
 
     pub(super) fn active_ime_target(&self, cx: &App) -> Option<WorkspaceImeTarget> {
@@ -1608,7 +1680,7 @@ impl WorkspaceApp {
         self.ime_drag_selection = Some(WorkspaceImeDragSelection { target, anchor });
         self.set_ime_selection_from_anchor(target, anchor, index);
         self.ime_marked_text = None;
-        cx.notify();
+        self.notify_ime_target(target, cx);
         true
     }
 
@@ -1662,7 +1734,7 @@ impl WorkspaceApp {
         });
         self.ime_drag_selection = None;
         self.ime_marked_text = None;
-        cx.notify();
+        self.notify_ime_target(target, cx);
         true
     }
 
@@ -1679,7 +1751,7 @@ impl WorkspaceApp {
             return;
         };
         if self.set_ime_selection_from_anchor(drag.target, drag.anchor, index) {
-            cx.notify();
+            self.notify_ime_target(drag.target, cx);
         }
     }
 
@@ -2584,7 +2656,7 @@ impl WorkspaceApp {
                 marked.replacement_range.end,
             );
             self.show_active_input_caret(cx);
-            cx.notify();
+            self.notify_ime_target(target, cx);
             return;
         }
         // Password owners expose only geometry proxies, never undoable secret snapshots.
@@ -2610,7 +2682,7 @@ impl WorkspaceApp {
         self.selected_ime_target = None;
         self.selected_ime_range = Some(restored.selection);
         self.show_active_input_caret(cx);
-        cx.notify();
+        self.notify_ime_target(target, cx);
     }
 
     pub(super) fn handle_active_text_input_delete_selection(
@@ -2745,7 +2817,7 @@ impl WorkspaceApp {
         self.ime_marked_text = None;
         self.ime_drag_selection = None;
         self.show_active_input_caret(cx);
-        cx.notify();
+        self.notify_ime_target(target, cx);
         true
     }
 
@@ -2839,7 +2911,7 @@ impl WorkspaceApp {
         self.set_ime_selection_from_anchor(target, next_caret, next_caret);
         self.ime_marked_text = None;
         self.show_active_input_caret(cx);
-        cx.notify();
+        self.notify_ime_target(target, cx);
         true
     }
 
@@ -2926,7 +2998,7 @@ impl WorkspaceApp {
         self.selected_ime_range = None;
         self.ime_drag_selection = None;
         self.ime_marked_text = None;
-        cx.notify();
+        self.notify_ime_target(target, cx);
         true
     }
 

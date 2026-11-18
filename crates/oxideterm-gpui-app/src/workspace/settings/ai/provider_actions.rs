@@ -66,8 +66,10 @@ impl WorkspaceApp {
                 let deliveries = self
                     .ai_entity
                     .update(cx, |ai, _cx| ai.take_chat_stream_deliveries());
-                self.apply_ai_chat_stream_deliveries(deliveries, window, cx);
-                cx.notify();
+                if !deliveries.is_empty() {
+                    self.apply_ai_chat_stream_deliveries(deliveries, window, cx);
+                    App::notify(cx, self.ai_sidebar_view.entity_id());
+                }
             }
             ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
                 let deliveries = self

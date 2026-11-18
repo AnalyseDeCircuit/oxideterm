@@ -116,30 +116,74 @@ fn ai_chat_hash_json_value(
     }
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn render_ai_sidebar_content(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.ensure_ai_chat_initialized(cx);
-        let enabled = self.settings_store.settings().ai.enabled;
-        let panel = if !enabled {
-            ai_chat_panel(&self.tokens)
-                .relative()
-                .bg(self.context_sidebar_content_background(self.tokens.ui.shell_bg()))
-                .child(self.render_ai_sidebar_disabled(cx))
-                .into_any_element()
-        } else {
-            ai_chat_panel(&self.tokens)
-                .relative()
-                .bg(self.context_sidebar_content_background(self.tokens.ui.shell_bg()))
-                .child(self.render_ai_sidebar_chat_header(cx))
-                .when_some(self.render_ai_compaction_notice(cx), |panel, notice| {
-                    panel.child(notice)
-                })
-                .when_some(self.render_ai_background_tasks(cx), |panel, tasks| {
-                    panel.child(tasks)
-                })
+pub(in crate::workspace) struct AiAssistantSidebarView {
+    workspace: gpui::WeakEntity<WorkspaceApp>,
+}
+
+impl AiAssistantSidebarView {
+    pub(in crate::workspace) fn new(workspace: gpui::WeakEntity<WorkspaceApp>) -> Self {
+        Self { workspace }
+    }
+}
+
+enum AiSidebarContent {
+    Disabled(AnyElement),
+    Chat {
+        header: AnyElement,
+        notices: Vec<AnyElement>,
+        messages: AnyElement,
+        footer: Vec<AnyElement>,
+    },
+}
+
+impl Render for AiAssistantSidebarView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some(workspace) = self.workspace.upgrade() else {
+            return div().into_any_element();
+        };
+        let (tokens, background, content) = workspace.update(cx, |app, cx| {
+            app.ensure_ai_chat_initialized(cx);
+            let content = if app.settings_store.settings().ai.enabled {
+                AiSidebarContent::Chat {
+                    header: app.render_ai_sidebar_chat_header(cx),
+                    notices: [
+                        app.render_ai_compaction_notice(cx),
+                        app.render_ai_background_tasks(cx),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect(),
+                    messages: app.render_ai_sidebar_chat_body(cx),
+                    footer: app
+                        .render_ai_history_status(cx)
+                        .into_iter()
+                        .chain([
+                            app.render_ai_context_warning_banners(cx),
+                            app.render_ai_sidebar_model_bar(cx),
+                            app.render_ai_sidebar_input(app.ai_entity.read(cx).history_ready(), cx),
+                        ])
+                        .collect(),
+                }
+            } else {
+                AiSidebarContent::Disabled(app.render_ai_sidebar_disabled(cx))
+            };
+            (
+                app.tokens,
+                app.context_sidebar_content_background(app.tokens.ui.shell_bg()),
+                content,
+            )
+        });
+        let panel = ai_chat_panel(&tokens).relative().bg(background);
+        let panel = match content {
+            AiSidebarContent::Disabled(disabled) => panel.child(disabled),
+            AiSidebarContent::Chat {
+                header,
+                notices,
+                messages,
+                footer,
+            } => panel
+                .child(header)
+                .children(notices)
                 .child(
                     div()
                         .w_full()
@@ -154,19 +198,12 @@ impl WorkspaceApp {
                                 .min_w_0()
                                 .h_full()
                                 .min_h_0()
-                                .child(self.render_ai_sidebar_chat_body(cx)),
+                                .child(messages),
                         ),
                 )
-                .children(self.render_ai_history_status(cx))
-                .child(self.render_ai_context_warning_banners(cx))
-                .child(self.render_ai_sidebar_model_bar(cx))
-                .child(
-                    self.render_ai_sidebar_input(self.ai_entity.read(cx).history_ready(), cx),
-                )
-                .into_any_element()
+                .children(footer),
         };
 
-        let workspace = cx.entity();
         div()
             .size_full()
             .min_w_0()
@@ -187,16 +224,20 @@ impl WorkspaceApp {
                     // normal sized flex wrapper around the actual AI panel so
                     // header, body, model bar, and input inherit the sidebar width.
                     .child(panel),
-                Self::deferred_ai_select_anchor_update(workspace),
+                WorkspaceApp::deferred_ai_select_anchor_update(workspace),
             ))
             .into_any_element()
     }
+}
 
+impl WorkspaceApp {
     pub(in crate::workspace) fn render_ai_sidebar_chat_body(
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if let Some(detail) = self.render_ai_agent_detail(cx) { return detail; }
+        if let Some(detail) = self.render_ai_agent_detail(cx) {
+            return detail;
+        }
         if let Some(error) = self.ai_entity.read(cx).chat_initialization_error().copied() {
             return self.render_ai_sidebar_initialization_error(error, cx);
         }

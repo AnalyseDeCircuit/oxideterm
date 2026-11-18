@@ -203,11 +203,7 @@ pub(in crate::workspace) fn context_sidebar_inner_surface_background(
 pub(in crate::workspace) fn settings_mono_font_family(
     settings: &PersistedSettings,
 ) -> SharedString {
-    let family = settings
-        .terminal
-        .font_family
-        .terminal_family_name(&settings.terminal.custom_font_family);
-    settings_css_font_family_head(&family).unwrap_or_else(|| gpui_font_family_name(&family))
+    oxideterm_gpui_settings_view::components::settings_mono_font_family(settings)
 }
 
 pub(in crate::workspace) fn terminal_cjk_font_family_preference(family: &str) -> Option<String> {

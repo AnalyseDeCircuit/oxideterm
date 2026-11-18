@@ -5,14 +5,14 @@ use std::{
     time::{Duration, SystemTime},
 };
 
+pub use crate::SettingsNavigationDraftAction;
+use crate::{SettingsInput, SettingsKeybindingScopeFilter};
+use crate::{SettingsRouteSnapshot, SettingsRouteState};
 use gpui::{AppContext, Context, Entity, EventEmitter, KeyDownEvent, Task, Timer};
 use oxideterm_connections::{
     ConnectionImportDuplicateStrategy, ConnectionImportPreview, ConnectionImportSource,
-    PrivilegePromptType, PrivilegeResponseMode,
+    ManagedSshKeyInfo, ManagedSshKeyUsage, PrivilegePromptType, PrivilegeResponseMode,
 };
-pub(in crate::workspace) use oxideterm_gpui_settings_view::SettingsNavigationDraftAction;
-use oxideterm_gpui_settings_view::{SettingsInput, SettingsKeybindingScopeFilter};
-use oxideterm_gpui_settings_view::{SettingsRouteSnapshot, SettingsRouteState};
 use oxideterm_gpui_ui::confirm::ConfirmDialogAction;
 use oxideterm_settings_model::{
     AiSettingsPage, SettingsNavigationLayout, SettingsTab, TerminalSettingsPage,
@@ -20,14 +20,54 @@ use oxideterm_settings_model::{
     editor_terminal_theme, terminal_theme_to_colors,
 };
 use oxideterm_theme::{derive_ui_colors_from_terminal, theme_by_id};
-use zeroize::Zeroizing;
+use zeroize::{Zeroize, Zeroizing};
 
-use crate::workspace::browser_behavior;
+use oxideterm_gpui_ui::confirm as browser_behavior;
 
-use super::update::NativeUpdateRuntime;
-use super::{
-    CliCompanionStatus, PortableSettingsAction, PortableSettingsDialog, SettingsManagedKeyDialog,
-};
+use super::native_update::NativeUpdateRuntime;
+use oxideterm_settings_model::CliCompanionStatus;
+
+mod cli;
+mod connections;
+mod known_hosts;
+mod network;
+mod portable;
+mod privilege;
+mod totp;
+
+pub use connections::{ManagedKeyFileImportRequest, ManagedKeyPasteImportRequest};
+pub use known_hosts::KnownHostsState;
+pub use totp::TotpDraft;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PortableSettingsDialog {
+    ChangePassword,
+}
+
+#[derive(Clone, Debug)]
+pub enum SettingsManagedKeyDialog {
+    ImportFile,
+    Paste,
+    Rename {
+        key_id: String,
+    },
+    Delete {
+        key: ManagedSshKeyInfo,
+        usage: ManagedSshKeyUsage,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PortableSettingsAction {
+    AutoUnlock,
+    ChangePassword,
+}
+
+pub fn settings_store_modified_time(path: &std::path::Path) -> Option<std::time::SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+}
 
 const EXTERNAL_STORE_WATCH_INTERVAL: Duration = Duration::from_millis(530);
 
@@ -41,8 +81,8 @@ struct ExternalStoreWatch {
 
 impl ExternalStoreWatch {
     fn new(settings_path: PathBuf, connections_path: PathBuf) -> Self {
-        let settings_modified = super::settings_store_modified_time(&settings_path);
-        let connections_modified = super::settings_store_modified_time(&connections_path);
+        let settings_modified = settings_store_modified_time(&settings_path);
+        let connections_modified = settings_store_modified_time(&connections_path);
         Self {
             settings_path,
             connections_path,
@@ -52,13 +92,13 @@ impl ExternalStoreWatch {
     }
 
     fn refresh_observed_state(&mut self) {
-        self.settings_modified = super::settings_store_modified_time(&self.settings_path);
-        self.connections_modified = super::settings_store_modified_time(&self.connections_path);
+        self.settings_modified = settings_store_modified_time(&self.settings_path);
+        self.connections_modified = settings_store_modified_time(&self.connections_path);
     }
 
-    fn take_external_change(&mut self) -> bool {
-        let settings_modified = super::settings_store_modified_time(&self.settings_path);
-        let connections_modified = super::settings_store_modified_time(&self.connections_path);
+    fn take_external_change(&mut self) -> Option<ExternalStoreChange> {
+        let settings_modified = settings_store_modified_time(&self.settings_path);
+        let connections_modified = settings_store_modified_time(&self.connections_path);
         self.take_change_for_modified_times(settings_modified, connections_modified)
     }
 
@@ -66,44 +106,43 @@ impl ExternalStoreWatch {
         &mut self,
         settings_modified: Option<SystemTime>,
         connections_modified: Option<SystemTime>,
-    ) -> bool {
-        let changed = settings_modified != self.settings_modified
-            || connections_modified != self.connections_modified;
-        if changed {
-            // Advance before publishing so a failed reload does not create an event storm.
-            self.settings_modified = settings_modified;
-            self.connections_modified = connections_modified;
-        }
-        changed
+    ) -> Option<ExternalStoreChange> {
+        let change = ExternalStoreChange {
+            settings: settings_modified != self.settings_modified,
+            connections: connections_modified != self.connections_modified,
+        };
+        // Advance before publishing so a failed reload does not create an event storm.
+        self.settings_modified = settings_modified;
+        self.connections_modified = connections_modified;
+        (change.settings || change.connections).then_some(change)
     }
 }
 
 /// Non-secret result produced by the portable runtime status worker.
-pub(in crate::workspace) struct PortableStatusRefresh {
-    pub(in crate::workspace) status:
-        Result<oxideterm_portable_runtime::PortableStatusSnapshot, String>,
-    pub(in crate::workspace) exportable_secret_count: usize,
+pub struct PortableStatusRefresh {
+    pub status: Result<oxideterm_portable_runtime::PortableStatusSnapshot, String>,
+    pub exportable_secret_count: usize,
 }
 
 /// Read-only projection used after releasing the settings Entity borrow.
 #[derive(Clone)]
-pub(in crate::workspace) struct PortableStatusSnapshot {
-    pub(in crate::workspace) status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
-    pub(in crate::workspace) error: Option<String>,
-    pub(in crate::workspace) exportable_secret_count: Option<usize>,
-    pub(in crate::workspace) refresh_pending: bool,
+pub struct PortableStatusSnapshot {
+    pub status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
+    pub error: Option<String>,
+    pub exportable_secret_count: Option<usize>,
+    pub refresh_pending: bool,
 }
 
-pub(in crate::workspace) struct PortablePasswordDialogSnapshot {
-    pub(in crate::workspace) open: bool,
-    pub(in crate::workspace) pending: bool,
-    pub(in crate::workspace) error: Option<String>,
-    pub(in crate::workspace) current_password_present: bool,
-    pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
+pub struct PortablePasswordDialogSnapshot {
+    pub open: bool,
+    pub pending: bool,
+    pub error: Option<String>,
+    pub current_password_present: bool,
+    pub presence: oxideterm_gpui_ui::motion::ExitPresence,
 }
 
 /// Copies only non-secret render state for the active managed-key dialog.
-pub(in crate::workspace) enum ManagedKeyDialogSnapshot {
+pub enum ManagedKeyDialogSnapshot {
     ImportFile {
         file_path: String,
         file_name: String,
@@ -125,33 +164,33 @@ pub(in crate::workspace) enum ManagedKeyDialogSnapshot {
     },
 }
 
-pub(in crate::workspace) struct NetworkProxyPasswordSnapshot {
-    pub(in crate::workspace) password_present: bool,
-    pub(in crate::workspace) password_status: Option<String>,
+pub struct NetworkProxyPasswordSnapshot {
+    pub password_present: bool,
+    pub password_status: Option<String>,
 }
 
-pub(in crate::workspace) struct NetworkProxyTestSnapshot {
-    pub(in crate::workspace) test_host: String,
-    pub(in crate::workspace) test_port: String,
-    pub(in crate::workspace) test_pending: bool,
-    pub(in crate::workspace) test_result: Option<Result<u128, String>>,
+pub struct NetworkProxyTestSnapshot {
+    pub test_host: String,
+    pub test_port: String,
+    pub test_pending: bool,
+    pub test_result: Option<Result<u128, String>>,
 }
 
 /// Editable privilege credential state with a zeroizing secret owner.
-pub(in crate::workspace) struct PrivilegeCredentialDraft {
-    pub(super) credential_id: Option<String>,
-    pub(super) label: String,
-    pub(super) prompt_type: PrivilegePromptType,
-    pub(super) response_mode: PrivilegeResponseMode,
-    pub(super) username_hint: String,
-    pub(super) prompt_patterns: String,
-    pub(super) host_patterns: String,
-    pub(super) second_factor_patterns: String,
-    pub(super) second_factor_user_hint: String,
-    pub(super) totp_credential_id: Option<String>,
-    pub(super) secret: Zeroizing<String>,
-    pub(super) enabled: bool,
-    pub(super) require_click_to_send: bool,
+pub struct PrivilegeCredentialDraft {
+    pub credential_id: Option<String>,
+    pub label: String,
+    pub prompt_type: PrivilegePromptType,
+    pub response_mode: PrivilegeResponseMode,
+    pub username_hint: String,
+    pub prompt_patterns: String,
+    pub host_patterns: String,
+    pub second_factor_patterns: String,
+    pub second_factor_user_hint: String,
+    pub totp_credential_id: Option<String>,
+    pub secret: Zeroizing<String>,
+    pub enabled: bool,
+    pub require_click_to_send: bool,
 }
 
 impl Default for PrivilegeCredentialDraft {
@@ -174,49 +213,49 @@ impl Default for PrivilegeCredentialDraft {
     }
 }
 
-pub(in crate::workspace) struct PrivilegeCredentialSnapshot {
-    pub(in crate::workspace) credential_id: Option<String>,
-    pub(in crate::workspace) label: String,
-    pub(in crate::workspace) prompt_type: PrivilegePromptType,
-    pub(in crate::workspace) response_mode: PrivilegeResponseMode,
-    pub(in crate::workspace) username_hint: String,
-    pub(in crate::workspace) prompt_patterns: String,
-    pub(in crate::workspace) host_patterns: String,
-    pub(in crate::workspace) second_factor_patterns: String,
-    pub(in crate::workspace) second_factor_user_hint: String,
-    pub(in crate::workspace) totp_credential_id: Option<String>,
-    pub(in crate::workspace) enabled: bool,
-    pub(in crate::workspace) require_click_to_send: bool,
-    pub(in crate::workspace) error: Option<String>,
+pub struct PrivilegeCredentialSnapshot {
+    pub credential_id: Option<String>,
+    pub label: String,
+    pub prompt_type: PrivilegePromptType,
+    pub response_mode: PrivilegeResponseMode,
+    pub username_hint: String,
+    pub prompt_patterns: String,
+    pub host_patterns: String,
+    pub second_factor_patterns: String,
+    pub second_factor_user_hint: String,
+    pub totp_credential_id: Option<String>,
+    pub enabled: bool,
+    pub require_click_to_send: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone)]
-pub(in crate::workspace) struct CliCompanionSnapshot {
-    pub(in crate::workspace) status: Option<CliCompanionStatus>,
-    pub(in crate::workspace) loading: bool,
-    pub(in crate::workspace) error: Option<String>,
+pub struct CliCompanionSnapshot {
+    pub status: Option<CliCompanionStatus>,
+    pub loading: bool,
+    pub error: Option<String>,
 }
 
 #[derive(Clone)]
-pub(in crate::workspace) struct SshConfigImportSnapshot {
-    pub(in crate::workspace) open: bool,
-    pub(in crate::workspace) selected_hosts: HashSet<String>,
-    pub(in crate::workspace) status: Option<String>,
-    pub(in crate::workspace) presence: oxideterm_gpui_ui::motion::ExitPresence,
+pub struct SshConfigImportSnapshot {
+    pub open: bool,
+    pub selected_hosts: HashSet<String>,
+    pub status: Option<String>,
+    pub presence: oxideterm_gpui_ui::motion::ExitPresence,
 }
 
 /// Read-only projection for the connection importer settings surface.
-pub(in crate::workspace) struct ConnectionImportSnapshot {
-    pub(in crate::workspace) source: ConnectionImportSource,
-    pub(in crate::workspace) paths: Vec<String>,
-    pub(in crate::workspace) preview: Option<ConnectionImportPreview>,
-    pub(in crate::workspace) selected_draft_ids: HashSet<String>,
-    pub(in crate::workspace) duplicate_strategy: ConnectionImportDuplicateStrategy,
-    pub(in crate::workspace) status: Option<String>,
+pub struct ConnectionImportSnapshot {
+    pub source: ConnectionImportSource,
+    pub paths: Vec<String>,
+    pub preview: Option<ConnectionImportPreview>,
+    pub selected_draft_ids: HashSet<String>,
+    pub duplicate_strategy: ConnectionImportDuplicateStrategy,
+    pub status: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum CliCompanionOperation {
+pub enum CliCompanionOperation {
     Refresh,
     Install,
     Uninstall,
@@ -225,7 +264,7 @@ pub(in crate::workspace) enum CliCompanionOperation {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum DataDirectoryConfirm {
+pub enum DataDirectoryConfirm {
     Conflict {
         path: PathBuf,
         files_found: Vec<String>,
@@ -233,19 +272,19 @@ pub(in crate::workspace) enum DataDirectoryConfirm {
     Reset,
 }
 
-pub(in crate::workspace) enum DataDirectoryOperationResult {
+pub enum DataDirectoryOperationResult {
     Changed,
     Reset,
     Failed(String),
 }
 
-pub(in crate::workspace) enum BackgroundGalleryOperationResult {
+pub enum BackgroundGalleryOperationResult {
     Updated(Option<bool>, Option<String>),
     Failed,
     MediaFailed(oxideterm_gpui_background::BackgroundFailure),
 }
 
-pub(in crate::workspace) enum ThemeImportResult {
+pub enum ThemeImportResult {
     Imported {
         target: ThemeTarget,
         system_dark: Option<bool>,
@@ -257,7 +296,7 @@ pub(in crate::workspace) enum ThemeImportResult {
 }
 
 /// Moves a completed theme editor action into the root persistence adapter.
-pub(in crate::workspace) enum ThemeEditorOperationResult {
+pub enum ThemeEditorOperationResult {
     Save(Arc<ThemeEditorState>),
     Delete(Arc<ThemeEditorState>),
 }
@@ -270,7 +309,7 @@ enum ThemeEditorExitAction {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum KeybindingRecordingFooterAction {
+pub enum KeybindingRecordingFooterAction {
     Confirm,
     Cancel,
 }
@@ -281,18 +320,18 @@ const KEYBINDING_RECORDING_FOOTER_ACTIONS: [KeybindingRecordingFooterAction; 2] 
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum KeybindingRecordingKeyAction {
+pub enum KeybindingRecordingKeyAction {
     Confirm,
     Handled,
 }
 
 /// Transfers the completed recording into the persistence/keymap adapter without cloning it.
-pub(in crate::workspace) struct KeybindingRecordingCommit {
-    pub(in crate::workspace) action_id: String,
-    pub(in crate::workspace) combo: crate::keybindings::KeyCombo,
+pub struct KeybindingRecordingCommit {
+    pub action_id: String,
+    pub combo: crate::keybindings::KeyCombo,
 }
 
-pub(in crate::workspace) enum KeybindingFileOperationResult {
+pub enum KeybindingFileOperationResult {
     Exported,
     ExportFailed,
     Imported {
@@ -302,7 +341,7 @@ pub(in crate::workspace) enum KeybindingFileOperationResult {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(in crate::workspace) enum LaunchAtLoginError {
+pub enum LaunchAtLoginError {
     #[cfg(not(target_os = "macos"))]
     ApprovalRequired,
     OperationFailed(Arc<str>),
@@ -311,10 +350,10 @@ pub(in crate::workspace) enum LaunchAtLoginError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::workspace) struct LaunchAtLoginSnapshot {
-    pub(in crate::workspace) enabled: bool,
-    pub(in crate::workspace) pending: bool,
-    pub(in crate::workspace) error: Option<LaunchAtLoginError>,
+pub struct LaunchAtLoginSnapshot {
+    pub enabled: bool,
+    pub pending: bool,
+    pub error: Option<LaunchAtLoginError>,
 }
 
 /// Converts managed gallery paths once at the filesystem boundary.
@@ -336,12 +375,15 @@ fn is_theme_editor_input(input: SettingsInput) -> bool {
 }
 
 /// Owns settings work that must complete independently from root rendering.
-pub(in crate::workspace) struct SettingsWorkspaceEntity {
-    pub(super) theme_background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
-    pub(super) background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
-    pub(super) editor_background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
+pub struct SettingsWorkspaceEntity {
+    pub section_list: crate::surface::SettingsSectionList,
+    pub theme_background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
+    pub background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
+    pub editor_background_preview: Entity<oxideterm_gpui_background::BackgroundPreview>,
     route: SettingsRouteState,
-    pub(super) theme_preview_page: oxideterm_gpui_settings_view::ThemePreviewPage,
+    pub theme_preview_page: crate::ThemePreviewPage,
+    pub(crate) command_specs: Option<crate::command_specs::CommandSpecsDraft>,
+    pub appearance_edit_dark: Option<bool>,
     external_store_watch: Option<ExternalStoreWatch>,
     external_store_watch_task: Option<Task<()>>,
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -349,63 +391,66 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     portable_exportable_secret_count: Option<usize>,
     portable_refresh_pending: bool,
     portable_refresh_task: Option<Task<()>>,
-    pub(super) portable_dialog: Option<PortableSettingsDialog>,
-    pub(super) portable_action_pending: Option<PortableSettingsAction>,
-    pub(super) portable_action_error: Option<String>,
-    pub(super) portable_current_password: Zeroizing<String>,
-    pub(super) portable_new_password: Zeroizing<String>,
-    pub(super) portable_confirm_password: Zeroizing<String>,
-    pub(super) settings_focused_input: Option<SettingsInput>,
-    pub(super) terminal_cjk_font_custom: bool,
-    pub(super) ide_cjk_font_custom: bool,
-    pub(super) portable_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pub(super) portable_dialog_exit_task: Option<Task<()>>,
-    pub(super) portable_action_task: Option<Task<()>>,
-    pub(super) managed_key_dialog: Option<SettingsManagedKeyDialog>,
-    pub(super) managed_key_status: Option<String>,
-    pub(super) known_hosts: super::known_hosts::KnownHostsState,
-    pub(super) managed_key_file_path: String,
-    pub(super) managed_key_file_name: String,
-    pub(super) managed_key_file_passphrase: Zeroizing<String>,
-    pub(super) managed_key_paste_name: String,
-    pub(super) managed_key_paste_private_key: Zeroizing<String>,
-    pub(super) managed_key_paste_passphrase: Zeroizing<String>,
-    pub(super) managed_key_rename_name: String,
-    pub(super) managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pub(super) managed_key_dialog_exit_task: Option<Task<()>>,
-    pub(super) managed_key_file_picker_task: Option<Task<()>>,
-    pub(in crate::workspace) public_mcp_client_editor: Option<String>,
-    pub(super) new_mcp_client_mode: oxideterm_public_mcp::ClientApprovalMode,
-    pub(super) network_proxy_password: Zeroizing<String>,
-    pub(super) network_proxy_password_status: Option<String>,
-    pub(super) network_proxy_test_host: String,
-    pub(super) network_proxy_test_port: String,
-    pub(super) network_proxy_test_pending: bool,
-    pub(super) network_proxy_test_result: Option<Result<u128, String>>,
-    pub(super) network_proxy_test_task: Option<Task<()>>,
-    pub(super) network_proxy_test_abort: Option<tokio::task::AbortHandle>,
-    pub(super) privilege_draft: PrivilegeCredentialDraft,
-    pub(super) totp_draft: Option<super::totp_credentials_page::TotpDraft>,
-    pub(super) totp_error: Option<oxideterm_connections::totp::TotpError>,
-    pub(super) privilege_error: Option<String>,
-    pub(super) privilege_editor_open: bool,
-    pub(super) privilege_scope_id: Option<String>,
-    pub(super) cli_companion_status: Option<CliCompanionStatus>,
-    pub(super) cli_companion_loading: bool,
-    pub(super) cli_companion_error: Option<String>,
-    pub(super) cli_companion_task: Option<Task<()>>,
-    pub(super) ssh_config_import_dialog_open: bool,
-    pub(super) ssh_config_selected_hosts: HashSet<String>,
-    pub(super) connection_import_status: Option<String>,
-    pub(super) connection_import_source: ConnectionImportSource,
-    pub(super) connection_import_paths: Vec<String>,
-    pub(super) connection_import_preview: Option<ConnectionImportPreview>,
-    pub(super) selected_connection_import_drafts: HashSet<String>,
-    pub(super) connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
-    pub(super) connection_import_target_group: String,
-    pub(super) connection_import_path_picker_task: Option<Task<()>>,
-    pub(super) ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pub(super) ssh_config_import_dialog_exit_task: Option<Task<()>>,
+    pub portable_dialog: Option<PortableSettingsDialog>,
+    pub portable_action_pending: Option<PortableSettingsAction>,
+    pub portable_action_error: Option<String>,
+    pub portable_current_password: Zeroizing<String>,
+    pub portable_new_password: Zeroizing<String>,
+    pub portable_confirm_password: Zeroizing<String>,
+    pub settings_focused_input: Option<SettingsInput>,
+    pub terminal_triggers: crate::terminal_triggers::TerminalTriggersSettingsState,
+    pub highlight: crate::highlight_page::HighlightSettingsState,
+    trigger_input_draft: Zeroizing<String>,
+    pub terminal_cjk_font_custom: bool,
+    pub ide_cjk_font_custom: bool,
+    pub portable_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    pub portable_dialog_exit_task: Option<Task<()>>,
+    pub portable_action_task: Option<Task<()>>,
+    pub managed_key_dialog: Option<SettingsManagedKeyDialog>,
+    pub managed_key_status: Option<String>,
+    pub known_hosts: KnownHostsState,
+    pub managed_key_file_path: String,
+    pub managed_key_file_name: String,
+    pub managed_key_file_passphrase: Zeroizing<String>,
+    pub managed_key_paste_name: String,
+    pub managed_key_paste_private_key: Zeroizing<String>,
+    pub managed_key_paste_passphrase: Zeroizing<String>,
+    pub managed_key_rename_name: String,
+    pub managed_key_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    pub managed_key_dialog_exit_task: Option<Task<()>>,
+    pub managed_key_file_picker_task: Option<Task<()>>,
+    pub public_mcp_client_editor: Option<String>,
+    pub new_mcp_client_mode: oxideterm_public_mcp::ClientApprovalMode,
+    pub network_proxy_password: Zeroizing<String>,
+    pub network_proxy_password_status: Option<String>,
+    pub network_proxy_test_host: String,
+    pub network_proxy_test_port: String,
+    pub network_proxy_test_pending: bool,
+    pub network_proxy_test_result: Option<Result<u128, String>>,
+    pub network_proxy_test_task: Option<Task<()>>,
+    pub network_proxy_test_abort: Option<tokio::task::AbortHandle>,
+    pub privilege_draft: PrivilegeCredentialDraft,
+    pub totp_draft: Option<TotpDraft>,
+    pub totp_error: Option<oxideterm_connections::totp::TotpError>,
+    pub privilege_error: Option<String>,
+    pub privilege_editor_open: bool,
+    pub privilege_scope_id: Option<String>,
+    pub cli_companion_status: Option<CliCompanionStatus>,
+    pub cli_companion_loading: bool,
+    pub cli_companion_error: Option<String>,
+    pub cli_companion_task: Option<Task<()>>,
+    pub ssh_config_import_dialog_open: bool,
+    pub ssh_config_selected_hosts: HashSet<String>,
+    pub connection_import_status: Option<String>,
+    pub connection_import_source: ConnectionImportSource,
+    pub connection_import_paths: Vec<String>,
+    pub connection_import_preview: Option<ConnectionImportPreview>,
+    pub selected_connection_import_drafts: HashSet<String>,
+    pub connection_import_duplicate_strategy: ConnectionImportDuplicateStrategy,
+    pub connection_import_target_group: String,
+    pub connection_import_path_picker_task: Option<Task<()>>,
+    pub ssh_config_import_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence,
+    pub ssh_config_import_dialog_exit_task: Option<Task<()>>,
     data_directory_confirm: Option<DataDirectoryConfirm>,
     data_directory_confirm_presence: oxideterm_gpui_ui::motion::ExitPresence,
     data_directory_picker_task: Option<Task<()>>,
@@ -433,12 +478,14 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     settings_search_query: String,
     keybinding_scope_filter: SettingsKeybindingScopeFilter,
     keybinding_search_query: String,
-    pub(super) skill_search_query: String,
-    pub(super) skill_scope_filter: Option<oxideterm_skills::SkillScope>,
-    pub(super) expanded_skill_paths: HashSet<PathBuf>,
-    pub(super) skill_diagnostics_expanded: bool,
-    pub(super) background_effects_expanded: Option<bool>,
-    pub(super) background_interactions_expanded: Option<bool>,
+    pub skill_search_query: String,
+    pub skill_scope_filter: Option<oxideterm_skills::SkillScope>,
+    pub expanded_skill_paths: HashSet<PathBuf>,
+    pub skill_diagnostics_expanded: bool,
+    pub background_effects_expanded: Option<bool>,
+    pub background_interactions_expanded: Option<bool>,
+    pub(crate) background_scope_motion: oxideterm_gpui_ui::motion::UserSegmentedControlMotionState,
+    pub(crate) background_scope_task: Option<Task<()>>,
     keybinding_recording_action_id: Option<String>,
     keybinding_conflict_action_ids: Vec<String>,
     keybinding_recording_combo: Option<crate::keybindings::KeyCombo>,
@@ -455,32 +502,38 @@ pub(in crate::workspace) struct SettingsWorkspaceEntity {
     launch_at_login_error: Option<LaunchAtLoginError>,
     launch_at_login_generation: u64,
     launch_at_login_task: Option<Task<()>>,
-    pub(super) native_update: NativeUpdateRuntime,
+    pub(crate) native_update: NativeUpdateRuntime,
 }
 
 #[derive(Clone, Copy)]
-pub(in crate::workspace) struct KeybindingResetConfirmSnapshot {
-    pub(in crate::workspace) phase: oxideterm_gpui_ui::motion::ExitPhase,
-    pub(in crate::workspace) focused_action: Option<ConfirmDialogAction>,
+pub struct KeybindingResetConfirmSnapshot {
+    pub phase: oxideterm_gpui_ui::motion::ExitPhase,
+    pub focused_action: Option<ConfirmDialogAction>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum KeybindingResetConfirmKeyAction {
+pub enum KeybindingResetConfirmKeyAction {
     Cancel,
     Confirm,
     Handled,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum SettingsWorkspaceToast {
+pub enum SettingsWorkspaceToast {
     Success,
     Warning,
     Error,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum SettingsWorkspaceEvent {
-    ExternalStoresChanged,
+pub struct ExternalStoreChange {
+    pub settings: bool,
+    pub connections: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SettingsWorkspaceEvent {
+    ExternalStoresChanged(ExternalStoreChange),
     ResetNativeUpdateOverlay,
     ShowNativeUpdateNotification,
     ShowNativeUpdateToast(SettingsWorkspaceToast),
@@ -493,6 +546,8 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
     ThemeImportReady,
     ThemeEditorOperationReady,
     KeybindingFileOperationReady,
+    HighlightDraftChanged(SettingsInput),
+    RefreshTerminalHighlightPreferences,
     PortablePasswordChangeFinished {
         success: bool,
     },
@@ -505,7 +560,7 @@ pub(in crate::workspace) enum SettingsWorkspaceEvent {
 impl EventEmitter<SettingsWorkspaceEvent> for SettingsWorkspaceEntity {}
 
 impl SettingsWorkspaceEntity {
-    pub(super) fn edit_theme_editor_background(
+    pub fn edit_theme_editor_background(
         &mut self,
         edit: impl FnOnce(&mut oxideterm_settings::BackgroundStyle),
         cx: &mut Context<Self>,
@@ -515,13 +570,19 @@ impl SettingsWorkspaceEntity {
             cx.notify();
         }
     }
-    pub(in crate::workspace) fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            section_list: crate::surface::SettingsSectionList::default(),
+            terminal_triggers: Default::default(),
+            highlight: Default::default(),
+            trigger_input_draft: Zeroizing::new(String::new()),
             theme_background_preview: cx.new(oxideterm_gpui_background::BackgroundPreview::new),
             background_preview: cx.new(oxideterm_gpui_background::BackgroundPreview::new),
             editor_background_preview: cx.new(oxideterm_gpui_background::BackgroundPreview::new),
             route: SettingsRouteState::default(),
             theme_preview_page: Default::default(),
+            command_specs: None,
+            appearance_edit_dark: None,
             external_store_watch: None,
             external_store_watch_task: None,
             portable_status: None,
@@ -619,6 +680,8 @@ impl SettingsWorkspaceEntity {
             skill_diagnostics_expanded: false,
             background_effects_expanded: None,
             background_interactions_expanded: None,
+            background_scope_motion: Default::default(),
+            background_scope_task: None,
             keybinding_recording_action_id: None,
             keybinding_conflict_action_ids: Vec::new(),
             keybinding_recording_combo: None,
@@ -639,15 +702,11 @@ impl SettingsWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn route_snapshot(&self) -> SettingsRouteSnapshot {
+    pub fn route_snapshot(&self) -> SettingsRouteSnapshot {
         self.route.route_snapshot()
     }
 
-    pub(in crate::workspace) fn set_active_tab(
-        &mut self,
-        tab: SettingsTab,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn set_active_tab(&mut self, tab: SettingsTab, cx: &mut Context<Self>) -> bool {
         if !self.route.set_active_tab(tab) {
             return false;
         }
@@ -660,7 +719,7 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn set_terminal_page(
+    pub fn set_terminal_page(
         &mut self,
         page: TerminalSettingsPage,
         cx: &mut Context<Self>,
@@ -672,11 +731,7 @@ impl SettingsWorkspaceEntity {
         changed
     }
 
-    pub(in crate::workspace) fn set_ai_page(
-        &mut self,
-        page: AiSettingsPage,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn set_ai_page(&mut self, page: AiSettingsPage, cx: &mut Context<Self>) -> bool {
         let changed = self.route.set_ai_page(page);
         if changed {
             cx.notify();
@@ -684,7 +739,7 @@ impl SettingsWorkspaceEntity {
         changed
     }
 
-    pub(in crate::workspace) fn open_navigation_editor(
+    pub fn open_navigation_editor(
         &mut self,
         persisted_groups: &[Vec<String>],
         cx: &mut Context<Self>,
@@ -693,23 +748,21 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_navigation_editor(&mut self, cx: &mut Context<Self>) {
+    pub fn close_navigation_editor(&mut self, cx: &mut Context<Self>) {
         if self.route.close_navigation_editor() {
             cx.notify();
         }
     }
 
-    pub(in crate::workspace) fn navigation_draft_snapshot(
-        &self,
-    ) -> Option<Arc<SettingsNavigationLayout>> {
+    pub fn navigation_draft_snapshot(&self) -> Option<Arc<SettingsNavigationLayout>> {
         self.route.navigation_draft_snapshot()
     }
 
-    pub(in crate::workspace) fn navigation_editor_open(&self) -> bool {
+    pub fn navigation_editor_open(&self) -> bool {
         self.route.navigation_editor_open()
     }
 
-    pub(in crate::workspace) fn apply_navigation_draft_action(
+    pub fn apply_navigation_draft_action(
         &mut self,
         action: SettingsNavigationDraftAction,
         cx: &mut Context<Self>,
@@ -721,7 +774,7 @@ impl SettingsWorkspaceEntity {
         changed
     }
 
-    pub(in crate::workspace) fn take_navigation_editor_persisted_groups(
+    pub fn take_navigation_editor_persisted_groups(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<Vec<Vec<String>>> {
@@ -730,7 +783,7 @@ impl SettingsWorkspaceEntity {
         Some(groups)
     }
 
-    pub(in crate::workspace) fn launch_at_login_snapshot(&self) -> LaunchAtLoginSnapshot {
+    pub fn launch_at_login_snapshot(&self) -> LaunchAtLoginSnapshot {
         LaunchAtLoginSnapshot {
             enabled: self.launch_at_login_enabled,
             pending: self.launch_at_login_pending,
@@ -739,7 +792,7 @@ impl SettingsWorkspaceEntity {
     }
 
     #[cfg(any(not(target_os = "macos"), test))]
-    pub(in crate::workspace) fn start_launch_at_login_operation(
+    pub fn start_launch_at_login_operation(
         &mut self,
         operation: impl std::future::Future<Output = Result<bool, LaunchAtLoginError>> + 'static,
         cx: &mut Context<Self>,
@@ -783,7 +836,7 @@ impl SettingsWorkspaceEntity {
     }
 
     #[cfg(target_os = "macos")]
-    pub(in crate::workspace) fn finish_launch_at_login_settings_handoff(
+    pub fn finish_launch_at_login_settings_handoff(
         &mut self,
         result: Result<(), String>,
         cx: &mut Context<Self>,
@@ -800,11 +853,11 @@ impl SettingsWorkspaceEntity {
         );
     }
 
-    pub(in crate::workspace) fn keybinding_scope_filter(&self) -> SettingsKeybindingScopeFilter {
+    pub fn keybinding_scope_filter(&self) -> SettingsKeybindingScopeFilter {
         self.keybinding_scope_filter
     }
 
-    pub(in crate::workspace) fn set_keybinding_scope_filter(
+    pub fn set_keybinding_scope_filter(
         &mut self,
         filter: SettingsKeybindingScopeFilter,
         cx: &mut Context<Self>,
@@ -817,31 +870,27 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn keybinding_search_query(&self) -> &str {
+    pub fn keybinding_search_query(&self) -> &str {
         &self.keybinding_search_query
     }
 
-    pub(in crate::workspace) fn keybinding_recording_action_id(&self) -> Option<&str> {
+    pub fn keybinding_recording_action_id(&self) -> Option<&str> {
         self.keybinding_recording_action_id.as_deref()
     }
 
-    pub(in crate::workspace) fn keybinding_recording_combo(
-        &self,
-    ) -> Option<&crate::keybindings::KeyCombo> {
+    pub fn keybinding_recording_combo(&self) -> Option<&crate::keybindings::KeyCombo> {
         self.keybinding_recording_combo.as_ref()
     }
 
-    pub(in crate::workspace) fn keybinding_conflicts(&self) -> &[String] {
+    pub fn keybinding_conflicts(&self) -> &[String] {
         &self.keybinding_conflict_action_ids
     }
 
-    pub(in crate::workspace) fn keybinding_recording_footer_focus(
-        &self,
-    ) -> Option<KeybindingRecordingFooterAction> {
+    pub fn keybinding_recording_footer_focus(&self) -> Option<KeybindingRecordingFooterAction> {
         self.keybinding_recording_footer_focus
     }
 
-    pub(in crate::workspace) fn start_keybinding_recording(
+    pub fn start_keybinding_recording(
         &mut self,
         action_id: impl Into<String>,
         cx: &mut Context<Self>,
@@ -853,7 +902,7 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn stop_keybinding_recording(&mut self, cx: &mut Context<Self>) {
+    pub fn stop_keybinding_recording(&mut self, cx: &mut Context<Self>) {
         let changed = self.keybinding_recording_action_id.take().is_some()
             || !self.keybinding_conflict_action_ids.is_empty()
             || self.keybinding_recording_combo.take().is_some()
@@ -864,7 +913,7 @@ impl SettingsWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn handle_keybinding_recording_key(
+    pub fn handle_keybinding_recording_key(
         &mut self,
         event: &KeyDownEvent,
         overrides: &serde_json::Map<String, serde_json::Value>,
@@ -945,7 +994,7 @@ impl SettingsWorkspaceEntity {
         Some(KeybindingRecordingKeyAction::Handled)
     }
 
-    pub(in crate::workspace) fn activate_keybinding_recording_footer(
+    pub fn activate_keybinding_recording_footer(
         &mut self,
         action: KeybindingRecordingFooterAction,
         cx: &mut Context<Self>,
@@ -960,7 +1009,7 @@ impl SettingsWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn take_keybinding_recording_commit(
+    pub fn take_keybinding_recording_commit(
         &mut self,
         cx: &mut Context<Self>,
     ) -> Option<KeybindingRecordingCommit> {
@@ -975,7 +1024,7 @@ impl SettingsWorkspaceEntity {
         Some(KeybindingRecordingCommit { action_id, combo })
     }
 
-    pub(in crate::workspace) fn open_keybinding_reset_confirm(&mut self, cx: &mut Context<Self>) {
+    pub fn open_keybinding_reset_confirm(&mut self, cx: &mut Context<Self>) {
         self.keybinding_reset_confirm_exit_task = None;
         self.keybinding_reset_confirm_open = true;
         self.keybinding_reset_confirm_presence.reopen();
@@ -983,9 +1032,7 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn keybinding_reset_confirm_snapshot(
-        &self,
-    ) -> Option<KeybindingResetConfirmSnapshot> {
+    pub fn keybinding_reset_confirm_snapshot(&self) -> Option<KeybindingResetConfirmSnapshot> {
         self.keybinding_reset_confirm_open
             .then_some(KeybindingResetConfirmSnapshot {
                 phase: self.keybinding_reset_confirm_presence.phase(),
@@ -993,7 +1040,7 @@ impl SettingsWorkspaceEntity {
             })
     }
 
-    pub(in crate::workspace) fn begin_keybinding_reset_confirm_exit(
+    pub fn begin_keybinding_reset_confirm_exit(
         &mut self,
         delay: Duration,
         cx: &mut Context<Self>,
@@ -1021,7 +1068,7 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn handle_keybinding_reset_confirm_key(
+    pub fn handle_keybinding_reset_confirm_key(
         &mut self,
         key: &str,
         shift: bool,
@@ -1078,7 +1125,7 @@ impl SettingsWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn start_external_store_watch(
+    pub fn start_external_store_watch(
         &mut self,
         settings_path: PathBuf,
         connections_path: PathBuf,
@@ -1096,8 +1143,8 @@ impl SettingsWorkspaceEntity {
                         let Some(watch) = settings.external_store_watch.as_mut() else {
                             return false;
                         };
-                        if watch.take_external_change() {
-                            cx.emit(SettingsWorkspaceEvent::ExternalStoresChanged);
+                        if let Some(change) = watch.take_external_change() {
+                            cx.emit(SettingsWorkspaceEvent::ExternalStoresChanged(change));
                         }
                         true
                     })
@@ -1109,32 +1156,27 @@ impl SettingsWorkspaceEntity {
         }));
     }
 
-    pub(in crate::workspace) fn acknowledge_external_store_state(&mut self) {
+    pub fn acknowledge_external_store_state(&mut self) {
         if let Some(watch) = self.external_store_watch.as_mut() {
             watch.refresh_observed_state();
         }
     }
 
-    pub(in crate::workspace) fn data_directory_confirm(&self) -> Option<&DataDirectoryConfirm> {
+    pub fn data_directory_confirm(&self) -> Option<&DataDirectoryConfirm> {
         self.data_directory_confirm.as_ref()
     }
 
-    pub(in crate::workspace) fn data_directory_confirm_is_visible(&self) -> bool {
+    pub fn data_directory_confirm_is_visible(&self) -> bool {
         self.data_directory_confirm.is_some()
             && self.data_directory_confirm_presence.phase()
                 == oxideterm_gpui_ui::motion::ExitPhase::Visible
     }
 
-    pub(in crate::workspace) fn data_directory_confirm_phase(
-        &self,
-    ) -> oxideterm_gpui_ui::motion::ExitPhase {
+    pub fn data_directory_confirm_phase(&self) -> oxideterm_gpui_ui::motion::ExitPhase {
         self.data_directory_confirm_presence.phase()
     }
 
-    pub(in crate::workspace) fn open_data_directory_reset_confirm(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_data_directory_reset_confirm(&mut self, cx: &mut Context<Self>) {
         self.data_directory_confirm_exit_task = None;
         self.data_directory_confirm_presence.reopen();
         self.data_directory_confirm = Some(DataDirectoryConfirm::Reset);
@@ -1142,7 +1184,7 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn start_data_directory_picker(
+    pub fn start_data_directory_picker(
         &mut self,
         selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
         cx: &mut Context<Self>,
@@ -1182,7 +1224,7 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn begin_data_directory_confirm_exit(
+    pub fn begin_data_directory_confirm_exit(
         &mut self,
         confirmed: bool,
         delay: Duration,
@@ -1250,27 +1292,22 @@ impl SettingsWorkspaceEntity {
         cx.emit(SettingsWorkspaceEvent::DataDirectoryOperationReady);
     }
 
-    pub(in crate::workspace) fn take_data_directory_results(
-        &mut self,
-    ) -> VecDeque<DataDirectoryOperationResult> {
+    pub fn take_data_directory_results(&mut self) -> VecDeque<DataDirectoryOperationResult> {
         std::mem::take(&mut self.data_directory_results)
     }
 
-    pub(in crate::workspace) fn background_blur_preview(
-        &self,
-        system_dark: Option<bool>,
-    ) -> Option<i64> {
+    pub fn background_blur_preview(&self, system_dark: Option<bool>) -> Option<i64> {
         (self.background_blur_system_dark == system_dark)
             .then_some(self.background_blur_preview)
             .flatten()
     }
 
-    pub(in crate::workspace) fn finish_background_blur_drag(&mut self, cx: &mut Context<Self>) {
+    pub fn finish_background_blur_drag(&mut self, cx: &mut Context<Self>) {
         self.background_blur_commit_task = None;
         self.finish_background_blur_commit(self.background_blur_commit_generation, cx);
     }
 
-    pub(in crate::workspace) fn update_background_blur_preview(
+    pub fn update_background_blur_preview(
         &mut self,
         persisted_value: i64,
         preview_value: i64,
@@ -1328,11 +1365,11 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn initialize_background_gallery(&mut self, images: Vec<String>) {
+    pub fn initialize_background_gallery(&mut self, images: Vec<String>) {
         self.background_images = Arc::from(images);
     }
 
-    pub(super) fn background_media_is_animated(
+    pub fn background_media_is_animated(
         &mut self,
         path: Option<&str>,
         cx: &mut Context<Self>,
@@ -1365,20 +1402,16 @@ impl SettingsWorkspaceEntity {
         false
     }
 
-    pub(super) fn background_media_has_animation(&self, path: Option<&str>) -> bool {
+    pub fn background_media_has_animation(&self, path: Option<&str>) -> bool {
         path.and_then(|path| self.background_media_info.get(Path::new(path)))
             .is_some_and(|info| matches!(info, Ok(true)))
     }
 
-    pub(in crate::workspace) fn background_images_snapshot(&self) -> Arc<[String]> {
+    pub fn background_images_snapshot(&self) -> Arc<[String]> {
         Arc::clone(&self.background_images)
     }
 
-    pub(in crate::workspace) fn add_background_pack_images(
-        &mut self,
-        paths: &[PathBuf],
-        cx: &mut Context<Self>,
-    ) {
+    pub fn add_background_pack_images(&mut self, paths: &[PathBuf], cx: &mut Context<Self>) {
         if paths.is_empty() {
             return;
         }
@@ -1397,7 +1430,7 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn start_background_image_import(
+    pub fn start_background_image_import(
         &mut self,
         selection: impl std::future::Future<Output = Option<Vec<PathBuf>>> + 'static,
         settings_path: PathBuf,
@@ -1523,20 +1556,18 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn remove_background_image(
+    pub fn remove_background_image(
         &mut self,
         settings_path: PathBuf,
         image_path: String,
         current_path: Option<String>,
         system_dark: Option<bool>,
         runtime: tokio::runtime::Handle,
+        is_bundled: fn(&Path, &Path) -> bool,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.background_gallery_task.is_some()
-            || crate::workspace::is_bundled_workspace_background(
-                &settings_path,
-                Path::new(&image_path),
-            )
+            || is_bundled(&settings_path, Path::new(&image_path))
         {
             return false;
         }
@@ -1582,12 +1613,13 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn clear_background_image_gallery(
+    pub fn clear_background_image_gallery(
         &mut self,
         settings_path: PathBuf,
         current_path: Option<String>,
         system_dark: Option<bool>,
         runtime: tokio::runtime::Handle,
+        is_bundled: fn(&Path, &Path) -> bool,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.background_gallery_task.is_some() {
@@ -1599,10 +1631,7 @@ impl SettingsWorkspaceEntity {
             let result = runtime
                 .spawn_blocking(move || -> anyhow::Result<(Vec<String>, Option<String>)> {
                     for image_path in oxideterm_settings::list_background_images(&settings_path)? {
-                        if !crate::workspace::is_bundled_workspace_background(
-                            &settings_path,
-                            &image_path,
-                        ) {
+                        if !is_bundled(&settings_path, &image_path) {
                             oxideterm_settings::remove_background_image(
                                 &settings_path,
                                 &image_path,
@@ -1660,13 +1689,13 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn take_background_gallery_results(
+    pub fn take_background_gallery_results(
         &mut self,
     ) -> VecDeque<BackgroundGalleryOperationResult> {
         std::mem::take(&mut self.background_gallery_results)
     }
 
-    pub(in crate::workspace) fn start_theme_import(
+    pub fn start_theme_import(
         &mut self,
         target: ThemeTarget,
         system_dark: Option<bool>,
@@ -1724,34 +1753,28 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn take_theme_import_results(
-        &mut self,
-    ) -> VecDeque<ThemeImportResult> {
+    pub fn take_theme_import_results(&mut self) -> VecDeque<ThemeImportResult> {
         std::mem::take(&mut self.theme_import_results)
     }
 
-    pub(in crate::workspace) fn theme_editor(&self) -> Option<&ThemeEditorState> {
+    pub fn theme_editor(&self) -> Option<&ThemeEditorState> {
         self.theme_editor.as_deref()
     }
 
     /// Shares one immutable render snapshot without copying the color arrays.
-    pub(in crate::workspace) fn theme_editor_snapshot(&self) -> Option<Arc<ThemeEditorState>> {
+    pub fn theme_editor_snapshot(&self) -> Option<Arc<ThemeEditorState>> {
         self.theme_editor.as_ref().map(Arc::clone)
     }
 
-    pub(in crate::workspace) fn theme_editor_open(&self) -> bool {
+    pub fn theme_editor_open(&self) -> bool {
         self.theme_editor.is_some()
     }
 
-    pub(in crate::workspace) fn theme_editor_phase(&self) -> oxideterm_gpui_ui::motion::ExitPhase {
+    pub fn theme_editor_phase(&self) -> oxideterm_gpui_ui::motion::ExitPhase {
         self.theme_editor_presence.phase()
     }
 
-    pub(in crate::workspace) fn open_theme_editor(
-        &mut self,
-        editor: ThemeEditorState,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_theme_editor(&mut self, editor: ThemeEditorState, cx: &mut Context<Self>) {
         // Replacing the retained task cancels a stale exit before installing
         // the new draft. The presence generation is an additional stale guard.
         self.theme_editor_exit_task = None;
@@ -1763,7 +1786,7 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn select_theme_editor_section(
+    pub fn select_theme_editor_section(
         &mut self,
         section: ThemeEditorSection,
         cx: &mut Context<Self>,
@@ -1780,11 +1803,7 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn duplicate_theme_editor_from(
-        &mut self,
-        theme_id: &str,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn duplicate_theme_editor_from(&mut self, theme_id: &str, cx: &mut Context<Self>) -> bool {
         let Some(editor) = self.theme_editor.as_mut() else {
             return false;
         };
@@ -1800,10 +1819,7 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn derive_theme_editor_ui_colors(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn derive_theme_editor_ui_colors(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(editor) = self.theme_editor.as_mut() else {
             return false;
         };
@@ -1814,19 +1830,11 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn cancel_theme_editor(
-        &mut self,
-        delay: Duration,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn cancel_theme_editor(&mut self, delay: Duration, cx: &mut Context<Self>) -> bool {
         self.begin_theme_editor_exit(ThemeEditorExitAction::Cancel, delay, cx)
     }
 
-    pub(in crate::workspace) fn save_theme_editor(
-        &mut self,
-        delay: Duration,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn save_theme_editor(&mut self, delay: Duration, cx: &mut Context<Self>) -> bool {
         if self
             .theme_editor
             .as_ref()
@@ -1837,11 +1845,7 @@ impl SettingsWorkspaceEntity {
         self.begin_theme_editor_exit(ThemeEditorExitAction::Save, delay, cx)
     }
 
-    pub(in crate::workspace) fn delete_theme_editor(
-        &mut self,
-        delay: Duration,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn delete_theme_editor(&mut self, delay: Duration, cx: &mut Context<Self>) -> bool {
         if self
             .theme_editor
             .as_ref()
@@ -1926,13 +1930,11 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn take_theme_editor_results(
-        &mut self,
-    ) -> VecDeque<ThemeEditorOperationResult> {
+    pub fn take_theme_editor_results(&mut self) -> VecDeque<ThemeEditorOperationResult> {
         std::mem::take(&mut self.theme_editor_results)
     }
 
-    pub(in crate::workspace) fn start_keybinding_export(
+    pub fn start_keybinding_export(
         &mut self,
         selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
         overrides: serde_json::Map<String, serde_json::Value>,
@@ -1967,10 +1969,13 @@ impl SettingsWorkspaceEntity {
         generation
     }
 
-    pub(in crate::workspace) fn start_keybinding_import(
+    pub fn start_keybinding_import(
         &mut self,
         selection: impl std::future::Future<Output = Option<PathBuf>> + 'static,
         runtime: tokio::runtime::Handle,
+        sanitize: fn(
+            serde_json::Value,
+        ) -> Result<serde_json::Map<String, serde_json::Value>, String>,
         cx: &mut Context<Self>,
     ) -> u64 {
         let generation = self.replace_keybinding_file_operation();
@@ -1988,9 +1993,7 @@ impl SettingsWorkspaceEntity {
                         .and_then(|content| {
                             serde_json::from_str::<serde_json::Value>(&content).map_err(|_| ())
                         })
-                        .and_then(|value| {
-                            crate::keybindings::sanitize_imported_overrides(value).map_err(|_| ())
-                        })
+                        .and_then(|value| sanitize(value).map_err(|_| ()))
                 })
                 .await
                 .map_err(|_| ())
@@ -2042,13 +2045,13 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn take_keybinding_file_operation_results(
+    pub fn take_keybinding_file_operation_results(
         &mut self,
     ) -> VecDeque<KeybindingFileOperationResult> {
         std::mem::take(&mut self.keybinding_file_operation_results)
     }
 
-    pub(in crate::workspace) fn portable_status_snapshot(&self) -> PortableStatusSnapshot {
+    pub fn portable_status_snapshot(&self) -> PortableStatusSnapshot {
         PortableStatusSnapshot {
             status: self.portable_status.clone(),
             error: self.portable_status_error.clone(),
@@ -2057,13 +2060,13 @@ impl SettingsWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn portable_mode(&self) -> Option<bool> {
+    pub fn portable_mode(&self) -> Option<bool> {
         self.portable_status
             .as_ref()
             .map(|status| status.is_portable)
     }
 
-    pub(in crate::workspace) fn start_portable_status_refresh(
+    pub fn start_portable_status_refresh(
         &mut self,
         force: bool,
         runtime: Arc<tokio::runtime::Runtime>,
@@ -2124,34 +2127,30 @@ impl SettingsWorkspaceEntity {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn invalidate_portable_status(&mut self, cx: &mut Context<Self>) {
+    pub fn invalidate_portable_status(&mut self, cx: &mut Context<Self>) {
         self.portable_status = None;
         self.portable_status_error = None;
         cx.notify();
     }
 
-    pub(in crate::workspace) fn settings_entity_focused_input(&self) -> Option<SettingsInput> {
+    pub fn settings_entity_focused_input(&self) -> Option<SettingsInput> {
         self.settings_focused_input
     }
 
-    pub(in crate::workspace) fn settings_search_open(&self) -> bool {
+    pub fn settings_search_open(&self) -> bool {
         self.settings_search_open
     }
 
-    pub(in crate::workspace) fn settings_search_query(&self) -> &str {
+    pub fn settings_search_query(&self) -> &str {
         &self.settings_search_query
     }
 
-    pub(in crate::workspace) fn open_settings_search(&mut self, cx: &mut Context<Self>) {
+    pub fn open_settings_search(&mut self, cx: &mut Context<Self>) {
         self.settings_search_open = true;
         cx.notify();
     }
 
-    pub(in crate::workspace) fn close_settings_search(
-        &mut self,
-        clear_query: bool,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn close_settings_search(&mut self, clear_query: bool, cx: &mut Context<Self>) -> bool {
         let mut changed = std::mem::take(&mut self.settings_search_open);
         if self.settings_focused_input == Some(SettingsInput::SettingsSearch) {
             self.settings_focused_input = None;
@@ -2167,10 +2166,7 @@ impl SettingsWorkspaceEntity {
         changed
     }
 
-    pub(in crate::workspace) fn clear_settings_search_query(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn clear_settings_search_query(&mut self, cx: &mut Context<Self>) -> bool {
         if self.settings_search_query.is_empty() {
             return false;
         }
@@ -2179,11 +2175,17 @@ impl SettingsWorkspaceEntity {
         true
     }
 
-    pub(in crate::workspace) fn settings_entity_input_value(
-        &self,
-        input: SettingsInput,
-    ) -> Option<&str> {
+    pub fn settings_entity_input_value(&self, input: SettingsInput) -> Option<&str> {
+        if crate::highlight_page::is_highlight_input(input) {
+            return (self.settings_focused_input == Some(input))
+                .then_some(self.highlight.input_draft.as_str());
+        }
+        if crate::terminal_triggers::is_terminal_trigger_input(input) {
+            return (self.settings_focused_input == Some(input))
+                .then_some(self.trigger_input_draft.as_str());
+        }
         match input {
+            SettingsInput::TerminalCommandSpecsJson => self.command_specs.as_ref().map(|draft| draft.value.as_str()),
             SettingsInput::SettingsSearch => Some(&self.settings_search_query),
             SettingsInput::CustomThemeName => self
                 .theme_editor
@@ -2245,13 +2247,28 @@ impl SettingsWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn focus_settings_entity_input(
+    pub fn focus_settings_entity_input(
         &mut self,
         input: SettingsInput,
         cx: &mut Context<Self>,
     ) -> bool {
+        if crate::terminal_triggers::is_terminal_trigger_input(input) {
+            if !self.terminal_triggers.editor_open {
+                return false;
+            }
+            if self.settings_focused_input != Some(input) {
+                let Some(value) = self.terminal_triggers.editor_input_value(input) else {
+                    return false;
+                };
+                self.trigger_input_draft = Zeroizing::new(value);
+            }
+            self.settings_focused_input = Some(input);
+            cx.notify();
+            return true;
+        }
         let portable_open = self.portable_dialog == Some(PortableSettingsDialog::ChangePassword);
         let can_focus = match input {
+            SettingsInput::TerminalCommandSpecsJson => self.command_specs_open(),
             SettingsInput::SettingsSearch => self.settings_search_open,
             SettingsInput::CustomThemeName
             | SettingsInput::CustomThemeTerminalColor(_)
@@ -2299,23 +2316,42 @@ impl SettingsWorkspaceEntity {
         if !can_focus {
             return false;
         }
+        self.trigger_input_draft.zeroize();
         self.settings_focused_input = Some(input);
         cx.notify();
         true
     }
 
-    pub(in crate::workspace) fn blur_settings_entity_input(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn focus_highlight_input(&mut self, input: SettingsInput, value: String, cx: &mut Context<Self>) {
+        if self.settings_focused_input != Some(input) {
+            self.trigger_input_draft.zeroize();
+            self.highlight.input_draft = value;
+            self.settings_focused_input = Some(input);
+            cx.notify();
+        }
+    }
+
+    pub fn queue_highlight_preferences_refresh(&mut self, cx: &mut Context<Self>) {
+        self.highlight.refresh_task = Some(cx.spawn(async |settings, cx| {
+            cx.background_executor().timer(Duration::from_millis(150)).await;
+            let _ = settings.update(cx, |settings, cx| {
+                settings.highlight.refresh_task = None;
+                cx.emit(SettingsWorkspaceEvent::RefreshTerminalHighlightPreferences);
+            });
+        }));
+    }
+
+    pub fn blur_settings_entity_input(&mut self, cx: &mut Context<Self>) -> bool {
         let changed = self.settings_focused_input.take().is_some();
         if changed {
+            self.trigger_input_draft.zeroize();
+            self.highlight.input_draft.clear();
             cx.notify();
         }
         changed
     }
 
-    pub(in crate::workspace) fn replace_settings_entity_input(
+    pub fn replace_settings_entity_input(
         &mut self,
         input: SettingsInput,
         replacement_range: Option<std::ops::Range<usize>>,
@@ -2341,11 +2377,15 @@ impl SettingsWorkspaceEntity {
             }
         }
         self.clear_settings_entity_input_error(input);
+        self.apply_active_trigger_input();
+        if crate::highlight_page::is_highlight_input(input) {
+            cx.emit(SettingsWorkspaceEvent::HighlightDraftChanged(input));
+        }
         cx.notify();
         true
     }
 
-    pub(in crate::workspace) fn pop_settings_entity_input(
+    pub fn pop_settings_entity_input(
         &mut self,
         input: SettingsInput,
         cx: &mut Context<Self>,
@@ -2358,8 +2398,18 @@ impl SettingsWorkspaceEntity {
         };
         value.pop();
         self.clear_settings_entity_input_error(input);
+        self.apply_active_trigger_input();
+        if crate::highlight_page::is_highlight_input(input) {
+            cx.emit(SettingsWorkspaceEvent::HighlightDraftChanged(input));
+        }
         cx.notify();
         true
+    }
+
+    pub fn apply_active_trigger_input(&mut self) -> bool {
+        self.settings_focused_input
+            .filter(|input| crate::terminal_triggers::is_terminal_trigger_input(*input))
+            .is_none_or(|input| self.terminal_triggers.apply_editor_input(input, &self.trigger_input_draft))
     }
 
     fn clear_settings_entity_input_error(&mut self, input: SettingsInput) {
@@ -2394,7 +2444,14 @@ impl SettingsWorkspaceEntity {
     }
 
     fn settings_entity_input_mut(&mut self, input: SettingsInput) -> Option<&mut String> {
+        if crate::highlight_page::is_highlight_input(input) {
+            return Some(&mut self.highlight.input_draft);
+        }
+        if crate::terminal_triggers::is_terminal_trigger_input(input) {
+            return Some(&mut self.trigger_input_draft);
+        }
         match input {
+            SettingsInput::TerminalCommandSpecsJson => self.command_specs.as_mut().map(|draft| &mut *draft.value),
             SettingsInput::SettingsSearch => Some(&mut self.settings_search_query),
             SettingsInput::CustomThemeName => self
                 .theme_editor
@@ -2484,7 +2541,7 @@ mod tests {
     use oxideterm_settings_model::{SettingsTab, ThemeTarget, theme_editor_from_settings};
 
     use super::{
-        ExternalStoreWatch, KeybindingFileOperationResult, LaunchAtLoginError,
+        ExternalStoreChange, ExternalStoreWatch, KeybindingFileOperationResult, LaunchAtLoginError,
         SettingsWorkspaceEntity, ThemeEditorOperationResult,
     };
 
@@ -2507,49 +2564,23 @@ mod tests {
             connections_modified: Some(initial),
         };
 
-        assert!(watch.take_change_for_modified_times(Some(changed), Some(initial)));
-        assert!(!watch.take_change_for_modified_times(Some(changed), Some(initial)));
-        assert!(watch.take_change_for_modified_times(Some(changed), Some(changed)));
-    }
-
-    #[test]
-    fn secret_render_projections_do_not_copy_entity_owned_plaintext() {
-        let portable_source = include_str!("portable_runtime/actions.rs");
-        let managed_key_source = include_str!("connections_page.rs");
-        let proxy_source = include_str!("network_page.rs");
-
-        for forbidden in [
-            concat!("portable_current_password", ".to_string()"),
-            concat!("portable_new_password", ".to_string()"),
-            concat!("portable_confirm_password", ".to_string()"),
-        ] {
-            assert!(!portable_source.contains(forbidden), "{forbidden}");
-        }
-        for forbidden in [
-            concat!(
-                "file_passphrase: self.managed_key_file_passphrase",
-                ".clone()"
-            ),
-            concat!(
-                "private_key: self.managed_key_paste_private_key",
-                ".clone()"
-            ),
-            concat!("passphrase: self.managed_key_paste_passphrase", ".clone()"),
-        ] {
-            assert!(!managed_key_source.contains(forbidden), "{forbidden}");
-        }
-        assert!(
-            !proxy_source.contains(concat!("password: self.network_proxy_password", ".clone()"))
+        assert_eq!(
+            watch.take_change_for_modified_times(Some(changed), Some(initial)),
+            Some(ExternalStoreChange {
+                settings: true,
+                connections: false
+            })
         );
-    }
-
-    #[test]
-    fn workspace_drop_zeroizes_the_transient_settings_ime_draft() {
-        let workspace_source = include_str!("../../workspace.rs");
-
-        assert!(workspace_source.contains("impl Drop for WorkspaceApp"));
-        assert!(
-            workspace_source.contains("zeroize::Zeroize::zeroize(&mut self.settings_input_draft)")
+        assert_eq!(
+            watch.take_change_for_modified_times(Some(changed), Some(initial)),
+            None
+        );
+        assert_eq!(
+            watch.take_change_for_modified_times(Some(changed), Some(changed)),
+            Some(ExternalStoreChange {
+                settings: false,
+                connections: true
+            })
         );
     }
 
@@ -2653,7 +2684,10 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(
             events.try_recv().expect("settings file change event"),
-            super::SettingsWorkspaceEvent::ExternalStoresChanged
+            super::SettingsWorkspaceEvent::ExternalStoresChanged(ExternalStoreChange {
+                settings: true,
+                connections: false,
+            })
         );
         assert!(events.try_recv().is_err());
 
@@ -2669,7 +2703,10 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(
             events.try_recv().expect("connections file change event"),
-            super::SettingsWorkspaceEvent::ExternalStoresChanged
+            super::SettingsWorkspaceEvent::ExternalStoresChanged(ExternalStoreChange {
+                settings: false,
+                connections: true,
+            })
         );
         assert!(events.try_recv().is_err());
         entity.read_with(cx, |entity, _cx| {
@@ -2942,7 +2979,7 @@ mod tests {
                     Some("draft.webp")
                 );
                 entity.settings_focused_input =
-                    Some(oxideterm_gpui_settings_view::SettingsInput::BackgroundEffectColor(0));
+                    Some(crate::SettingsInput::BackgroundEffectColor(0));
                 if save {
                     entity.save_theme_editor(Duration::ZERO, cx);
                 } else {

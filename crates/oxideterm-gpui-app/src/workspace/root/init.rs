@@ -151,9 +151,12 @@ impl WorkspaceApp {
             let input_caret = input_caret.clone();
             move |_cx| ime::WorkspaceInputEntity::new(input_caret)
         });
-        let workspace_input_observation = cx.observe(&workspace_input, |_, _, cx| {
-            // The input Entity only notifies when its window-scoped caret phase changes.
-            cx.notify();
+        let workspace_input_observation = cx.observe(&workspace_input, |workspace, _, cx| {
+            if let Some(target) = workspace.active_ime_target(cx) {
+                workspace.notify_ime_target(target, cx);
+            } else {
+                cx.notify();
+            }
         });
         let detected_graphics = detect_graphics(window);
         let render_profile_override = render_profile_from_env();
@@ -219,24 +222,42 @@ impl WorkspaceApp {
         let connection_flow = cx.new(ConnectionFlowEntity::new);
         let settings_path = settings_store.path().to_path_buf();
         let connections_path = connection_store.path().to_path_buf();
+        let appearance_edit_dark = settings
+            .appearance
+            .active_scheme(system_dark)
+            .map(oxideterm_settings::AppearanceScheme::is_dark);
         let settings_workspace = cx.new(move |cx| {
             let mut settings = settings::SettingsWorkspaceEntity::new(cx);
+            settings.appearance_edit_dark = appearance_edit_dark;
+            settings.terminal_triggers = settings::TerminalTriggersSettingsState::load(&settings_path);
             settings.start_external_store_watch(settings_path, connections_path, cx);
             settings
         });
-        let settings_workspace_observation =
-            cx.observe(&settings_workspace, |_workspace, _settings, cx| {
-                // Entity-owned settings workers repaint mounted settings surfaces.
-                cx.notify();
-            });
+        let settings_surface = Self::mount_settings_surface(&settings_workspace, cx);
+        let terminal_trigger_editor = Self::mount_terminal_trigger_editor(&settings_workspace, cx);
+        let highlight_editor = Self::mount_highlight_editor(&settings_workspace, cx);
+        let theme_editor_dialog = Self::mount_theme_editor(&settings_workspace, cx);
+        let ssh_import_dialog_view = Self::mount_connection_dialog(&settings_workspace, false, cx);
+        let managed_key_dialog_view = Self::mount_connection_dialog(&settings_workspace, true, cx);
+        let mcp_client_dialog = Self::mount_mcp_client_dialog(&settings_workspace, cx);
+        let command_specs_dialog = Self::mount_command_specs_dialog(&settings_workspace, cx);
+        let settings_navigation_editor =
+            Self::mount_settings_navigation_editor(&settings_workspace, cx);
+        let portable_password_dialog =
+            Self::mount_portable_password_dialog(&settings_workspace, cx);
+        let settings_theme_picker = Self::mount_settings_theme_picker(cx);
+        let settings_window_chrome = cx.new(|cx| {
+            oxideterm_gpui_settings_view::window_chrome::SettingsWindowChromeEntity::new(
+                &settings_workspace,
+                cx,
+            )
+        });
         let settings_workspace_subscription = cx.subscribe(
             &settings_workspace,
             |workspace, settings, event: &settings::SettingsWorkspaceEvent, cx| {
                 workspace.handle_settings_workspace_event(settings, event, cx);
             },
         );
-        let terminal_triggers =
-            settings::TerminalTriggersSettingsState::load(settings_store.path());
         let file_manager = cx.new(|cx| FileManagerState::load(settings_store.path(), cx));
         let file_manager_observation =
             cx.observe(&file_manager, |_workspace, _file_manager, cx| {
@@ -407,10 +428,9 @@ impl WorkspaceApp {
         let graphics = cx.new(|cx| {
             GraphicsWorkspaceEntity::new(graphics_backend, forwarding_runtime.clone(), cx)
         });
-        let graphics_observation = cx.observe(&graphics, |_workspace, _graphics, cx| {
-            // Entity-owned session and frame delivery repaints mounted graphics surfaces.
-            cx.notify();
-        });
+        let graphics_owner = cx.weak_entity();
+        let graphics_surface =
+            cx.new(|cx| graphics::GraphicsSurfaceView::new(graphics.clone(), graphics_owner, cx));
         let graphics_subscription = cx.subscribe(
             &graphics,
             |workspace, _graphics, event: &graphics::GraphicsWorkspaceEvent, cx| match event {
@@ -454,10 +474,10 @@ impl WorkspaceApp {
         )?;
         let cloud_sync =
             cx.new(|cx| cloud_sync::CloudSyncWorkspaceEntity::new(cloud_sync_store, cx));
-        let cloud_sync_observation = cx.observe(&cloud_sync, |_workspace, _cloud_sync, cx| {
-            // Entity-owned delivery and timers repaint every mounted Cloud Sync surface.
-            cx.notify();
-        });
+        let cloud_sync_panel = Self::mount_cloud_sync_panel(&cloud_sync, cx);
+        let sync_owner = cx.weak_entity();
+        let cloud_sync_confirm =
+            cx.new(|cx| cloud_sync::CloudSyncConfirmPortal::new(&cloud_sync, sync_owner, cx));
         let cloud_sync_subscription = cx.subscribe(
             &cloud_sync,
             |workspace, _cloud_sync, event: &cloud_sync::CloudSyncWorkspaceEvent, cx| {
@@ -501,6 +521,8 @@ impl WorkspaceApp {
             );
             entity
         });
+        let assistant_owner = cx.weak_entity();
+        let ai_sidebar_view = cx.new(|_| sidebar::AiAssistantSidebarView::new(assistant_owner));
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
             |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
@@ -636,9 +658,6 @@ impl WorkspaceApp {
             pending_privilege_totp: None,
             privilege_prompt_sync_task: None,
             terminal_highlight_popover_open: false,
-            terminal_trigger_settings_pane: None,
-            terminal_trigger_shell_confirmation_pending: false,
-            terminal_triggers,
             terminal_trigger_runtime:
                 terminal_triggers_runtime::TerminalTriggerRuntimeState::default(),
             terminal_saved_connection_refs: HashMap::new(),
@@ -672,7 +691,16 @@ impl WorkspaceApp {
                 scroll_handle: UniformListScrollHandle::new(),
             },
             settings_workspace,
-            _settings_workspace_observation: settings_workspace_observation,
+            settings_window_chrome,
+            settings_surface,
+            terminal_trigger_editor,
+            highlight_editor,
+            theme_editor_dialog,
+            ssh_import_dialog_view,
+            managed_key_dialog_view,
+            mcp_client_dialog,
+            settings_navigation_editor,
+            portable_password_dialog,
             _settings_workspace_subscription: settings_workspace_subscription,
             segmented_control_user_motion:
                 selection_motion::UserSegmentedControlMotionState::default(),
@@ -729,6 +757,7 @@ impl WorkspaceApp {
                 },
             ),
             ai_entity,
+            ai_sidebar_view,
             acp_entity,
             mosh_plugin_sessions: Arc::new(oxideterm_mosh::MoshPluginSessions::default()),
             plugin_overlay_members: HashMap::new(),
@@ -783,24 +812,9 @@ impl WorkspaceApp {
             )
             .measure_all(),
             open_settings_select: None,
-            settings_theme_preview: None,
-            settings_theme_scroll: ScrollHandle::new(),
+            settings_theme_picker,
             open_settings_select_owner_window_id: None,
             settings_select_focus_origin: None,
-            // Settings tabs are variable-height browser sections, not a single
-            // flex tree. Initialize the shared GPUI ListState here and let the
-            // settings surface reset it by active tab/signature during render.
-            settings_section_list_state: ListState::new(
-                SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT),
-                    SETTINGS_SECTION_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            settings_section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
             standard_confirm_focused_action: None,
             skip_future_ssh_close_confirmations: false,
             select_anchors: HashMap::new(),
@@ -826,9 +840,7 @@ impl WorkspaceApp {
             ime_drag_selection: None,
             focused_settings_input: None,
             settings_input_draft: String::new(),
-            terminal_command_specs_editor_open: false,
-            highlight_rule_editor_index: None,
-            semantic_scheme_editor_open: false,
+            command_specs_dialog,
             settings_slider_drag: None,
             workspace_input,
             _workspace_input_observation: workspace_input_observation,
@@ -903,21 +915,18 @@ impl WorkspaceApp {
             _sftp_observation: sftp_observation,
             _sftp_subscription: sftp_subscription,
             graphics,
-            _graphics_observation: graphics_observation,
+            graphics_surface,
             _graphics_subscription: graphics_subscription,
             host_tools,
             _host_tools_subscription: host_tools_subscription,
             cloud_sync,
-            _cloud_sync_observation: cloud_sync_observation,
+            cloud_sync_panel,
+            cloud_sync_confirm,
             _cloud_sync_subscription: cloud_sync_subscription,
             i18n,
             tokens,
             theme_transition_task: None,
             system_dark,
-            appearance_edit_dark: settings
-                .appearance
-                .active_scheme(system_dark)
-                .map(oxideterm_settings::AppearanceScheme::is_dark),
             active_background: settings.resolved_background(system_dark),
             detected_graphics,
             render_profile_override,

@@ -1,43 +1,22 @@
 use super::*;
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn terminal_preview(
-        &self,
-        settings: &PersistedSettings,
-        cx: &App,
-    ) -> AnyElement {
-        let family = settings
-            .terminal
-            .font_family
-            .terminal_family_name(&settings.terminal.custom_font_family);
-        let cjk_family = terminal_cjk_font_family_preference(&settings.terminal.cjk_font_family);
-        let resolved = oxideterm_gpui_terminal::terminal_ui::resolve_terminal_font(
-            cx.text_system(),
-            &family,
-            cjk_family.as_deref(),
-            settings.terminal.font_ligatures,
-            settings.terminal.font_weight as f32,
-        );
+/// Platform-resolved font metrics supplied by the terminal renderer.
+pub struct TerminalPreviewFont {
+    pub font: gpui::Font,
+    pub unavailable_families: Vec<String>,
+    pub font_size: gpui::Pixels,
+    pub line_height: gpui::Pixels,
+    pub letter_spacing: Option<gpui::Pixels>,
+}
+
+impl SettingsComponents<'_> {
+    pub fn terminal_preview(&self, resolved: TerminalPreviewFont) -> AnyElement {
         let unavailable_message = (!resolved.unavailable_families.is_empty()).then(|| {
             self.i18n
                 .t("settings_view.terminal.font_unavailable")
                 .replace("{{fonts}}", &resolved.unavailable_families.join(", "))
                 .replace("{{font}}", &resolved.font.family)
         });
-        let preview_line_height =
-            oxideterm_gpui_terminal::terminal_ui::terminal_line_height_for_font(
-                cx.text_system(),
-                &resolved.font,
-                px(settings.terminal.font_size as f32),
-                settings.terminal.line_height as f32,
-            );
-        let preview_letter_spacing =
-            oxideterm_gpui_terminal::terminal_ui::terminal_letter_spacing_for_font(
-                cx.text_system(),
-                &resolved.font,
-                px(settings.terminal.font_size as f32),
-                settings.terminal.character_spacing as f32,
-            );
         div()
             .w_full()
             .rounded(px(self.tokens.radii.md))
@@ -71,36 +50,36 @@ impl WorkspaceApp {
                     .flex()
                     .flex_col()
                     .font(resolved.font)
-                    .text_size(px(settings.terminal.font_size as f32))
-                    .when_some(preview_letter_spacing, |style, spacing| {
+                    .text_size(resolved.font_size)
+                    .when_some(resolved.letter_spacing, |style, spacing| {
                         style.letter_spacing(spacing)
                     })
                     .text_color(rgb(self.tokens.ui.text))
                     .child(
                         div()
-                            .line_height(preview_line_height)
+                            .line_height(resolved.line_height)
                             .child("ABCDEFG abcdefg 0123456789"),
                     )
                     .child(
                         div()
-                            .line_height(preview_line_height)
+                            .line_height(resolved.line_height)
                             .child("Thực thi lệnh chậm - lưu, tổ chức, chạy"),
                     )
                     .child(
                         div()
-                            .line_height(preview_line_height)
+                            .line_height(resolved.line_height)
                             .text_color(rgb(self.tokens.ui.text_muted))
                             .child("-> => == != <= >= {}"),
                     )
                     .child(
                         div()
-                            .line_height(preview_line_height)
+                            .line_height(resolved.line_height)
                             .text_color(rgb(self.tokens.ui.success))
                             .child("天地玄黄 The quick brown fox"),
                     )
                     .child(
                         div()
-                            .line_height(preview_line_height)
+                            .line_height(resolved.line_height)
                             .text_color(rgb(self.tokens.ui.warning))
                             .child("       󰊤  "),
                     ),

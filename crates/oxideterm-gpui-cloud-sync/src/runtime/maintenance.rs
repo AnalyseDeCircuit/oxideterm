@@ -75,10 +75,11 @@ impl CloudSyncRuntime<'_> {
         if self.cloud_sync.read(cx).view.pending_preview.is_none() {
             return;
         }
-        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.view.confirm = Some(CloudSyncConfirm::ImportPreview);
             cloud_sync.view.confirm_presence.reopen();
             cloud_sync.view.confirm_focused_action = None;
+            cx.notify();
         });
     }
 
@@ -90,10 +91,11 @@ impl CloudSyncRuntime<'_> {
         if !has_preview {
             return;
         }
-        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.view.confirm = Some(CloudSyncConfirm::ForceUpload);
             cloud_sync.view.confirm_presence.reopen();
             cloud_sync.view.confirm_focused_action = None;
+            cx.notify();
         });
     }
 
@@ -113,10 +115,11 @@ impl CloudSyncRuntime<'_> {
                 .map(|backup| (backup.id.clone(), backup.created_at.clone()))
         });
         if let Some((id, created_at)) = selected {
-            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            self.cloud_sync.update(cx, |cloud_sync, cx| {
                 cloud_sync.view.confirm = Some(CloudSyncConfirm::RestoreBackup { id, created_at });
                 cloud_sync.view.confirm_presence.reopen();
                 cloud_sync.view.confirm_focused_action = None;
+                cx.notify();
             });
         }
     }
@@ -127,10 +130,11 @@ impl CloudSyncRuntime<'_> {
         created_at: String,
         cx: &mut App,
     ) {
-        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.view.confirm = Some(CloudSyncConfirm::DeleteBackup { id, created_at });
             cloud_sync.view.confirm_presence.reopen();
             cloud_sync.view.confirm_focused_action = None;
+            cx.notify();
         });
     }
 
@@ -146,10 +150,11 @@ impl CloudSyncRuntime<'_> {
         {
             return;
         }
-        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearBackups);
             cloud_sync.view.confirm_presence.reopen();
             cloud_sync.view.confirm_focused_action = None;
+            cx.notify();
         });
     }
 
@@ -165,10 +170,11 @@ impl CloudSyncRuntime<'_> {
         {
             return;
         }
-        self.cloud_sync.update(cx, |cloud_sync, _cx| {
+        self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.view.confirm = Some(CloudSyncConfirm::ClearHistory);
             cloud_sync.view.confirm_presence.reopen();
             cloud_sync.view.confirm_focused_action = None;
+            cx.notify();
         });
     }
 
@@ -227,9 +233,10 @@ impl CloudSyncRuntime<'_> {
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
         if delay.is_zero() {
-            self.cloud_sync.update(cx, |cloud_sync, _cx| {
+            self.cloud_sync.update(cx, |cloud_sync, cx| {
                 if cloud_sync.view.confirm_presence.finish_exit(generation) {
                     cloud_sync.view.confirm = None;
+                    cx.notify();
                 }
             });
             return true;
@@ -237,6 +244,7 @@ impl CloudSyncRuntime<'_> {
         // Keep the immutable confirmation payload mounted for the exit frame.
         self.cloud_sync.update(cx, |cloud_sync, cx| {
             cloud_sync.schedule_confirm_exit(generation, delay, cx);
+            cx.notify();
         });
         true
     }

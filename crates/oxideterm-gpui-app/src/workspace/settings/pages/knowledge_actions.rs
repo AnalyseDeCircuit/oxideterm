@@ -17,7 +17,7 @@ impl WorkspaceApp {
             SettingsSectionId::KnowledgeDocuments,
             self.settings_dynamic_section_counts(cx),
         ) {
-            self.settings_section_list_state
+            self.settings_workspace.read(cx).section_list.state()
                 .scroll_to(gpui::ListOffset {
                     item_ix,
                     offset_in_item: px(0.0),

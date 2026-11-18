@@ -661,19 +661,8 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(super) fn render_graphics_surface(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.graphics.update(cx, |graphics, cx| {
-            graphics.set_surface_visible(true, cx);
-        });
-        let graphics = self.graphics.read(cx);
-        if graphics.session.is_some() || graphics.status != GraphicsStatus::Idle {
-            return self.render_graphics_active_surface(window, cx);
-        }
-        self.render_graphics_distro_selector(cx)
+    pub(super) fn render_graphics_surface(&self) -> AnyElement {
+        self.graphics_surface.clone().into_any_element()
     }
 
     pub(in crate::workspace) fn sync_graphics_surface_visibility(&self, cx: &mut App) {
@@ -1310,145 +1299,6 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    fn render_graphics_active_surface(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        self.graphics
-            .update(cx, |graphics, _cx| graphics.ensure_vnc_worker());
-        let (frame_size, render_image, geometry, show_status_overlay) = {
-            let graphics = self.graphics.read(cx);
-            (
-                graphics.vnc_size,
-                graphics.vnc_render_image.clone(),
-                graphics.vnc_geometry.clone(),
-                graphics.status != GraphicsStatus::Active
-                    || graphics.error.is_some()
-                    || graphics.session.is_none(),
-            )
-        };
-        div()
-            .size_full()
-            .relative()
-            .overflow_hidden()
-            .bg(rgb(0x000000))
-            .child(
-                div()
-                    .size_full()
-                    .child(graphics_vnc_canvas(
-                        frame_size,
-                        render_image,
-                        geometry,
-                        0x000000,
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                            this.graphics.update(cx, |graphics, _cx| {
-                                graphics.send_vnc_pointer(
-                                    event.position,
-                                    Some((MouseButton::Left, true)),
-                                );
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Right,
-                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                            this.graphics.update(cx, |graphics, _cx| {
-                                graphics.send_vnc_pointer(
-                                    event.position,
-                                    Some((MouseButton::Right, true)),
-                                );
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_down(
-                        MouseButton::Middle,
-                        cx.listener(|this, event: &MouseDownEvent, _window, cx| {
-                            this.graphics.update(cx, |graphics, _cx| {
-                                graphics.send_vnc_pointer(
-                                    event.position,
-                                    Some((MouseButton::Middle, true)),
-                                );
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|this, event: &MouseUpEvent, _window, cx| {
-                            this.graphics.update(cx, |graphics, _cx| {
-                                graphics.send_vnc_pointer(
-                                    event.position,
-                                    Some((MouseButton::Left, false)),
-                                );
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_up(
-                        MouseButton::Right,
-                        cx.listener(|this, event: &MouseUpEvent, _window, cx| {
-                            this.graphics.update(cx, |graphics, _cx| {
-                                graphics.send_vnc_pointer(
-                                    event.position,
-                                    Some((MouseButton::Right, false)),
-                                );
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_up(
-                        MouseButton::Middle,
-                        cx.listener(|this, event: &MouseUpEvent, _window, cx| {
-                            this.graphics.update(cx, |graphics, _cx| {
-                                graphics.send_vnc_pointer(
-                                    event.position,
-                                    Some((MouseButton::Middle, false)),
-                                );
-                            });
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
-                        this.graphics.update(cx, |graphics, _cx| {
-                            graphics.send_vnc_pointer(event.position, None);
-                        });
-                        cx.stop_propagation();
-                    }))
-                    .on_scroll(cx.listener(|this, event: &ScrollEvent, _window, cx| {
-                        this.graphics.update(cx, |graphics, _cx| {
-                            graphics.send_vnc_scroll(event.position, &event.delta);
-                        });
-                        cx.stop_propagation();
-                    })),
-            )
-            .child(self.render_graphics_toolbar(window, cx))
-            .when(show_status_overlay, |surface| {
-                surface.child(self.render_graphics_status_overlay(cx))
-            })
-            .child(
-                div()
-                    .absolute()
-                    .right(px(16.0))
-                    .bottom(px(16.0))
-                    .px(px(8.0))
-                    .py(px(4.0))
-                    .rounded(px(self.tokens.radii.sm))
-                    .bg(rgba((theme.bg_panel << 8) | GRAPHICS_ALPHA_90))
-                    .border_1()
-                    .border_color(rgba((theme.border << 8) | GRAPHICS_ALPHA_50))
-                    .text_size(px(11.0))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.graphics_canvas_diagnostics_text()),
-            )
-            .into_any_element()
-    }
 
     fn render_graphics_toolbar(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let theme = self.tokens.ui;
@@ -2284,6 +2134,130 @@ impl WorkspaceApp {
             self.detected_graphics.driver_name.clone()
         };
         format!("{}: {backend}", self.i18n.t("graphics.gpu_canvas_backend"))
+    }
+}
+
+pub(super) struct GraphicsSurfaceView {
+    graphics: Entity<GraphicsWorkspaceEntity>,
+    workspace: gpui::WeakEntity<WorkspaceApp>,
+    _observation: Subscription,
+}
+
+impl GraphicsSurfaceView {
+    pub(super) fn new(
+        graphics: Entity<GraphicsWorkspaceEntity>,
+        workspace: gpui::WeakEntity<WorkspaceApp>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let observation = cx.observe(&graphics, |_, _, cx| cx.notify());
+        Self {
+            graphics,
+            workspace,
+            _observation: observation,
+        }
+    }
+}
+
+impl Render for GraphicsSurfaceView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.graphics
+            .update(cx, |graphics, cx| graphics.set_surface_visible(true, cx));
+        let graphics = self.graphics.read(cx);
+        if graphics.session.is_none() && graphics.status == GraphicsStatus::Idle {
+            return self
+                .workspace
+                .update(cx, |workspace, cx| {
+                    workspace.render_graphics_distro_selector(cx)
+                })
+                .unwrap_or_else(|_| div().into_any_element());
+        }
+
+        self.graphics
+            .update(cx, |graphics, _| graphics.ensure_vnc_worker());
+        let graphics = self.graphics.read(cx);
+        let canvas = graphics_vnc_canvas(
+            graphics.vnc_size,
+            graphics.vnc_render_image.clone(),
+            graphics.vnc_geometry.clone(),
+            0x000000,
+        );
+        let show_status = graphics.status != GraphicsStatus::Active
+            || graphics.error.is_some()
+            || graphics.session.is_none();
+        let Ok((tokens, toolbar, status, diagnostics)) =
+            self.workspace.update(cx, |workspace, cx| {
+                (
+                    workspace.tokens,
+                    workspace.render_graphics_toolbar(window, cx),
+                    show_status.then(|| workspace.render_graphics_status_overlay(cx)),
+                    workspace.graphics_canvas_diagnostics_text(),
+                )
+            })
+        else {
+            return div().into_any_element();
+        };
+        let mut viewer = div().size_full().child(canvas);
+        for button in [MouseButton::Left, MouseButton::Right, MouseButton::Middle] {
+            viewer = viewer
+                .on_mouse_down(
+                    button,
+                    cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        this.graphics.update(cx, |graphics, _| {
+                            graphics.send_vnc_pointer(event.position, Some((button, true)));
+                        });
+                        cx.stop_propagation();
+                    }),
+                )
+                .on_mouse_up(
+                    button,
+                    cx.listener(move |this, event: &MouseUpEvent, _, cx| {
+                        this.graphics.update(cx, |graphics, _| {
+                            graphics.send_vnc_pointer(event.position, Some((button, false)));
+                        });
+                        cx.stop_propagation();
+                    }),
+                );
+        }
+
+        let theme = tokens.ui;
+        div()
+            .size_full()
+            .relative()
+            .overflow_hidden()
+            .bg(rgb(0x000000))
+            .child(
+                viewer
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                        this.graphics.update(cx, |graphics, _| {
+                            graphics.send_vnc_pointer(event.position, None)
+                        });
+                        cx.stop_propagation();
+                    }))
+                    .on_scroll(cx.listener(|this, event: &ScrollEvent, _, cx| {
+                        this.graphics.update(cx, |graphics, _| {
+                            graphics.send_vnc_scroll(event.position, &event.delta)
+                        });
+                        cx.stop_propagation();
+                    })),
+            )
+            .child(toolbar)
+            .children(status)
+            .child(
+                div()
+                    .absolute()
+                    .right(px(16.0))
+                    .bottom(px(16.0))
+                    .px(px(8.0))
+                    .py(px(4.0))
+                    .rounded(px(tokens.radii.sm))
+                    .bg(rgba((theme.bg_panel << 8) | GRAPHICS_ALPHA_90))
+                    .border_1()
+                    .border_color(rgba((theme.border << 8) | GRAPHICS_ALPHA_50))
+                    .text_size(px(11.0))
+                    .text_color(rgb(theme.text_muted))
+                    .child(diagnostics),
+            )
+            .into_any_element()
     }
 }
 

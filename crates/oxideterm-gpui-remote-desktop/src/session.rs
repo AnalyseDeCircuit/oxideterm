@@ -56,7 +56,7 @@ use clipboard::*;
 use input::*;
 pub use input::{DesktopShortcutMatcher, desktop_shortcut_matches};
 pub use interaction::remote_desktop_keyboard_capture;
-pub use panel::{DesktopWindowAction, render_remote_desktop_panel};
+pub use panel::{DesktopWindowAction, RemoteDesktopPanelView};
 pub use public_mcp::RemoteDesktopPublicClipboardSnapshot;
 use vendor_files::*;
 
@@ -453,6 +453,7 @@ pub struct RemoteDesktopSessionEntity {
     certificate_challenge: Option<RemoteDesktopCertificateChallengeState>,
     session_trusted_certificate_fingerprint: Option<String>,
     state: RemoteDesktopViewState,
+    panel: Option<Entity<RemoteDesktopPanelView>>,
     geometry: SharedRemoteDesktopGeometry,
     frame_slot: RemoteDesktopFrameDeliverySlot,
     ui_frame_visible: bool,
@@ -492,7 +493,11 @@ pub struct RemoteDesktopSessionEntity {
 impl RemoteDesktopSessionEntity {
     pub fn active_session_status(&self) -> RemoteDesktopSessionStatus {
         // The protocol entity remains the authoritative source for sidebar liveness.
-        self.state.snapshot().status
+        self.state.status()
+    }
+
+    pub fn panel(&self) -> Option<Entity<RemoteDesktopPanelView>> {
+        self.panel.clone()
     }
 
     pub fn ai_can_disconnect(&self) -> bool {
@@ -535,6 +540,7 @@ impl RemoteDesktopSessionEntity {
             certificate_challenge: None,
             session_trusted_certificate_fingerprint: None,
             state,
+            panel: None,
             geometry: SharedRemoteDesktopGeometry::default(),
             frame_slot,
             ui_frame_visible: false,

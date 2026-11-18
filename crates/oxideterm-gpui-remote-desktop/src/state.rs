@@ -786,6 +786,10 @@ impl RemoteDesktopViewState {
             .map_or(true, |awaiting_epoch| awaiting_epoch == graphics_epoch)
     }
 
+    pub(crate) fn status(&self) -> RemoteDesktopSessionStatus {
+        self.status
+    }
+
     pub fn snapshot(&self) -> RemoteDesktopViewSnapshot {
         RemoteDesktopViewSnapshot {
             title: self.title.clone(),

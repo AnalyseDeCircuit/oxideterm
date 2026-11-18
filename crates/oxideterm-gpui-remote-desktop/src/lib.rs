@@ -19,11 +19,11 @@ pub use input::{
 pub use session::{
     DesktopCredentialPrompt, DesktopShortcutMatcher, DesktopWindowAction,
     PendingRemoteDesktopSshTunnel, RemoteDesktopCertificateAcceptance,
-    RemoteDesktopCertificateChallengeState, RemoteDesktopPublicClipboardSnapshot,
-    RemoteDesktopSessionEntity, RemoteDesktopSessionEvent, RemoteDesktopSshTunnelLease,
-    RemoteDesktopWorkspaceEntity, desktop_connection_audit, desktop_shortcut_matches,
-    preview_remote_desktop_profile, remote_desktop_audit_context, remote_desktop_keyboard_capture,
-    remote_desktop_tab_visible, render_remote_desktop_panel,
+    RemoteDesktopCertificateChallengeState, RemoteDesktopPanelView,
+    RemoteDesktopPublicClipboardSnapshot, RemoteDesktopSessionEntity, RemoteDesktopSessionEvent,
+    RemoteDesktopSshTunnelLease, RemoteDesktopWorkspaceEntity, desktop_connection_audit,
+    desktop_shortcut_matches, preview_remote_desktop_profile, remote_desktop_audit_context,
+    remote_desktop_keyboard_capture, remote_desktop_tab_visible,
 };
 pub use state::{
     RemoteDesktopCursorState, RemoteDesktopFrameApplyStats, RemoteDesktopFrameSnapshot,

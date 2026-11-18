@@ -1,6 +1,6 @@
 use gpui::{
     AnchoredPositionMode, AnyElement, App, Context, Corner, CursorStyle, Div, Entity, FontWeight,
-    MouseButton, MouseDownEvent, MouseMoveEvent, Rgba, SharedString, Window, anchored, deferred,
+    MouseButton, MouseDownEvent, MouseMoveEvent, Render, Rgba, SharedString, Subscription, Window, anchored, deferred,
     div, point, prelude::*, px, rgb, rgba, svg,
 };
 use oxideterm_cloud_sync::{
@@ -106,6 +106,42 @@ pub struct CloudSyncPageRenderer {
     pub cloud_sync: Entity<CloudSyncWorkspaceEntity>,
     pub render: std::rc::Rc<CloudSyncListRenderProjection>,
     pub input_anchors: CloudSyncInputViewport,
+}
+
+type CloudSyncFrame =
+    Box<dyn Fn(&mut App) -> Option<(CloudSyncPageRenderer, Option<OverlayAnchor>)>>;
+type DismissCloudSyncOverlays = Rc<dyn Fn(&mut Window, &mut App)>;
+
+pub struct CloudSyncPanelView {
+    frame: CloudSyncFrame,
+    dismiss_overlays: DismissCloudSyncOverlays,
+    _sync_changed: Subscription,
+}
+
+impl CloudSyncPanelView {
+    pub fn new(
+        sync: &Entity<CloudSyncWorkspaceEntity>,
+        frame: impl Fn(&mut App) -> Option<(CloudSyncPageRenderer, Option<OverlayAnchor>)> + 'static,
+        dismiss_overlays: impl Fn(&mut Window, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let sync_changed = cx.observe(sync, |_, _, cx| cx.notify());
+        Self {
+            frame: Box::new(frame),
+            dismiss_overlays: Rc::new(dismiss_overlays),
+            _sync_changed: sync_changed,
+        }
+    }
+}
+
+impl Render for CloudSyncPanelView {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let Some((renderer, anchor)) = (self.frame)(cx) else {
+            return div().into_any_element();
+        };
+        let dismiss = self.dismiss_overlays.clone();
+        renderer.render_panel(anchor, move |window, cx| dismiss(window, cx), cx)
+    }
 }
 
 impl std::ops::Deref for CloudSyncPageRenderer {

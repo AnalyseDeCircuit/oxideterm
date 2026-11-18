@@ -153,7 +153,6 @@ use oxideterm_gpui_terminal::{
     TerminalToolbarActionSpec, TerminalTrzszLabels, TerminalUiPreferenceOverrides,
     TerminalUiPreferences, TerminalUiTheme, TerminalWorkingDirectorySource,
     detect_custom_privilege_prompt, prune_terminal_session_logs, resolved_terminal_semantic_scheme,
-    terminal_semantic_line_band, terminal_semantic_variant_color,
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
@@ -161,7 +160,7 @@ use oxideterm_gpui_ui::{
     material_surface,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     text_input::TextInputView,
-    toast::{ToastVariant, ToastView, toast_action, toast_close},
+    toast::{ToastVariant, ToastView, toast_close},
     toaster::toaster,
     tooltip::tooltip_surface,
 };
@@ -194,8 +193,8 @@ use oxideterm_settings::{
     AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundFit, BackgroundScope,
     CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, GLOBAL_HIGHLIGHT_RULE_SET_ID,
     HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, Language,
-    MAX_TERMINAL_BACKGROUND_OPACITY, MAX_WINDOW_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
-    MIN_WINDOW_OPACITY, PersistedSettings, SettingsStore, background_images_directory,
+    MAX_TERMINAL_BACKGROUND_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
+    PersistedSettings, SettingsStore, background_images_directory,
     default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_settings_model::{
@@ -231,7 +230,6 @@ use oxideterm_terminal::{
 };
 use oxideterm_theme::{
     AppUiColors, TerminalTheme, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
-    theme_by_id,
 };
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
@@ -311,10 +309,7 @@ use oxideterm_gpui_settings_view::{
 };
 use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId, select_anchor_probe};
 use oxideterm_gpui_ui::text_input::TextInputAnchor;
-use oxideterm_gpui_ui::typography::{
-    css_font_family_head as settings_css_font_family_head, gpui_font_family_name,
-    tauri_ui_font_family as settings_ui_font_family,
-};
+use oxideterm_gpui_ui::typography::tauri_ui_font_family as settings_ui_font_family;
 pub(super) use selectable_text::{
     SelectableTextRole, SelectableTextScrollExt, selectable_vertical_scrollbar_layer,
 };
@@ -328,12 +323,8 @@ use virtual_list::{
     sync_tauri_virtual_list_state_by_signatures,
 };
 
-const SETTINGS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 4;
 const SETTINGS_PERCENT_SCALE: f64 = 100.0;
-const SETTINGS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 260.0;
-const SETTINGS_SECTION_LIST_OVERSCAN: usize = 2;
 const SETTINGS_SCROLL_CARET_PAUSE_MS: u64 = 700;
-const AI_SETTINGS_SECTION_ESTIMATED_HEIGHT: f32 = 360.0;
 const AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
 const AI_PROVIDER_MODEL_ROW_LIST_OVERSCAN: usize = 6;
@@ -783,9 +774,6 @@ pub(crate) struct WorkspaceApp {
     privilege_prompt_sync_task: Option<Task<()>>,
     terminal_highlight_popover_open: bool,
     // Settings keep the source pane stable while editing session-only trigger overrides.
-    terminal_trigger_settings_pane: Option<PaneId>,
-    terminal_trigger_shell_confirmation_pending: bool,
-    terminal_triggers: settings::TerminalTriggersSettingsState,
     terminal_trigger_runtime: terminal_triggers_runtime::TerminalTriggerRuntimeState,
     // Runtime panes share one stable saved-profile identity index across triggers and broadcasts.
     terminal_saved_connection_refs:
@@ -816,7 +804,19 @@ pub(crate) struct WorkspaceApp {
     onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,
     settings_workspace: Entity<settings::SettingsWorkspaceEntity>,
-    _settings_workspace_observation: Subscription,
+    settings_window_chrome: Entity<oxideterm_gpui_settings_view::window_chrome::SettingsWindowChromeEntity>,
+    settings_surface: Entity<oxideterm_gpui_settings_view::surface::SettingsSurfaceView>,
+    terminal_trigger_editor:
+        Entity<oxideterm_gpui_settings_view::terminal_triggers::TerminalTriggerEditor>,
+    highlight_editor: Entity<oxideterm_gpui_settings_view::highlight_page::HighlightEditor>,
+    theme_editor_dialog: Entity<oxideterm_gpui_settings_view::theme_editor::ThemeEditorDialog>,
+    ssh_import_dialog_view: Entity<oxideterm_gpui_settings_view::connections_page::ConnectionDialog>,
+    managed_key_dialog_view: Entity<oxideterm_gpui_settings_view::connections_page::ConnectionDialog>,
+    mcp_client_dialog: Entity<oxideterm_gpui_settings_view::mcp_page::McpClientDialog>,
+    settings_navigation_editor:
+        Entity<oxideterm_gpui_settings_view::navigation_editor::SettingsNavigationEditor>,
+    portable_password_dialog:
+        Entity<oxideterm_gpui_settings_view::portable_runtime::dialog::PortablePasswordDialog>,
     _settings_workspace_subscription: Subscription,
     segmented_control_user_motion: selection_motion::UserSegmentedControlMotionState,
     // Prompt and memory documents are edited outside the virtual settings list.
@@ -846,6 +846,7 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_motion_generation: u64,
     context_sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
     ai_entity: Entity<ai_state::AiWorkspaceEntity>,
+    ai_sidebar_view: Entity<sidebar::AiAssistantSidebarView>,
     acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
     mosh_plugin_sessions: Arc<oxideterm_mosh::MoshPluginSessions>,
     // Panes whose plugin toolbar state currently declares `overlay`; one
@@ -894,14 +895,11 @@ pub(crate) struct WorkspaceApp {
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     knowledge_workspace_list_state: ListState,
     open_settings_select: Option<SettingsSelect>,
-    settings_theme_preview: Option<String>,
-    settings_theme_scroll: ScrollHandle,
+    settings_theme_picker: Entity<oxideterm_gpui_settings_view::theme_picker::SettingsThemePicker>,
     // A root-mounted select portal must only use the trigger geometry from the
     // native window that opened it.
     open_settings_select_owner_window_id: Option<gpui::WindowId>,
     settings_select_focus_origin: Option<browser_behavior::BrowserFocusOrigin>,
-    settings_section_list_state: ListState,
-    settings_section_list_cache: RefCell<VirtualListSignatureCache>,
     standard_confirm_focused_action: Option<ConfirmDialogAction>,
     skip_future_ssh_close_confirmations: bool,
     select_anchors: HashMap<SelectAnchorId, OverlayAnchor>,
@@ -927,9 +925,7 @@ pub(crate) struct WorkspaceApp {
     settings_input_draft: String,
     // The large command-spec document and highlight/semantic rule editors live
     // in workspace modals so the settings virtual list stays compact and single-scroll.
-    terminal_command_specs_editor_open: bool,
-    highlight_rule_editor_index: Option<usize>,
-    semantic_scheme_editor_open: bool,
+    command_specs_dialog: Entity<oxideterm_gpui_settings_view::command_specs::CommandSpecsDialog>,
     settings_slider_drag: Option<SettingsSlider>,
     workspace_input: Entity<ime::WorkspaceInputEntity>,
     _workspace_input_observation: Subscription,
@@ -1001,18 +997,18 @@ pub(crate) struct WorkspaceApp {
     _sftp_observation: Subscription,
     _sftp_subscription: Subscription,
     graphics: Entity<GraphicsWorkspaceEntity>,
-    _graphics_observation: Subscription,
+    graphics_surface: Entity<graphics::GraphicsSurfaceView>,
     _graphics_subscription: Subscription,
     host_tools: Entity<HostToolsEntity>,
     _host_tools_subscription: Subscription,
     cloud_sync: Entity<cloud_sync::CloudSyncWorkspaceEntity>,
-    _cloud_sync_observation: Subscription,
+    cloud_sync_panel: Entity<oxideterm_gpui_cloud_sync::panel::CloudSyncPanelView>,
+    cloud_sync_confirm: Entity<cloud_sync::CloudSyncConfirmPortal>,
     _cloud_sync_subscription: Subscription,
     i18n: I18n,
     tokens: ThemeTokens,
     theme_transition_task: Option<Task<()>>,
     system_dark: bool,
-    appearance_edit_dark: Option<bool>,
     active_background: oxideterm_settings::BackgroundStyle,
     detected_graphics: DetectedGraphics,
     render_profile_override: Option<RenderProfile>,

@@ -1,14 +1,10 @@
 use super::*;
+use oxideterm_gpui_settings_view::components::{is_connection_key_input, is_surface_input};
 
 // Match the browser slider debounce while keeping exactly one retained task.
 const BACKGROUND_BLUR_COMMIT_DELAY: Duration = Duration::from_millis(150);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum SettingsCalloutTone {
-    Info,
-    Warning,
-    Error,
-}
+pub(in crate::workspace) use oxideterm_gpui_settings_view::components::SettingsCalloutTone;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_select_trigger(
@@ -18,16 +14,10 @@ impl WorkspaceApp {
         placeholder: bool,
         disabled: bool,
     ) -> Div {
-        let focused = self.open_settings_select == Some(select_id);
-        // Browser focus-visible depends on keyboard vs pointer origin. Keep the
-        // setting select trigger path shared so individual settings pages do
-        // not reimplement the same modality check.
-        select_trigger_with_focus_visible(
-            &self.tokens,
-            value,
-            placeholder,
-            disabled,
-            browser_behavior::browser_focus_visible(focused, self.settings_select_focus_origin),
+        self.settings_components().select_trigger(
+            value, placeholder, disabled,
+            self.open_settings_select == Some(select_id),
+            self.settings_select_focus_origin,
         )
     }
 
@@ -58,60 +48,19 @@ impl WorkspaceApp {
         trigger_style: impl FnOnce(Div) -> Div,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let anchor_id = select_id.anchor_id();
-        let workspace = cx.entity();
-        let trigger = trigger_style(
-            self.settings_select_trigger(select_id, value, false, disabled),
+        let trigger = trigger_style(self.settings_select_trigger(select_id, value, false, disabled));
+        self.settings_components().select_control(
+            select_id, disabled, width, trigger, Self::settings_window_dispatch(cx),
         )
-        .when(!disabled, |trigger| {
-            trigger.cursor_pointer().on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, window, cx| {
-                    this.open_settings_select_from_pointer(
-                        select_id,
-                        window.window_handle().window_id(),
-                        cx,
-                    );
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-        });
-        // Settings selects all share the same Radix-like trigger contract:
-        // pointer-open sets focus origin, anchor bounds are refreshed in the
-        // same paint pass, and scroll-close is owned by the settings surface.
-        div()
-            .relative()
-            .min_w(px(0.0))
-            .when_some(width, |control, width| control.w(px(width)).max_w_full())
-            .when(width.is_none(), |control| control.w_full())
-            .child(select_anchor_probe(
-                anchor_id,
-                trigger,
-                move |anchor, window, cx| {
-                    let window_id = window.window_handle().window_id();
-                    let _ = workspace.update(cx, |this, cx| {
-                        this.update_settings_select_anchor(window_id, anchor, cx);
-                    });
-                },
-            ))
-            .into_any_element()
     }
 
-    fn settings_card_frame(&self, children: Vec<AnyElement>) -> AnyElement {
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg.max(10.0)))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .p(px(self.tokens.metrics.settings_card_padding))
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap))
-            .children(children);
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
+    pub(in crate::workspace) fn settings_components(&self) -> oxideterm_gpui_settings_view::components::SettingsComponents<'_> {
+        oxideterm_gpui_settings_view::components::SettingsComponents {
+            tokens: &self.tokens,
+            i18n: &self.i18n,
+            settings: self.settings_store.settings(),
+            has_background: self.settings_background_active(),
+        }
     }
 
     pub(in crate::workspace) fn settings_card_header_text(
@@ -121,60 +70,7 @@ impl WorkspaceApp {
         icon: Option<AnyElement>,
         actions: Option<AnyElement>,
     ) -> AnyElement {
-        let description = description.filter(|text| !text.is_empty());
-        let has_description = description.is_some();
-        let heading = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(px(8.0))
-            .when_some(icon, |row, icon| row.child(icon))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(self.tokens.ui.text_heading))
-                    .child(title),
-            );
-
-        let left = div()
-            .flex_1()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(heading)
-            .when_some(description, |col, description| {
-                col.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(description),
-                )
-            });
-
-        let header = div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_row()
-            .flex_wrap()
-            .justify_between()
-            .gap(px(12.0));
-        let header = if has_description {
-            header.items_start()
-        } else {
-            header.items_center()
-        };
-
-        header
-            .child(left)
-            .when_some(actions, |row, actions| row.child(actions))
-            .into_any_element()
+        self.settings_components().settings_card_header_text(title, description, icon, actions)
     }
 
     pub(in crate::workspace) fn settings_card(
@@ -183,7 +79,7 @@ impl WorkspaceApp {
         description_key: &str,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
-        self.settings_card_with_header(title_key, description_key, None, None, rows)
+        self.settings_components().settings_card(title_key, description_key, rows)
     }
 
     pub(in crate::workspace) fn settings_card_with_header(
@@ -194,210 +90,11 @@ impl WorkspaceApp {
         actions: Option<AnyElement>,
         rows: Vec<AnyElement>,
     ) -> AnyElement {
-        let description = (!description_key.is_empty()).then(|| self.i18n.t(description_key));
-        let has_header =
-            !title_key.is_empty() || description.is_some() || icon.is_some() || actions.is_some();
-        if !has_header {
-            return self.settings_card_frame(rows);
-        }
-        let header =
-            self.settings_card_header_text(self.i18n.t(title_key), description, icon, actions);
-        if rows.is_empty() {
-            return div()
-                .w_full()
-                .min_w(px(0.0))
-                .px(px(2.0))
-                .child(header)
-                .into_any_element();
-        }
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(8.0))
-            .child(div().w_full().min_w(px(0.0)).px(px(2.0)).child(header))
-            .child(self.settings_card_frame(rows))
-            .into_any_element()
+        self.settings_components().settings_card_with_header(title_key, description_key, icon, actions, rows)
     }
 
     pub(in crate::workspace) fn plain_settings_card(&self, rows: Vec<AnyElement>) -> AnyElement {
-        self.settings_card_frame(rows)
-    }
-
-    pub(in crate::workspace) fn separated_settings_rows(
-        &self,
-        rows: Vec<AnyElement>,
-    ) -> Vec<AnyElement> {
-        // Group separated rows in a zero-gap column so hairlines sit cleanly
-        // between items without inheriting the outer card stack gap twice.
-        let total = rows.len();
-        if total == 0 {
-            return Vec::new();
-        }
-        let mut group = div().w_full().min_w(px(0.0)).flex().flex_col();
-        for (index, row) in rows.into_iter().enumerate() {
-            if index > 0 {
-                group = group.child(self.card_separator());
-            }
-            let mut slot = div().w_full().min_w(px(0.0));
-            if index > 0 {
-                slot = slot.pt(px(10.0));
-            }
-            if index + 1 < total {
-                slot = slot.pb(px(10.0));
-            }
-            group = group.child(slot.child(row));
-        }
-        vec![group.into_any_element()]
-    }
-
-    pub(in crate::workspace) fn terminal_input_settings_card(
-        &self,
-        section: SettingsSectionId,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        match section {
-            SettingsSectionId::TerminalInputClipboard => {
-                let mut rows = Vec::new();
-                rows.push(self.bool_row(
-                    "settings_view.terminal.paste_protection",
-                    "settings_view.terminal.paste_protection_hint",
-                    settings.terminal.paste_protection,
-                    set_paste_protection,
-                    cx,
-                ));
-                rows.push(self.bool_row(
-                    "settings_view.terminal.osc52_clipboard",
-                    "settings_view.terminal.osc52_clipboard_hint",
-                    settings.terminal.osc52_clipboard,
-                    set_osc52_clipboard,
-                    cx,
-                ));
-                rows.push(self.bool_row(
-                    "settings_view.terminal.osc52_clipboard_read",
-                    "settings_view.terminal.osc52_clipboard_read_hint",
-                    settings.terminal.osc52_clipboard_read,
-                    set_osc52_clipboard_read,
-                    cx,
-                ));
-                if !cfg!(target_os = "macos") {
-                    rows.push(self.bool_row(
-                        "settings_view.terminal.smart_copy",
-                        "settings_view.terminal.smart_copy_hint",
-                        settings.terminal.smart_copy,
-                        set_smart_copy,
-                        cx,
-                    ));
-                }
-                rows.push(self.bool_row(
-                    "settings_view.terminal.copy_on_select",
-                    "settings_view.terminal.copy_on_select_hint",
-                    settings.terminal.copy_on_select,
-                    set_copy_on_select,
-                    cx,
-                ));
-                rows.push(self.bool_row(
-                    "settings_view.terminal.middle_click_paste",
-                    "settings_view.terminal.middle_click_paste_hint",
-                    settings.terminal.middle_click_paste,
-                    set_middle_click_paste,
-                    cx,
-                ));
-                rows.push(self.bool_row(
-                    "settings_view.terminal.right_click_paste",
-                    "settings_view.terminal.right_click_paste_hint",
-                    settings.terminal.right_click_paste,
-                    set_right_click_paste,
-                    cx,
-                ));
-                self.settings_card(
-                    "settings_view.terminal.input_clipboard",
-                    "",
-                    self.separated_settings_rows(rows),
-                )
-            }
-            SettingsSectionId::TerminalInputMouseLinks => {
-                let rows = vec![
-                    self.bool_row(
-                        "settings_view.terminal.selection_requires_shift",
-                        "settings_view.terminal.selection_requires_shift_hint",
-                        settings.terminal.selection_requires_shift,
-                        set_selection_requires_shift,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.open_links_with_modifier",
-                        "settings_view.terminal.open_links_with_modifier_hint",
-                        settings.terminal.open_links_with_modifier,
-                        set_open_links_with_modifier,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.detect_file_paths_as_links",
-                        "settings_view.terminal.detect_file_paths_as_links_hint",
-                        settings.terminal.detect_file_paths_as_links,
-                        set_detect_file_paths_as_links,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.timestamp_hover",
-                        "settings_view.terminal.timestamp_hover_hint",
-                        settings.terminal.timestamp_hover,
-                        set_timestamp_hover,
-                        cx,
-                    ),
-                ];
-                self.settings_card(
-                    "settings_view.terminal.input_mouse_links",
-                    "",
-                    self.separated_settings_rows(rows),
-                )
-            }
-            SettingsSectionId::TerminalInputKeyboard => {
-                let rows = vec![
-                    self.bool_row(
-                        "settings_view.terminal.free_type_mode",
-                        "settings_view.terminal.free_type_mode_hint",
-                        settings.terminal.free_type_mode,
-                        set_free_type_mode,
-                        cx,
-                    ),
-                    self.bool_row(
-                        "settings_view.terminal.autosuggest_enabled",
-                        "settings_view.terminal.autosuggest_enabled_hint",
-                        settings.terminal.autosuggest.enabled,
-                        set_terminal_autosuggest_enabled,
-                        cx,
-                    ),
-                    self.select_setting_row(
-                        "settings_view.terminal.backspace_sequence",
-                        "settings_view.terminal.backspace_sequence_hint",
-                        SettingsSelect::TerminalBackspaceSequence,
-                        terminal_backspace_sequence_label(settings.terminal.backspace_sequence)
-                            .to_string(),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
-                    self.select_setting_row(
-                        "settings_view.terminal.delete_sequence",
-                        "settings_view.terminal.delete_sequence_hint",
-                        SettingsSelect::TerminalDeleteSequence,
-                        terminal_delete_sequence_label(settings.terminal.delete_sequence)
-                            .to_string(),
-                        self.tokens.metrics.settings_select_width,
-                        cx,
-                    ),
-                ];
-                self.settings_card(
-                    "settings_view.terminal.input_keyboard",
-                    "",
-                    self.separated_settings_rows(rows),
-                )
-            }
-            _ => div().into_any_element(),
-        }
+        self.settings_components().plain_settings_card(rows)
     }
 
     pub(in crate::workspace) fn card_subsection_header(
@@ -405,29 +102,7 @@ impl WorkspaceApp {
         title: impl Into<SharedString>,
         hint: Option<String>,
     ) -> AnyElement {
-        let hint = hint.filter(|text| !text.is_empty());
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .flex()
-            .flex_col()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(self.tokens.ui.text_secondary))
-                    .child(title.into()),
-            )
-            .when_some(hint, |col, hint| {
-                col.child(
-                    div()
-                        .text_size(px(self.tokens.metrics.ui_text_xs))
-                        .text_color(rgb(self.tokens.ui.text_muted))
-                        .child(hint),
-                )
-            })
-            .into_any_element()
+        self.settings_components().card_subsection_header(title, hint)
     }
 
     pub(in crate::workspace) fn settings_callout(
@@ -436,85 +111,11 @@ impl WorkspaceApp {
         icon: Option<LucideIcon>,
         body: AnyElement,
     ) -> AnyElement {
-        let ui = self.tokens.ui;
-        let (border_color, background, icon_color, text_color) = match tone {
-            SettingsCalloutTone::Info => (
-                rgba((ui.info << 8) | 0x4d),
-                rgba((ui.info << 8) | 0x14),
-                rgb(ui.info),
-                rgb(ui.text_muted),
-            ),
-            SettingsCalloutTone::Warning => (
-                rgba((ui.warning << 8) | 0x4d),
-                rgba((ui.warning << 8) | 0x14),
-                rgb(ui.warning),
-                rgb(ui.text_muted),
-            ),
-            SettingsCalloutTone::Error => (
-                rgba((ui.error << 8) | 0x4d),
-                rgba((ui.error << 8) | 0x14),
-                rgb(ui.error),
-                rgb(ui.error),
-            ),
-        };
-        let icon_offset_y = ((self.tokens.metrics.ui_text_xs * 1.45 - 14.0) * 0.5).max(1.0);
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(border_color)
-            .bg(background)
-            .px(px(12.0))
-            .py(px(10.0))
-            .flex()
-            .flex_row()
-            .items_start()
-            .gap(px(10.0))
-            .when_some(icon, |row, icon| {
-                row.child(
-                    div()
-                        .flex_none()
-                        .mt(px(icon_offset_y))
-                        .child(Self::render_lucide_icon(icon, 14.0, icon_color)),
-                )
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .line_height(gpui::relative(1.45))
-                    .text_color(text_color)
-                    .child(body),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn settings_mono_box(&self, body: AnyElement) -> AnyElement {
-        div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-            .bg(rgb(self.tokens.ui.bg_sunken))
-            .px(px(10.0))
-            .py(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .font_family(settings_mono_font_family(self.settings_store.settings()))
-            .text_color(rgb(self.tokens.ui.text))
-            .line_height(px((self.tokens.metrics.ui_text_xs + 4.0).max(16.0)))
-            .child(body)
-            .into_any_element()
+        self.settings_components().settings_callout(tone, icon.map(LucideIcon::path), body)
     }
 
     pub(in crate::workspace) fn card_separator(&self) -> AnyElement {
-        div()
-            .h(px(1.0))
-            .w_full()
-            .bg(rgba((self.tokens.ui.border << 8) | 0x66))
-            .into_any_element()
+        self.settings_components().card_separator()
     }
 
     pub(in crate::workspace) fn settings_background_active(&self) -> bool {
@@ -522,47 +123,11 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn settings_panel_background(&self, color: u32) -> Rgba {
-        if self.settings_background_active() {
-            rgba((color << 8) | oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens))
-        } else {
-            rgb(color)
-        }
-    }
-
-    pub(in crate::workspace) fn settings_card_surface(&self, card: Div, _color: u32) -> Div {
-        let chrome = oxideterm_gpui_ui::surface_chrome(
-            &self.tokens,
-            oxideterm_gpui_ui::SurfaceOptions::new(oxideterm_gpui_ui::SurfaceKind::Inspector)
-                .padding(oxideterm_gpui_ui::SurfacePadding::None)
-                .has_background_image(self.settings_background_active()),
-        );
-        // Settings cards sit flat in the Z=0 ground plane with a crisp border
-        // and translucent glass fallback when custom background media is active.
-        let card = card
-            .rounded(px(chrome.radius.max(10.0)))
-            .border_color(chrome.border)
-            .bg(chrome.background);
-        card.child(oxideterm_gpui_ui::surface::panel_edge_highlight(
-            &self.tokens,
-            if self.settings_background_active() {
-                oxideterm_gpui_ui::theme_glass_card_background_alpha(&self.tokens) as f32 / 255.0
-            } else {
-                1.0
-            },
-            chrome.radius.max(10.0),
-        ))
+        self.settings_components().settings_panel_background(color)
     }
 
     pub(in crate::workspace) fn text_badge(&self, label: String, color: u32) -> AnyElement {
-        div()
-            .px(px(8.0))
-            .py(px(2.0))
-            .rounded(px(self.tokens.radii.sm))
-            .bg(rgba((color << 8) | 0x1a))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(color))
-            .child(label)
-            .into_any_element()
+        self.settings_components().text_badge(label, color)
     }
 
     pub(in crate::workspace) fn standard_footer_action_button(
@@ -668,120 +233,6 @@ impl WorkspaceApp {
             )
     }
 
-    pub(in crate::workspace) fn terminal_page_switcher(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let pages = TerminalSettingsPage::all();
-        let route = self.settings_workspace.read(cx).route_snapshot();
-        let active_index = pages
-            .iter()
-            .position(|page| *page == route.terminal_page)
-            .unwrap_or(0);
-        let previous_index = pages
-            .iter()
-            .position(|page| *page == route.previous_terminal_page)
-            .unwrap_or(active_index);
-        let mut items = Vec::with_capacity(pages.len());
-        for (page_index, page) in pages.iter().enumerate() {
-            let page_id = *page;
-            let active = route.terminal_page == page_id;
-            let item = oxideterm_gpui_ui::segmented_control_item(
-                &self.tokens,
-                self.i18n.t(page_id.label_key()),
-                active,
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    let changed = this
-                        .settings_workspace
-                        .update(cx, |settings, cx| settings.set_terminal_page(page_id, cx));
-                    if changed {
-                        this.begin_user_segmented_control_transition(
-                            selection_motion::TERMINAL_SETTINGS_SWITCHER_ID,
-                            page_index,
-                            cx,
-                        );
-                    }
-                    cx.notify();
-                }),
-            );
-            items.push(item.into_any_element());
-        }
-        oxideterm_gpui_ui::segmented_control(
-            &self.tokens,
-            selection_motion::TERMINAL_SETTINGS_SWITCHER_ID,
-            oxideterm_gpui_ui::SegmentedControlOptions::new(
-                active_index,
-                previous_index,
-                pages.len(),
-            )
-            .user_transition_active(self.segmented_control_user_transition_active(
-                selection_motion::TERMINAL_SETTINGS_SWITCHER_ID,
-                active_index,
-            ))
-            .has_background_image(self.settings_background_active()),
-            items,
-        )
-        .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ai_page_switcher(&self, cx: &mut Context<Self>) -> AnyElement {
-        let pages = AiSettingsPage::all();
-        let route = self.settings_workspace.read(cx).route_snapshot();
-        let active_index = pages
-            .iter()
-            .position(|page| *page == route.ai_page)
-            .unwrap_or(0);
-        let previous_index = pages
-            .iter()
-            .position(|page| *page == route.previous_ai_page)
-            .unwrap_or(active_index);
-        let mut items = Vec::with_capacity(pages.len());
-        for (page_index, page) in pages.iter().enumerate() {
-            let page_id = *page;
-            let active = route.ai_page == page_id;
-            let item = oxideterm_gpui_ui::segmented_control_item(
-                &self.tokens,
-                self.i18n.t(page_id.label_key()),
-                active,
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    let changed = this
-                        .settings_workspace
-                        .update(cx, |settings, cx| settings.set_ai_page(page_id, cx));
-                    if changed {
-                        this.begin_user_segmented_control_transition(
-                            selection_motion::AI_SETTINGS_SWITCHER_ID,
-                            page_index,
-                            cx,
-                        );
-                    }
-                    cx.notify();
-                }),
-            );
-            items.push(item.into_any_element());
-        }
-        oxideterm_gpui_ui::segmented_control(
-            &self.tokens,
-            selection_motion::AI_SETTINGS_SWITCHER_ID,
-            oxideterm_gpui_ui::SegmentedControlOptions::new(
-                active_index,
-                previous_index,
-                pages.len(),
-            )
-            .user_transition_active(self.segmented_control_user_transition_active(
-                selection_motion::AI_SETTINGS_SWITCHER_ID,
-                active_index,
-            ))
-            .has_background_image(self.settings_background_active()),
-            items,
-        )
-        .into_any_element()
-    }
 
     pub(in crate::workspace) fn update_settings_select_anchor(
         &mut self,
@@ -952,6 +403,41 @@ impl WorkspaceApp {
                     self.activate_first_settings_search_result(cx);
                     return true;
                 }
+                "escape" if super::terminal_triggers::is_terminal_trigger_input(input) => {
+                    if self.settings_workspace.read(cx).terminal_triggers.scope_picker_open {
+                        self.close_terminal_trigger_scope_picker(cx);
+                    } else {
+                        self.close_terminal_trigger_editor(cx);
+                    }
+                    return true;
+                }
+                "escape" if super::highlight::is_semantic_scheme_input(input) => {
+                    self.close_semantic_scheme_editor(cx);
+                    return true;
+                }
+                "escape" if super::highlight::is_highlight_rule_input(input) => {
+                    self.close_highlight_rule_editor(cx);
+                    return true;
+                }
+                "escape" if input == SettingsInput::TerminalCommandSpecsJson => {
+                    self.close_terminal_command_specs_editor(cx);
+                    self.show_active_input_caret(cx);
+                    return true;
+                }
+                "enter" if input == SettingsInput::TerminalCommandSpecsJson => {
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        settings.replace_settings_entity_input(input, None, "\n", cx);
+                    });
+                    return true;
+                }
+                "enter" if super::terminal_triggers::is_terminal_trigger_input(input)
+                    && input.accepts_newline() =>
+                {
+                    self.settings_workspace.update(cx, |settings, cx| {
+                        settings.replace_settings_entity_input(input, None, "\n", cx);
+                    });
+                    return true;
+                }
                 "escape" | "enter" => {
                     self.settings_workspace.update(cx, |settings, cx| {
                         settings.blur_settings_entity_input(cx);
@@ -1043,46 +529,6 @@ impl WorkspaceApp {
         let modifiers = event.keystroke.modifiers;
 
         match key {
-            "escape"
-                if input == SettingsInput::TerminalCommandSpecsJson
-                    && self.terminal_command_specs_editor_open =>
-            {
-                // This input belongs to a workspace modal, so Escape dismisses
-                // the editor instead of leaving an unfocused modal behind.
-                self.close_terminal_command_specs_editor(cx);
-                self.show_active_input_caret(cx);
-                true
-            }
-            "escape"
-                if super::terminal_triggers::is_terminal_trigger_input(input)
-                    && self.terminal_triggers.editor_open =>
-            {
-                if self.terminal_triggers.scope_picker_open {
-                    self.clear_terminal_trigger_input_focus();
-                    self.terminal_triggers.scope_picker_open = false;
-                    cx.notify();
-                } else {
-                    self.close_terminal_trigger_editor(cx);
-                }
-                self.show_active_input_caret(cx);
-                true
-            }
-            "escape"
-                if super::highlight::is_semantic_scheme_input(input)
-                    && self.semantic_scheme_editor_open =>
-            {
-                self.close_semantic_scheme_editor(cx);
-                self.show_active_input_caret(cx);
-                true
-            }
-            "escape"
-                if super::highlight::is_highlight_rule_input(input)
-                    && self.highlight_rule_editor_index.is_some() =>
-            {
-                self.close_highlight_rule_editor(cx);
-                self.show_active_input_caret(cx);
-                true
-            }
             "escape" => {
                 if matches!(
                     input,
@@ -1164,13 +610,22 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self
-            .settings_workspace
-            .update(cx, |settings, cx| settings.blur_settings_entity_input(cx))
-        {
+        let blurred_settings = self.settings_workspace.update(cx, |settings, cx| {
+            let focused = settings.settings_entity_focused_input();
+            settings.blur_settings_entity_input(cx);
+            focused
+        });
+        if let Some(input) = blurred_settings {
             self.ime_marked_text = None;
             self.clear_ime_selection();
-            changed = true;
+            if is_surface_input(input)
+                || is_connection_key_input(input)
+                || oxideterm_gpui_settings_view::theme_editor::is_theme_editor_input(input)
+            {
+                self.show_active_input_caret(cx);
+            } else {
+                changed = true;
+            }
         }
         if self
             .ai_entity
@@ -1523,8 +978,11 @@ impl WorkspaceApp {
         current_value: String,
         cx: &mut Context<Self>,
     ) {
+        let dismissed_select = self.open_settings_select.is_some();
         self.close_settings_select();
-        let entity_owned_input = self
+        let trigger_input = super::terminal_triggers::is_terminal_trigger_input(input);
+        let highlight_input = oxideterm_gpui_settings_view::highlight_page::is_highlight_input(input);
+        let entity_owned_input = trigger_input || highlight_input || self
             .settings_workspace
             .read(cx)
             .settings_entity_input_value(input)
@@ -1537,11 +995,30 @@ impl WorkspaceApp {
                 self.clear_settings_input_draft(previous_input);
             }
             self.settings_workspace.update(cx, |settings, cx| {
-                settings.focus_settings_entity_input(input, cx);
+                if highlight_input {
+                    settings.focus_highlight_input(input, current_value, cx);
+                } else {
+                    settings.focus_settings_entity_input(input, cx);
+                }
             });
             self.clear_ime_selection();
             self.show_active_input_caret(cx);
-            cx.notify();
+            if (!trigger_input
+                && !highlight_input
+                && !oxideterm_gpui_settings_view::theme_editor::is_theme_editor_input(input)
+                && !is_surface_input(input)
+                && !is_connection_key_input(input)
+                && !matches!(
+                input,
+                SettingsInput::TerminalCommandSpecsJson
+                    | SettingsInput::PortableCurrentPassword
+                    | SettingsInput::PortableNewPassword
+                    | SettingsInput::PortableConfirmPassword
+            ))
+                || dismissed_select
+            {
+                cx.notify();
+            }
             return;
         }
         if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
@@ -1621,7 +1098,6 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_settings_select(&mut self) {
-        self.settings_theme_preview = None;
         browser_behavior::close_browser_trigger_select(
             &mut self.open_settings_select,
             &mut self.settings_select_focus_origin,
@@ -1643,7 +1119,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn clear_settings_input_draft(&mut self, input: SettingsInput) {
-        if input.is_secret() {
+        if input.is_secret() || input == SettingsInput::TerminalCommandSpecsJson {
             zeroize::Zeroize::zeroize(&mut self.settings_input_draft);
         }
         self.settings_input_draft.clear();
@@ -1722,8 +1198,8 @@ impl WorkspaceApp {
         if let Some(value) = persisted_settings_input_value(settings, input) {
             return value;
         }
-        if let Some(value) = self.terminal_trigger_settings_input_value(input) {
-            return value;
+        if super::terminal_triggers::is_terminal_trigger_input(input) {
+            return String::new();
         }
         if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
             return value.to_owned();
@@ -1751,9 +1227,6 @@ impl WorkspaceApp {
         }
         match input {
             SettingsInput::PublicMcpPort => self.public_mcp.port_draft().to_owned(),
-            SettingsInput::TerminalCommandSpecsJson => {
-                self.terminal_command_specs_editor_initial_value()
-            }
             SettingsInput::NativePluginInstallUrl => {
                 self.plugin_manager_state(cx).install_url_draft.clone()
             }
@@ -1863,7 +1336,7 @@ impl WorkspaceApp {
             } else {
                 let tokens = oxideterm_settings_model::theme_tokens_for_system(
                     self.settings_store.settings(),
-                    self.appearance_edit_scheme().unwrap_or(self.system_dark),
+                    self.appearance_edit_scheme(cx).unwrap_or(self.system_dark),
                 );
                 [tokens.ui.accent, tokens.terminal.cyan]
             };
@@ -1900,11 +1373,6 @@ impl WorkspaceApp {
             cx.notify();
             return;
         }
-        let terminal_trigger_input_draft = self.settings_input_draft.clone();
-        if self.apply_terminal_trigger_settings_input(input, &terminal_trigger_input_draft) {
-            cx.notify();
-            return;
-        }
         let cloud_sync_input = {
             let cloud_sync = self.cloud_sync.read(cx);
             cloud_sync_form_input_value_ref(&cloud_sync.view.form, input).is_some()
@@ -1926,9 +1394,6 @@ impl WorkspaceApp {
             | SettingsInput::NativePluginInstalledPageJump
             | SettingsInput::NativePluginMarketplacePageJump => {
                 // Commit on Enter or Apply so typing does not move the plugin list.
-                cx.notify();
-            }
-            SettingsInput::TerminalCommandSpecsJson => {
                 cx.notify();
             }
             SettingsInput::NativePluginInstallUrl => {
@@ -2080,11 +1545,15 @@ impl WorkspaceApp {
         index: usize,
         cx: &mut Context<Self>,
     ) {
-        if let Some(open_index) = self.highlight_rule_editor_index {
+        let open_index = self.settings_workspace.read(cx).highlight.highlight_rule_editor_index;
+        if let Some(open_index) = open_index {
             if open_index == index {
                 self.close_highlight_rule_editor(cx);
             } else if open_index > index {
-                self.highlight_rule_editor_index = Some(open_index - 1);
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.highlight.highlight_rule_editor_index = Some(open_index - 1);
+                    cx.notify();
+                });
             }
         }
         self.edit_settings(
@@ -2118,11 +1587,18 @@ impl WorkspaceApp {
         } else {
             None
         };
-        if let (Some(next), Some(open_index)) = (next, self.highlight_rule_editor_index) {
+        let open_index = self.settings_workspace.read(cx).highlight.highlight_rule_editor_index;
+        if let (Some(next), Some(open_index)) = (next, open_index) {
             if open_index == index {
-                self.highlight_rule_editor_index = Some(next);
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.highlight.highlight_rule_editor_index = Some(next);
+                    cx.notify();
+                });
             } else if open_index == next {
-                self.highlight_rule_editor_index = Some(index);
+                self.settings_workspace.update(cx, |settings, cx| {
+                    settings.highlight.highlight_rule_editor_index = Some(index);
+                    cx.notify();
+                });
             }
         }
         self.edit_settings(
@@ -2211,7 +1687,7 @@ impl WorkspaceApp {
             .background_settings_for_controls(cx)
             .terminal
             .background_blur;
-        let system_dark = self.appearance_edit_scheme();
+        let system_dark = self.appearance_edit_scheme(cx);
         self.settings_workspace.update(cx, |settings, cx| {
             settings.update_background_blur_preview(
                 persisted_background_blur,

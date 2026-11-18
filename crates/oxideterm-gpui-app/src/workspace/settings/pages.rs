@@ -7,16 +7,8 @@ mod keybindings;
 mod knowledge_actions;
 mod knowledge_dialogs;
 mod knowledge_render;
-mod local_reconnect;
 
-use constants::{
-    KNOWLEDGE_ACTION_BUTTON_HEIGHT, KNOWLEDGE_DIALOG_WIDTH,
-    KNOWLEDGE_DOCUMENT_ACTION_GROUP_MIN_WIDTH, KNOWLEDGE_DOCUMENT_HEADER_INFO_MIN_WIDTH,
-    KNOWLEDGE_EMBEDDING_CONFIG_BUTTON_HEIGHT, KNOWLEDGE_EMBEDDING_ICON_BOX,
-    KNOWLEDGE_ICON_BUTTON_HOVER_ALPHA, KNOWLEDGE_ICON_BUTTON_SIZE, KNOWLEDGE_INLINE_ICON_SIZE,
-    KNOWLEDGE_ROW_ICON_SIZE, KNOWLEDGE_STATUS_BG_ALPHA, KNOWLEDGE_STATUS_BORDER_ALPHA,
-    SETTINGS_RECONNECT_FIELD_BASIS, SETTINGS_RECONNECT_HINT_LINE_HEIGHT,
-};
+use constants::KNOWLEDGE_DIALOG_WIDTH;
 use helpers::open_external_url;
 pub(in crate::workspace) use helpers::open_path_external;
-pub(in crate::workspace) use keybindings::settings_keybinding_scope_matches;
+pub(in crate::workspace) use oxideterm_gpui_settings_view::keybinding_page::settings_keybinding_scope_matches;

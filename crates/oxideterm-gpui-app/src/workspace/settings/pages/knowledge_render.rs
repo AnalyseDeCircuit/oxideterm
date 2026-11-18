@@ -1,4 +1,7 @@
 use super::*;
+use oxideterm_gpui_settings_view::knowledge_page::{
+    KnowledgeSettingsFrame, KnowledgeSettingsPage, KnowledgeSettingsRequest,
+};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_knowledge_section(
@@ -27,10 +30,14 @@ impl WorkspaceApp {
                 }
             }
             SettingsSectionId::KnowledgeCollections => {
-                return self.knowledge_collections_card(&collections, selected_id.as_deref(), cx);
+                return self.with_knowledge_settings_page(cx, |page, cx| {
+                    page.knowledge_collections_card(&collections, selected_id.as_deref(), cx)
+                });
             }
             SettingsSectionId::KnowledgeEmbeddingConfig => {
-                return self.knowledge_embedding_config_section(cx);
+                return self.with_knowledge_settings_page(cx, |page, cx| {
+                    page.knowledge_embedding_config_section(cx)
+                });
             }
             SettingsSectionId::KnowledgeDocuments => {
                 if let Some(collection) = selected_collection {
@@ -42,9 +49,13 @@ impl WorkspaceApp {
                         .read(cx)
                         .knowledge_document_page(&collection.id);
                     return match page {
-                        Ok((page_index, documents)) => self.knowledge_documents_card(
-                            collection, documents, page_index, stats, true, cx,
-                        ),
+                        Ok((page_index, documents)) => {
+                            self.with_knowledge_settings_page(cx, |page, cx| {
+                                page.knowledge_documents_card(
+                                    collection, documents, page_index, stats, true, cx,
+                                )
+                            })
+                        }
                         Err(error) => self.knowledge_error_row(&error),
                     };
                 }
@@ -55,458 +66,152 @@ impl WorkspaceApp {
         div().into_any_element()
     }
 
-    pub(in crate::workspace) fn knowledge_error_row(&self, error: &str) -> AnyElement {
-        self.settings_callout(
-            SettingsCalloutTone::Error,
-            Some(LucideIcon::AlertCircle),
-            div().child(error.to_string()).into_any_element(),
-        )
-    }
-
-    pub(in crate::workspace) fn knowledge_collections_card(
+    fn with_knowledge_settings_page<R>(
         &self,
-        collections: &[oxideterm_ai::RagCollectionResponse],
-        selected_id: Option<&str>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let mut rows = vec![
-            div()
-                .flex()
-                .items_center()
-                .justify_end()
-                .child(
-                    // Tauri DocumentManager renders this as an outline small
-                    // Button with a leading Plus icon. Route activation through
-                    // the workspace wrapper so collection creation shares the
-                    // same guarded Button path as document actions.
-                    self.workspace_toolbar_action_button(
-                        self.i18n.t("settings_view.knowledge.create_collection"),
-                        Some(Self::render_lucide_icon(
-                            LucideIcon::Plus,
-                            KNOWLEDGE_INLINE_ICON_SIZE,
-                            rgb(self.tokens.ui.text),
-                        )),
-                        ToolbarButtonOptions {
-                            button: ButtonOptions {
-                                variant: ButtonVariant::Outline,
-                                size: ButtonSize::Sm,
-                                radius: ButtonRadius::Md,
-                                disabled: false,
-                            },
-                            ..ToolbarButtonOptions::default()
-                        },
-                        cx.listener(|this, _event, _window, cx| {
-                            this.open_knowledge_create_dialog(cx);
-                            this.reset_standard_confirm_focus();
-                            cx.stop_propagation();
-                        }),
-                    )
-                    .into_any_element(),
-                )
-                .into_any_element(),
-        ];
-        if collections.is_empty() {
-            rows.push(self.knowledge_empty_row(
-                LucideIcon::BookOpen,
-                self.i18n.t("settings_view.knowledge.no_collections"),
-                cx,
-            ));
-        } else {
-            for collection in collections {
-                rows.push(self.knowledge_collection_row(collection, selected_id, cx));
-            }
-        }
-        self.settings_card(
-            "settings_view.knowledge.collections",
-            "settings_view.knowledge.create_description",
-            rows,
-        )
-    }
-
-    pub(in crate::workspace) fn knowledge_documents_card(
-        &self,
-        collection: &oxideterm_ai::RagCollectionResponse,
-        documents: oxideterm_ai::RagPaginatedDocuments,
-        page_index: usize,
-        stats: Option<oxideterm_ai::RagStatsResponse>,
-        include_document_rows: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let reindex_collection_id = collection.id.clone();
-        let import_collection_id = collection.id.clone();
-        let embedding_collection_id = collection.id.clone();
-        let total = documents.total;
-        let page_size = crate::workspace::ai_state::KNOWLEDGE_DOCUMENT_PAGE_SIZE;
-        let page_count = total.div_ceil(page_size).max(1);
-        let documents = documents.documents;
-        let create_document_collection_id = collection.id.clone();
-        let import_progress = self.ai_entity.read(cx).knowledge_import_progress();
-        let embedding_progress = self.ai_entity.read(cx).knowledge_embedding_progress();
-        let import_label = import_progress
-            .map(|(current, total)| format!("{current}/{total}"))
-            .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.import_files"));
-        let embedding_label = embedding_progress
-            .map(|(current, total)| format!("{current}/{total}"))
-            .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.generate_embeddings"));
-        let reindex_progress = self.ai_entity.read(cx).knowledge_reindex_progress();
-        let reindex_label = reindex_progress
-            .map(|(current, total)| {
-                if total == 0 {
-                    self.i18n.t("settings_view.knowledge.reindex")
-                } else {
-                    format!("{current}/{total}")
-                }
-            })
-            .unwrap_or_else(|| self.i18n.t("settings_view.knowledge.reindex"));
-        let mut rows = vec![
-            div()
-                .w_full()
-                .min_w(px(0.0))
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .justify_between()
-                .gap(px(12.0))
-                .child(
-                    div()
-                        .min_w(px(0.0))
-                        .flex_1()
-                        .flex_basis(px(KNOWLEDGE_DOCUMENT_HEADER_INFO_MIN_WIDTH))
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.0))
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_sm))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(self.tokens.ui.text))
-                                .child(collection.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(self.tokens.ui.text_muted))
-                                .child(self.knowledge_scope_label(&collection.scope)),
-                        ),
-                )
-                .child(
-                    div()
-                        .min_w(px(0.0))
-                        .max_w_full()
-                        .flex_1()
-                        .flex_basis(px(KNOWLEDGE_DOCUMENT_ACTION_GROUP_MIN_WIDTH))
-                        .flex()
-                        .flex_wrap()
-                        .items_center()
-                        .justify_end()
-                        .gap(px(8.0))
-                        .child({
-                            let import_disabled = import_progress.is_some();
-                            self.knowledge_text_icon_button(
-                                LucideIcon::FolderOpen,
-                                import_label,
-                                import_disabled,
-                                cx.listener(move |this, _event, window, cx| {
-                                    this.knowledge_import_files(
-                                        import_collection_id.clone(),
-                                        window,
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                        })
-                        .child(self.knowledge_text_icon_button(
-                            LucideIcon::FilePlus,
-                            self.i18n.t("settings_view.knowledge.new_document"),
-                            false,
-                            cx.listener(move |this, _event, window, cx| {
-                                this.open_knowledge_document_dialog(
-                                    create_document_collection_id.clone(),
-                                    false,
-                                    window,
-                                    cx,
-                                );
-                                this.reset_standard_confirm_focus();
-                                cx.stop_propagation();
-                            }),
-                        ))
-                        .child({
-                            let embedding_disabled = embedding_progress.is_some();
-                            self.knowledge_text_icon_button(
-                                LucideIcon::Sparkles,
-                                embedding_label,
-                                embedding_disabled,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    this.knowledge_generate_embeddings(
-                                        embedding_collection_id.clone(),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                            )
-                        })
-                        .child({
-                            let reindex_disabled = matches!(reindex_progress, Some((_current, 0)));
-                            self.knowledge_text_icon_button(
-                                if reindex_progress.is_some() {
-                                    LucideIcon::X
-                                } else {
-                                    LucideIcon::RefreshCw
-                                },
-                                reindex_label,
-                                reindex_disabled,
-                                cx.listener(move |this, _event, _window, cx| {
-                                    if this
-                                        .ai_entity
-                                        .read(cx)
-                                        .knowledge_reindex_progress()
-                                        .is_some()
-                                    {
-                                        this.knowledge_cancel_reindex(cx);
-                                    } else {
-                                        this.knowledge_reindex(reindex_collection_id.clone(), cx);
-                                    }
-                                    cx.stop_propagation();
-                                }),
-                            )
-                        }),
-                )
-                .into_any_element(),
-        ];
-        if let Some(stats) = stats {
-            rows.push(self.knowledge_stats_row(stats, cx));
-        }
-        if include_document_rows {
-            rows.push(self.card_separator());
-            if documents.is_empty() {
-                rows.push(self.knowledge_empty_row(
-                    LucideIcon::FileText,
-                    self.i18n.t("settings_view.knowledge.no_documents"),
-                    cx,
-                ));
-            } else {
-                for document in documents {
-                    rows.push(self.knowledge_document_row(document, false, cx));
-                }
-            }
-        }
-        if page_count > 1 {
-            let previous_collection = collection.id.clone();
-            let next_collection = collection.id.clone();
-            rows.push(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(self.knowledge_text_icon_button(
-                        LucideIcon::ChevronLeft,
-                        self.i18n.t("settings_view.knowledge.previous_page"),
-                        page_index == 0,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.show_knowledge_document_page(
-                                previous_collection.clone(),
-                                page_index.saturating_sub(1),
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_xs))
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(
-                                self.i18n
-                                    .t("settings_view.knowledge.page_summary")
-                                    .replace("{{page}}", &(page_index + 1).to_string())
-                                    .replace("{{pages}}", &page_count.to_string())
-                                    .replace("{{total}}", &total.to_string()),
-                            ),
-                    )
-                    .child(self.knowledge_text_icon_button(
-                        LucideIcon::ChevronRight,
-                        self.i18n.t("settings_view.knowledge.next_page"),
-                        page_index + 1 >= page_count,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.show_knowledge_document_page(
-                                next_collection.clone(),
-                                page_index + 1,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ))
-                    .into_any_element(),
-            );
-        }
-        self.settings_card("settings_view.knowledge.navigator_documents", "", rows)
-    }
-
-    pub(in crate::workspace) fn knowledge_collection_row(
-        &self,
-        collection: &oxideterm_ai::RagCollectionResponse,
-        selected_id: Option<&str>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let selected = selected_id == Some(collection.id.as_str());
-        let collection_id = collection.id.clone();
-        let delete_id = collection.id.clone();
-        let delete_name = collection.name.clone();
-        div()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap(px(12.0))
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(if selected {
-                rgba((self.tokens.ui.accent << 8) | 0x4d)
-            } else {
-                rgba(0x00000000)
-            })
-            .bg(if selected {
-                rgba((self.tokens.ui.accent << 8) | 0x1a)
-            } else {
-                rgba(0x00000000)
-            })
-            .px(px(12.0))
-            .py(px(8.0))
-            .cursor_pointer()
-            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.ai_entity.update(cx, |entity, cx| {
-                        entity.select_knowledge_collection(collection_id.clone());
-                        cx.notify();
-                    });
-                    this.refresh_knowledge_navigator(true, cx);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .child(
-                div()
-                    .min_w(px(0.0))
-                    .flex_1()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.0))
-                    .child(div().flex_none().child(Self::render_lucide_icon(
-                        LucideIcon::BookOpen,
-                        KNOWLEDGE_ROW_ICON_SIZE,
-                        rgb(self.tokens.ui.text_muted),
-                    )))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap(px(2.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .truncate()
-                                    .child(collection.name.clone()),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .truncate()
-                                    .child(format!(
-                                        "{} · {}",
-                                        self.knowledge_scope_label(&collection.scope),
-                                        self.knowledge_format_date(collection.updated_at)
-                                    )),
-                            ),
-                    ),
-            )
-            .child(div().flex_none().child(self.knowledge_icon_button(
-                LucideIcon::Trash2,
+        cx: &Context<Self>,
+        render: impl FnOnce(KnowledgeSettingsPage<'_>, &App) -> R,
+    ) -> R {
+        let owner = cx.entity().downgrade();
+        let dispatch = Rc::new(
+            move |request, position, window: &mut Window, cx: &mut App| {
+                let _ = owner.update(cx, |app, cx| {
+                    app.handle_knowledge_settings_request(request, position, window, cx)
+                });
+            },
+        );
+        let ai = self.ai_entity.read(cx);
+        let model = self.current_settings_input_value(SettingsInput::AiEmbeddingModel, cx);
+        let document_selected = |id: &str, cx: &App| self.is_knowledge_document_selected(id, cx);
+        let document_cut = |id: &str, cx: &App| self.knowledge_note_is_cut(id, cx);
+        let provider_has_key = |id: &str, cx: &App| self.ai_provider_has_key_cached(id, cx);
+        let chevron = |expanded| {
+            self.render_animated_chevron(
+                ("knowledge-embedding-chevron", expanded as usize),
+                expanded,
+                14.0,
                 rgb(self.tokens.ui.text_muted),
-                Some(rgb(self.tokens.ui.error)),
-                move |this, _event, _window, cx| {
-                    this.ai_entity.update(cx, |entity, cx| {
-                        entity.request_delete_knowledge_collection(
-                            delete_id.clone(),
-                            delete_name.clone(),
-                        );
-                        cx.notify();
-                    });
-                    this.reset_standard_confirm_focus();
-                    cx.stop_propagation();
-                    cx.notify();
+            )
+            .into_any_element()
+        };
+        self.with_settings_controls(cx, |controls, cx| {
+            render(
+                KnowledgeSettingsPage {
+                    controls,
+                    dispatch,
+                    provider_has_key: &provider_has_key,
+                    document_selected: &document_selected,
+                    document_cut: &document_cut,
+                    chevron: &chevron,
+                    frame: KnowledgeSettingsFrame {
+                        page_size: crate::workspace::ai_state::KNOWLEDGE_DOCUMENT_PAGE_SIZE,
+                        compact_row_height: KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT,
+                        has_background: self.background_surface_active("knowledge"),
+                        import_progress: ai.knowledge_import_progress(),
+                        embedding_progress: ai.knowledge_embedding_progress(),
+                        reindex_progress: ai.knowledge_reindex_progress(),
+                        embedding_config_expanded: ai.knowledge_embedding_config_expanded(),
+                        external_edit_id: ai
+                            .knowledge_external_edit()
+                            .map(|edit| edit.doc_id.as_str()),
+                        embedding_model: &model,
+                    },
                 },
                 cx,
-            )))
-            .into_any_element()
+            )
+        })
     }
 
-    pub(in crate::workspace) fn knowledge_text_icon_button(
-        &self,
-        icon: LucideIcon,
-        label: String,
-        disabled: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-    ) -> Div {
-        // Knowledge action chips match Tauri's small outline buttons. Use the
-        // workspace action wrapper so disabled cursor/loading/focus-visible
-        // behavior stays aligned with the rest of settings.
-        self.workspace_toolbar_action_button(
-            label,
-            Some(Self::render_lucide_icon(
-                icon,
-                KNOWLEDGE_INLINE_ICON_SIZE,
-                rgb(self.tokens.ui.text),
-            )),
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant: ButtonVariant::Outline,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled,
-                },
-                height: Some(KNOWLEDGE_ACTION_BUTTON_HEIGHT),
-                padding_x: Some(10.0),
-                font_size: Some(self.tokens.metrics.ui_text_xs),
-                background: Some(rgb(self.tokens.ui.bg)),
-                border: Some(rgb(self.tokens.ui.border)),
-                text_color: Some(rgb(self.tokens.ui.text)),
-                hover_background: Some(rgb(self.tokens.ui.bg_hover)),
-                ..ToolbarButtonOptions::default()
-            },
-            listener,
-        )
-    }
-
-    pub(in crate::workspace) fn knowledge_icon_button(
-        &self,
-        icon: LucideIcon,
-        color: gpui::Rgba,
-        hover_color: Option<gpui::Rgba>,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+    fn handle_knowledge_settings_request(
+        &mut self,
+        request: KnowledgeSettingsRequest,
+        position: gpui::Point<Pixels>,
+        window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Div {
-        // The original local helper accepted a hover text color, but the icon
-        // SVG is rendered with an explicit color. Keep the parameter until the
-        // shared icon primitive grows a real hover-icon-color slot.
-        let _ = hover_color;
-        self.workspace_icon_action_button(
-            icon,
-            KNOWLEDGE_INLINE_ICON_SIZE,
-            color,
-            IconButtonOptions {
-                hover_background: Some(rgba((0xffffff << 8) | KNOWLEDGE_ICON_BUTTON_HOVER_ALPHA)),
-                ..IconButtonOptions::opaque_toolbar(KNOWLEDGE_ICON_BUTTON_SIZE, ButtonRadius::Sm)
-            },
-            listener,
-            cx,
-        )
+    ) {
+        match request {
+            KnowledgeSettingsRequest::CreateCollection => {
+                self.open_knowledge_create_dialog(cx);
+                self.reset_standard_confirm_focus();
+            }
+            KnowledgeSettingsRequest::ImportFiles(import_collection_id) => {
+                self.knowledge_import_files(import_collection_id.clone(), window, cx);
+            }
+            KnowledgeSettingsRequest::NewDocument(create_document_collection_id) => {
+                self.open_knowledge_document_dialog(
+                    create_document_collection_id.clone(),
+                    false,
+                    window,
+                    cx,
+                );
+                self.reset_standard_confirm_focus();
+            }
+            KnowledgeSettingsRequest::Generate(embedding_collection_id) => {
+                self.knowledge_generate_embeddings(embedding_collection_id.clone(), cx);
+            }
+            KnowledgeSettingsRequest::ToggleReindex(reindex_collection_id) => {
+                if self
+                    .ai_entity
+                    .read(cx)
+                    .knowledge_reindex_progress()
+                    .is_some()
+                {
+                    self.knowledge_cancel_reindex(cx);
+                } else {
+                    self.knowledge_reindex(reindex_collection_id.clone(), cx);
+                }
+            }
+            KnowledgeSettingsRequest::ShowPage(collection, page) => {
+                self.show_knowledge_document_page(collection, page, cx);
+            }
+            KnowledgeSettingsRequest::SelectCollection(collection_id) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.select_knowledge_collection(collection_id.clone());
+                    cx.notify();
+                });
+                self.refresh_knowledge_navigator(true, cx);
+                self.settings_surface.update(cx, |_, cx| cx.notify());
+            }
+            KnowledgeSettingsRequest::DeleteCollection(delete_id, delete_name) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.request_delete_knowledge_collection(
+                        delete_id.clone(),
+                        delete_name.clone(),
+                    );
+                    cx.notify();
+                });
+                self.reset_standard_confirm_focus();
+                self.settings_surface.update(cx, |_, cx| cx.notify());
+            }
+            KnowledgeSettingsRequest::SyncExternal => {
+                self.knowledge_sync_external_edit(true, cx);
+            }
+            KnowledgeSettingsRequest::OpenExternal(edit_id) => {
+                self.knowledge_open_external(edit_id.clone(), cx);
+            }
+            KnowledgeSettingsRequest::DeleteDocument(delete_id, delete_name) => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity
+                        .request_delete_knowledge_document(delete_id.clone(), delete_name.clone());
+                    cx.notify();
+                });
+                self.reset_standard_confirm_focus();
+                self.settings_surface.update(cx, |_, cx| cx.notify());
+            }
+            KnowledgeSettingsRequest::NoteMenu(menu_document) => {
+                self.open_knowledge_note_menu(menu_document.clone(), position, window, cx);
+            }
+            KnowledgeSettingsRequest::OpenInWorkspace(open_id) => {
+                self.open_knowledge_workspace_tab(window, cx);
+                self.select_knowledge_document(open_id.clone(), cx);
+            }
+            KnowledgeSettingsRequest::ToggleEmbedding => {
+                self.ai_entity.update(cx, |entity, cx| {
+                    entity.toggle_knowledge_embedding_config();
+                    cx.notify();
+                });
+                self.settings_surface.update(cx, |_, cx| cx.notify());
+            }
+        }
     }
 
     pub(in crate::workspace) fn knowledge_document_row(
@@ -515,546 +220,28 @@ impl WorkspaceApp {
         open_in_workspace: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let menu_document = document.clone();
-        let delete_id = document.id.clone();
-        let delete_name = document.title.clone();
-        let edit_id = document.id.clone();
-        let open_id = document.id.clone();
-        let selected = open_in_workspace && self.is_knowledge_document_selected(&document.id, cx);
-        let metadata = format!(
-            "{} · {} {} · {}",
-            document.format,
-            document.chunk_count,
-            self.i18n.t("settings_view.knowledge.chunks"),
-            self.knowledge_format_date(document.indexed_at)
-        );
-        let editing_this = !open_in_workspace
-            && self
-                .ai_entity
-                .read(cx)
-                .knowledge_external_edit()
-                .is_some_and(|edit| edit.doc_id == document.id);
-        let mut options = oxideterm_gpui_ui::EntityListRowOptions::new()
-            .active(selected)
-            .has_background_image(self.background_surface_active("knowledge"));
-        if open_in_workspace {
-            options = options
-                .compact()
-                .hover_background(oxideterm_gpui_ui::color_for_background(
-                    self.tokens.ui.bg_hover,
-                    self.background_surface_active("knowledge"),
-                    0x66,
-                ));
-        }
-        let mut trailing = Vec::with_capacity(2);
-        if !open_in_workspace {
-            trailing.push(
-                if editing_this {
-                    self.knowledge_icon_button(
-                        LucideIcon::RefreshCw,
-                        rgb(self.tokens.ui.accent),
-                        Some(rgb(self.tokens.ui.accent)),
-                        |this, _event, _window, cx| {
-                            this.knowledge_sync_external_edit(true, cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    )
-                } else {
-                    self.knowledge_icon_button(
-                        LucideIcon::Pencil,
-                        rgb(self.tokens.ui.text_muted),
-                        Some(rgb(self.tokens.ui.text)),
-                        move |this, _event, _window, cx| {
-                            this.knowledge_open_external(edit_id.clone(), cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    )
-                }
-                .into_any_element(),
-            );
-        }
-        trailing.push(
-            self.knowledge_icon_button(
-                LucideIcon::Trash2,
-                rgb(self.tokens.ui.text_muted),
-                Some(rgb(self.tokens.ui.error)),
-                move |this, _event, _window, cx| {
-                    this.ai_entity.update(cx, |entity, cx| {
-                        entity.request_delete_knowledge_document(
-                            delete_id.clone(),
-                            delete_name.clone(),
-                        );
-                        cx.notify();
-                    });
-                    this.reset_standard_confirm_focus();
-                    cx.stop_propagation();
-                    cx.notify();
-                },
-                cx,
-            )
-            .into_any_element(),
-        );
-        let row = oxideterm_gpui_ui::entity_list_row(
-            &self.tokens,
-            options,
-            Some(
-                oxideterm_gpui_ui::file_icons::file_icon(&format!("note.{}", document.format))
-                    .render(
-                        if open_in_workspace {
-                            KNOWLEDGE_INLINE_ICON_SIZE
-                        } else {
-                            KNOWLEDGE_ROW_ICON_SIZE
-                        },
-                        &self.tokens,
-                    ),
-            ),
-            div()
-                .min_w(px(0.0))
-                .truncate()
-                .text_size(px(if open_in_workspace {
-                    self.tokens.metrics.ui_text_xs
-                } else {
-                    self.tokens.metrics.ui_text_sm
-                }))
-                .text_color(rgb(self.tokens.ui.text))
-                .child(document.title)
-                .into_any_element(),
-            (!open_in_workspace).then(|| {
-                div()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(metadata)
-                    .into_any_element()
-            }),
-            Vec::new(),
-            trailing,
-        )
-        .id(format!("knowledge-document-row-{}", document.id))
-        .when(open_in_workspace, |row| {
-            row.h(px(KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT))
-                .min_h(px(KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT))
-                .py_0()
-                .px(px(self.tokens.spacing.two))
-                .rounded_none()
-                .border_0()
-                .bg(if selected {
-                    rgba((self.tokens.ui.accent << 8) | 0x33)
-                } else {
-                    rgba(0x00000000)
-                })
-                .opacity(if self.knowledge_note_is_cut(&menu_document.id, cx) {
-                    0.5
-                } else {
-                    1.0
-                })
-                .cursor_pointer()
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                        this.open_knowledge_note_menu(
-                            menu_document.clone(),
-                            event.position,
-                            window,
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(move |this, _event, window, cx| {
-                        this.open_knowledge_workspace_tab(window, cx);
-                        this.select_knowledge_document(open_id.clone(), cx);
-                        cx.stop_propagation();
-                    }),
-                )
-        });
-        row.into_any_element()
-    }
-
-    pub(in crate::workspace) fn knowledge_embedding_config_section(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let settings = self.settings_store.settings();
-        let preliminary = oxideterm_ai::resolve_ai_embedding_provider(
-            &settings.ai.providers,
-            settings.ai.active_provider_id.as_deref(),
-            settings.ai.embedding_config.as_ref(),
-            None,
-        );
-        let has_api_key = preliminary.provider.as_ref().and_then(|provider| {
-            oxideterm_ai::ai_embedding_requires_api_key(provider)
-                .then(|| self.ai_provider_has_key_cached(&provider.id, cx))
-        });
-        let resolved = oxideterm_ai::resolve_ai_embedding_provider(
-            &settings.ai.providers,
-            settings.ai.active_provider_id.as_deref(),
-            settings.ai.embedding_config.as_ref(),
-            has_api_key,
-        );
-        let provider_label = settings
-            .ai
-            .embedding_config
-            .as_ref()
-            .and_then(|config| config.get("providerId"))
-            .and_then(serde_json::Value::as_str)
-            .and_then(|provider_id| {
-                ai_provider_views(settings)
-                    .into_iter()
-                    .find(|provider| provider.id == provider_id)
-                    .map(|provider| provider.name)
-            })
-            .unwrap_or_else(|| {
-                self.i18n
-                    .t("settings_view.knowledge.auto_embedding_provider")
-            });
-        let model_value = self.current_settings_input_value(SettingsInput::AiEmbeddingModel, cx);
-        let status = match resolved.reason {
-            oxideterm_ai::AiEmbeddingProviderReason::Ready => resolved
-                .provider
-                .as_ref()
-                .map(|provider| {
-                    self.i18n
-                        .t("settings_view.knowledge.semantic_search_using")
-                        .replace("{{provider}}", &provider.name)
-                        .replace("{{model}}", &resolved.model)
-                })
-                .unwrap_or_else(|| {
-                    self.i18n
-                        .t("settings_view.knowledge.semantic_search_not_configured")
-                }),
-            oxideterm_ai::AiEmbeddingProviderReason::MissingModel => self
-                .i18n
-                .t("settings_view.knowledge.semantic_search_missing_model"),
-            oxideterm_ai::AiEmbeddingProviderReason::MissingApiKey => self
-                .i18n
-                .t("settings_view.knowledge.embedding_api_key_missing"),
-            oxideterm_ai::AiEmbeddingProviderReason::UnsupportedProvider => self
-                .i18n
-                .t("settings_view.knowledge.embedding_provider_unsupported"),
-            oxideterm_ai::AiEmbeddingProviderReason::NoProvider => self
-                .i18n
-                .t("settings_view.knowledge.semantic_search_not_configured"),
-        };
-        let status_color = if resolved.reason == oxideterm_ai::AiEmbeddingProviderReason::Ready {
-            self.tokens.ui.success
-        } else {
-            self.tokens.ui.text_muted
-        };
-        let embeddings_expanded = self
-            .ai_entity
-            .read(cx)
-            .knowledge_embedding_config_expanded();
-
-        let card = div()
-            .w_full()
-            .min_w(px(0.0))
-            .rounded(px(self.tokens.radii.lg))
-            .border_1()
-            .border_color(rgb(self.tokens.ui.border))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .gap(px(12.0))
-                    .p(px(self.tokens.metrics.settings_card_padding))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .flex()
-                            .items_start()
-                            .gap(px(12.0))
-                            .child(
-                                div()
-                                    .size(px(KNOWLEDGE_EMBEDDING_ICON_BOX))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .rounded(px(self.tokens.radii.md))
-                                    .bg(rgba(
-                                        (self.tokens.ui.accent << 8) | KNOWLEDGE_STATUS_BG_ALPHA,
-                                    ))
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::Sparkles,
-                                        KNOWLEDGE_ROW_ICON_SIZE,
-                                        rgb(self.tokens.ui.accent),
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .min_w(px(0.0))
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(4.0))
-                                    .child(
-                                        div()
-                                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                                            .font_weight(gpui::FontWeight::MEDIUM)
-                                            .text_color(rgb(self.tokens.ui.text))
-                                            .child(self.i18n.t("settings_view.knowledge.semantic_search")),
-                                    )
-                                    .child(
-                                        div()
-                                            .flex()
-                                            .items_center()
-                                            .gap(px(8.0))
-                                            .flex_wrap()
-                                            .child(
-                                                div()
-                                                    .rounded_full()
-                                                    .border_1()
-                                                    .border_color(rgba(
-                                                        (status_color << 8)
-                                                            | KNOWLEDGE_STATUS_BORDER_ALPHA,
-                                                    ))
-                                                    .bg(rgba(
-                                                        (status_color << 8)
-                                                            | KNOWLEDGE_STATUS_BG_ALPHA,
-                                                    ))
-                                                    .px(px(8.0))
-                                                    .py(px(2.0))
-                                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                    .text_color(rgb(status_color))
-                                                    .child(status),
-                                            )
-                                            .child(
-                                                div()
-                                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                                    .child(self.i18n.t("settings_view.knowledge.keyword_search_ready")),
-                                            ),
-                                    ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .h(px(KNOWLEDGE_EMBEDDING_CONFIG_BUTTON_HEIGHT))
-                            .flex()
-                            .items_center()
-                            .gap(px(6.0))
-                            .rounded(px(self.tokens.radii.md))
-                            .border_1()
-                            .border_color(rgb(self.tokens.ui.border))
-                            .bg(rgb(self.tokens.ui.bg))
-                            .px(px(10.0))
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .text_color(rgb(self.tokens.ui.text))
-                            .cursor_pointer()
-                            .hover(|style| style.bg(rgb(self.tokens.ui.bg_hover)))
-                            .child(Self::render_lucide_icon(
-                                LucideIcon::Wrench,
-                                KNOWLEDGE_INLINE_ICON_SIZE,
-                                rgb(self.tokens.ui.text),
-                            ))
-                            .child(self.i18n.t("settings_view.knowledge.configure_embeddings"))
-                            .child(self.render_animated_chevron(
-                                ("knowledge-embedding-chevron", embeddings_expanded as usize),
-                                embeddings_expanded,
-                                KNOWLEDGE_INLINE_ICON_SIZE,
-                                rgb(self.tokens.ui.text_muted),
-                            ))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.ai_entity.update(cx, |entity, cx| {
-                                        entity.toggle_knowledge_embedding_config();
-                                        cx.notify();
-                                    });
-                                    cx.stop_propagation();
-                                    cx.notify();
-                                }),
-                            ),
-                    ),
-            )
-            .when(embeddings_expanded, |section| {
-                section
-                    .child(self.card_separator())
-                    .child(
-                        div()
-                            .p(px(self.tokens.metrics.settings_card_padding))
-                            .flex()
-                            .flex_col()
-                            .gap(px(self.tokens.metrics.settings_card_gap))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(
-                                        self.i18n
-                                            .t("settings_view.knowledge.semantic_search_description"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .w_full()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(self.tokens.metrics.settings_row_gap))
-                                    .child(self.select_setting_row(
-                                        "settings_view.ai.embedding_provider",
-                                        "",
-                                        SettingsSelect::AiEmbeddingProvider,
-                                        provider_label,
-                                        self.tokens.metrics.settings_select_width,
-                                        cx,
-                                    ))
-                                    .child(self.card_separator())
-                                    .child(self.setting_row(
-                                        "settings_view.ai.embedding_model",
-                                        "",
-                                        self.settings_text_input_control(
-                                            SettingsInput::AiEmbeddingModel,
-                                            model_value,
-                                            self.i18n.t("settings_view.ai.embedding_model"),
-                                            224.0,
-                                            cx,
-                                        ),
-                                        cx,
-                                    )),
-                            ),
-                    )
-            });
-        self.settings_card_surface(card, self.tokens.ui.bg_card)
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn knowledge_stats_row(
-        &self,
-        stats: oxideterm_ai::RagStatsResponse,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let embedded_pct = if stats.chunk_count > 0 {
-            ((stats.embedded_chunk_count as f64 / stats.chunk_count as f64) * 100.0).round() as i64
-        } else {
-            0
-        };
-        let mut row = div()
-            .flex()
-            .items_center()
-            .flex_wrap()
-            .gap(px(24.0))
-            .text_size(px(self.tokens.metrics.ui_text_xs))
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(self.knowledge_stat_item(
-                stats.doc_count.to_string(),
-                self.i18n.t("settings_view.knowledge.stat_docs"),
-                cx,
-            ))
-            .child(self.knowledge_stat_item(
-                stats.chunk_count.to_string(),
-                self.i18n.t("settings_view.knowledge.stat_chunks"),
-                cx,
-            ))
-            .child(self.knowledge_stat_item(
-                format!("{embedded_pct}%"),
-                self.i18n.t("settings_view.knowledge.stat_embedded"),
-                cx,
-            ));
-        if stats.last_updated > 0 {
-            row = row.child(self.knowledge_stat_item(
-                self.knowledge_format_date(stats.last_updated),
-                self.i18n.t("settings_view.knowledge.stat_updated"),
-                cx,
-            ));
-        }
-        row.into_any_element()
-    }
-
-    pub(in crate::workspace) fn knowledge_stat_item(
-        &self,
-        value: String,
-        label: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        div()
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .child(
-                div()
-                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                    .text_color(rgb(self.tokens.ui.text))
-                    .child(self.render_selectable_display_text(
-                        "knowledge-stat-value",
-                        &label,
-                        value.clone(),
-                        self.tokens.ui.text,
-                        cx,
-                    )),
-            )
-            .child(self.render_selectable_display_text(
-                "knowledge-stat-label",
-                &value,
-                label,
-                self.tokens.ui.text_muted,
-                cx,
-            ))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn knowledge_format_date(&self, timestamp_millis: i64) -> String {
-        let Some(datetime) = chrono::DateTime::from_timestamp_millis(timestamp_millis) else {
-            return "-".to_string();
-        };
-        let datetime = datetime.with_timezone(&chrono::Local);
-        match self.i18n.locale() {
-            Locale::ZhCn | Locale::ZhTw => datetime.format("%Y年%-m月%-d日").to_string(),
-            _ => datetime.format("%b %-d, %Y").to_string(),
-        }
+        self.with_knowledge_settings_page(cx, |page, cx| {
+            page.knowledge_document_row(document, open_in_workspace, cx)
+        })
     }
 
     pub(in crate::workspace) fn knowledge_empty_row(
         &self,
         icon: LucideIcon,
         label: String,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) -> AnyElement {
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .gap(px(8.0))
-            .px(px(16.0))
-            .py(px(32.0))
-            .text_center()
-            .text_color(rgb(self.tokens.ui.text_muted))
-            .child(Self::render_lucide_icon(
-                icon,
-                32.0,
-                rgba((self.tokens.ui.text_muted << 8) | 0x66),
-            ))
-            .child(
-                div()
-                    .w_full()
-                    .text_center()
-                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                    .child(label),
-            )
-            .into_any_element()
+        self.with_knowledge_settings_page(cx, |page, cx| {
+            page.knowledge_empty_row(icon.path(), label, cx)
+        })
     }
 
-    pub(in crate::workspace) fn knowledge_scope_label(
-        &self,
-        scope: &oxideterm_ai::DocScope,
-    ) -> String {
-        match scope {
-            oxideterm_ai::DocScope::Global => self.i18n.t("settings_view.knowledge.scope_global"),
-            oxideterm_ai::DocScope::Connection(_) => {
-                self.i18n.t("settings_view.knowledge.scope_connection")
-            }
-        }
+    pub(in crate::workspace) fn knowledge_error_row(&self, error: &str) -> AnyElement {
+        self.settings_callout(
+            SettingsCalloutTone::Error,
+            Some(LucideIcon::AlertCircle),
+            div().child(error.to_string()).into_any_element(),
+        )
     }
 
     pub(in crate::workspace) fn knowledge_document_format_label(

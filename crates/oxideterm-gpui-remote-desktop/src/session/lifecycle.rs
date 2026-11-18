@@ -241,6 +241,7 @@ impl RemoteDesktopSessionEntity {
     ) -> RemoteDesktopDeliveryOutcome {
         let drain = delivery::drain_channel(&self.delivery_rx, REMOTE_DESKTOP_DELIVERY_BUDGET);
         let mut changed = false;
+        let mut frame_changed = false;
         let mut intents = Vec::new();
         for delivery in drain.items {
             match delivery {
@@ -249,7 +250,7 @@ impl RemoteDesktopSessionEntity {
                     if self.frame_slot.is_visible()
                         && self.apply_frame_ready(generation, window, cx)
                     {
-                        changed = true;
+                        frame_changed = true;
                     }
                 }
                 RemoteDesktopWorkerDelivery::FrameRecoveryRequired { tab_id, generation } => {
@@ -581,7 +582,7 @@ impl RemoteDesktopSessionEntity {
             cx.notify();
         }
         RemoteDesktopDeliveryOutcome {
-            changed,
+            changed: changed || frame_changed,
             backlog_remaining: drain.outcome.backlog_remaining,
             intents,
         }
@@ -625,8 +626,10 @@ impl RemoteDesktopSessionEntity {
 
         frame_slot.mark_frame_presented();
         let apply_started_at = Instant::now();
+        let previous_status = self.state.status();
         let apply_stats = self.state.apply_frame_events(events);
-        if self.state.snapshot().status == RemoteDesktopSessionStatus::Connected {
+        let status = self.state.status();
+        if status == RemoteDesktopSessionStatus::Connected {
             self.mark_connection_established();
         }
         let apply_elapsed = apply_started_at.elapsed();
@@ -670,6 +673,13 @@ impl RemoteDesktopSessionEntity {
         Self::drop_textures(retired_textures, window);
         if frame_slot.complete_delivery() && frame_slot.mark_frame_ready_queued() {
             self.schedule_frame_apply(generation, frame_slot.next_frame_ready_delay(), cx);
+        }
+        // The session is also read by the connection sidebar, including when
+        // its desktop is detached. Frames must only invalidate the mounted panel.
+        if status != previous_status {
+            cx.notify();
+        } else if let Some(panel) = &self.panel {
+            App::notify(cx, panel.entity_id());
         }
         true
     }
@@ -1146,9 +1156,7 @@ impl RemoteDesktopSessionEntity {
                             }
                         }
                         DesktopWindowDelivery::Frame(_) => {
-                            if session.apply_frame_ready(generation, window, cx) {
-                                cx.notify();
-                            }
+                            session.apply_frame_ready(generation, window, cx);
                         }
                     }
                 });

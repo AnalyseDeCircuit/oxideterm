@@ -693,29 +693,8 @@ impl WorkspaceApp {
                 ai.chat_confirm_owner_snapshot(),
             )
         };
-        let (settings_data_directory_phase, theme_editor_phase, settings_ssh_import_phase) = {
-            let settings = self.settings_workspace.read(cx);
-            (
-                settings
-                    .data_directory_confirm()
-                    .is_some()
-                    .then_some(settings.data_directory_confirm_phase()),
-                settings
-                    .theme_editor_open()
-                    .then_some(settings.theme_editor_phase()),
-                settings
-                    .ssh_config_import_dialog_open()
-                    .then_some(settings.ssh_config_import_dialog_phase()),
-            )
-        };
-        let cloud_sync_phase = {
-            let cloud_sync = self.cloud_sync.read(cx);
-            cloud_sync
-                .view
-                .confirm
-                .is_some()
-                .then_some(cloud_sync.view.confirm_presence.phase())
-        };
+        let settings_chrome = &self.settings_window_chrome.read(cx).state;
+        let cloud_sync_phase = self.cloud_sync_confirm.read(cx).phase();
         let native_plugin_phase = {
             let plugins = self.plugin_entity.read(cx);
             plugins
@@ -778,7 +757,7 @@ impl WorkspaceApp {
                 ),
             ai_confirm,
             overlay_confirm: self.overlay.read(cx).confirm_owner_snapshot(),
-            settings_data_directory_phase,
+            settings_data_directory_phase: settings_chrome.data_directory,
             remote_shell_integration_open: self
                 .workspace_runtime
                 .read(cx)
@@ -793,18 +772,18 @@ impl WorkspaceApp {
             ssh_tunnel_open: self.ssh_tunnels.form.is_some(),
             active_tab_modal: self.active_tab_window_modal_owner(cx),
             terminal_cast_player_open: self.terminal.read(cx).cast_player_open(),
-            theme_editor_phase,
-            settings_ssh_import_phase,
-            terminal_command_specs_editor_open: self.terminal_command_specs_editor_open,
-            terminal_trigger_editor_open: self.terminal_triggers.editor_open,
-            semantic_scheme_editor_open: self.semantic_scheme_editor_open
+            theme_editor_phase: settings_chrome.theme_editor,
+            settings_ssh_import_phase: settings_chrome.ssh_import,
+            terminal_command_specs_editor_open: settings_chrome.command_specs,
+            terminal_trigger_editor_open: settings_chrome.terminal_trigger_editor,
+            semantic_scheme_editor_open: settings_chrome.semantic_scheme_editor
                 && self
                     .settings_store
                     .settings()
                     .terminal
                     .active_custom_semantic_scheme()
                     .is_some(),
-            highlight_rule_editor_open: self.highlight_rule_editor_index.is_some_and(|index| {
+            highlight_rule_editor_open: settings_chrome.highlight_rule_editor_index.is_some_and(|index| {
                 index
                     < self
                         .settings_store
@@ -813,10 +792,8 @@ impl WorkspaceApp {
                         .effective_highlight_rules()
                         .len()
             }),
-            public_mcp_client_editor_open: self
-                .settings_workspace
-                .read(cx)
-                .public_mcp_client_editor
+            public_mcp_client_editor_open: settings_chrome
+                .public_mcp_client
                 .as_deref()
                 .is_some_and(|client_ref| {
                     self.public_mcp
@@ -917,22 +894,22 @@ impl WorkspaceApp {
                 None
             }
             TabKind::Settings => {
-                let settings = self.settings_workspace.read(cx);
+                let settings = &self.settings_window_chrome.read(cx).state;
                 let ai = self.ai_entity.read(cx);
-                if settings.portable_password_dialog_open() {
+                if let Some(phase) = settings.portable_password {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::PortablePassword,
-                        phase: settings.portable_password_dialog_phase(),
+                        phase,
                     })
-                } else if settings.managed_key_dialog_open() {
+                } else if let Some(phase) = settings.managed_key {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::ManagedKey,
-                        phase: settings.managed_key_dialog_phase(),
+                        phase,
                     })
-                } else if let Some(snapshot) = settings.keybinding_reset_confirm_snapshot() {
+                } else if let Some(phase) = settings.keybinding_reset {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::KeybindingReset,
-                        phase: snapshot.phase,
+                        phase,
                     })
                 } else if ai.knowledge_delete_confirm().is_some() {
                     Some(ActiveTabWindowModalSnapshot {
@@ -958,7 +935,7 @@ impl WorkspaceApp {
                         kind: ActiveTabWindowModalKind::AiMcpServer,
                         phase: ai.mcp_dialog_presence().phase(),
                     })
-                } else if settings.navigation_editor_open() {
+                } else if settings.navigation_editor {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::SettingsNavigationEditor,
                         phase: visible,
@@ -1320,10 +1297,8 @@ impl WorkspaceApp {
             }
             ActiveWindowModalOwner::TerminalTriggerEditor => {
                 if event.keystroke.key.as_str() == "escape" {
-                    if self.terminal_triggers.scope_picker_open {
-                        self.clear_terminal_trigger_input_focus();
-                        self.terminal_triggers.scope_picker_open = false;
-                        cx.notify();
+                    if self.settings_workspace.read(cx).terminal_triggers.scope_picker_open {
+                        self.close_terminal_trigger_scope_picker(cx);
                     } else {
                         self.close_terminal_trigger_editor(cx);
                     }

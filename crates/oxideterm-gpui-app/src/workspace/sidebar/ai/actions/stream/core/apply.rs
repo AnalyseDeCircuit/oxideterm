@@ -469,7 +469,9 @@ impl WorkspaceApp {
             )
         });
         match outcome {
-            AiStreamApplyOutcome::Applied => {}
+            // The delivery batch invalidates the assistant view once after
+            // applying its deltas. Only lifecycle effects below reach the shell.
+            AiStreamApplyOutcome::Applied => return,
             AiStreamApplyOutcome::Completed => {
                 self.ai_runtime_context.update(cx, |runtime, _cx| {
                     runtime.finish_tool_session(
