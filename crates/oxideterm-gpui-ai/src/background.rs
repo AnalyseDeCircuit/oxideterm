@@ -1,6 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod tools;
+pub use tools::{AiBackgroundRead, AiBackgroundReadPlan};
+
 use std::sync::Arc;
 
 use async_trait::async_trait;

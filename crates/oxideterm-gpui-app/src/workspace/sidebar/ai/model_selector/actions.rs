@@ -1,5 +1,5 @@
 use oxideterm_ai::tool_loop::acp_session_cwd_from_agent;
-use oxideterm_gpui_ai::model_picker::{active_model_picker_provider, ai_acp_agent_id_from_provider_id};
+use oxideterm_gpui_ai::model_picker::AiPickerSelection;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn select_ai_reasoning_level(
@@ -38,43 +38,9 @@ impl WorkspaceApp {
         agent_id: String,
         cx: &mut Context<Self>,
     ) {
-        if self.ai.state.read(cx).picker_acp_options(&agent_id).is_some() {
-            return;
-        }
-        let Some(conversation_id) = self
-            .ai.state
-            .read(cx)
-            .conversation_state()
-            .active_conversation()
-            .map(|conversation| conversation.id.clone())
-        else {
-            return;
-        };
-        if self
-            .ai.state
-            .read(cx)
-            .acp_model_discovery_is_pending(&conversation_id, &agent_id)
-        {
-            return;
-        }
-        let Some(mut agent) = self
-            .settings_store
-            .settings()
-            .ai
-            .acp_agents
-            .iter()
-            .find(|agent| agent.id == agent_id && agent.enabled)
-            .cloned()
-        else {
-            return;
-        };
-        // Only the native Codex adapter promises model metadata during session/new.
-        // Other ACP agents keep their existing first-prompt or explicit-model behavior.
-        if agent.plugin_id.as_deref() != Some("com.oxideterm.acp.codex")
-            && !oxideterm_ai::acp_model_report_is_available_during_session_start(&agent.args)
-        {
-            return;
-        }
+        let Some((conversation_id, mut agent)) = self.ai.state.read(cx).prepare_picker_acp_discovery(
+            &agent_id, &self.settings_store.settings().ai,
+        ) else { return };
         if self.resolve_ai_acp_plugin(&mut agent, cx).is_err() {
             self.show_acp_plugin_requirement(&agent, cx);
             return;
@@ -135,37 +101,17 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let next_open = !self.ai.state.read(cx).model_selector_is_open(scope);
-        self.close_ai_sidebar_popovers(cx);
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_model_selector_open(scope, next_open);
-        });
-        if next_open {
-            let providers = self.ai_model_selector_providers(cx);
-            let mut active_acp_agent_id = None;
-            if let Some(provider) = active_provider_view(
-                &providers,
-                active_model_picker_provider(&self.settings_store.settings().ai).as_deref(),
-            ) {
-                active_acp_agent_id =
-                    ai_acp_agent_id_from_provider_id(&provider.id).map(str::to_string);
-                self.ai.state.update(cx, |ai, _cx| {
-                    ai.expand_model_selector_provider(provider.id.clone());
-                });
-            }
-            if let Some(agent_id) = active_acp_agent_id {
+        let opened = self.ai.state.update(cx, |ai, cx| ai.toggle_picker(
+            scope, &self.settings_store.settings().ai, &self.i18n, cx,
+        ));
+        self.ime_marked_text = None;
+        if let Some(agent) = opened {
+            if let Some(agent_id) = agent {
                 self.schedule_ai_acp_model_discovery(agent_id, cx);
             }
-            self.ai.state.update(cx, |ai, _cx| {
-                ai.blur_chat_input(false);
-                ai.terminal_inline_panel_mut().prompt_focused = false;
-            });
             self.refresh_ai_model_selector_provider_statuses(cx);
             window.focus(&self.focus_handle, cx);
-        } else {
-            self.close_ai_model_selector(cx);
         }
-        self.ime_marked_text = None;
         cx.notify();
     }
 
@@ -249,34 +195,15 @@ impl WorkspaceApp {
         provider: AiProviderView,
         cx: &mut Context<Self>,
     ) {
-        if !self.ai.state.read(cx).picker_has_key(&provider) {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.model_selector.no_key_warning"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            cx.notify();
-            return;
+        match self.ai.state.read(cx).picker_refresh_index(
+            &provider, &self.settings_store.settings().ai, |id| self.ai_picker_plugin_available(id, cx),
+        ) {
+            Ok(Some(index)) => self.refresh_ai_provider_models(index, provider, cx),
+            Ok(None) => {}
+            Err(key) => {
+                self.push_ai_settings_toast(self.i18n.t(key), TerminalNoticeVariant::Warning, cx);
+            }
         }
-        if !self.ai.state.read(cx).picker_online(&provider, &self.settings_store.settings().ai, |id| self.ai_picker_plugin_available(id, cx)) {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.model_selector.offline"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            cx.notify();
-            return;
-        }
-        if ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
-            return;
-        }
-        let Some(index) = ai_provider_views(&self.settings_store.settings().ai.providers)
-            .iter()
-            .position(|candidate| candidate.id == provider.id)
-        else {
-            return;
-        };
-        self.refresh_ai_provider_models(index, provider, cx);
     }
 
     pub(in crate::workspace) fn select_ai_model_from_selector(
@@ -286,30 +213,21 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let previous_model = self.settings_store.settings().ai.active_model.clone();
-        if let Some(agent_id) =
-            ai_acp_agent_id_from_provider_id(&provider_id).map(str::to_string)
-        {
-            let session_model_selection = self
-                .ai.state.read(cx).picker_acp_options(&agent_id)
-                .and_then(|options| {
-                    let option = oxideterm_ai::acp_model_config_option(&options)?;
-                    let choice = option.choices.iter().find(|choice| choice.label == model)?;
-                    Some((option.config_id.clone(), choice.value_id.clone()))
-                });
-            if let Some((config_id, value_id)) = session_model_selection {
+        match self.ai.state.read(cx).plan_picker_selection(&provider_id, &model) {
+            AiPickerSelection::AcpSession { agent_id, config_id, value_id } => {
                 self.select_ai_acp_model_from_selector(agent_id, config_id, value_id, cx);
                 return;
             }
-            self.edit_settings(
-                move |settings| {
+            AiPickerSelection::AcpAgent(agent_id) => {
+                self.edit_settings(move |settings| {
                     settings.ai.active_backend = AiActiveBackend::Acp;
                     settings.ai.active_acp_agent_id = Some(agent_id);
-                },
-                cx,
-            );
-            self.close_ai_model_selector(cx);
-            cx.notify();
-            return;
+                }, cx);
+                self.close_ai_model_selector(cx);
+                cx.notify();
+                return;
+            }
+            AiPickerSelection::Provider => {}
         }
         self.edit_settings(
             |settings| {
@@ -405,5 +323,3 @@ impl WorkspaceApp {
         }
     }
 }
-
-use oxideterm_gpui_ai::state::ai_conversation_reasoning_effort;

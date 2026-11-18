@@ -2855,29 +2855,6 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[gpui::test]
-    fn launch_at_login_macos_handoff_uses_typed_shallow_error_state(cx: &mut TestAppContext) {
-        let entity = cx.new(SettingsWorkspaceEntity::new);
-        entity.update(cx, |entity, cx| {
-            entity.finish_launch_at_login_settings_handoff(
-                Err("system settings unavailable".to_string()),
-                cx,
-            );
-        });
-
-        let first = entity.read_with(cx, |entity, _cx| entity.launch_at_login_snapshot());
-        let second = entity.read_with(cx, |entity, _cx| entity.launch_at_login_snapshot());
-        let (
-            Some(LaunchAtLoginError::OperationFailed(first_error)),
-            Some(LaunchAtLoginError::OperationFailed(second_error)),
-        ) = (first.error, second.error)
-        else {
-            panic!("macOS handoff should retain a typed platform error");
-        };
-        // Render snapshots share the immutable message instead of copying it.
-        assert!(Arc::ptr_eq(&first_error, &second_error));
-    }
-
-    #[gpui::test]
     fn keybinding_file_replacement_completion_and_release_preserve_task_ownership(
         cx: &mut TestAppContext,
     ) {

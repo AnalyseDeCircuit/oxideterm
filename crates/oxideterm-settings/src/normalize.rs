@@ -692,6 +692,28 @@ pub(crate) fn migrate_legacy_terminal_line_height(
     true
 }
 
+/// Converts pre-v4 raw-advance `terminal.characterSpacing` values into the
+/// compact 0.93 baseline scale so existing profiles keep their cell width.
+pub(crate) fn migrate_legacy_terminal_character_spacing(settings: &mut Value) -> bool {
+    let Some(old_spacing) = settings
+        .pointer("/terminal/characterSpacing")
+        .and_then(Value::as_f64)
+    else {
+        return false;
+    };
+    if !old_spacing.is_finite() {
+        return false;
+    }
+
+    let converted =
+        ((old_spacing / TERMINAL_CHARACTER_SPACING_BASELINE_SCALE) * 100.0).round() / 100.0;
+    let Some(terminal) = settings.get_mut("terminal").and_then(Value::as_object_mut) else {
+        return false;
+    };
+    terminal.insert("characterSpacing".to_string(), json!(converted));
+    true
+}
+
 pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     let saved_version = raw.get("version").and_then(Value::as_u64).unwrap_or(0);
     if saved_version > u64::from(SETTINGS_SCHEMA_VERSION) {
@@ -748,6 +770,14 @@ pub fn sanitize_settings_value(raw: Value) -> Result<SanitizedSettings> {
     {
         migration_warnings
             .push("Migrated legacy terminal.lineHeight to font-metrics scale".to_string());
+    }
+    if saved_version < 4
+        && raw.pointer("/terminal/characterSpacing").is_some()
+        && migrate_legacy_terminal_character_spacing(&mut settings)
+    {
+        migration_warnings.push(
+            "Migrated legacy terminal.characterSpacing to compact 0.93 baseline".to_string(),
+        );
     }
 
     for (path, fallback, min, max) in [
@@ -1782,10 +1812,12 @@ mod tests {
             "version": 3,
             "terminal": {
                 "fontFamily": "jetbrains",
+                "characterSpacing": 1.0,
                 "lineHeight": 1.2
             }
         }))
         .expect("sanitize v3 jetbrains settings");
+        assert_eq!(legacy_jetbrains.settings.terminal.character_spacing, 1.08);
         assert_eq!(legacy_jetbrains.settings.terminal.line_height, 0.91);
         assert!(
             legacy_jetbrains
@@ -1793,15 +1825,23 @@ mod tests {
                 .iter()
                 .any(|warning| warning.contains("lineHeight"))
         );
+        assert!(
+            legacy_jetbrains
+                .migration_warnings
+                .iter()
+                .any(|warning| warning.contains("characterSpacing"))
+        );
 
         let legacy_menlo = sanitize_settings_value(json!({
             "version": 3,
             "terminal": {
                 "fontFamily": "menlo",
+                "characterSpacing": 0.93,
                 "lineHeight": 1.2
             }
         }))
         .expect("sanitize v3 menlo settings");
+        assert_eq!(legacy_menlo.settings.terminal.character_spacing, 1.0);
         assert_eq!(legacy_menlo.settings.terminal.line_height, 1.03);
 
         let v4_explicit = sanitize_settings_value(json!({

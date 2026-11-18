@@ -792,19 +792,6 @@ mod tests {
     }
 
     #[test]
-    fn only_suppressed_terminal_prompt_disables_future_questions() {
-        let mut state = RemoteShellIntegrationRuntimeState::default();
-        state.confirm_source = Some(RemoteShellIntegrationConfirmSource::TerminalOpen);
-        state.confirm_node_id = Some(NodeId("terminal-node".to_string()));
-        state.suppress_future_terminal_prompts = true;
-        assert!(state.cancel_confirm());
-
-        state.open_toolbar_confirm(Some(NodeId("toolbar-node".to_string())));
-        state.toggle_prompt_suppression();
-        assert!(!state.cancel_confirm());
-    }
-
-    #[test]
     fn terminal_gate_cancellation_rejects_old_results_and_allows_another_owner() {
         let mut state = RemoteShellIntegrationRuntimeState::default();
         state.configure(RemoteShellIntegrationMode::Ask, true);

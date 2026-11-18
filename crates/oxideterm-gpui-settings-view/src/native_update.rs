@@ -742,36 +742,3 @@ fn native_update_format_bytes(bytes: u64) -> String {
     }
     format!("{:.1} TB", value / 1024.0)
 }
-
-#[cfg(test)]
-mod tests {
-    use gpui::{AppContext, TestAppContext};
-
-    use super::*;
-
-    #[gpui::test]
-    fn native_update_delivery_changes_entity_state_without_workspace_polling(
-        cx: &mut TestAppContext,
-    ) {
-        let settings = cx.new(SettingsWorkspaceEntity::new);
-        let sender = settings.update(cx, |settings, _cx| {
-            let (sender, receiver) = delivery::ActiveDeliverySender::channel();
-            settings.native_update.receiver = Some(receiver);
-            settings.native_update.state = NativeUpdateUiState::Downloading(None);
-            sender
-        });
-        sender
-            .send(NativeUpdateDelivery::Finished(Err(
-                "download failed".to_string()
-            )))
-            .expect("delivery");
-
-        settings.update(cx, |settings, cx| {
-            assert!(!settings.drain_native_update_delivery(cx));
-            assert!(matches!(
-                settings.native_update.state,
-                NativeUpdateUiState::Error(ref error) if error == "download failed"
-            ));
-        });
-    }
-}

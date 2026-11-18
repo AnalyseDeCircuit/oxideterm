@@ -218,4 +218,5 @@ include!("model_picker/list.rs");
 include!("model_picker/models.rs");
 
 mod controller;
+pub use controller::AiPickerSelection;
 pub use controller::{active_model_picker_provider, ai_acp_agent_id_from_provider_id, ai_acp_provider_id};

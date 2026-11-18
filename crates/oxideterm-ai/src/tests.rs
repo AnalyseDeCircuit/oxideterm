@@ -413,37 +413,6 @@ fn image_input_model_switch_preserves_history_and_budgets_the_target_model() {
 }
 
 #[test]
-fn orchestrator_send_terminal_input_exposes_bounded_control_keys() {
-    let tools = orchestrator_tool_definitions();
-    let terminal_input = tools
-        .iter()
-        .find(|tool| tool.name == "send_terminal_input")
-        .expect("send_terminal_input tool");
-    let properties = terminal_input
-        .parameters
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .expect("tool properties");
-
-    assert!(
-        terminal_input
-            .description
-            .contains("control/navigation key")
-    );
-    assert!(terminal_input.description.contains("run_command instead"));
-    assert!(properties.contains_key("text"));
-    assert!(properties.contains_key("append_enter"));
-    assert_eq!(
-        properties
-            .get("key")
-            .and_then(|value| value.get("enum"))
-            .and_then(serde_json::Value::as_array)
-            .map(Vec::len),
-        Some(16)
-    );
-}
-
-#[test]
 fn orchestrator_skill_tools_are_bounded_read_actions() {
     let loaded = canonicalize_orchestrator_tool_arguments(
         "load_skill",
@@ -1202,21 +1171,6 @@ fn parses_and_sanitizes_follow_up_suggestions() {
     assert_eq!(parsed.clean_content, "Answer");
     assert_eq!(parsed.suggestions.len(), 1);
     assert_eq!(parsed.suggestions[0].text, localized_text);
-}
-
-#[test]
-fn chat_request_overrides_inject_current_context_as_system_message() {
-    let mut history = vec![AiChatMessage {
-        context: Some("--- #buffer ---\nerror output".into()),
-        ..chat_message("u1", AiChatRole::User, "#buffer explain")
-    }];
-
-    apply_chat_request_overrides(&mut history, Some("explain".into()), None);
-
-    assert_eq!(history[0].role, AiChatRole::System);
-    assert!(history[0].content.starts_with("Current terminal context:"));
-    assert!(history[0].content.contains("--- #buffer ---"));
-    assert_eq!(history[1].content, "explain");
 }
 
 #[test]

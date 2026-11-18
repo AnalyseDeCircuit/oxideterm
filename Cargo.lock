@@ -8305,6 +8305,7 @@ dependencies = [
  "oxideterm-terminal-semantic",
  "serde",
  "serde_json",
+ "sys-locale",
  "tempfile",
  "uuid",
 ]

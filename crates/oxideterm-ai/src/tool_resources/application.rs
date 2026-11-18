@@ -757,6 +757,111 @@ pub fn ai_action_accepted(action: &str) -> Value {
     serde_json::json!({ "accepted": true, "action": action })
 }
 
+pub enum AiCredentialAction<'a> {
+    Open(Option<&'a str>),
+    Delete {
+        action: &'a str,
+        id: &'a str,
+        credential: AiCredentialKind<'a>,
+    },
+}
+
+pub enum AiCredentialKind<'a> {
+    ManagedSshKey { force: bool },
+    Privilege { connection_id: &'a str },
+    RemoteDesktop,
+}
+
+impl AiCredentialKind<'_> {
+    pub fn result(&self, action: &str, id: &str, deleted: bool) -> Value {
+        let kind = match self {
+            Self::ManagedSshKey { .. } => "managed_ssh_key",
+            Self::Privilege { .. } => "privilege",
+            Self::RemoteDesktop => "remote_desktop",
+        };
+        serde_json::json!({ "accepted": deleted, "action": action, "kind": kind, "id": id })
+    }
+}
+
+pub fn ai_credential_action(arguments: &Value) -> Result<AiCredentialAction<'_>, String> {
+    let action = arguments.get("action").and_then(Value::as_str)
+        .ok_or_else(|| "A credential action is required.".to_owned())?;
+    let connection_id = arguments.get("connection_id").and_then(Value::as_str);
+    if action == "open_manager" {
+        return Ok(AiCredentialAction::Open(connection_id));
+    }
+    let kind = arguments.get("kind").and_then(Value::as_str)
+        .ok_or_else(|| "A credential kind is required.".to_owned())?;
+    let id = arguments.get("id").and_then(Value::as_str)
+        .ok_or_else(|| "A credential identifier is required.".to_owned())?;
+    let credential = match kind {
+        "managed_ssh_key" => AiCredentialKind::ManagedSshKey {
+            force: arguments.get("force").and_then(Value::as_bool).unwrap_or(false),
+        },
+        "privilege" => AiCredentialKind::Privilege {
+            connection_id: connection_id.ok_or_else(|| "A privilege credential scope is required.".to_owned())?,
+        },
+        "remote_desktop" => AiCredentialKind::RemoteDesktop,
+        _ => return Err("Unsupported credential kind.".to_owned()),
+    };
+    Ok(AiCredentialAction::Delete { action, id, credential })
+}
+
+pub enum AiSerialControl {
+    RefreshPort,
+    SendBreak,
+    SetDtr(bool),
+    SetRts(bool),
+    SetLocalEcho(bool),
+    SetLineEnding(oxideterm_connections::SerialLineEnding),
+    SetOutputLineEnding(oxideterm_connections::SerialLineEnding),
+    SetDisplayMode(oxideterm_connections::SerialDisplayMode),
+    SetSendMode(oxideterm_connections::SerialSendMode),
+}
+
+pub fn ai_serial_control(arguments: &Value) -> Result<(&str, AiSerialControl), String> {
+    use oxideterm_connections::{SerialDisplayMode, SerialLineEnding, SerialSendMode};
+    use AiSerialControl::*;
+    let action = arguments.get("action").and_then(Value::as_str)
+        .ok_or_else(|| "A serial action is required.".to_owned())?;
+    let enabled = arguments.get("enabled").and_then(Value::as_bool);
+    let value = arguments.get("value").and_then(Value::as_str);
+    let line_ending = || match value {
+        Some("none") => Some(SerialLineEnding::None),
+        Some("lf") => Some(SerialLineEnding::Lf),
+        Some("crlf") => Some(SerialLineEnding::CrLf),
+        Some("cr") => Some(SerialLineEnding::Cr),
+        _ => None,
+    };
+    let control = match action {
+        "refresh_port" => RefreshPort,
+        "reconnect" => return Err("Serial reconnect must create a new terminal tab from Active Sessions.".to_owned()),
+        "send_break" => SendBreak,
+        "set_dtr" => SetDtr(enabled.ok_or_else(|| "The DTR state is required.".to_owned())?),
+        "set_rts" => SetRts(enabled.ok_or_else(|| "The RTS state is required.".to_owned())?),
+        "set_local_echo" => SetLocalEcho(enabled.ok_or_else(|| "The local echo state is required.".to_owned())?),
+        "set_line_ending" => SetLineEnding(line_ending().ok_or_else(|| "A valid serial line ending is required.".to_owned())?),
+        "set_output_line_ending" => SetOutputLineEnding(line_ending().ok_or_else(|| "A valid serial output line ending is required.".to_owned())?),
+        "set_display_mode" => SetDisplayMode(match value {
+            Some("text") => SerialDisplayMode::Text,
+            Some("hex") => SerialDisplayMode::Hex,
+            Some("mixed") => SerialDisplayMode::Mixed,
+            _ => return Err("A valid serial display mode is required.".to_owned()),
+        }),
+        "set_send_mode" => SetSendMode(match value {
+            Some("text") => SerialSendMode::Text,
+            Some("hex") => SerialSendMode::Hex,
+            _ => return Err("A valid serial send mode is required.".to_owned()),
+        }),
+        _ => return Err("Unsupported serial action.".to_owned()),
+    };
+    Ok((action, control))
+}
+
+pub fn ai_transport_session_action_accepted(action: &str, session_id: oxideterm_workspace::TerminalSessionId) -> Value {
+    serde_json::json!({"accepted": true, "action": action, "sessionId": session_id.0.to_string()})
+}
+
 pub struct AiSettingsWrite<'a> {
     pub settings: oxideterm_settings::PersistedSettings,
     pub section: &'a str,

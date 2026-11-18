@@ -1,6 +1,4 @@
-use oxideterm_ai::agent::{
-    AgentState, AgentText,
-};
+use oxideterm_ai::agent::AgentText;
 
 impl WorkspaceApp {
     fn notify_ai_agent_attention(

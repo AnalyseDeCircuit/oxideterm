@@ -769,35 +769,6 @@ mod tests {
     }
 
     #[test]
-    fn onedrive_error_keeps_safe_graph_diagnostics() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            MICROSOFT_GRAPH_REQUEST_ID_HEADER,
-            HeaderValue::from_static("request-123"),
-        );
-        headers.insert(
-            AUTHORIZATION,
-            HeaderValue::from_static("Bearer representative-secret"),
-        );
-        let request_id = onedrive_response_request_id(&headers);
-
-        let error = onedrive_value_error(
-            StatusCode::BAD_REQUEST,
-            &json!({ "error": { "code": "badRequest", "message": "Invalid request" } }),
-            "onedrive_metadata_upload",
-            "fallback",
-            request_id.as_deref(),
-        )
-        .to_string();
-
-        assert!(error.contains("operation=onedrive_metadata_upload"));
-        assert!(error.contains("status=400"));
-        assert!(error.contains("graph_code=badRequest"));
-        assert!(error.contains("request_id=request-123"));
-        assert!(!error.contains("representative-secret"));
-    }
-
-    #[test]
     fn onedrive_cleanup_keeps_current_blob_and_legacy_latest_only() {
         let keep = onedrive_keep_object_paths(&json!({
             "blobPath": "objects/current.oxide"

@@ -5,9 +5,7 @@ use oxideterm_gpui_ai::conversation::context::{
 };
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn ai_help_markdown(&self) -> String {
-        ai_help_markdown_core(|key| self.i18n.t(key))
-    }
+
 
     pub(in crate::workspace) fn resolve_ai_reference_context(
         &self,

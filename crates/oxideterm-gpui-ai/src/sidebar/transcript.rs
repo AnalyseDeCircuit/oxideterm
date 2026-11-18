@@ -93,6 +93,50 @@ pub struct AiComposerFrame {
     pub auth_methods: Option<Vec<AcpAuthMethod>>,
 }
 
+pub struct AiTranscriptPolicy {
+    pub model_selected: bool,
+    pub images_allowed: bool,
+    pub reasoning: Option<(AiProviderView, String, AiReasoningLevel)>,
+    pub agent_models: Vec<AgentModel>,
+}
+
+impl AiTranscriptPolicy {
+    pub fn from_settings(
+        ai: &oxideterm_settings::AiSettings,
+        state: &AiWorkspaceEntity,
+        stream_config: impl FnOnce() -> Option<oxideterm_ai::AiChatStreamConfig>,
+    ) -> Self {
+        use oxideterm_ai::{active_model_selection, active_provider_view};
+        let providers = oxideterm_ai::provider_views(&ai.providers);
+        let acp = ai.active_backend == AiActiveBackend::Acp;
+        let selected = active_model_selection(ai.active_model.as_deref());
+        let reasoning = (!acp).then(|| {
+            let provider = active_provider_view(&providers, ai.active_provider_id.as_deref())?;
+            let model = selected.as_ref()?;
+            if oxideterm_ai::model_reasoning_capability(&provider.provider_type, model).levels.is_empty() {
+                return None;
+            }
+            let override_value = state.conversation_state().active_conversation()
+                .and_then(|conversation| crate::state::ai_conversation_reasoning_effort(conversation, &provider.id, model))
+                .or_else(|| ai.reasoning_model_overrides.get(&provider.id)
+                    .and_then(|models| models.get(model)).and_then(serde_json::Value::as_str))
+                .unwrap_or("auto");
+            let level = oxideterm_ai::normalize_reasoning_level_for_model(&provider.provider_type, model, override_value);
+            Some((provider.clone(), model.clone(), level))
+        }).flatten();
+        let model_selected = if acp { ai.active_acp_agent_id.is_some() }
+            else { ai.active_provider_id.is_some() && selected.is_some() };
+        let images_allowed = state.chat_ui().images.is_empty() || stream_config().is_some_and(|config| {
+            config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp
+                || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) != Some(false)
+        });
+        let agent_models = providers.into_iter().filter(|provider| provider.enabled)
+            .flat_map(|provider| provider.models.into_iter().map(move |model| AgentModel { provider_id: provider.id.clone(), model }))
+            .collect();
+        Self { model_selected, images_allowed, reasoning, agent_models }
+    }
+}
+
 pub struct AiSidebarChildren {
     pub header: Entity<super::AiChatHeaderView>,
     pub background: Entity<crate::background::AiBackgroundTaskView>,
@@ -141,13 +185,9 @@ pub enum AiTranscriptRequest {
     CancelEdit,
     SaveEdit,
     FollowUp(String),
-    ApproveTool(u64, String, bool),
     AcpPermission(u64, String, Option<String>),
-    SelectToolCandidate(u64, String, Option<usize>),
-    CursorResponse(u64, String, bool),
     InsertCommand(String),
     ImagePreviewFailed,
-    RetryHistory,
     AgentModelLocked,
     BeginRename(String, String),
     RenamePointer(MouseDownEvent),
@@ -542,8 +582,11 @@ impl AiAssistantSidebarView {
         (self.bindings.request)(AiTranscriptRequest::FollowUp(a0), None, cx);
     }
 
-    fn resolve_ai_tool_approval(&self, a0: u64, a1: String, a2: bool, cx: &mut App) {
-        (self.bindings.request)(AiTranscriptRequest::ApproveTool(a0, a1, a2), None, cx);
+    fn resolve_ai_tool_approval(&self, generation: u64, call: String, approved: bool, cx: &mut App) {
+        self.state.update(cx, |state, cx| {
+            state.resolve_tool_approval(generation, &call, approved);
+            cx.notify();
+        });
     }
 
     fn resolve_ai_acp_permission(&self, a0: u64, a1: String, a2: Option<String>, cx: &mut App) {
@@ -552,24 +595,33 @@ impl AiAssistantSidebarView {
 
     fn resolve_ai_tool_candidate_selection(
         &self,
-        a0: u64,
-        a1: String,
-        a2: Option<usize>,
+        generation: u64,
+        call: String,
+        index: Option<usize>,
         cx: &mut App,
     ) {
-        (self.bindings.request)(
-            AiTranscriptRequest::SelectToolCandidate(a0, a1, a2),
-            None,
-            cx,
-        );
+        self.state.update(cx, |state, cx| {
+            state.resolve_tool_candidate_selection(generation, &call, index);
+            cx.notify();
+        });
     }
 
-    fn resolve_ai_cursor_request(&self, a0: u64, a1: &str, a2: bool, cx: &mut App) {
-        (self.bindings.request)(
-            AiTranscriptRequest::CursorResponse(a0, a1.to_owned(), a2),
-            None,
-            cx,
-        );
+    fn resolve_ai_cursor_request(&self, generation: u64, call: &str, accepted: bool, cx: &mut App) {
+        let frame = self.state.read(cx).chat_stream_environment(cx);
+        self.state.update(cx, |state, cx| {
+            let Some((conversation, assistant, method)) = state.pending_cursor_requests
+                .get(&(generation, call.into()))
+                .map(|pending| (pending.conversation_id.clone(), pending.assistant_id.clone(), pending.request.method()))
+            else { return };
+            if state.resolve_cursor_request(generation, call, accepted) {
+                state.apply_ai_tool_status(
+                    generation, &conversation, &assistant, call, method, "{}",
+                    if accepted { "completed" } else { "rejected" }, None, Some("read".into()),
+                    None, false, None, None, None, |data| frame.diagnostic(data), cx,
+                );
+                cx.notify();
+            }
+        });
     }
 
     fn insert_ai_code_block_command(&self, a0: String, cx: &mut App) {
@@ -577,7 +629,9 @@ impl AiAssistantSidebarView {
     }
 
     fn retry_ai_chat_initialization(&self, cx: &mut App) {
-        (self.bindings.request)(AiTranscriptRequest::RetryHistory, None, cx);
+        self.state.update(cx, |state, cx| {
+            state.retry_chat_initialization(self.bindings.history_path.clone(), cx);
+        });
     }
 }
 
@@ -744,3 +798,4 @@ impl gpui::RenderOnce for AiSidebarLayer {
 }
 
 include!("transcript/overlays.rs");
+include!("transcript/placement.rs");

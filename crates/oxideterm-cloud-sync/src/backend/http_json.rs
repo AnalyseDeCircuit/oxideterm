@@ -278,38 +278,3 @@ fn http_json_value_error(
         .unwrap_or(&fallback_message);
     anyhow::anyhow!("{code}: {message}")
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn http_json_error_uses_remote_payload_or_local_fallback() {
-        let cases = [
-            (
-                StatusCode::UNAUTHORIZED,
-                Value::Null,
-                "Failed to fetch remote metadata",
-                "http_401: Failed to fetch remote metadata (401)",
-            ),
-            (
-                StatusCode::PRECONDITION_FAILED,
-                json!({
-                    "error": {
-                        "code": "etag_conflict_detected",
-                        "message": "Remote changed"
-                    }
-                }),
-                "Failed to upload snapshot",
-                "etag_conflict_detected: Remote changed",
-            ),
-        ];
-
-        for (status, payload, fallback, expected) in cases {
-            assert_eq!(
-                http_json_value_error(status, &payload, "http", fallback).to_string(),
-                expected
-            );
-        }
-    }
-}

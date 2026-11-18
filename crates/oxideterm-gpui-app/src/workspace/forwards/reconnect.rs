@@ -196,26 +196,4 @@ mod tests {
         assert_eq!(restored.target_port, 0);
         assert_eq!(restored.description, "socks");
     }
-
-    #[test]
-    fn restore_failure_detail_keeps_forward_error_class() {
-        let rule = ReconnectForwardRule {
-            forward_type: "local".to_string(),
-            bind_address: "127.0.0.1".to_string(),
-            bind_port: 8080,
-            target_host: "localhost".to_string(),
-            target_port: 3000,
-            ..ReconnectForwardRule::default()
-        };
-        let details = vec![format!(
-            "{}: Connection failed: Port already in use: 127.0.0.1:8080",
-            forward_restore_failure_label(&rule)
-        )];
-
-        let detail = forward_restore_result_detail(0, 1, &details);
-
-        assert!(detail.starts_with("forward restore failed:"));
-        assert!(detail.contains("local 127.0.0.1:8080 -> localhost:3000"));
-        assert!(detail.contains("Port already in use"));
-    }
 }

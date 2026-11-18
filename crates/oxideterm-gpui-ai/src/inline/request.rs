@@ -6,7 +6,64 @@ use oxideterm_ai::{
     provider_views as ai_provider_views,
 };
 
+pub enum AiInlineKey {
+    Pass,
+    ModelSearch,
+    Close,
+    Submit,
+    Execute,
+    Insert,
+    Handled,
+}
+
 impl AiWorkspaceEntity {
+    pub fn inline_panel_key(
+        &self,
+        keystroke: &gpui::Keystroke,
+        submit: bool,
+        insert: bool,
+        composing: bool,
+    ) -> AiInlineKey {
+        use AiInlineKey::*;
+        let panel = self.terminal_inline_panel();
+        if !panel.open || !panel.prompt_focused || (keystroke.modifiers.platform && !submit && !insert) {
+            return Pass;
+        }
+        if self.model_selector_is_open(crate::state::AiModelSelectorScope::TerminalInline)
+            && self.model_selector_search_focused()
+        {
+            return ModelSearch;
+        }
+        let has_response = !panel.response.trim().is_empty();
+        match keystroke.key.as_str() {
+            "escape" => Close,
+            "enter" if composing => Handled,
+            _ if submit && !panel.loading => if has_response { Execute } else { Submit },
+            _ if !submit && insert && has_response && !panel.loading => Insert,
+            _ => Handled,
+        }
+    }
+
+    pub fn start_inline_panel(
+        &mut self,
+        target: (oxideterm_workspace::PaneId, oxideterm_workspace::TerminalSessionId),
+        selected_text: &str,
+        context_budget: usize,
+    ) {
+        self.open_terminal_inline_panel(super::truncate_ai_inline_context(
+            oxideterm_ai::sanitize_for_ai(selected_text),
+            context_budget as i64,
+        ));
+        self.terminal_inline_panel_mut().target = Some(target);
+    }
+
+    pub fn inline_response_command(&self) -> Option<zeroize::Zeroizing<String>> {
+        let command = zeroize::Zeroizing::new(super::extract_terminal_ai_inline_command(
+            &self.terminal_inline_panel().response,
+        ));
+        (!command.trim().is_empty()).then_some(command)
+    }
+
     pub fn submit_inline_prompt(
         &mut self,
         regenerate: bool,

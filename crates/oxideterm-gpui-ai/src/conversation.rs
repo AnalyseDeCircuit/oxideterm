@@ -1,10 +1,13 @@
 use std::hash::Hash;
 
+pub mod acp_file_review;
+pub mod acp_terminal;
 mod acp_turn;
 mod agents;
+pub mod terminal_watch;
 pub use acp_turn::AiAcpChatLaunch;
 mod provider;
-pub use provider::AiProviderTurn;
+pub use provider::{AiProviderSendPlan, AiProviderTurn};
 
 use gpui::{App, Entity};
 use oxideterm_ai::{AiRuntimeAuthority, stream_state::AiStoppedAssistantTurn};

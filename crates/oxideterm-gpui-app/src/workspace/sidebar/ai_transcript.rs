@@ -1,21 +1,19 @@
 use std::rc::Rc;
 
 use gpui::{App, AppContext, Context, Entity, IntoElement};
-use oxideterm_ai::{active_model_selection, active_provider_view, model_reasoning_capability};
 use oxideterm_gpui_ai::{
     sidebar::{
         editor::AiEditorView,
         transcript::{
             AiAssistantSidebarView, AiComposerFrame, AiOverlayFrame, AiRenameFrame,
             AiSidebarChildren, AiSidebarLayer, AiSidebarLayerKind, AiTranscriptBindings,
-            AiTranscriptFrame, AiTranscriptRequest, SelectableTextRole as TranscriptTextRole,
+            AiTranscriptFrame, AiTranscriptPolicy, AiTranscriptRequest, SelectableTextRole as TranscriptTextRole,
         },
     },
     state::AiWorkspaceEntity,
 };
 use oxideterm_gpui_markdown::render::MarkdownCodeBlockActions;
 use oxideterm_gpui_ui::tauri_ui_font_family;
-use oxideterm_settings::AiActiveBackend;
 
 use super::super::{
     SelectableTextRole, TerminalNoticeVariant, WorkspaceApp, settings_mono_font_family,
@@ -53,58 +51,14 @@ impl WorkspaceApp {
                 let app = entity.read(cx);
                 let settings = app.settings_store.settings();
                 let text = app.selectable_text_render_state_for_entity(entity.clone(), cx);
-                let agent_models = oxideterm_ai::provider_views(&settings.ai.providers)
-                    .into_iter()
-                    .filter(|provider| provider.enabled)
-                    .flat_map(|provider| {
-                        provider.models.into_iter().map(move |model| {
-                            oxideterm_ai::agent::AgentModel {
-                                provider_id: provider.id.clone(),
-                                model,
-                            }
-                        })
-                    })
-                    .collect();
                 let ai = &settings.ai;
-                let model_selected = if ai.active_backend == AiActiveBackend::Acp {
-                    ai.active_acp_agent_id.is_some()
-                } else {
-                    ai.active_provider_id.is_some()
-                        && active_model_selection(ai.active_model.as_deref()).is_some()
-                };
-                let images_allowed = app.ai.state.read(cx).chat_ui().images.is_empty()
-                    || app.resolve_ai_stream_config(cx).is_ok_and(|config| {
-                        config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp
-                            || oxideterm_ai::model_image_input(
-                                &config.provider_type,
-                                &config.model,
-                                config.image_input,
-                            ) != Some(false)
-                    });
-                let reasoning = if ai.active_backend == AiActiveBackend::Acp {
-                    None
-                } else {
-                    let providers = oxideterm_ai::provider_views(&ai.providers);
-                    active_provider_view(&providers, ai.active_provider_id.as_deref()).and_then(
-                        |provider| {
-                            let model = active_model_selection(ai.active_model.as_deref())?;
-                            (!model_reasoning_capability(&provider.provider_type, &model)
-                                .levels
-                                .is_empty())
-                            .then(|| {
-                                (
-                                    provider.clone(),
-                                    model.clone(),
-                                    app.active_ai_reasoning_level(provider, &model, cx),
-                                )
-                            })
-                        },
-                    )
-                };
+                let policy = AiTranscriptPolicy::from_settings(ai, app.ai.state.read(cx), || {
+                    app.resolve_ai_stream_config(cx).ok()
+                });
                 let composer = AiComposerFrame {
                     enabled: ai.enabled,
-                    model_selected,
-                    images_allowed,
+                    model_selected: policy.model_selected,
+                    images_allowed: policy.images_allowed,
                     backend: ai.active_backend,
                     context_counts: ai
                         .enabled
@@ -115,7 +69,7 @@ impl WorkspaceApp {
                     ide_context: app.ai_has_ide_context(cx),
                     sftp_context: app.ai_has_sftp_context(cx),
                     tools: app.ai_tool_indicator_info(cx),
-                    reasoning: reasoning.as_ref().map(|(_, _, level)| *level),
+                    reasoning: policy.reasoning.as_ref().map(|(_, _, level)| *level),
                     auth_methods: app
                         .ai
                         .state
@@ -138,7 +92,7 @@ impl WorkspaceApp {
                             active_offset: app.ime_active_offset_for_target(rename_target, cx),
                             caret_visible: app.input_caret.visible(),
                         },
-                        reasoning,
+                        reasoning: policy.reasoning,
                         breakdown: app
                             .ai
                             .state
@@ -159,7 +113,7 @@ impl WorkspaceApp {
                     window_background: app.window_background_preferences().is_some(),
                     thinking_style: settings.ai.thinking_style,
                     thinking_default_expanded: settings.ai.thinking_default_expanded,
-                    agent_models,
+                    agent_models: policy.agent_models,
                     markdown: app.localized_markdown_options(),
                     selectable_text: Rc::new(move |fragment| {
                         let role = match fragment.role {
@@ -191,17 +145,8 @@ impl WorkspaceApp {
                     AiTranscriptRequest::CancelEdit => app.cancel_edit_ai_message(cx),
                     AiTranscriptRequest::SaveEdit => app.save_ai_message_edit(cx),
                     AiTranscriptRequest::FollowUp(a0) => app.send_ai_follow_up_suggestion(a0, cx),
-                    AiTranscriptRequest::ApproveTool(a0, a1, a2) => {
-                        app.resolve_ai_tool_approval(a0, a1, a2, cx)
-                    }
                     AiTranscriptRequest::AcpPermission(a0, a1, a2) => {
                         app.resolve_ai_acp_permission(a0, a1, a2, cx)
-                    }
-                    AiTranscriptRequest::SelectToolCandidate(a0, a1, a2) => {
-                        app.resolve_ai_tool_candidate_selection(a0, a1, a2, cx)
-                    }
-                    AiTranscriptRequest::CursorResponse(a0, a1, a2) => {
-                        app.resolve_ai_cursor_request(a0, &a1, a2, cx)
                     }
                     AiTranscriptRequest::InsertCommand(a0) => {
                         app.insert_ai_code_block_command(a0, cx)
@@ -211,7 +156,6 @@ impl WorkspaceApp {
                         TerminalNoticeVariant::Error,
                         cx,
                     ),
-                    AiTranscriptRequest::RetryHistory => app.retry_ai_chat_initialization(cx),
                     AiTranscriptRequest::BeginRename(id, title) => {
                         if let Some(window) = window {
                             app.begin_ai_conversation_rename(id, title, window, cx);
@@ -270,6 +214,7 @@ impl WorkspaceApp {
                     }
                     AiTranscriptRequest::ClosePopovers => {
                         app.close_ai_sidebar_popovers(cx);
+                        // The floating layer is mounted by the window, so closing it invalidates that layer.
                         cx.notify();
                     }
                     AiTranscriptRequest::NewConversation => {

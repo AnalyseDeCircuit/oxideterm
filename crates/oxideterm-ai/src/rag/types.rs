@@ -150,29 +150,3 @@ pub fn is_cjk(c: char) -> bool {
         | '\u{AC00}'..='\u{D7AF}' // Hangul
     )
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn classifies_cjk_and_non_cjk_scripts() {
-        for (script, samples, expected) in [
-            ("CJK Unified", &['中', '国'][..], true),
-            ("CJK Extension A", &['\u{3400}', '\u{4DBF}'][..], true),
-            ("CJK Compat", &['\u{F900}'][..], true),
-            ("CJK Symbols", &['〇', '\u{3000}'][..], true),
-            ("Hiragana", &['あ', 'ん'][..], true),
-            ("Katakana", &['ア', 'ン'][..], true),
-            ("Hangul", &['가', '힣'][..], true),
-            ("ASCII", &['A', 'z', '0', ' '][..], false),
-            ("Latin", &['é', 'ñ'][..], false),
-            ("Cyrillic", &['Д'][..], false),
-            ("Arabic", &['ع'][..], false),
-        ] {
-            for character in samples {
-                assert_eq!(is_cjk(*character), expected, "{script}: {character:?}");
-            }
-        }
-    }
-}

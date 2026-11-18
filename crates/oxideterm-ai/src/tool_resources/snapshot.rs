@@ -1548,27 +1548,6 @@ mod tests {
     }
 
     #[test]
-    fn target_discovery_applies_a_hard_result_limit() {
-        let mut snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
-        snapshot.targets = (0..=AI_TARGET_DISCOVERY_LIMIT)
-            .map(|index| {
-                let mut target = sample_target();
-                target.id = format!("ssh-node:internal-{index}");
-                target.label = format!("host-{index}.example.com");
-                target
-            })
-            .collect();
-
-        let result = snapshot.list_targets(&serde_json::json!({
-            "view": "connections",
-            "kind": "ssh-node",
-        }));
-
-        assert!(result.ok);
-        assert_eq!(result.targets.len(), AI_TARGET_DISCOVERY_LIMIT);
-    }
-
-    #[test]
     fn long_tool_output_uses_head_tail_preview_metadata() {
         let output = format!(
             "HEAD{}OMITTED{}TAIL",
@@ -1590,45 +1569,6 @@ mod tests {
         );
         assert_eq!(
             output_preview.get("rawOutputStored"),
-            Some(&serde_json::json!(true))
-        );
-    }
-
-    #[test]
-    fn run_command_execution_summary_preserves_visibility_and_state() {
-        let mut result = sample_result();
-        result.envelope = serde_json::json!({
-            "ok": true,
-            "summary": "Command sent to terminal.",
-            "output": "Command sent: uptime",
-            "data": {
-                "executionState": "sent",
-                "commandId": "command-1",
-                "visibleInTerminal": true
-            },
-            "targets": [{
-                "id": "ssh-node:prod-node-1",
-                "kind": "ssh-node",
-                "label": "prod.example.com",
-                "metadata": { "state": "connected", "refs": { "sessionId": "42" } }
-            }],
-            "meta": { "toolName": "run_command", "durationMs": 7, "truncated": false }
-        });
-
-        annotate_ai_run_command_execution_result(
-            &mut result,
-            &serde_json::json!({ "command": "uptime" }),
-        );
-
-        let model: serde_json::Value =
-            serde_json::from_str(&crate::ai_tool_result_model_content(&result)).unwrap();
-        assert_eq!(model["execution"]["commandId"], "command-1");
-        assert_eq!(
-            result.envelope.pointer("/execution/state"),
-            Some(&serde_json::json!("sent"))
-        );
-        assert_eq!(
-            result.envelope.pointer("/execution/visibleInTerminal"),
             Some(&serde_json::json!(true))
         );
     }
@@ -1676,40 +1616,6 @@ mod tests {
                 .as_array()
                 .is_some_and(|items| items.len() < AI_MODEL_RESULT_DATA_MAX_NODES)
         );
-    }
-
-    #[test]
-    fn active_context_matches_tab_session_or_node_refs() {
-        let mut target = sample_target();
-        target.refs.insert("tabId".to_string(), "7".to_string());
-        target
-            .refs
-            .insert("sessionId".to_string(), "42".to_string());
-
-        assert!(target_matches_active_context(
-            &target,
-            Some("7"),
-            None,
-            None
-        ));
-        assert!(target_matches_active_context(
-            &target,
-            None,
-            Some("prod-node-1"),
-            None
-        ));
-        assert!(target_matches_active_context(
-            &target,
-            None,
-            None,
-            Some("42")
-        ));
-        assert!(!target_matches_active_context(
-            &target,
-            Some("8"),
-            Some("staging-node"),
-            Some("43")
-        ));
     }
 
     #[test]

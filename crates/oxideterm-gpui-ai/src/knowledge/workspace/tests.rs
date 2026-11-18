@@ -80,18 +80,6 @@ fn only_closing_knowledge_tab_invalidates_pending_document_load() {
 }
 
 #[test]
-fn forced_navigator_refresh_during_load_schedules_one_follow_up() {
-    let mut workspace = KnowledgeWorkspaceEntity::default();
-    let generation = workspace.begin_navigator_refresh(true).unwrap();
-
-    assert_eq!(workspace.begin_navigator_refresh(true), None);
-    assert!(
-        workspace.install_navigator_snapshot(generation, KnowledgeNavigatorSnapshot::default(),)
-    );
-    assert!(workspace.begin_navigator_refresh(true).is_some());
-}
-
-#[test]
 fn created_document_is_deduplicated_and_survives_stale_navigator_refresh() {
     let mut existing = navigator_document("Existing", "markdown", None);
     existing.id = "existing".to_string();

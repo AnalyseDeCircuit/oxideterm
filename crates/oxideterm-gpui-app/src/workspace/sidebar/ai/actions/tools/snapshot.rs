@@ -1,6 +1,10 @@
+use oxideterm_gpui_ai::conversation::terminal_watch::{
+    AiTerminalCommandObservation, AiTerminalWatch, AiTerminalWatchRecord, AiTerminalWatchSample,
+    AiTerminalWatchStatus,
+};
 use oxideterm_ai::tool_resources::{
     AiActiveNodeCapture, AiAppSurface, AiApplicationTool, AiLiveResourceOperation, AiRuntimeHealthCapture, AiSerialTargetInput, AiSshNodeTargetInput,
-    AiTerminalOutputWait, AiTerminalRunEnd, AiTerminalWaitFailure, AiTerminalWaitProgress, AiTerminalWaitSample,
+    AiTerminalOutputWait,
     AiTargetCapture, AiTerminalTargetInput, AiTerminalTransport, finish_ai_target_discovery,
     finish_ai_workspace_snapshot, ai_read_stable_resource, dispatch_ai_application_tool,
     ai_preference_saved, ai_remember_preference_payload, save_ai_user_preference, plan_ai_settings_write,
@@ -322,19 +326,6 @@ impl WorkspaceApp {
         }))
     }
 
-    pub(in crate::workspace) fn resolve_ai_tool_approval(
-        &mut self,
-        generation: u64,
-        tool_call_id: String,
-        approved: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.resolve_tool_approval(generation, &tool_call_id, approved);
-        });
-        cx.notify();
-    }
-
     pub(in crate::workspace) fn resolve_ai_acp_permission(
         &mut self,
         generation: u64,
@@ -347,19 +338,6 @@ impl WorkspaceApp {
         });
         self.ai.acp.update(cx, |entity, _cx| {
             entity.remove_file_write_preview(&tool_call_id);
-        });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn resolve_ai_tool_candidate_selection(
-        &mut self,
-        generation: u64,
-        tool_call_id: String,
-        selected_index: Option<usize>,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.resolve_tool_candidate_selection(generation, &tool_call_id, selected_index);
         });
         cx.notify();
     }
@@ -438,10 +416,10 @@ impl WorkspaceApp {
             ManageCredential => self.execute_ai_manage_credential(args, window, cx),
             ListMemoryEntries => Ok(self.execute_ai_list_memory_entries(args)),
             ManageMemoryEntry => self.execute_ai_manage_memory_entry(args, cx),
-            CreateBackgroundTask => self.execute_ai_create_background_task(conversation_id, args, cx),
-            ListBackgroundTasks => Ok(self.execute_ai_list_background_tasks(conversation_id, cx)),
-            GetBackgroundTask => self.execute_ai_get_background_task(conversation_id, args, cx),
-            CancelBackgroundTask => self.execute_ai_cancel_background_task(conversation_id, args, cx),
+            CreateBackgroundTask => self.ai.background.read(cx).execute_ai_create_background_task(conversation_id, args),
+            ListBackgroundTasks => Ok(self.ai.background.read(cx).execute_ai_list_background_tasks(conversation_id)),
+            GetBackgroundTask => self.ai.background.read(cx).execute_ai_get_background_task(conversation_id, args),
+            CancelBackgroundTask => self.ai.background.read(cx).execute_ai_cancel_background_task(conversation_id, args),
             RememberPreference => return self.execute_ai_remember_preference(args, cx),
             LoadSkill => return {
                 self.ai.state.update(cx, |state, _| state.execute_ai_load_skill(conversation_id, args, &snapshot, &self.ai.skills, self.settings_store.settings().ai.skills.enabled))
@@ -486,26 +464,23 @@ impl WorkspaceApp {
             self.start_ai_web_execution(owner, tool_call_id, tool_name, args, sender, cx);
             return;
         }
-        let args = match self.prepare_ai_runtime_authority(&tool_session_id, &tool_name, args, cx) {
-            Ok(args) => args,
-            Err(error) => {
-                let snapshot =
-                    self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                let result = snapshot.to_executed_tool_result(
-                    tool_call_id,
-                    tool_name,
-                    snapshot.fail(
-                        "Runtime target is unavailable.",
-                        ai_runtime_validation_public_code(&error, post_user_approval),
-                        ai_runtime_validation_recovery_message(post_user_approval),
-                        "interactive",
-                    ),
-                    0,
-                );
-                let _ = sender.send(result);
-                return;
-            }
-        };
+        if let Err(error) = self.validate_ai_runtime_authority(&tool_session_id, &tool_name, &args, cx) {
+            let snapshot =
+                self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+            let result = snapshot.to_executed_tool_result(
+                tool_call_id,
+                tool_name,
+                snapshot.fail(
+                    "Runtime target is unavailable.",
+                    ai_runtime_validation_public_code(&error, post_user_approval),
+                    ai_runtime_validation_recovery_message(post_user_approval),
+                    "interactive",
+                ),
+                0,
+            );
+            let _ = sender.send(result);
+            return;
+        }
         if tool_name == "connect_target" {
             self.start_ai_connect_target_execution(
                 &conversation_id,
@@ -588,83 +563,31 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let started = std::time::Instant::now();
-        let operation = match ai_live_resource_operation(&tool_name, &args) {
-            Ok(operation) => operation,
+        let owners = (|| {
+            let operation = ai_live_resource_operation(&tool_name, &args)?;
+            let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
+            let authority = self.ai.authority.read(cx);
+            if operation.requires_ide_owner() {
+                let (tab_id, node_id) = authority.validate_ide_handle(&tool_session_id, raw_handle_id, operation.capability())?;
+                let fs = self.ide_workspace.read(cx).ai_owner_file_system(tab_id, cx)
+                    .ok_or_else(|| oxideterm_ai::RuntimeValidationError::new(
+                        oxideterm_ai::RuntimeValidationFailure::OwnerClosed,
+                    ))?;
+                Ok((operation, node_id, None, Some(fs)))
+            } else {
+                let owner = authority.validate_sftp_handle(&tool_session_id, raw_handle_id, operation.capability())?;
+                Ok((operation, owner.node_id.clone(), Some(owner), None))
+            }
+        })();
+        let (operation, node_id, sftp_owner, ide_file_system) = match owners {
+            Ok(owners) => owners,
             Err(error) => {
                 self.send_ai_live_resource_validation_failure(
-                    &tool_session_id,
-                    tool_call_id,
-                    tool_name,
-                    sender,
-                    error,
-                    post_user_approval,
-                    started.elapsed().as_millis(),
-                    cx,
+                    &tool_session_id, tool_call_id, tool_name, sender, error, post_user_approval,
+                    started.elapsed().as_millis(), cx,
                 );
                 return;
             }
-        };
-        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let (node_id, sftp_owner, ide_file_system) = if operation.requires_ide_owner() {
-            let (tab_id, node_id) = match self.ai.authority.read(cx).validate_ide_handle(
-                &tool_session_id,
-                raw_handle_id,
-                operation.capability(),
-            ) {
-                Ok(owner) => owner,
-                Err(error) => {
-                    self.send_ai_live_resource_validation_failure(
-                        &tool_session_id,
-                        tool_call_id,
-                        tool_name,
-                        sender,
-                        error,
-                        post_user_approval,
-                        started.elapsed().as_millis(),
-                        cx,
-                    );
-                    return;
-                }
-            };
-            let Some(file_system) = self.ide_workspace.read(cx).ai_owner_file_system(tab_id, cx)
-            else {
-                self.send_ai_live_resource_validation_failure(
-                    &tool_session_id,
-                    tool_call_id,
-                    tool_name,
-                    sender,
-                    oxideterm_ai::RuntimeValidationError::new(
-                        oxideterm_ai::RuntimeValidationFailure::OwnerClosed,
-                    ),
-                    post_user_approval,
-                    started.elapsed().as_millis(),
-                    cx,
-                );
-                return;
-            };
-            (node_id, None, Some(file_system))
-        } else {
-            let owner = match self.ai.authority.read(cx).validate_sftp_handle(
-                &tool_session_id,
-                raw_handle_id,
-                operation.capability(),
-            ) {
-                Ok(node_id) => node_id,
-                Err(error) => {
-                    self.send_ai_live_resource_validation_failure(
-                        &tool_session_id,
-                        tool_call_id,
-                        tool_name,
-                        sender,
-                        error,
-                        post_user_approval,
-                        started.elapsed().as_millis(),
-                        cx,
-                    );
-                    return;
-                }
-            };
-            (owner.node_id.clone(), Some(owner), None)
         };
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
         let services = self.ai_live_tool_services();
@@ -763,19 +686,18 @@ impl WorkspaceApp {
         let _ = sender.send(result);
     }
 
-    fn prepare_ai_runtime_authority(
+    fn validate_ai_runtime_authority(
         &self,
         tool_session_id: &ToolSessionId,
         tool_name: &str,
-        args: serde_json::Value,
+        args: &serde_json::Value,
         cx: &App,
-    ) -> Result<serde_json::Value, oxideterm_ai::RuntimeValidationError> {
-        self.ai.authority.read(cx).validate_tool_authority(tool_session_id, tool_name, &args,
+    ) -> Result<(), oxideterm_ai::RuntimeValidationError> {
+        self.ai.authority.read(cx).validate_tool_authority(tool_session_id, tool_name, args,
             |id| self.connection_store.get(id).is_some(),
             |id| self.connection_store.get(id)
                 .and_then(|connection| self.indexed_saved_ssh_node_for_connection(id, connection)).is_some(),
-        )?;
-        Ok(args)
+        )
     }
 
     /// Validates authority before policy approval. Execution repeats validation
@@ -808,8 +730,7 @@ impl WorkspaceApp {
                 | "list_forwards"
                 | "manage_forward"
         ) {
-            self.prepare_ai_runtime_authority(tool_session_id, tool_name, args.clone(), cx)
-                .map(|_| ())
+            self.validate_ai_runtime_authority(tool_session_id, tool_name, args, cx)
         } else {
             Ok(())
         }
@@ -1201,12 +1122,7 @@ impl WorkspaceApp {
         else {
             unreachable!("local shell command returned before terminal dispatch");
         };
-        let node_id = self
-            .workspace_runtime
-            .read(cx)
-            .ssh_terminal_nodes()
-            .into_iter()
-            .find_map(|(id, node)| (id == session_id).then_some(node));
+        let node_id = self.ai_terminal_node(session_id, cx);
         let target = snapshot.terminal_target(session_id);
         let command = zeroize::Zeroizing::new(ai_command_with_cwd(
             &command,
@@ -1253,21 +1169,7 @@ impl WorkspaceApp {
             return;
         }
         let before = pane.read(cx).ai_buffer_snapshot();
-        let (activity, mut activity_rx) = tokio::sync::watch::channel(0u64);
-        let runtime_activity = activity.clone();
-        let runtime_subscription = cx.observe(&self.workspace_runtime, move |_, _, _| {
-            runtime_activity.send_modify(|revision| *revision = revision.wrapping_add(1));
-        });
-        let subscription = cx.subscribe(&pane, move |_, _, event, _| {
-            if matches!(
-                event,
-                TerminalPaneEvent::OutputActivity
-                    | TerminalPaneEvent::Exited { .. }
-                    | TerminalPaneEvent::PrivilegePromptStateChanged
-            ) {
-                activity.send_modify(|revision| *revision = revision.wrapping_add(1));
-            }
-        });
+        let (activity, pane_subscription, runtime_subscription) = self.watch_ai_terminal_activity(&pane, cx);
         if execution_leases.iter().any(|lease| !lease.is_current()) {
             let _ = sender.send(rejected_ai_tool_result(
                 tool_call_id,
@@ -1333,169 +1235,42 @@ impl WorkspaceApp {
             oxideterm_ai::agent::OwnedResourceKind::Observation,
             &self.i18n.t("settings_view.ai.waiting_condition"),
         );
+        let status_command = command_id.clone();
+        let call_id = tool_call_id.clone();
+        let name = tool_name.clone();
+        let watch = AiTerminalWatch {
+            call_id: tool_call_id, tool_name, started, sender, activity, direction: owner.dispatch.clone(),
+        };
         cx.spawn(async move |weak, cx| {
+            let _subscriptions = (pane_subscription, runtime_subscription);
             let _observation = observation;
-            let _subscription = subscription;
-            let _runtime_subscription = runtime_subscription;
-            let mut connection_lost = false;
-            let mut outcome_unknown = false;
-            let mut sender = Some(sender);
-            let mut direction_changed = false;
-            let mut previous_wait_state = "";
-            let mut last = before.clone();
-            let mut changed_at = std::time::Instant::now();
-            let mut owner_closed = false;
-            let mut user_taken_over = false;
-            let wait = AiTerminalCommandWait::with_timeout(std::time::Instant::now(), wait_timeout);
-            let mut last_waiting_for_secret = false;
-            loop {
-                if sender.as_ref().is_none_or(tokio::sync::oneshot::Sender::is_closed) {
-                    return;
-                }
-                if owner.dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
-                    direction_changed = true;
-                    break;
-                }
-                if execution_leases.iter().any(|lease| !lease.is_current()) {
-                    user_taken_over = true;
-                    break;
-                }
-                let current = weak.update(cx, |this, cx| {
-                    // Do not let the retained pane entity become authority
-                    // after its terminal owner or tool session is revoked.
-                    let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
-                        .and_then(|id| this.ssh_registry.get(&id))
-                        .is_some_and(|connection| matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
-                    if recovering {
-                        connection_lost = true;
-                        return Some((last.clone(), false, None, true, false));
-                    }
-                    if let Some(node) = &node_id {
-                        let alive = this.node_router.connection_id_for_node(node).and_then(|id| this.ssh_registry.get(&id))
-                            .is_some_and(|connection| !matches!(connection.state(), ConnectionState::Disconnected | ConnectionState::Disconnecting));
-                        if !alive { return None; }
-                    }
-                    if connection_lost {
-                        handle_id = this.ai.authority.update(cx, |runtime, _|
-                            runtime.issue_terminal_handle(&tool_session_id, session_id).ok())
-                            .map(|projection| projection.handle_id);
-                    }
-                    let current_session = this
-                        .ai.authority
-                        .read(cx)
-                        .validate_terminal_handle(
-                            &tool_session_id,
-                            handle_id
-                                .as_ref()
-                                .map(oxideterm_ai::RuntimeHandleId::as_str),
-                            oxideterm_ai::RuntimeCapability::TerminalRunCommand,
-                        )
-                        .ok();
-                    if current_session != Some(session_id) { return None; }
-                    let (_, current_pane) = this.ai_terminal_session(session_id, cx)?;
-                    Some({
-                        let pane = current_pane.read(cx);
-                        (
-                            pane.ai_buffer_snapshot(),
-                            pane.ai_waiting_for_secret(),
-                            command_id.as_ref().and_then(|command_id| {
-                                pane.ai_command_records()
-                                    .into_iter()
-                                    .find(|record| record.command_id == *command_id)
-                            }),
-                            false,
-                            command_id.as_deref().is_some_and(|id| pane.ai_command_prompt_returned(id)),
-                        )
-                    })
-                });
-                let (current, waiting_for_secret, command_record, recovering, prompt_returned) = match current {
-                    Ok(Some(current)) => current,
-                    Ok(None) => {
-                        owner_closed = true;
-                        break;
-                    }
-                    Err(_) => break,
-                };
-                if current != last {
-                    last = current.clone();
-                    changed_at = std::time::Instant::now();
-                }
-                let command_completed = command_record.as_ref().is_some_and(|record| {
-                    record.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed
-                });
-                if !recovering && (connection_lost && command_record.is_none()
-                    || command_record.as_ref().is_some_and(|record| record.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale)) {
-                    outcome_unknown = true;
-                    break;
-                }
-                if !recovering { connection_lost = false; }
-                last_waiting_for_secret = waiting_for_secret;
-                let expired = wait.expired(std::time::Instant::now());
-                if recovering && expired {
-                    outcome_unknown = true;
-                    break;
-                }
-                if expired || ai_terminal_command_output_ready(
-                    command_completed, prompt_returned, &before, &current,
-                    changed_at.elapsed(), waiting_for_secret, recovering,
-                ) {
-                    let result = weak.update(cx, |this, cx| {
-                        let current_snapshot = this
-                            .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                        current_snapshot.to_executed_tool_result(
-                            tool_call_id.clone(),
-                            tool_name.clone(),
-                            current_snapshot.terminal_run_observed(
-                                command_id.as_deref(), &before, &current, command_completed, prompt_returned,
-                                waiting_for_secret, command_record.as_ref().and_then(|record| record.exit_code), expired, target.clone(),
-                            ),
-                            started.elapsed().as_millis(),
-                        )
-                    });
-                    if let (Some(sender), Ok(result)) = (sender.take(), result) {
-                        let _ = sender.send(result);
-                    }
-                    return;
-                }
-                // Credentials remain local even when a bounded observation yields to the model.
-                let wait_state = if recovering { "waiting_connection" } else if waiting_for_secret { "waiting_user" } else { "waiting_condition" };
-                if wait_state != previous_wait_state {
-                    let _ = weak.update(cx, |this, cx| {
-                        if let Some(run) = this.ai.state.read(cx).agent_run(owner.generation) {
-                            let state = if recovering { AgentState::AwaitingConnection } else if waiting_for_secret { AgentState::AwaitingUser } else { AgentState::AwaitingCondition };
-                            let _ = this.ai.state.read(cx).agents.services.runtime.set_state(&run, state);
-                        }
-                        this.apply_ai_tool_status(owner.generation,
-                        &owner.conversation_id, &owner.assistant_id, &tool_call_id, &tool_name, &owner.arguments, wait_state,
-                        Some(serde_json::json!({"commandId": command_id, "waiting": true, "waitDeadline": ai_now_ms() + wait.deadline().saturating_duration_since(std::time::Instant::now()).as_millis() as i64})), Some("interactive".into()),
-                        None, false, None, None, None, cx);
-                    });
-                    previous_wait_state = wait_state;
-                }
-                tokio::select! {
-                    _ = activity_rx.changed() => {},
-                    _ = Timer::after(Duration::from_millis(250)) => {},
-                    _ = sender.as_mut().unwrap().closed() => return,
-                }
-            }
-            let result = weak.update(cx, |this, cx| {
-                let current_snapshot =
-                    this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                let end = if outcome_unknown { AiTerminalRunEnd::OutcomeUnknown }
-                    else if direction_changed { AiTerminalRunEnd::DirectionChanged }
-                    else if user_taken_over { AiTerminalRunEnd::TakenOver }
-                    else if owner_closed { AiTerminalRunEnd::OwnerClosed }
-                    else { AiTerminalRunEnd::Unconfirmed };
-                current_snapshot.terminal_run_finished(
-                    tool_call_id, tool_name, started.elapsed().as_millis(), end, &before, &last,
-                    command_id, last_waiting_for_secret, target, post_user_approval,
-                )
-            });
-            if let (Some(sender), Ok(result)) = (sender.take(), result) {
-                let _ = sender.send(result);
-            }
-        })
-        .detach();
+            let sample = |recovered, command: Option<&str>, cx: &mut gpui::AsyncApp| {
+                weak.update(cx, |app, cx| app.sample_ai_watched_terminal(
+                    &tool_session_id, session_id, node_id.as_ref(), &mut handle_id,
+                    oxideterm_ai::RuntimeCapability::TerminalRunCommand,
+                    recovered, command, cx,
+                )).unwrap_or(AiTerminalWatchSample::HostClosed)
+            };
+            let finish = |cx: &mut gpui::AsyncApp| {
+                weak.update(cx, |app, cx| app.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx)).ok()
+            };
+            let status = |status, deadline_ms, cx: &mut gpui::AsyncApp| {
+                let _ = weak.update(cx, |app, cx| app.report_ai_terminal_watch_status(
+                    &owner, &call_id, &name, status_command.as_deref(), status, deadline_ms, true, cx,
+                ));
+            };
+            watch.observe_command(
+                AiTerminalCommandObservation {
+                    command_id,
+                    before: zeroize::Zeroizing::new(before),
+                    timeout: wait_timeout,
+                    leases: execution_leases,
+                    target,
+                    post_user_approval,
+                },
+                sample, finish, status, cx,
+            ).await;
+        }).detach();
     }
 
     pub(in crate::workspace) fn start_ai_wait_terminal_output_execution(
@@ -1553,18 +1328,60 @@ impl WorkspaceApp {
             let _ = sender.send(result);
             return;
         };
-        let node_id = self
-            .workspace_runtime
-            .read(cx)
-            .ssh_terminal_nodes()
-            .into_iter()
-            .find_map(|(id, node)| (id == session_id).then_some(node));
-        let (activity, mut activity_rx) = tokio::sync::watch::channel(0u64);
+        let node_id = self.ai_terminal_node(session_id, cx);
+        let (activity, pane_subscription, runtime_subscription) = self.watch_ai_terminal_activity(&pane, cx);
+        let initial_buffer = pane.read(cx).ai_buffer_snapshot();
+        let initial_alternate_screen = pane.read(cx).ai_screen_is_alternate_buffer();
+        let observation = owner.resource(
+            self,
+            cx,
+            oxideterm_ai::agent::OwnedResourceKind::Observation,
+            &self.i18n.t("settings_view.ai.waiting_condition"),
+        );
+        let call_id = tool_call_id.clone();
+        let name = tool_name.clone();
+        let watch = AiTerminalWatch {
+            call_id: tool_call_id, tool_name, started, sender, activity, direction: owner.dispatch.clone(),
+        };
+        cx.spawn(async move |weak, cx| {
+            let _subscriptions = (pane_subscription, runtime_subscription);
+            let _observation = observation;
+            let sample = |recovered, command: Option<&str>, cx: &mut gpui::AsyncApp| {
+                weak.update(cx, |app, cx| app.sample_ai_watched_terminal(
+                    &tool_session_id, session_id, node_id.as_ref(), &mut handle_id,
+                    oxideterm_ai::RuntimeCapability::TerminalObserve,
+                    recovered, command, cx,
+                )).unwrap_or(AiTerminalWatchSample::HostClosed)
+            };
+            let finish = |cx: &mut gpui::AsyncApp| {
+                weak.update(cx, |app, cx| app.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx)).ok()
+            };
+            let status = |status, deadline_ms, cx: &mut gpui::AsyncApp| {
+                let _ = weak.update(cx, |app, cx| app.report_ai_terminal_watch_status(
+                    &owner, &call_id, &name, None, status, deadline_ms, false, cx,
+                ));
+            };
+            let wait = AiTerminalOutputWait::new(&args, initial_buffer, initial_alternate_screen, std::time::Instant::now());
+            watch.observe_output(wait, snapshot, sample, finish, status, cx).await;
+        }).detach();
+    }
+
+    fn ai_terminal_node(&self, session: TerminalSessionId, cx: &App) -> Option<NodeId> {
+        self.workspace_runtime.read(cx).ssh_terminal_nodes().into_iter()
+            .find_map(|(id, node)| (id == session).then_some(node))
+    }
+
+    fn watch_ai_terminal_activity(
+        &self,
+        pane: &Entity<TerminalPane>,
+        cx: &mut Context<Self>,
+    ) -> (tokio::sync::watch::Receiver<u64>, Subscription, Subscription) {
+        let (activity, activity_rx) = tokio::sync::watch::channel(0u64);
         let runtime_activity = activity.clone();
         let runtime_subscription = cx.observe(&self.workspace_runtime, move |_, _, _| {
             runtime_activity.send_modify(|revision| *revision = revision.wrapping_add(1));
         });
-        let subscription = cx.subscribe(&pane, move |_, _, event, _| {
+        let subscription = cx.subscribe(pane, move |_, _, event, _| {
             if matches!(
                 event,
                 TerminalPaneEvent::OutputActivity
@@ -1574,119 +1391,94 @@ impl WorkspaceApp {
                 activity.send_modify(|revision| *revision = revision.wrapping_add(1));
             }
         });
-        let initial_buffer = pane.read(cx).ai_buffer_snapshot();
-        let initial_alternate_screen = pane.read(cx).ai_screen_is_alternate_buffer();
-        let observation = owner.resource(
-            self,
-            cx,
-            oxideterm_ai::agent::OwnedResourceKind::Observation,
-            &self.i18n.t("settings_view.ai.waiting_condition"),
-        );
-        cx.spawn(async move |weak, cx| {
-            let _observation = observation;
-            let _subscriptions = (subscription, runtime_subscription);
-            let mut previous_wait_state = "";
-            let mut sender = Some(sender);
-            let mut wait = AiTerminalOutputWait::new(&args, initial_buffer, initial_alternate_screen, std::time::Instant::now());
-            let failure = loop {
-                if owner.dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
-                    break AiTerminalWaitFailure::DirectionChanged;
-                }
-                if sender.as_ref().is_none_or(tokio::sync::oneshot::Sender::is_closed) {
-                    return;
-                }
-                let observation = weak.update(cx, |this, cx| {
-                    // Revalidate the opaque handle on every observation so a
-                    // retained pane cannot outlive the tool session authority.
-                    let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
-                        .and_then(|id| this.ssh_registry.get(&id)).is_some_and(|connection|
-                            matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
-                    if recovering { return Some((String::new(), false, Vec::new(), true, false, false)); }
-                    if let Some(node) = &node_id {
-                        let alive = this.node_router.connection_id_for_node(node).and_then(|id| this.ssh_registry.get(&id))
-                            .is_some_and(|connection| !matches!(connection.state(), ConnectionState::Disconnected | ConnectionState::Disconnecting));
-                        if !alive { return None; }
-                    }
-                    if wait.connection_lost() {
-                        handle_id = this.ai.authority.update(cx, |runtime, _|
-                            runtime.issue_terminal_handle(&tool_session_id, session_id).ok()).map(|projection| projection.handle_id);
-                    }
-                    let current_session = this
-                        .ai.authority
-                        .read(cx)
-                        .validate_terminal_handle(
-                            &tool_session_id,
-                            handle_id
-                                .as_ref()
-                                .map(oxideterm_ai::RuntimeHandleId::as_str),
-                            oxideterm_ai::RuntimeCapability::TerminalObserve,
-                        )
-                        .ok();
-                    if current_session != Some(session_id) {
-                        return None;
-                    }
-                    let (_, pane) = this.ai_terminal_session(session_id, cx)?;
-                    let pane = pane.read(cx);
-                    Some((
-                        pane.ai_buffer_snapshot(),
-                        pane.ai_screen_is_alternate_buffer(),
-                        pane.ai_command_records(),
-                        false,
-                        pane.ai_waiting_for_secret(),
-                        wait.requested_command()
-                            .map(|id| pane.ai_command_prompt_returned(id))
-                            .unwrap_or_else(|| pane.ai_command_records().last().is_some_and(|record| pane.ai_command_prompt_returned(&record.command_id))),
-                    ))
-                });
-                let Ok(Some((buffer, alternate_screen, records, recovering, waiting_for_secret, prompt_returned))) = observation else {
-                    break AiTerminalWaitFailure::OwnerClosed;
-                };
-                let state = if recovering { "waiting_connection" } else { "waiting_condition" };
-                if state != previous_wait_state {
-                    let _ = weak.update(cx, |this, cx| this.apply_ai_tool_status(owner.generation, &owner.conversation_id,
-                        &owner.assistant_id, &tool_call_id, &tool_name, &owner.arguments, state,
-                        Some(serde_json::json!({"waiting":true,"waitDeadline":ai_now_ms() + wait.deadline().saturating_duration_since(std::time::Instant::now()).as_millis() as i64})),
-                        Some("read".into()), None, false, None, None, None, cx));
-                    previous_wait_state = state;
-                }
-                if recovering {
-                    if !wait.recovering(std::time::Instant::now()) {
-                        break AiTerminalWaitFailure::TimedOut;
-                    }
-                    Timer::after(Duration::from_millis(250)).await;
-                    continue;
-                }
-                let records = records.iter().map(|record| ai_terminal_command_capture(record, false)).collect::<Vec<_>>();
-                match wait.observe(&snapshot, AiTerminalWaitSample {
-                    buffer: &buffer, alternate_screen, waiting_for_secret, prompt_returned,
-                }, &records, std::time::Instant::now()) {
-                    AiTerminalWaitProgress::Pending => {},
-                    AiTerminalWaitProgress::Failed(failure) => break failure,
-                    AiTerminalWaitProgress::Observed(action) => {
-                        let result = weak.update(cx, |this, cx| {
-                            this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx)
-                                .to_executed_tool_result(tool_call_id, tool_name, action, started.elapsed().as_millis())
-                        });
-                        if let (Some(sender), Ok(result)) = (sender.take(), result) { let _ = sender.send(result); }
-                        return;
-                    }
-                }
-                tokio::select! {
-                    _ = activity_rx.changed() => {},
-                    _ = Timer::after(Duration::from_millis(250)) => {},
-                    _ = sender.as_mut().unwrap().closed() => return,
-                }
-            };
-            let result = weak.update(cx, |this, cx| {
-                let snapshot = this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                let action = wait.failure(&snapshot, failure);
-                snapshot.to_executed_tool_result(tool_call_id, tool_name, action, started.elapsed().as_millis())
-            });
-            if let (Some(sender), Ok(result)) = (sender.take(), result) {
-                let _ = sender.send(result);
+        (activity_rx, subscription, runtime_subscription)
+    }
+
+    fn sample_ai_watched_terminal(
+        &self,
+        tool_session_id: &ToolSessionId,
+        session_id: TerminalSessionId,
+        node_id: Option<&NodeId>,
+        handle_id: &mut Option<oxideterm_ai::RuntimeHandleId>,
+        capability: oxideterm_ai::RuntimeCapability,
+        recovered: bool,
+        command: Option<&str>,
+        cx: &mut Context<Self>,
+    ) -> AiTerminalWatchSample {
+        if let Some(node_id) = node_id {
+            let connection = self.node_router.connection_id_for_node(node_id)
+                .and_then(|id| self.ssh_registry.get(&id));
+            let Some(connection) = connection else { return AiTerminalWatchSample::OwnerClosed };
+            match connection.state() {
+                ConnectionState::Connecting | ConnectionState::LinkDown
+                | ConnectionState::Reconnecting | ConnectionState::Error(_) => return AiTerminalWatchSample::Recovering,
+                ConnectionState::Disconnected | ConnectionState::Disconnecting => return AiTerminalWatchSample::OwnerClosed,
+                _ => {}
             }
-        })
-        .detach();
+        }
+        // Sample only the current owner; a retained pane is not authority.
+        if recovered {
+            *handle_id = self.ai.authority.update(cx, |authority, _| {
+                authority.issue_terminal_handle(tool_session_id, session_id).ok()
+            }).map(|projection| projection.handle_id);
+        }
+        if self.ai.authority.read(cx).validate_terminal_handle(
+            tool_session_id,
+            handle_id.as_ref().map(oxideterm_ai::RuntimeHandleId::as_str),
+            capability,
+        ).ok() != Some(session_id) {
+            return AiTerminalWatchSample::OwnerClosed;
+        }
+        let Some(pane) = self.ai_terminal_pane_for_session(session_id, cx) else { return AiTerminalWatchSample::OwnerClosed };
+        let pane = pane.read(cx);
+        let run_command = capability == oxideterm_ai::RuntimeCapability::TerminalRunCommand;
+        let records = pane.ai_command_records();
+        let prompt_returned = command.or_else(|| {
+            if run_command { None } else { records.last().map(|record| record.command_id.as_str()) }
+        }).is_some_and(|id| pane.ai_command_prompt_returned(id));
+        let records = records.into_iter()
+            .filter(|record| !run_command || command == Some(record.command_id.as_str()))
+            .map(|record| {
+                let status = ai_terminal_command_capture(&record, false).status;
+                AiTerminalWatchRecord {
+                    id: record.command_id,
+                    command: zeroize::Zeroizing::new(record.command),
+                    status, started_at: record.started_at, finished_at: record.finished_at, exit_code: record.exit_code,
+                }
+            }).collect();
+        AiTerminalWatchSample::Current {
+            buffer: zeroize::Zeroizing::new(pane.ai_buffer_snapshot()),
+            alternate_screen: !run_command && pane.ai_screen_is_alternate_buffer(),
+            waiting_for_secret: pane.ai_waiting_for_secret(),
+            prompt_returned,
+            records,
+        }
+    }
+
+    fn report_ai_terminal_watch_status(
+        &mut self,
+        owner: &AiToolRunContext,
+        call_id: &str,
+        tool_name: &str,
+        command_id: Option<&str>,
+        status: AiTerminalWatchStatus,
+        deadline_ms: i64,
+        run: bool,
+        cx: &mut Context<Self>,
+    ) {
+        let mut data = serde_json::json!({"waiting": true, "waitDeadline": deadline_ms});
+        if run {
+            let ai = self.ai.state.read(cx);
+            if let Some(agent) = ai.agent_run(owner.generation) {
+                let _ = ai.agents.services.runtime.set_state(&agent, status.agent_state());
+            }
+            data["commandId"] = serde_json::json!(command_id);
+        }
+        self.apply_ai_tool_status(
+            owner.generation, &owner.conversation_id, &owner.assistant_id, call_id, tool_name,
+            &owner.arguments, status.protocol_status(), Some(data),
+            Some(if run { "interactive" } else { "read" }.into()), None, false, None, None, None, cx,
+        );
     }
 
     pub(in crate::workspace) fn execute_ai_write_settings_resource(

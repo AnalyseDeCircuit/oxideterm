@@ -1,6 +1,6 @@
 use oxideterm_ai::tool_loop::{ai_direction_changed_result, ai_pending_dispatch};
 use oxideterm_ai::tool_resources::{
-    ai_application_action_result, ai_memory_now_ms,
+    ai_memory_now_ms,
     ai_runtime_validation_public_code, ai_runtime_validation_recovery_message,
 };
 

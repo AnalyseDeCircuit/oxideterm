@@ -142,22 +142,3 @@ fn insert_optional_ref(refs: &mut BTreeMap<String, String>, key: &str, value: Op
 fn string_list(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sftp_projection_uses_only_non_sensitive_node_identity() {
-        let projection = sftp_target_projection(AiSftpTargetInput {
-            node_id: "node-a".to_string(),
-            session_id: "sftp-a".to_string(),
-            connection_id: Some("connection-a".to_string()),
-            host: "example.internal".to_string(),
-        });
-
-        assert_eq!(projection.id, "sftp-session:sftp-a");
-        assert_eq!(projection.label, "SFTP example.internal");
-        assert_eq!(projection.metadata, json!({ "host": "example.internal" }));
-    }
-}

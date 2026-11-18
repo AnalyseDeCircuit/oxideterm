@@ -1,4 +1,5 @@
-use crate::workspace::ai_state::{AiQueuedChatTurn, AiStandardConfirmKind};
+use crate::workspace::ai_state::AiStandardConfirmKind;
+use oxideterm_gpui_ai::state::conversation_queue::{AiDraftContext, AiDraftSubmission, AiLocalChatCommand};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn open_ai_safety_confirm(&mut self, cx: &mut Context<Self>) {
@@ -65,257 +66,67 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn send_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
         self.ensure_ai_chat_initialized(cx);
-        if !self.ai.state.read(cx).history_ready() {
-            return;
-        }
-        let content = self.ai.state.read(cx).chat_ui().draft.trim().to_string();
-        let images = self.ai.state.read(cx).chat_ui().images.clone();
-        if images.iter().map(|image| image.bytes).sum::<usize>()
-            > oxideterm_ai::AI_IMAGE_REQUEST_BYTES
-        {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.images.request_limit"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            return;
-        }
-        if self.ai.state.read(cx).chat_ui().image_import.is_some() {
-            return;
-        }
-        if content.is_empty() && images.is_empty() {
-            cx.notify();
-            return;
-        }
-        if !self.settings_store.settings().ai.enabled {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.chat.disabled_message"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            cx.notify();
-            return;
-        }
-        let question = self.ai.state.read(cx).active_user_question();
-        if !images.is_empty() && question.is_some() {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.images.queue_only"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
-            return;
-        }
-        if let Some((generation, id)) = question {
-            if self.ai.state.update(cx, |ai, _| {
-                ai.resolve_user_question(generation, &id, zeroize::Zeroizing::new(content))
-            }) {
-                self.reset_ai_chat_input_after_submit(cx);
+        let enabled = self.settings_store.settings().ai.enabled;
+        let draft = match self.ai.state.update(cx, |ai, cx| ai.prepare_draft_submission(enabled, cx)) {
+            AiDraftSubmission::Ignore => return,
+            AiDraftSubmission::Warning(key) => {
+                self.push_ai_settings_toast(self.i18n.t(key), TerminalNoticeVariant::Warning, cx);
+                return;
             }
-            cx.notify();
-            return;
-        }
+            AiDraftSubmission::Answered => {
+                self.ime_marked_text = None;
+                return;
+            }
+            AiDraftSubmission::Prepare(draft) => draft,
+        };
         self.bootstrap_ai_mcp_registry(cx);
-
-        let parsed_input = parse_ai_user_input(&content);
-        let detected_intent = detect_ai_intent(&parsed_input);
-        let sidebar_context = self.resolve_ai_sidebar_context_block(cx);
-        let selected_context = self.resolve_ai_selected_terminal_context(cx);
-        let reference_context = self.resolve_ai_reference_context(&parsed_input.references, cx);
-        let context_sources = [
-            selected_context.as_ref().map(|_| "terminal"),
-            sidebar_context.as_ref().map(|_| "sidebar"),
-            reference_context.as_ref().map(|_| "reference"),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>();
-        let context =
-            ai_chat_message_context([selected_context, sidebar_context, reference_context]);
-        let slash_command = parsed_input
-            .slash_command
-            .as_deref()
-            .and_then(resolve_ai_slash_command);
-        let explicit_skill =
-            if slash_command.is_none() && self.settings_store.settings().ai.skills.enabled {
-                parsed_input.slash_command.as_deref().and_then(|skill_id| {
-                    let registry = self.ai.skills.read();
-                    let record = registry.enabled_record(skill_id)?;
-                    let instructions = registry.load(skill_id).ok()?;
-                    Some((
-                        skill_id.to_string(),
-                        record.content_hash.clone(),
-                        instructions,
-                    ))
-                })
-            } else {
-                None
-            };
-        if let Some(command) = slash_command.filter(|command| command.client_only) {
-            if !images.is_empty() {
-                self.push_ai_settings_toast(
-                    self.i18n.t("ai.images.queue_only"),
-                    TerminalNoticeVariant::Warning,
-                    cx,
-                );
+        match draft.local_command(self.ai.state.read(cx).chat_is_loading()) {
+            Ok(Some(AiLocalChatCommand::Clear)) => {
+                self.create_ai_sidebar_conversation(None, cx);
+                self.reset_ai_chat_input_after_submit(cx);
                 return;
             }
-            if self.ai.state.read(cx).chat_is_loading() {
-                self.push_ai_settings_toast(
-                    self.i18n.t("ai.queue.client_command_busy"),
-                    TerminalNoticeVariant::Warning,
-                    cx,
-                );
+            Ok(Some(AiLocalChatCommand::Help)) => {
+                self.ai.state.update(cx, |ai, cx| ai.add_draft_help(draft, &self.i18n, cx));
+                self.ime_marked_text = None;
                 return;
             }
-            match command.name {
-                "clear" => {
-                    self.create_ai_sidebar_conversation(None, cx);
-                    self.reset_ai_chat_input_after_submit(cx);
-                    cx.notify();
-                    return;
-                }
-                "help" => {
-                    self.add_ai_help_response(content, cx);
-                    return;
-                }
-                "compact" => {
-                    self.start_ai_compact_conversation(cx);
-                    self.reset_ai_chat_input_after_submit(cx);
-                    cx.notify();
-                    return;
-                }
-                _ => return,
+            Ok(Some(AiLocalChatCommand::Compact)) => {
+                self.start_ai_compact_conversation(cx);
+                self.reset_ai_chat_input_after_submit(cx);
+                return;
             }
+            Ok(Some(AiLocalChatCommand::Ignore)) => return,
+            Err(key) => {
+                self.push_ai_settings_toast(self.i18n.t(key), TerminalNoticeVariant::Warning, cx);
+                return;
+            }
+            Ok(None) => {}
         }
 
-        let stream_config = match self.resolve_ai_stream_config(cx) {
+        let sidebar = self.resolve_ai_sidebar_context_block(cx);
+        let terminal = self.resolve_ai_selected_terminal_context(cx);
+        let references = self.resolve_ai_reference_context(&draft.input.references, cx);
+        let config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
-                cx.notify();
                 return;
             }
         };
-        if !images.is_empty()
-            && stream_config.execution_backend != AiExecutionBackend::Acp
-            && oxideterm_ai::model_image_input(
-                &stream_config.provider_type,
-                &stream_config.model,
-                stream_config.image_input,
-            ) == Some(false)
-        {
-            self.push_ai_settings_toast(
-                self.i18n.t("ai.images.model_unavailable"),
-                TerminalNoticeVariant::Warning,
-                cx,
-            );
+        if let Err(key) = draft.check_image_support(&config) {
+            self.push_ai_settings_toast(self.i18n.t(key), TerminalNoticeVariant::Warning, cx);
             return;
         }
-        if let Some(context_block) = context.as_ref() {
-            if let Some(mut audit_context) = oxideterm_audit::AuditContext::current_request()
-                .or_else(oxideterm_audit::AuditContext::current)
-            {
-                if audit_context.source == oxideterm_audit::AuditSource::Application {
-                    audit_context.source = oxideterm_audit::AuditSource::User;
-                }
-                audit_context.observe(
-                    oxideterm_audit::AuditCategory::Automation,
-                    "ai_context_provided",
-                    Some(&format!(
-                        "provider={} model={} sources={} bytes={}",
-                        stream_config.provider_id.as_deref().unwrap_or("unknown"),
-                        stream_config.model,
-                        context_sources.join(","),
-                        context_block.len()
-                    )),
-                    oxideterm_audit::AuditOutcome::Sent,
-                    oxideterm_audit::AuditEvidence::Dispatch,
-                    oxideterm_audit::AuditAuthorization::NotRequired,
-                );
-            }
-        }
-        let now = ai_now_ms();
-        let title = generate_chat_title(&content);
-        let id = self.next_ai_chat_id(now, cx);
-        let message = AiChatMessage {
-            id: self.next_ai_chat_id(now, cx),
-            role: AiChatRole::User,
-            content: content.clone(),
-            timestamp_ms: now,
-            model: Some(stream_config.model.clone()),
-            context,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        let runtime_system_prompt = self.resolve_ai_sidebar_system_prompt_segment(cx);
-        let explicit_skill_prompt = explicit_skill.as_ref().map(
-            |(skill_id, _content_hash, instructions)| {
-                format!(
-                    "## Explicit Agent Skill\nThe user explicitly selected `{skill_id}`. Follow these instructions for this request, subject to the current tool permissions and safety mode.\n\n<skill_instructions id=\"{skill_id}\">\n{}\n</skill_instructions>",
-                    oxideterm_ai::sanitize_for_ai(instructions)
-                )
-            },
-        );
-        let task_system_prompt = ai_chat_message_context([
-            ai_input_system_prompt(slash_command, &parsed_input.participants),
-            explicit_skill_prompt,
-            runtime_system_prompt,
-            ai_detected_intent_system_prompt(&detected_intent),
-        ]);
-        let active_participant = parsed_input
-            .participants
-            .first()
-            .map(|participant| participant.name.clone());
-        let request_text = if stream_config.execution_backend == AiExecutionBackend::Acp
-            && parsed_input.slash_command.is_some()
-            && slash_command.is_none()
-            && explicit_skill.is_none()
-        {
-            // Agent-advertised ACP commands are protocol input, not OxideTerm
-            // system prompts. Preserve the slash prefix for the agent.
-            content
-        } else {
-            parsed_input.clean_text
-        };
-        let request_content = if request_text.is_empty() && explicit_skill.is_some() {
-            Some("Apply the explicitly selected Agent Skill to the current task.".to_string())
-        } else {
-            (!request_text.is_empty()).then_some(request_text)
-        };
-        let conversation_id = self.ai.state.update(cx, |ai, _cx| {
-            ai.ensure_conversation(id, Some(title), now, None)
+        let runtime_prompt = self.resolve_ai_sidebar_system_prompt_segment(cx);
+        let skills = self.settings_store.settings().ai.skills.enabled.then_some(&self.ai.skills);
+        let pending = self.ai.state.update(cx, |ai, cx| {
+            ai.enqueue_submitted_draft(draft, AiDraftContext { terminal, sidebar, references }, runtime_prompt, config, skills, cx)
         });
-        let turn = AiQueuedChatTurn {
-            images,
-            id: message.id,
-            content: zeroize::Zeroizing::new(message.content),
-            context: message.context.map(zeroize::Zeroizing::new),
-            config: stream_config,
-            request_content: request_content.map(zeroize::Zeroizing::new),
-            task_system_prompt: task_system_prompt.map(zeroize::Zeroizing::new),
-            participant: active_participant,
-            skill: explicit_skill.map(|(id, hash, _)| (id, hash)),
-        };
-        let busy = self.ai.state.read(cx).chat_is_loading();
-        self.ai.state.update(cx, |ai, _| {
-            ai.queued_chat_turns
-                .entry(conversation_id.clone())
-                .or_default()
-                .push_back(turn)
-        });
-        self.reset_ai_chat_input_after_submit(cx);
-        if !busy {
-            self.send_next_queued_ai_message(&conversation_id, cx);
+        self.ime_marked_text = None;
+        if let Some(pending) = pending {
+            self.launch_prepared_queued_turn(pending, cx);
         }
-        cx.notify();
     }
 
     pub(in crate::workspace) fn send_next_queued_ai_message(
@@ -474,57 +285,6 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn add_ai_help_response(
-        &mut self,
-        content: String,
-        cx: &mut Context<Self>,
-    ) {
-        let now = ai_now_ms();
-        let title = generate_chat_title(&content);
-        let id = self.next_ai_chat_id(now, cx);
-        let user_message = AiChatMessage {
-            id: self.next_ai_chat_id(now, cx),
-            role: AiChatRole::User,
-            content,
-            timestamp_ms: now,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        let assistant_message = AiChatMessage {
-            id: self.next_ai_chat_id(now, cx),
-            role: AiChatRole::Assistant,
-            content: self.ai_help_markdown(),
-            timestamp_ms: now,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: None,
-            summary_ref: None,
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.add_help_exchange(id, title, now, user_message, assistant_message);
-        });
-        self.reset_ai_chat_input_after_submit(cx);
-        cx.notify();
-    }
-
     pub(in crate::workspace) fn send_ai_follow_up_suggestion(
         &mut self,
         text: String,
@@ -648,21 +408,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn reset_ai_chat_input_after_submit(&mut self, cx: &mut App) {
-        self.ai.state.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, cx| {
             ai.clear_chat_input_after_submit();
+            cx.notify();
         });
         self.ime_marked_text = None;
     }
-}
-
-pub(in crate::workspace) fn ai_chat_message_context(
-    contexts: impl IntoIterator<Item = Option<String>>,
-) -> Option<String> {
-    let blocks = contexts
-        .into_iter()
-        .flatten()
-        .map(|context| context.trim().to_string())
-        .filter(|context| !context.is_empty())
-        .collect::<Vec<_>>();
-    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
 }

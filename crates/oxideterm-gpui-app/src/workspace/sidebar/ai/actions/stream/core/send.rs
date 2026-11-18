@@ -1,3 +1,5 @@
+use oxideterm_gpui_ai::conversation::AiProviderSendPlan;
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn start_acp_chat_thread(
         &mut self,
@@ -83,121 +85,24 @@ impl WorkspaceApp {
         }) else {
             return;
         };
-        let AiPendingChatStream {
-            conversation_id,
-            config,
-            request_content,
-            task_system_prompt,
-            rag_system_prompt,
-            launch_id,
-        } = pending;
-        if allow_pre_send_compaction
-            && self.should_force_ai_pre_send_compaction(
-                &conversation_id,
-                &config,
-                request_content.as_deref(),
-                task_system_prompt.as_deref(),
-                rag_system_prompt.as_deref(),
-                cx,
-            )
-        {
-            let pending = AiPendingChatStream {
-                launch_id,
-                conversation_id: conversation_id.clone(),
-                config,
-                request_content,
-                task_system_prompt,
-                rag_system_prompt,
-            };
-            let pending = match self.start_ai_compact_conversation_for(
-                conversation_id,
-                true,
-                true,
-                Some(pending),
-                cx,
-            ) {
-                Ok(()) => return,
-                Err(Some(pending)) => *pending,
-                Err(None) => return,
-            };
-
-            return self.start_ai_chat_stream_after_budget_preflight(
-                pending.conversation_id,
-                pending.config,
-                pending.request_content,
-                pending.task_system_prompt,
-                pending.rag_system_prompt,
-                false,
-                cx,
-            );
+        match self.ai_conversation_prompt(cx).plan_provider_turn(pending, allow_pre_send_compaction) {
+            Some(AiProviderSendPlan::Compact(pending)) => {
+                let id = pending.conversation_id.clone();
+                if let Err(Some(pending)) = self.start_ai_compact_conversation_for(id, true, true, Some(pending), cx) {
+                    self.start_ai_chat_stream_after_budget_preflight(
+                        pending.conversation_id, pending.config, pending.request_content,
+                        pending.task_system_prompt, pending.rag_system_prompt, false, cx,
+                    );
+                }
+            }
+            Some(AiProviderSendPlan::Launch(turn)) => {
+                let services = self.ai_model_backend_services(cx);
+                self.ai.conversations.launch_provider_turn(
+                    *turn, services, self.global_agent_options(), self.agent_concurrency(),
+                    |data| self.ai_diagnostic_base(data), cx,
+                );
+            }
+            None => {}
         }
-
-        let Some((history, trimmed_count)) = self.ai_conversation_prompt(cx).build_ai_stream_history(
-            &conversation_id,
-            &config,
-            request_content.clone(),
-            task_system_prompt.clone(),
-            rag_system_prompt.clone(),
-        ) else {
-            return;
-        };
-        let context_window = self.ai_active_model_context_window(&config);
-        let (budget_decision, budget_diagnostic_payload) = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .map(|conversation| {
-                let decision = self.ai_conversation_prompt(cx).ai_send_budget_decision(
-                    conversation,
-                    &config,
-                    request_content.as_deref(),
-                    task_system_prompt.as_deref(),
-                    rag_system_prompt.as_deref(),
-                );
-                let payload = self.ai_conversation_prompt(cx).ai_budget_diagnostic_payload(
-                    conversation,
-                    &config,
-                    request_content.as_deref(),
-                    task_system_prompt.as_deref(),
-                    rag_system_prompt.as_deref(),
-                    decision,
-                    trimmed_count,
-                );
-                (decision, payload)
-            })
-            .unwrap_or_else(|| {
-                let decision = None;
-                let payload = serde_json::json!({
-                    "requestKind": "chat",
-                    "budgetLevel": 0,
-                    "nextLevel": 0,
-                    "contextWindow": self.ai_active_model_context_window(&config),
-                    "responseReserve": config.max_response_tokens,
-                    "trimmedCount": trimmed_count,
-                });
-                (decision, payload)
-            });
-        let provider_turn = oxideterm_gpui_ai::conversation::AiProviderTurn {
-            conversation_id,
-            config,
-            request_content,
-            history,
-            trimmed_count,
-            context_window,
-            budget_level: budget_decision.map(|decision| decision.level).unwrap_or(0),
-            budget_diagnostic_payload,
-            services: self.ai_model_backend_services(cx),
-            agent_options: self.global_agent_options(),
-            agent_concurrency: self.agent_concurrency(),
-        };
-        self.ai.conversations.launch_provider_turn(
-            provider_turn,
-            |data| self.ai_diagnostic_base(data),
-            cx,
-        );
     }
 }

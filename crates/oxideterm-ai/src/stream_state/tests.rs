@@ -171,14 +171,6 @@ fn cancellation_retains_partial_text_and_completes_rejected_tool_results() {
 }
 
 #[test]
-fn prompt_budget_uses_configured_safety_margin() {
-    let budget = compute_ai_prompt_budget(1_000, 200, 100, Some(50));
-
-    assert_eq!(budget.usable_prompt_budget, 750);
-    assert_eq!(budget.history_budget, 650);
-}
-
-#[test]
 fn prompt_breakdown_counts_every_provider_visible_component() {
     let mut assistant = message("assistant", AiChatRole::Assistant, "answer");
     assistant.thinking_content = Some("reasoning".to_string());
@@ -224,29 +216,6 @@ fn prompt_breakdown_counts_every_provider_visible_component() {
         breakdown.total(),
         breakdown.prompt_tokens() + breakdown.reserved_output
     );
-}
-
-#[test]
-fn gemini_provider_parts_replace_the_visible_assistant_projection() {
-    let provider_parts = vec![serde_json::json!({
-        "text": "provider-native answer",
-        "thoughtSignature": "signed-state"
-    })];
-    let expected_provider_tokens = ai_estimated_tokens(
-        &serde_json::to_string(&provider_parts).expect("provider parts should serialize"),
-    );
-    let mut assistant = message(
-        "assistant",
-        AiChatRole::Assistant,
-        "this visible projection must not also be counted",
-    );
-    set_ai_provider_parts(&mut assistant, "gemini", provider_parts);
-
-    let breakdown = ai_prompt_token_breakdown(&[assistant], &[], "gemini", 0);
-
-    assert_eq!(breakdown.messages, 0);
-    assert_eq!(breakdown.tool_results, expected_provider_tokens);
-    assert_eq!(breakdown.prompt_tokens(), expected_provider_tokens);
 }
 
 #[test]

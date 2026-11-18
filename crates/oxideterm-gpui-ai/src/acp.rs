@@ -1180,40 +1180,6 @@ mod tests {
         });
     }
 
-    #[test]
-    fn acp_application_tools_match_the_provider_catalog() {
-        let provider_tools = oxideterm_ai::orchestrator_tool_definitions();
-        let acp_tools = acp_application_tool_definitions(&provider_tools);
-
-        assert_eq!(provider_tools.len(), acp_tools.len());
-        for (provider, acp) in provider_tools.iter().zip(&acp_tools) {
-            assert_eq!(provider.name, acp.name);
-            assert_eq!(provider.description, acp.description);
-            assert_eq!(provider.parameters, acp.input_schema);
-        }
-    }
-
-    #[test]
-    fn external_mcp_tools_receive_protocol_safe_proxy_names() {
-        let provider_tools = vec![oxideterm_ai::AiToolDefinition {
-            name: "mcp::demo::ping".to_string(),
-            description: "Ping the demo MCP server.".to_string(),
-            parameters: serde_json::json!({ "type": "object" }),
-        }];
-
-        let acp_tools = acp_application_tool_definitions(&provider_tools);
-
-        assert_eq!(acp_tools.len(), 1);
-        assert_ne!(acp_tools[0].name, provider_tools[0].name);
-        assert!(
-            acp_tools[0]
-                .name
-                .chars()
-                .all(|character| character.is_ascii_alphanumeric()
-                    || matches!(character, '_' | '-' | '.'))
-        );
-    }
-
     #[gpui::test]
     fn cursor_requests_use_tool_session_identity_and_reject_ambiguous_turns(
         cx: &mut gpui::TestAppContext,

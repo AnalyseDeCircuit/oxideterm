@@ -1,6 +1,30 @@
 use oxideterm_gpui_ai::stream::AiChatWindowDelivery;
+use oxideterm_gpui_ai::conversation::acp_file_review::AcpFileReviewBindings;
 
 impl WorkspaceApp {
+    fn acp_file_review_bindings(&self, cx: &Context<Self>) -> AcpFileReviewBindings {
+        let owner = cx.weak_entity();
+        let attention = owner.clone();
+        AcpFileReviewBindings {
+            preview: crate::workspace::acp_workspace::acp_file_write_preview,
+            frame: Rc::new(move |cx| {
+                let app = owner.upgrade()?.read(cx);
+                let ai = &app.settings_store.settings().ai;
+                Some(oxideterm_gpui_ai::stream::AiChatStreamFrame {
+                    i18n: app.i18n.clone(),
+                    tool_use_enabled: ai.tool_use.enabled,
+                    provider_id: ai.active_provider_id.clone(),
+                    model: ai.active_model.clone(),
+                })
+            }),
+            request_attention: Rc::new(move |conversation_id, assistant_id, cx| {
+                let _ = attention.update(cx, |app, cx| {
+                    app.notify_ai_agent_attention(conversation_id, assistant_id, "ai.agents.approval", cx);
+                });
+            }),
+        }
+    }
+
     pub(in crate::workspace) fn apply_ai_chat_window_request(
         &mut self,
         delivery: AiChatWindowDelivery,
@@ -31,7 +55,7 @@ impl WorkspaceApp {
                 unreachable!("chat batch consumes local deliveries");
             }
             AiStreamDeliveryEvent::ToolResourcesRequested { tool_session_id, name, args, sender } => {
-                let result = self.ai_tool_resource_keys(delivery.generation, &tool_session_id, &name, &args, cx);
+let result = self.ai.conversations.tool_resource_keys(delivery.generation, &tool_session_id, &name, &args, cx);
                 let _ = sender.send(result);
             }
             AiStreamDeliveryEvent::AgentCommandRequested { dispatch, tool_session_id, call, sender } => {
@@ -53,7 +77,10 @@ impl WorkspaceApp {
             AiStreamDeliveryEvent::AcpClientEvent { agent_id, event } => {
                 let event = match self.ai.conversations.handle_acp_session_request(
                     &agent_id, delivery.generation, &delivery.conversation_id, &delivery.assistant_id,
-                    event, |data| self.ai_diagnostic_base(data), cx,
+                    event,
+                    |data| self.ai_diagnostic_base(data),
+                    self.acp_file_review_bindings(cx),
+                    cx,
                 ) {
                     Ok(attention) => {
                         if attention {
@@ -63,437 +90,9 @@ impl WorkspaceApp {
                     }
                     Err(event) => event,
                 };
-                match event {
-                    oxideterm_ai::AcpClientEvent::RequestPermission { .. }
-                    | oxideterm_ai::AcpClientEvent::ReadTextFile { .. } => unreachable!("ACP controller owns these requests"),
-                    oxideterm_ai::AcpClientEvent::CursorRequest { .. } => {
-                        unreachable!("chat batch consumes cursor requests");
-                    }
-                    oxideterm_ai::AcpClientEvent::WriteTextFile {
-                        mut request,
-                        response_tx,
-                    } => {
-                        let owner_session_id = request.session_id.to_string();
-                        let Some((workspace_root, policy)) =
-                            self.ai.acp
-                                .read(cx)
-                                .session_context(&agent_id, &owner_session_id)
-                        else {
-                            let _ = response_tx.send(Err(oxideterm_ai::acp_internal_error(
-                                "ACP session context is unavailable",
-                            )));
-                            return;
-                        };
-                        if !policy.fs_write_text_file {
-                            let _ = response_tx.send(Err(oxideterm_ai::acp_method_not_found(
-                                "fs/write_text_file",
-                            )));
-                            return;
-                        }
-                        let requested_path = request.path.clone();
-                        let proposed_content =
-                            zeroize::Zeroizing::new(std::mem::take(&mut request.content));
-                        let tool_call_id = oxideterm_ai::next_acp_file_review_id();
-                        let generation = delivery.generation;
-                        let conversation_id = delivery.conversation_id.clone();
-                        let assistant_id = delivery.assistant_id.clone();
-                        cx.spawn(async move |weak, cx| {
-                            let target_path =
-                                match oxideterm_ai::resolve_acp_write_text_file_target(
-                                    &workspace_root,
-                                    &requested_path,
-                                )
-                                .await
-                                {
-                                    Ok(path) => path,
-                                    Err(error) => {
-                                        let _ = response_tx.send(Err(error));
-                                        return;
-                                    }
-                                };
-                            let existing_content = match tokio::fs::read_to_string(&target_path)
-                                .await
-                            {
-                                Ok(content) => zeroize::Zeroizing::new(content),
-                                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                                    zeroize::Zeroizing::new(String::new())
-                                }
-                                Err(_) => {
-                                    let _ = response_tx.send(Err(
-                                        oxideterm_ai::acp_internal_error(
-                                            "ACP file review could not read the target",
-                                        ),
-                                    ));
-                                    return;
-                                }
-                            };
-                            let preview =
-                                crate::workspace::acp_workspace::acp_file_write_preview(
-                                    &existing_content,
-                                    &proposed_content,
-                                );
-                            let (choice_tx, choice_rx) = tokio::sync::oneshot::channel();
-                            let safe_arguments = serde_json::json!({
-                                "path": requested_path.display().to_string(),
-                            })
-                            .to_string();
-                            let registered = weak
-                                .update(cx, |workspace, cx| {
-                                    workspace.ai.acp.update(cx, |entity, _cx| {
-                                        entity.register_file_write_preview(
-                                            tool_call_id.clone(),
-                                            preview,
-                                        );
-                                    });
-                                    workspace.apply_ai_tool_status(
-                                        generation,
-                                        &conversation_id,
-                                        &assistant_id,
-                                        &tool_call_id,
-                                        "write_file",
-                                        &safe_arguments,
-                                        "pending_user_approval",
-                                        Some(serde_json::json!({
-                                            "acpFileWriteReview": true,
-                                            "acpPermissionOptions": [
-                                                {
-                                                    "id": "allow_once",
-                                                    "name": workspace.i18n.t("ai.tool_use.approve"),
-                                                    "kind": "allow_once",
-                                                },
-                                                {
-                                                    "id": "reject_once",
-                                                    "name": workspace.i18n.t("ai.tool_use.reject"),
-                                                    "kind": "reject_once",
-                                                }
-                                            ],
-                                        })),
-                                        Some("write".to_string()),
-                                        Some(requested_path.display().to_string()),
-                                        false,
-                                        None,
-                                        None,
-                                        None,
-                                        cx,
-                                    );
-                                    workspace.ai.state.update(cx, |ai, _cx| {
-                                        ai.register_acp_permission_choice(
-                                            generation,
-                                            tool_call_id.clone(),
-                                            choice_tx,
-                                        )
-                                    })
-                                })
-                                .unwrap_or(false);
-                            if !registered {
-                                let _ = response_tx.send(Err(oxideterm_ai::acp_internal_error(
-                                    "ACP file review is no longer active",
-                                )));
-                                return;
-                            }
-                            let approved = choice_rx
-                                .await
-                                .ok()
-                                .flatten()
-                                .as_deref()
-                                .is_some_and(|option| option.starts_with("allow_"));
-                            let response = if approved {
-                                match oxideterm_ai::resolve_acp_write_text_file_target(
-                                    &workspace_root,
-                                    &requested_path,
-                                )
-                                .await
-                                {
-                                    Ok(revalidated_target) => {
-                                        oxideterm_ai::write_acp_validated_text_file(
-                                            &revalidated_target,
-                                            &proposed_content,
-                                        )
-                                        .await
-                                    }
-                                    Err(error) => Err(error),
-                                }
-                            } else {
-                                Err(oxideterm_ai::acp_internal_error(
-                                    "ACP file write was declined by the user",
-                                ))
-                            };
-                            let succeeded = response.is_ok();
-                            let _ = response_tx.send(response);
-                            let _ = weak.update(cx, |workspace, cx| {
-                                workspace.ai.acp.update(cx, |entity, _cx| {
-                                    entity.remove_file_write_preview(&tool_call_id);
-                                });
-                                workspace.apply_ai_tool_status(
-                                    generation,
-                                    &conversation_id,
-                                    &assistant_id,
-                                    &tool_call_id,
-                                    "write_file",
-                                    &safe_arguments,
-                                    if succeeded {
-                                        "completed"
-                                    } else if approved {
-                                        "error"
-                                    } else {
-                                        "rejected"
-                                    },
-                                    Some(serde_json::json!({
-                                        "ok": succeeded,
-                                    })),
-                                    Some("write".to_string()),
-                                    Some(requested_path.display().to_string()),
-                                    false,
-                                    None,
-                                    None,
-                                    None,
-                                    cx,
-                                );
-                            });
-                        })
-                        .detach();
-                    }
-                    oxideterm_ai::AcpClientEvent::CreateTerminal {
-                        request,
-                        response_tx,
-                    } => {
-                        let owner_session_id = request.session_id.to_string();
-                        let Some((workspace_root, policy)) =
-                            self.ai.acp
-                                .read(cx)
-                                .session_context(&agent_id, &owner_session_id)
-                        else {
-                            let _ = response_tx.send(Err(oxideterm_ai::acp_internal_error(
-                                "ACP session context is unavailable",
-                            )));
-                            return;
-                        };
-                        if !policy.terminal {
-                            let _ = response_tx.send(Err(oxideterm_ai::acp_method_not_found(
-                                "terminal/create",
-                            )));
-                            return;
-                        }
-                        let mut terminal_spec =
-                            match oxideterm_ai::acp_terminal_create_spec(&request) {
-                                Ok(spec) => spec,
-                                Err(error) => {
-                                    let _ = response_tx.send(Err(error));
-                                    return;
-                                }
-                            };
-                        let requested_cwd = terminal_spec.cwd.clone();
-                        let window_handle = window.window_handle();
-                        cx.spawn(async move |weak, cx| {
-                            let resolved_cwd =
-                                oxideterm_ai::resolve_acp_terminal_working_directory(
-                                    &workspace_root,
-                                    requested_cwd.as_deref(),
-                                )
-                                .await;
-                            let _ = cx.update_window(window_handle, |_, window, cx| {
-                                weak.update(cx, |workspace, cx| {
-                                    let resolved_cwd = match resolved_cwd {
-                                        Ok(cwd) => cwd,
-                                        Err(error) => {
-                                            let _ = response_tx.send(Err(error));
-                                            return;
-                                        }
-                                    };
-                                    let command = std::mem::take(&mut terminal_spec.command);
-                                    let args = std::mem::take(&mut terminal_spec.args);
-                                    let env = std::mem::take(&mut terminal_spec.env);
-                                    let title = std::path::Path::new(&command)
-                                        .file_name()
-                                        .and_then(|name| name.to_str())
-                                        .filter(|name| !name.is_empty())
-                                        .unwrap_or("ACP")
-                                        .to_string();
-                                    let shell = ShellInfo::new(
-                                        title.clone(),
-                                        title.clone(),
-                                        std::path::PathBuf::from(&command),
-                                    )
-                                    .with_args(args);
-                                    let config = LocalPtyConfig {
-                                        command: None,
-                                        shell: Some(shell),
-                                        cwd: Some(resolved_cwd),
-                                        env,
-                                        remove_env: Vec::new(),
-                                        load_profile: false,
-                                        current_directory_shell_integration: false,
-                                        oh_my_posh_enabled: false,
-                                        oh_my_posh_theme: None,
-                                    };
-                                    let terminal_id = oxideterm_ai::next_acp_terminal_id();
-                                    match workspace
-                                        .create_local_terminal_tab_with_owned_session(
-                                            config,
-                                            title,
-                                            window,
-                                            cx,
-                                        ) {
-                                        Ok((_workspace_session_id, session)) => {
-                                            workspace.ai.acp.update(
-                                                cx,
-                                                |entity, _cx| {
-                                                    entity.register_terminal(
-                                                        terminal_id.clone(),
-                                                        agent_id,
-                                                        owner_session_id,
-                                                        session,
-                                                        terminal_spec.output_byte_limit,
-                                                    );
-                                                },
-                                            );
-                                            let _ = response_tx.send(Ok(
-                                                oxideterm_ai::acp_terminal_created_response(
-                                                    &terminal_id,
-                                                ),
-                                            ));
-                                        }
-                                        Err(_) => {
-                                            let _ = response_tx.send(Err(
-                                                oxideterm_ai::acp_internal_error(
-                                                    "ACP terminal could not be created",
-                                                ),
-                                            ));
-                                        }
-                                    }
-                                })
-                            });
-                        })
-                        .detach();
-                    }
-                    oxideterm_ai::AcpClientEvent::TerminalOutput {
-                        request,
-                        response_tx,
-                    } => {
-                        let owner_session_id = request.session_id.to_string();
-                        let terminal_id =
-                            oxideterm_ai::acp_terminal_output_request_id(&request);
-                        let terminal = self
-                            .ai.acp
-                            .read(cx)
-                            .terminal(&terminal_id, &agent_id, &owner_session_id);
-                        let Some(terminal) = terminal else {
-                            let _ = response_tx
-                                .send(Err(oxideterm_ai::acp_terminal_not_found_error()));
-                            return;
-                        };
-                        let mut session = terminal.session.lock();
-                        session.read_pending();
-                        let output = session.buffer_text();
-                        let exit_code = match session.lifecycle() {
-                            TerminalLifecycle::Running => None,
-                            TerminalLifecycle::Exited(exit_code) => exit_code,
-                            TerminalLifecycle::Closed => None,
-                        };
-                        drop(session);
-                        let _ = response_tx.send(Ok(
-                            oxideterm_ai::acp_terminal_output_response(
-                                output,
-                                terminal.output_byte_limit,
-                                exit_code,
-                            ),
-                        ));
-                    }
-                    oxideterm_ai::AcpClientEvent::ReleaseTerminal {
-                        request,
-                        response_tx,
-                    } => {
-                        let owner_session_id = request.session_id.to_string();
-                        let terminal_id =
-                            oxideterm_ai::acp_release_terminal_request_id(&request);
-                        let terminal = self.ai.acp.update(cx, |entity, _cx| {
-                            entity.release_terminal(
-                                &terminal_id,
-                                &agent_id,
-                                &owner_session_id,
-                            )
-                        });
-                        let Some(terminal) = terminal else {
-                            let _ = response_tx
-                                .send(Err(oxideterm_ai::acp_terminal_not_found_error()));
-                            return;
-                        };
-                        terminal.session.lock().shutdown();
-                        let _ = response_tx
-                            .send(Ok(oxideterm_ai::acp_release_terminal_response()));
-                    }
-                    oxideterm_ai::AcpClientEvent::KillTerminal {
-                        request,
-                        response_tx,
-                    } => {
-                        let owner_session_id = request.session_id.to_string();
-                        let terminal_id =
-                            oxideterm_ai::acp_kill_terminal_request_id(&request);
-                        let terminal = self
-                            .ai.acp
-                            .read(cx)
-                            .terminal(&terminal_id, &agent_id, &owner_session_id);
-                        let Some(terminal) = terminal else {
-                            let _ = response_tx
-                                .send(Err(oxideterm_ai::acp_terminal_not_found_error()));
-                            return;
-                        };
-                        terminal.session.lock().shutdown();
-                        let _ =
-                            response_tx.send(Ok(oxideterm_ai::acp_kill_terminal_response()));
-                    }
-                    oxideterm_ai::AcpClientEvent::WaitForTerminalExit {
-                        request,
-                        response_tx,
-                    } => {
-                        let owner_session_id = request.session_id.to_string();
-                        let terminal_id =
-                            oxideterm_ai::acp_wait_terminal_request_id(&request);
-                        let terminal = self
-                            .ai.acp
-                            .read(cx)
-                            .terminal(&terminal_id, &agent_id, &owner_session_id);
-                        let Some(terminal) = terminal else {
-                            let _ = response_tx
-                                .send(Err(oxideterm_ai::acp_terminal_not_found_error()));
-                            return;
-                        };
-                        // Waiting is owned by the ACP task runtime. It never
-                        // invalidates the root renderer while the process runs.
-                        self.forwarding_runtime.spawn(async move {
-                            loop {
-                                let lifecycle = terminal.session.lock().lifecycle();
-                                match lifecycle {
-                                    TerminalLifecycle::Running => {
-                                        tokio::time::sleep(std::time::Duration::from_millis(
-                                            50,
-                                        ))
-                                        .await;
-                                    }
-                                    TerminalLifecycle::Exited(exit_code) => {
-                                        let _ = response_tx.send(Ok(
-                                            oxideterm_ai::acp_wait_terminal_response(
-                                                exit_code,
-                                            ),
-                                        ));
-                                        break;
-                                    }
-                                    TerminalLifecycle::Closed => {
-                                        let _ = response_tx.send(Ok(
-                                            oxideterm_ai::acp_wait_terminal_response(None),
-                                        ));
-                                        break;
-                                    }
-                                }
-                            }
-                        });
-                    }
-                    oxideterm_ai::AcpClientEvent::SessionUpdate(_)
-                    | oxideterm_ai::AcpClientEvent::CreateElicitation { .. }
-                    | oxideterm_ai::AcpClientEvent::CompleteElicitation(_) => {
-                        unreachable!("chat batch normalizes ACP stream events");
-                    }
-                }
+                self.ai.conversations.handle_acp_terminal_event(
+                    agent_id, event, Self::acp_terminal_bridge(cx), window, cx,
+                );
             }
             AiStreamDeliveryEvent::AcpSessionStarted { .. }
             | AiStreamDeliveryEvent::UserQuestionRequested { .. }

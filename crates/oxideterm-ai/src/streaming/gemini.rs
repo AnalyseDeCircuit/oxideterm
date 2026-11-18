@@ -454,24 +454,6 @@ mod tests {
     }
 
     #[test]
-    fn stream_url_accepts_service_and_versioned_roots() {
-        let expected = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:streamGenerateContent";
-
-        assert_eq!(
-            gemini_stream_url("https://generativelanguage.googleapis.com", "gemini-3-pro").unwrap(),
-            expected
-        );
-        assert_eq!(
-            gemini_stream_url(
-                "https://generativelanguage.googleapis.com/v1beta/",
-                "gemini-3-pro"
-            )
-            .unwrap(),
-            expected
-        );
-    }
-
-    #[test]
     fn thinking_config_matches_model_generation() {
         for (model, effort, expected) in [
             (

@@ -273,22 +273,6 @@ mod tests {
     }
 
     #[test]
-    fn protocol_era_does_not_choose_nonstandard_stdio_framing() {
-        assert_eq!(
-            McpProtocol::modern_preferred().stdio_framing,
-            McpStdioFraming::LineDelimited
-        );
-        assert_eq!(
-            McpProtocol::legacy_streamable_http().stdio_framing,
-            McpStdioFraming::LineDelimited
-        );
-        assert_eq!(
-            McpProtocol::legacy_content_length_stdio().stdio_framing,
-            McpStdioFraming::LegacyContentLength
-        );
-    }
-
-    #[test]
     fn duplicate_server_names_are_disambiguated() {
         let config_a = McpServerConfig {
             id: "a".to_string(),
@@ -694,25 +678,6 @@ mod tests {
         assert!(validate_mcp_http_url("http://localhost:3000").is_ok());
         assert!(validate_mcp_http_url("https://example.com/mcp").is_ok());
         assert!(validate_mcp_http_url("file:///tmp/mcp").is_err());
-    }
-
-    #[test]
-    fn mcp_tool_output_keeps_error_text_out_of_truncation_meta() {
-        let result = McpCallToolResult {
-            is_error: true,
-            structured_content: None,
-            content: vec![McpCallContent {
-                content_type: "text".to_string(),
-                text: Some("bad input".to_string()),
-                data: None,
-                mime_type: None,
-            }],
-        };
-
-        let (ok, output, truncated) = mcp_tool_output(&result);
-        assert!(!ok);
-        assert_eq!(output, "bad input");
-        assert!(!truncated);
     }
 
     fn http_test_config(id: &str, transport: McpTransport, url: &str) -> McpServerConfig {

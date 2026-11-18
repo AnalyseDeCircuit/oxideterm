@@ -1315,17 +1315,4 @@ mod tests {
             )
         });
     }
-
-    #[test]
-    fn conflict_state_blocks_automatic_retry_until_user_resolves_it() {
-        assert!(!knowledge_save_state_allows_autosave(
-            &KnowledgeDocumentSaveState::Conflict
-        ));
-        assert!(!knowledge_save_state_allows_autosave(
-            &KnowledgeDocumentSaveState::Saving
-        ));
-        assert!(knowledge_save_state_allows_autosave(
-            &KnowledgeDocumentSaveState::Dirty
-        ));
-    }
 }

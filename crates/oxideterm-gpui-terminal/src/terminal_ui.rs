@@ -1430,7 +1430,9 @@ fn scaled_cell_width_and_letter_spacing(
     character_spacing: f32,
 ) -> (Pixels, Option<Pixels>) {
     let spacing = sanitize_character_spacing(character_spacing);
-    let cell_width = (base_width * spacing).max(px(1.0));
+    let effective_scale =
+        spacing * (oxideterm_settings::TERMINAL_CHARACTER_SPACING_BASELINE_SCALE as f32);
+    let cell_width = (base_width * effective_scale).max(px(1.0));
     let delta = cell_width - base_width;
     let letter_spacing = (delta.as_f32().abs() > 0.001).then_some(delta);
     (cell_width, letter_spacing)
@@ -1711,25 +1713,29 @@ mod tests {
     #[test]
     fn character_spacing_scales_cell_width_and_derives_matching_letter_spacing() {
         let base_width = px(10.0);
-        assert_eq!(
-            scaled_cell_width_and_letter_spacing(base_width, 1.0),
-            (px(10.0), None)
-        );
-        assert_eq!(
-            scaled_cell_width_and_letter_spacing(base_width, 1.1),
-            (px(11.0), Some(px(1.0)))
-        );
-        assert_eq!(
-            scaled_cell_width_and_letter_spacing(base_width, 0.85),
-            (px(8.5), Some(px(-1.5)))
-        );
-        assert_eq!(
-            scaled_cell_width_and_letter_spacing(base_width, 5.0),
-            (px(20.0), Some(px(10.0)))
-        );
-        assert_eq!(
-            scaled_cell_width_and_letter_spacing(base_width, f32::NAN),
-            (px(10.0), None)
-        );
+        let assert_scaled = |input: f32, expected_cell: f32, expected_letter_spacing: Option<f32>| {
+            let (cell_width, letter_spacing) =
+                scaled_cell_width_and_letter_spacing(base_width, input);
+            assert!(
+                (f32::from(cell_width) - expected_cell).abs() < 1e-4,
+                "input {input}: cell_width={cell_width:?}, expected {expected_cell}"
+            );
+            match (letter_spacing, expected_letter_spacing) {
+                (Some(actual), Some(expected)) => assert!(
+                    (f32::from(actual) - expected).abs() < 1e-4,
+                    "input {input}: letter_spacing={actual:?}, expected {expected}"
+                ),
+                (None, None) => {}
+                (actual, expected) => panic!(
+                    "input {input}: letter_spacing={actual:?}, expected={expected:?}"
+                ),
+            }
+        };
+
+        assert_scaled(1.0, 9.3, Some(-0.7));
+        assert_scaled(1.1, 10.23, Some(0.23));
+        assert_scaled(0.85, 7.905, Some(-2.095));
+        assert_scaled(5.0, 18.6, Some(8.6));
+        assert_scaled(f32::NAN, 9.3, Some(-0.7));
     }
 }

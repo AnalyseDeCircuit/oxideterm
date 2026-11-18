@@ -107,12 +107,7 @@ impl WorkspaceApp {
         self.ai.conversations.cancel_ai_chat_stream_without_notify(cx);
     }
 
-    pub(in crate::workspace) fn retry_ai_chat_initialization(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, cx| {
-            ai.retry_chat_initialization(default_ai_conversations_path(), cx)
-        });
-        cx.notify();
-    }
+
 
     pub(in crate::workspace) fn ai_conversation_turns_label(&self, count: usize) -> String {
         self.i18n
@@ -120,9 +115,7 @@ impl WorkspaceApp {
             .replace("{{count}}", &count.to_string())
     }
 
-    pub(in crate::workspace) fn next_ai_chat_id(&mut self, now_ms: i64, cx: &mut App) -> String {
-        self.ai.state.update(cx, |ai, _cx| ai.next_chat_id(now_ms))
-    }
+
 
     pub(in crate::workspace) fn open_ai_settings(
         &mut self,

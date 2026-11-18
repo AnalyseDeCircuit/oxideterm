@@ -318,36 +318,4 @@ mod sticky_prompt_tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         assert!(cx.debug_bounds("sticky-question").is_none());
     }
-
-    #[gpui::test]
-    #[ignore = "manual chat scroll layout benchmark"]
-    fn sticky_prompt_scroll_benchmark(cx: &mut TestAppContext) {
-        let state = ListState::new(120, ListAlignment::Top, px(500.0));
-        let (view, cx) = cx.add_window_view(|_, _| ChatViewport {
-            state: state.clone(),
-            shown: Default::default(),
-            prompts: test_prompts(),
-            paint_top: None,
-        });
-        cx.simulate_resize(size(px(500.0), px(700.0)));
-        let mut samples = Vec::new();
-        for frame in 0..360 {
-            state.scroll_to(ListOffset {
-                item_ix: (frame / 3) % 116,
-                offset_in_item: px((frame % 3) as f32 * 20.0),
-            });
-            view.update(cx, |_, cx| cx.notify());
-            let started = std::time::Instant::now();
-            cx.update(|window, cx| window.draw(cx).clear(cx));
-            if frame >= 60 {
-                samples.push(started.elapsed().as_nanos());
-            }
-        }
-        samples.sort_unstable();
-        println!(
-            "chat-scroll median_ns={} p95_ns={}",
-            samples[samples.len() / 2],
-            samples[samples.len() * 95 / 100]
-        );
-    }
 }

@@ -1,5 +1,5 @@
 use oxideterm_ai::terminal_observation::{
-    AiTerminalCommandWait, ai_terminal_command_output_ready, ai_terminal_input_payload,
+    ai_terminal_input_payload,
     terminal_delta_output,
 };
 

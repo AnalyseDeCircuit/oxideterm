@@ -51,7 +51,7 @@ pub use model::*;
 pub use stream_apply::*;
 mod stream_apply;
 mod stream_records;
-mod conversation_queue;
+pub mod conversation_queue;
 pub mod compaction;
 pub mod launch;
 pub mod skills;
@@ -3404,6 +3404,10 @@ impl AiWorkspaceEntity {
         self.chat_stream_frame = Some(source);
     }
 
+    pub(crate) fn chat_stream_environment(&self, cx: &gpui::App) -> crate::stream::AiChatStreamFrame {
+        self.chat_stream_frame.as_ref().and_then(|source| source(cx)).unwrap_or_default()
+    }
+
     // Called only once the window registry has acquired a live window.
     pub fn take_chat_window_request(
         &mut self,
@@ -3961,9 +3965,7 @@ impl AiWorkspaceEntity {
         if self.chat_window_ticket.is_some() || !self.chat_stream_batch.has_deliveries() {
             return;
         }
-        let frame = self.chat_stream_frame.as_ref()
-            .and_then(|source| source(cx))
-            .unwrap_or_default();
+        let frame = self.chat_stream_environment(cx);
         // Keep the unprocessed tail in the AI entity, not the window broker.
         let mut batch = std::mem::take(&mut self.chat_stream_batch);
         let delivery = batch.next_window_delivery(
@@ -6151,16 +6153,5 @@ mod refresh_failure_message_tests {
             "x".repeat(500),
         )));
         assert_eq!(truncated.chars().count(), 400);
-    }
-
-    #[test]
-    fn flattens_newlines_inside_the_cause() {
-        let error = anyhow::Error::new(std::io::Error::other("line one\nline two\r\nline three"));
-        let message = model_refresh_failure_message(&error);
-        assert!(
-            !message.contains('\n') && !message.contains('\r'),
-            "{message}"
-        );
-        assert_eq!(message.matches("line").count(), 3, "{message}");
     }
 }

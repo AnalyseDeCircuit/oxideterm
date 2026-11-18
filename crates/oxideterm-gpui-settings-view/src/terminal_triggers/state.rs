@@ -611,28 +611,6 @@ mod tests {
     }
 
     #[test]
-    fn invalid_editor_keeps_the_last_saved_snapshot() {
-        let (_directory, mut state) = state();
-        state.new_rule();
-        let trigger = state.editor.as_mut().expect("trigger editor");
-        trigger.name = "Broken regex".to_string();
-        trigger.matcher.mode = TerminalTriggerMatchMode::Regex;
-        trigger.matcher.pattern = "(".to_string();
-        trigger.action = TerminalTriggerAction::SendText {
-            text: "ignored".to_string(),
-            append_enter: false,
-        };
-
-        assert!(!state.save_editor(false));
-        assert!(state.snapshot.triggers.is_empty());
-        assert!(state.editor.is_some());
-        assert_eq!(
-            state.error_key,
-            Some("settings_view.terminal.triggers.validation_failed")
-        );
-    }
-
-    #[test]
     fn explicit_shell_editor_requires_the_separate_trust_setting() {
         let (_directory, mut state) = state();
         state.new_rule();

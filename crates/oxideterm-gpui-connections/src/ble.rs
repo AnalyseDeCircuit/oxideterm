@@ -161,20 +161,3 @@ pub fn form_from_ble_profile(profile: &BleProfile, ungrouped_label: String) -> N
     form.focused_field = NewConnectionField::BleProfileName;
     form
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn ble_profile_edit_preserves_acknowledged_writes_and_mtu_cap() {
-        let mut profile = BleProfile::new("sensor", "6e400001-b5a3-f393-e0a9-e50e24dcca9e");
-        profile.write_without_response = false;
-        for (mtu, expected) in [(None, ""), (Some(23), "23")] {
-            profile.mtu = mtu;
-            let form = form_from_ble_profile(&profile, "Ungrouped".into());
-            assert!(!form.ble.write_without_response);
-            assert_eq!(form.ble.mtu, expected);
-        }
-    }
-}

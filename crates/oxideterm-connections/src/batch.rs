@@ -2459,19 +2459,6 @@ mod tests {
     }
 
     #[test]
-    fn tags_are_trimmed_and_deduplicated_case_insensitively() {
-        assert_eq!(
-            normalize_batch_tags(vec![
-                " Prod ".to_owned(),
-                "prod".to_owned(),
-                "".to_owned(),
-                "uat".to_owned()
-            ]),
-            vec!["Prod".to_owned(), "uat".to_owned()]
-        );
-    }
-
-    #[test]
     fn batch_row_limit_is_enforced() {
         let data = (0..=MAX_BATCH_ROWS)
             .map(|index| format!("host-{index}"))

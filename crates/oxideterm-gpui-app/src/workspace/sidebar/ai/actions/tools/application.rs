@@ -1,6 +1,7 @@
 use oxideterm_ai::tool_resources::{
     AiForwardOperation, AiPluginAction, AiTransportLifecycle, AiSerialSessionCapture, ai_action_accepted, ai_forwarding_operation, ai_credential_scopes, ai_list_credential_metadata, ai_list_transport_profiles,
-    ai_plugin_action, ai_plugin_action_accepted,
+    ai_plugin_action, ai_plugin_action_accepted, AiCredentialAction, AiCredentialKind, AiSerialControl,
+    ai_credential_action, ai_serial_control, ai_transport_session_action_accepted,
 };
 
 // Copyright (C) 2026 AnalyseDeCircuit
@@ -455,77 +456,25 @@ impl WorkspaceApp {
         let pane = self
             .ai_terminal_pane_for_session(session_id, cx)
             .ok_or_else(|| "The serial terminal owner is no longer available.".to_string())?;
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A serial action is required.".to_string())?;
-        let enabled = arguments
-            .get("enabled")
-            .and_then(serde_json::Value::as_bool);
-        let value = arguments.get("value").and_then(serde_json::Value::as_str);
-        let serial_action = match action {
-            "refresh_port" => oxideterm_gpui_terminal::TerminalSerialAction::RefreshPortPresence,
-            "reconnect" => {
-                return Err(
-                    "Serial reconnect must create a new terminal tab from Active Sessions."
-                        .to_string(),
-                );
-            }
-            "send_break" => oxideterm_gpui_terminal::TerminalSerialAction::SendBreak,
-            "set_dtr" => oxideterm_gpui_terminal::TerminalSerialAction::SetDataTerminalReady(
-                enabled.ok_or_else(|| "The DTR state is required.".to_string())?,
-            ),
-            "set_rts" => oxideterm_gpui_terminal::TerminalSerialAction::SetRequestToSend(
-                enabled.ok_or_else(|| "The RTS state is required.".to_string())?,
-            ),
-            "set_local_echo" => oxideterm_gpui_terminal::TerminalSerialAction::SetLocalEcho(
-                enabled.ok_or_else(|| "The local echo state is required.".to_string())?,
-            ),
-            "set_line_ending" => {
-                let line_ending = match value {
-                    Some("none") => oxideterm_terminal::SerialLineEnding::None,
-                    Some("lf") => oxideterm_terminal::SerialLineEnding::Lf,
-                    Some("crlf") => oxideterm_terminal::SerialLineEnding::CrLf,
-                    Some("cr") => oxideterm_terminal::SerialLineEnding::Cr,
-                    _ => return Err("A valid serial line ending is required.".to_string()),
-                };
-                oxideterm_gpui_terminal::TerminalSerialAction::SetLineEnding(line_ending)
-            }
-            "set_output_line_ending" => {
-                let line_ending = match value {
-                    Some("none") => oxideterm_terminal::SerialLineEnding::None,
-                    Some("lf") => oxideterm_terminal::SerialLineEnding::Lf,
-                    Some("crlf") => oxideterm_terminal::SerialLineEnding::CrLf,
-                    Some("cr") => oxideterm_terminal::SerialLineEnding::Cr,
-                    _ => return Err("A valid serial output line ending is required.".to_string()),
-                };
-                oxideterm_gpui_terminal::TerminalSerialAction::SetOutputLineEnding(line_ending)
-            }
-            "set_display_mode" => {
-                let display_mode = match value {
-                    Some("text") => oxideterm_terminal::SerialDisplayMode::Text,
-                    Some("hex") => oxideterm_terminal::SerialDisplayMode::Hex,
-                    Some("mixed") => oxideterm_terminal::SerialDisplayMode::Mixed,
-                    _ => return Err("A valid serial display mode is required.".to_string()),
-                };
-                oxideterm_gpui_terminal::TerminalSerialAction::SetDisplayMode(display_mode)
-            }
-            "set_send_mode" => {
-                let send_mode = match value {
-                    Some("text") => oxideterm_terminal::SerialSendMode::Text,
-                    Some("hex") => oxideterm_terminal::SerialSendMode::Hex,
-                    _ => return Err("A valid serial send mode is required.".to_string()),
-                };
-                oxideterm_gpui_terminal::TerminalSerialAction::SetSendMode(send_mode)
-            }
-            _ => return Err("Unsupported serial action.".to_string()),
+        use oxideterm_gpui_connections::form_state::{
+            terminal_serial_display_mode_from_profile, terminal_serial_line_ending_from_profile,
+            terminal_serial_send_mode_from_profile,
+        };
+        use oxideterm_gpui_terminal::TerminalSerialAction as Serial;
+        let (action, operation) = ai_serial_control(arguments)?;
+        let serial_action = match operation {
+            AiSerialControl::RefreshPort => Serial::RefreshPortPresence,
+            AiSerialControl::SendBreak => Serial::SendBreak,
+            AiSerialControl::SetDtr(value) => Serial::SetDataTerminalReady(value),
+            AiSerialControl::SetRts(value) => Serial::SetRequestToSend(value),
+            AiSerialControl::SetLocalEcho(value) => Serial::SetLocalEcho(value),
+            AiSerialControl::SetLineEnding(value) => Serial::SetLineEnding(terminal_serial_line_ending_from_profile(value)),
+            AiSerialControl::SetOutputLineEnding(value) => Serial::SetOutputLineEnding(terminal_serial_line_ending_from_profile(value)),
+            AiSerialControl::SetDisplayMode(value) => Serial::SetDisplayMode(terminal_serial_display_mode_from_profile(value)),
+            AiSerialControl::SetSendMode(value) => Serial::SetSendMode(terminal_serial_send_mode_from_profile(value)),
         };
         pane.update(cx, |pane, cx| pane.apply_serial_action(serial_action, cx))?;
-        Ok(serde_json::json!({
-            "accepted": true,
-            "action": action,
-            "sessionId": session_id.0.to_string(),
-        }))
+        Ok(ai_transport_session_action_accepted(action, session_id))
     }
 
     pub(in crate::workspace) fn execute_ai_manage_telnet_session(
@@ -587,11 +536,7 @@ impl WorkspaceApp {
             _ => return Err("The requested Telnet action is unsupported.".to_string()),
         };
         pane.update(cx, |pane, cx| pane.apply_telnet_action(telnet_action, cx))?;
-        Ok(serde_json::json!({
-            "accepted": true,
-            "action": action,
-            "sessionId": session_id.0.to_string(),
-        }))
+        Ok(ai_transport_session_action_accepted(action, session_id))
     }
 
     pub(in crate::workspace) fn execute_ai_list_remote_desktop_sessions(
@@ -746,62 +691,25 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A credential action is required.".to_string())?;
-        if action == "open_manager" {
-            let scope_id = arguments
-                .get("connection_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            self.open_privilege_credentials_settings(scope_id, window, cx);
-            return Ok(ai_action_accepted(action));
-        }
-        let kind = arguments
-            .get("kind")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A credential kind is required.".to_string())?;
-        let id = arguments
-            .get("id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A credential identifier is required.".to_string())?;
-        let deleted = match kind {
-            "managed_ssh_key" => {
-                let force = arguments
-                    .get("force")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
-                self.connection_store
-                    .delete_managed_ssh_key(id, force)
-                    .map(|result| result.deleted)
-                    .map_err(|error| error.to_string())?
+        let (action, id, credential) = match ai_credential_action(arguments)? {
+            AiCredentialAction::Open(connection_id) => {
+                self.open_privilege_credentials_settings(connection_id.map(str::to_owned), window, cx);
+                return Ok(ai_action_accepted("open_manager"));
             }
-            "privilege" => {
-                let connection_id = arguments
-                    .get("connection_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| "A privilege credential scope is required.".to_string())?;
-                self.connection_store
-                    .delete_privilege_credential(connection_id, id)
-                    .map_err(|error| error.to_string())?
-            }
-            "remote_desktop" => self
-                .connection_store
-                .delete_remote_desktop_credential(id)
-                .map_err(|error| error.to_string())?,
-            _ => return Err("Unsupported credential kind.".to_string()),
+            AiCredentialAction::Delete { action, id, credential } => (action, id, credential),
         };
+        let deleted = match credential {
+            AiCredentialKind::ManagedSshKey { force } => self.connection_store
+                .delete_managed_ssh_key(id, force).map(|result| result.deleted),
+            AiCredentialKind::Privilege { connection_id } => self.connection_store
+                .delete_privilege_credential(connection_id, id),
+            AiCredentialKind::RemoteDesktop => self.connection_store.delete_remote_desktop_credential(id),
+        }.map_err(|error| error.to_string())?;
         if deleted {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
         cx.notify();
-        Ok(serde_json::json!({
-            "accepted": deleted,
-            "action": action,
-            "kind": kind,
-            "id": id,
-        }))
+        Ok(credential.result(action, id, deleted))
     }
 
     pub(in crate::workspace) fn execute_ai_list_memory_entries(&self, arguments: &serde_json::Value) -> serde_json::Value {

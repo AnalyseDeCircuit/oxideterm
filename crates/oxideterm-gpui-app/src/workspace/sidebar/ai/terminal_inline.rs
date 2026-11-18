@@ -1,4 +1,4 @@
-use oxideterm_gpui_ai::inline::{extract_terminal_ai_inline_command, truncate_ai_inline_context};
+use oxideterm_gpui_ai::inline::AiInlineKey;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn terminal_ai_inline_target_pane(
@@ -72,14 +72,9 @@ impl WorkspaceApp {
             .get(&pane_id)
             .and_then(|pane| pane.read(cx).selected_text_snapshot())
             .unwrap_or_default();
-        let sanitized_selection = truncate_ai_inline_context(
-            oxideterm_ai::sanitize_for_ai(&selection),
-            self.ai_ambient_context_budget() as i64,
-        );
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.open_terminal_inline_panel(sanitized_selection);
-            ai.terminal_inline_panel_mut().target = Some((pane_id, session_id));
-        });
+        let budget = self.ai_ambient_context_budget();
+        let selection = zeroize::Zeroizing::new(selection);
+        self.ai.state.update(cx, |ai, _| ai.start_inline_panel((pane_id, session_id), &selection, budget));
 
         window.focus(&self.focus_handle, cx);
         self.refresh_terminal_ai_inline_key_status(cx);
@@ -113,14 +108,6 @@ impl WorkspaceApp {
         if self.terminal_ai_inline_window(cx) != Some(window.window_handle().window_id()) {
             return false;
         }
-        let (panel_open, panel_loading, response_is_empty) = {
-            let panel = self.ai.state.read(cx).terminal_inline_panel();
-            (
-                panel.open && panel.prompt_focused,
-                panel.loading,
-                panel.response.trim().is_empty(),
-            )
-        };
         let submit = crate::keybindings::keystroke_matches_action(
             &event.keystroke,
             "terminal.aiSubmit",
@@ -131,47 +118,17 @@ impl WorkspaceApp {
             "terminal.aiInsert",
             &self.settings_store.settings().keybindings.overrides,
         );
-        if !panel_open || (event.keystroke.modifiers.platform && !submit && !insert) {
-            return false;
+        let composing = self.marked_text_for_target(WorkspaceImeTarget::AiInlinePrompt, cx).is_some();
+        match self.ai.state.read(cx).inline_panel_key(&event.keystroke, submit, insert, composing) {
+            AiInlineKey::Pass => return false,
+            AiInlineKey::ModelSearch => return self.handle_ai_sidebar_key(event, cx),
+            AiInlineKey::Close => self.close_terminal_ai_inline_panel(window, cx),
+            AiInlineKey::Submit => self.send_terminal_ai_inline_prompt(cx),
+            AiInlineKey::Execute => self.execute_terminal_ai_inline_response(window, cx),
+            AiInlineKey::Insert => self.insert_terminal_ai_inline_response(window, cx),
+            AiInlineKey::Handled => {}
         }
-        if self
-            .ai.state
-            .read(cx)
-            .model_selector_is_open(AiModelSelectorScope::TerminalInline)
-            && self.ai.state.read(cx).model_selector_search_focused()
-        {
-            return self.handle_ai_sidebar_key(event, cx);
-        }
-
-        match event.keystroke.key.as_str() {
-            "escape" => {
-                self.close_terminal_ai_inline_panel(window, cx);
-                true
-            }
-            "enter"
-                if self
-                    .marked_text_for_target(WorkspaceImeTarget::AiInlinePrompt, cx)
-                    .is_some() =>
-            {
-                true
-            }
-            _ if submit => {
-                if panel_loading {
-                    return true;
-                }
-                if response_is_empty {
-                    self.send_terminal_ai_inline_prompt(cx);
-                } else {
-                    self.execute_terminal_ai_inline_response(window, cx);
-                }
-                true
-            }
-            _ if insert && !response_is_empty && !panel_loading => {
-                self.insert_terminal_ai_inline_response(window, cx);
-                true
-            }
-            _ => true,
-        }
+        true
     }
 
     pub(in crate::workspace) fn send_terminal_ai_inline_prompt(&mut self, cx: &mut Context<Self>) {
@@ -195,12 +152,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let command = extract_terminal_ai_inline_command(
-            &self.ai.state.read(cx).terminal_inline_panel().response,
-        );
-        if command.trim().is_empty() {
+        let Some(command) = self.ai.state.read(cx).inline_response_command() else {
             return;
-        }
+        };
         if let Some(pane) = self.terminal_ai_inline_target_pane(cx) {
             let _ = pane.update(cx, |pane, cx| {
                 pane.send_ai_input_bytes(command.as_bytes(), cx);
@@ -214,12 +168,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let command = extract_terminal_ai_inline_command(
-            &self.ai.state.read(cx).terminal_inline_panel().response,
-        );
-        if command.trim().is_empty() {
+        let Some(command) = self.ai.state.read(cx).inline_response_command() else {
             return;
-        }
+        };
         if let Some(pane) = self.terminal_ai_inline_target_pane(cx) {
             let _ = pane.update(cx, |pane, cx| {
                 pane.begin_command_mark(

@@ -1,9 +1,276 @@
 use gpui::{Context, FollowMode};
-use oxideterm_ai::{AiChatRole, tool_loop::agent_chat_message};
+use oxideterm_ai::{
+    AI_IMAGE_REQUEST_BYTES, AiChatRole, AiChatStreamConfig, AiExecutionBackend, AiImageAttachment,
+    AiParsedInput, AiSlashCommand, ai_detected_intent_system_prompt, ai_input_system_prompt,
+    detect_ai_intent, generate_chat_title, parse_ai_user_input, resolve_ai_slash_command,
+    tool_loop::agent_chat_message,
+};
+use oxideterm_i18n::I18n;
+use zeroize::Zeroizing;
 
-use super::{AiPendingChatStream, AiWorkspaceEntity};
+use super::{
+    AiPendingChatStream, AiQueuedChatTurn, AiWorkspaceEntity, ai_now_ms, skills::AiSkillCatalog,
+};
+
+pub enum AiDraftSubmission {
+    Ignore,
+    Warning(&'static str),
+    Answered,
+    Prepare(AiSubmittedDraft),
+}
+
+pub enum AiLocalChatCommand {
+    Clear,
+    Help,
+    Compact,
+    Ignore,
+}
+
+pub struct AiSubmittedDraft {
+    content: Zeroizing<String>,
+    images: Vec<AiImageAttachment>,
+    pub input: AiParsedInput,
+    slash: Option<&'static AiSlashCommand>,
+}
+
+/// Text already sampled by the window owner. Context formatting remains part
+/// of the conversation request, not the terminal or IDE bridge.
+pub struct AiDraftContext {
+    pub terminal: Option<String>,
+    pub sidebar: Option<String>,
+    pub references: Option<String>,
+}
+
+impl AiSubmittedDraft {
+    pub fn local_command(&self, busy: bool) -> Result<Option<AiLocalChatCommand>, &'static str> {
+        let Some(command) = self.slash.filter(|command| command.client_only) else {
+            return Ok(None);
+        };
+        if !self.images.is_empty() {
+            return Err("ai.images.queue_only");
+        }
+        if busy {
+            return Err("ai.queue.client_command_busy");
+        }
+        Ok(Some(match command.name {
+            "clear" => AiLocalChatCommand::Clear,
+            "help" => AiLocalChatCommand::Help,
+            "compact" => AiLocalChatCommand::Compact,
+            _ => AiLocalChatCommand::Ignore,
+        }))
+    }
+
+    pub fn check_image_support(&self, config: &AiChatStreamConfig) -> Result<(), &'static str> {
+        if !self.images.is_empty()
+            && config.execution_backend != AiExecutionBackend::Acp
+            && oxideterm_ai::model_image_input(
+                &config.provider_type,
+                &config.model,
+                config.image_input,
+            ) == Some(false)
+        {
+            return Err("ai.images.model_unavailable");
+        }
+        Ok(())
+    }
+}
+
+fn chat_context(blocks: impl IntoIterator<Item = Option<String>>) -> Option<String> {
+    let blocks = blocks
+        .into_iter()
+        .flatten()
+        .map(|block| block.trim().to_owned())
+        .filter(|block| !block.is_empty())
+        .collect::<Vec<_>>();
+    (!blocks.is_empty()).then(|| blocks.join("\n\n"))
+}
 
 impl AiWorkspaceEntity {
+    pub fn prepare_draft_submission(
+        &mut self,
+        enabled: bool,
+        cx: &mut Context<Self>,
+    ) -> AiDraftSubmission {
+        use AiDraftSubmission::*;
+        if !self.history_ready() {
+            return Ignore;
+        }
+        let ui = self.chat_ui();
+        if ui.images.iter().map(|image| image.bytes).sum::<usize>() > AI_IMAGE_REQUEST_BYTES {
+            return Warning("ai.images.request_limit");
+        }
+        let content = ui.draft.trim();
+        if ui.image_import.is_some() || (content.is_empty() && ui.images.is_empty()) {
+            return Ignore;
+        }
+        if !enabled {
+            return Warning("ai.chat.disabled_message");
+        }
+        let content = Zeroizing::new(content.to_owned());
+        if let Some((generation, id)) = self.active_user_question() {
+            if !self.chat_ui().images.is_empty() {
+                return Warning("ai.images.queue_only");
+            }
+            return if self.resolve_user_question(generation, &id, content) {
+                self.clear_chat_input_after_submit();
+                cx.notify();
+                Answered
+            } else {
+                Ignore
+            };
+        }
+        let input = parse_ai_user_input(&content);
+        let slash = input
+            .slash_command
+            .as_deref()
+            .and_then(resolve_ai_slash_command);
+        Prepare(AiSubmittedDraft {
+            content,
+            images: self.chat_ui().images.clone(),
+            input,
+            slash,
+        })
+    }
+
+    pub fn add_draft_help(&mut self, draft: AiSubmittedDraft, i18n: &I18n, cx: &mut Context<Self>) {
+        let now = ai_now_ms();
+        let title = generate_chat_title(&draft.content);
+        let id = self.next_chat_id(now);
+        let user = agent_chat_message(AiChatRole::User, draft.content.to_string());
+        let assistant = agent_chat_message(
+            AiChatRole::Assistant,
+            oxideterm_ai::ai_help_markdown(|key| i18n.t(key)),
+        );
+        let user = oxideterm_ai::AiChatMessage {
+            id: self.next_chat_id(now),
+            timestamp_ms: now,
+            ..user
+        };
+        let assistant = oxideterm_ai::AiChatMessage {
+            id: self.next_chat_id(now),
+            timestamp_ms: now,
+            ..assistant
+        };
+        self.add_help_exchange(id, title, now, user, assistant);
+        self.clear_chat_input_after_submit();
+        cx.notify();
+    }
+
+    pub fn enqueue_submitted_draft(
+        &mut self,
+        draft: AiSubmittedDraft,
+        context: AiDraftContext,
+        runtime_prompt: Option<String>,
+        config: AiChatStreamConfig,
+        skills: Option<&AiSkillCatalog>,
+        cx: &mut Context<Self>,
+    ) -> Option<AiPendingChatStream> {
+        let AiSubmittedDraft {
+            content,
+            images,
+            input,
+            slash,
+        } = draft;
+        let sources = [
+            context.terminal.as_ref().map(|_| "terminal"),
+            context.sidebar.as_ref().map(|_| "sidebar"),
+            context.references.as_ref().map(|_| "reference"),
+        ];
+        let context = chat_context([context.terminal, context.sidebar, context.references]);
+        if let Some(context) = &context
+            && let Some(mut audit) = oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current)
+        {
+            if audit.source == oxideterm_audit::AuditSource::Application {
+                audit.source = oxideterm_audit::AuditSource::User;
+            }
+            audit.observe(
+                oxideterm_audit::AuditCategory::Automation,
+                "ai_context_provided",
+                Some(&format!(
+                    "provider={} model={} sources={} bytes={}",
+                    config.provider_id.as_deref().unwrap_or("unknown"),
+                    config.model,
+                    sources.into_iter().flatten().collect::<Vec<_>>().join(","),
+                    context.len()
+                )),
+                oxideterm_audit::AuditOutcome::Sent,
+                oxideterm_audit::AuditEvidence::Dispatch,
+                oxideterm_audit::AuditAuthorization::NotRequired,
+            );
+        }
+
+        let mut skill = None;
+        let mut skill_prompt = None;
+        if slash.is_none()
+            && let Some((catalog, id)) = skills.zip(input.slash_command.as_deref())
+        {
+            let registry = catalog.read();
+            if let Some(record) = registry.enabled_record(id)
+                && let Ok(instructions) = registry.load(id)
+            {
+                skill = Some((id.to_owned(), record.content_hash.clone()));
+                skill_prompt = Some(format!(
+                    "## Explicit Agent Skill\nThe user explicitly selected `{id}`. Follow these instructions for this request, subject to the current tool permissions and safety mode.\n\n<skill_instructions id=\"{id}\">\n{}\n</skill_instructions>",
+                    oxideterm_ai::sanitize_for_ai(&instructions)
+                ));
+            }
+        }
+        let intent = detect_ai_intent(&input);
+        let task_system_prompt = chat_context([
+            ai_input_system_prompt(slash, &input.participants),
+            skill_prompt,
+            runtime_prompt,
+            ai_detected_intent_system_prompt(&intent),
+        ]);
+        let participant = input.participants.first().map(|entry| entry.name.clone());
+        let now = ai_now_ms();
+        let title = generate_chat_title(&content);
+        let conversation_key = self.next_chat_id(now);
+        let id = self.next_chat_id(now);
+        let request = if config.execution_backend == AiExecutionBackend::Acp
+            && input.slash_command.is_some()
+            && slash.is_none()
+            && skill.is_none()
+        {
+            // ACP-advertised commands must keep the slash prefix on the wire.
+            Zeroizing::new(content.to_string())
+        } else {
+            Zeroizing::new(input.clean_text)
+        };
+        let request_content = if request.is_empty() && skill.is_some() {
+            Some(Zeroizing::new(
+                "Apply the explicitly selected Agent Skill to the current task.".to_owned(),
+            ))
+        } else {
+            (!request.is_empty()).then_some(request)
+        };
+        let conversation = self.ensure_conversation(conversation_key, Some(title), now, None);
+        let busy = self.chat_is_loading();
+        self.queued_chat_turns
+            .entry(conversation.clone())
+            .or_default()
+            .push_back(AiQueuedChatTurn {
+                images,
+                id,
+                content,
+                context: context.map(Zeroizing::new),
+                config,
+                request_content,
+                task_system_prompt: task_system_prompt.map(Zeroizing::new),
+                participant,
+                skill,
+            });
+        self.clear_chat_input_after_submit();
+        let pending = if busy {
+            None
+        } else {
+            self.prepare_next_queued_turn(&conversation, true)
+        };
+        cx.notify();
+        pending
+    }
+
     pub fn steer_chat_draft(&mut self, cx: &mut Context<Self>) -> Result<(), &'static str> {
         if !self.chat_ui().images.is_empty() {
             return Err("ai.images.queue_only");

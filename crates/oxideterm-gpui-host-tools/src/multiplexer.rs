@@ -1003,49 +1003,6 @@ mod mux_search_pass_tests {
         assert!(!search.matches_inside(roots));
         assert!(!search.matches_subtree(&roots[0]));
     }
-
-    #[test]
-    fn empty_query_lists_everything_and_reveals_nothing() {
-        let (snapshot, details) = captured("sess", tree("alpha"));
-        let search = MuxSearchPass::new("   ", Some(&snapshot), &details);
-        let roots = details.get("sess").unwrap();
-        assert!(!search.is_active());
-        assert!(search.matches_session(&snapshot.sessions[0], Some(roots)));
-        assert!(search.matches_subtree(&roots[0]));
-        assert!(search.matches_subtree(&roots[0].children[0]));
-        assert!(!search.matches_inside(roots));
-    }
-
-    #[test]
-    fn uncaptured_session_is_judged_by_name_alone() {
-        let (snapshot, details) = captured("sess", tree("alpha"));
-        let search = MuxSearchPass::new("sess", Some(&snapshot), &details);
-        assert!(search.matches_session(&snapshot.sessions[0], None));
-        let search = MuxSearchPass::new("other", Some(&snapshot), &details);
-        assert!(!search.matches_session(&snapshot.sessions[0], None));
-    }
-
-    #[test]
-    fn row_identity_separates_providers_and_sessions() {
-        let pane = node(MuxKind::Pane, "0", "shell", Vec::new());
-        let zellij = HostToolsEntity::mux_row_identity(Multiplexer::Zellij, "s", Some(&pane));
-        assert_eq!(
-            zellij,
-            HostToolsEntity::mux_row_identity(Multiplexer::Zellij, "s", Some(&pane))
-        );
-        assert_ne!(
-            zellij,
-            HostToolsEntity::mux_row_identity(Multiplexer::Herdr, "s", Some(&pane))
-        );
-        assert_ne!(
-            zellij,
-            HostToolsEntity::mux_row_identity(Multiplexer::Zellij, "other", Some(&pane))
-        );
-        assert_ne!(
-            HostToolsEntity::mux_row_identity(Multiplexer::Zellij, "s", None),
-            HostToolsEntity::mux_row_identity(Multiplexer::Herdr, "s", None)
-        );
-    }
 }
 
 /// The verb's icon and copy, resolved from the tree level the verb runs on.

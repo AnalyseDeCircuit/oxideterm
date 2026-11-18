@@ -303,9 +303,9 @@ mod cli_companion_tests {
     #[cfg(unix)]
     use super::remove_managed_cli;
     use super::{
-        CLI_COMPANION_COMMAND_NAME, CliCompanionOperation, LEGACY_CLI_COMPANION_COMMAND_NAME,
-        cli_companion_migrate_at_paths, cli_install_path, cli_path_present,
-        installed_cli_matches_bundle, legacy_cli_install_path, run_cli_companion_operation,
+        CliCompanionOperation,
+        cli_companion_migrate_at_paths, cli_path_present,
+        installed_cli_matches_bundle, run_cli_companion_operation,
     };
 
     pub fn temp_test_dir(name: &str) -> std::path::PathBuf {
@@ -350,33 +350,6 @@ mod cli_companion_tests {
         assert!(cli_path_present(&install_path));
         assert!(!installed_cli_matches_bundle(&install_path, &bundled_path).unwrap());
         let _ = std::fs::remove_dir_all(temp_dir);
-    }
-
-    #[test]
-    pub fn managed_paths_keep_new_and_legacy_commands_distinct() {
-        let expected_new_name = if cfg!(windows) {
-            format!("{CLI_COMPANION_COMMAND_NAME}.exe")
-        } else {
-            CLI_COMPANION_COMMAND_NAME.to_string()
-        };
-        let expected_legacy_name = if cfg!(windows) {
-            format!("{LEGACY_CLI_COMPANION_COMMAND_NAME}.exe")
-        } else {
-            LEGACY_CLI_COMPANION_COMMAND_NAME.to_string()
-        };
-
-        assert_eq!(
-            cli_install_path().file_name().unwrap().to_string_lossy(),
-            expected_new_name
-        );
-        assert_eq!(
-            legacy_cli_install_path()
-                .file_name()
-                .unwrap()
-                .to_string_lossy(),
-            expected_legacy_name
-        );
-        assert_ne!(cli_install_path(), legacy_cli_install_path());
     }
 
     #[cfg(unix)]

@@ -23,7 +23,97 @@ pub fn active_model_picker_provider(settings: &AiSettings) -> Option<String> {
     settings.active_provider_id.clone()
 }
 
+pub enum AiPickerSelection {
+    AcpSession { agent_id: String, config_id: String, value_id: String },
+    AcpAgent(String),
+    Provider,
+}
+
 impl AiWorkspaceEntity {
+    pub fn plan_picker_selection(&self, provider: &str, model: &str) -> AiPickerSelection {
+        let Some(agent_id) = ai_acp_agent_id_from_provider_id(provider) else {
+            return AiPickerSelection::Provider;
+        };
+        if let Some(options) = self.picker_acp_options(agent_id)
+            && let Some(option) = oxideterm_ai::acp_model_config_option(&options)
+            && let Some(choice) = option.choices.iter().find(|choice| choice.label == model)
+        {
+            return AiPickerSelection::AcpSession {
+                agent_id: agent_id.to_owned(),
+                config_id: option.config_id.clone(),
+                value_id: choice.value_id.clone(),
+            };
+        }
+        AiPickerSelection::AcpAgent(agent_id.to_owned())
+    }
+
+    pub fn toggle_picker(
+        &mut self,
+        scope: AiModelSelectorScope,
+        settings: &AiSettings,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> Option<Option<String>> {
+        let next_open = !self.model_selector_is_open(scope);
+        self.close_chat_popovers();
+        self.dismiss_model_selector();
+        self.set_model_selector_open(scope, next_open);
+        cx.notify();
+        if !next_open {
+            self.dismiss_model_selector();
+            return None;
+        }
+        let providers = self.picker_providers(settings, i18n);
+        let active = active_provider_view(
+            &providers,
+            active_model_picker_provider(settings).as_deref(),
+        );
+        let agent = active.and_then(|provider| {
+            self.expand_model_selector_provider(provider.id.clone());
+            ai_acp_agent_id_from_provider_id(&provider.id).map(str::to_owned)
+        });
+        self.blur_chat_input(false);
+        self.terminal_inline_panel_mut().prompt_focused = false;
+        Some(agent)
+    }
+
+    pub fn prepare_picker_acp_discovery(
+        &self,
+        agent_id: &str,
+        settings: &AiSettings,
+    ) -> Option<(String, AcpAgentConfig)> {
+        if self.picker_acp_options(agent_id).is_some() {
+            return None;
+        }
+        let conversation = &self.conversation_state().active_conversation()?.id;
+        if self.acp_model_discovery_is_pending(conversation, agent_id) {
+            return None;
+        }
+        let agent = settings.acp_agents.iter().find(|agent| agent.id == agent_id && agent.enabled)?;
+        // Other ACP agents discover models after the first prompt or use an explicit model.
+        (agent.plugin_id.as_deref() == Some("com.oxideterm.acp.codex")
+            || oxideterm_ai::acp_model_report_is_available_during_session_start(&agent.args))
+            .then(|| (conversation.clone(), agent.clone()))
+    }
+
+    pub fn picker_refresh_index(
+        &self,
+        provider: &AiProviderView,
+        settings: &AiSettings,
+        plugin_available: impl Fn(&str) -> bool,
+    ) -> Result<Option<usize>, &'static str> {
+        if !self.picker_has_key(provider) {
+            return Err("ai.model_selector.no_key_warning");
+        }
+        if !self.picker_online(provider, settings, plugin_available) {
+            return Err("ai.model_selector.offline");
+        }
+        if ai_acp_agent_id_from_provider_id(&provider.id).is_some() {
+            return Ok(None);
+        }
+        Ok(ai_provider_views(&settings.providers).iter().position(|candidate| candidate.id == provider.id))
+    }
+
     pub fn active_ai_acp_session_state(&self, agent_id: &str) -> Option<AiAcpSessionState> {
         self.conversation_state()
             .active_conversation()

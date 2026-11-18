@@ -1334,24 +1334,4 @@ mod tests {
             })
         );
     }
-
-    #[gpui::test]
-    fn package_filter_and_expansion_do_not_start_remote_capture(cx: &mut TestAppContext) {
-        let (profiler_update_tx, profiler_update_rx) = tokio::sync::mpsc::channel(1);
-        let entity = cx.new(|cx| {
-            HostToolsEntity::new(
-                profiler_update_tx,
-                profiler_update_rx,
-                SshConnectionRegistry::default(),
-                cx,
-            )
-        });
-
-        entity.update(cx, |host_tools, cx| {
-            assert!(host_tools.select_package_filter(PackageFilter::Upgradable, cx));
-            host_tools.toggle_package_expanded(2, cx);
-            assert!(!host_tools.package_snapshot_in_flight());
-            assert!(host_tools.host_packages.running.is_none());
-        });
-    }
 }

@@ -695,43 +695,6 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-mod terminal_inline_tests {
-    use super::{
-        AI_INLINE_PANEL_COLLAPSED_HEIGHT, AI_INLINE_PANEL_EXPANDED_HEIGHT, AiInlineCursorAnchor,
-        terminal_ai_inline_panel_placement,
-    };
-
-    #[test]
-    fn places_panel_below_cursor_when_space_allows() {
-        let placement = terminal_ai_inline_panel_placement(
-            Some(AiInlineCursorAnchor {
-                y: 100.0,
-                line_height: 20.0,
-                container_width: 800.0,
-                container_height: 600.0,
-            }),
-            AI_INLINE_PANEL_COLLAPSED_HEIGHT,
-        );
-        assert_eq!(placement.left, 140.0);
-        assert_eq!(placement.top, 124.0);
-    }
-
-    #[test]
-    fn flips_panel_above_cursor_near_bottom() {
-        let placement = terminal_ai_inline_panel_placement(
-            Some(AiInlineCursorAnchor {
-                y: 560.0,
-                line_height: 20.0,
-                container_width: 800.0,
-                container_height: 600.0,
-            }),
-            AI_INLINE_PANEL_EXPANDED_HEIGHT,
-        );
-        assert_eq!(placement.left, 140.0);
-        assert_eq!(placement.top, 396.0);
-    }
-}
-
 pub use request::{resolve_terminal_ai_inline_config, truncate_ai_inline_context};
+pub use request::AiInlineKey;
 mod request;

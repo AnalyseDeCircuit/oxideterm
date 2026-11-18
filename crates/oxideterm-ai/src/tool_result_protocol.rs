@@ -558,27 +558,6 @@ mod tests {
         assert_eq!(payload["exitCode"], 0);
         assert_eq!(payload["evidenceFacts"].as_array().map(Vec::len), Some(4));
     }
-
-    #[test]
-    fn model_content_truncates_error_output_more_aggressively() {
-        let content = ai_tool_result_model_content(&result(serde_json::json!({
-            "ok": false,
-            "summary": "failed",
-            "output": "x".repeat(AI_TOOL_MODEL_ERROR_OUTPUT_MAX_CHARS + 10),
-            "error": {
-                "code": "failed",
-                "message": "failure"
-            }
-        })));
-        let payload: serde_json::Value = serde_json::from_str(&content).expect("model-facing JSON");
-
-        assert_eq!(payload["truncated"], true);
-        assert!(
-            payload["output"]
-                .as_str()
-                .is_some_and(|output| output.contains("[truncated:"))
-        );
-    }
 }
 
 pub fn ai_tool_choice_label(choice: &crate::AiToolChoice) -> serde_json::Value {

@@ -336,6 +336,7 @@ impl<Node: Clone + Eq + std::hash::Hash + 'static, Terminal: Clone + 'static>
     pub fn handle_acp_session_request(
         &self, agent_id: &str, generation: u64, conversation_id: &str, assistant_id: &str,
         event: oxideterm_ai::AcpClientEvent, diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
+        file_review: super::acp_file_review::AcpFileReviewBindings,
         cx: &mut App,
     ) -> Result<bool, oxideterm_ai::AcpClientEvent> {
         match event {
@@ -415,6 +416,10 @@ impl<Node: Clone + Eq + std::hash::Hash + 'static, Terminal: Clone + 'static>
                         Ok(false)
                     }
 
+            event @ oxideterm_ai::AcpClientEvent::WriteTextFile { .. } => {
+                self.review_acp_file_write(agent_id, generation, conversation_id, assistant_id, event, file_review, cx);
+                Ok(false)
+            }
             event => Err(event),
         }
     }

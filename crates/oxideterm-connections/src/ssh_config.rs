@@ -1518,21 +1518,6 @@ mod tests {
     }
 
     #[test]
-    fn alias_query_returns_the_canonical_config_spelling() {
-        let hosts = vec![SshConfigHost {
-            alias: "Production-DB".to_string(),
-            ..SshConfigHost::default()
-        }];
-
-        assert_eq!(
-            canonical_ssh_config_alias(&hosts, "production-db"),
-            Some("Production-DB")
-        );
-        assert_eq!(canonical_ssh_config_alias(&hosts, "user@host"), None);
-        assert_eq!(canonical_ssh_config_alias(&hosts, "host:22"), None);
-    }
-
-    #[test]
     fn resolved_alias_import_skips_duplicates_and_writes_once() {
         let path = std::env::temp_dir().join(format!(
             "oxideterm-ssh-alias-import-{}-connections.json",

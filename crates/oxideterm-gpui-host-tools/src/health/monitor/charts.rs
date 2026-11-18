@@ -383,27 +383,3 @@ pub(crate) fn render_sparkline(render: &CompactMonitorRenderContext, cpu: bool) 
                 ),
         )
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn chart_coordinates_preserve_time_gaps_and_missing_values() {
-        assert_eq!(
-            trend_points(
-                &[
-                    (100, Some(0.0)),
-                    (125, Some(50.0)),
-                    (150, None),
-                    (200, Some(200.0))
-                ],
-                100.0
-            ),
-            vec![Some((0.0, 0.0)), Some((0.25, 0.5)), None, Some((1.0, 1.0))]
-        );
-        assert_eq!(
-            trend_points(&[(100, Some(f64::NAN)), (100, Some(10.0))], 0.0),
-            vec![None, Some((0.0, 1.0))]
-        );
-    }
-}

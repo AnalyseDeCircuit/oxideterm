@@ -30,19 +30,7 @@ impl WorkspaceApp {
         );
     }
 
-    pub(in crate::workspace) fn should_force_ai_pre_send_compaction(
-        &self,
-        conversation_id: &str,
-        config: &AiChatStreamConfig,
-        request_content: Option<&str>,
-        task_system_prompt: Option<&str>,
-        rag_system_prompt: Option<&str>,
-        cx: &App,
-    ) -> bool {
-        self.ai_conversation_prompt(cx).should_force_ai_pre_send_compaction(
-            conversation_id, config, request_content, task_system_prompt, rag_system_prompt,
-        )
-    }
+
 
     pub(in crate::workspace) fn resolve_ai_stream_config(&self, cx: &App) -> Result<AiChatStreamConfig, String> {
         let settings = &self.settings_store.settings().ai;

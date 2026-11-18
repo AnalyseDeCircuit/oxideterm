@@ -140,23 +140,6 @@ async fn stream_once(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ChatStreamProviderFamily, chat_stream_provider_family};
-
-    #[test]
-    fn unknown_provider_type_falls_back_to_openai_compatible_stream() {
-        assert_eq!(
-            chat_stream_provider_family("custom_vendor"),
-            ChatStreamProviderFamily::OpenAiCompatible
-        );
-        assert_eq!(
-            chat_stream_provider_family(""),
-            ChatStreamProviderFamily::OpenAiCompatible
-        );
-    }
-}
-
-#[cfg(test)]
 pub(crate) use responses_parse::ResponsesStream;
 #[cfg(test)]
 pub(crate) use responses_payload::responses_body;

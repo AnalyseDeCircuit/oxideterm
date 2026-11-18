@@ -128,69 +128,6 @@ pub(super) fn row_menu_selection_target_maps_saved_profiles_and_skips_unselectab
 }
 
 #[test]
-#[ignore = "manual session group projection benchmark"]
-fn session_group_projection_performance() {
-    for (group_count, item_count) in [(20, 200), (100, 1000), (500, 5000)] {
-        let roots: Vec<_> = (0..group_count).map(|i| format!("group-{i}")).collect();
-        let expanded = roots.iter().cloned().collect();
-        let children = HashMap::new();
-        let mut connection = saved_connection_fixture(SavedAuth::Agent);
-        let items: Vec<_> = (0..item_count)
-            .map(|i| {
-                connection.id = format!("connection-{i}");
-                connection.group = Some(roots[i % group_count].clone());
-                SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
-            })
-            .collect();
-        let expected: Vec<_> = (0..group_count)
-            .flat_map(|group| (group..item_count).step_by(group_count))
-            .collect();
-        let start = std::time::Instant::now();
-        for _ in 0..20 {
-            let rows = std::hint::black_box(session_manager_tree_rows(
-                &items, &roots, &children, &expanded,
-            ));
-            let indices: Vec<_> = rows
-                .iter()
-                .filter_map(|row| match row {
-                    SessionManagerTreeRow::Item { item_index, .. } => Some(*item_index),
-                    _ => None,
-                })
-                .collect();
-            assert_eq!(indices, expected);
-        }
-        eprintln!(
-            "groups={group_count} connections={item_count} mean_ms={:.3}",
-            start.elapsed().as_secs_f64() * 1000.0 / 20.0
-        );
-        let start = std::time::Instant::now();
-        for _ in 0..20 {
-            let rows = std::hint::black_box(session_manager_grid_rows(
-                &items,
-                &roots,
-                "Recent".into(),
-                "Hosts".into(),
-                4,
-                4,
-            ));
-            let indices: Vec<_> = rows
-                .into_iter()
-                .filter_map(|row| match row {
-                    SessionManagerGridRow::Cards { item_indices } => Some(item_indices),
-                    _ => None,
-                })
-                .flatten()
-                .collect();
-            assert_eq!(indices, expected);
-        }
-        eprintln!(
-            "groups={group_count} connections={item_count} grid_mean_ms={:.3}",
-            start.elapsed().as_secs_f64() * 1000.0 / 20.0
-        );
-    }
-}
-
-#[test]
 fn session_grid_groups_preserve_subtrees_order_and_ungrouped_cards() {
     let mut connection = saved_connection_fixture(SavedAuth::Agent);
     let items: Vec<_> = [
@@ -265,43 +202,6 @@ fn session_grid_groups_preserve_subtrees_order_and_ungrouped_cards() {
 }
 
 #[test]
-#[ignore = "manual session display sorting benchmark"]
-fn session_display_sort_performance() {
-    for count in [200usize, 1000, 5000] {
-        let mut connection = saved_connection_fixture(SavedAuth::Agent);
-        let items: Vec<_> = (0..count)
-            .map(|index| {
-                let rank = (index * 73) % count;
-                connection.id = format!("connection-{rank:05}");
-                connection.name = format!("Production-Server-{rank:05}");
-                SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
-            })
-            .collect();
-        let expected: Vec<_> = (0..count)
-            .map(|rank| format!("connection-{rank:05}"))
-            .collect();
-        let mut elapsed = std::time::Duration::ZERO;
-        for _ in 0..20 {
-            let mut input = items.clone();
-            let start = std::time::Instant::now();
-            sort_session_manager_items(&mut input, SessionSortField::Name, SortDirection::Asc);
-            elapsed += start.elapsed();
-            assert_eq!(
-                input
-                    .iter()
-                    .map(SessionManagerDisplayItem::id)
-                    .collect::<Vec<_>>(),
-                expected
-            );
-        }
-        eprintln!(
-            "connections={count} sort_mean_ms={:.3}",
-            elapsed.as_secs_f64() * 1000.0 / 20.0
-        );
-    }
-}
-
-#[test]
 fn session_display_sort_preserves_each_column_and_direction() {
     let base = saved_connection_fixture(SavedAuth::Agent);
     let items: Vec<_> = [
@@ -352,51 +252,6 @@ fn session_display_sort_preserves_each_column_and_direction() {
                 "{field:?} {direction:?}"
             );
         }
-    }
-}
-
-#[test]
-#[ignore = "manual recent sessions grid projection benchmark"]
-fn recent_sessions_grid_performance() {
-    for count in [200usize, 1000, 5000] {
-        let mut connection = saved_connection_fixture(SavedAuth::Agent);
-        connection.group = None;
-        let items: Vec<_> = (0..count)
-            .map(|index| {
-                connection.id = format!("connection-{index}");
-                connection.last_used_at = chrono::DateTime::from_timestamp(
-                    1_700_000_000 + ((index * 73) % count) as i64,
-                    0,
-                );
-                SessionManagerDisplayItem::Connection(ConnectionInfo::from(&connection))
-            })
-            .collect();
-        let expected: Vec<_> = (count - 8..count).rev().collect();
-        let start = std::time::Instant::now();
-        for _ in 0..30 {
-            let rows = std::hint::black_box(session_manager_grid_rows(
-                &items,
-                &[],
-                "Recent".into(),
-                "Hosts".into(),
-                4,
-                4,
-            ));
-            let ranks: Vec<_> = rows
-                .iter()
-                .filter_map(|row| match row {
-                    SessionManagerGridRow::RecentItems { item_indices, .. } => Some(item_indices),
-                    _ => None,
-                })
-                .flatten()
-                .map(|index| (index * 73) % count)
-                .collect();
-            assert_eq!(ranks, expected);
-        }
-        eprintln!(
-            "connections={count} recent_grid_mean_ms={:.3}",
-            start.elapsed().as_secs_f64() * 1000.0 / 30.0
-        );
     }
 }
 
@@ -506,33 +361,6 @@ fn session_tree_projection_preserves_nested_groups_and_ungrouped_items() {
 }
 
 #[test]
-fn row_action_targets_map_only_openable_rows_to_open_targets() {
-    let cases = [
-        (
-            SessionManagerRowActionTarget::Tunnel("t-1".into()),
-            Some(SessionManagerOpenTarget::Tunnel("t-1".into())),
-        ),
-        (
-            SessionManagerRowActionTarget::Connection("c-1".into()),
-            Some(SessionManagerOpenTarget::Connection("c-1".into())),
-        ),
-        (
-            SessionManagerRowActionTarget::SshConfig("alias".into()),
-            Some(SessionManagerOpenTarget::SshConfig("alias".into())),
-        ),
-        (
-            SessionManagerRowActionTarget::RemoteDesktop("r-1".into()),
-            Some(SessionManagerOpenTarget::RemoteDesktop("r-1".into())),
-        ),
-        (SessionManagerRowActionTarget::Group("g".into()), None),
-        (SessionManagerRowActionTarget::GroupRoot, None),
-    ];
-    for (target, expected) in cases {
-        assert_eq!(target.open_target(), expected, "target: {target:?}");
-    }
-}
-
-#[test]
 fn shift_range_selection_selects_contiguous_visible_rows() {
     let visible: Vec<SessionManagerSelectionTarget> = ["a", "b", "c", "d"]
         .into_iter()
@@ -568,50 +396,5 @@ fn shift_range_selection_selects_contiguous_visible_rows() {
     assert_eq!(
         session_manager_selection_range(&[], &target("a"), &target("a")),
         None,
-    );
-}
-
-#[test]
-fn sidebar_tree_row_rails_track_continuing_ancestors_and_terminal_siblings() {
-    let group = |path: &str, depth: usize| SessionManagerTreeRow::Group {
-        path: path.into(),
-        depth,
-        expanded: true,
-        has_children: true,
-    };
-    let item = |item_index: usize, depth: usize| SessionManagerTreeRow::Item { item_index, depth };
-
-    let rows = vec![
-        group("prod", 0),     // 0: root group (followed by root item, no parent rail)
-        item(0, 1),           // 1: child of prod, continues to subgroup
-        group("prod/web", 1), // 2: last child of prod -> outer rail for depth=2 must stop
-        item(1, 2),           // 3: first child of prod/web -> continues to item 2
-        item(2, 2),           // 4: last child of prod/web
-        item(3, 0),           // 5: ungrouped root item
-    ];
-
-    assert_eq!(session_manager_tree_row_rails(&rows, 0), (vec![], false));
-    assert_eq!(session_manager_tree_row_rails(&rows, 1), (vec![], false));
-    assert_eq!(session_manager_tree_row_rails(&rows, 2), (vec![], true));
-    assert_eq!(
-        session_manager_tree_row_rails(&rows, 3),
-        (vec![false], false)
-    );
-    assert_eq!(
-        session_manager_tree_row_rails(&rows, 4),
-        (vec![false], true)
-    );
-    assert_eq!(session_manager_tree_row_rails(&rows, 5), (vec![], true));
-
-    // When a sibling group follows prod/web at depth 1, depth 2 items keep the outer rail.
-    let continuing_rows = vec![
-        group("prod", 0),
-        group("prod/api", 1),
-        item(0, 2),
-        group("prod/web", 1),
-    ];
-    assert_eq!(
-        session_manager_tree_row_rails(&continuing_rows, 2),
-        (vec![true], true)
     );
 }

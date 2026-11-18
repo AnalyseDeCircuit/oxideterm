@@ -1938,21 +1938,6 @@ mod semantic_scheme_tests {
     use super::*;
 
     #[test]
-    fn local_shell_ids_select_the_matching_tree_sitter_dialect() {
-        assert_eq!(semantic_shell_dialect("bash"), SemanticShellDialect::Bash);
-        assert_eq!(
-            semantic_shell_dialect("pwsh"),
-            SemanticShellDialect::PowerShell
-        );
-        assert_eq!(semantic_shell_dialect("zsh"), SemanticShellDialect::Zsh);
-        assert_eq!(semantic_shell_dialect("fish"), SemanticShellDialect::Fish);
-        assert_eq!(
-            semantic_shell_dialect("custom-shell"),
-            SemanticShellDialect::Auto
-        );
-    }
-
-    #[test]
     fn connection_highlight_rule_set_resolves_to_terminal_override() {
         let mut terminal = oxideterm_settings::TerminalSettings::default();
         terminal

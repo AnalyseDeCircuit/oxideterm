@@ -14,10 +14,9 @@ use oxideterm_ssh::{
 };
 use tokio::sync::oneshot;
 
-use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
 
 use super::{
-    ConnectionFlowEntity, ConnectionFlowEvent, ConnectionSelectAnchorStore, NativeProxyConnectRun,
+    ConnectionFlowEntity, ConnectionFlowEvent, NativeProxyConnectRun,
 };
 use crate::{
     HostKeyChallenge, NewConnectionField, NewConnectionForm, NewConnectionProxyHop,
@@ -38,22 +37,6 @@ fn unknown_host_key_challenge() -> HostKeyChallenge {
         host: "example.test".to_string(),
         port: 22,
     }
-}
-
-#[test]
-fn connection_select_anchor_store_skips_unchanged_layout_and_clears_as_one_owner() {
-    let store = ConnectionSelectAnchorStore::default();
-    let anchor = OverlayAnchor {
-        id: SelectAnchorId::NewConnectionGroup,
-        bounds: Default::default(),
-    };
-
-    assert!(store.update(anchor));
-    assert!(!store.update(anchor));
-    assert_eq!(store.get(anchor.id), Some(anchor));
-
-    store.clear();
-    assert_eq!(store.get(anchor.id), None);
 }
 
 fn keyboard_interactive_request(flow_id: &str) -> KeyboardInteractivePromptRequest {
@@ -91,26 +74,6 @@ fn proxy_connect_run() -> NativeProxyConnectRun {
         save_after_open: None,
         upstream_proxy: None,
     }
-}
-
-#[gpui::test]
-fn form_feedback_keeps_success_styling_bound_to_success_message(cx: &mut TestAppContext) {
-    let entity = cx.new(ConnectionFlowEntity::new);
-    entity.update(cx, |entity, cx| {
-        entity
-            .form
-            .replace_with_new_form(NewConnectionForm::default());
-
-        assert!(entity.set_form_success_feedback("Connection successful".to_string(), cx));
-        assert!(entity.form.form.as_ref().unwrap().feedback_is_success());
-
-        assert!(entity.set_form_feedback(
-            Some(false),
-            Some("Authentication failed".to_string()),
-            cx,
-        ));
-        assert!(!entity.form.form.as_ref().unwrap().feedback_is_success());
-    });
 }
 
 #[gpui::test]

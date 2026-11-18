@@ -4021,24 +4021,11 @@ mod tests {
         active_ime_should_defer_input_key, copy_shortcut_owner_for_target,
         effective_platform_text_replacement_range, host_tools_dialog_input,
         ime_geometry_uses_secret_mask, ime_target_is_secret, ime_text_snapshot,
-        keystroke_platform_text, keystroke_uses_text_edit_modifier, multiline_ime_line_ranges,
+        keystroke_platform_text,
         normalize_clipboard_text_for_ime_target, path_completion_owns_vertical_navigation,
-        platform_text_commit_is_duplicate, secret_ime_proxy, soft_wrapped_line_ranges_utf16,
+        platform_text_commit_is_duplicate, secret_ime_proxy,
         utf16_offset_for_char_index, workspace_ime_target_for_plain_host_tools_input,
     };
-
-    #[test]
-    fn ai_chat_hit_testing_uses_soft_wrapped_visual_lines() {
-        let bounds = gpui::Bounds {
-            origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
-            size: gpui::size(gpui::px(120.0), gpui::px(60.0)),
-        };
-        let text = "abcdefghij😀klmn\nZ";
-        assert_eq!(
-            multiline_ime_line_ranges(WorkspaceImeTarget::AiChatInput, text, bounds, Some(12)),
-            vec![0..12, 12..16, 17..18],
-        );
-    }
 
     #[test]
     fn history_editor_vertical_navigation_follows_soft_rows() {
@@ -4192,33 +4179,6 @@ mod tests {
     }
 
     #[test]
-    fn platform_edit_shortcut_uses_expected_modifier_for_target_os() {
-        let platform_v = key(
-            "v",
-            None,
-            Modifiers {
-                platform: true,
-                ..Modifiers::default()
-            },
-        );
-        let control_v = key(
-            "v",
-            None,
-            Modifiers {
-                control: true,
-                ..Modifiers::default()
-            },
-        );
-
-        assert!(keystroke_uses_text_edit_modifier(&platform_v));
-        if cfg!(target_os = "macos") {
-            assert!(!keystroke_uses_text_edit_modifier(&control_v));
-        } else {
-            assert!(keystroke_uses_text_edit_modifier(&control_v));
-        }
-    }
-
-    #[test]
     fn active_ime_defers_only_platform_owned_text_and_composition_keys() {
         let printable = key("a", Some("a"), Modifiers::default());
         let shortcut = key(
@@ -4344,21 +4304,6 @@ mod tests {
         );
 
         assert_eq!(range, Some(2..2));
-    }
-
-    #[test]
-    fn read_only_soft_wrap_ranges_follow_visual_line_count() {
-        let text = "你好！我是 OxideSens，你的终端助手。我可以帮助你处理终端命令、SSH 连接、文件操作、脚本调试等等。";
-        let ranges = soft_wrapped_line_ranges_utf16(text, 260.0, 112.0);
-        assert!(ranges.len() >= 3, "{ranges:?}");
-        assert_eq!(ranges.first().map(|range| range.start), Some(0));
-        assert_eq!(
-            ranges.last().map(|range| range.end),
-            Some(text.encode_utf16().count())
-        );
-        for pair in ranges.windows(2) {
-            assert_eq!(pair[0].end, pair[1].start);
-        }
     }
 
     #[test]

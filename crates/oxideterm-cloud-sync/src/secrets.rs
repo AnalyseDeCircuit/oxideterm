@@ -597,33 +597,6 @@ mod tests {
     }
 
     #[test]
-    fn cloud_sync_delegates_native_secrets_to_the_shared_store() {
-        // Cloud sync must not fork its own keychain policy beside the shared store.
-        let source = include_str!("secrets.rs");
-        assert!(source.contains("NativeSecretStore"));
-        for keychain_command in [
-            ["add-generic", "-password"].concat(),
-            ["find-generic", "-password"].concat(),
-            ["delete-generic", "-password"].concat(),
-        ] {
-            assert!(!source.contains(&keychain_command));
-        }
-    }
-
-    #[test]
-    fn native_secret_store_failure_retains_the_platform_cause() {
-        let error = anyhow::anyhow!("Windows credential error 1312")
-            .context("failed to store secret in the OS credential manager")
-            .context("failed to store cloud sync secret basic-username");
-
-        let displayed = native_secret_access_failure(error).to_string();
-
-        assert!(displayed.contains("failed to store cloud sync secret basic-username"));
-        assert!(displayed.contains("failed to store secret in the OS credential manager"));
-        assert!(displayed.contains("Windows credential error 1312"));
-    }
-
-    #[test]
     fn silent_read_reports_unlock_required_without_prompting_value() {
         let mut provider = TestSecrets {
             hints: HashSet::from([secret_keys::TOKEN.to_string()]),

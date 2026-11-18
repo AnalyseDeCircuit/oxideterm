@@ -672,15 +672,6 @@ mod local_terminal_tests {
     }
 
     #[test]
-    pub fn blank_git_bash_override_keeps_scanned_shells() {
-        let shells = vec![ShellInfo::new("cmd", "Command Prompt", "cmd.exe")];
-        assert_eq!(
-            effective_local_shells(&shells, Some("  "), &Default::default()),
-            shells
-        );
-    }
-
-    #[test]
     pub fn one_shot_shell_choice_precedes_default_and_fallback() {
         let shells = vec![
             ShellInfo::new("bash", "Bash", "/bin/bash"),

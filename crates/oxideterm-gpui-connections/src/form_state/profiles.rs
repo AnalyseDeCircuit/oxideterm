@@ -145,7 +145,7 @@ pub fn terminal_serial_line_ending_from_profile(
     }
 }
 
-fn terminal_serial_send_mode_from_profile(
+pub fn terminal_serial_send_mode_from_profile(
     mode: oxideterm_connections::SerialSendMode,
 ) -> oxideterm_terminal::SerialSendMode {
     match mode {
@@ -154,7 +154,7 @@ fn terminal_serial_send_mode_from_profile(
     }
 }
 
-fn terminal_serial_display_mode_from_profile(
+pub fn terminal_serial_display_mode_from_profile(
     mode: oxideterm_connections::SerialDisplayMode,
 ) -> oxideterm_terminal::SerialDisplayMode {
     match mode {

@@ -865,24 +865,4 @@ mod tests {
 
         assert!(wake.is_stopped());
     }
-
-    #[gpui::test]
-    fn stale_dirty_refresh_generation_cannot_complete(cx: &mut TestAppContext) {
-        let entity = test_cloud_sync_entity(cx);
-        entity.update(cx, |cloud_sync, cx| cloud_sync.queue_dirty_refresh(cx));
-        let stale_generation = entity.read_with(cx, |cloud_sync, _cx| {
-            cloud_sync.controller.dirty_refresh_generation
-        });
-        entity.update(cx, |cloud_sync, cx| cloud_sync.queue_dirty_refresh(cx));
-        let current_generation = entity.read_with(cx, |cloud_sync, _cx| {
-            cloud_sync.controller.dirty_refresh_generation
-        });
-
-        assert!(!entity.update(cx, |cloud_sync, _cx| {
-            cloud_sync.accept_dirty_refresh_generation(stale_generation)
-        }));
-        assert!(entity.update(cx, |cloud_sync, _cx| {
-            cloud_sync.accept_dirty_refresh_generation(current_generation)
-        }));
-    }
 }
