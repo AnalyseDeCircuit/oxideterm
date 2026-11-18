@@ -14,13 +14,6 @@ impl WorkspaceApp {
         self.connections.flow.read(cx).ssh_worker_sender()
     }
 
-    pub(in crate::workspace) fn ble_worker_sender(
-        &self,
-        cx: &App,
-    ) -> ActiveDeliverySender<BleConnectionWorkerResult> {
-        self.connections.flow.read(cx).ble_worker_sender()
-    }
-
     pub(in crate::workspace) fn apply_connection_flow_worker_delivery(
         &mut self,
         window: &mut Window,

@@ -859,11 +859,31 @@ fn proxy_hop_auth_target_matches(left: &SavedProxyHop, right: &SavedProxyHop) ->
         }
 }
 
-pub fn saved_connection_for_open(store: &ConnectionStore, id: &str) -> Option<SavedConnection> {
-    store.get(id).cloned()
+pub enum SavedSshOpen {
+    Authenticate(SavedConnection),
+    Connect { config: SshConfig, title: String },
 }
 
-pub fn saved_connection_requires_credentials(config: Option<&SshConfig>) -> bool {
+pub fn prepare_saved_ssh_open(
+    store: &ConnectionStore,
+    settings: &oxideterm_settings::PersistedSettings,
+    id: &str,
+    open_sftp_override: bool,
+) -> Option<(SavedSshOpen, bool)> {
+    let connection = store.get(id)?;
+    let open_sftp = open_sftp_override || connection.options.open_sftp_on_connect;
+    let config = oxideterm_session_adapter::ssh_config_from_saved_connection(store, settings, connection);
+    let plan = match config {
+        Some(config) if !saved_connection_requires_credentials(Some(&config)) => SavedSshOpen::Connect {
+            config,
+            title: connection.name.clone(),
+        },
+        _ => SavedSshOpen::Authenticate(connection.clone()),
+    };
+    Some((plan, open_sftp))
+}
+
+fn saved_connection_requires_credentials(config: Option<&SshConfig>) -> bool {
     config.is_none_or(|config| matches!(config.auth, AuthMethod::Password { prompt: true, .. }))
 }
 

@@ -161,3 +161,206 @@ pub fn form_from_ble_profile(profile: &BleProfile, ungrouped_label: String) -> N
     form.focused_field = NewConnectionField::BleProfileName;
     form
 }
+
+impl BleOpenRequest {
+    pub fn from_saved_profile(profile: BleProfile, standalone: BleStandaloneTarget) -> Self {
+        Self {
+            target: BleTraceTarget {
+                node_id: profile.id.clone(),
+                label: profile.name.clone(),
+                endpoint: profile
+                    .device_name
+                    .clone()
+                    .or_else(|| profile.device_mac.clone()),
+            },
+            adapter_guard: None,
+            selected_device: None,
+            adapter_mac: profile.adapter_mac.clone(),
+            device_mac: profile.device_mac.clone(),
+            device_name: profile.device_name.clone(),
+            platform_identifier: profile.platform_identifier.clone(),
+            service_uuid: profile.service_uuid.clone(),
+            title: format!("BLE {}", profile.name),
+            terminal_options: profile.terminal.clone(),
+            runtime_options:
+                crate::form_state::terminal_serial_runtime_options_from_ble_profile(
+                    &profile,
+                ),
+            mtu: profile.mtu,
+            write_without_response: profile.write_without_response,
+            profile_id: Some(profile.id),
+            form_id: None,
+            standalone,
+        }
+    }
+}
+
+impl crate::entity::ConnectionFlowEntity {
+    pub fn start_ble_resolver(
+        &mut self,
+        request: BleOpenRequest,
+        attempt_id: String,
+        runtime: &tokio::runtime::Runtime,
+        cx: &mut gpui::Context<Self>,
+    ) -> BlePendingOpen {
+        let tx = self.ble_worker_sender();
+        let BleOpenRequest {
+            target,
+            adapter_guard,
+            selected_device,
+            adapter_mac,
+            device_mac,
+            device_name,
+            platform_identifier,
+            service_uuid,
+            title,
+            terminal_options,
+            runtime_options,
+            mtu,
+            write_without_response,
+            profile_id,
+            form_id,
+            standalone: _,
+        } = request;
+        let cancellation = tokio_util::sync::CancellationToken::new();
+        if let Some(form) = self.form.form.as_mut().filter(|form| Some(form.ble.instance_id) == form_id) {
+            form.ble.open_cancel = Some(cancellation.clone().drop_guard());
+            cx.notify();
+        }
+        let cancel_worker = cancellation.clone();
+
+        // Live selections keep their peripheral handle; saved profiles resolve
+        // persisted clues afresh. The long-lived runtime keeps the adapter's
+        // platform tasks alive through the handoff to the terminal session.
+        let worker = runtime.spawn(async move {
+            let mut last_stage = oxideterm_terminal::BleResolveStage::OpeningAdapter;
+            let stage_tx = tx.clone();
+            let stage_target = target.clone();
+            let stage_attempt_id = attempt_id.clone();
+            let result = oxideterm_terminal::ble_resolve_profile_to_session(
+                adapter_guard,
+                selected_device.as_ref(),
+                &cancel_worker,
+                adapter_mac.as_deref(),
+                device_mac.as_deref(),
+                device_name.as_deref(),
+                platform_identifier.as_deref(),
+                &service_uuid,
+                runtime_options,
+                mtu,
+                write_without_response,
+                |stage| {
+                    last_stage = stage;
+                    let _ = stage_tx.send(BleConnectionWorkerResult::StageChanged {
+                        stage,
+                        attempt_id: stage_attempt_id.clone(),
+                        target: stage_target.clone(),
+                    });
+                },
+            )
+            .await;
+            match result {
+                Ok((config, guard, resolved_link)) => {
+                    let _ = tx.send(BleConnectionWorkerResult::ScanComplete {
+                        config,
+                        adapter_guard: guard,
+                        resolved_link,
+                        terminal_options,
+                        title,
+                        attempt_id,
+                        target,
+                        profile_id,
+                        form_id,
+                    });
+                }
+                Err(error) => {
+                    let _ = tx.send(BleConnectionWorkerResult::ScanFailed {
+                        stage: last_stage,
+                        error,
+                        attempt_id,
+                        target,
+                        profile_id,
+                        form_id,
+                    });
+                }
+            }
+        });
+        BlePendingOpen { cancellation, _worker: worker }
+    }
+
+    pub fn is_ble_form_current(&self, form_id: Option<uuid::Uuid>) -> bool {
+        self.form.form.as_ref().is_some_and(|form| Some(form.ble.instance_id) == form_id)
+    }
+
+    pub fn finish_ble_form_open(
+        &mut self,
+        form_id: Option<uuid::Uuid>,
+        error: Option<&str>,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        if !self.is_ble_form_current(form_id) {
+            return;
+        }
+        if let Some(detail) = error {
+            if let Some(form) = self.form.form.as_mut() {
+                form.pending = false;
+                form.error = Some(format!("{}: {detail}", i18n.t("modals.new_connection.ble_open_failed")));
+            }
+        } else {
+            self.form.clear();
+        }
+        cx.notify();
+    }
+}
+
+/// Maps a resolver failure to the current locale's sentence. The raw
+/// underlying error text stays as reported by btleplug inside the
+/// `{error}` slot.
+pub fn localize_ble_resolve_error(i18n: &oxideterm_i18n::I18n, error: &oxideterm_terminal::BleResolveError) -> String {
+    use oxideterm_terminal::BleResolveError;
+    match error {
+        BleResolveError::Cancelled => i18n.t("connections.ble.resolve.cancelled"),
+        BleResolveError::NoAdapters => i18n.t("connections.ble.resolve.no_adapters"),
+        BleResolveError::AdapterOpen(error) => i18n.t_with(
+            "connections.ble.resolve.adapter_open_failed",
+            &[("error", error)],
+        ),
+        BleResolveError::DeviceEnumeration(error) => i18n.t_with(
+            "connections.ble.resolve.device_enumeration_failed",
+            &[("error", error)],
+        ),
+        BleResolveError::Scan(error) => i18n
+            .t_with("connections.ble.resolve.scan_failed", &[("error", error)]),
+        BleResolveError::NoDeviceMatched { identity } => i18n.t_with(
+            "connections.ble.resolve.no_device_matched",
+            &[("identity", identity)],
+        ),
+        BleResolveError::AmbiguousDevice { identity } => i18n.t_with(
+            "connections.ble.resolve.ambiguous_device",
+            &[("identity", identity)],
+        ),
+        BleResolveError::DeviceBusy { device } => i18n
+            .t_with("connections.ble.resolve.device_busy", &[("device", device)]),
+        BleResolveError::Connect(error) => i18n.t_with(
+            "connections.ble.resolve.connect_failed",
+            &[("error", error)],
+        ),
+        BleResolveError::ServiceDiscovery(error) => i18n.t_with(
+            "connections.ble.resolve.service_discovery_failed",
+            &[("error", error)],
+        ),
+        BleResolveError::ServiceMismatch { service_uuid } => i18n.t_with(
+            "connections.ble.resolve.service_mismatch",
+            &[("uuid", service_uuid)],
+        ),
+        BleResolveError::DirectConnectUnavailable { identity, reason } => i18n.t_with(
+            "connections.ble.resolve.direct_connect_failed",
+            &[("identity", identity), ("reason", reason)],
+        ),
+        BleResolveError::InvalidServiceUuid { service_uuid } => i18n.t_with(
+            "connections.ble.resolve.invalid_service_uuid",
+            &[("uuid", service_uuid)],
+        ),
+    }
+}

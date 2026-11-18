@@ -8,7 +8,6 @@
 use super::*;
 use crate::workspace::new_connection::{
     BleConnectionWorkerResult, BleOpenRequest, BleStandaloneTarget, BleTraceTarget,
-    ConnectionFormState,
 };
 use crate::workspace::standalone_connections::{
     StandaloneConnectionKind, StandaloneConnectionLaunch, StandaloneConnectionSurface,
@@ -42,34 +41,7 @@ impl WorkspaceApp {
                     .map(|attempt_id| BleStandaloneTarget::Reconnect { attempt_id })
             });
         self.start_ble_open_flow(
-            BleOpenRequest {
-                target: BleTraceTarget {
-                    node_id: profile.id.clone(),
-                    label: profile.name.clone(),
-                    endpoint: profile
-                        .device_name
-                        .clone()
-                        .or_else(|| profile.device_mac.clone()),
-                },
-                adapter_guard: None,
-                selected_device: None,
-                adapter_mac: profile.adapter_mac.clone(),
-                device_mac: profile.device_mac.clone(),
-                device_name: profile.device_name.clone(),
-                platform_identifier: profile.platform_identifier.clone(),
-                service_uuid: profile.service_uuid.clone(),
-                title: format!("BLE {}", profile.name),
-                terminal_options: profile.terminal.clone(),
-                runtime_options:
-                    crate::workspace::new_connection::terminal_serial_runtime_options_from_ble_profile(
-                        &profile,
-                    ),
-                mtu: profile.mtu,
-                write_without_response: profile.write_without_response,
-                profile_id: Some(profile.id),
-                form_id: None,
-                standalone: standalone.unwrap_or(BleStandaloneTarget::New),
-            },
+            BleOpenRequest::from_saved_profile(profile, standalone.unwrap_or(BleStandaloneTarget::New)),
             cx,
         );
     }
@@ -85,8 +57,8 @@ impl WorkspaceApp {
         // The trace card is keyed by the same attempt identity that owns the
         // active-session record, so a reconnect reuses the existing row and a
         // fresh open registers exactly one.
-        let attempt_id = match request.standalone {
-            BleStandaloneTarget::Reconnect { attempt_id } => attempt_id,
+        let attempt_id = match &request.standalone {
+            BleStandaloneTarget::Reconnect { attempt_id } => attempt_id.clone(),
             BleStandaloneTarget::New => {
                 let clues = request.clues();
                 let launch = match request.profile_id.as_ref() {
@@ -145,104 +117,10 @@ impl WorkspaceApp {
             cx,
         );
 
-        let BleOpenRequest {
-            target,
-            adapter_guard,
-            selected_device,
-            adapter_mac,
-            device_mac,
-            device_name,
-            platform_identifier,
-            service_uuid,
-            title,
-            terminal_options,
-            runtime_options,
-            mtu,
-            write_without_response,
-            profile_id,
-            form_id,
-            standalone: _,
-        } = request;
-        let tx = self.ble_worker_sender(cx);
-        let cancellation = tokio_util::sync::CancellationToken::new();
-        if let Some(form_id) = form_id {
-            self.update_connection_form_state(cx, |state| {
-                if let Some(form) = state
-                    .form
-                    .as_mut()
-                    .filter(|form| form.ble.instance_id == form_id)
-                {
-                    form.ble.open_cancel = Some(cancellation.clone().drop_guard());
-                }
-            });
-        }
-        let cancel_worker = cancellation.clone();
-        let owned_attempt = attempt_id.clone();
-
-        // Live selections keep their peripheral handle; saved profiles resolve
-        // persisted clues afresh. The long-lived runtime keeps the adapter's
-        // platform tasks alive through the handoff to the terminal session.
-        let runtime = self.forwarding_runtime.clone();
-        let worker = runtime.spawn(async move {
-            let mut last_stage = oxideterm_terminal::BleResolveStage::OpeningAdapter;
-            let stage_tx = tx.clone();
-            let stage_target = target.clone();
-            let stage_attempt_id = attempt_id.clone();
-            let result = oxideterm_terminal::ble_resolve_profile_to_session(
-                adapter_guard,
-                selected_device.as_ref(),
-                &cancel_worker,
-                adapter_mac.as_deref(),
-                device_mac.as_deref(),
-                device_name.as_deref(),
-                platform_identifier.as_deref(),
-                &service_uuid,
-                runtime_options,
-                mtu,
-                write_without_response,
-                |stage| {
-                    last_stage = stage;
-                    let _ = stage_tx.send(BleConnectionWorkerResult::StageChanged {
-                        stage,
-                        attempt_id: stage_attempt_id.clone(),
-                        target: stage_target.clone(),
-                    });
-                },
-            )
-            .await;
-            match result {
-                Ok((config, guard, resolved_link)) => {
-                    let _ = tx.send(BleConnectionWorkerResult::ScanComplete {
-                        config,
-                        adapter_guard: guard,
-                        resolved_link,
-                        terminal_options,
-                        title,
-                        attempt_id,
-                        target,
-                        profile_id,
-                        form_id,
-                    });
-                }
-                Err(error) => {
-                    let _ = tx.send(BleConnectionWorkerResult::ScanFailed {
-                        stage: last_stage,
-                        error,
-                        attempt_id,
-                        target,
-                        profile_id,
-                        form_id,
-                    });
-                }
-            }
+        let pending = self.connections.flow.update(cx, |flow, cx| {
+            flow.start_ble_resolver(request, attempt_id.clone(), &self.forwarding_runtime, cx)
         });
-        self.standalone_connections.set_ble_pending(
-            &owned_attempt,
-            crate::workspace::new_connection::BlePendingOpen {
-                cancellation,
-                _worker: worker,
-            },
-        );
+        self.standalone_connections.set_ble_pending(&attempt_id, pending);
     }
 
     /// Closes a resolver link that no session will adopt, on the shared
@@ -303,7 +181,7 @@ impl WorkspaceApp {
                 profile_id,
                 form_id,
             } => {
-                if form_id.is_some() && !self.ble_form_is_current(form_id, cx) {
+                if form_id.is_some() && !self.connections.flow.read(cx).is_ble_form_current(form_id) {
                     self.abandon_ble_resolved_link(resolved_link);
                     self.standalone_connections.cancel_attempt(&attempt_id);
                     return;
@@ -339,9 +217,9 @@ impl WorkspaceApp {
                             let _ = self.connection_store.mark_ble_profile_used(profile_id);
                             self.queue_cloud_sync_dirty_refresh(cx);
                         }
-                        if self.ble_form_is_current(form_id, cx) {
-                            self.update_connection_form_state(cx, ConnectionFormState::clear);
-                        }
+                        self.connections.flow.update(cx, |flow, cx| {
+                            flow.finish_ble_form_open(form_id, None, &self.i18n, cx);
+                        });
                         // A ready terminal is its own confirmation; the overlay
                         // card is removed by the same delivered event.
                         self.push_ble_trace_event(
@@ -356,9 +234,9 @@ impl WorkspaceApp {
                     Err(error) => {
                         let detail = error.to_string();
                         self.standalone_connections.mark_attempt_error(&attempt_id);
-                        if self.ble_form_is_current(form_id, cx) {
-                            self.fail_ble_form_open(&detail, cx);
-                        }
+                        self.connections.flow.update(cx, |flow, cx| {
+                            flow.finish_ble_form_open(form_id, Some(&detail), &self.i18n, cx);
+                        });
                         self.push_ble_trace_event(
                             &target,
                             &attempt_id,
@@ -387,13 +265,13 @@ impl WorkspaceApp {
                     profile_id = profile_id.as_deref().unwrap_or(""),
                     "BLE open failed"
                 );
-                let detail = self.localize_ble_resolve_error(&error);
+                let detail = oxideterm_gpui_connections::ble::localize_ble_resolve_error(&self.i18n, &error);
                 // The record keeps its failure visible in the active-session
                 // list, which is where the reconnect action lives.
                 self.standalone_connections.mark_attempt_error(&attempt_id);
-                if self.ble_form_is_current(form_id, cx) {
-                    self.fail_ble_form_open(&detail, cx);
-                }
+                self.connections.flow.update(cx, |flow, cx| {
+                    flow.finish_ble_form_open(form_id, Some(&detail), &self.i18n, cx);
+                });
                 // The failure card stays visible until dismissed or retried.
                 self.push_ble_trace_event(
                     &target,
@@ -405,81 +283,6 @@ impl WorkspaceApp {
                 );
             }
         }
-    }
-
-    /// Maps a resolver failure to the current locale's sentence. The raw
-    /// underlying error text stays as reported by btleplug inside the
-    /// `{error}` slot.
-    fn localize_ble_resolve_error(&self, error: &oxideterm_terminal::BleResolveError) -> String {
-        use oxideterm_terminal::BleResolveError;
-        match error {
-            BleResolveError::Cancelled => self.i18n.t("connections.ble.resolve.cancelled"),
-            BleResolveError::NoAdapters => self.i18n.t("connections.ble.resolve.no_adapters"),
-            BleResolveError::AdapterOpen(error) => self.i18n.t_with(
-                "connections.ble.resolve.adapter_open_failed",
-                &[("error", error)],
-            ),
-            BleResolveError::DeviceEnumeration(error) => self.i18n.t_with(
-                "connections.ble.resolve.device_enumeration_failed",
-                &[("error", error)],
-            ),
-            BleResolveError::Scan(error) => self
-                .i18n
-                .t_with("connections.ble.resolve.scan_failed", &[("error", error)]),
-            BleResolveError::NoDeviceMatched { identity } => self.i18n.t_with(
-                "connections.ble.resolve.no_device_matched",
-                &[("identity", identity)],
-            ),
-            BleResolveError::AmbiguousDevice { identity } => self.i18n.t_with(
-                "connections.ble.resolve.ambiguous_device",
-                &[("identity", identity)],
-            ),
-            BleResolveError::DeviceBusy { device } => self
-                .i18n
-                .t_with("connections.ble.resolve.device_busy", &[("device", device)]),
-            BleResolveError::Connect(error) => self.i18n.t_with(
-                "connections.ble.resolve.connect_failed",
-                &[("error", error)],
-            ),
-            BleResolveError::ServiceDiscovery(error) => self.i18n.t_with(
-                "connections.ble.resolve.service_discovery_failed",
-                &[("error", error)],
-            ),
-            BleResolveError::ServiceMismatch { service_uuid } => self.i18n.t_with(
-                "connections.ble.resolve.service_mismatch",
-                &[("uuid", service_uuid)],
-            ),
-            BleResolveError::DirectConnectUnavailable { identity, reason } => self.i18n.t_with(
-                "connections.ble.resolve.direct_connect_failed",
-                &[("identity", identity), ("reason", reason)],
-            ),
-            BleResolveError::InvalidServiceUuid { service_uuid } => self.i18n.t_with(
-                "connections.ble.resolve.invalid_service_uuid",
-                &[("uuid", service_uuid)],
-            ),
-        }
-    }
-
-    fn ble_form_is_current(&mut self, form_id: Option<uuid::Uuid>, cx: &mut Context<Self>) -> bool {
-        self.update_connection_form_state(cx, |state| {
-            state
-                .form
-                .as_ref()
-                .is_some_and(|form| Some(form.ble.instance_id) == form_id)
-        })
-    }
-
-    fn fail_ble_form_open(&mut self, detail: &str, cx: &mut Context<Self>) {
-        let message = format!(
-            "{}: {detail}",
-            self.i18n.t("modals.new_connection.ble_open_failed")
-        );
-        self.update_connection_form_state(cx, |state| {
-            if let Some(form) = state.form.as_mut() {
-                form.pending = false;
-                form.error = Some(message);
-            }
-        });
     }
 
     fn push_ble_trace_event(

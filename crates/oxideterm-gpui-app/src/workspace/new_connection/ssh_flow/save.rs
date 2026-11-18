@@ -7,7 +7,7 @@ use crate::workspace::{
     standalone_connections::{StandaloneConnectionKind, StandaloneConnectionLaunch},
 };
 use oxideterm_gpui_connections::profiles::{
-    saved_connection_for_open, saved_connection_requires_credentials,
+    SavedSshOpen, prepare_saved_ssh_open,
 };
 use oxideterm_gpui_terminal::TerminalNoticeVariant;
 
@@ -63,16 +63,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let action = if self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .is_some_and(|form| form.standalone_connection_id.is_some())
-        {
-            NewConnectionSubmitAction::Connect
-        } else {
-            NewConnectionSubmitAction::SaveAndConnect
-        };
+        let action = self.connections.flow.read(cx).default_submit_action();
         self.submit_new_connection_form_with_action(action, window, cx);
     }
 
@@ -82,12 +73,10 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use oxideterm_gpui_connections::submission::{FormSubmission, plan_form_submission};
+        use oxideterm_gpui_connections::submission::FormSubmission;
 
         let plan = self.connections.flow.update(cx, |flow, cx| {
-            let plan = plan_form_submission(&mut flow.form, action, &self.i18n);
-            cx.notify();
-            plan
+            flow.plan_submission(action, &self.i18n, cx)
         });
         match plan {
             None => {}
@@ -157,14 +146,8 @@ impl WorkspaceApp {
             || Ok(Vec::new()),
             |id| self.runtime_proxy_hops_for_parent_path(id),
         );
-        let store = &mut self.connection_store;
-        let i18n = &self.i18n;
         let handoff = self.connections.flow.update(cx, |flow, cx| {
-            let form = flow.form.form.as_mut()?;
-            let handoff =
-                oxideterm_gpui_connections::submission::persist_ssh_form(form, store, prefix, i18n);
-            cx.notify();
-            handoff
+            flow.persist_ssh(&mut self.connection_store, prefix, &self.i18n, cx)
         });
         if handoff.is_some() {
             self.queue_cloud_sync_dirty_refresh(cx);
@@ -547,7 +530,12 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(conn) = saved_connection_for_open(&self.connection_store, id) else {
+        let Some((plan, open_sftp_on_connect)) = prepare_saved_ssh_open(
+            &self.connection_store,
+            self.settings_store.settings(),
+            id,
+            open_sftp_on_connect_override,
+        ) else {
             // Saved rows can outlive an external store update. Report the
             // stale reference without exposing its identifier or connection data.
             tracing::warn!("Saved connection lookup failed before opening");
@@ -564,60 +552,46 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        let config = ssh_config_from_saved_connection(
-            &self.connection_store,
-            self.settings_store.settings(),
-            &conn,
-        );
-        let open_sftp_on_connect =
-            open_sftp_on_connect_override || conn.options.open_sftp_on_connect;
-        if saved_connection_requires_credentials(config.as_ref()) {
-            if self.try_reuse_active_saved_connection_terminal(id, &conn, window, cx) {
-                if open_sftp_on_connect
-                    && let Some(node_id) = self.indexed_saved_ssh_node_for_connection(id, &conn)
-                    && let Some(session_id) = self
-                        .workspace_runtime
-                        .read(cx)
-                        .ssh_terminal_session_ids_for_node(&node_id)
-                        .first()
-                        .copied()
-                {
-                    self.maybe_open_sftp_after_terminal_open(
-                        &node_id, session_id, true, window, cx,
-                    );
-                }
-                return;
-            }
-            self.open_saved_connection_prompt(
-                id,
-                SavedConnectionPromptAction::Connect,
-                Some(
-                    self.i18n
-                        .t("sessionManager.edit_properties.password_required"),
-                ),
-                window,
-                cx,
-            );
-            if open_sftp_on_connect {
-                self.update_connection_form_state(cx, |state| {
-                    if let Some(form) = state.form.as_mut() {
-                        form.open_sftp_on_connect = true;
+        match plan {
+            SavedSshOpen::Authenticate(conn) => {
+                if self.try_reuse_active_saved_connection_terminal(id, &conn, window, cx) {
+                    if open_sftp_on_connect
+                        && let Some(node_id) = self.indexed_saved_ssh_node_for_connection(id, &conn)
+                        && let Some(session_id) = self
+                            .workspace_runtime
+                            .read(cx)
+                            .ssh_terminal_session_ids_for_node(&node_id)
+                            .first()
+                            .copied()
+                    {
+                        self.maybe_open_sftp_after_terminal_open(
+                            &node_id, session_id, true, window, cx,
+                        );
                     }
-                });
+                    return;
+                }
+                self.open_saved_connection_prompt(
+                    id,
+                    SavedConnectionPromptAction::Connect,
+                    Some(
+                        self.i18n
+                            .t("sessionManager.edit_properties.password_required"),
+                    ),
+                    window,
+                    cx,
+                );
+                if open_sftp_on_connect {
+                    self.update_connection_form_state(cx, |state| {
+                        if let Some(form) = state.form.as_mut() {
+                            form.open_sftp_on_connect = true;
+                        }
+                    });
+                }
             }
-            return;
+            SavedSshOpen::Connect { config, title } => self.start_saved_connection_flow(
+                id.to_string(), config, title, None, open_sftp_on_connect, window, cx,
+            ),
         }
-        let config = config.expect("credential form handles unavailable configurations");
-        let title = conn.name.clone();
-        self.start_saved_connection_flow(
-            id.to_string(),
-            config,
-            title,
-            None,
-            open_sftp_on_connect,
-            window,
-            cx,
-        );
     }
 
     pub(in crate::workspace) fn open_saved_connection_prompt(
@@ -674,18 +648,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.open_saved_connection_editor(id, None, window, cx);
-        if self
-            .connection_form_state(cx)
-            .editing_saved_connection_id
-            .as_deref()
-            == Some(id)
-        {
-            // This marker is consumed after a successful save so normal
-            // connection edits keep their existing save-only behavior.
-            self.update_connection_form_state(cx, |state| {
-                state.editing_saved_connection_connect_after_save_node_id = Some(node_id);
-            });
-        }
+        self.connections.flow.update(cx, |flow, cx| {
+            flow.arm_reconnect_after_edit(id, node_id, cx);
+        });
     }
 
     pub(in crate::workspace) fn open_runtime_node_reconnect_editor(&mut self, node_id: NodeId, window: &mut Window, cx: &mut Context<Self>) {
@@ -699,7 +664,7 @@ impl WorkspaceApp {
         match draft {
             Ok(draft) => {
                 self.prepare_modal_interaction_boundary(cx);
-                self.update_connection_form_state(cx, |state| state.replace_with_new_form(draft));
+                self.connections.flow.update(cx, |flow, cx| flow.replace_form(draft, cx));
                 self.focus_connection_form(window, cx);
             }
             Err(error) if save => self.set_connection_status(Some(error.to_string()), cx),
@@ -928,7 +893,7 @@ impl WorkspaceApp {
         }
         if let Some(draft) = draft {
             self.open_new_connection_form(window, cx);
-            self.update_connection_form_state(cx, |state| state.replace_with_new_form(draft));
+            self.connections.flow.update(cx, |flow, cx| flow.replace_form(draft, cx));
         }
     }
 

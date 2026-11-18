@@ -21,47 +21,18 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<SessionManagerInput> {
-        let input = self.connections.session_manager.read(cx).focused_input?;
-        let session_manager_tab_active = self
-            .keyboard_content_tab(cx)
-            .is_some_and(|tab| tab.kind == oxideterm_workspace::TabKind::SessionManager);
-        // The sidebar form has no tab to own keys, so the surfaces the root
-        // mounts there gate their fields directly: the search disclosure
-        // mirrors the active-sessions search gating, and the group manager
-        // dialog is a modal whose draft field must stay active independently
-        // of the tab underneath, like the Oxide import/export dialogs.
-        let sidebar_search_active = input == SessionManagerInput::Search
-            && self.session_manager_search_open
-            && !self.session_manager_sidebar_sort_open
-            && self.session_manager_sidebar_visible();
-        let session_manager = self.connections.session_manager.read(cx);
-        let group_dialog_active = input == SessionManagerInput::GroupName
-            && session_manager.show_group_manager
-            && self.session_manager_sidebar_visible();
-        (sidebar_search_active
-            || group_dialog_active
-            || session_manager_input_is_active(
-                input,
-                session_manager_tab_active,
-                session_manager.oxide_import_dialog.as_ref(),
-                session_manager.oxide_export_dialog.as_ref(),
-            ))
-        .then_some(input)
+        self.connections.session_manager.read(cx).active_input(
+            self.keyboard_content_tab(cx)
+                .is_some_and(|tab| tab.kind == TabKind::SessionManager),
+            self.session_manager_sidebar_visible(),
+        )
     }
 
     pub(in crate::workspace) fn focused_oxide_dialog_input(
         &self,
         cx: &App,
     ) -> Option<SessionManagerInput> {
-        let session_manager = self.connections.session_manager.read(cx);
-        let input = session_manager.focused_input?;
-        session_manager_input_is_active(
-            input,
-            false,
-            session_manager.oxide_import_dialog.as_ref(),
-            session_manager.oxide_export_dialog.as_ref(),
-        )
-        .then_some(input)
+        self.connections.session_manager.read(cx).active_input(false, false)
     }
 
     pub(in crate::workspace) fn open_oxide_export_portable_migration_dialog(
@@ -135,35 +106,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn select_oxide_import_file(&mut self, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(SharedString::from(self.i18n.t("modals.import.select_file"))),
+        self.connections.session_manager.update(cx, |manager, cx| {
+            manager.select_oxide_import_file(&self.i18n, cx);
         });
-        let selection = async move {
-            match receiver.await {
-                Ok(Ok(Some(paths))) => Some(
-                    paths
-                        .into_iter()
-                        .next()
-                        .ok_or_else(|| "未选择文件".to_string())
-                        .and_then(|path| {
-                            fs::read(&path)
-                                .map(|bytes| (path, Arc::<[u8]>::from(bytes)))
-                                .map_err(|error| error.to_string())
-                        }),
-                ),
-                Ok(Ok(None)) => None,
-                Ok(Err(error)) => Some(Err(error.to_string())),
-                Err(error) => Some(Err(error.to_string())),
-            }
-        };
-        self.connections
-            .session_manager
-            .update(cx, |session_manager, cx| {
-                session_manager.start_import_file_picker(selection, cx);
-            });
     }
 
     pub(in crate::workspace) fn preview_oxide_import_dialog(&mut self, cx: &mut Context<Self>) {
@@ -302,29 +247,9 @@ impl WorkspaceApp {
             imported_plugin_settings,
             skipped_plugin_settings,
         };
-        let applied = result.envelope.imported
-            + result.envelope.merged
-            + result.envelope.replaced
-            + result.envelope.renamed
-            + result.envelope.imported_forwards
-            + result.envelope.imported_serial_profiles
-            + result.envelope.imported_telnet_profiles
-            + result.envelope.imported_mosh_profiles
-            + result.envelope.imported_standalone_sftp_profiles
-            + result.envelope.imported_remote_desktop_profiles
-            + result.envelope.restored_managed_keys
-            + result.envelope.restored_profile_credentials
-            + result.envelope.cleared_profile_credentials
-            + result.imported_quick_commands
-            + result.imported_plugin_settings
-            + usize::from(result.imported_app_settings)
-            + result.envelope.imported_portable_secrets;
-        let errors = result.envelope.errors.len()
-            + result.quick_commands_errors.len()
-            + usize::from(plugin_settings_failed)
-            + usize::from(options.import_app_settings && result.skipped_app_settings);
+        let counts = result.audit_counts(plugin_settings_failed, options.import_app_settings);
         self.present_oxide_import_result(result, cx);
-        (applied, errors)
+        counts
     }
 
     pub(super) fn present_oxide_import_result(
@@ -380,54 +305,20 @@ impl WorkspaceApp {
         dialog: &OxideExportDialogState,
         cx: &App,
     ) -> Option<ExportPreflightResult> {
-        let has_preflight_content =
-            !oxide_export_target_ids(dialog).is_empty() || dialog.include_portable_secrets;
-        has_preflight_content.then(|| {
-            oxide_export_preflight(
-                &self.connection_store,
-                dialog,
-                self.oxide_export_portable_secret_count(dialog, cx),
-            )
+        self.oxide_transfer().preflight_for_dialog(dialog, || {
+            self.oxide_export_portable_secret_count(dialog, cx)
         })
     }
 
     pub(in crate::workspace) fn export_oxide_dialog(&mut self, cx: &mut Context<Self>) {
-        let validation = {
-            let session_manager = self.connections.session_manager.read(cx);
-            let Some(dialog) = session_manager.oxide_export_dialog.as_ref() else {
-                return;
-            };
-            if let Some(error_key) = oxide_export_validation_error(dialog) {
-                Err(self.i18n.t(error_key))
-            } else {
-                let selected_ids = oxide_export_target_ids(dialog)
-                    .into_iter()
-                    .collect::<Vec<_>>();
-                let preflight = oxide_export_preflight(
-                    &self.connection_store,
-                    dialog,
-                    self.oxide_export_portable_secret_count(dialog, cx),
-                );
-                self.build_oxide_export_options(dialog, cx)
-                    .map(|options| (selected_ids, preflight, options))
-            }
-        };
-        let (selected_ids, preflight, options) = match validation {
-            Ok(request) => request,
-            Err(error) => {
-                self.connections
-                    .session_manager
-                    .update(cx, |session_manager, cx| {
-                        if let Some(dialog) = session_manager.oxide_export_dialog.as_mut() {
-                            dialog.error = Some(error);
-                            cx.notify();
-                        }
-                    });
-                return;
-            }
-        };
-        self.oxide_transfer()
-            .start_export(selected_ids, preflight, options, cx);
+        let request = self.oxide_transfer().prepare_export(
+            cx,
+            |dialog, cx| self.oxide_export_portable_secret_count(dialog, cx),
+            |dialog, cx| self.build_oxide_export_options(dialog, cx),
+        );
+        if let Some((ids, preflight, options)) = request {
+            self.oxide_transfer().start_export(ids, preflight, options, cx);
+        }
     }
 
     pub(super) fn prompt_save_oxide_export(
@@ -436,58 +327,10 @@ impl WorkspaceApp {
         exported_count: usize,
         cx: &mut Context<Self>,
     ) {
-        let mut audit = oxideterm_audit::AuditOperation::begin(
-            oxideterm_audit::AuditCategory::Configuration,
-            "configuration_export",
-            None,
-            Some("oxide_file"),
-        );
-        audit.summary(&format!("connections={exported_count}"));
-        let directory = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join("Downloads"))
-            .unwrap_or_else(|| PathBuf::from("."));
-        let suggested = format!(
-            "oxideterm-export-{}.oxide",
-            Utc::now().format("%Y%m%d-%H%M%S")
-        );
-        let receiver = cx.prompt_for_new_path(&directory, Some(&suggested));
-        let save = async move {
-            let result = match receiver.await {
-                Ok(Ok(Some(path))) => Some(
-                    fs::write(&path, bytes)
-                        .map(|_| path)
-                        .map_err(|error| error.to_string()),
-                ),
-                Ok(Ok(None)) => None,
-                Ok(Err(error)) => Some(Err(error.to_string())),
-                Err(error) => Some(Err(error.to_string())),
-            };
-            audit.finish(
-                match &result {
-                    Some(Ok(_)) => oxideterm_audit::AuditOutcome::Succeeded,
-                    Some(Err(_)) => oxideterm_audit::AuditOutcome::Failed,
-                    None => oxideterm_audit::AuditOutcome::Cancelled,
-                },
-                oxideterm_audit::AuditEvidence::Protocol,
-                None,
-                None,
-            );
-            result
-        };
         let settings_path = self.settings_store.path().to_path_buf();
-        let success_template = self.i18n.t("export.success");
-        self.connections
-            .session_manager
-            .update(cx, |session_manager, cx| {
-                session_manager.start_export_file_picker(
-                    save,
-                    settings_path,
-                    success_template,
-                    exported_count,
-                    cx,
-                );
-            });
+        self.connections.session_manager.update(cx, |manager, cx| {
+            manager.prompt_save_oxide_export(bytes, exported_count, settings_path, &self.i18n, cx);
+        });
     }
 
     pub(super) fn build_oxide_export_options(

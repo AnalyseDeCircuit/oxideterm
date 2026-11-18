@@ -16,7 +16,7 @@ use oxideterm_gpui_connections::session_manager::{
 };
 use oxideterm_gpui_connections::views::{
     ConnectionFormEnvironment, ConnectionsEnvironment, ConnectionsInput, ConnectionsViewBindings,
-    ConnectionsWindowRequest, FormPluginType, FormTotpCredential, TunnelFormEnvironment, TunnelKind,
+    ConnectionsWindowRequest, FormPluginType, TunnelFormEnvironment, TunnelKind,
 };
 
 use super::{WorkspaceApp, ime::WorkspaceImeTarget, selectable_text::selectable_text_id};
@@ -64,15 +64,7 @@ impl WorkspaceApp {
                     let owner = oxide_environment.upgrade()?;
                     let app = owner.read(cx);
                     let store = &app.connection_store;
-                    Some(OxideDialogEnvironment {
-                        saved_ids: store.connections().iter().map(|record| record.id.clone())
-                            .chain(store.plugin_profiles().iter().map(|profile| profile.id.clone())).collect(),
-                        serial_count: store.serial_profiles().len(),
-                        telnet_count: store.telnet_profiles().len(),
-                        mosh_count: store.mosh_profiles().len(),
-                        remote_desktop_count: store.remote_desktop_profiles().len(),
-                        ble_count: store.ble_profiles().len(),
-                    })
+                    Some(OxideDialogEnvironment::from_store(store))
                 }),
                 ime: Rc::new(move |input, cx| Some(manager_ime.upgrade()?.read(cx)
                     .connection_ime_frame_for_target(WorkspaceImeTarget::SessionManager(input), cx))),
@@ -264,6 +256,23 @@ impl WorkspaceApp {
             ConnectionsWindowRequest::SaveConfirmedAuthentication { node_id, connection_id, configured_credentials_confirmed } => {
                 self.save_confirmed_connection_auth(node_id, connection_id, configured_credentials_confirmed, cx);
             }
+            ConnectionsWindowRequest::ToggleCatalogSidebarSearch => {
+            self.prepare_modal_interaction_boundary(cx);
+            if self.connections.session_manager.read(cx).sidebar_search_open {
+                self.close_session_manager_sidebar_search(cx);
+            } else {
+                self.begin_disclosure_motion("session-manager-search".into(), true, cx);
+                self.clear_ime_selection();
+                self.selected_ime_target = Some(WorkspaceImeTarget::SessionManager(
+                    super::SessionManagerInput::Search,
+                ));
+                self.connections.session_manager.update(cx, super::session_manager::SessionManagerState::open_sidebar_search);
+                window.focus(&self.focus_handle, cx);
+                self.show_active_input_caret(cx);
+            }
+            cx.stop_propagation();
+            cx.notify();
+            }
             ConnectionsWindowRequest::FocusForm => window.focus(&self.focus_handle, cx),
             ConnectionsWindowRequest::FocusSessionInput(input, event) => {
                 self.connections.session_manager.update(cx, |manager, cx| {
@@ -283,14 +292,9 @@ impl WorkspaceApp {
             ConnectionsWindowRequest::FocusInput(input, event) => {
                 let target = match input {
                     ConnectionsInput::Form(field) => {
-                        self.update_connection_form_state(cx, |state| {
-                            if let Some(form) = state.form.as_mut() {
-                                form.field_focused = true;
-                                form.focused_field = field;
-                                form_state::clear_connection_selection(form);
-                            }
+                        self.connections.flow.update(cx, |flow, cx| {
+                            flow.focus_form_input(field, cx);
                         });
-                        self.close_new_connection_select(cx);
                         WorkspaceImeTarget::NewConnection(field)
                     }
                     ConnectionsInput::KeyboardInteractive(index) => {
@@ -368,18 +372,6 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings();
         let plugins = self.plugin_entity.read(cx);
         ConnectionFormEnvironment {
-            connections: self.connection_store.connection_infos(),
-            groups: self.connection_store.groups().to_vec(),
-            totp: self
-                .connection_store
-                .totp_credentials()
-                .iter()
-                .map(|entry| FormTotpCredential {
-                    id: entry.id.clone(),
-                    name: entry.name.clone(),
-                })
-                .collect(),
-            keys: self.connection_store.managed_ssh_keys(),
             node_titles: self
                 .ssh_nodes
                 .iter()
@@ -395,9 +387,6 @@ impl WorkspaceApp {
                     ForwardType::Dynamic => TunnelKind::Dynamic,
                 },
             }),
-            terminal: settings.terminal.clone(),
-            ui_font: settings.appearance.ui_font_family.clone(),
-            default_shell_id: settings.local_terminal.default_shell_id.clone(),
             local_shells: self.effective_local_shells_for_settings(settings),
             plugin_types: self
                 .plugin_connection_types(cx)
@@ -423,6 +412,7 @@ impl WorkspaceApp {
             rdp_available: plugins.remote_desktop_plugin_enabled(RemoteDesktopProtocol::Rdp),
             vnc_available: plugins.remote_desktop_plugin_enabled(RemoteDesktopProtocol::Vnc),
             panel_glass: self.settings_background_active(),
+            ..ConnectionFormEnvironment::from_store(&self.connection_store, settings)
         }
     }
 

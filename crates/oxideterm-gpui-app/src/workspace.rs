@@ -608,8 +608,6 @@ pub(crate) struct WorkspaceApp {
     session_search_query: String,
     // Session manager sidebar search disclosure and sort menu open state.
     // These are sidebar-only flags so the tab's toolbar menus don't conflict.
-    session_manager_search_open: bool,
-    session_manager_sidebar_sort_open: bool,
     // Set only across the tabbar's "show in sidebar" handoff: it closes the
     // Session Manager tab and the sidebar form takes over, so
     // finish_tab_removal must keep the panel on Connections instead of

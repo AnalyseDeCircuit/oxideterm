@@ -385,6 +385,8 @@ pub struct SessionManagerState {
     pub sort_field: SessionSortField,
     pub sort_direction: SortDirection,
     pub search_query: String,
+    pub sidebar_search_open: bool,
+    pub sidebar_sort_open: bool,
     pub selected_items: HashSet<SessionManagerSelectionTarget>,
     // The fixed endpoint of the last plain click, used by Shift+click range selection.
     pub selection_anchor: Option<SessionManagerSelectionTarget>,
@@ -458,6 +460,8 @@ impl Default for SessionManagerState {
             sort_field: SessionSortField::LastUsed,
             sort_direction: SortDirection::Desc,
             search_query: String::new(),
+            sidebar_search_open: false,
+            sidebar_sort_open: false,
             selected_items: HashSet::new(),
             selection_anchor: None,
             visible_selection_targets: Vec::new(),
@@ -743,7 +747,46 @@ impl SessionManagerState {
         }
     }
 
-    pub fn begin_ssh_config_host_load(
+    pub fn refresh_ssh_config_hosts(
+        &mut self,
+        enabled: bool,
+        runtime: Arc<tokio::runtime::Runtime>,
+        store: &oxideterm_connections::ConnectionStore,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut Context<Self>,
+    ) {
+        if !enabled {
+            self.clear_ssh_config_hosts(cx);
+            return;
+        }
+        let existing_names = store.connections().iter().map(|saved| saved.name.clone()).collect();
+        self.begin_ssh_config_host_load(
+            runtime, existing_names, i18n.t("settings_view.connections.ssh_config.load_failed"), cx,
+        );
+    }
+
+    pub fn import_ssh_config_host(
+        &mut self,
+        store: &mut oxideterm_connections::ConnectionStore,
+        alias: &str,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let (imported, status) = match oxideterm_connections::import_ssh_config_alias(store, alias) {
+            Ok(true) => {
+                self.remove_ssh_config_host_alias(alias, cx);
+                (true, i18n.t("settings_view.errors.import_success").replace("{{name}}", alias))
+            }
+            Ok(false) => (false, i18n.t("settings_view.connections.ssh_config.batch_import_skipped")
+                .replace("{{count}}", "1")),
+            Err(error) => (false, i18n.t("settings_view.errors.import_failed")
+                .replace("{{error}}", &error.to_string())),
+        };
+        self.set_status(Some(status), cx);
+        imported
+    }
+
+    fn begin_ssh_config_host_load(
         &mut self,
         runtime: Arc<tokio::runtime::Runtime>,
         existing_names: HashSet<String>,

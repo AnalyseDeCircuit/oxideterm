@@ -1,4 +1,5 @@
 use super::*;
+use chrono::Utc;
 use gpui::{App, Entity};
 use oxideterm_connections::oxide_file::OxideForwardRecord;
 use oxideterm_connections::{
@@ -15,6 +16,8 @@ use oxideterm_quick_commands::QuickCommandImportStrategy;
 use oxideterm_settings::export_oxide_settings_snapshot_json;
 use std::{
     collections::{HashMap, HashSet},
+    fs,
+    path::PathBuf,
     sync::Arc,
     time::Duration,
 };
@@ -66,6 +69,84 @@ pub fn oxide_export_draft(
 }
 
 impl SessionManagerState {
+    pub fn select_oxide_import_file(&mut self, i18n: &I18n, cx: &mut gpui::Context<Self>) {
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some(gpui::SharedString::from(i18n.t("modals.import.select_file"))),
+        });
+        let selection = async move {
+            match receiver.await {
+                Ok(Ok(Some(paths))) => Some(
+                    paths
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| "未选择文件".to_string())
+                        .and_then(|path| {
+                            fs::read(&path)
+                                .map(|bytes| (path, Arc::<[u8]>::from(bytes)))
+                                .map_err(|error| error.to_string())
+                        }),
+                ),
+                Ok(Ok(None)) => None,
+                Ok(Err(error)) => Some(Err(error.to_string())),
+                Err(error) => Some(Err(error.to_string())),
+            }
+        };
+        self.start_import_file_picker(selection, cx);
+    }
+
+    pub fn prompt_save_oxide_export(
+        &mut self,
+        bytes: Vec<u8>,
+        exported_count: usize,
+        settings_path: PathBuf,
+        i18n: &I18n,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let mut audit = oxideterm_audit::AuditOperation::begin(
+            oxideterm_audit::AuditCategory::Configuration,
+            "configuration_export",
+            None,
+            Some("oxide_file"),
+        );
+        audit.summary(&format!("connections={exported_count}"));
+        let directory = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|home| home.join("Downloads"))
+            .unwrap_or_else(|| PathBuf::from("."));
+        let suggested = format!(
+            "oxideterm-export-{}.oxide",
+            Utc::now().format("%Y%m%d-%H%M%S")
+        );
+        let receiver = cx.prompt_for_new_path(&directory, Some(&suggested));
+        let save = async move {
+            let result = match receiver.await {
+                Ok(Ok(Some(path))) => Some(
+                    fs::write(&path, bytes)
+                        .map(|_| path)
+                        .map_err(|error| error.to_string()),
+                ),
+                Ok(Ok(None)) => None,
+                Ok(Err(error)) => Some(Err(error.to_string())),
+                Err(error) => Some(Err(error.to_string())),
+            };
+            audit.finish(
+                match &result {
+                    Some(Ok(_)) => oxideterm_audit::AuditOutcome::Succeeded,
+                    Some(Err(_)) => oxideterm_audit::AuditOutcome::Failed,
+                    None => oxideterm_audit::AuditOutcome::Cancelled,
+                },
+                oxideterm_audit::AuditEvidence::Protocol,
+                None,
+                None,
+            );
+            result
+        };
+        self.start_export_file_picker(save, settings_path, i18n.t("export.success"), exported_count, cx);
+    }
+
     pub fn show_oxide_import_dialog(
         &mut self,
         portable_migration: bool,
@@ -680,6 +761,43 @@ impl OxideTransfer<'_> {
             }
             cx.notify();
         });
+    }
+
+    pub fn preflight_for_dialog(
+        &self,
+        dialog: &OxideExportDialogState,
+        portable_secret_count: impl FnOnce() -> usize,
+    ) -> Option<ExportPreflightResult> {
+        let has_content = !oxide_export_target_ids(dialog).is_empty() || dialog.include_portable_secrets;
+        has_content.then(|| oxide_export_preflight(self.store, dialog, portable_secret_count()))
+    }
+
+    pub fn prepare_export(
+        &self,
+        cx: &mut App,
+        portable_secret_count: impl FnOnce(&OxideExportDialogState, &App) -> usize,
+        export_options: impl FnOnce(&OxideExportDialogState, &App) -> Result<OxideExportOptions, String>,
+    ) -> Option<(Vec<String>, ExportPreflightResult, OxideExportOptions)> {
+        let dialog = self.manager.read(cx).oxide_export_dialog.as_ref()?;
+        let request = if let Some(error_key) = oxide_export_validation_error(dialog) {
+            Err(self.i18n.t(error_key))
+        } else {
+            let selected = oxide_export_target_ids(dialog).into_iter().collect();
+            let preflight = oxide_export_preflight(self.store, dialog, portable_secret_count(dialog, cx));
+            export_options(dialog, cx).map(|options| (selected, preflight, options))
+        };
+        match request {
+            Ok(request) => Some(request),
+            Err(error) => {
+                self.manager.update(cx, |manager, cx| {
+                    if let Some(dialog) = manager.oxide_export_dialog.as_mut() {
+                        dialog.error = Some(error);
+                        cx.notify();
+                    }
+                });
+                None
+            }
+        }
     }
 
     pub fn start_export(

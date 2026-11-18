@@ -285,7 +285,9 @@ impl WorkspaceApp {
         }
         if section != SidebarSection::Connections {
             self.close_session_manager_sidebar_search(cx);
-            self.session_manager_sidebar_sort_open = false;
+            self.connections.session_manager.update(cx, |manager, cx| {
+                manager.set_sidebar_sort_open(false, cx);
+            });
         }
         self.persist_sidebar_settings(cx);
         cx.notify();

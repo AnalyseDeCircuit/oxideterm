@@ -1,13 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    sync::Arc,
-};
+use std::collections::HashSet;
 
+#[cfg(test)]
 use chrono::Utc;
 use gpui::prelude::*;
 use oxideterm_connections::{
-    SecretString,
     oxide_file::{
         ExportPreflightResult, ImportResultEnvelope, OxideExportOptions, OxideForwardRecord,
     },

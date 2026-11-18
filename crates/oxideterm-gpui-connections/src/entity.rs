@@ -508,6 +508,21 @@ impl ConnectionFlowEntity {
         true
     }
 
+    pub fn replace_form(&mut self, form: crate::form_state::NewConnectionForm, cx: &mut Context<Self>) {
+        self.form.replace_with_new_form(form);
+        cx.notify();
+    }
+
+    pub fn focus_form_input(&mut self, field: crate::NewConnectionField, cx: &mut Context<Self>) {
+        if let Some(form) = self.form.form.as_mut() {
+            form.field_focused = true;
+            form.focused_field = field;
+            crate::form_state::clear_connection_selection(form);
+        }
+        self.form.close_select();
+        cx.notify();
+    }
+
     pub(crate) fn clear_form_after_submit(&mut self, cx: &mut Context<Self>) {
         let was_open = self.form.form.is_some();
         self.form.clear();
@@ -1102,6 +1117,23 @@ impl ConnectionFlowEntity {
             challenge.remember_password = !challenge.remember_password;
             cx.emit(AuthenticationChanged);
         }
+    }
+
+    pub fn dismiss_keyboard_interactive_challenge(
+        &mut self,
+        delay: Duration,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.cancel_keyboard_interactive_challenge(delay, cx) {
+            return false;
+        }
+        if let Some(form) = self.form.form.as_mut() {
+            form.pending = false;
+            form.error = Some(i18n.t("ssh.kbi.cancelled"));
+            cx.notify();
+        }
+        true
     }
 
     pub fn cancel_keyboard_interactive_challenge(

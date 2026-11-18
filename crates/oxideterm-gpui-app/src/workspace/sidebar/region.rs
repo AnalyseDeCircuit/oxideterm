@@ -394,7 +394,7 @@ impl WorkspaceApp {
                 panel_section == SidebarSection::Connections
                     && self
                         .disclosure_motions
-                        .retained("session-manager-search", self.session_manager_search_open),
+                        .retained("session-manager-search", self.connections.session_manager.read(cx).sidebar_search_open),
                 |panel| {
                     panel.child(
                         self.disclosure_motions.render(
@@ -553,7 +553,7 @@ impl WorkspaceApp {
             let actions = div()
                 .flex()
                 .items_center()
-                .child(self.render_session_manager_search_button(cx))
+                .child(self.connections.session_manager_sidebar_search_button())
                 .child(
                     div()
                         .id("sidebar-session-manager-sort")
@@ -611,7 +611,7 @@ impl WorkspaceApp {
         let host_view_active = action == SidebarActionKind::ToggleSessionView
             && self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Host;
         let sort_active = action == SidebarActionKind::ToggleSessionSort
-            && self.session_manager_sidebar_sort_open;
+            && self.connections.session_manager.read(cx).sidebar_sort_open;
         let active = host_view_active || sort_active;
 
         div()
@@ -647,8 +647,9 @@ impl WorkspaceApp {
                             this.open_session_manager_tab(window, cx);
                         }
                         SidebarActionKind::ToggleSessionSort => {
-                            this.session_manager_sidebar_sort_open =
-                                !this.session_manager_sidebar_sort_open;
+                            this.connections.session_manager.update(cx, |manager, cx| {
+                                manager.set_sidebar_sort_open(!manager.sidebar_sort_open, cx);
+                            });
                             cx.notify();
                         }
                     }
@@ -659,55 +660,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    /// Icon button that toggles the session-manager search disclosure in the
-    /// sidebar header, mirroring the active-sessions search button.
-    pub(in crate::workspace) fn render_session_manager_search_button(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let open = self.session_manager_search_open;
-        let theme = self.tokens.ui;
-        self.workspace_tooltip_icon_button(
-            LucideIcon::Search,
-            self.tokens.metrics.sidebar_action_icon_size,
-            rgb(if open { theme.text } else { theme.text_muted }),
-            IconButtonOptions {
-                has_background: open,
-                background: open.then_some(rgb(theme.bg_active)),
-                hover_background: Some(rgb(theme.bg_hover)),
-                ..IconButtonOptions::opaque_toolbar(
-                    self.tokens.metrics.sidebar_action_size,
-                    ButtonRadius::Md,
-                )
-            },
-            self.i18n.t("sidebar.search.title"),
-            "sidebar-session-manager-search",
-            false,
-            cx.listener(|this, _event, window, cx| {
-                this.prepare_modal_interaction_boundary(cx);
-                if this.session_manager_search_open {
-                    this.close_session_manager_sidebar_search(cx);
-                } else {
-                    this.begin_disclosure_motion("session-manager-search".into(), true, cx);
-                    this.session_manager_search_open = true;
-                    this.clear_ime_selection();
-                    this.selected_ime_target = Some(ime::WorkspaceImeTarget::SessionManager(
-                        SessionManagerInput::Search,
-                    ));
-                    this.connections.session_manager.update(cx, |manager, cx| {
-                        manager.focused_input = Some(SessionManagerInput::Search);
-                        cx.notify();
-                    });
-                    window.focus(&this.focus_handle, cx);
-                    this.show_active_input_caret(cx);
-                }
-                cx.stop_propagation();
-                cx.notify();
-            }),
-            cx.entity(),
-        )
-        .into_any_element()
-    }
 
     pub(in crate::workspace) fn render_session_manager_search_input(
         &self, _cx: &mut Context<Self>,

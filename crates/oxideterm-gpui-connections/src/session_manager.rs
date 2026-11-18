@@ -24,7 +24,7 @@ pub use catalog_view::{CatalogAction, CatalogEnvironment};
 pub use groups::*;
 pub use interaction::*;
 pub use labels::*;
-pub use mutations::delete_catalog_profile;
+pub use mutations::{CatalogDeletion, delete_catalog_profile, delete_catalog_selection};
 pub use oxide_delivery::*;
 pub use oxide_dialogs::{
     BatchWindowAction, ManagerTextRole, OxideDialogAction, OxideDialogEnvironment,

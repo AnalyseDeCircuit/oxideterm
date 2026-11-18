@@ -1,4 +1,5 @@
-use gpui::Context;
+use gpui::{App, Context, Entity};
+use std::ops::DerefMut;
 use oxideterm_connections::ConnectionStore;
 use oxideterm_i18n::I18n;
 
@@ -195,4 +196,57 @@ pub fn delete_catalog_profile(
         Target::RemoteDesktop(id) => store.delete_remote_desktop_profile(id),
         _ => Ok(false),
     }
+}
+
+pub enum CatalogDeletion {
+    Single(Target),
+    Batch(Vec<Target>),
+    Group(String),
+}
+
+impl SessionManagerState {
+    pub fn take_catalog_deletion(&mut self, cx: &mut Context<Self>) -> Option<CatalogDeletion> {
+        let target = match self.take_delete(cx)? {
+            Confirm::Single { id, .. } => Target::Connection(id),
+            Confirm::SerialProfile { id, .. } => Target::Serial(id),
+            Confirm::BleProfile { id, .. } => Target::Ble(id),
+            Confirm::LocalTerminalProfile { id, .. } => Target::LocalTerminal(id),
+            Confirm::TelnetProfile { id, .. } => Target::Telnet(id),
+            Confirm::MoshProfile { id, .. } => Target::Mosh(id),
+            Confirm::StandaloneSftpProfile { id, .. } => Target::StandaloneSftp(id),
+            Confirm::RemoteDesktopProfile { id, .. } => Target::RemoteDesktop(id),
+            Confirm::Batch { targets } => return Some(CatalogDeletion::Batch(targets)),
+            Confirm::Group { name } => return Some(CatalogDeletion::Group(name)),
+        };
+        Some(CatalogDeletion::Single(target))
+    }
+}
+
+pub fn delete_catalog_selection<C: DerefMut<Target = App>>(
+    manager: &Entity<SessionManagerState>,
+    targets: Vec<Target>,
+    i18n: &I18n,
+    cx: &mut C,
+    mut remove: impl FnMut(&Target, &mut C) -> anyhow::Result<bool>,
+) -> bool {
+    let mut deleted = 0;
+    for target in targets {
+        match remove(&target, cx) {
+            Ok(true) => deleted += 1,
+            Ok(false) => {}
+            Err(error) => {
+                let status = match &target {
+                    Target::Connection(_) | Target::Ftp(_) => error.to_string(),
+                    Target::Plugin(_) => i18n.t("plugin.connections.failed"),
+                    _ => continue,
+                };
+                manager.update(&mut **cx, |state, cx| state.set_status(Some(status), cx));
+                if !matches!(target, Target::Ftp(_)) {
+                    return false;
+                }
+            }
+        }
+    }
+    manager.update(&mut **cx, |state, cx| state.finish_batch_delete(deleted, i18n, cx));
+    deleted > 0
 }

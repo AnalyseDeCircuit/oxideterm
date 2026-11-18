@@ -87,6 +87,49 @@ impl ConnectionFlowEntity {
 }
 
 impl ConnectionFlowEntity {
+    pub fn default_submit_action(&self) -> NewConnectionSubmitAction {
+        if self.form.form.as_ref().is_some_and(|form| form.standalone_connection_id.is_some()) {
+            NewConnectionSubmitAction::Connect
+        } else {
+            NewConnectionSubmitAction::SaveAndConnect
+        }
+    }
+
+    pub fn plan_submission(
+        &mut self,
+        action: NewConnectionSubmitAction,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> Option<FormSubmission> {
+        let plan = plan_form_submission(&mut self.form, action, i18n);
+        cx.notify();
+        plan
+    }
+
+    pub fn persist_ssh(
+        &mut self,
+        store: &mut ConnectionStore,
+        prefix: anyhow::Result<Vec<crate::form_state::NewConnectionProxyHop>>,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> Option<SavedConnectionRuntimeHandoff> {
+        let handoff = persist_ssh_form(self.form.form.as_mut()?, store, prefix, i18n);
+        cx.notify();
+        handoff
+    }
+
+    pub fn arm_reconnect_after_edit(
+        &mut self,
+        connection_id: &str,
+        node_id: oxideterm_ssh::NodeId,
+        cx: &mut Context<Self>,
+    ) {
+        if self.form.editing_saved_connection_id.as_deref() == Some(connection_id) {
+            self.form.editing_saved_connection_connect_after_save_node_id = Some(node_id);
+            cx.notify();
+        }
+    }
+
     pub fn begin_connection_form(
         &mut self,
         transport: crate::form_state::NewConnectionTransport,
@@ -1946,4 +1989,59 @@ impl crate::entity::ConnectionFlowEntity {
             },
         ))
     }
+}
+
+pub enum SavedDesktopOpen {
+    Prompt(Box<NewConnectionForm>),
+    Launch {
+        profile: RemoteDesktopConnectionProfile,
+        password: Option<SecretString>,
+        gateway: Option<String>,
+    },
+}
+
+pub fn prepare_saved_desktop_open(
+    store: &ConnectionStore,
+    settings: &PersistedSettings,
+    id: &str,
+    i18n: &I18n,
+) -> Result<Option<SavedDesktopOpen>, String> {
+    let Some(saved) = store.get_remote_desktop_profile(id).cloned() else {
+        return Ok(None);
+    };
+    let password = store.get_remote_desktop_credential(id).map_err(|error| {
+        format!("{}: {error}", i18n.t("sessionManager.remote_desktop_profiles.open_failed"))
+    })?;
+    let socks_proxy = if saved.protocol == RemoteDesktopProtocol::Rdp {
+        if password.is_none() {
+            // Imported and synced profiles may lack device-local credentials.
+            let mut form = crate::form_state::form_from_remote_desktop_profile(&saved, String::new());
+            form.error = Some(i18n.t("modals.new_connection.remote_desktop_password_required"));
+            form.focused_field = crate::NewConnectionField::Password;
+            return Ok(Some(SavedDesktopOpen::Prompt(Box::new(form))));
+        }
+        oxideterm_session_adapter::rdp_socks_proxy_from_saved_policy(
+            store, settings, &saved.upstream_proxy, saved.ssh_gateway_connection_id.is_some(),
+        ).map_err(|error| format!("{}: {error}", i18n.t("modals.new_connection.remote_desktop_proxy_failed")))?
+    } else {
+        None
+    };
+    let profile = RemoteDesktopConnectionProfile {
+        id: saved.id.clone(),
+        label: saved.name,
+        protocol: saved.protocol,
+        endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
+        transport_endpoint: None,
+        socks_proxy,
+        username: saved.username,
+        domain: saved.domain,
+        credential_ref: saved.credential_ref,
+        read_only: saved.read_only,
+        session_options: saved.session_options,
+    };
+    Ok(Some(SavedDesktopOpen::Launch {
+        profile,
+        password,
+        gateway: saved.ssh_gateway_connection_id,
+    }))
 }

@@ -1,14 +1,12 @@
 use super::*;
 use crate::workspace::new_connection::{
-    form_from_remote_desktop_profile, terminal_serial_flow_from_profile,
+    terminal_serial_flow_from_profile,
     terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_profile,
 };
 use crate::workspace::terminal_command_bar::{
     SavedConsoleProfileKind, delete_saved_console_profile,
 };
-use oxideterm_remote_desktop::{
-    RemoteDesktopConnectionProfile, RemoteDesktopEndpoint, RemoteDesktopSecret,
-};
+use oxideterm_remote_desktop::RemoteDesktopSecret;
 
 impl WorkspaceApp {
     fn update_catalog_groups(
@@ -30,14 +28,6 @@ impl WorkspaceApp {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
     }
-    pub(super) fn connection_count_for_group(&self, group: &str) -> usize {
-        connection_count_for_group(group, &self.connection_store, &self.saved_ssh_tunnels())
-    }
-
-    pub(super) fn session_group_tree(&self) -> (Vec<String>, HashMap<String, Vec<String>>) {
-        session_group_tree(&self.connection_store, &self.saved_ssh_tunnels())
-    }
-
     pub(in crate::workspace) fn close_session_row_menus(&mut self, cx: &mut Context<Self>) -> bool {
         self.connections
             .session_manager
@@ -54,32 +44,10 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        let visible_items = self
-            .session_manager_display_items(cx)
-            .into_iter()
-            .filter_map(|item| item.selection_target())
-            .collect::<HashSet<_>>();
-        self.connections
-            .session_manager
-            .update(cx, |session_manager, cx| {
-                let previous_count = session_manager.selected_items.len();
-                session_manager
-                    .selected_items
-                    .retain(|target| visible_items.contains(target));
-                // A hidden anchor row would make the next Shift+click degrade or
-                // span across rows the user cannot see; keep anchors that are
-                // still visible.
-                if session_manager
-                    .selection_anchor
-                    .as_ref()
-                    .is_some_and(|anchor| !visible_items.contains(anchor))
-                {
-                    session_manager.selection_anchor = None;
-                }
-                if session_manager.selected_items.len() != previous_count {
-                    cx.notify();
-                }
-            });
+        let visible = self.session_manager_display_items(cx);
+        self.connections.session_manager.update(cx, |manager, cx| {
+            manager.retain_visible_selection(visible, cx);
+        });
     }
 
     pub(super) fn submit_session_group_editor(&mut self, cx: &mut Context<Self>) {
@@ -119,26 +87,17 @@ impl WorkspaceApp {
     }
 
     pub(super) fn confirm_session_manager_delete(&mut self, cx: &mut Context<Self>) {
-        use SessionManagerDeleteConfirm as Confirm;
-        use SessionManagerSelectionTarget as Target;
         let Some(confirm) = self
             .connections
             .session_manager
-            .update(cx, SessionManagerState::take_delete)
+            .update(cx, SessionManagerState::take_catalog_deletion)
         else {
             return;
         };
         let target = match confirm {
-            Confirm::Single { id, .. } => Target::Connection(id),
-            Confirm::SerialProfile { id, .. } => Target::Serial(id),
-            Confirm::BleProfile { id, .. } => Target::Ble(id),
-            Confirm::LocalTerminalProfile { id, .. } => Target::LocalTerminal(id),
-            Confirm::TelnetProfile { id, .. } => Target::Telnet(id),
-            Confirm::MoshProfile { id, .. } => Target::Mosh(id),
-            Confirm::StandaloneSftpProfile { id, .. } => Target::StandaloneSftp(id),
-            Confirm::RemoteDesktopProfile { id, .. } => Target::RemoteDesktop(id),
-            Confirm::Batch { targets } => return self.delete_selected_session_items(targets, cx),
-            Confirm::Group { name } => return self.delete_session_group(&name, cx),
+            CatalogDeletion::Single(target) => target,
+            CatalogDeletion::Batch(targets) => return self.delete_selected_session_items(targets, cx),
+            CatalogDeletion::Group(group) => return self.delete_session_group(&group, cx),
         };
         let result = self.remove_catalog_target(&target, true, cx);
         if self.connections.session_manager.update(cx, |state, cx| {
@@ -344,116 +303,43 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(saved) = self
-            .connection_store
-            .get_remote_desktop_profile(id)
-            .cloned()
-        else {
-            if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
-                self.standalone_connections
-                    .mark_attempt_error(connection_attempt_id);
-            }
-            return;
-        };
-        let password = match self.connection_store.get_remote_desktop_credential(id) {
-            Ok(secret) => secret
-                .map(SecretString::into_zeroizing)
-                .map(RemoteDesktopSecret::from),
-            Err(error) => {
-                if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
-                    self.standalone_connections
-                        .mark_attempt_error(connection_attempt_id);
-                }
-                let status = format!(
-                    "{}: {error}",
-                    self.i18n
-                        .t("sessionManager.remote_desktop_profiles.open_failed")
+        use oxideterm_gpui_connections::submission::{SavedDesktopOpen, prepare_saved_desktop_open};
+        let plan = prepare_saved_desktop_open(
+            &self.connection_store, self.settings_store.settings(), id, &self.i18n,
+        );
+        match plan {
+            Ok(Some(SavedDesktopOpen::Launch { profile, password, gateway })) => {
+                self.open_remote_desktop_connection_for_connection(
+                    profile,
+                    password.map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing())),
+                    gateway,
+                    runtime_connection_attempt_id,
+                    window,
+                    cx,
                 );
-                self.connections
-                    .session_manager
-                    .update(cx, |session_manager, cx| {
-                        session_manager.set_status(Some(status), cx)
-                    });
+            }
+            other => {
+                if let Some(attempt) = runtime_connection_attempt_id.as_deref() {
+                    self.standalone_connections.mark_attempt_error(attempt);
+                }
+                match other {
+                    Ok(Some(SavedDesktopOpen::Prompt(mut form))) => {
+                        form.standalone_connection_id = runtime_connection_attempt_id
+                            .as_deref()
+                            .and_then(|attempt| self.standalone_connections.connection_id_for_attempt(attempt));
+                        self.open_new_connection_form(window, cx);
+                        self.connections.flow.update(cx, |flow, cx| flow.replace_form(*form, cx));
+                    }
+                    Err(status) => {
+                        self.connections.session_manager.update(cx, |manager, cx| {
+                            manager.set_status(Some(status), cx);
+                        });
+                    }
+                    _ => {}
+                }
                 return;
             }
-        };
-        if saved.protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp
-            && password.is_none()
-        {
-            if let Some(connection_attempt_id) = runtime_connection_attempt_id.as_deref() {
-                self.standalone_connections
-                    .mark_attempt_error(connection_attempt_id);
-            }
-            // Synced and imported assets intentionally omit device-local credentials.
-            // Reopen the regular form so the user can authenticate on this device.
-            self.open_new_connection_form(window, cx);
-            let password_required = self
-                .i18n
-                .t("modals.new_connection.remote_desktop_password_required");
-            let reconnect_id = runtime_connection_attempt_id
-                .as_deref()
-                .and_then(|attempt| {
-                    self.standalone_connections
-                        .connection_id_for_attempt(attempt)
-                });
-            self.update_connection_form_state(cx, |state| {
-                if let Some(form) = state.form.as_mut() {
-                    *form = form_from_remote_desktop_profile(&saved, String::new());
-                    form.standalone_connection_id = reconnect_id;
-                    form.error = Some(password_required);
-                    form.focused_field = NewConnectionField::Password;
-                }
-            });
-            return;
         }
-        let socks_proxy = if saved.protocol == oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp
-        {
-            match oxideterm_session_adapter::rdp_socks_proxy_from_saved_policy(
-                &self.connection_store,
-                self.settings_store.settings(),
-                &saved.upstream_proxy,
-                saved.ssh_gateway_connection_id.is_some(),
-            ) {
-                Ok(proxy) => proxy,
-                Err(error) => {
-                    if let Some(attempt) = runtime_connection_attempt_id.as_deref() {
-                        self.standalone_connections.mark_attempt_error(attempt);
-                    }
-                    let status = format!(
-                        "{}: {error}",
-                        self.i18n
-                            .t("modals.new_connection.remote_desktop_proxy_failed")
-                    );
-                    self.connections
-                        .session_manager
-                        .update(cx, |manager, cx| manager.set_status(Some(status), cx));
-                    return;
-                }
-            }
-        } else {
-            None
-        };
-        let profile = RemoteDesktopConnectionProfile {
-            id: saved.id.clone(),
-            label: saved.name,
-            protocol: saved.protocol,
-            endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
-            transport_endpoint: None,
-            socks_proxy,
-            username: saved.username,
-            domain: saved.domain,
-            credential_ref: saved.credential_ref,
-            read_only: saved.read_only,
-            session_options: saved.session_options,
-        };
-        self.open_remote_desktop_connection_for_connection(
-            profile,
-            password,
-            saved.ssh_gateway_connection_id,
-            runtime_connection_attempt_id,
-            window,
-            cx,
-        );
         let _ = self.connection_store.mark_remote_desktop_profile_used(id);
         self.queue_cloud_sync_dirty_refresh(cx);
     }
@@ -463,31 +349,11 @@ impl WorkspaceApp {
         targets: Vec<SessionManagerSelectionTarget>,
         cx: &mut Context<Self>,
     ) {
-        use SessionManagerSelectionTarget as Target;
-        let mut deleted = 0;
-        for target in targets {
-            match self.remove_catalog_target(&target, false, cx) {
-                Ok(true) => deleted += 1,
-                Ok(false) => {}
-                Err(error) => {
-                    let status = match &target {
-                        Target::Connection(_) | Target::Ftp(_) => error.to_string(),
-                        Target::Plugin(_) => self.i18n.t("plugin.connections.failed"),
-                        _ => continue,
-                    };
-                    self.connections
-                        .session_manager
-                        .update(cx, |state, cx| state.set_status(Some(status), cx));
-                    if !matches!(target, Target::Ftp(_)) {
-                        return;
-                    }
-                }
-            }
-        }
-        self.connections.session_manager.update(cx, |state, cx| {
-            state.finish_batch_delete(deleted, &self.i18n, cx)
-        });
-        if deleted > 0 {
+        let manager = self.connections.session_manager.clone();
+        let i18n = self.i18n.clone();
+        if delete_catalog_selection(&manager, targets, &i18n, cx, |target, cx| {
+            self.remove_catalog_target(target, false, cx)
+        }) {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
     }
@@ -503,7 +369,7 @@ impl WorkspaceApp {
             return;
         };
         self.open_new_connection_form(window, cx);
-        self.update_connection_form_state(cx, |state| state.replace_with_new_form(form));
+        self.connections.flow.update(cx, |flow, cx| flow.replace_form(form, cx));
         // Refresh discovery without replacing the persisted device selected for editing.
         match target {
             SessionManagerOpenTarget::Serial(_) => self.refresh_serial_ports(cx),

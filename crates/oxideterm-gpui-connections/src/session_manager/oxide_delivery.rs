@@ -50,6 +50,33 @@ pub struct OxideClientStateImportResult {
     pub skipped_plugin_settings: bool,
 }
 
+impl OxideClientStateImportResult {
+    pub fn audit_counts(&self, plugin_settings_failed: bool, app_settings_requested: bool) -> (usize, usize) {
+        let applied = self.envelope.imported
+            + self.envelope.merged
+            + self.envelope.replaced
+            + self.envelope.renamed
+            + self.envelope.imported_forwards
+            + self.envelope.imported_serial_profiles
+            + self.envelope.imported_telnet_profiles
+            + self.envelope.imported_mosh_profiles
+            + self.envelope.imported_standalone_sftp_profiles
+            + self.envelope.imported_remote_desktop_profiles
+            + self.envelope.restored_managed_keys
+            + self.envelope.restored_profile_credentials
+            + self.envelope.cleared_profile_credentials
+            + self.imported_quick_commands
+            + self.imported_plugin_settings
+            + usize::from(self.imported_app_settings)
+            + self.envelope.imported_portable_secrets;
+        let errors = self.envelope.errors.len()
+            + self.quick_commands_errors.len()
+            + usize::from(plugin_settings_failed)
+            + usize::from(app_settings_requested && self.skipped_app_settings);
+        (applied, errors)
+    }
+}
+
 pub struct OxideCoreImportResult {
     pub store: ConnectionStore,
     pub envelope: ImportResultEnvelope,

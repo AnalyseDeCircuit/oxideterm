@@ -9,34 +9,16 @@ impl WorkspaceApp {
         include_items: bool,
         cx: &App,
     ) -> CatalogEnvironment {
-        let items = if include_items {
-            self.session_manager_display_items(cx)
-        } else {
-            Vec::new()
-        };
-        let tunnel_status = items
-            .iter()
-            .filter_map(|item| match item {
-                SessionManagerDisplayItem::Tunnel(_) => {
-                    Some((item.id().to_owned(), self.ssh_tunnel_status(item.id())))
-                }
-                _ => None,
-            })
-            .collect();
-        let group_counts = self
-            .connections
-            .session_manager
-            .read(cx)
-            .row_action_menu
-            .as_ref()
-            .and_then(|menu| match &menu.target {
-                SessionManagerRowActionTarget::Group(group) => {
-                    Some((group.clone(), self.connection_count_for_group(group)))
-                }
-                _ => None,
-            })
-            .into_iter()
-            .collect();
+        let catalog = CatalogEnvironment::from_store(
+            self.connections.session_manager.read(cx),
+            &self.connection_store,
+            self.saved_ssh_tunnels(),
+            include_items,
+        );
+        let tunnel_status = catalog.items.iter().filter_map(|item| match item {
+            SessionManagerDisplayItem::Tunnel(_) => Some((item.id().to_owned(), self.ssh_tunnel_status(item.id()))),
+            _ => None,
+        }).collect();
         let settings = self.settings_store.settings();
         let mut horizontal_chrome_width = self.context_sidebar_occupied_width(cx);
         if !settings.sidebar_ui.zen_mode {
@@ -46,21 +28,17 @@ impl WorkspaceApp {
             }
         }
         CatalogEnvironment {
-            items,
             tunnel_status,
-            group_counts,
             horizontal_chrome_width,
-            groups: self.session_group_tree(),
             chrome_divider: self.workspace_chrome_divider(),
             has_background: self.background_surface_active("session_manager"),
             ui_font: settings_ui_font_family(&settings.appearance.ui_font_family).into(),
             sidebar_background: self.workspace_sidebar_background(self.tokens.ui.shell_bg()),
-            sidebar_sort_open: self.session_manager_sidebar_sort_open,
             sidebar_sort_anchor: self
                 .select_anchors
                 .get(&SelectAnchorId::SessionManagerSidebarSort)
                 .copied(),
-            stored_groups: self.connection_store.groups().to_vec(),
+            ..catalog
         }
     }
 
@@ -110,8 +88,9 @@ impl WorkspaceApp {
                 return self.move_selected_connections(group.as_deref(), cx);
             }
             CatalogAction::CloseSidebarSort => {
-                if self.session_manager_sidebar_sort_open {
-                    self.session_manager_sidebar_sort_open = false;
+                if self.connections.session_manager.update(cx, |manager, cx| {
+                    manager.set_sidebar_sort_open(false, cx)
+                }) {
                     cx.notify();
                 }
                 return;

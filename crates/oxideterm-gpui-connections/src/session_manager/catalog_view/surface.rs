@@ -655,7 +655,7 @@ impl CatalogView {
         let items = std::mem::take(&mut self.environment.items);
         let body = self.render_session_manager_sidebar_tree(items, cx);
         let row_action_menu = self.session_manager.read(cx).row_action_menu.clone();
-        let sort_menu_open = self.environment.sidebar_sort_open;
+        let sort_menu_open = self.session_manager.read(cx).sidebar_sort_open;
         // Operation output shares the tab's status field; mirror the compact
         // sidebar footer chrome so status feedback matches Active Sessions.
         let status = self.session_manager.read(cx).status.clone();
