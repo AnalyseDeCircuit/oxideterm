@@ -301,6 +301,9 @@ impl Render for TerminalPane {
         let _ = self.advance_smooth_scroll_animation(now);
         let fold_animating = self.advance_command_fold_animations(now);
         let theme_transition_colors = self.advance_theme_transition(now);
+        let dilation_settle_row = self
+            .theme_dilation_settle_row
+            .filter(|_| theme_transition_colors.is_none());
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
         if self
             .context_menu
@@ -312,10 +315,15 @@ impl Render for TerminalPane {
         }
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
+        if let Some(settled) = dilation_settle_row {
+            let next = settled.saturating_add(super::THEME_DILATION_SETTLE_ROWS_PER_FRAME);
+            self.theme_dilation_settle_row = (next < viewport_rows).then_some(next);
+        }
         if self.snapshot_dirty
             || self.smooth_scroll_animation.is_some()
             || fold_animating
             || theme_transition_colors.is_some()
+            || self.theme_dilation_settle_row.is_some()
         {
             window.request_animation_frame();
         }
@@ -471,6 +479,7 @@ impl Render for TerminalPane {
         )
         .marked_text_caret(self.marked_text_caret_utf16)
         .theme_transition_colors(theme_transition_colors)
+        .dilation_settle_row(dilation_settle_row)
         .detect_file_paths_as_links(self.settings.detect_file_paths_as_links)
         .precomputed_search_matches()
         .selection_highlight_query(selection_highlight_query)

@@ -45,7 +45,7 @@ fn start_app_quit(cx: &mut App) {
                     .iter()
                     .map(|session| {
                         session.update(cx, |workspace, cx| {
-                            workspace.ai_entity.update(cx, |ai, _| {
+                            workspace.ai.state.update(cx, |ai, _| {
                                 ai.persist_chat_state();
                                 let (sender, receiver) = tokio::sync::oneshot::channel();
                                 ai.history_barrier(sender);
@@ -100,7 +100,7 @@ fn start_app_quit(cx: &mut App) {
                             for session in &sessions {
                                 session.update(cx, |workspace, cx| {
                                     workspace
-                                        .ai_entity
+                                        .ai.state
                                         .update(cx, |ai, _| ai.retry_history_write())
                                 });
                             }
@@ -121,7 +121,7 @@ fn start_app_quit(cx: &mut App) {
         cx.update(|cx| {
             for session in &sessions {
                 session.update(cx, |workspace, cx| {
-                    workspace.ai_entity.update(cx, |ai, cx| {
+                    workspace.ai.state.update(cx, |ai, cx| {
                         ai.history.quitting = false;
                         cx.notify();
                     })
@@ -161,7 +161,7 @@ impl WorkspaceApp {
     }
 
     fn stop_ai_for_quit(&mut self, cx: &mut Context<Self>) {
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.history.quitting = true;
             ai.history
                 .migration_cancel
@@ -274,7 +274,7 @@ mod tests {
                     workspace.tab_host.read(cx).close_confirm(),
                     Some(&TabCloseConfirm::ApplicationQuit)
                 );
-                assert!(!workspace.ai_entity.read(cx).history.quitting);
+                assert!(!workspace.ai.state.read(cx).history.quitting);
             });
             cx.simulate_keystrokes("escape");
             cx.update(|window, cx| window.draw(cx).clear(cx));
@@ -293,7 +293,7 @@ mod tests {
         let task = cx.update(|_, cx| cx.global_mut::<HistoryQuit>().task.take().unwrap());
         cx.foreground_executor().block_test(task);
         workspace.read_with(cx, |workspace, cx| {
-            assert!(workspace.ai_entity.read(cx).history.quitting);
+            assert!(workspace.ai.state.read(cx).history.quitting);
         });
     }
 }

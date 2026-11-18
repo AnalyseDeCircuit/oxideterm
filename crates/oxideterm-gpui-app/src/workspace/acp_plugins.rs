@@ -43,11 +43,20 @@ impl WorkspaceApp {
                     .map(|plugin| (agent.id.clone(), plugin.clone()))
             })
             .collect::<Vec<_>>();
+        let revisions = agents
+            .into_iter()
+            .map(|agent| oxideterm_gpui_ai::acp::AcpPluginRevision {
+                plugin_id: agent.plugin_id,
+                name: agent.name,
+                version: agent.version,
+                command: agent.command,
+            })
+            .collect();
         let changed = self
-            .acp_entity
-            .update(cx, |entity, cx| entity.sync_plugins(agents, &bindings, cx));
+            .ai.acp
+            .update(cx, |entity, cx| entity.sync_plugins(revisions, &bindings, cx));
         for agent_id in changed {
-            self.ai_entity
+            self.ai.state
                 .update(cx, |ai, _cx| ai.invalidate_acp_agent_metadata(&agent_id));
             self.edit_settings(
                 |settings| {
@@ -84,10 +93,10 @@ impl WorkspaceApp {
             })
             .map(|agent| agent.id.clone())
             .collect::<Vec<_>>();
-        self.acp_entity
+        self.ai.acp
             .update(cx, |entity, cx| entity.stop_agents(&agent_ids, cx));
         for id in agent_ids {
-            self.ai_entity
+            self.ai.state
                 .update(cx, |ai, _cx| ai.invalidate_acp_agent_metadata(&id));
         }
     }
@@ -101,7 +110,7 @@ impl WorkspaceApp {
             return Ok(());
         };
         let plugins = self.plugin_entity.read(cx);
-        if self.acp_entity.read(cx).plugin_is_updating(plugin_id) {
+        if self.ai.acp.read(cx).plugin_is_updating(plugin_id) {
             return Err(self.plugin_requirement_message(plugin_id, &agent.display_name, cx));
         }
         let plugin = plugins
@@ -121,7 +130,7 @@ impl WorkspaceApp {
         let Some(plugin_id) = agent.plugin_id.as_deref() else {
             return false;
         };
-        if !self.acp_entity.read(cx).plugin_is_updating(plugin_id)
+        if !self.ai.acp.read(cx).plugin_is_updating(plugin_id)
             && self
                 .plugin_entity
                 .read(cx)

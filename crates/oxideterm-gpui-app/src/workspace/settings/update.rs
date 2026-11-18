@@ -10,6 +10,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match event {
+            SettingsWorkspaceEvent::SubmitAiMcp => self.submit_ai_mcp_draft(cx),
             SettingsWorkspaceEvent::ExternalStoresChanged(change) => {
                 let _ = self.reload_watched_stores(*change, cx);
             }

@@ -32,7 +32,7 @@ impl WorkspaceApp {
             mode,
         };
         let task_id = self
-            .ai_background_tasks
+            .ai.background
             .read(cx)
             .create(spec)
             .map_err(|error| error.to_string())?;
@@ -48,7 +48,7 @@ impl WorkspaceApp {
         cx: &App,
     ) -> serde_json::Value {
         serde_json::json!({
-            "tasks": self.ai_background_tasks
+            "tasks": self.ai.background
                 .read(cx)
                 .snapshots_for_owner(conversation_id),
         })
@@ -61,7 +61,7 @@ impl WorkspaceApp {
         cx: &App,
     ) -> Result<serde_json::Value, String> {
         let task_id = ai_background_task_id(arguments)?;
-        self.ai_background_tasks
+        self.ai.background
             .read(cx)
             .snapshot_for_owner(conversation_id, &task_id)
             .map(|task| serde_json::json!({ "task": task }))
@@ -75,7 +75,7 @@ impl WorkspaceApp {
         cx: &App,
     ) -> Result<serde_json::Value, String> {
         let task_id = ai_background_task_id(arguments)?;
-        self.ai_background_tasks
+        self.ai.background
             .read(cx)
             .cancel_for_owner(conversation_id, &task_id)
             .then(|| serde_json::json!({ "cancelled": true, "taskId": task_id }))
@@ -89,9 +89,9 @@ impl WorkspaceApp {
         _event: ai_background_tasks::AiBackgroundTaskEvent,
         cx: &mut Context<Self>,
     ) {
-        let events = self.ai_background_tasks.read(cx).take_events();
+        let events = self.ai.background.read(cx).take_events();
         let requests = self
-            .ai_background_tasks
+            .ai.background
             .read(cx)
             .take_execution_requests();
         for request in requests {
@@ -104,6 +104,7 @@ impl WorkspaceApp {
             });
             let _ = request.response.send(result);
         }
+        let mut notifications_changed = false;
         for event in events {
             let oxideterm_ai_tasks::BackgroundTaskEvent::Changed(snapshot) = event else {
                 continue;
@@ -123,6 +124,7 @@ impl WorkspaceApp {
                 .i18n
                 .t("ai.background_tasks.notification_body")
                 .replace("{{count}}", &snapshot.run_count.to_string());
+            notifications_changed = true;
             self.push_notification_entry(
                 WorkspaceNotificationKind::Agent,
                 severity,
@@ -132,19 +134,9 @@ impl WorkspaceApp {
                 Some(format!("ai-background-task:{}", snapshot.id.as_str())),
             );
         }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn cancel_ai_background_task_from_ui(
-        &mut self,
-        conversation_id: &str,
-        task_id: &oxideterm_ai_tasks::BackgroundTaskId,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai_background_tasks.update(cx, |tasks, _cx| {
-            tasks.cancel_for_owner(conversation_id, task_id);
-        });
-        cx.notify();
+        if notifications_changed {
+            cx.notify();
+        }
     }
 
     fn execute_ai_background_read(

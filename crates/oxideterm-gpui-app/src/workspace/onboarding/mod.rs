@@ -1,10 +1,8 @@
-mod actions;
-mod components;
-mod sections;
-mod state;
-mod view;
-
 use super::*;
 
-pub(in crate::workspace) use state::OnboardingState;
-use state::*;
+mod actions;
+mod mount;
+mod state;
+
+pub(in crate::workspace) use mount::create_onboarding_view;
+pub(in crate::workspace) use state::*;

@@ -123,47 +123,6 @@ impl WorkspaceApp {
         self.settings_views.surface.clone().into_any_element()
     }
 
-    pub(in crate::workspace) fn render_settings_ai_page_section(
-        &mut self,
-        section: SettingsSectionId,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let settings = self.settings_store.settings();
-        let enabled = settings.ai.enabled;
-        let content = match section {
-            SettingsSectionId::AiGeneralSettings => {
-                return self.ai_general_settings_card(settings, cx);
-            }
-            SettingsSectionId::AiGeneralPrivacy => return self.ai_privacy_settings_card(),
-            SettingsSectionId::AiProvidersSettings => {
-                let provider_views = self.ai_provider_views_for_settings_render(cx);
-                self.ai_provider_settings_section(&provider_views, cx)
-            }
-            SettingsSectionId::AiContextControls => self.ai_context_controls_section(settings, cx),
-            SettingsSectionId::AiContextSystemPrompt => self.ai_system_prompt_section(settings, cx),
-            SettingsSectionId::AiContextMemory => self.ai_memory_section(settings, cx),
-            SettingsSectionId::AiContextModelWindows => {
-                let provider_views = ai_provider_views(settings);
-                self.ai_model_context_windows_section(settings, &provider_views, cx)
-            }
-            SettingsSectionId::AiToolsToolUse => self.ai_tool_use_section(settings, cx),
-            SettingsSectionId::AiToolsWebSearch => self.ai_web_search_section(settings, cx),
-            SettingsSectionId::AiToolsAgents => self.render_ai_agent_settings(cx),
-            SettingsSectionId::AiToolsSkills => self.ai_skills_section(settings, cx),
-            SettingsSectionId::AiToolsMcpServers => self.ai_mcp_servers_section(settings, cx),
-            _ => return div().into_any_element(),
-        };
-        self.ai_settings_availability(content, enabled)
-    }
-
-    pub(in crate::workspace) fn ai_provider_views_for_settings_render(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> Vec<AiProviderView> {
-        let provider_views = ai_provider_views(self.settings_store.settings());
-        self.ensure_ai_provider_key_statuses_for_views(&provider_views, cx);
-        provider_views
-    }
 
     pub(in crate::workspace) fn sync_settings_section_list_state(&self, cx: &App) {
         let state = self.settings_workspace.read(cx);
@@ -200,83 +159,19 @@ impl WorkspaceApp {
     }
 
     fn hash_runtime_settings_layout(&self, tab: SettingsTab, section: Option<SettingsSectionId>, hasher: &mut DefaultHasher, cx: &App) {
-        let route = self.settings_workspace.read(cx).route_snapshot();
-        let settings = self.settings_store.settings();
         match tab {
             SettingsTab::Ai => {
-                format!("{:?}", route.ai_page).hash(hasher);
-                // Hash expansion state only into the virtual row whose height
-                // can change. The compact prompt and memory cards stay stable.
-                match section {
-                    Some(SettingsSectionId::AiProvidersSettings) => {
-                        settings.ai.providers.len().hash(hasher);
-                        settings.ai.web_search.enabled.hash(hasher);
-                        settings.ai.web_search.provider_id.hash(hasher);
-                        self.ai_entity
-                            .read(cx)
-                            .hash_settings_provider_layout(hasher);
-                    }
-                    Some(SettingsSectionId::AiContextModelWindows) => {
-                        settings.ai.providers.len().hash(hasher);
-                        self.ai_entity
-                            .read(cx)
-                            .hash_settings_context_layout(hasher);
-                    }
-                    Some(SettingsSectionId::AiToolsToolUse) => {
-                        settings.ai.tool_use.disabled_tools.hash(hasher);
-                        self.ai_entity
-                            .read(cx)
-                            .settings_section_expanded(AiSettingsViewSection::ToolUse)
-                            .hash(hasher);
-                    }
-                    Some(SettingsSectionId::AiToolsWebSearch) => {
-                        settings.ai.web_search.enabled.hash(hasher);
-                        settings.ai.web_search.provider_id.hash(hasher);
-                        settings.ai.providers.len().hash(hasher);
-                    }
-                    Some(SettingsSectionId::AiToolsAgents) => {
-                        settings.ai.tool_use.enabled.hash(hasher);
-                        let ai = self.ai_entity.read(cx);
-                        ai.agents.settings_model_picker_open.hash(hasher);
-                        let options = self.global_agent_options();
-                        options.enabled.hash(hasher);
-                        options
-                            .default_model
-                            .as_ref()
-                            .map(|model| (&model.provider_id, &model.model))
-                            .hash(hasher);
-                        for provider in ai_provider_views(settings) {
-                            provider.id.hash(hasher);
-                            provider.enabled.hash(hasher);
-                            provider.models.hash(hasher);
-                        }
-                    }
-                    Some(SettingsSectionId::AiToolsSkills) => {
-                        let state = self.settings_workspace.read(cx);
-                        state.skill_search_query.hash(hasher);
-                        format!("{:?}", state.skill_scope_filter).hash(hasher);
-                        state.skill_diagnostics_expanded.hash(hasher);
-                        let registry = self.skill_registry.read();
-                        for skill in registry.records() {
-                            skill.id.hash(hasher);
-                            skill.skill_path.hash(hasher);
-                            state
-                                .expanded_skill_paths
-                                .contains(&skill.skill_path)
-                                .hash(hasher);
-                            skill.enabled.hash(hasher);
-                            skill.content_hash.hash(hasher);
-                        }
-                        for diagnostic in registry.diagnostics() {
-                            diagnostic.path.hash(hasher);
-                            diagnostic.message.hash(hasher);
-                        }
-                    }
-                    _ => {}
-                }
+                oxideterm_gpui_settings_view::ai::hash_section_layout(
+                    section,
+                    self.settings_workspace.read(cx),
+                    self.settings_store.settings(),
+                    self.settings_views.ai_providers.read(cx),
+                    &self.skill_registry.read(),
+                    hasher,
+                );
             }
             SettingsTab::Knowledge => {
-                let ai = self.ai_entity.read(cx);
+                let ai = self.knowledge_page(cx).read(cx);
                 ai.knowledge_selected_collection_id().hash(hasher);
                 ai.knowledge_document_page_index().hash(hasher);
                 ai.knowledge_stats_cache_key().hash(hasher);
@@ -317,7 +212,7 @@ impl WorkspaceApp {
             terminal_page: route.terminal_page,
             ai_page: route.ai_page,
             visible_keybinding_scope_count: self.visible_keybinding_scope_count(cx),
-            knowledge_has_error: self.ai_entity.read(cx).knowledge_error().is_some(),
+            knowledge_has_error: self.knowledge_page(cx).read(cx).knowledge_error().is_some(),
             knowledge_has_selected_collection,
         }
     }
@@ -331,9 +226,9 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn knowledge_has_selected_collection(&self, cx: &App) -> bool {
-        let rag_store = self.ai_entity.read(cx).rag_store();
+        let rag_store = self.ai.state.read(cx).rag_store();
         let collections = oxideterm_ai::rag_list_collections(&rag_store, None).unwrap_or_default();
-        self.ai_entity
+        self.knowledge_page(cx)
             .read(cx)
             .knowledge_selected_collection_id()
             .filter(|id| collections.iter().any(|collection| collection.id == *id))
@@ -373,11 +268,11 @@ impl WorkspaceApp {
         let settings = self.settings_store.settings().clone();
         self.apply_loaded_settings_to_runtime(&previous_settings, &settings, cx);
         let _ = self.settings_store.save();
-        self.settings_workspace.update(cx, |settings, _cx| {
-            settings.acknowledge_external_store_state()
-        });
+        self.settings_workspace.update(cx, |state, _| state.acknowledge_external_store_state());
+        self.refresh_ai_settings_views(&previous_settings, &settings, cx);
         self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
         self.sync_tab_titles(cx);
+        self.notify_onboarding_view(cx);
         cx.notify();
     }
 
@@ -435,6 +330,7 @@ impl WorkspaceApp {
         // Re-apply the same runtime side effects used by edit_settings instead
         // of relying on stale in-memory settings or browser-style stores.
         self.apply_loaded_settings_to_runtime(&previous_settings, &settings, cx);
+        self.refresh_ai_settings_views(&previous_settings, &settings, cx);
         self.refresh_ai_skill_registry();
         self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
@@ -446,6 +342,18 @@ impl WorkspaceApp {
         }
         cx.notify();
         Ok(())
+    }
+
+    fn refresh_ai_settings_views(
+        &self,
+        previous: &PersistedSettings,
+        settings: &PersistedSettings,
+        cx: &mut Context<Self>,
+    ) {
+        if settings.ai != previous.ai {
+            self.settings_workspace.update(cx, |_, cx| cx.notify());
+            self.settings_views.ai_mcp.update(cx, |_, cx| cx.notify());
+        }
     }
 
 }

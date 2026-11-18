@@ -1,6 +1,6 @@
 use super::*;
 use oxideterm_gpui_settings_view::knowledge_page::{
-    KnowledgeSection, KnowledgeSettingsFrame, KnowledgeSettingsPage, KnowledgeSettingsRequest,
+    KnowledgeSection, KnowledgeSettingsFrame, KnowledgeSettingsRequest,
 };
 
 impl WorkspaceApp {
@@ -12,7 +12,7 @@ impl WorkspaceApp {
         if section == SettingsSectionId::KnowledgeEmbeddingConfig {
             self.ensure_ai_provider_key_statuses(cx);
         }
-        let ai = self.ai_entity.clone();
+        let ai = self.knowledge_page(cx);
         let model = ai.read(cx);
         let store = model.rag_store();
         let selected = model.knowledge_selected_collection_id().map(str::to_owned);
@@ -37,7 +37,7 @@ impl WorkspaceApp {
         cx: &'a App,
     ) -> oxideterm_gpui_settings_view::surface::KnowledgePageData<'a> {
         use oxideterm_gpui_settings_view::surface::KnowledgePageData;
-        let ai = self.ai_entity.read(cx);
+        let ai = self.knowledge_page(cx).read(cx);
         KnowledgePageData {
             frame: KnowledgeSettingsFrame {
                 page_size: crate::workspace::ai_state::KNOWLEDGE_DOCUMENT_PAGE_SIZE,
@@ -92,60 +92,6 @@ impl WorkspaceApp {
         }
     }
 
-    fn with_knowledge_settings_page<R>(
-        &self,
-        cx: &Context<Self>,
-        render: impl FnOnce(KnowledgeSettingsPage<'_>, &App) -> R,
-    ) -> R {
-        let owner = cx.entity().downgrade();
-        let dispatch = Rc::new(
-            move |request, position, window: &mut Window, cx: &mut App| {
-                let _ = owner.update(cx, |app, cx| {
-                    app.handle_knowledge_settings_request(request, position, window, cx)
-                });
-            },
-        );
-        let ai = self.ai_entity.read(cx);
-        let model = self.current_settings_input_value(SettingsInput::AiEmbeddingModel, cx);
-        let document_selected = |id: &str, cx: &App| self.is_knowledge_document_selected(id, cx);
-        let document_cut = |id: &str, cx: &App| self.knowledge_note_is_cut(id, cx);
-        let provider_has_key = |id: &str, cx: &App| self.ai_provider_has_key_cached(id, cx);
-        let chevron = |expanded| {
-            self.render_animated_chevron(
-                ("knowledge-embedding-chevron", expanded as usize),
-                expanded,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-            )
-            .into_any_element()
-        };
-        self.with_settings_controls(cx, |controls, cx| {
-            render(
-                KnowledgeSettingsPage {
-                    controls,
-                    dispatch,
-                    provider_has_key: &provider_has_key,
-                    document_selected: &document_selected,
-                    document_cut: &document_cut,
-                    chevron: &chevron,
-                    frame: KnowledgeSettingsFrame {
-                        page_size: crate::workspace::ai_state::KNOWLEDGE_DOCUMENT_PAGE_SIZE,
-                        compact_row_height: KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT,
-                        has_background: self.background_surface_active("knowledge"),
-                        import_progress: ai.knowledge_import_progress(),
-                        embedding_progress: ai.knowledge_embedding_progress(),
-                        reindex_progress: ai.knowledge_reindex_progress(),
-                        embedding_config_expanded: ai.knowledge_embedding_config_expanded(),
-                        external_edit_id: ai
-                            .knowledge_external_edit()
-                            .map(|edit| edit.doc_id.as_str()),
-                        embedding_model: &model,
-                    },
-                },
-                cx,
-            )
-        })
-    }
 
     pub(in crate::workspace::settings) fn handle_knowledge_settings_request(
         &mut self,
@@ -176,7 +122,7 @@ impl WorkspaceApp {
             }
             KnowledgeSettingsRequest::ToggleReindex(reindex_collection_id) => {
                 if self
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_reindex_progress()
                     .is_some()
@@ -190,7 +136,7 @@ impl WorkspaceApp {
                 self.show_knowledge_document_page(collection, page, cx);
             }
             KnowledgeSettingsRequest::SelectCollection(collection_id) => {
-                self.ai_entity.update(cx, |entity, cx| {
+                self.knowledge_page(cx).update(cx, |entity, cx| {
                     entity.select_knowledge_collection(collection_id.clone());
                     cx.notify();
                 });
@@ -198,7 +144,7 @@ impl WorkspaceApp {
                 self.settings_views.surface.update(cx, |_, cx| cx.notify());
             }
             KnowledgeSettingsRequest::DeleteCollection(delete_id, delete_name) => {
-                self.ai_entity.update(cx, |entity, cx| {
+                self.knowledge_page(cx).update(cx, |entity, cx| {
                     entity.request_delete_knowledge_collection(
                         delete_id.clone(),
                         delete_name.clone(),
@@ -215,7 +161,7 @@ impl WorkspaceApp {
                 self.knowledge_open_external(edit_id.clone(), cx);
             }
             KnowledgeSettingsRequest::DeleteDocument(delete_id, delete_name) => {
-                self.ai_entity.update(cx, |entity, cx| {
+                self.knowledge_page(cx).update(cx, |entity, cx| {
                     entity
                         .request_delete_knowledge_document(delete_id.clone(), delete_name.clone());
                     cx.notify();
@@ -231,7 +177,7 @@ impl WorkspaceApp {
                 self.select_knowledge_document(open_id.clone(), cx);
             }
             KnowledgeSettingsRequest::ToggleEmbedding => {
-                self.ai_entity.update(cx, |entity, cx| {
+                self.knowledge_page(cx).update(cx, |entity, cx| {
                     entity.toggle_knowledge_embedding_config();
                     cx.notify();
                 });
@@ -240,41 +186,12 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn knowledge_document_row(
-        &self,
-        document: oxideterm_ai::RagDocumentResponse,
-        open_in_workspace: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.with_knowledge_settings_page(cx, |page, cx| {
-            page.knowledge_document_row(document, open_in_workspace, cx)
-        })
-    }
-
-    pub(in crate::workspace) fn knowledge_empty_row(
-        &self,
-        icon: LucideIcon,
-        label: String,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.with_knowledge_settings_page(cx, |page, cx| {
-            page.knowledge_empty_row(icon.path(), label, cx)
-        })
-    }
-
-    pub(in crate::workspace) fn knowledge_error_row(&self, error: &str) -> AnyElement {
-        self.settings_callout(
-            SettingsCalloutTone::Error,
-            Some(LucideIcon::AlertCircle),
-            div().child(error.to_string()).into_any_element(),
-        )
-    }
 
     pub(in crate::workspace) fn knowledge_document_format_label(
         &self,
         cx: &Context<Self>,
     ) -> String {
-        match self.ai_entity.read(cx).knowledge_new_document_format() {
+        match self.knowledge_page(cx).read(cx).knowledge_new_document_format() {
             "plaintext" => self.i18n.t("settings_view.knowledge.format_plain_text"),
             _ => self.i18n.t("settings_view.knowledge.format_markdown"),
         }

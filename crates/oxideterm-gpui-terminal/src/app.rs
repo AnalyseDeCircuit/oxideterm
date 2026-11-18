@@ -525,6 +525,7 @@ pub struct TerminalPane {
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
     theme_transition: Option<TerminalThemeTransition>,
+    theme_dilation_settle_row: Option<usize>,
     snapshot: TerminalSnapshot,
     render_mode: TermMode,
     snapshot_dirty: bool,
@@ -848,6 +849,7 @@ impl TerminalSearchCache {
 }
 
 const PTY_RESIZE_DEBOUNCE: Duration = Duration::from_millis(100);
+const THEME_DILATION_SETTLE_ROWS_PER_FRAME: usize = 8;
 const PENDING_CWD_TIMEOUT: Duration = Duration::from_secs(8);
 const MAX_COMMAND_MARKS_PER_PANE: usize = 2000;
 const COMMAND_MARK_DEDUP_WINDOW_MS: u64 = 2000;
@@ -1345,6 +1347,7 @@ impl TerminalPane {
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
             theme_transition: None,
+            theme_dilation_settle_row: None,
             snapshot,
             render_mode,
             snapshot_dirty: false,
@@ -2261,7 +2264,9 @@ impl TerminalPane {
                 != preferences.character_spacing.to_bits()
             || self.preferences.line_height.to_bits() != preferences.line_height.to_bits();
         let next_settings = TerminalUiSettings::from_preferences(&preferences);
-        if self.preferences.command_folding_enabled != preferences.command_folding_enabled {
+        let command_folding_changed =
+            self.preferences.command_folding_enabled != preferences.command_folding_enabled;
+        if command_folding_changed {
             // Remove the visual mapping before resizing the grid for the gutter.
             // The underlying output remains available when folding is disabled.
             self.command_folding = command_folding::CommandFolding::default();
@@ -2295,10 +2300,14 @@ impl TerminalPane {
         // Font resolution is stable across output frames and changes only with typography
         // preferences, so defer the next measurement until the pane is rendered again.
         self.metrics_dirty |= metrics_changed;
-        self.last_pty_resize = None;
-        self.pending_pty_resize = None;
-        self.pty_resize_task = None;
-        self.viewport_scale_factor_bits = None;
+        if metrics_changed || command_folding_changed {
+            // Appearance-only updates must not clear the acknowledged PTY geometry or
+            // arm a redundant SIGWINCH resize in the middle of a theme transition.
+            self.last_pty_resize = None;
+            self.pending_pty_resize = None;
+            self.pty_resize_task = None;
+            self.viewport_scale_factor_bits = None;
+        }
         self.reset_cursor_blink();
         self.wake_terminal_scheduler();
         cx.notify();
@@ -2324,6 +2333,7 @@ impl TerminalPane {
     }
 
     fn apply_theme_transition(&mut self, next_theme: TerminalUiTheme, cx: &App) {
+        self.theme_dilation_settle_row = None;
         if !next_theme.tokens.motion.enabled
             || cx.reduce_motion()
             || self.theme.visual_colors_eq(&next_theme)
@@ -2364,6 +2374,9 @@ impl TerminalPane {
         if progress >= 1.0 {
             let transition = self.theme_transition.take()?;
             self.theme = transition.to;
+            // Spread macOS glyph-dilation cache refreshes over a few settled frames so
+            // finishing a theme fade does not rasterize every row in one spike.
+            self.theme_dilation_settle_row = cfg!(target_os = "macos").then_some(0);
             return None;
         }
         // Match the workspace appearance transition's smoothstep easing.
@@ -6298,7 +6311,14 @@ mod tests {
         });
 
         pane.update(cx, |pane, cx| {
-            pane.set_appearance(light.clone(), None, false, cx);
+            let resize_state = Some((DEFAULT_COLS, DEFAULT_ROWS, 8, 16));
+            pane.last_pty_resize = resize_state;
+            pane.viewport_scale_factor_bits = Some(2.0_f32.to_bits());
+            let mut next_preferences = pane.preferences.clone();
+            next_preferences.theme = light.clone();
+            pane.set_preferences(next_preferences, cx);
+            assert_eq!(pane.last_pty_resize, resize_state);
+            assert_eq!(pane.viewport_scale_factor_bits, Some(2.0_f32.to_bits()));
             assert_eq!(pane.theme.background, dark.background);
             assert_eq!(pane.preferences.theme.background, light.background);
             let transition = pane.theme_transition.as_ref().expect("theme transition");

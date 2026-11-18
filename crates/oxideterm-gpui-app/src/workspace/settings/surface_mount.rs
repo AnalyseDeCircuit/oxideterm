@@ -20,6 +20,19 @@ impl WorkspaceApp {
 }
 
 impl SettingsSurfaceHost for WorkspaceApp {
+    fn ai_mcp(&self) -> Entity<oxideterm_gpui_settings_view::ai::mcp::AiMcpSettingsView> {
+        self.settings_views.ai_mcp.clone()
+    }
+    fn ai_providers(&self) -> Entity<oxideterm_gpui_settings_view::ai::providers::AiProviderSettingsView> {
+        self.settings_views.ai_providers.clone()
+    }
+    fn ai_skills(&self) -> oxideterm_gpui_settings_view::ai::AiSkillData {
+        let registry = self.skill_registry.read();
+        oxideterm_gpui_settings_view::ai::AiSkillData {
+            records: registry.records().cloned().collect(),
+            diagnostics: registry.diagnostics().to_vec(),
+        }
+    }
     fn settings_state(&self) -> &Entity<SettingsWorkspaceEntity> {
         &self.settings_workspace
     }
@@ -187,9 +200,6 @@ impl SettingsSurfaceHost for WorkspaceApp {
             .preview()
             .map(str::to_owned)
     }
-    fn render_ai(&mut self, section: SettingsSectionId, cx: &mut Context<Self>) -> AnyElement {
-        self.render_settings_ai_page_section(section, cx)
-    }
     fn keybinding_note(&mut self, note: String, color: u32, cx: &mut Context<Self>) -> AnyElement {
         self.render_selectable_text_scoped(
             "settings-keybindings-note",
@@ -209,6 +219,14 @@ impl SettingsSurfaceHost for WorkspaceApp {
     }
     fn page_action(&mut self, action: SettingsPageAction<'_>, cx: &mut Context<Self>) {
         match action {
+            SettingsPageAction::AiSkills(request) => {
+                use oxideterm_gpui_settings_view::ai::AiSkillAction;
+                if let AiSkillAction::EditAndRefresh(edit) = request {
+                    self.edit_settings(edit, cx);
+                }
+                self.refresh_ai_skill_registry();
+                self.settings_views.surface.update(cx, |_, cx| cx.notify());
+            }
             SettingsPageAction::Connection(request) => {
                 self.handle_connection_page_request(request, cx)
             }

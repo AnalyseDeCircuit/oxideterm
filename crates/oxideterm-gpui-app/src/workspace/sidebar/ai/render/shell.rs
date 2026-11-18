@@ -121,7 +121,13 @@ pub(in crate::workspace) struct AiAssistantSidebarView {
 }
 
 impl AiAssistantSidebarView {
-    pub(in crate::workspace) fn new(workspace: gpui::WeakEntity<WorkspaceApp>) -> Self {
+    pub(in crate::workspace) fn new(
+        workspace: gpui::WeakEntity<WorkspaceApp>,
+        state: &Entity<ai_state::AiWorkspaceEntity>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        cx.subscribe(state, |_, _, _: &oxideterm_gpui_ai::stream::AiChatBatchApplied, cx| cx.notify())
+            .detach();
         Self { workspace }
     }
 }
@@ -145,10 +151,10 @@ impl Render for AiAssistantSidebarView {
             app.ensure_ai_chat_initialized(cx);
             let content = if app.settings_store.settings().ai.enabled {
                 AiSidebarContent::Chat {
-                    header: app.render_ai_sidebar_chat_header(cx),
+                    header: app.ai.chat_header.clone().into_any_element(),
                     notices: [
                         app.render_ai_compaction_notice(cx),
-                        app.render_ai_background_tasks(cx),
+                        Some(app.ai.background_view.clone().into_any_element()),
                     ]
                     .into_iter()
                     .flatten()
@@ -160,7 +166,7 @@ impl Render for AiAssistantSidebarView {
                         .chain([
                             app.render_ai_context_warning_banners(cx),
                             app.render_ai_sidebar_model_bar(cx),
-                            app.render_ai_sidebar_input(app.ai_entity.read(cx).history_ready(), cx),
+                            app.render_ai_sidebar_input(app.ai.state.read(cx).history_ready(), cx),
                         ])
                         .collect(),
                 }
@@ -238,11 +244,11 @@ impl WorkspaceApp {
         if let Some(detail) = self.render_ai_agent_detail(cx) {
             return detail;
         }
-        if let Some(error) = self.ai_entity.read(cx).chat_initialization_error().copied() {
+        if let Some(error) = self.ai.state.read(cx).chat_initialization_error().copied() {
             return self.render_ai_sidebar_initialization_error(error, cx);
         }
         let Some((conversation_id, items, signatures, prompts, message_end)) = ({
-            let ai = self.ai_entity.read(cx);
+            let ai = self.ai.state.read(cx);
             let conversation = ai.conversation_state().active_conversation();
             conversation.and_then(|conversation| {
                 if conversation.messages.is_empty() {
@@ -315,7 +321,7 @@ impl WorkspaceApp {
         self.sync_ai_chat_list_state(&conversation_id, &signatures, virtual_spec, cx);
 
         let entity = cx.entity();
-        let state = self.ai_entity.read(cx).chat_ui().message_list_state.clone();
+        let state = self.ai.state.read(cx).chat_ui().message_list_state.clone();
         let viewport = self.ai_chat_list_viewport_snapshot(cx);
         let scrollbar = oxideterm_gpui_ui::scroll::Scrollbar::for_list(&state).id("ai-chat-scrollbar");
         let list = tauri_virtual_list(state.clone(), virtual_spec, move |index, _window, cx| {
@@ -344,15 +350,15 @@ impl WorkspaceApp {
     ) -> AnyElement {
         match item {
             AiChatListItem::HistoryPage { older } => {
-                let ai = self.ai_entity.read(cx);
+                let ai = self.ai.state.read(cx);
                 let Some(id) = ai.conversation_state().active_conversation_id.clone() else { return div().into_any_element(); };
                 let loading = ai.history.pages.get(&id).is_some_and(|page| page.loading);
                 let label = self.i18n.t(if loading { "ai.history.loading" } else if older { "ai.history.older" } else { "ai.history.newer" });
                 if !loading && ai.history.pages.get(&id).is_some_and(|page| !page.failed) {
-                    self.ai_entity.update(cx, |ai, cx| ai.request_visible_history_page(id.clone(), older, cx));
+                    self.ai.state.update(cx, |ai, cx| ai.request_visible_history_page(id.clone(), older, cx));
                 }
                 ai_message_action(&self.tokens, label, Self::render_lucide_icon(if older { LucideIcon::ChevronLeft } else { LucideIcon::ChevronDown }, 14.0, rgb(self.tokens.ui.text_muted)), false)
-                    .id(if older { "ai-history-older" } else { "ai-history-newer" }).on_click(cx.listener(move |this, _, _, cx| { this.ai_entity.update(cx, |ai, _| ai.request_history_page(id.clone(), older)); cx.notify(); })).into_any_element()
+                    .id(if older { "ai-history-older" } else { "ai-history-newer" }).on_click(cx.listener(move |this, _, _, cx| { this.ai.state.update(cx, |ai, _| ai.request_history_page(id.clone(), older)); cx.notify(); })).into_any_element()
             }
             AiChatListItem::TrimNotice { count, .. } => self.render_ai_trim_notice(count, cx),
             AiChatListItem::Message {
@@ -360,7 +366,7 @@ impl WorkspaceApp {
                 last_assistant,
             } => {
                 let live = {
-                    let ai = self.ai_entity.read(cx);
+                    let ai = self.ai.state.read(cx);
                     ai.conversation_state().active_conversation().and_then(|conversation| conversation.messages.get(index).and_then(|message| {
                         let owner = crate::workspace::ai_state::history::HistoryViewOwner::Main(conversation.id.clone());
                         ai.live_history_view(&owner, &message.id).map(|view| (owner, view))
@@ -368,7 +374,7 @@ impl WorkspaceApp {
                 };
                 if let Some((owner, view)) = live { return self.render_ai_owned_message(owner, view, last_assistant, viewport, cx); }
                 let (message, last_assistant) = {
-                    let ai = self.ai_entity.read(cx);
+                    let ai = self.ai.state.read(cx);
                     let Some(conversation) = ai.conversation_state().active_conversation() else {
                         return div().into_any_element();
                     };
@@ -380,7 +386,7 @@ impl WorkspaceApp {
                     (message.clone(), last_assistant)
                 };
                 let stored = {
-                    let ai = self.ai_entity.read(cx);
+                    let ai = self.ai.state.read(cx);
                     let id = ai.conversation_state().active_conversation_id.clone().unwrap_or_default();
                     ai.history.pages.get(&id).filter(|page| page.descriptions.contains_key(&message.id))
                         .filter(|_| !message.is_streaming && !ai.history_message_is_pending(&id, &message.id))
@@ -388,12 +394,12 @@ impl WorkspaceApp {
                 };
                 if let Some((conversation, view, failed)) = stored {
                     if let Some(view) = view { return self.render_ai_stored_message(&conversation, view, last_assistant, viewport, cx); }
-                    if !failed { self.ai_entity.update(cx, |ai, _| ai.request_history_body(conversation.clone(), message.id.clone(), None, false)); }
+                    if !failed { self.ai.state.update(cx, |ai, _| ai.request_history_body(conversation.clone(), message.id.clone(), None, false)); }
                     let id = message.id.clone();
                     return div().flex().flex_col().child(self.render_ai_history_message(&message, false, viewport, true, cx))
                         .child(ai_message_action(&self.tokens, self.i18n.t(if failed { "common.actions.retry" } else { "ai.history.loading" }),
                             Self::render_lucide_icon(LucideIcon::RefreshCw, 12.0, rgb(self.tokens.ui.text_muted)), false)
-                            .id(gpui::SharedString::from(format!("ai-history-retry-{}", message.id))).on_click(cx.listener(move |this, _, _, cx| { this.ai_entity.update(cx, |ai, _| ai.request_history_body(conversation.clone(), id.clone(), None, true)); cx.notify(); })))
+                            .id(gpui::SharedString::from(format!("ai-history-retry-{}", message.id))).on_click(cx.listener(move |this, _, _, cx| { this.ai.state.update(cx, |ai, _| ai.request_history_body(conversation.clone(), id.clone(), None, true)); cx.notify(); })))
                         .into_any_element();
                 }
                 self.render_ai_message(&message, last_assistant, viewport, cx)
@@ -406,12 +412,12 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Option<AiChatListViewportSnapshot> {
-        let bounds = self.ai_entity.read(cx).chat_ui().message_list_state.viewport_bounds();
+        let bounds = self.ai.state.read(cx).chat_ui().message_list_state.viewport_bounds();
         let height = f32::from(bounds.size.height);
         if height <= 0.0 {
             return None;
         }
-        let scroll_top = self.ai_entity.read(cx).chat_ui().message_list_state.logical_scroll_top();
+        let scroll_top = self.ai.state.read(cx).chat_ui().message_list_state.logical_scroll_top();
         Some(AiChatListViewportSnapshot {
             item_ix: scroll_top.item_ix,
             offset_in_item: f32::from(scroll_top.offset_in_item),
@@ -444,7 +450,7 @@ impl WorkspaceApp {
         spec: TauriVirtualListSpec,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             // Opening a conversation starts at its newest message. GPUI's tail
             // mode then pauses automatically while the user reads older content.
             ai.sync_chat_message_list(conversation_id, signatures, spec);
@@ -457,7 +463,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let (active_id, running, compacted_count) = {
-            let ai = self.ai_entity.read(cx);
+            let ai = self.ai.state.read(cx);
             let active_id = ai
                 .conversation_state()
                 .active_conversation_id
@@ -565,7 +571,7 @@ impl WorkspaceApp {
     }
 
     fn render_ai_history_status(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         let failed = matches!(ai.history.status, crate::workspace::ai_state::HistoryStatus::Failed) && ai.history.writer.is_some();
         let loading = !failed && ai.chat_initialization_error().is_none() && !ai.history_ready();
         if !failed && !loading { return None; }
@@ -575,7 +581,7 @@ impl WorkspaceApp {
             .text_size(px(12.0)).text_color(rgb(self.tokens.ui.text_muted)).child(text)
             .when(failed,|row| row.child(div().id("ai-history-retry").cursor_pointer().text_color(rgb(self.tokens.ui.accent))
                 .child(self.i18n.t("common.actions.retry"))
-                .on_click(cx.listener(|this,_,_,cx| { this.ai_entity.update(cx,|ai,_| ai.retry_history_write()); }))))
+                .on_click(cx.listener(|this,_,_,cx| { this.ai.state.update(cx,|ai,_| ai.retry_history_write()); }))))
             .into_any_element())
     }
 
@@ -791,7 +797,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, window, cx| {
-                    this.ai_entity.update(cx, |ai, _cx| {
+                    this.ai.state.update(cx, |ai, _cx| {
                         ai.set_chat_draft(prompt.clone());
                         ai.focus_chat_input();
                     });
@@ -812,7 +818,7 @@ window.focus(&this.focus_handle, cx);
         let acp_backend_active =
             self.settings_store.settings().ai.active_backend == AiActiveBackend::Acp;
         if !acp_backend_active
-            && let Some(percentage) = self.ai_entity.read(cx).chat_ui().model_switch_warning_percentage
+            && let Some(percentage) = self.ai.state.read(cx).chat_ui().model_switch_warning_percentage
         {
             banners = banners.child(
                 self.render_ai_context_warning_banner(
@@ -890,7 +896,7 @@ window.focus(&this.focus_handle, cx);
                             .child(self.render_ai_context_warning_button(
                                 self.i18n.t("ai.context.compact_button"),
                                 LucideIcon::Archive,
-                                self.ai_entity.read(cx).chat_is_loading(),
+                                self.ai.state.read(cx).chat_is_loading(),
                                 AiContextWarningAction::Compact(model_switch),
                                 cx,
                             ))
@@ -898,7 +904,7 @@ window.focus(&this.focus_handle, cx);
                                 actions.child(self.render_ai_context_warning_button(
                                     self.i18n.t("ai.context.summarize"),
                                     LucideIcon::Archive,
-                                    self.ai_entity.read(cx).chat_is_loading(),
+                                    self.ai.state.read(cx).chat_is_loading(),
                                     AiContextWarningAction::Summarize,
                                     cx,
                                 ))
@@ -965,7 +971,7 @@ window.focus(&this.focus_handle, cx);
                 match action {
                     AiContextWarningAction::Compact(model_switch) => {
                         if model_switch {
-                            this.ai_entity.update(cx, |ai, _cx| {
+                            this.ai.state.update(cx, |ai, _cx| {
                                 ai.set_model_switch_warning(None);
                             });
                         }
@@ -973,14 +979,14 @@ window.focus(&this.focus_handle, cx);
                     }
                     AiContextWarningAction::NewChat(model_switch) => {
                         if model_switch {
-                            this.ai_entity.update(cx, |ai, _cx| {
+                            this.ai.state.update(cx, |ai, _cx| {
                                 ai.set_model_switch_warning(None);
                             });
                         }
                         this.create_ai_sidebar_conversation(None, cx);
                     }
                     AiContextWarningAction::Dismiss => {
-                        this.ai_entity.update(cx, |ai, _cx| {
+                        this.ai.state.update(cx, |ai, _cx| {
                             ai.set_model_switch_warning(None);
                         });
                     }
@@ -996,7 +1002,7 @@ window.focus(&this.focus_handle, cx);
     }
 
     pub(in crate::workspace) fn ai_context_danger_warning_active(&self, cx: &App) -> bool {
-        let Some(conversation) = self.ai_entity.read(cx).conversation_state().active_conversation() else {
+        let Some(conversation) = self.ai.state.read(cx).conversation_state().active_conversation() else {
             return false;
         };
         if self.settings_store.settings().ai.active_backend == AiActiveBackend::Provider
@@ -1031,7 +1037,7 @@ window.focus(&this.focus_handle, cx);
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "ai-summarize-confirm-motion",
-            self.ai_entity.read(cx).chat_ui().summarize_confirm_presence.phase(),
+            self.ai.state.read(cx).chat_ui().summarize_confirm_presence.phase(),
             ConfirmDialogView {
                 variant: ConfirmDialogVariant::Default,
                 title: div()
@@ -1086,7 +1092,7 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(snapshot) = self.ai_entity.read(cx).chat_confirm_snapshot() else {
+        let Some(snapshot) = self.ai.state.read(cx).chat_confirm_snapshot() else {
             return div().into_any_element();
         };
         if !matches!(snapshot.kind, ai_state::AiChatConfirmKind::ClearAll) {
@@ -1148,7 +1154,7 @@ window.focus(&this.focus_handle, cx);
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let Some(snapshot) = self.ai_entity.read(cx).chat_confirm_snapshot() else {
+        let Some(snapshot) = self.ai.state.read(cx).chat_confirm_snapshot() else {
             return div().into_any_element();
         };
         if !matches!(

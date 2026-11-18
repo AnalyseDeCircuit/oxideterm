@@ -1,5 +1,4 @@
 use super::*;
-pub(in crate::workspace) use oxideterm_gpui_settings_view::components::SettingsCalloutTone;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn settings_select_trigger(
@@ -67,58 +66,6 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn settings_card_header_text(
-        &self,
-        title: String,
-        description: Option<String>,
-        icon: Option<AnyElement>,
-        actions: Option<AnyElement>,
-    ) -> AnyElement {
-        self.settings_components()
-            .settings_card_header_text(title, description, icon, actions)
-    }
-
-    pub(in crate::workspace) fn settings_card(
-        &self,
-        title_key: &str,
-        description_key: &str,
-        rows: Vec<AnyElement>,
-    ) -> AnyElement {
-        self.settings_components()
-            .settings_card(title_key, description_key, rows)
-    }
-
-    pub(in crate::workspace) fn settings_card_with_header(
-        &self,
-        title_key: &str,
-        description_key: &str,
-        icon: Option<AnyElement>,
-        actions: Option<AnyElement>,
-        rows: Vec<AnyElement>,
-    ) -> AnyElement {
-        self.settings_components().settings_card_with_header(
-            title_key,
-            description_key,
-            icon,
-            actions,
-            rows,
-        )
-    }
-
-    pub(in crate::workspace) fn plain_settings_card(&self, rows: Vec<AnyElement>) -> AnyElement {
-        self.settings_components().plain_settings_card(rows)
-    }
-
-    pub(in crate::workspace) fn settings_callout(
-        &self,
-        tone: SettingsCalloutTone,
-        icon: Option<LucideIcon>,
-        body: AnyElement,
-    ) -> AnyElement {
-        self.settings_components()
-            .settings_callout(tone, icon.map(LucideIcon::path), body)
-    }
-
     pub(in crate::workspace) fn card_separator(&self) -> AnyElement {
         self.settings_components().card_separator()
     }
@@ -161,81 +108,6 @@ impl WorkspaceApp {
             },
             cx,
         )
-    }
-
-    pub(in crate::workspace) fn split_confirm_footer_button(
-        &self,
-        label: String,
-        action: ConfirmDialogAction,
-        destructive: bool,
-        draw_right_separator: bool,
-    ) -> Div {
-        let text_color = if destructive {
-            self.tokens.ui.error
-        } else {
-            self.tokens.ui.text_muted
-        };
-        let hover_bg = if destructive {
-            rgba((self.tokens.ui.error << 8) | 0x1a)
-        } else {
-            rgba((self.tokens.ui.bg_hover << 8) | 0x80)
-        };
-        let hover_text = if destructive {
-            self.tokens.ui.error
-        } else {
-            self.tokens.ui.text
-        };
-
-        // Some Tauri confirm dialogs use a split footer instead of shadcn
-        // DialogFooter spacing. Use the shared split footer primitive so AI
-        // and settings confirms share button focus-visible behavior.
-        split_footer_button(
-            &self.tokens,
-            label,
-            SplitFooterButtonOptions {
-                text_color: rgb(text_color),
-                hover_text_color: rgb(hover_text),
-                hover_background: hover_bg,
-                font_weight: if destructive {
-                    gpui::FontWeight::SEMIBOLD
-                } else {
-                    gpui::FontWeight::MEDIUM
-                },
-                focus_visible: self.standard_confirm_focus() == Some(action),
-                right_separator: draw_right_separator,
-                separator_color: Some(rgba((self.tokens.ui.border << 8) | 0x66)),
-                disabled: false,
-                loading: false,
-                height: None,
-                padding_y: Some(10.0),
-                font_size: Some(self.tokens.metrics.ui_text_sm),
-                edge: SplitFooterButtonEdge::None,
-            },
-        )
-    }
-
-    pub(in crate::workspace) fn split_confirm_footer_action_button(
-        &self,
-        label: String,
-        action: ConfirmDialogAction,
-        destructive: bool,
-        draw_right_separator: bool,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        // Split confirm footers are visually different from DialogFooter, but
-        // Tauri still routes pointer activation through the same Radix action
-        // lifecycle. Keep focus cleanup and event isolation shared with
-        // standard_footer_action_button.
-        self.split_confirm_footer_button(label, action, destructive, draw_right_separator)
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event, window, cx| {
-                    this.clear_standard_confirm_focus();
-                    listener(this, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
     }
 
     pub(in crate::workspace) fn update_settings_slider_drag(
@@ -355,12 +227,13 @@ impl WorkspaceApp {
             }
             SettingsDraftEdit::Invalid => {
                 self.settings_views.surface.update(cx, |_, cx| cx.notify());
+                self.notify_onboarding_view(cx);
                 return;
             }
             SettingsDraftEdit::Unhandled => {}
         }
 
-        if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
+        if oxideterm_gpui_ai::knowledge::page::KnowledgePage::owns_settings_input(input) {
             // Entity-owned inputs are updated directly by the IME adapter and
             // must not be copied into the legacy settings page model.
             cx.notify();

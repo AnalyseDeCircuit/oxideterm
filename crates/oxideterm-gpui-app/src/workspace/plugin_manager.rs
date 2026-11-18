@@ -152,7 +152,6 @@ pub(super) struct NativePluginManagerState {
     marketplace_updates_only: bool,
     marketplace_expanded_ids: HashSet<String>,
     package_manager_expanded: bool,
-    pub(super) custom_acp_expanded: bool,
     pub(super) marketplace_entries: Vec<plugin_host::NativePluginRegistryEntry>,
     pub(super) catalog_version: u32,
     pub(super) history_page_ids: Vec<String>,
@@ -197,7 +196,6 @@ impl NativePluginManagerState {
             marketplace_updates_only: false,
             marketplace_expanded_ids: HashSet::new(),
             package_manager_expanded: false,
-            custom_acp_expanded: false,
             marketplace_entries: Vec::new(),
             catalog_version: 1,
             history_page_ids: Vec::new(),
@@ -1036,7 +1034,7 @@ impl WorkspaceApp {
             .child(self.render_plugin_tag_filter(NativePluginManagerTab::Installed, cx))
             .when(
                 self.plugin_manager_state(cx).installed_tag.as_deref() == Some("acp"),
-                |card| card.child(self.ai_acp_agents_section(self.settings_store.settings(), cx)),
+                |card| card.child(self.settings_views.acp_settings.clone()),
             );
         let range = self.update_plugin_manager_state(cx, |manager| {
             manager.pagination[0].range(plugin_rows.len())
@@ -1357,6 +1355,10 @@ impl WorkspaceApp {
     ) {
         if add_custom {
             self.edit_settings(oxideterm_settings_model::ai_add_acp_agent, cx);
+            self.settings_workspace.update(cx, |state, cx| {
+                state.ai_acp_expanded = true;
+                cx.notify();
+            });
         }
         self.open_plugin_manager_tab(window, cx);
         self.update_plugin_manager_state(cx, |manager| {
@@ -1364,7 +1366,6 @@ impl WorkspaceApp {
             manager.active_tab = NativePluginManagerTab::Installed;
             manager.installed_tag = Some("acp".into());
             manager.pagination[0].page = 0;
-            manager.custom_acp_expanded |= add_custom;
             manager.section_list_state.splice(
                 PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX
                     ..PLUGIN_MANAGER_TABBED_CONTENT_SECTION_INDEX + 1,
@@ -2857,7 +2858,7 @@ impl WorkspaceApp {
 
         if overwrite {
             self.stop_acp_plugin(expected_id.as_deref(), cx);
-            self.acp_entity.update(cx, |entity, _cx| {
+            self.ai.acp.update(cx, |entity, _cx| {
                 entity.begin_plugin_update(expected_id.as_deref())
             });
         }
@@ -2981,7 +2982,7 @@ impl WorkspaceApp {
                     settings.add_background_pack_images(&imported_backgrounds, cx);
                 });
                 if was_installing && self.plugin_manager_state(cx).active_install.is_none() {
-                    self.acp_entity
+                    self.ai.acp
                         .update(cx, |entity, _| entity.finish_plugin_update());
                 }
                 if bootstrap_runtime {
@@ -3673,7 +3674,6 @@ impl WorkspaceApp {
             .when(
                 plugin.runtime_plan.helper_entry("acp", "acp", 1).is_some(),
                 |details| {
-                    let settings = self.settings_store.settings();
                     details
                         .child(
                             div()
@@ -3682,17 +3682,7 @@ impl WorkspaceApp {
                                 .text_color(rgb(theme.text_muted))
                                 .child(self.i18n.t("plugin.acp_setup_hint")),
                         )
-                        .children(
-                            settings
-                                .ai
-                                .acp_agents
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, agent)| {
-                                    agent.plugin_id.as_deref() == Some(manifest.id.as_str())
-                                })
-                                .map(|(index, agent)| self.ai_acp_agent_card(index, agent, cx)),
-                        )
+                        .child(self.settings_views.acp_plugin_settings(&manifest.id, cx))
                 },
             )
             .into_any_element()

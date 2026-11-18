@@ -1,9 +1,10 @@
 mod acp_workspace;
 mod actions;
-mod ai_background_tasks;
-mod ai_lazy;
+use oxideterm_gpui_ai::background as ai_background_tasks;
 mod ai_runtime_context;
-mod ai_state;
+use oxideterm_gpui_ai::state as ai_state;
+use ai_views::AiWorkspaceViews;
+mod ai_views;
 mod app_lock;
 mod audit;
 mod background_tasks;
@@ -102,9 +103,7 @@ use std::{
 };
 
 use self::{
-    ai_lazy::LazyAiRagStore,
     breadcrumb_scroll::scroll_breadcrumb_by_wheel,
-    knowledge::KnowledgeWorkspaceLayout,
     path_completion::{
         PathCompletionCandidate, PathCompletionOwner, PathCompletionState,
         local_path_completion_request, remote_path_completion_request,
@@ -192,13 +191,10 @@ use oxideterm_session_adapter::{
 };
 use oxideterm_settings::{
     AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundScope,
-    CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, GLOBAL_HIGHLIGHT_RULE_SET_ID,
+    CursorStyle as SettingsCursorStyle, FrostedGlassMode, GLOBAL_HIGHLIGHT_RULE_SET_ID,
     HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, Language,
     PersistedSettings, SettingsStore, background_images_directory,
     default_settings_path, ensure_bundled_background_image, list_background_images,
-};
-use oxideterm_settings_model::{
-    AiMcpServerDraft, AiProviderKeyStatusDelivery,
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
@@ -248,10 +244,7 @@ use self::ime::{
     WorkspaceImeTarget, active_ime_should_defer_input_key,
     workspace_ime_target_for_plain_host_tools_input,
 };
-use self::knowledge::{
-    KNOWLEDGE_WORKSPACE_SECTION_COUNT, KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT,
-    KNOWLEDGE_WORKSPACE_SECTION_OVERSCAN,
-};
+use self::knowledge::KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT;
 use self::new_connection::{
     ConnectionFlowEvent, NativeSshPromptHandler, NewConnectionField,
     NewConnectionForm, SavedConnectionPromptAction, SshConnectionIntent,
@@ -268,14 +261,7 @@ use self::root::{background::*, helpers::*};
 use self::session_manager::{
     SessionManagerInput, SessionManagerWorkspaceEvent,
 };
-use self::sidebar::AiInlinePanelState;
-#[cfg(test)]
-use self::sidebar::AiStreamDeliveryEvent;
 use self::sidebar::{ActiveSessionSidebarViewMode, SidebarSection};
-use self::sidebar::{
-    AiCompactionDelivery, AiCompactionDeliverySender, AiStreamDelivery, AiStreamDeliverySender,
-    ai_now_ms,
-};
 use self::tabs::{TabRemovalTransition, TerminalLocation};
 use self::terminal_entity::{WorkspaceTerminalEntity, WorkspaceTerminalEvent};
 use self::window_intent::WorkspaceWindowIntentEntity;
@@ -320,29 +306,9 @@ pub(super) use virtual_list::{
 };
 use virtual_list::{
     VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
-    sync_tauri_virtual_list_state_by_signatures,
 };
 
 const SETTINGS_SCROLL_CARET_PAUSE_MS: u64 = 700;
-const AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
-const AI_PROVIDER_MODEL_ROW_LIST_OVERSCAN: usize = 6;
-const AI_PROVIDER_MODEL_CHIP_LIST_INITIAL_ROW_COUNT: usize = 0;
-const AI_PROVIDER_MODEL_CHIPS_PER_VIRTUAL_ROW: usize = 4;
-const AI_PROVIDER_MODEL_CHIP_ROW_ESTIMATED_HEIGHT: f32 = 28.0;
-const AI_PROVIDER_MODEL_CHIP_ROW_OVERSCAN: usize = 6;
-const AI_PROVIDER_CARD_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const AI_PROVIDER_CARD_LIST_ESTIMATED_HEIGHT: f32 = 220.0;
-const AI_PROVIDER_CARD_LIST_OVERSCAN: usize = 3;
-const AI_MCP_SERVER_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const AI_MCP_SERVER_LIST_ESTIMATED_HEIGHT: f32 = 156.0;
-const AI_MCP_SERVER_LIST_OVERSCAN: usize = 4;
-const FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT: usize = 5;
-const FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT: f32 = 180.0;
-const FORWARDS_SECTION_LIST_OVERSCAN: usize = 2;
-const FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT: usize = 0;
-const FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT: f32 = 42.0;
-const FORWARDS_TABLE_ROW_LIST_OVERSCAN: usize = 8;
 const QUICK_COMMAND_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const QUICK_COMMAND_LIST_ESTIMATED_HEIGHT: f32 = 56.0;
 const QUICK_COMMAND_LIST_OVERSCAN: usize = 6;
@@ -353,30 +319,7 @@ const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 40.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum AiCompactionNoticePhase {
-    Running,
-    Done,
-}
-
-#[derive(Clone, Debug)]
-struct AiCompactionNotice {
-    conversation_id: String,
-    phase: AiCompactionNoticePhase,
-    compacted_count: Option<usize>,
-    timestamp_ms: i64,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct AiChatInitializationError {
-    message_key: &'static str,
-    can_retry: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AiChatFooterAction {
-    Submit,
-}
+use oxideterm_gpui_ai::state::{AiChatFooterAction, AiChatInitializationError, AiCompactionNoticePhase};
 
 // AI composer footer uses the same explicit action list as dialog footers so
 // keyboard focus order stays centralized even though it is not a modal trap.
@@ -448,19 +391,7 @@ impl<T> MarkdownPreviewCache<T> {
     }
 }
 
-const AI_CHAT_LIST_ROW_HEIGHT_ESTIMATE: f32 = 80.0;
-const AI_CHAT_LIST_VIRTUAL_OVERSCAN: usize = 8;
-
-fn ai_chat_virtual_list_spec() -> TauriVirtualListSpec {
-    // Tauri AI chat is a browser scroll container, while native uses GPUI List
-    // for message virtualization. Keep the estimate/overscan explicit so this
-    // variable-height list follows the same shared virtual-list contract as
-    // tables, file panes, notifications, and event logs.
-    TauriVirtualListSpec::new(
-        px(AI_CHAT_LIST_ROW_HEIGHT_ESTIMATE),
-        AI_CHAT_LIST_VIRTUAL_OVERSCAN,
-    )
-}
+use oxideterm_gpui_ai::state::ai_chat_virtual_list_spec;
 
 // Tauri NotificationsPanel uses variable-height grouped rows. Keep the native
 // estimate/overscan as a virtual-list spec instead of a raw overdraw number so
@@ -478,47 +409,7 @@ enum AiChatListItem {
     BottomSpacer,
 }
 
-#[derive(Default)]
-struct AiChatMessageSignatureCache {
-    conversation_id: Option<String>,
-    signatures: HashMap<String, u64>,
-}
-
-impl AiChatMessageSignatureCache {
-    fn select_conversation(&mut self, conversation_id: &str) {
-        if self.conversation_id.as_deref() == Some(conversation_id) {
-            return;
-        }
-        self.conversation_id = Some(conversation_id.to_string());
-        self.signatures.clear();
-    }
-
-    fn signature_for(&mut self, message_id: &str, compute: impl FnOnce() -> u64) -> u64 {
-        if let Some(signature) = self.signatures.get(message_id) {
-            return *signature;
-        }
-        let signature = compute();
-        self.signatures.insert(message_id.to_string(), signature);
-        signature
-    }
-
-    fn invalidate_message(&mut self, message_id: &str) {
-        self.signatures.remove(message_id);
-    }
-
-    fn invalidate_all(&mut self) {
-        self.signatures.clear();
-    }
-
-    fn needs_prune(&self, retained_count: usize) -> bool {
-        self.signatures.len() > retained_count.saturating_add(32)
-    }
-
-    fn prune(&mut self, retained_message_ids: &HashSet<&str>) {
-        self.signatures
-            .retain(|message_id, _| retained_message_ids.contains(message_id.as_str()));
-    }
-}
+use oxideterm_gpui_ai::state::AiChatMessageSignatureCache;
 
 #[derive(Clone, Copy, Debug)]
 struct AiMessageViewport {
@@ -533,41 +424,7 @@ struct AiChatListViewportSnapshot {
     height: f32,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct AiContextTokenBreakdown {
-    system_instructions: usize,
-    tool_definitions: usize,
-    reserved_output: usize,
-    messages: usize,
-    tool_results: usize,
-    total: usize,
-    max_tokens: usize,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct AiContextTokenBreakdownKey {
-    conversation_id: Option<String>,
-    conversation_fingerprint: u64,
-    provider_id: String,
-    model: String,
-    max_tokens: usize,
-    request_configuration_fingerprint: u64,
-}
-
-#[derive(Default)]
-struct AiContextTokenBreakdownCache {
-    key: Option<AiContextTokenBreakdownKey>,
-    breakdown_without_draft: Option<AiContextTokenBreakdown>,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct AiPreparedPromptUsage {
-    conversation_id: String,
-    last_user_message_id: Option<String>,
-    provider_id: String,
-    model: String,
-    breakdown: AiContextTokenBreakdown,
-}
+use oxideterm_gpui_ai::state::{AiContextTokenBreakdown, AiContextTokenBreakdownKey, AiPreparedPromptUsage};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConfirmKeyboardAction {
@@ -586,11 +443,7 @@ struct ShortcutsModalState {
     scroll_handle: UniformListScrollHandle,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AiModelSelectorScope {
-    Sidebar,
-    TerminalInline,
-}
+use oxideterm_gpui_ai::state::AiModelSelectorScope;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum TabDragMode {
@@ -791,14 +644,13 @@ pub(crate) struct WorkspaceApp {
     _command_palette_observation: Subscription,
     version_migration: VersionMigrationState,
     onboarding: OnboardingState,
+    onboarding_view: Entity<oxideterm_gpui_onboarding::OnboardingView>,
     shortcuts_modal: ShortcutsModalState,
     settings_workspace: Entity<settings::SettingsWorkspaceEntity>,
     settings_views: oxideterm_gpui_settings_view::views::SettingsViews,
     _settings_workspace_subscription: Subscription,
     segmented_control_user_motion: selection_motion::UserSegmentedControlMotionState,
     // Prompt and memory documents are edited outside the virtual settings list.
-    ai_text_editor_dialog: Option<settings::AiTextEditorDialog>,
-    ai_text_editor: Option<Entity<oxideterm_gpui_editor::TextEditorView>>,
     detached_local_terminal_list_state: ListState,
     detached_local_terminal_list_cache: RefCell<VirtualListSignatureCache>,
     plugin_entity: Entity<plugin_entity::PluginWorkspaceEntity>,
@@ -822,9 +674,8 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_rendered: bool,
     context_sidebar_motion_generation: u64,
     context_sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
-    ai_entity: Entity<ai_state::AiWorkspaceEntity>,
+    ai: AiWorkspaceViews,
     ai_sidebar_view: Entity<sidebar::AiAssistantSidebarView>,
-    acp_entity: Entity<acp_workspace::AcpWorkspaceEntity>,
     mosh_plugin_sessions: Arc<oxideterm_mosh::MoshPluginSessions>,
     // Panes whose plugin toolbar state currently declares `overlay`; one
     // member per pane, in-memory only, never persisted. The single physical
@@ -844,11 +695,7 @@ pub(crate) struct WorkspaceApp {
     skill_registry: std::sync::Arc<parking_lot::RwLock<oxideterm_skills::SkillRegistry>>,
     skill_workspace_root: Option<std::path::PathBuf>,
     loaded_conversation_skills: HashMap<String, HashMap<String, String>>,
-    ai_background_tasks: Entity<ai_background_tasks::AiBackgroundTaskEntity>,
-    _ai_background_tasks_subscription: Subscription,
     ai_runtime_context: Entity<ai_runtime_context::AiRuntimeContextEntity>,
-    _ai_entity_subscription: Subscription,
-    _acp_entity_subscription: Subscription,
     active_context_sidebar_panel: ContextSidebarPanel,
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
@@ -870,7 +717,6 @@ pub(crate) struct WorkspaceApp {
     session_manager_handoff_to_sidebar: bool,
     active_session_sidebar_list_state: ListState,
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
-    knowledge_workspace_list_state: ListState,
     open_settings_select: Option<SettingsSelect>,
     // A root-mounted select portal must only use the trigger geometry from the
     // native window that opened it.
@@ -937,7 +783,7 @@ pub(crate) struct WorkspaceApp {
     active_ssh_node_id: Option<NodeId>,
     next_ssh_node_id: u64,
     forwarding: Entity<forwards::ForwardingWorkspaceEntity>,
-    _forwarding_subscriptions: Vec<Subscription>,
+    _forwarding_subscription: Subscription,
     file_manager: Entity<FileManagerState>,
     _file_manager_observation: Subscription,
     _file_manager_subscription: Subscription,
@@ -954,7 +800,7 @@ pub(crate) struct WorkspaceApp {
     sftp_presentation_request: Option<sftp::SftpPresentationRequest>,
     ide_workspace: Entity<ide::IdeWorkspaceEntity>,
     _ide_workspace_subscription: Subscription,
-    knowledge_workspace: Entity<knowledge::KnowledgeWorkspaceEntity>,
+    knowledge_workspace: oxideterm_gpui_ai::knowledge::workspace::KnowledgeViews,
     sftp_view: Entity<sftp::SftpWorkspaceEntity>,
     sftp_pages: HashMap<TabId, sftp::views::SftpPage>,
     sftp_dispatch_surface: Rc<Cell<Option<sftp::SftpSurfaceId>>>,
@@ -1155,40 +1001,6 @@ impl std::fmt::Debug for AiRuntimeCommandRecord {
             .field("risk", &self.risk)
             .finish()
     }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct AiToolExecutionRecord {
-    pub(crate) record_id: String,
-    pub(crate) conversation_id: String,
-    pub(crate) assistant_message_id: String,
-    pub(crate) tool_call_id: String,
-    pub(crate) tool_name: String,
-    pub(crate) argument_summary: String,
-    pub(crate) resource_kind: Option<oxideterm_ai::StableResourceKind>,
-    pub(crate) target_kind: Option<String>,
-    pub(crate) risk: String,
-    pub(crate) approval_source: Option<String>,
-    pub(crate) execution_surface: String,
-    pub(crate) visible_in_terminal: Option<bool>,
-    pub(crate) status: String,
-    pub(crate) success: Option<bool>,
-    pub(crate) error_code: Option<String>,
-    pub(crate) duration_ms: Option<u64>,
-    pub(crate) started_at: i64,
-    pub(crate) finished_at: Option<i64>,
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct AiToolResultFact {
-    pub(crate) fact_id: String,
-    pub(crate) conversation_id: String,
-    pub(crate) assistant_message_id: String,
-    pub(crate) tool_call_id: String,
-    pub(crate) tool_name: String,
-    pub(crate) source_kind: String,
-    pub(crate) summary: String,
-    pub(crate) created_at: i64,
 }
 
 #[derive(Clone)]

@@ -29,7 +29,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.knowledge_page(cx).read(cx);
         ai.knowledge_create_dialog_open().then(|| self.render_knowledge_dialog(
             KnowledgeDialogContent::Collection {
                 name: ai.knowledge_new_collection_name(),
@@ -50,7 +50,7 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.knowledge_page(cx).read(cx);
         ai.knowledge_document_dialog_open().then(|| self.render_knowledge_dialog(
             KnowledgeDialogContent::Document {
                 title: ai.knowledge_new_document_title(),
@@ -68,7 +68,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn open_knowledge_create_dialog(&mut self, cx: &mut Context<Self>) {
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.open_knowledge_create_dialog();
             cx.notify();
         });
@@ -77,7 +77,7 @@ impl WorkspaceApp {
 
     fn knowledge_collection_scope_label(&self, cx: &App) -> String {
         let selected_connection_id = self
-            .ai_entity
+            .knowledge_page(cx)
             .read(cx)
             .knowledge_new_collection_connection_id();
         selected_connection_id
@@ -92,7 +92,7 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.close_knowledge_create_dialog(delay, cx);
         });
         cx.notify();
@@ -106,7 +106,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let owner_window_id = window.window_handle().window_id();
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.open_knowledge_document_dialog(
                 collection_id,
                 owner_window_id,
@@ -123,7 +123,7 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.close_knowledge_document_dialog(delay, cx);
         });
         cx.notify();
@@ -133,14 +133,14 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let confirm = self.ai_entity.read(cx).knowledge_delete_confirm()?;
+        let confirm = self.knowledge_page(cx).read(cx).knowledge_delete_confirm()?;
         Some(self.render_knowledge_dialog(
             KnowledgeDialogContent::Delete(confirm),
             |app, action, cx| {
                 if matches!(action, KnowledgeDialogAction::Confirm) {
                     app.knowledge_confirm_delete(cx);
                 } else {
-                    app.ai_entity.update(cx, |ai, cx| {
+                    app.knowledge_page(cx).update(cx, |ai, cx| {
                         ai.clear_knowledge_delete_confirm();
                         cx.notify();
                     });

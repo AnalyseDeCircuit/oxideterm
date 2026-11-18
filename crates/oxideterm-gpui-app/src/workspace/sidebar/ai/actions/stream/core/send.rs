@@ -1,40 +1,3 @@
-impl AiWorkspaceEntity {
-    pub(in crate::workspace) fn begin_assistant_turn(
-        &mut self,
-        conversation_id: &str,
-        message: AiChatMessage,
-        budget_level: u8,
-        backend: oxideterm_ai::AiMessageBackendProvenance,
-    ) {
-        let message_id = message.id.clone();
-        self.add_message(conversation_id, message);
-        if let Some(conversation) = self
-            .conversation_state_mut()
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)
-        {
-            let metadata = conversation
-                .session_metadata
-                .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
-            if let Some(object) = metadata.as_object_mut() {
-                object.insert(
-                    "conversationId".to_string(),
-                    serde_json::json!(conversation_id),
-                );
-                object.insert("origin".to_string(), serde_json::json!("sidebar"));
-                object.insert(
-                    "lastBudgetLevel".to_string(),
-                    serde_json::json!(budget_level),
-                );
-            }
-            // The backend owner is persisted separately from display model
-            // text so mixed provider/ACP history can be synchronized exactly.
-            oxideterm_ai::store_ai_message_backend_provenance(conversation, &message_id, backend);
-        }
-    }
-}
-
 impl WorkspaceApp {
     fn begin_ai_chat_stream_with_authority(
         &mut self,
@@ -42,7 +5,7 @@ impl WorkspaceApp {
         assistant_id: &str,
         cx: &mut Context<Self>,
     ) -> (u64, AiStreamDeliverySender, ToolSessionId) {
-        let (replaced_generation, generation, sender) = self.ai_entity.update(cx, |ai, _cx| {
+        let (replaced_generation, generation, sender) = self.ai.state.update(cx, |ai, _cx| {
             let replaced_generation = ai.conversation_stream_generations(conversation_id);
             let (generation, sender) =
                 ai.begin_chat_stream(conversation_id.to_owned(), assistant_id.to_owned());
@@ -76,7 +39,7 @@ impl WorkspaceApp {
         }) {
             Ok(launch) => launch,
             Err(_) => {
-                self.ai_entity.update(cx, |ai, _cx| {
+                self.ai.state.update(cx, |ai, _cx| {
                     ai.set_conversation_loading(&conversation_id, false)
                 });
                 let agent = self
@@ -102,7 +65,7 @@ impl WorkspaceApp {
             }
         };
         let request_message = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .model_contexts
@@ -140,7 +103,7 @@ impl WorkspaceApp {
 
             let catalog_hash = format!("{:x}", sha2::Sha256::digest(catalog.as_bytes()));
             let already_known = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .conversation_state()
                 .conversations
@@ -155,7 +118,7 @@ impl WorkspaceApp {
         });
 
         let handoff = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .model_contexts
@@ -177,7 +140,7 @@ impl WorkspaceApp {
             prompt.push_str(handoff.as_str());
             images.splice(0..0, historical_images);
         }
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.history.model_contexts.remove(&conversation_id);
         });
         {
@@ -218,7 +181,7 @@ impl WorkspaceApp {
         let now = ai_now_ms();
         let assistant_id = self.next_ai_chat_id(now, cx);
         let backend = ai_message_backend_for_stream(&config);
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.begin_assistant_turn(
                 &conversation_id,
                 AiChatMessage {
@@ -248,7 +211,7 @@ impl WorkspaceApp {
             self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
         let turn_id = format!("{conversation_id}:{generation}");
         let mut config_selections = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .conversations
@@ -263,7 +226,7 @@ impl WorkspaceApp {
             config_selections.push(model_selection);
         }
         let mode_id = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .conversations
@@ -272,7 +235,7 @@ impl WorkspaceApp {
             .and_then(ai_acp_session_state)
             .and_then(|state| state.current_mode_id);
         let application_tool_services = self.ai_model_backend_services(cx);
-        let started = self.acp_entity.update(cx, |entity, _cx| {
+        let started = self.ai.acp.update(cx, |entity, _cx| {
             entity.start_turn(crate::workspace::acp_workspace::AcpThreadStart {
                 route: crate::workspace::acp_workspace::AcpTurnRoute {
                     generation,
@@ -322,7 +285,7 @@ impl WorkspaceApp {
                     oxideterm_audit::AuditAuthorization::NotRequired,
                 );
             }
-            self.ai_entity.update(cx, |ai, _cx| {
+            self.ai.state.update(cx, |ai, _cx| {
                 let Some(conversation) = ai
                     .conversation_state_mut()
                     .conversations
@@ -347,7 +310,7 @@ impl WorkspaceApp {
             });
         }
         if !started {
-            self.ai_entity.update(cx, |ai, _cx| {
+            self.ai.state.update(cx, |ai, _cx| {
                 ai.enqueue_chat_stream_delivery(AiStreamDelivery {
                     generation,
                     conversation_id,
@@ -386,7 +349,7 @@ impl WorkspaceApp {
         };
 
         let launch = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_launches
             .get(&conversation_id)
@@ -419,7 +382,7 @@ impl WorkspaceApp {
             };
             let _ = weak.update(cx, |this, cx| {
                 if !this
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .chat_launch_matches(&conversation_id, launch.as_deref())
                 {
@@ -457,7 +420,7 @@ impl WorkspaceApp {
                 config.image_input,
             ) == Some(false)
             && self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .history
                 .model_contexts
@@ -469,7 +432,7 @@ impl WorkspaceApp {
                         .any(|m| !oxideterm_ai::message_images(m).is_empty())
                 })
         {
-            self.ai_entity.update(cx, |ai, _| {
+            self.ai.state.update(cx, |ai, _| {
                 ai.pending_image_requests.insert(
                     conversation_id.clone(),
                     AiPendingChatStream {
@@ -497,7 +460,7 @@ impl WorkspaceApp {
         {
             let pending = AiPendingChatStream {
                 launch_id: self
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .chat_launches
                     .get(&conversation_id)
@@ -541,7 +504,7 @@ impl WorkspaceApp {
         ) else {
             return;
         };
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.history.model_contexts.remove(&conversation_id);
         });
         if trimmed_count > 0 {
@@ -558,7 +521,7 @@ impl WorkspaceApp {
         let now = ai_now_ms();
         let assistant_id = self.next_ai_chat_id(now, cx);
         let request_message = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .conversations
@@ -577,7 +540,7 @@ impl WorkspaceApp {
             .map(|message| message.id.clone())
             .unwrap_or_else(|| format!("{assistant_id}-request"));
         let (budget_decision, budget_diagnostic_payload) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .conversations
@@ -616,7 +579,7 @@ impl WorkspaceApp {
             });
         let budget_level = budget_decision.map(|decision| decision.level).unwrap_or(0);
         let backend = ai_message_backend_for_stream(&config);
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.begin_assistant_turn(
                 &conversation_id,
                 AiChatMessage {
@@ -697,7 +660,7 @@ impl WorkspaceApp {
         ));
         self.persist_ai_transcript_entries(conversation_id.clone(), transcript_entries, cx);
         self.persist_ai_diagnostic_events(conversation_id.clone(), diagnostic_events, cx);
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.set_conversation_loading(&conversation_id, true)
         });
         // Every model turn receives a fresh authority lease. The token remains
@@ -729,7 +692,7 @@ impl WorkspaceApp {
             ui_tx,
             Some(execution),
         ));
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _cx| ai.set_chat_stream_task(generation, task));
     }
 }

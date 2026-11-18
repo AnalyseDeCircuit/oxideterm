@@ -347,7 +347,7 @@ impl WorkspaceApp {
         oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
             .into_iter()
             .filter(|provider| {
-                self.ai_entity
+                self.ai.state
                     .read(cx)
                     .key_store()
                     .has_provider_key(&provider.id)
@@ -512,13 +512,13 @@ impl WorkspaceApp {
                     .into_iter()
                     .map(|provider| provider.id)
                     .filter(|provider_id| {
-                        self.ai_entity
+                        self.ai.state
                             .read(cx)
                             .key_store()
                             .has_provider_key(provider_id)
                     })
                     .collect::<Vec<_>>();
-            self.ai_entity
+            self.ai.state
                 .read(cx)
                 .key_store()
                 .get_provider_keys(&provider_ids)
@@ -731,7 +731,7 @@ impl WorkspaceApp {
             }
 
             match self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .key_store()
                 .store_provider_key(&secret.id, secret.secret)

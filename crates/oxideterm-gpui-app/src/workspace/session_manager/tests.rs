@@ -1,8 +1,8 @@
 use super::*;
 use gpui::TestAppContext;
 use oxideterm_connections::{
-    ConnectionStore, ConnectionStoreData, MoshProfile, SavedAuth, SavedConnection, SavedProxyHop,
-    SerialProfile, TelnetProfile,
+    ConnectionStore, ConnectionStoreData, MoshProfile, SavedAuth, SavedConnection,
+    SavedUpstreamProxyPolicy, SerialProfile, TelnetProfile,
 };
 
 pub(in crate::workspace) fn isolated_workspace_fixture(
@@ -602,24 +602,35 @@ fn session_manager_sidebar_loads_ssh_config_without_opening_a_tab(cx: &mut TestA
     .unwrap();
     cx.executor().allow_parking();
     let (workspace, cx) = workspace_with_console_profiles(cx, &fixture_dir);
-    let load = workspace.update(cx, |workspace, cx| {
+    let (loaded, receiver) = tokio::sync::oneshot::channel();
+    let (observation, runtime) = workspace.update(cx, |workspace, cx| {
+        let manager = workspace.connections.session_manager.clone();
+        assert!(manager.read(cx).ssh_config_hosts.is_empty());
+        let mut loaded = Some(loaded);
+        let observation = cx.observe(&manager, move |_, manager, cx| {
+            let manager = manager.read(cx);
+            if (!manager.ssh_config_hosts.is_empty() || manager.status.is_some())
+                && let Some(loaded) = loaded.take()
+            {
+                let _ = loaded.send(());
+            }
+        });
         workspace
             .settings_store
             .settings_mut()
             .ssh_config
             .auto_load_hosts = true;
         workspace.set_sidebar_section(SidebarSection::Connections, cx);
-        workspace
-            .connections
-            .session_manager
-            .update(cx, |manager, _| {
-                manager
-                    .ssh_config_load_task
-                    .take()
-                    .expect("sidebar starts SSH config discovery")
-            })
+        (observation, workspace.forwarding_runtime.clone())
     });
-    cx.foreground_executor().block_test(load);
+    let load =
+        runtime.spawn(async move { tokio::time::timeout(Duration::from_secs(5), receiver).await });
+    cx.foreground_executor()
+        .block_test(load)
+        .unwrap()
+        .expect("sidebar SSH config discovery timed out")
+        .expect("discovery observer must stay alive until completion");
+    drop(observation);
     workspace.read_with(cx, |workspace, cx| {
         assert!(
             workspace

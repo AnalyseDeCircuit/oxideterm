@@ -226,7 +226,7 @@ impl WorkspaceApp {
             source_pane_id: pane_id,
             session_id,
             ai_runtime: self.ai_runtime_context.downgrade(),
-            agent_resources: self.ai_entity.read(cx).agents.services.resources.clone(),
+            agent_resources: self.ai.state.read(cx).agents.services.resources.clone(),
             tab_host: self.tab_host.downgrade(),
             terminal: self.terminal.downgrade(),
         }
@@ -655,13 +655,13 @@ impl WorkspaceApp {
         // overlay anchor and re-derives the affected plugin runtimes.
         self.plugin_toolbar_pane_closed(pane_id, cx);
         if self
-            .ai_entity
+            .ai.state
             .read(cx)
             .terminal_inline_panel()
             .target
             .is_some_and(|(id, _)| id == *pane_id)
         {
-            self.ai_entity
+            self.ai.state
                 .update(cx, |ai, _| ai.close_terminal_inline_panel());
         }
         if self.search.focused == Some(*pane_id) {
@@ -1376,11 +1376,7 @@ impl WorkspaceApp {
                 let (pane_id, page_id) = (*pane_id, *page_id);
                 let container = tab_id.unwrap_or(page_id);
                 let content = if page.kind == TabKind::Knowledge {
-                    self.render_knowledge_workspace_surface(
-                        KnowledgeWorkspaceLayout::SplitPane,
-                        window,
-                        cx,
-                    )
+                    self.render_knowledge_workspace_surface()
                 } else {
                     self.render_tab_content_for_id(page_id, &page.kind, None, window, cx)
                 };
@@ -1535,14 +1531,14 @@ impl WorkspaceApp {
                             .child(pane),
                     )
                     .when(
-                        self.ai_entity.read(cx).terminal_inline_panel().open
+                        self.ai.state.read(cx).terminal_inline_panel().open
                             && self
-                                .ai_entity
+                                .ai.state
                                 .read(cx)
                                 .terminal_inline_panel()
                                 .target
                                 .is_some_and(|(id, _)| id == *pane_id),
-                        |pane_frame| pane_frame.child(self.render_terminal_ai_inline_panel(cx)),
+                        |pane_frame| pane_frame.child(self.ai.inline_panel.clone()),
                     )
                     .when(
                         self.search

@@ -53,41 +53,30 @@ impl WorkspaceApp {
         result: SettingsSearchResult,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, cx| {
-            let section = match result.section {
-                SettingsSectionId::AiProvidersSettings => {
-                    Some(AiSettingsViewSection::ProviderSettings)
-                }
-                SettingsSectionId::AiToolsToolUse => Some(AiSettingsViewSection::ToolUse),
-                SettingsSectionId::AiContextModelWindows => {
-                    Some(AiSettingsViewSection::ContextWindows)
-                }
-                _ => None,
-            };
-            if let Some(section) = section {
-                if !ai.settings_section_expanded(section) {
-                    ai.toggle_settings_section(section, cx);
-                }
-                for provider in ai_provider_views(self.settings_store.settings()) {
-                    if section == AiSettingsViewSection::ProviderSettings {
-                        if !ai.settings_provider_expanded(&provider.id, false) {
-                            ai.toggle_settings_provider_expanded(&provider.id, false, cx);
-                        }
-                        if !ai.settings_provider_models_expanded(&provider.id) {
-                            ai.toggle_settings_provider_models(&provider.id, cx);
-                        }
-                    } else if section == AiSettingsViewSection::ContextWindows
-                        && !ai.settings_context_provider_expanded(&provider.id)
-                    {
-                        ai.toggle_settings_context_provider(&provider.id, cx);
-                    }
-                }
-            }
-            if result.section == SettingsSectionId::KnowledgeEmbeddingConfig {
+        if result.section == SettingsSectionId::AiToolsToolUse {
+            self.settings_workspace.update(cx, |state, cx| {
+                state.ai_tool_policy_expanded = true;
+                cx.notify();
+            });
+        }
+        if result.section == SettingsSectionId::AiContextModelWindows {
+            let providers = ai_provider_views(self.settings_store.settings());
+            self.settings_workspace.update(cx, |state, cx| {
+                state.ai_context_windows.expanded = true;
+                state.ai_context_windows.expanded_providers.extend(providers.into_iter().map(|provider| provider.id));
+                cx.notify();
+            });
+        }
+        if result.section == SettingsSectionId::AiProvidersSettings {
+            let ids = ai_provider_views(self.settings_store.settings()).into_iter().map(|provider| provider.id);
+            self.settings_views.ai_providers.update(cx, |view, cx| view.expand_for_search(ids, cx));
+        }
+        if result.section == SettingsSectionId::KnowledgeEmbeddingConfig {
+            self.knowledge_page(cx).update(cx, |ai, cx| {
                 ai.expand_knowledge_embedding_config();
                 cx.notify();
-            }
-        });
+            });
+        }
         let tab = result.tab;
         self.settings_workspace.update(cx, |settings, cx| settings.navigate_to_search_result(&result, cx));
         let dismissed_select = self.open_settings_select.is_some();

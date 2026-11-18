@@ -20,6 +20,261 @@ pub const AI_TOOL_MODEL_ERROR_OUTPUT_MAX_CHARS: usize = 2_000;
 pub const AI_TOOL_MODEL_SUMMARY_MAX_CHARS: usize = 1_000;
 pub const AI_TOOL_MODEL_ERROR_MESSAGE_MAX_CHARS: usize = 1_000;
 
+pub fn rejected_ai_tool_result(
+    tool_call_id: String,
+    tool_name: String,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> AiExecutedToolResult {
+    let code = code.into();
+    let message = message.into();
+    let envelope = serde_json::json!({
+        "ok": false,
+        "summary": message,
+        "output": message,
+        "error": {
+            "code": code,
+            "message": message,
+            "recoverable": true,
+        },
+        "meta": {
+            "toolName": tool_name,
+            "durationMs": 0,
+            "verified": false,
+            "truncated": false,
+        }
+    });
+    AiExecutedToolResult {
+        images: Vec::new(),
+        tool_call_id,
+        tool_name,
+        success: false,
+        output: message.clone(),
+        error: Some(message),
+        duration_ms: 0,
+        envelope,
+    }
+}
+
+pub fn unavailable_ai_tool_result(tool_call_id: String, tool_name: String) -> AiExecutedToolResult {
+    pre_execution_rejected_ai_tool_result(
+        tool_call_id,
+        tool_name,
+        "tool_not_available",
+        "Tool not available in current context.",
+    )
+}
+
+pub fn pre_execution_rejected_ai_tool_result(
+    tool_call_id: String,
+    tool_name: String,
+    code: impl Into<String>,
+    message: impl Into<String>,
+) -> AiExecutedToolResult {
+    let code = code.into();
+    let message = message.into();
+    let envelope = serde_json::json!({
+        "ok": false,
+        "summary": message,
+        "output": "",
+        "error": {
+            "code": code,
+            "message": message,
+            "recoverable": true,
+        },
+        "meta": {
+            "toolName": tool_name,
+            "durationMs": 0,
+            "truncated": false,
+        }
+    });
+    AiExecutedToolResult {
+        images: Vec::new(),
+        tool_call_id,
+        tool_name,
+        success: false,
+        output: String::new(),
+        error: Some(message),
+        duration_ms: 0,
+        envelope,
+    }
+}
+
+pub fn executed_summary(result: &AiExecutedToolResult) -> String {
+    result
+        .envelope
+        .get("summary")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_else(|| {
+            if result.success {
+                "Tool completed."
+            } else {
+                "Tool failed."
+            }
+        })
+        .to_string()
+}
+
+pub fn ai_policy_risk_label(risk: crate::AiActionRisk) -> &'static str {
+    match risk {
+        crate::AiActionRisk::Read => "read",
+        crate::AiActionRisk::Write => "write",
+        crate::AiActionRisk::Execute => "execute",
+        crate::AiActionRisk::Interactive => "interactive",
+        crate::AiActionRisk::Destructive => "destructive",
+        crate::AiActionRisk::Credential => "credential",
+    }
+}
+
+pub fn ai_policy_decision_label(decision: crate::AiPolicyDecisionKind) -> &'static str {
+    match decision {
+        crate::AiPolicyDecisionKind::Allow => "allow",
+        crate::AiPolicyDecisionKind::RequireApproval => "require_approval",
+        crate::AiPolicyDecisionKind::Deny => "deny",
+    }
+}
+
+pub fn ai_policy_safety_mode_label(mode: crate::AiPolicySafetyMode) -> &'static str {
+    match mode {
+        crate::AiPolicySafetyMode::Default => "default",
+        crate::AiPolicySafetyMode::ReadOnly => "read_only",
+        crate::AiPolicySafetyMode::Bypass => "bypass",
+    }
+}
+
+pub fn annotate_executed_ai_tool_result_policy(
+    result: &mut AiExecutedToolResult,
+    decision: &crate::AiPolicyDecision,
+) {
+    let Some(envelope) = result.envelope.as_object_mut() else {
+        return;
+    };
+    let meta = envelope
+        .entry("meta")
+        .or_insert_with(|| serde_json::json!({}))
+        .as_object_mut();
+    let Some(meta) = meta else {
+        return;
+    };
+    let approval_mode = ai_policy_safety_mode_label(decision.approval_mode);
+    if decision.approval_mode == crate::AiPolicySafetyMode::Bypass
+        && decision.risk == crate::AiActionRisk::Destructive
+        && decision.decision == crate::AiPolicyDecisionKind::Allow
+    {
+        meta.insert("approvalMode".to_string(), serde_json::json!(approval_mode));
+    }
+    if let Some(profile_id) = decision.profile_id.as_deref() {
+        meta.insert("profileId".to_string(), serde_json::json!(profile_id));
+    }
+    let mut policy_decision = serde_json::json!({
+        "decision": ai_policy_decision_label(decision.decision),
+        "risk": ai_policy_risk_label(decision.risk),
+        "reasonCode": decision.reason_code.as_str(),
+        "matchedPolicyKey": decision.matched_policy_key.as_str(),
+        "approvalMode": approval_mode,
+    });
+    if let Some(profile_id) = decision.profile_id.as_deref()
+        && let Some(object) = policy_decision.as_object_mut()
+    {
+        object.insert("profileId".to_string(), serde_json::json!(profile_id));
+    }
+    meta.insert("policyDecision".to_string(), policy_decision);
+}
+
+pub fn trim_tail_chars(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let tail = value.chars().rev().take(max_chars).collect::<Vec<_>>();
+    let omitted = value.chars().count().saturating_sub(max_chars);
+    format!(
+        "[trimmed {omitted} chars]\n{}",
+        tail.into_iter().rev().collect::<String>()
+    )
+}
+
+pub fn truncate_for_model(value: String, max_chars: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count <= max_chars {
+        return value;
+    }
+    let head = value.chars().take(max_chars).collect::<String>();
+    format!(
+        "{head}\n[truncated {} chars]",
+        char_count.saturating_sub(max_chars)
+    )
+}
+
+pub fn ai_line_count(value: &str) -> usize {
+    if value.is_empty() {
+        0
+    } else {
+        value.split('\n').count()
+    }
+}
+
+pub fn ai_head_tail_preview(value: &str, max_chars: usize) -> String {
+    let char_count = value.chars().count();
+    if char_count <= max_chars {
+        return value.to_string();
+    }
+    let marker = format!(
+        "\n\n[output truncated: {} chars omitted; showing head and tail]\n\n",
+        char_count.saturating_sub(max_chars)
+    );
+    let marker_chars = marker.chars().count();
+    let available = max_chars.saturating_sub(marker_chars);
+    let head_chars = (available * 55).div_ceil(100);
+    let tail_chars = available.saturating_sub(head_chars);
+    let head = value.chars().take(head_chars).collect::<String>();
+    let tail = value
+        .chars()
+        .rev()
+        .take(tail_chars)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect::<String>();
+    format!("{head}{marker}{tail}")
+}
+
+pub fn prepare_ai_tool_output(value: &str) -> (String, Option<String>, serde_json::Value, bool) {
+    const FULL_OUTPUT_MAX_CHARS: usize = 24 * 1024;
+    const RAW_OUTPUT_PERSIST_MAX_CHARS: usize = 256 * 1024;
+    const MODEL_OUTPUT_PREVIEW_MAX_CHARS: usize = 12_000;
+
+    let char_count = value.chars().count();
+    let line_count = ai_line_count(value);
+    if char_count <= FULL_OUTPUT_MAX_CHARS {
+        return (
+            value.to_string(),
+            None,
+            serde_json::json!({
+                "strategy": "full",
+                "charCount": char_count,
+                "lineCount": line_count,
+                "rawOutputStored": false,
+            }),
+            false,
+        );
+    }
+
+    let output = ai_head_tail_preview(value, MODEL_OUTPUT_PREVIEW_MAX_CHARS);
+    let raw_output_stored = char_count <= RAW_OUTPUT_PERSIST_MAX_CHARS;
+    (
+        output.clone(),
+        raw_output_stored.then(|| value.to_string()),
+        serde_json::json!({
+            "strategy": "head_tail",
+            "charCount": char_count,
+            "lineCount": line_count,
+            "omittedChars": char_count.saturating_sub(output.chars().count()),
+            "rawOutputStored": raw_output_stored,
+        }),
+        true,
+    )
+}
+
 pub fn ai_to_usable_budget_threshold(
     raw_window_ratio: f32,
     context_window: usize,

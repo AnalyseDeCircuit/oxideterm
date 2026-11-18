@@ -1,60 +1,4 @@
-pub(in crate::workspace) fn ai_stream_tool_definitions(
-    tool_use_enabled: bool,
-    skills_enabled: bool,
-    web_enabled: bool,
-    tool_policy: &oxideterm_ai::AiToolUsePolicy,
-    mcp_registry: &oxideterm_ai::McpRegistry,
-) -> Vec<oxideterm_ai::AiToolDefinition> {
-    if !tool_use_enabled {
-        return Vec::new();
-    }
-    let mut tools = oxideterm_ai::orchestrator_tool_definitions();
-    if !web_enabled {
-        tools.retain(|tool| !oxideterm_ai::web::is_web_tool(&tool.name));
-    }
-    if !skills_enabled {
-        // The global Skills switch controls capability exposure, not only
-        // whether a guessed tool call succeeds at execution time.
-        tools.retain(|tool| tool.name != "load_skill" && tool.name != "read_skill_resource");
-    }
-    // Native does not ship Tauri's autonomous agent path yet. Expose MCP
-    // resource/dynamic tools through chat as a native-only bridge so MCP
-    // remains usable from the primary AI surface.
-    tools.extend(mcp_registry.tool_definitions().into_iter().filter(|tool| {
-        !tool_policy
-            .disabled_tools
-            .iter()
-            .any(|name| name == &tool.name)
-    }));
-    tools
-}
-
-pub(in crate::workspace) fn ai_active_tool_count(
-    tool_use_enabled: bool,
-    skills_enabled: bool,
-    web_enabled: bool,
-    tool_policy: &oxideterm_ai::AiToolUsePolicy,
-    mcp_registry: &oxideterm_ai::McpRegistry,
-) -> usize {
-    // The compact status must reflect tools that policy permits, rather than
-    // reusing an unrelated execution limit such as max tool rounds.
-    ai_stream_tool_definitions(
-        tool_use_enabled,
-        skills_enabled,
-        web_enabled,
-        tool_policy,
-        mcp_registry,
-    )
-        .into_iter()
-        .filter(|tool| {
-            !tool_policy
-                .disabled_tools
-                .iter()
-                .any(|disabled| disabled == &tool.name)
-        })
-        .count()
-}
-
+pub(in crate::workspace) use oxideterm_ai::chat_tools::{ai_active_tool_count, ai_stream_tool_definitions};
 impl WorkspaceApp {
     fn ai_scoped_memory_context(
         &self,
@@ -192,7 +136,7 @@ impl WorkspaceApp {
         rag_system_prompt: Option<&str>,
         cx: &App,
     ) -> bool {
-        let Some(conversation) = self.ai_entity.read(cx).conversation_state()
+        let Some(conversation) = self.ai.state.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -250,7 +194,7 @@ impl WorkspaceApp {
                 settings.ai.skills.enabled,
                 self.ai_web_provider_id().is_ok(),
                 &tool_policy,
-                self.ai_entity.read(cx).mcp_registry(),
+                self.ai.state.read(cx).mcp_registry(),
             );
             return Ok(AiChatStreamConfig {
                 api_protocol: oxideterm_ai::AiApiProtocol::default(),
@@ -300,7 +244,7 @@ impl WorkspaceApp {
             .and_then(|models| models.get(&model))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("auto");
-        let reasoning_effort = self.ai_entity.read(cx).conversation_state()
+        let reasoning_effort = self.ai.state.read(cx).conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, &model)
@@ -318,7 +262,7 @@ impl WorkspaceApp {
             settings.ai.skills.enabled,
             self.ai_web_provider_id().is_ok(),
             &tool_policy,
-            self.ai_entity.read(cx).mcp_registry(),
+            self.ai.state.read(cx).mcp_registry(),
         );
         let image_input = self.ai_image_model_setting(&provider.id, &provider.base_url, &model);
         let omit_history_images = self.ai_image_text_only(&provider.id, &provider.base_url, &model, cx)
@@ -377,7 +321,7 @@ impl WorkspaceApp {
             .and_then(|models| models.get(&model))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("auto");
-        let reasoning_effort = self.ai_entity.read(cx).conversation_state()
+        let reasoning_effort = self.ai.state.read(cx).conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, &model)
@@ -427,7 +371,7 @@ impl WorkspaceApp {
         agent_id: &str,
         cx: &App,
     ) -> Option<AiAcpSessionState> {
-        self.ai_entity.read(cx).conversation_state()
+        self.ai.state.read(cx).conversation_state()
             .active_conversation()
             .and_then(ai_acp_session_state)
             .filter(|state| state.agent_id == agent_id)
@@ -450,7 +394,7 @@ impl WorkspaceApp {
             rag_system_prompt.as_deref(),
             cx,
         );
-        let history = self.ai_entity.read(cx).history.model_contexts.get(conversation_id)
+        let history = self.ai.state.read(cx).history.model_contexts.get(conversation_id)
             .map(|conversation| conversation.messages.clone())?;
         let mut history = self.compose_ai_stream_history(
             history,
@@ -656,7 +600,7 @@ impl WorkspaceApp {
         rag_system_prompt: Option<&str>,
         cx: &App,
     ) -> Option<String> {
-        let conversation = self.ai_entity.read(cx).conversation_state()
+        let conversation = self.ai.state.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)?;
@@ -678,14 +622,14 @@ impl WorkspaceApp {
         count: usize,
         cx: &mut Context<Self>,
     ) {
-        let sequence = self.ai_entity.update(cx, |ai, _cx| {
+        let sequence = self.ai.state.update(cx, |ai, _cx| {
             ai.show_context_trim_notice(count)
         });
         cx.spawn(async move |weak, cx| {
             Timer::after(Duration::from_secs(5)).await;
             let _ = weak.update(cx, |this, cx| {
                 let cleared = this
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.clear_context_trim_notice(sequence));
                 if cleared {
                     cx.notify();
@@ -701,7 +645,7 @@ impl WorkspaceApp {
         entries: Vec<oxideterm_ai::PersistedTranscriptEntry>,
         cx: &App,
     ) {
-        self.ai_entity
+        self.ai.state
             .read(cx)
             .persist_transcript_entries(conversation_id, entries);
     }
@@ -712,7 +656,7 @@ impl WorkspaceApp {
         events: Vec<oxideterm_ai::PersistedDiagnosticEvent>,
         cx: &App,
     ) {
-        self.ai_entity
+        self.ai.state
             .read(cx)
             .persist_diagnostic_events(conversation_id, events);
     }

@@ -80,7 +80,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let expanded_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
+        let expanded_width = self.ai.state.read(cx).chat_ui().sidebar_width;
         self.context_sidebar_motion
             .retarget(if self.context_sidebar_visible() {
                 expanded_width
@@ -118,7 +118,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        context_sidebar_frame_chrome(self.ai_entity.read(cx).chat_ui().sidebar_width)
+        context_sidebar_frame_chrome(self.ai.state.read(cx).chat_ui().sidebar_width)
             .child(self.render_context_right_sidebar_region(cx))
             .child(oxideterm_gpui_ui::surface::panel_edge_highlight(
                 &self.tokens,
@@ -259,7 +259,7 @@ impl WorkspaceApp {
         let activity_width = self.tokens.metrics.activity_bar_width;
         let hotzone = sidebar_resize_hotzone_chrome(
             "context-right-sidebar-resize-hotzone",
-            if self.ai_entity.read(cx).chat_ui().sidebar_resizing {
+            if self.ai.state.read(cx).chat_ui().sidebar_resizing {
                 rgb(theme.accent)
             } else {
                 self.workspace_chrome_divider()
@@ -456,7 +456,7 @@ impl WorkspaceApp {
             SidebarSection::Extensions => "sidebar.panels.plugins",
             SidebarSection::CloudSync => "plugin.cloud_sync.panel_title",
             SidebarSection::Notifications => "sidebar.panels.event_log",
-            SidebarSection::Connections => "sidebar.panels.connections.session_manager",
+            SidebarSection::Connections => "sidebar.panels.session_manager",
             _ => "sidebar.panels.sessions",
         };
         let title = plugin_panel_title.unwrap_or_else(|| self.i18n.t(title_key));
@@ -1526,7 +1526,7 @@ mod sidebar_resize_region_tests {
                     if right {
                         viewport_width
                             - workspace.tokens.metrics.activity_bar_width
-                            - workspace.ai_entity.read(cx).chat_ui().sidebar_width
+                            - workspace.ai.state.read(cx).chat_ui().sidebar_width
                     } else {
                         workspace.sidebar_width
                     }
@@ -1595,7 +1595,7 @@ mod sidebar_resize_region_tests {
             let resizing = |cx: &gpui::VisualTestContext| {
                 workspace.read_with(cx, |workspace, cx| {
                     workspace.sidebar_resizing
-                        || workspace.ai_entity.read(cx).chat_ui().sidebar_resizing
+                        || workspace.ai.state.read(cx).chat_ui().sidebar_resizing
                 })
             };
             assert!(resizing(cx));

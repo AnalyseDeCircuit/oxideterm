@@ -720,7 +720,7 @@ impl WorkspaceApp {
             .handle_for_role(window_registry::WindowRole::Main)
             .map(|handle| handle.window_id());
         if let Some(main_window_id) = main_window_id {
-            let transferred = self.ai_entity.update(cx, |ai, cx| {
+            let transferred = self.knowledge_page(cx).update(cx, |ai, cx| {
                 ai.transfer_knowledge_document_dialog_owner(source_window_id, main_window_id, cx)
             });
             if transferred {
@@ -757,7 +757,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.release_settings_select_window(window_id);
-        let dismissed_document_dialog = self.ai_entity.update(cx, |ai, cx| {
+        let dismissed_document_dialog = self.knowledge_page(cx).update(cx, |ai, cx| {
             ai.dismiss_knowledge_document_dialog_for_window(window_id, cx)
         });
         if dismissed_document_dialog {
@@ -1725,16 +1725,7 @@ impl WorkspaceApp {
                 return self.render_forwards_surface_for_tab(tab_id, window, cx);
             }
             DetachedTabSurfaceRoute::Knowledge(_tab_id) => {
-                let layout = if self
-                    .window_registry
-                    .handle_for_role(window_registry::WindowRole::Main)
-                    .is_some_and(|handle| handle.window_id() == window.window_handle().window_id())
-                {
-                    KnowledgeWorkspaceLayout::MainWindow
-                } else {
-                    KnowledgeWorkspaceLayout::DetachedWindow
-                };
-                return self.render_knowledge_workspace_surface(layout, window, cx);
+                return self.render_knowledge_workspace_surface();
             }
             DetachedTabSurfaceRoute::Other => {}
         }

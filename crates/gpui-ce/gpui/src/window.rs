@@ -5707,24 +5707,29 @@ impl Window {
         Ok(())
     }
 
-    /// Appends a prepared glyph batch without repeating atlas lookups.
+    /// Appends a prepared glyph batch without repeating atlas lookups, optionally
+    /// overriding monochrome/subpixel glyph colors.
     pub(crate) fn paint_prepared_glyph_batch(
         &mut self,
         origin: Point<ScaledPixels>,
         batch: Arc<PreparedGlyphBatch>,
+        color_override: Option<crate::SceneHsla>,
     ) {
         self.invalidator.debug_assert_paint();
 
         let content_mask = self.snapped_content_mask();
         let opacity = self.element_opacity();
         let enhance_glyph_edges = self.enhance_glyph_edges();
-        self.next_frame.scene.insert_prepared_glyph_batch(
-            batch,
-            origin,
-            content_mask,
-            opacity,
-            enhance_glyph_edges,
-        );
+        self.next_frame
+            .scene
+            .insert_prepared_glyph_batch_with_color(
+                batch,
+                origin,
+                content_mask,
+                opacity,
+                enhance_glyph_edges,
+                color_override,
+            );
     }
 
     /// Paints a monochrome (non-emoji) glyph into the scene for the next frame at the current z-index.

@@ -51,7 +51,7 @@ impl WorkspaceApp {
 
         let window_id = window.window_handle().window_id();
         let document_dialog_owned_by_window = self
-            .ai_entity
+            .knowledge_page(cx)
             .read(cx)
             .knowledge_document_dialog_owned_by(window_id);
         match tab_kind {
@@ -66,9 +66,7 @@ impl WorkspaceApp {
                 if navigation {
                     modals.push(self.settings_views.navigation_editor.clone().into_any_element());
                 }
-                if let Some(modal) = self.render_ai_mcp_add_server_dialog(cx) {
-                    modals.push(modal);
-                }
+                modals.push(self.settings_views.ai_mcp_dialog.clone().into_any_element());
                 if let Some(modal) = self.render_knowledge_create_collection_dialog(cx) {
                     modals.push(modal);
                 }
@@ -107,26 +105,7 @@ impl WorkspaceApp {
                 modals.extend(self.render_session_manager_window_modals(window, cx));
             }
             TabKind::Forwards => {
-                let _scope = self.enter_forwarding_page(tab_id, cx);
-                let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
-                    return modals;
-                };
-                let has_background = self.background_surface_active("forwards");
-                // The renderers preserve the forwarding module's private state boundary
-                // and return an empty element when no corresponding modal is active.
-                modals.push(self.render_forward_edit_modal(
-                    node_id.clone(),
-                    tab_id,
-                    has_background,
-                    window,
-                    cx,
-                ));
-                modals.push(self.render_forward_delete_confirm(
-                    node_id,
-                    tab_id,
-                    has_background,
-                    cx,
-                ));
+                modals.extend(self.render_forwards_dialogs(tab_id, cx));
             }
             TabKind::Sftp => {
                 let _scope = self.enter_sftp_surface(sftp::SftpSurfaceId::Tab(tab_id));
@@ -187,7 +166,7 @@ impl WorkspaceApp {
         }
         // Confirmation snapshots are immutable frame inputs. Sampling each
         // owner once avoids repeatedly cloning typed payloads during render.
-        let ai_chat_confirm_snapshot = self.ai_entity.read(cx).chat_confirm_snapshot();
+        let ai_chat_confirm_snapshot = self.ai.state.read(cx).chat_confirm_snapshot();
         let overlay_confirm_snapshot = self.overlay.read(cx).confirm_snapshot();
         let tab_close_confirm_open = self.tab_host.read(cx).close_confirm().is_some();
         let title = self
@@ -250,7 +229,7 @@ impl WorkspaceApp {
         let content = if let Some((tab_id, tab_kind, root_pane)) = &active_tab_projection {
             match (tab_kind, root_pane) {
                 (TabKind::Settings, _) => self.render_settings_surface(),
-                (TabKind::Onboarding, _) => self.render_onboarding_tab(window, cx),
+                (TabKind::Onboarding, _) => self.render_onboarding_tab(),
                 (TabKind::FileManager, _) => self.render_file_manager_surface(window, cx),
                 (TabKind::Graphics, _) => self.render_graphics_surface(),
                 (TabKind::Runtime, _) => self.render_connection_runtime_surface(cx),
@@ -275,11 +254,7 @@ impl WorkspaceApp {
                     self.render_native_plugin_tab_surface(&plugin_id, &tab_id, cx)
                 }
                 (TabKind::CloudSync, _) => self.render_cloud_sync_surface(),
-                (TabKind::Knowledge, _) => self.render_knowledge_workspace_surface(
-                    KnowledgeWorkspaceLayout::MainWindow,
-                    window,
-                    cx,
-                ),
+                (TabKind::Knowledge, _) => self.render_knowledge_workspace_surface(),
                 (TabKind::RemoteDesktop, _) => {
                     self.render_remote_desktop_surface(*tab_id, window, cx)
                 }
@@ -365,7 +340,7 @@ impl WorkspaceApp {
         let titlebar_visible = self.window_titlebar_visible(window);
         let effective_titlebar_height = self.window_titlebar_height(window);
         let sidebar_resize_cursor_active =
-            self.sidebar_resizing || self.ai_entity.read(cx).chat_ui().sidebar_resizing;
+            self.sidebar_resizing || self.ai.state.read(cx).chat_ui().sidebar_resizing;
         let embedded_sftp_resize_cursor_active = self.embedded_sftp_sidebar_resizing;
         let disclaimer_locked = self.onboarding_disclaimer_locked();
         let read_only_selection_workspace = cx.entity();
@@ -711,7 +686,7 @@ impl WorkspaceApp {
                 } else if this
                     .active_content_tab(cx)
                     .is_some_and(|tab| tab.kind == TabKind::Forwards)
-                    && this.forwarding.read(cx).view().focused_input.is_some()
+                    && this.forwarding.read(cx).current_page(cx).is_some_and(|page| page.focused_input().is_some())
                 {
                     let _ = this.handle_forwards_key(event, cx);
                     window.prevent_default();
@@ -746,13 +721,13 @@ impl WorkspaceApp {
                         .read(cx)
                         .settings_entity_focused_input()
                         .is_some()
-                    || this.ai_entity.read(cx).focused_settings_input().is_some()
+                    || this.knowledge_page(cx).read(cx).focused_settings_input().is_some()
                 {
                     let _ = this.handle_settings_input_key(event, cx);
                     window.prevent_default();
                     cx.stop_propagation();
                 } else if this.ai_sidebar_visible()
-                    && this.ai_entity.read(cx).sidebar_keyboard_target_focused()
+                    && this.ai.state.read(cx).sidebar_keyboard_target_focused()
                 {
                     let _ = this.handle_ai_sidebar_key(event, cx);
                     window.prevent_default();
@@ -775,7 +750,6 @@ impl WorkspaceApp {
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
                 this.update_sidebar_resize(event, window, cx);
                 this.update_file_manager_bookmarks_resize(event, window, cx);
-                this.update_knowledge_resize(event, window, cx);
                 this.update_embedded_sftp_sidebar_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_pane_resize(event, window, cx);
@@ -1270,29 +1244,13 @@ impl WorkspaceApp {
             .child(self.connections.form_overlays())
             .child(self.connections.batch_menus())
             .child(self.connections.authentication())
+            .child(self.settings_views.ai_confirm.clone())
             .when(
-                self.ai_entity.read(cx).settings_confirm_is_enable(),
-                |root| root.child(self.render_ai_enable_confirm_dialog(cx)),
-            )
-            .when(
-                self.ai_entity
-                    .read(cx)
-                    .settings_confirm_is_provider_key_remove(),
-                |root| root.child(self.render_ai_provider_key_remove_confirm_dialog(cx)),
-            )
-            .when(
-                self.ai_entity
-                    .read(cx)
-                    .settings_confirm_provider_name()
-                    .is_some(),
-                |root| root.child(self.render_ai_provider_remove_confirm_dialog(cx)),
-            )
-            .when(
-                self.ai_entity.read(cx).chat_ui().safety_confirm_open,
+                self.ai.state.read(cx).chat_ui().safety_confirm_open,
                 |root| root.child(self.render_ai_safety_confirm_dialog(cx)),
             )
             .when(
-                self.ai_entity.read(cx).chat_ui().summarize_confirm_open,
+                self.ai.state.read(cx).chat_ui().summarize_confirm_open,
                 |root| root.child(self.render_ai_summarize_confirm_dialog(cx)),
             )
             .when(
@@ -1483,11 +1441,7 @@ impl WorkspaceApp {
                     root.child(self.render_quick_commands_manager_modal(cx))
                 },
             )
-            .when(self.ai_text_editor_dialog.is_some(), |root| {
-                // Long AI documents use workspace-wide modal ownership so the
-                // settings list keeps compact, independently measured cards.
-                root.child(self.render_ai_text_editor_modal(cx))
-            })
+            .child(self.settings_views.ai_text_editor.clone())
             .child(self.connections.oxide_dialogs())
             .child(self.connections.batch_dialog())
             .when(self.command_palette.read(cx).is_open(), |root| {
@@ -1659,7 +1613,6 @@ impl WorkspaceApp {
                 this.update_sidebar_resize(event, window, cx);
                 this.update_file_manager_bookmarks_resize(event, window, cx);
                 this.update_embedded_sftp_sidebar_resize(event, window, cx);
-                this.update_knowledge_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);
                 this.update_sftp_pane_resize(event, window, cx);
                 this.update_sftp_queue_resize(event, window, cx);
@@ -1688,7 +1641,6 @@ impl WorkspaceApp {
             self.finish_file_manager_bookmarks_resize(window.window_handle().window_id(), cx);
         let was_read_only_dragging = self.read_only_selection_drag_active();
         self.finish_sidebar_resize(cx);
-        self.finish_knowledge_resize(cx);
         self.finish_embedded_sftp_sidebar_resize(cx);
         self.finish_ai_sidebar_resize(cx);
         self.finish_sftp_pane_resize(cx);

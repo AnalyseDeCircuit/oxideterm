@@ -819,7 +819,7 @@ impl WorkspaceApp {
     pub(super) fn native_plugin_ai_snapshot(&self, cx: &App) -> Value {
         let settings = self.settings_store.settings();
         native_plugin_ai_snapshot_value(
-            &self.ai_entity.read(cx).conversation_state(),
+            &self.ai.state.read(cx).conversation_state(),
             &settings.ai.providers,
             settings.ai.active_provider_id.as_deref(),
             &settings.ai.model_context_windows,
@@ -1628,7 +1628,7 @@ impl WorkspaceApp {
                 .unwrap_or_default();
         let sync_plugin_settings_revisions =
             native_plugin_settings_revision_map(&sync_plugin_settings);
-        let plugin_secret_store = self.ai_entity.read(cx).key_store().clone();
+        let plugin_secret_store = self.ai.state.read(cx).key_store().clone();
         let telnet_transport_plugins = self
             .plugin_entity
             .read(cx)

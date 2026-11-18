@@ -1,31 +1,8 @@
-const AI_AGENT_CONCURRENCY_SETTING: &str = "subagentConcurrency";
-
 impl WorkspaceApp {
     pub(in crate::workspace) fn global_agent_options(&self) -> oxideterm_ai::agent::AgentOptions {
-        self.settings_store
-            .settings()
-            .ai
-            .extra
-            .get("subagents")
-            .and_then(|value| serde_json::from_value(value.clone()).ok())
-            .unwrap_or_default()
+        oxideterm_gpui_settings_view::ai::subagents::global_agent_options(self.settings_store.settings())
     }
 
-    fn set_global_agent_options(
-        &mut self,
-        options: oxideterm_ai::agent::AgentOptions,
-        cx: &mut Context<Self>,
-    ) {
-        self.edit_settings(
-            move |settings| {
-                settings.ai.extra.insert(
-                    "subagents".into(),
-                    serde_json::to_value(&options).expect("agent options are serializable"),
-                );
-            },
-            cx,
-        );
-    }
     fn agent_usage_label(&self, usage: oxideterm_ai::agent::AgentUsage) -> String {
         match (usage.input_tokens, usage.output_tokens) {
             (Some(input), Some(output)) => self
@@ -120,39 +97,15 @@ impl WorkspaceApp {
 
     fn select_agent_model(
         &mut self,
-        target: Option<oxideterm_ai::agent::AgentRunId>,
-        model: Option<AgentModel>,
+        target: oxideterm_ai::agent::AgentRunId,
+        model: AgentModel,
         cx: &mut Context<Self>,
     ) {
-        if target.is_none() {
-            let mut options = self.global_agent_options();
-            options.default_model = model;
-            self.set_global_agent_options(options, cx);
-            self.ai_entity.update(cx, |ai, _| {
-                ai.agents.model_picker_open = false;
-                ai.agents.settings_model_picker_open = false;
+        let changed = self.ai.state.update(cx, |ai, _cx| {
+            let changed = ai.agents.records.get(&target).is_some_and(|record| {
+                ai.agents.services.runtime.change_queued_model(&record.snapshot.run, model).is_ok()
             });
-            cx.notify();
-            return;
-        }
-        let changed = self.ai_entity.update(cx, |ai, _cx| {
-            let changed = if let Some(id) = target {
-                ai.agents
-                    .records
-                    .get(&id)
-                    .zip(model)
-                    .is_some_and(|(record, model)| {
-                        ai.agents
-                            .services
-                            .runtime
-                            .change_queued_model(&record.snapshot.run, model)
-                            .is_ok()
-                    })
-            } else {
-                false
-            };
             ai.agents.model_picker_open = false;
-            ai.agents.settings_model_picker_open = false;
             changed
         });
         if !changed {
@@ -167,30 +120,19 @@ impl WorkspaceApp {
 
     fn render_agent_model_picker(
         &self,
-        target: Option<oxideterm_ai::agent::AgentRunId>,
+        target: oxideterm_ai::agent::AgentRunId,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut list = div()
             .id("agent-model-options")
-            .max_h(px(180.0))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.spacing.one));
-        if target.is_none() {
-            list = list.child(self.agent_button(
-                "agent-inherit-model".into(),
-                self.i18n.t("ai.agents.inherit_model"),
-                |this, _, cx| this.select_agent_model(None, None, cx),
-                cx,
-            ));
-        }
+            .max_h(px(180.0)).overflow_y_scroll()
+            .flex().flex_col().gap(px(self.tokens.spacing.one));
         for model in self.configured_agent_models() {
             let target = target.clone();
             list = list.child(self.agent_button(
                 format!("agent-model-{}-{}", model.provider_id, model.model),
                 format!("{} / {}", model.provider_id, model.model),
-                move |this, _, cx| this.select_agent_model(target.clone(), Some(model.clone()), cx),
+                move |this, _, cx| this.select_agent_model(target.clone(), model.clone(), cx),
                 cx,
             ));
         }
@@ -198,139 +140,7 @@ impl WorkspaceApp {
     }
 
     fn agent_concurrency(&self) -> usize {
-        self.settings_store
-            .settings()
-            .ai
-            .extra
-            .get(AI_AGENT_CONCURRENCY_SETTING)
-            .and_then(serde_json::Value::as_u64)
-            .map(|value| value as usize)
-            .unwrap_or(oxideterm_ai::agent::DEFAULT_AGENT_CONCURRENCY)
-            .clamp(1, oxideterm_ai::agent::MAX_AGENT_CONCURRENCY)
-    }
-
-    pub(in crate::workspace) fn render_ai_agent_settings(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let options = self.global_agent_options();
-        let picker_open = self.ai_entity.read(cx).agents.settings_model_picker_open;
-        let mut section = div()
-            .w_full()
-            .min_w_0()
-            .flex()
-            .flex_col()
-            .gap(px(self.tokens.metrics.settings_card_gap));
-        if !self.settings_store.settings().ai.tool_use.enabled {
-            section = section.child(
-                div()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.warning))
-                    .child(self.i18n.t("settings_view.ai.subagents_tools_off")),
-            );
-        }
-        let checked = options.enabled;
-        let toggle = self
-            .agent_control(
-                "allow-subagents".into(),
-                self.i18n.t("ai.agents.allow"),
-                oxideterm_gpui_ui::checkbox::checkbox(&self.tokens, "allow-subagents", String::new(), checked),
-                |this, _, cx| {
-                    let mut options = this.global_agent_options();
-                    options.enabled = !options.enabled;
-                    this.set_global_agent_options(options, cx);
-                },
-                cx,
-            )
-            .role(gpui::Role::CheckBox)
-            .aria_toggled(if checked {
-                gpui::Toggled::True
-            } else {
-                gpui::Toggled::False
-            })
-            .into_any_element();
-        section = section.child(self.setting_row(
-            "ai.agents.allow",
-            "settings_view.ai.subagents_scope_hint",
-            toggle,
-            cx,
-        ));
-        let label = options
-            .default_model
-            .map(|model| format!("{} / {}", model.provider_id, model.model))
-            .unwrap_or_else(|| self.i18n.t("ai.agents.inherit_model"));
-        let picker = self.agent_button(
-            "agent-default-model".into(),
-            label,
-            |this, _, cx| {
-                this.ai_entity.update(cx, |ai, _| {
-                    ai.agents.settings_model_picker_open = !ai.agents.settings_model_picker_open;
-                });
-                cx.notify();
-            },
-            cx,
-        );
-        section =
-            section.child(self.setting_row("ai.agents.model", "ai.agents.model_hint", picker, cx));
-        if picker_open {
-            section = section.child(self.render_agent_model_picker(None, cx));
-        }
-        self.settings_card(
-            "settings_view.ai.conversation_agents",
-            "settings_view.ai.conversation_agents_hint",
-            vec![
-                section
-                    .child(self.render_ai_agent_concurrency_setting(cx))
-                    .into_any_element(),
-            ],
-        )
-    }
-
-    pub(in crate::workspace) fn render_ai_agent_concurrency_setting(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let current = self.agent_concurrency();
-        let mut choices = oxideterm_gpui_ui::tabs::segmented_tabs(&self.tokens);
-        for limit in 1..=oxideterm_ai::agent::MAX_AGENT_CONCURRENCY {
-            choices = choices.child(
-                self.agent_control(
-                    format!("agent-limit-{limit}"),
-                    limit.to_string(),
-                    oxideterm_gpui_ui::tabs::segmented_tab(
-                        &self.tokens,
-                        limit.to_string(),
-                        current == limit,
-                    ),
-                    move |this, _, cx| {
-                        this.edit_settings(
-                            move |settings| {
-                                settings.ai.extra.insert(
-                                    AI_AGENT_CONCURRENCY_SETTING.into(),
-                                    serde_json::json!(limit),
-                                );
-                            },
-                            cx,
-                        );
-                        this.ai_entity
-                            .read(cx)
-                            .agents
-                            .services
-                            .runtime
-                            .set_concurrency(limit);
-                        cx.notify();
-                    },
-                    cx,
-                )
-                .aria_selected(current == limit),
-            );
-        }
-        self.setting_row(
-            "ai.agents.concurrency",
-            "settings_view.ai.subagents_global_hint",
-            choices.into_any_element(),
-            cx,
-        )
+        oxideterm_gpui_settings_view::ai::subagents::agent_concurrency(self.settings_store.settings())
     }
 
     fn render_ai_agent_group(
@@ -340,7 +150,7 @@ impl WorkspaceApp {
     ) -> Option<AnyElement> {
         let mut latest = std::collections::BTreeMap::new();
         for record in self
-            .ai_entity
+            .ai.state
             .read(cx)
             .agents
             .records
@@ -386,7 +196,7 @@ impl WorkspaceApp {
             .filter(|(_, snapshot, _)| snapshot.state == AgentState::Running)
             .count();
         let expanded = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .agents
             .expanded_groups
@@ -424,7 +234,7 @@ impl WorkspaceApp {
                     expanded,
                 ),
                 move |this, _, cx| {
-                    this.ai_entity.update(cx, |ai, _cx| {
+                    this.ai.state.update(cx, |ai, _cx| {
                         ai.agents
                             .expanded_groups
                             .insert(toggle_group.clone(), !expanded);
@@ -442,7 +252,7 @@ impl WorkspaceApp {
                 format!("agent-stop-group-{group_id}"),
                 self.i18n.t("ai.agents.stop_all"),
                 move |this, _, cx| {
-                    let ai = this.ai_entity.read(cx);
+                    let ai = this.ai.state.read(cx);
                     if let Some(group) = ai.agents.groups.get(&group_id) {
                         let _ = ai.agents.services.runtime.cancel_group(&group.parent);
                     }
@@ -453,7 +263,7 @@ impl WorkspaceApp {
         }
         let mut block = ai_tool_block(&self.tokens).child(header);
         let records: Vec<_> = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .agents
             .records
@@ -598,7 +408,7 @@ impl WorkspaceApp {
                         snapshot.title.as_str().to_owned(),
                         body,
                         move |this, _, cx| {
-                            this.ai_entity
+                            this.ai.state
                                 .update(cx, |ai, cx| ai.open_agent_detail(id.clone(), cx));
                             cx.notify();
                         },
@@ -618,7 +428,7 @@ impl WorkspaceApp {
                         format!("agent-row-stop-{}", stop_run.run_id),
                         self.i18n.t("ai.agents.stop"),
                         move |this, _, cx| {
-                            let runtime = &this.ai_entity.read(cx).agents.services.runtime;
+                            let runtime = &this.ai.state.read(cx).agents.services.runtime;
                             if let Ok(parent) = runtime.parent_run(&stop_run) {
                                 let _ = runtime.stop(&parent, &stop_run);
                             }
@@ -656,9 +466,9 @@ impl WorkspaceApp {
     }
 
     fn render_ai_agent_detail(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let id = self.ai_entity.read(cx).agents.detail.clone()?;
+        let id = self.ai.state.read(cx).agents.detail.clone()?;
         let record = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .agents
             .records
@@ -677,7 +487,7 @@ impl WorkspaceApp {
                 "agent-back".into(),
                 self.i18n.t("ai.agents.back"),
                 |this, _, cx| {
-                    this.ai_entity.update(cx, |ai, _cx| {
+                    this.ai.state.update(cx, |ai, _cx| {
                         ai.close_agent_detail();
                         ai.agents.model_picker_open = false;
                     });
@@ -710,7 +520,7 @@ impl WorkspaceApp {
                 "agent-stop-one".into(),
                 self.i18n.t("ai.agents.stop"),
                 move |this, _, cx| {
-                    let runtime = &this.ai_entity.read(cx).agents.services.runtime;
+                    let runtime = &this.ai.state.read(cx).agents.services.runtime;
                     if let Ok(parent) = runtime.parent_run(&stop_run) {
                         let _ = runtime.stop(&parent, &stop_run);
                     }
@@ -730,7 +540,7 @@ impl WorkspaceApp {
             .flex_col()
             .gap(px(self.tokens.spacing.two))
             .p(px(self.tokens.spacing.three));
-        if let Some(scroll) = self.ai_entity.read(cx).agents.detail_scroll.get(&id) {
+        if let Some(scroll) = self.ai.state.read(cx).agents.detail_scroll.get(&id) {
             body = body.track_scroll(scroll);
         }
         if state == AgentState::Queued {
@@ -738,23 +548,23 @@ impl WorkspaceApp {
                 "agent-queued-model".into(),
                 self.i18n.t("ai.agents.change_model"),
                 |this, _, cx| {
-                    this.ai_entity.update(cx, |ai, _cx| {
+                    this.ai.state.update(cx, |ai, _cx| {
                         ai.agents.model_picker_open = !ai.agents.model_picker_open
                     });
                     cx.notify();
                 },
                 cx,
             ));
-            if self.ai_entity.read(cx).agents.model_picker_open {
-                body = body.child(self.render_agent_model_picker(Some(id.clone()), cx));
+            if self.ai.state.read(cx).agents.model_picker_open {
+                body = body.child(self.render_agent_model_picker(id.clone(), cx));
             }
         }
-        if self.ai_entity.read(cx).agents.details_loading.contains(&id) {
+        if self.ai.state.read(cx).agents.details_loading.contains(&id) {
             body = body.child(ai_tool_heading(
                 &self.tokens,
                 self.i18n.t("ai.agents.loading"),
             ));
-        } else if self.ai_entity.read(cx).agents.detail_errors.contains(&id) {
+        } else if self.ai.state.read(cx).agents.detail_errors.contains(&id) {
             body = body.child(
                 div()
                     .text_color(rgb(self.tokens.ui.error))
@@ -766,7 +576,7 @@ impl WorkspaceApp {
             id.clone(),
         );
         let (descriptions, live, older, newer) = {
-            let ai = self.ai_entity.read(cx);
+            let ai = self.ai.state.read(cx);
             let page = ai.history_view(&owner);
             let mut descriptions: Vec<_> = page
                 .map(|page| page.descriptions.values().cloned().collect())
@@ -799,7 +609,7 @@ impl WorkspaceApp {
                     format!("agent-page-{older}"),
                     self.i18n.t(label),
                     move |this, _, cx| {
-                        this.ai_entity.update(cx, |ai, cx| {
+                        this.ai.state.update(cx, |ai, cx| {
                             ai.load_agent_message_page(id.clone(), Some(older), cx)
                         });
                         cx.notify();
@@ -810,7 +620,7 @@ impl WorkspaceApp {
         }
         if !descriptions.is_empty() {
             if let Some(list) = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .agents
                 .detail_lists
@@ -839,7 +649,7 @@ impl WorkspaceApp {
         }
         let auxiliary_key = format!("agent-{id}-context");
         let auxiliary_open = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .tool_call_expansion_state
@@ -862,7 +672,7 @@ impl WorkspaceApp {
                 auxiliary_open,
             ),
             move |this, _, cx| {
-                this.ai_entity.update(cx, |ai, _| {
+                this.ai.state.update(cx, |ai, _| {
                     ai.toggle_tool_call_expansion(auxiliary_key.clone());
                 });
                 cx.notify();
@@ -895,7 +705,7 @@ impl WorkspaceApp {
                 cx,
             ));
             let mut runs: Vec<_> = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .agents
                 .records
@@ -921,7 +731,7 @@ impl WorkspaceApp {
                         format!("agent-run-{other}"),
                         label,
                         move |this, _, cx| {
-                            this.ai_entity
+                            this.ai.state
                                 .update(cx, |ai, cx| ai.open_agent_detail(other.clone(), cx));
                             cx.notify();
                         },
@@ -930,7 +740,7 @@ impl WorkspaceApp {
                 }
             }
             let communication = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .agents
                 .communication_pages
@@ -963,7 +773,7 @@ impl WorkspaceApp {
                             format!("agent-communication-{label}"),
                             self.i18n.t(label),
                             move |this, _, cx| {
-                                this.ai_entity.update(cx, |ai, cx| {
+                                this.ai.state.update(cx, |ai, cx| {
                                     ai.load_agent_communication(id.clone(), direction, cx)
                                 });
                                 cx.notify();

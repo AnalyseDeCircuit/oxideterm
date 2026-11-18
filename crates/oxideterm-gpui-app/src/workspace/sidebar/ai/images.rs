@@ -64,7 +64,7 @@ impl WorkspaceApp {
     }
 
     fn ai_image_text_only(&self, provider: &str, endpoint: &str, model: &str, cx: &App) -> bool {
-        self.ai_entity
+        self.ai.state
             .read(cx)
             .conversation_state()
             .active_conversation()
@@ -77,7 +77,7 @@ impl WorkspaceApp {
 
     fn resume_ai_image_request_for_model(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -89,7 +89,7 @@ impl WorkspaceApp {
             return;
         };
         let pending = self
-            .ai_entity
+            .ai.state
             .update(cx, |ai, _| ai.pending_image_requests.remove(&id));
         if let Some(pending) = pending {
             self.start_ai_chat_stream_after_api_key_lookup(
@@ -103,7 +103,7 @@ impl WorkspaceApp {
     }
 
     fn select_ai_images(&mut self, cx: &mut Context<Self>) {
-        if self.ai_entity.read(cx).chat_ui().image_import.is_some() {
+        if self.ai.state.read(cx).chat_ui().image_import.is_some() {
             return;
         }
         if !self.check_ai_image_input(cx) {
@@ -116,7 +116,7 @@ impl WorkspaceApp {
             prompt: Some(self.i18n.t("ai.images.add").into()),
         });
         let conversation = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -124,11 +124,11 @@ impl WorkspaceApp {
         let task = cx.spawn(async move |weak, cx| {
             let paths = receiver.await;
             let _ = weak.update(cx, |this, cx| {
-                this.ai_entity.update(cx, |ai, _| {
+                this.ai.state.update(cx, |ai, _| {
                     ai.set_chat_image_import(None);
                 });
                 if this
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .conversation_state()
                     .active_conversation_id
@@ -142,7 +142,7 @@ impl WorkspaceApp {
                 cx.notify();
             });
         });
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _| ai.set_chat_image_import(Some(task)));
     }
 
@@ -196,13 +196,13 @@ impl WorkspaceApp {
     }
 
     fn import_ai_images(&mut self, sources: Vec<AiImageSource>, cx: &mut Context<Self>) {
-        if sources.is_empty() || self.ai_entity.read(cx).chat_ui().image_import.is_some() {
+        if sources.is_empty() || self.ai.state.read(cx).chat_ui().image_import.is_some() {
             return;
         }
         if !self.check_ai_image_input(cx) {
             return;
         }
-        if sources.len() + self.ai_entity.read(cx).chat_ui().images.len()
+        if sources.len() + self.ai.state.read(cx).chat_ui().images.len()
             > oxideterm_ai::AI_IMAGE_MAX_ATTACHMENTS
         {
             self.push_ai_settings_toast(
@@ -213,7 +213,7 @@ impl WorkspaceApp {
             return;
         }
         let conversation = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -227,10 +227,10 @@ impl WorkspaceApp {
         let task = cx.spawn(async move |weak, cx| {
             let result = work.await;
             let _ = weak.update(cx, |this, cx| {
-                this.ai_entity
+                this.ai.state
                     .update(cx, |ai, _| ai.set_chat_image_import(None));
                 if this
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .conversation_state()
                     .active_conversation_id
@@ -244,7 +244,7 @@ impl WorkspaceApp {
                 }
                 match result {
                     Ok(Ok(images)) => this
-                        .ai_entity
+                        .ai.state
                         .update(cx, |ai, _| ai.chat_images_mut().extend(images)),
                     _ => this.push_ai_settings_toast(
                         this.i18n.t("ai.images.invalid"),
@@ -255,20 +255,20 @@ impl WorkspaceApp {
                 cx.notify();
             });
         });
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _| ai.set_chat_image_import(Some(task)));
         cx.notify();
     }
 
     fn preview_ai_image(&mut self, image: AiImageAttachment, cx: &mut Context<Self>) {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         if ai
             .chat_ui()
             .image_preview
             .as_ref()
             .is_some_and(|(id, _)| id == &image.id)
         {
-            self.ai_entity
+            self.ai.state
                 .update(cx, |ai, _| ai.set_chat_image_preview(None));
             cx.notify();
             return;
@@ -297,7 +297,7 @@ impl WorkspaceApp {
             let result = work.await;
             let _ = weak.update(cx, |this, cx| {
                 if this
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .conversation_state()
                     .active_conversation_id
@@ -306,7 +306,7 @@ impl WorkspaceApp {
                     return;
                 }
                 if let Ok(Some(preview)) = result {
-                    this.ai_entity
+                    this.ai.state
                         .update(cx, |ai, _| ai.set_chat_image_preview(Some(preview)));
                 } else {
                     this.push_ai_settings_toast(
@@ -318,7 +318,7 @@ impl WorkspaceApp {
                 cx.notify();
             });
         });
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _| ai.set_chat_image_preview_task(task));
     }
 
@@ -337,7 +337,7 @@ impl WorkspaceApp {
         for image in images {
             let thumbnail = {
                 let mut cache = self
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .chat_ui()
                     .image_thumbnails
@@ -358,7 +358,7 @@ impl WorkspaceApp {
                     .clone()
             };
             let preview = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .image_preview
@@ -419,7 +419,7 @@ impl WorkspaceApp {
                             },
                         ),
                         move |this, _, cx| {
-                            this.ai_entity.update(cx, |ai, _| {
+                            this.ai.state.update(cx, |ai, _| {
                                 ai.chat_images_mut().retain(|image| image.id != id);
                                 ai.set_chat_image_preview(None);
                             });
@@ -441,7 +441,7 @@ impl WorkspaceApp {
     }
 
     fn render_ai_image_add_button(&self, enabled: bool, cx: &mut Context<Self>) -> AnyElement {
-        let importing = self.ai_entity.read(cx).chat_ui().image_import.is_some();
+        let importing = self.ai.state.read(cx).chat_ui().image_import.is_some();
         let label = self.i18n.t(if importing {
             "ai.images.loading"
         } else {
@@ -483,7 +483,7 @@ impl WorkspaceApp {
     }
 
     fn render_ai_image_controls(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         let pending = ai
             .conversation_state()
             .active_conversation_id
@@ -528,7 +528,7 @@ impl WorkspaceApp {
                     self.i18n.t("ai.images.continue_text"),
                     move |this, _, cx| {
                         let pending = this
-                            .ai_entity
+                            .ai.state
                             .update(cx, |ai, _| ai.pending_image_requests.remove(&id));
                         if let Some(mut pending) = pending {
                             pending.config.omit_history_images = true;
@@ -537,7 +537,7 @@ impl WorkspaceApp {
                                 &pending.config.base_url,
                                 &pending.config.model,
                             );
-                            this.ai_entity.update(cx, |ai, _| {
+                            this.ai.state.update(cx, |ai, _| {
                                 if let Some(conversation) = ai
                                     .conversation_state_mut()
                                     .conversations

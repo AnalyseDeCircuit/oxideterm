@@ -12,7 +12,7 @@ impl WorkspaceApp {
             i18n: self.i18n.clone(),
             mono_font_family: settings_mono_font_family(self.settings_store.settings()),
             selectable_text: self.host_tools_selectable_text(cx),
-            sidebar_width: self.ai_entity.read(cx).chat_ui().sidebar_width,
+            sidebar_width: self.ai.state.read(cx).chat_ui().sidebar_width,
         }
     }
 

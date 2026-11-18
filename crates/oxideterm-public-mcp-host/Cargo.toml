@@ -1,0 +1,42 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-public-mcp-host"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+async-trait.workspace = true
+base64.workspace = true
+chrono.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tempfile = "3.23"
+zeroize.workspace = true
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-cloud-sync = { path = "../oxideterm-cloud-sync" }
+oxideterm-connection-monitor = { path = "../oxideterm-connection-monitor" }
+oxideterm-connections = { path = "../oxideterm-connections" }
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-forwarding = { path = "../oxideterm-forwarding" }
+oxideterm-ide-core = { path = "../oxideterm-ide-core" }
+oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
+oxideterm-plugin-registry = { path = "../oxideterm-plugin-registry" }
+oxideterm-public-mcp = { path = "../oxideterm-public-mcp" }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
+oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
+oxideterm-terminal = { path = "../oxideterm-terminal" }
+image.workspace = true

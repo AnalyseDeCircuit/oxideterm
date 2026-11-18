@@ -1,0 +1,279 @@
+use super::*;
+use oxideterm_public_mcp::PublicTelnetControl;
+use oxideterm_terminal::{
+    TelnetControlCommand, TerminalLifecycle, TerminalSession, TerminalSessionKind,
+};
+
+pub type PublicMcpTerminalSession = Arc<Mutex<TerminalSession>>;
+const TERMINAL_READ_OUTPUT_LIMIT_BYTES: usize = 256 * 1024;
+const PUBLIC_MCP_TERMINAL_CAPACITY: usize = 128;
+const PUBLIC_MCP_TERMINAL_CAPACITY_PER_CLIENT: usize = 32;
+
+impl PublicMcpHost {
+    pub fn terminal(
+        &self,
+        client: &ClientRef,
+        id: &TerminalRef,
+    ) -> Option<PublicMcpTerminalRecord> {
+        self.terminals
+            .lock()
+            .get(id)
+            .filter(|record| &record.client_ref == client)
+            .cloned()
+    }
+
+    pub fn register_terminal(&self, id: TerminalRef, record: PublicMcpTerminalRecord) {
+        self.terminals.lock().insert(id, record);
+    }
+
+    pub fn remove_terminal(&self, id: &TerminalRef) -> Option<PublicMcpTerminalRecord> {
+        let mut history = self.history.lock();
+        let record = self.terminals.lock().remove(id);
+        history.revoke_terminal(id, false);
+        record
+    }
+
+    pub fn revoke_terminal_history(&self, id: &TerminalRef) {
+        self.history.lock().revoke_terminal(id, true);
+    }
+
+    pub fn client_terminals(&self, client: &ClientRef) -> Vec<TerminalRef> {
+        self.terminals
+            .lock()
+            .iter()
+            .filter(|(_, record)| &record.client_ref == client)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    pub fn terminals_for_session(
+        &self,
+        session: TerminalSessionId,
+    ) -> Vec<(TerminalRef, ClientRef)> {
+        self.terminals
+            .lock()
+            .iter()
+            .filter(|(_, record)| record.session_id == session)
+            .map(|(id, record)| (id.clone(), record.client_ref.clone()))
+            .collect()
+    }
+
+    pub fn terminal_open_rejection(&self, client: &ClientRef) -> Option<&'static str> {
+        if !self.state.clients.get(client).is_some_and(|client| {
+            client.enabled && client.tool_groups.contains(&ToolGroup::TerminalSession)
+        }) {
+            return Some("The MCP client authorization changed before the terminal opened");
+        }
+        let terminals = self.terminals.lock();
+        let total = terminals
+            .len()
+            .saturating_add(self.pending_terminal_opens.len());
+        let count = terminals
+            .values()
+            .filter(|record| &record.client_ref == client)
+            .count()
+            .saturating_add(
+                self.pending_terminal_opens
+                    .values()
+                    .filter(|pending| &pending.client_ref == client)
+                    .count(),
+            );
+        (total >= PUBLIC_MCP_TERMINAL_CAPACITY || count >= PUBLIC_MCP_TERMINAL_CAPACITY_PER_CLIENT)
+            .then_some("The retained terminal session limit has been reached")
+    }
+}
+
+pub fn finish_terminal_read(
+    request: DomainRequest,
+    generation: u64,
+    (cols, rows): (usize, usize),
+    display_offset: usize,
+    alternate_buffer: bool,
+    visible_text: impl FnOnce() -> String,
+) {
+    let PublicToolCall::ReadTerminal(args) = &request.call else {
+        return;
+    };
+    let terminal_ref = args.terminal_ref.clone();
+    let result = if args.cursor == Some(generation) {
+        json!({ "terminal_ref": terminal_ref, "cursor": generation, "unchanged": true, "lines": [], "truncated": false })
+    } else {
+        let text = Zeroizing::new(visible_text());
+        let (lines, truncated) = bounded_terminal_lines(
+            &text,
+            args.line_limit as usize,
+            args.tail,
+            TERMINAL_READ_OUTPUT_LIMIT_BYTES,
+        );
+        json!({ "terminal_ref": terminal_ref, "cursor": generation, "unchanged": false,
+            "cols": cols, "rows": rows, "display_offset": display_offset,
+            "alternate_buffer": alternate_buffer, "lines": lines, "truncated": truncated })
+    };
+    finish_serialized(request, result);
+}
+
+impl PublicMcpBackground {
+    pub fn find_terminal(
+        &self,
+        request: DomainRequest,
+        session_id: TerminalSessionId,
+        session: PublicMcpTerminalSession,
+    ) {
+        let backend = self.clone();
+        self.forwarding_runtime.spawn_blocking(move || {
+            let PublicToolCall::FindTerminal(args) = &request.call else {
+                return;
+            };
+            if request.is_cancelled() {
+                return;
+            }
+            let terminal_ref = args.terminal_ref.clone();
+            let limit = args.limit as usize;
+            let matches = session.lock().search_matches(&args.query);
+            let suspended = backend.admission.lock();
+            if request.is_cancelled() || *suspended {
+                return;
+            }
+            if !backend
+                .terminals
+                .lock()
+                .get(&terminal_ref)
+                .is_some_and(|record| {
+                    record.client_ref == request.client_ref && record.session_id == session_id
+                })
+            {
+                request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
+                return;
+            }
+            let truncated = matches.len() > limit;
+            let matches = matches
+                .into_iter()
+                .take(limit)
+                .map(|entry| {
+                    json!({
+                        "line": entry.line,
+                        "start_col": entry.start_col,
+                        "end_col": entry.end_col,
+                        "ranges": entry.ranges.into_iter().map(|range| json!({
+                            "line": range.line,
+                            "start_col": range.start_col,
+                            "end_col": range.end_col,
+                        })).collect::<Vec<_>>(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            finish_serialized(
+                request,
+                json!({
+                    "terminal_ref": terminal_ref,
+                    "matches": matches,
+                    "truncated": truncated,
+                }),
+            );
+        });
+    }
+}
+
+pub struct PublicMcpTerminalSerialState {
+    pub port_available: bool,
+    pub can_reconnect: bool,
+    pub data_terminal_ready: bool,
+    pub request_to_send: bool,
+}
+
+pub fn terminal_projection(
+    record: &PublicMcpTerminalRecord,
+    terminal_ref: &TerminalRef,
+    (cols, rows): (usize, usize),
+    alternate_buffer: bool,
+    session_kind: TerminalSessionKind,
+    serial: Option<PublicMcpTerminalSerialState>,
+    session: PublicMcpTerminalSession,
+) -> serde_json::Value {
+    let serial = serial.map(|status| json!({
+        "port_available": status.port_available, "can_reconnect": status.can_reconnect,
+        "data_terminal_ready": status.data_terminal_ready, "request_to_send": status.request_to_send,
+    }));
+    let (lifecycle_name, exit_code, interactive, buffer_lines) = {
+        let session = session.lock();
+        let (name, code) = terminal_lifecycle_projection(&session.lifecycle());
+        (
+            name,
+            code,
+            session.is_interactive(),
+            session.buffer_line_count(),
+        )
+    };
+    json!({
+        "terminal_ref": terminal_ref,
+        "transport": record.transport,
+        "title": record.title,
+        "lifecycle": lifecycle_name,
+        "exit_code": exit_code,
+        "interactive": interactive,
+        "cols": cols,
+        "rows": rows,
+        "buffer_lines": buffer_lines,
+        "alternate_buffer": alternate_buffer,
+        "node_ref": record.node_ref,
+        "serial": serial,
+        "capabilities": {
+            "read": true,
+            "history_read": true,
+            "find": true,
+            "input": interactive,
+            "resize": true,
+            "serial_control": session_kind == TerminalSessionKind::Serial,
+            "telnet_control": session_kind == TerminalSessionKind::Telnet,
+            "process_signals": session_kind == TerminalSessionKind::LocalPty,
+            "node_backed": session_kind == TerminalSessionKind::SshPty,
+        }
+    })
+}
+
+fn terminal_lifecycle_projection(lifecycle: &TerminalLifecycle) -> (&'static str, Option<i32>) {
+    match lifecycle {
+        TerminalLifecycle::Running => ("running", None),
+        TerminalLifecycle::Exited(exit_code) => ("exited", *exit_code),
+        TerminalLifecycle::Closed => ("closed", None),
+    }
+}
+
+pub fn telnet_control(control: PublicTelnetControl) -> TelnetControlCommand {
+    match control {
+        PublicTelnetControl::NoOperation => TelnetControlCommand::NoOperation,
+        PublicTelnetControl::Break => TelnetControlCommand::Break,
+        PublicTelnetControl::InterruptProcess => TelnetControlCommand::InterruptProcess,
+        PublicTelnetControl::AbortOutput => TelnetControlCommand::AbortOutput,
+        PublicTelnetControl::AreYouThere => TelnetControlCommand::AreYouThere,
+        PublicTelnetControl::EraseCharacter => TelnetControlCommand::EraseCharacter,
+        PublicTelnetControl::EraseLine => TelnetControlCommand::EraseLine,
+        PublicTelnetControl::GoAhead => TelnetControlCommand::GoAhead,
+    }
+}
+
+fn bounded_terminal_lines(
+    text: &str,
+    line_limit: usize,
+    tail: bool,
+    byte_limit: usize,
+) -> (Vec<String>, bool) {
+    let all_lines = text.lines().collect::<Vec<_>>();
+    let selected = if tail {
+        &all_lines[all_lines.len().saturating_sub(line_limit)..]
+    } else {
+        &all_lines[..all_lines.len().min(line_limit)]
+    };
+    let mut lines = Vec::with_capacity(selected.len());
+    let mut retained_bytes = 0usize;
+    for line in selected {
+        let next_bytes = line.len().saturating_add(1);
+        if retained_bytes.saturating_add(next_bytes) > byte_limit {
+            break;
+        }
+        lines.push((*line).to_owned());
+        retained_bytes += next_bytes;
+    }
+    let truncated = selected.len() < all_lines.len() || lines.len() < selected.len();
+    (lines, truncated)
+}

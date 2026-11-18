@@ -261,7 +261,7 @@ impl Render for DetachedTabWindow {
                         return session.handle_knowledge_input_key(event, window, cx);
                     }
                     if session
-                        .ai_entity
+                        .knowledge_page(cx)
                         .read(cx)
                         .knowledge_document_dialog_owned_by(window_id)
                     {

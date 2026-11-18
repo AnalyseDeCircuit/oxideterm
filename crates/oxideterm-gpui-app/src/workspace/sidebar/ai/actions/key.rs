@@ -36,7 +36,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         if let Some(selection) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .tool_candidate_selection
@@ -47,28 +47,28 @@ impl WorkspaceApp {
             }
             match event.keystroke.key.as_str() {
                 "down" | "arrowdown" => {
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.move_tool_candidate_selection(1);
                     });
                     cx.notify();
                     true
                 }
                 "up" | "arrowup" => {
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.move_tool_candidate_selection(-1);
                     });
                     cx.notify();
                     true
                 }
                 "home" => {
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.move_tool_candidate_selection(-(selection.candidate_count as isize));
                     });
                     cx.notify();
                     true
                 }
                 "end" => {
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.move_tool_candidate_selection(selection.candidate_count as isize);
                     });
                     cx.notify();
@@ -94,8 +94,8 @@ impl WorkspaceApp {
                 }
                 _ => true,
             }
-        } else if self.ai_entity.read(cx).model_selector_open()
-            && self.ai_entity.read(cx).model_selector_search_focused()
+        } else if self.ai.state.read(cx).model_selector_open()
+            && self.ai.state.read(cx).model_selector_search_focused()
         {
             if event.keystroke.modifiers.platform {
                 return false;
@@ -116,22 +116,22 @@ impl WorkspaceApp {
                 }
                 "down" | "arrowdown" => {
                     self.move_ai_model_selector_highlight(1, cx);
-                    cx.notify();
+                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
                     true
                 }
                 "up" | "arrowup" => {
                     self.move_ai_model_selector_highlight(-1, cx);
-                    cx.notify();
+                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
                     true
                 }
                 "home" => {
                     self.set_ai_model_selector_highlight_edge(false, cx);
-                    cx.notify();
+                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
                     true
                 }
                 "end" => {
                     self.set_ai_model_selector_highlight_edge(true, cx);
-                    cx.notify();
+                    self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
                     true
                 }
                 "enter" => {
@@ -140,26 +140,26 @@ impl WorkspaceApp {
                 }
                 "backspace" => {
                     let changed = self
-                        .ai_entity
+                        .ai.state
                         .update(cx, |ai, _cx| ai.pop_model_selector_search())
                         || self.ime_marked_text.take().is_some();
                     if changed {
                         // Empty Backspace should not repaint the selector when
                         // query, highlight, and IME state are already unchanged.
-                        cx.notify();
+                        self.notify_ime_target(WorkspaceImeTarget::AiModelSelectorSearch, cx);
                     }
                     true
                 }
                 _ => true,
             }
         } else if self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .renaming_conversation_id
             .is_some()
             && self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .renaming_conversation_focused
@@ -174,7 +174,7 @@ impl WorkspaceApp {
                 }
                 "backspace" => {
                     let changed = self
-                        .ai_entity
+                        .ai.state
                         .update(cx, |ai, _cx| ai.pop_conversation_rename())
                         || self.ime_marked_text.take().is_some();
                     if changed {
@@ -201,7 +201,7 @@ impl WorkspaceApp {
                 }
                 _ => true,
             }
-        } else if self.ai_entity.read(cx).chat_ui().editing_message_id.is_some() && self.ai_entity.read(cx).chat_ui().editing_message_focused
+        } else if self.ai.state.read(cx).chat_ui().editing_message_id.is_some() && self.ai.state.read(cx).chat_ui().editing_message_focused
         {
             if event.keystroke.modifiers.platform {
                 return false;
@@ -212,7 +212,7 @@ impl WorkspaceApp {
                     true
                 }
                 "backspace" => {
-                    let changed = self.ai_entity.update(cx, |ai, _cx| {
+                    let changed = self.ai.state.update(cx, |ai, _cx| {
                         ai.pop_message_edit()
                     }) || self.ime_marked_text.take().is_some();
                     if changed {
@@ -225,7 +225,7 @@ impl WorkspaceApp {
                     true
                 }
                 "enter" => {
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.push_message_edit_newline();
                     });
                     self.ime_marked_text = None;
@@ -235,7 +235,7 @@ impl WorkspaceApp {
                 "tab" => {
                     // Textareas in the Tauri sidebar release focus on Tab
                     // unless an autocomplete/menu owner consumes it first.
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.blur_message_edit();
                     });
                     self.ime_marked_text = None;
@@ -254,7 +254,7 @@ impl WorkspaceApp {
                 }
                 _ => true,
             }
-        } else if let Some(action) = self.ai_entity.read(cx).chat_ui().footer_focus {
+        } else if let Some(action) = self.ai.state.read(cx).chat_ui().footer_focus {
             if event.keystroke.modifiers.platform {
                 return false;
             }
@@ -269,7 +269,7 @@ impl WorkspaceApp {
                 self.apply_ai_chat_inline_footer_key_action(action, cx);
             }
             true
-        } else if self.ai_entity.read(cx).chat_ui().input_focused {
+        } else if self.ai.state.read(cx).chat_ui().input_focused {
             let autocomplete_len = self.ai_chat_autocomplete_items(cx).len();
             let prompt_action = ai_chat_prompt_key_action(
                 &event.keystroke,
@@ -284,7 +284,7 @@ impl WorkspaceApp {
             match prompt_action {
                 Some(AiChatPromptKeyAction::Complete) => {
                     let index = self
-                        .ai_entity
+                        .ai.state
                         .read(cx)
                         .chat_ui()
                         .autocomplete_index
@@ -309,21 +309,21 @@ impl WorkspaceApp {
             if autocomplete_len > 0 {
                 match event.keystroke.key.as_str() {
                     "down" | "arrowdown" => {
-                        self.ai_entity.update(cx, |ai, _cx| {
+                        self.ai.state.update(cx, |ai, _cx| {
                             ai.move_chat_autocomplete(1, autocomplete_len);
                         });
                         cx.notify();
                         return true;
                     }
                     "up" | "arrowup" => {
-                        self.ai_entity.update(cx, |ai, _cx| {
+                        self.ai.state.update(cx, |ai, _cx| {
                             ai.move_chat_autocomplete(-1, autocomplete_len);
                         });
                         cx.notify();
                         return true;
                     }
                     "escape" => {
-                        self.ai_entity.update(cx, |ai, _cx| {
+                        self.ai.state.update(cx, |ai, _cx| {
                             ai.suppress_chat_autocomplete();
                         });
                         self.ime_marked_text = None;
@@ -351,7 +351,7 @@ impl WorkspaceApp {
             }
             match event.keystroke.key.as_str() {
                 "backspace" => {
-                    let changed = self.ai_entity.update(cx, |ai, _cx| {
+                    let changed = self.ai.state.update(cx, |ai, _cx| {
                         ai.pop_chat_draft()
                     })
                         || self.ime_marked_text.take().is_some();
@@ -378,7 +378,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn ai_chat_footer_action_enabled(&self, cx: &App) -> bool {
-        self.ai_entity.read(cx).chat_is_loading() || !self.ai_entity.read(cx).chat_ui().draft.trim().is_empty()
+        self.ai.state.read(cx).chat_is_loading() || !self.ai.state.read(cx).chat_ui().draft.trim().is_empty()
     }
 
     pub(in crate::workspace) fn activate_ai_chat_footer_action(
@@ -387,11 +387,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         match action {
-            AiChatFooterAction::Submit if !self.ai_entity.read(cx).chat_ui().draft.trim().is_empty() => {
+            AiChatFooterAction::Submit if !self.ai.state.read(cx).chat_ui().draft.trim().is_empty() => {
                 self.send_ai_chat_draft(cx)
             }
             AiChatFooterAction::Submit => {
-                self.ai_entity.update(cx, |ai, _cx| {
+                self.ai.state.update(cx, |ai, _cx| {
                     ai.clear_chat_footer_focus();
                 });
                 cx.notify();
@@ -409,21 +409,21 @@ impl WorkspaceApp {
         // helper while this method performs the Workspace-specific state writes.
         match action {
             browser_behavior::InlineFooterInputKeyAction::ClearFocus => {
-                self.ai_entity.update(cx, |ai, _cx| {
+                self.ai.state.update(cx, |ai, _cx| {
                     ai.blur_chat_input(false);
                 });
                 self.ime_marked_text = None;
                 cx.notify();
             }
             browser_behavior::InlineFooterInputKeyAction::FocusInput => {
-                self.ai_entity.update(cx, |ai, _cx| {
+                self.ai.state.update(cx, |ai, _cx| {
                     ai.focus_chat_input();
                 });
                 self.ime_marked_text = None;
                 cx.notify();
             }
             browser_behavior::InlineFooterInputKeyAction::FocusFooter(action) => {
-                self.ai_entity.update(cx, |ai, _cx| {
+                self.ai.state.update(cx, |ai, _cx| {
                     ai.set_chat_footer_focus(Some(action));
                 });
                 self.ime_marked_text = None;

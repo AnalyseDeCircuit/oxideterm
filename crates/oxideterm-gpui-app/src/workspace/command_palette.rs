@@ -1373,7 +1373,7 @@ impl WorkspaceApp {
                     TabKind::SshTerminal => self.i18n.t("command_palette.session_ssh_terminal"),
                     TabKind::MoshTerminal => self.i18n.t("terminal.typeMosh"),
                     TabKind::Settings => self.i18n.t("settings_view.title"),
-                    TabKind::Onboarding => self.i18n.t("onboarding.step_welcome"),
+                    TabKind::Onboarding => self.i18n.t("onboarding.welcome"),
                     TabKind::SessionManager => self.i18n.t("sidebar.panels.saved_connections"),
                     TabKind::Runtime => self.i18n.t("sidebar.panels.runtime"),
                     TabKind::ConnectionPool => self.i18n.t("sidebar.panels.runtime_overview"),

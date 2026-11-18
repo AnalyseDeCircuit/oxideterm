@@ -1343,7 +1343,17 @@
     "knowledge_base": "ナレッジベースとメモリ",
     "knowledge_base_desc": "Markdown またはテキスト集合を索引化し、セマンティック検索、埋め込み、OxideSens コンテキストに使います。",
     "external_import": "外部接続のインポート",
-    "external_import_desc": "SSH 設定や対応するサードパーティ端末マネージャーから、プレビューと重複処理付きでホストをインポートします。"
+    "external_import_desc": "SSH 設定や対応するサードパーティ端末マネージャーから、プレビューと重複処理付きでホストをインポートします。",
+    "step_overview": "概要",
+    "step_disclaimer": "利用上の注意",
+    "badge_open_source": "無料・オープンソース · GPL-3.0",
+    "badge_pure_rust": "純粋な Rust ネイティブ",
+    "badge_no_webview": "WebView 不使用 · GPUI",
+    "overview_intro": "純粋な Rust と GPUI で構築された無料・オープンソースのネイティブワークスペース。WebView の負荷なく、リモート端末、ファイル転送、トンネル、ホスト監視、AI をひとつに統合します。",
+    "cat_connections": "接続とプロトコル",
+    "cat_files_dev": "ファイルとリモート開発",
+    "cat_ops_ai": "ホスト運用と AI",
+    "cat_security_ext": "セキュリティ・同期・拡張"
   },
   "zen_mode": {
     "exit": "Zen モードを終了",

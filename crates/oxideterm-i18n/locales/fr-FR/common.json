@@ -1343,7 +1343,17 @@
     "knowledge_base": "Base de connaissances et mémoire",
     "knowledge_base_desc": "Indexez des collections Markdown ou texte pour la recherche sémantique, les embeddings et le contexte OxideSens.",
     "external_import": "Import de connexions externes",
-    "external_import_desc": "Importez des hôtes depuis la configuration SSH et les gestionnaires de terminaux tiers pris en charge, avec aperçu et gestion des doublons."
+    "external_import_desc": "Importez des hôtes depuis la configuration SSH et les gestionnaires de terminaux tiers pris en charge, avec aperçu et gestion des doublons.",
+    "step_overview": "Présentation",
+    "step_disclaimer": "Conditions",
+    "badge_open_source": "Gratuit et open source · GPL-3.0",
+    "badge_pure_rust": "Natif en Rust pur",
+    "badge_no_webview": "Sans WebView · GPUI",
+    "overview_intro": "Un espace de travail gratuit et open source en Rust pur avec GPUI, sans WebView. Unifiez terminaux, transferts, tunnels, supervision d'hôtes et IA dans une seule fenêtre.",
+    "cat_connections": "Connexions et protocoles",
+    "cat_files_dev": "Fichiers et IDE distant",
+    "cat_ops_ai": "Supervision et IA",
+    "cat_security_ext": "Sécurité, synchro et extensions"
   },
   "zen_mode": {
     "exit": "Quitter le mode Zen",

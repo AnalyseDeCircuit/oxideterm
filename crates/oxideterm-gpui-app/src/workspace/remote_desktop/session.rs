@@ -235,10 +235,10 @@ impl WorkspaceApp {
         changed |= self.ime_marked_text.take().is_some();
         changed |= self.pending_platform_text_commit.take().is_some();
 
-        let ai_focus_changed = self.ai_entity.read(cx).chat_ui().input_focused
-            || self.ai_entity.read(cx).chat_ui().footer_focus.is_some()
-            || self.ai_entity.read(cx).model_selector_open()
-            || self.ai_entity.read(cx).model_selector_search_focused();
+        let ai_focus_changed = self.ai.state.read(cx).chat_ui().input_focused
+            || self.ai.state.read(cx).chat_ui().footer_focus.is_some()
+            || self.ai.state.read(cx).model_selector_open()
+            || self.ai.state.read(cx).model_selector_search_focused();
         self.clear_ai_sidebar_keyboard_focus(cx);
         changed |= ai_focus_changed;
 

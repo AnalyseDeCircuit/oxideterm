@@ -1,11 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Presentational builders for AI settings.
-//!
-//! These helpers own reusable GPUI layout and visual treatment. The app crate
-//! supplies translated labels, controls, and mouse handlers so workspace state
-//! and async side effects do not leak into this view crate.
+//! AI settings pages, dialogs, and their shared controls.
 
 use gpui::{
     AnyElement, CursorStyle, IntoElement, ParentElement, Rgba, SharedString, Styled, div,
@@ -734,4 +730,179 @@ mod layout_tests {
             });
         }
     }
+}
+pub mod acp;
+pub(crate) mod basic;
+pub mod confirm;
+pub(crate) mod context;
+pub(crate) mod context_windows;
+pub mod mcp;
+pub mod mcp_dialog;
+pub mod mcp_draft;
+pub mod providers;
+pub(crate) mod skills;
+pub mod subagents;
+pub mod text_editor;
+
+pub(crate) fn available(section: AnyElement, enabled: bool) -> AnyElement {
+    if enabled {
+        section
+    } else {
+        div()
+            .w_full()
+            .min_w_0()
+            .relative()
+            .child(div().w_full().min_w_0().opacity(0.5).child(section))
+            .child(div().absolute().inset_0().block_mouse_except_scroll())
+            .into_any_element()
+    }
+}
+
+pub(crate) fn section(
+    tokens: &ThemeTokens,
+    header: AnyElement,
+    body: impl IntoIterator<Item = AnyElement>,
+) -> AnyElement {
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap(px(tokens.spacing.two))
+        .child(div().w_full().min_w_0().px(px(2.0)).child(header))
+        .children(body)
+        .into_any_element()
+}
+
+pub struct AiSkillData {
+    pub records: Vec<oxideterm_skills::SkillRecord>,
+    pub diagnostics: Vec<oxideterm_skills::SkillDiagnostic>,
+}
+
+pub enum AiSkillAction {
+    Refresh,
+    EditAndRefresh(crate::components::SettingsEdit),
+}
+
+pub fn hash_section_layout(
+    section: Option<oxideterm_settings_model::SettingsSectionId>,
+    state: &crate::entity::SettingsWorkspaceEntity,
+    settings: &oxideterm_settings::PersistedSettings,
+    providers: &providers::AiProviderSettingsView,
+    registry: &oxideterm_skills::SkillRegistry,
+    hasher: &mut impl std::hash::Hasher,
+) {
+    use oxideterm_settings_model::{SettingsSectionId::*, ai_provider_views};
+    use std::hash::Hash;
+
+    format!("{:?}", state.route_snapshot().ai_page).hash(hasher);
+    // An expansion only invalidates the virtual row whose height may change.
+    match section {
+        Some(AiProvidersSettings) => {
+            settings.ai.providers.len().hash(hasher);
+            settings.ai.web_search.enabled.hash(hasher);
+            settings.ai.web_search.provider_id.hash(hasher);
+            providers.hash_layout(hasher);
+        }
+        Some(AiContextModelWindows) => {
+            settings.ai.providers.len().hash(hasher);
+            state.ai_context_windows.hash_layout(hasher);
+        }
+        Some(AiToolsToolUse) => {
+            settings.ai.tool_use.disabled_tools.hash(hasher);
+            state.ai_tool_policy_expanded.hash(hasher);
+        }
+        Some(AiToolsWebSearch) => {
+            settings.ai.web_search.enabled.hash(hasher);
+            settings.ai.web_search.provider_id.hash(hasher);
+            settings.ai.providers.len().hash(hasher);
+        }
+        Some(AiToolsAgents) => {
+            settings.ai.tool_use.enabled.hash(hasher);
+            state.ai_subagent_picker_open.hash(hasher);
+            let options = subagents::global_agent_options(settings);
+            options.enabled.hash(hasher);
+            options
+                .default_model
+                .as_ref()
+                .map(|model| (&model.provider_id, &model.model))
+                .hash(hasher);
+            for provider in ai_provider_views(settings) {
+                provider.id.hash(hasher);
+                provider.enabled.hash(hasher);
+                provider.models.hash(hasher);
+            }
+        }
+        Some(AiToolsSkills) => {
+            state.skill_search_query.hash(hasher);
+            format!("{:?}", state.skill_scope_filter).hash(hasher);
+            state.skill_diagnostics_expanded.hash(hasher);
+            for skill in registry.records() {
+                skill.id.hash(hasher);
+                skill.skill_path.hash(hasher);
+                state
+                    .expanded_skill_paths
+                    .contains(&skill.skill_path)
+                    .hash(hasher);
+                skill.enabled.hash(hasher);
+                skill.content_hash.hash(hasher);
+            }
+            for diagnostic in registry.diagnostics() {
+                diagnostic.path.hash(hasher);
+                diagnostic.message.hash(hasher);
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn textarea(
+    controls: &crate::components::SettingsControls<'_>,
+    input: crate::SettingsInput,
+    label: String,
+    hint: String,
+    placeholder: String,
+    value: String,
+    min_height: f32,
+    cx: &gpui::App,
+) -> AnyElement {
+    use crate::components::SettingsWindowRequest;
+    use oxideterm_gpui_ui::text_input::{text_caret, text_input_anchor_probe};
+    let frame = controls.ime.frame(input, &value, cx);
+    let caret = frame
+        .focused
+        .then(|| text_caret(controls.tokens, frame.caret_visible).into_any_element());
+    let area = settings_ai_textarea_surface(
+        controls.tokens,
+        min_height,
+        frame.focused,
+        frame.value,
+        &placeholder,
+        frame.marked_text.map(str::to_owned),
+        caret,
+    )
+    .on_mouse_down(gpui::MouseButton::Left, {
+        let dispatch = controls.dispatch.clone();
+        move |event, window, cx| {
+            dispatch(
+                SettingsWindowRequest::BeginInputSelection(input, event.clone()),
+                window,
+                cx,
+            );
+            cx.stop_propagation();
+        }
+    })
+    .on_mouse_move({
+        let dispatch = controls.dispatch.clone();
+        move |event, window, cx| {
+            dispatch(
+                SettingsWindowRequest::DragInputSelection(event.clone()),
+                window,
+                cx,
+            )
+        }
+    });
+    let update = frame.update_anchor;
+    let input = text_input_anchor_probe(frame.anchor_id, area, move |anchor, _, _| update(anchor));
+    settings_ai_textarea_row(controls.tokens, label, input.into_any_element(), hint)
 }

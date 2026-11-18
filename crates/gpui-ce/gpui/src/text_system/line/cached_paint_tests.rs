@@ -206,3 +206,97 @@ fn cached_partial_decorations_preserve_general_painter_boundaries(cx: &mut TestA
         }
     });
 }
+
+#[gpui::test]
+fn recolored_cached_paint_reuses_glyph_batch_and_updates_scene_colors(cx: &mut TestAppContext) {
+    test_underline_handler_at_scales(cx, |window, cx| {
+        let text = "abcd";
+        let initial_style = decoration(text.len());
+        let line = underline_test_line(text, std::slice::from_ref(&initial_style), false, window);
+        let cache = LinePaintCache::default();
+        let origin = point(px(12.0), px(10.0));
+        let row = Bounds::new(Point::default(), size(px(120.), px(40.)));
+
+        window.next_frame.scene.clear();
+        window.paint_layer(row, |window| {
+            line.layout
+                .paint_cached_in_current_layer(
+                    origin,
+                    px(20.),
+                    std::slice::from_ref(&initial_style),
+                    &cache,
+                    window,
+                    cx,
+                )
+                .unwrap();
+        });
+        let initial_batch = cache
+            .prepared
+            .lock()
+            .as_ref()
+            .expect("initial batch cached")
+            .glyphs
+            .clone();
+
+        let mut mid_style = initial_style.clone();
+        mid_style.color = hsla(0.15, 0.75, 0.45, 1.0);
+        window.next_frame.scene.clear();
+        window.paint_layer(row, |window| {
+            line.layout
+                .paint_cached_in_current_layer_recolored(
+                    origin,
+                    px(20.),
+                    std::slice::from_ref(&mid_style),
+                    &cache,
+                    Some(hsla(0.0, 0.0, 0.1, 1.0)),
+                    window,
+                    cx,
+                )
+                .unwrap();
+        });
+        let mid_batch = cache
+            .prepared
+            .lock()
+            .as_ref()
+            .expect("mid batch stays cached")
+            .glyphs
+            .clone();
+        assert!(
+            Arc::ptr_eq(&initial_batch, &mid_batch),
+            "recolored transition paint must reuse existing prepared glyph batch"
+        );
+        let expected_mid_hsla = hsla(0.15, 0.75, 0.45, 0.5);
+        assert_eq!(window.next_frame.scene.underlines.len(), 2);
+        assert!(
+            window
+                .next_frame
+                .scene
+                .underlines
+                .iter()
+                .all(|line| line.color == crate::SceneHsla::from(expected_mid_hsla))
+        );
+
+        // Settling back to non-recolored paint rebuilds once at the final color.
+        window.next_frame.scene.clear();
+        window.paint_layer(row, |window| {
+            line.layout
+                .paint_cached_in_current_layer(
+                    origin,
+                    px(20.),
+                    std::slice::from_ref(&mid_style),
+                    &cache,
+                    window,
+                    cx,
+                )
+                .unwrap();
+        });
+        let settled_batch = cache
+            .prepared
+            .lock()
+            .as_ref()
+            .expect("settled batch cached")
+            .glyphs
+            .clone();
+        assert!(!Arc::ptr_eq(&initial_batch, &settled_batch));
+    });
+}

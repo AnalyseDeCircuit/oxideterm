@@ -1,27 +1,4 @@
-#[derive(Clone)]
-pub(in crate::workspace) struct AcpApplicationToolTurn {
-    pub(in crate::workspace) services: AiModelBackendServices,
-    pub(in crate::workspace) tool_policy: oxideterm_ai::AiToolUsePolicy,
-    pub(in crate::workspace) safety_mode: oxideterm_ai::AiPolicySafetyMode,
-    pub(in crate::workspace) profile_id: Option<String>,
-    pub(in crate::workspace) ui_tx: AiStreamDeliverySender,
-    pub(in crate::workspace) generation: u64,
-    pub(in crate::workspace) tool_session_id: ToolSessionId,
-    pub(in crate::workspace) conversation_id: String,
-    pub(in crate::workspace) assistant_id: String,
-    pub(in crate::workspace) cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
-}
-
-impl AcpApplicationToolTurn {
-    pub(in crate::workspace) fn cancel(&self) {
-        self.cancelled
-            .store(true, std::sync::atomic::Ordering::Release);
-    }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancelled.load(std::sync::atomic::Ordering::Acquire)
-    }
-}
+pub(in crate::workspace) use oxideterm_gpui_ai::acp::AcpApplicationToolTurn;
 
 /// Executes one ACP-originated MCP call through the same application policy and
 /// runtime-capability boundaries used by provider-originated tool calls.

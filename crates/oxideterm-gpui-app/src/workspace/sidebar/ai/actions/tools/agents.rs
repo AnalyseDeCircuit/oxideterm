@@ -326,7 +326,7 @@ impl WorkspaceApp {
         label: &str,
         cx: &mut Context<Self>,
     ) {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         let record = ai
             .agents
             .message_runs
@@ -383,7 +383,7 @@ impl WorkspaceApp {
         context_window: usize,
         cx: &mut Context<Self>,
     ) -> AgentExecution {
-        let runtime = self.ai_entity.read(cx).agents.services.runtime.clone();
+        let runtime = self.ai.state.read(cx).agents.services.runtime.clone();
         runtime.set_concurrency(self.agent_concurrency());
         let scope = self.ai_runtime_context.read(cx).agent_scope(
             session,
@@ -416,7 +416,7 @@ impl WorkspaceApp {
                     oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
                 ) as usize,
         );
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.bind_agent_run(generation, run.clone(), false);
             ai.agents.groups.insert(
                 run.group_id.clone(),
@@ -432,7 +432,7 @@ impl WorkspaceApp {
         AgentExecution::new(
             runtime,
             run,
-            self.ai_entity.read(cx).agents.services.resources.clone(),
+            self.ai.state.read(cx).agents.services.resources.clone(),
         )
         .expect("new parent run is active")
     }
@@ -445,7 +445,7 @@ impl WorkspaceApp {
         sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
         cx: &mut Context<Self>,
     ) {
-        if sender.is_closed() || !self.ai_entity.read(cx).run_accepts_tools(generation) {
+        if sender.is_closed() || !self.ai.state.read(cx).run_accepts_tools(generation) {
             return;
         }
         let result = self.apply_ai_agent_command(generation, session, &call, cx);
@@ -469,11 +469,11 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
         let run = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .agent_run(generation)
             .ok_or("Agent run is unavailable")?;
-        let runtime = self.ai_entity.read(cx).agents.services.runtime.clone();
+        let runtime = self.ai.state.read(cx).agents.services.runtime.clone();
         let snapshot = runtime.snapshot(&run).map_err(|error| error.to_string())?;
         if snapshot.parent_id.is_some() {
             return Err("Only the parent can coordinate agents".into());
@@ -587,7 +587,7 @@ impl WorkspaceApp {
                         .resume(&run, &child)
                         .map_err(|error| error.to_string())?;
                     let labels = self
-                        .ai_entity
+                        .ai.state
                         .read(cx)
                         .agents
                         .records
@@ -620,7 +620,7 @@ impl WorkspaceApp {
                     .and_then(serde_json::Value::as_bool)
                     .unwrap_or(false);
                 let calls = details.then(|| {
-                    self.ai_entity
+                    self.ai.state
                         .read(cx)
                         .agents
                         .records
@@ -659,7 +659,7 @@ impl WorkspaceApp {
     ) -> Result<(), String> {
         let result = self.prepare_ai_child(run, labels, follow_up, cx);
         if result.is_err() {
-            let generations = self.ai_entity.update(cx, |ai, _cx| {
+            let generations = self.ai.state.update(cx, |ai, _cx| {
                 let generations: Vec<_> = ai.chat_stream_runs_for_agent(run);
                 for generation in &generations {
                     ai.complete_chat_stream(*generation);
@@ -696,10 +696,10 @@ impl WorkspaceApp {
         follow_up: Option<AgentText>,
         cx: &mut Context<Self>,
     ) -> Result<(), String> {
-        let runtime = self.ai_entity.read(cx).agents.services.runtime.clone();
+        let runtime = self.ai.state.read(cx).agents.services.runtime.clone();
         let snapshot = runtime.snapshot(run).map_err(|error| error.to_string())?;
         let (mut config, services, context_window, parent_message_id) = {
-            let ai = self.ai_entity.read(cx);
+            let ai = self.ai.state.read(cx);
             let group = ai
                 .agents
                 .groups
@@ -741,7 +741,7 @@ impl WorkspaceApp {
         message.model = Some(snapshot.model.model.clone());
         let assistant_id = message.id.clone();
         let conversation_id = snapshot.conversation_id.clone();
-        let (generation, sender) = self.ai_entity.update(cx, |ai, _cx| {
+        let (generation, sender) = self.ai.state.update(cx, |ai, _cx| {
             let stream = ai.allocate_chat_stream(
                 conversation_id.clone(),
                 assistant_id.clone(),
@@ -770,7 +770,7 @@ impl WorkspaceApp {
         let execution = AgentExecution::new(
             runtime,
             run.clone(),
-            self.ai_entity.read(cx).agents.services.resources.clone(),
+            self.ai.state.read(cx).agents.services.resources.clone(),
         )
         .map_err(|error| error.to_string())?;
         let task = self.forwarding_runtime.spawn(run_ai_chat_tool_loop(
@@ -786,7 +786,7 @@ impl WorkspaceApp {
             sender,
             Some(execution),
         ));
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _cx| ai.set_chat_stream_task(generation, task));
         Ok(())
     }

@@ -30,11 +30,13 @@ use crate::app::{
 };
 use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::*;
-use crate::terminal_view::highlight::{TerminalHighlightLayout, terminal_highlights_for_rows};
+use crate::terminal_view::highlight::{
+    TerminalHighlightForeground, TerminalHighlightLayout, terminal_highlights_for_rows,
+};
 use crate::terminal_view::links::*;
 use crate::terminal_view::selection::TerminalSelection;
 use crate::terminal_view::semantic::{
-    append_terminal_semantics_for_rows, semantic_line_role_for_rows,
+    append_terminal_semantics_with_palette, semantic_line_role_for_rows,
 };
 
 mod cell_drawing;
@@ -61,6 +63,7 @@ pub(crate) struct TerminalElement {
     metrics: TerminalMetrics,
     theme: TerminalUiTheme,
     transition_colors: Option<TerminalTransitionColors>,
+    dilation_settle_row: Option<usize>,
     cursor_visible: bool,
     marked_text: Option<String>,
     marked_text_caret_utf16: Option<usize>,
@@ -80,6 +83,7 @@ pub(crate) struct TerminalElement {
     semantic_coloring: bool,
     semantic_scheme: Option<Arc<CompiledSemanticScheme>>,
     semantic_shell: SemanticShellDialect,
+    semantic_classification_signature: u64,
     semantic_style_signature: u64,
     hovered_link: Option<TerminalLinkRange>,
     detect_file_paths_as_links: bool,
@@ -266,6 +270,7 @@ struct TerminalRowRect {
     col: usize,
     cells: usize,
     color: Hsla,
+    transition_key: TerminalTransitionColorKey,
     powerline_cutout: Option<char>,
 }
 
@@ -275,6 +280,7 @@ struct TerminalRowTextRun {
     text: SharedString,
     cells: usize,
     style: TextRun,
+    transition_key: TerminalTransitionColorKey,
     cache: Arc<TerminalTextRunCache>,
 }
 
@@ -283,6 +289,7 @@ struct PendingTerminalRowTextRun {
     text: String,
     cells: usize,
     style: TextRun,
+    transition_key: TerminalTransitionColorKey,
 }
 
 impl PendingTerminalRowTextRun {
@@ -307,6 +314,7 @@ impl PendingTerminalRowTextRun {
             text: SharedString::from(self.text),
             cells: self.cells,
             style: self.style,
+            transition_key: self.transition_key,
             cache,
         }
     }
@@ -322,7 +330,7 @@ struct TerminalLogicalHighlightLayout {
     backgrounds: Vec<TerminalRowOffsetRect>,
     underlines: Vec<TerminalRowOffsetRect>,
     outlines: Vec<TerminalRowOffsetRect>,
-    foregrounds: HashMap<(usize, usize), Hsla>,
+    foregrounds: HashMap<(usize, usize), TerminalHighlightForeground>,
 }
 
 struct TerminalRowOffsetRect {
@@ -707,6 +715,7 @@ impl TerminalElement {
             metrics,
             theme,
             transition_colors: None,
+            dilation_settle_row: None,
             cursor_visible,
             marked_text,
             marked_text_caret_utf16: None,
@@ -725,6 +734,7 @@ impl TerminalElement {
             semantic_coloring: false,
             semantic_scheme: None,
             semantic_shell: SemanticShellDialect::Auto,
+            semantic_classification_signature: 0,
             semantic_style_signature: 0,
             hovered_link,
             detect_file_paths_as_links: true,
@@ -753,6 +763,12 @@ impl TerminalElement {
         transition_colors: Option<TerminalTransitionColors>,
     ) -> Self {
         self.transition_colors = transition_colors;
+        self.refresh_semantic_style_signature();
+        self
+    }
+
+    pub(crate) fn dilation_settle_row(mut self, row: Option<usize>) -> Self {
+        self.dilation_settle_row = row;
         self
     }
 
@@ -796,9 +812,20 @@ impl TerminalElement {
             .semantic_scheme
             .as_deref()
             .unwrap_or_else(|| compiled_builtin_scheme(SemanticScheme::Balanced));
-        self.semantic_style_signature = terminal_semantic_style_signature(
+        self.semantic_classification_signature = terminal_semantic_classification_signature(
             self.semantic_coloring,
-            &self.theme,
+            semantic_scheme,
+            self.semantic_shell,
+        );
+        let terminal_palette = self
+            .transition_colors
+            .as_ref()
+            .map_or(self.theme.tokens.terminal, |transition| {
+                transition.target_terminal
+            });
+        self.semantic_style_signature = terminal_semantic_style_signature_from_palette(
+            self.semantic_coloring,
+            terminal_palette,
             semantic_scheme,
             self.semantic_shell,
         );
@@ -1106,6 +1133,12 @@ impl TerminalElement {
         if let Some(cache) = cache.as_deref_mut() {
             cache.performance.links_micros = duration_micros(links_started.elapsed());
         }
+        let row_terminal_background = self
+            .transition_colors
+            .as_ref()
+            .map_or(terminal_background, |transition| {
+                transition.target_background_hsla
+            });
         let row_style_hasher = self.row_layout_style_hasher();
         for row_index in visible_rows {
             let Some(row) = self.snapshot.lines.get(row_index) else {
@@ -1147,7 +1180,7 @@ impl TerminalElement {
                             row,
                             &highlight_layout,
                             &link_ranges,
-                            terminal_background,
+                            row_terminal_background,
                             previous,
                         )
                     },
@@ -1171,12 +1204,14 @@ impl TerminalElement {
                     row,
                     &highlight_layout,
                     &link_ranges,
-                    terminal_background,
+                    row_terminal_background,
                     None,
                 );
                 append_cached_row_layout(
                     row_index,
                     &row_layout,
+                    self.transition_colors.as_ref(),
+                    terminal_background,
                     &mut backgrounds,
                     &mut selections,
                     &mut text_runs,
@@ -1287,11 +1322,14 @@ impl TerminalElement {
                     .filter(|_| self.semantic_coloring)
                     .map(|context| {
                         let role = semantic_role.unwrap_or(SemanticLineRole::Unknown);
-                        cache.semantic_spans_for((context.signature, role, self.semantic_style_signature), || {
-                            oxideterm_terminal_semantic::classify_line_with_compiled_scheme_and_shell(
-                                &context.text, role, self.semantic_scheme(), self.semantic_shell,
-                            )
-                        })
+                        cache.semantic_spans_for(
+                            (context.signature, role, self.semantic_classification_signature),
+                            || {
+                                oxideterm_terminal_semantic::classify_line_with_compiled_scheme_and_shell(
+                                    &context.text, role, self.semantic_scheme(), self.semantic_shell,
+                                )
+                            },
+                        )
                     });
                 cache.get_or_insert_highlight_with(key, self.performance_metrics_enabled, || {
                     let line_layout = self.highlight_layout_for_rows_with_spans(
@@ -1338,11 +1376,16 @@ impl TerminalElement {
         rows: Range<usize>,
         spans: Option<&[oxideterm_terminal_semantic::SemanticSpan]>,
     ) -> TerminalHighlightLayout {
+        let warning_color = self
+            .transition_colors
+            .as_ref()
+            .map_or(self.theme.tokens.ui.warning, |transition| {
+                transition.target_ui_warning
+            });
         let transient = self.transient_command_highlight.as_ref().map(|highlight| {
             (
                 highlight,
-                rgba((self.theme.tokens.ui.warning << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA)
-                    .into(),
+                rgba((warning_color << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA).into(),
             )
         });
         let mut layout = terminal_highlights_for_rows(
@@ -1352,11 +1395,28 @@ impl TerminalElement {
             rows.clone(),
         );
         if self.semantic_coloring {
-            append_terminal_semantics_for_rows(
+            let (terminal_palette, ui_error, ui_warning) =
+                self.transition_colors.as_ref().map_or(
+                    (
+                        self.theme.tokens.terminal,
+                        self.theme.tokens.ui.error,
+                        self.theme.tokens.ui.warning,
+                    ),
+                    |transition| {
+                        (
+                            transition.target_terminal,
+                            transition.target_ui_error,
+                            transition.target_ui_warning,
+                        )
+                    },
+                );
+            append_terminal_semantics_with_palette(
                 &self.snapshot,
                 &self.command_marks,
                 rows,
-                &self.theme,
+                terminal_palette,
+                ui_error,
+                ui_warning,
                 self.semantic_scheme(),
                 self.semantic_shell,
                 &mut layout,
@@ -1440,7 +1500,7 @@ impl TerminalElement {
             let block_cursor = self.grid_cursor_visible()
                 && cell.cursor
                 && self.snapshot.cursor_shape == TerminalCursorShape::Block;
-            let bg = resolve_cell_background(
+            let (bg, bg_key) = resolve_cell_background(
                 cell,
                 block_cursor,
                 &self.theme,
@@ -1457,27 +1517,34 @@ impl TerminalElement {
                         .foreground_for_cell(row_index, col_index)
                         .is_some(),
             );
+            let emits_background_rect = bg_key != TerminalTransitionColorKey::TerminalBackground
+                && (bg != terminal_background
+                    || matches!(bg_key, TerminalTransitionColorKey::PaletteColor(_)));
 
             if let Some(ch) = cutout {
                 if let Some(rect) = current_background.take() {
                     backgrounds.push(rect);
                 }
                 // Paint only the part outside the glyph; a full-cell quad would hide the image.
-                if bg != terminal_background || cell.style_origin.background_explicit() {
+                if bg_key != TerminalTransitionColorKey::TerminalBackground
+                    && (bg != terminal_background || cell.style_origin.background_explicit())
+                {
                     backgrounds.push(TerminalRowRect {
                         col: paint_col,
                         cells: cell_width,
                         color: bg,
+                        transition_key: bg_key,
                         powerline_cutout: Some(ch),
                     });
                 }
-            } else if bg != terminal_background {
+            } else if emits_background_rect {
                 extend_or_push_row_rect(
                     &mut current_background,
                     &mut backgrounds,
                     paint_col,
                     cell_width,
                     bg,
+                    bg_key,
                 );
             } else if let Some(rect) = current_background.take() {
                 backgrounds.push(rect);
@@ -1486,12 +1553,23 @@ impl TerminalElement {
             if self.selection.is_some_and(|selection| {
                 selection.contains_viewport_cell(row_index, col_index, self.snapshot.display_offset)
             }) {
+                let (sel_color, sel_key) = match transition_colors {
+                    Some(transition) => (
+                        transition.target_selection_background,
+                        TerminalTransitionColorKey::SelectionBackground,
+                    ),
+                    None => (
+                        self.theme.selection_background,
+                        TerminalTransitionColorKey::Static,
+                    ),
+                };
                 extend_or_push_row_rect(
                     &mut current_selection,
                     &mut selections,
                     paint_col,
                     cell_width,
-                    self.theme.selection_background,
+                    sel_color,
+                    sel_key,
                 );
             } else if let Some(rect) = current_selection.take() {
                 selections.push(rect);
@@ -1511,7 +1589,7 @@ impl TerminalElement {
                 || !cell.zerowidth().is_empty()
                 || (self.grid_cursor_visible() && cell.cursor)
             {
-                let fg = resolve_cell_foreground(
+                let (fg, fg_key) = resolve_cell_foreground(
                     cell,
                     block_cursor,
                     highlight_layout.foreground_for_cell(row_index, col_index),
@@ -1538,12 +1616,14 @@ impl TerminalElement {
                         text: cell_text(cell),
                         cells: cell_width,
                         style,
+                        transition_key: fg_key,
                     });
                     continue;
                 }
                 if let Some(run) = &mut current_run
                     && run.col + run.cells == col_index
                     && text_run_style_matches(&run.style, &style)
+                    && run.transition_key == fg_key
                     && current_run_is_drawing == is_drawing
                 {
                     // Append directly to the existing run so ordinary rows do not
@@ -1563,6 +1643,7 @@ impl TerminalElement {
                     text: cell_text(cell),
                     cells: cell_width,
                     style,
+                    transition_key: fg_key,
                 });
             } else if let Some(run) = current_run.take() {
                 text_runs.push(run);
@@ -1640,14 +1721,17 @@ impl TerminalElement {
             .to_bits()
             .hash(&mut hasher);
         self.metrics.font.hash(&mut hasher);
-        self.theme.background.hash(&mut hasher);
-        self.theme.foreground.hash(&mut hasher);
-        self.theme.header_foreground.hash(&mut hasher);
-        self.theme.selection_background.hash(&mut hasher);
-        self.transition_colors
-            .as_ref()
-            .map(|colors| colors.signature)
-            .hash(&mut hasher);
+        if let Some(transition) = &self.transition_colors {
+            // Keep row layouts cached under a transition-invariant key while live colors remap at paint time.
+            true.hash(&mut hasher);
+            transition.layout_signature.hash(&mut hasher);
+        } else {
+            false.hash(&mut hasher);
+            self.theme.background.hash(&mut hasher);
+            self.theme.foreground.hash(&mut hasher);
+            self.theme.header_foreground.hash(&mut hasher);
+            self.theme.selection_background.hash(&mut hasher);
+        }
         self.transparent_background.hash(&mut hasher);
         self.bidi_enabled.hash(&mut hasher);
         self.detect_file_paths_as_links.hash(&mut hasher);
@@ -1958,9 +2042,12 @@ fn visual_line_for_row_with_bidi(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn append_cached_row_layout(
     row_index: usize,
     row_layout: &TerminalRowLayout,
+    transition_colors: Option<&TerminalTransitionColors>,
+    live_terminal_background: Hsla,
     backgrounds: &mut Vec<TerminalRect>,
     selections: &mut Vec<TerminalRect>,
     text_runs: &mut Vec<BatchedTextRun>,
@@ -1970,23 +2057,37 @@ fn append_cached_row_layout(
         row: row_index,
         col: rect.col,
         cells: rect.cells,
-        color: rect.color,
+        color: transition_colors.map_or(rect.color, |transition| {
+            transition.resolve_row_color(rect.transition_key, rect.color, live_terminal_background)
+        }),
         powerline_cutout: rect.powerline_cutout,
     }));
     selections.extend(row_layout.selections.iter().map(|rect| TerminalRect {
         row: row_index,
         col: rect.col,
         cells: rect.cells,
-        color: rect.color,
+        color: transition_colors.map_or(rect.color, |transition| {
+            transition.resolve_row_color(rect.transition_key, rect.color, live_terminal_background)
+        }),
         powerline_cutout: None,
     }));
-    text_runs.extend(row_layout.text_runs.iter().map(|run| BatchedTextRun {
-        row: row_index,
-        col: run.col,
-        text: run.text.clone(),
-        cells: run.cells,
-        style: run.style.clone(),
-        cache: Some(run.cache.clone()),
+    text_runs.extend(row_layout.text_runs.iter().map(|run| {
+        let mut style = run.style.clone();
+        if let Some(transition) = transition_colors {
+            style.color = transition.resolve_row_color(
+                run.transition_key,
+                run.style.color,
+                live_terminal_background,
+            );
+        }
+        BatchedTextRun {
+            row: row_index,
+            col: run.col,
+            text: run.text.clone(),
+            cells: run.cells,
+            style,
+            cache: Some(run.cache.clone()),
+        }
     }));
     if let Some(row_cursor) = row_layout.cursor {
         *cursor = Some(TerminalCursor {
@@ -2003,11 +2104,13 @@ fn extend_or_push_row_rect(
     col: usize,
     cells: usize,
     color: Hsla,
+    transition_key: TerminalTransitionColorKey,
 ) {
     if let Some(rect) = current
         && col <= rect.col + rect.cells
         && rect.col <= col + cells
         && rect.color == color
+        && rect.transition_key == transition_key
     {
         // A wide glyph and its spacer overlap by one column. Union their
         // coverage instead of painting translucent selection color twice.
@@ -2024,6 +2127,7 @@ fn extend_or_push_row_rect(
         col,
         cells,
         color,
+        transition_key,
         powerline_cutout: None,
     });
 }
@@ -2208,16 +2312,29 @@ fn terminal_transient_command_highlight_signature(
     hasher.finish()
 }
 
-fn terminal_semantic_style_signature(
+fn terminal_semantic_classification_signature(
     enabled: bool,
-    theme: &TerminalUiTheme,
     scheme: &CompiledSemanticScheme,
     shell: SemanticShellDialect,
 ) -> u64 {
     let mut hasher = DefaultHasher::new();
     enabled.hash(&mut hasher);
     if enabled {
-        let terminal = theme.tokens.terminal;
+        scheme.signature().hash(&mut hasher);
+        shell.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+fn terminal_semantic_style_signature_from_palette(
+    enabled: bool,
+    terminal: oxideterm_theme::TerminalTheme,
+    scheme: &CompiledSemanticScheme,
+    shell: SemanticShellDialect,
+) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    enabled.hash(&mut hasher);
+    if enabled {
         terminal.red.hash(&mut hasher);
         terminal.bright_red.hash(&mut hasher);
         terminal.green.hash(&mut hasher);
@@ -2420,66 +2537,111 @@ fn resolve_cell_background(
     theme: &TerminalUiTheme,
     terminal_background: Hsla,
     transition_colors: Option<&TerminalTransitionColors>,
-) -> Hsla {
+) -> (Hsla, TerminalTransitionColorKey) {
     if block_cursor {
-        return to_hsla(terminal_color_from_hex(theme.header_foreground));
+        return match transition_colors {
+            Some(transition) => (
+                transition.target_header_foreground,
+                TerminalTransitionColorKey::CursorBackground,
+            ),
+            None => (
+                to_hsla(terminal_color_from_hex(theme.header_foreground)),
+                TerminalTransitionColorKey::Static,
+            ),
+        };
     }
     if let Some(transition) = transition_colors {
         if !cell.style_origin.background_explicit() && cell.bg == transition.target_background {
-            return terminal_background;
+            return (
+                terminal_background,
+                TerminalTransitionColorKey::TerminalBackground,
+            );
         }
         if cell.style_origin.foreground_is_default_background()
             && cell.bg == transition.target_foreground
         {
-            return transition.interpolated_foreground;
+            return (
+                transition.target_foreground_hsla,
+                TerminalTransitionColorKey::DefaultForeground,
+            );
         }
-        if cell.style_origin.background_explicit() {
-            return transition
-                .map_ansi_color(cell.bg)
-                .unwrap_or_else(|| to_hsla(cell.bg));
+        if cell.style_origin.background_explicit() && transition.map_ansi_color(cell.bg).is_some() {
+            return (
+                to_hsla(cell.bg),
+                TerminalTransitionColorKey::PaletteColor(cell.bg),
+            );
         }
-        return to_hsla(cell.bg);
+        return (to_hsla(cell.bg), TerminalTransitionColorKey::Static);
     }
     if cell.bg == terminal_color_from_hex(theme.background) {
-        terminal_background
+        (terminal_background, TerminalTransitionColorKey::Static)
     } else {
-        to_hsla(cell.bg)
+        (to_hsla(cell.bg), TerminalTransitionColorKey::Static)
     }
 }
 
 fn resolve_cell_foreground(
     cell: &TerminalCell,
     block_cursor: bool,
-    highlight_fg: Option<Hsla>,
+    highlight_fg: Option<TerminalHighlightForeground>,
     terminal_background: Hsla,
     transition_colors: Option<&TerminalTransitionColors>,
-) -> Hsla {
+) -> (Hsla, TerminalTransitionColorKey) {
     if block_cursor {
-        return terminal_background;
+        return (
+            terminal_background,
+            if transition_colors.is_some() {
+                TerminalTransitionColorKey::TerminalBackground
+            } else {
+                TerminalTransitionColorKey::Static
+            },
+        );
     }
     if let Some(highlight_fg) = highlight_fg {
-        return highlight_fg;
+        if let Some(transition) = transition_colors
+            && let Some(ansi) = highlight_fg.ansi_color
+            && transition.map_ansi_color(ansi).is_some()
+        {
+            return (
+                highlight_fg.color,
+                TerminalTransitionColorKey::PaletteColor(ansi),
+            );
+        }
+        return (highlight_fg.color, TerminalTransitionColorKey::Static);
     }
     if let Some(transition) = transition_colors {
         if cell.style_origin.foreground_is_default_background()
             && cell.fg == transition.target_background
         {
-            return transition.interpolated_background;
+            return (
+                transition.target_background_hsla,
+                TerminalTransitionColorKey::TerminalBackground,
+            );
         }
         if !cell.style_origin.foreground_explicit() {
             if cell.fg == transition.target_foreground {
-                return transition.interpolated_foreground;
+                return (
+                    transition.target_foreground_hsla,
+                    TerminalTransitionColorKey::DefaultForeground,
+                );
             }
             if cell.fg == transition.target_dim_foreground {
-                return transition.interpolated_dim_foreground;
+                return (
+                    transition.target_dim_foreground_hsla,
+                    TerminalTransitionColorKey::DefaultDimForeground,
+                );
             }
-            return to_hsla(cell.fg);
+            return (to_hsla(cell.fg), TerminalTransitionColorKey::Static);
         }
-        return transition
-            .map_ansi_color(cell.fg)
-            .unwrap_or_else(|| to_hsla(cell.fg));
+        if transition.map_ansi_color(cell.fg).is_some() {
+            return (
+                to_hsla(cell.fg),
+                TerminalTransitionColorKey::PaletteColor(cell.fg),
+            );
+        }
+        return (to_hsla(cell.fg), TerminalTransitionColorKey::Static);
     }
-    to_hsla(cell.fg)
+    (to_hsla(cell.fg), TerminalTransitionColorKey::Static)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2528,7 +2690,7 @@ fn push_visual_text_runs(
             }
             continue;
         }
-        let fg = resolve_cell_foreground(
+        let (fg, fg_key) = resolve_cell_foreground(
             cell,
             block_cursor,
             highlight_layout.foreground_for_cell(source_row_index, cluster.logical_col),
@@ -2554,6 +2716,7 @@ fn push_visual_text_runs(
                 text: cluster.text.clone(),
                 cells: cluster.cells,
                 style,
+                transition_key: fg_key,
             });
             continue;
         }
@@ -2565,6 +2728,7 @@ fn push_visual_text_runs(
             && let Some(run) = &mut current_run
             && run.col + run.cells == cluster.visual_col
             && text_run_style_matches(&run.style, &style)
+            && run.transition_key == fg_key
             && current_run_is_drawing == is_drawing
         {
             run.text.push_str(&cluster.text);
@@ -2581,6 +2745,7 @@ fn push_visual_text_runs(
             text: cluster.text.clone(),
             cells: cluster.cells,
             style,
+            transition_key: fg_key,
         };
         if wide {
             text_runs.push(run);
@@ -2794,6 +2959,8 @@ impl Element for TerminalElement {
                 {
                     paint_terminal_image(image, origin, &self.metrics, window, cx);
                 }
+                let live_terminal_background = terminal_background(&self.theme);
+                let transition_colors = self.transition_colors.as_ref();
                 for rect in &layout.backgrounds {
                     paint_terminal_rect(rect, origin, &self.metrics, window);
                 }
@@ -2802,6 +2969,8 @@ impl Element for TerminalElement {
                         paint_terminal_row_rect(
                             cached_row.row,
                             rect,
+                            transition_colors,
+                            live_terminal_background,
                             origin,
                             &self.metrics,
                             window,
@@ -2842,6 +3011,8 @@ impl Element for TerminalElement {
                         paint_terminal_row_rect(
                             cached_row.row,
                             rect,
+                            transition_colors,
+                            live_terminal_background,
                             origin,
                             &self.metrics,
                             window,
@@ -2878,6 +3049,9 @@ impl Element for TerminalElement {
                         self.snapshot.cols,
                         &self.metrics,
                         glyph_edge_exclusions.as_deref(),
+                        transition_colors,
+                        self.dilation_settle_row,
+                        live_terminal_background,
                         window,
                         cx,
                     );
@@ -3253,12 +3427,17 @@ mod cache_tests {
         let lines = view.logical_lines_for_rows(0..1);
         let roles = view.semantic_roles_for_lines(&lines, Some(&mut cache));
         let (_, before) = view.cached_highlight_layout_for_rows(&lines, &roles, &mut cache);
-        let expected = to_hsla(terminal_color_from_hex(terminal_semantic_color(
-            &view.theme,
-            oxideterm_terminal_semantic::SemanticClass::String,
-            view.semantic_scheme(),
+        let expected = TerminalHighlightForeground::static_color(to_hsla(terminal_color_from_hex(
+            terminal_semantic_color(
+                &view.theme,
+                oxideterm_terminal_semantic::SemanticClass::String,
+                view.semantic_scheme(),
+            ),
         )));
-        assert_eq!(before[0].1.foregrounds.get(&(0, 1)), Some(&expected));
+        assert_eq!(
+            before[0].1.foregrounds.get(&(0, 1)).map(|fg| fg.color),
+            Some(expected.color)
+        );
         terminal.feed_recording_output(b"\x1b[3;6H \x1b[4;1H");
         view.snapshot = terminal.snapshot_with_display_offset(0, 1, None);
         let lines = view.logical_lines_for_rows(0..1);
@@ -3289,7 +3468,10 @@ mod cache_tests {
                 oxideterm_terminal_semantic::SemanticClass::String,
                 view.semantic_scheme(),
             )));
-            assert_eq!(layout[0].1.foregrounds.get(&(0, 0)), Some(&expected));
+            assert_eq!(
+                layout[0].1.foregrounds.get(&(0, 0)).map(|fg| fg.color),
+                Some(expected)
+            );
             let spans = cache
                 .semantic_spans
                 .entries
@@ -3848,6 +4030,8 @@ mod cache_tests {
         let quarter_theme = TerminalUiTheme::interpolate(&dark, &light, 0.25);
         let quarter_colors = TerminalTransitionColors::new(&dark, &light, &quarter_theme, 0.25);
 
+        let mid_live_bg = terminal_background(&mid_theme);
+        let quarter_live_bg = terminal_background(&quarter_theme);
         let mut cache = TerminalLayoutCache::default();
         let mut view = element(snap.clone());
         view.cursor_visible = false;
@@ -3860,29 +4044,95 @@ mod cache_tests {
             "default background cells must not emit target-colored rects mid-transition"
         );
         assert_eq!(
-            first_row.text_runs[0].style.color,
+            mid_colors.resolve_row_color(
+                first_row.text_runs[0].transition_key,
+                first_row.text_runs[0].style.color,
+                mid_live_bg,
+            ),
             mid_colors.interpolated_foreground
         );
         assert_eq!(
-            first_row.text_runs[1].style.color,
+            mid_colors.resolve_row_color(
+                first_row.text_runs[1].transition_key,
+                first_row.text_runs[1].style.color,
+                mid_live_bg,
+            ),
             mid_colors
                 .map_ansi_color(terminal_color_from_hex(light.tokens.terminal.red))
                 .unwrap()
         );
 
-        let mut next_view = element(snap);
+        let mut next_view = element(snap.clone());
         next_view.cursor_visible = false;
-        next_view.theme = quarter_theme;
+        next_view.theme = quarter_theme.clone();
         next_view.transition_colors = Some(quarter_colors);
         let second_layout = next_view.layout_for_rows(0..1, Some(&mut cache));
         let second_row = &second_layout.cached_rows[0].layout;
+        assert!(
+            Arc::ptr_eq(first_row, second_row),
+            "row layout cache must stay warm across transition progress updates"
+        );
         assert!(Arc::ptr_eq(
             &first_row.text_runs[0].cache,
             &second_row.text_runs[0].cache
         ));
-        assert_ne!(
+
+        let mut semantic_row = row_with_text_and_cursor(2, "failed", 0);
+        semantic_row.line_id = 7;
+        semantic_row.cells_mut()[0].cursor = false;
+        for cell in semantic_row.cells_mut() {
+            cell.fg = terminal_color_from_hex(light.foreground);
+            cell.bg = terminal_color_from_hex(light.background);
+            cell.style_origin = TerminalStyleOrigin::new(false, false);
+        }
+        semantic_row.refresh_signature();
+        let semantic_snap = snapshot(0, vec![semantic_row]);
+        let scheme = Arc::new(compiled_builtin_scheme(SemanticScheme::Balanced).clone());
+        let mut sem_first = element(semantic_snap.clone())
+            .semantic_configuration(true, scheme.clone(), SemanticShellDialect::Auto)
+            .theme_transition_colors(Some(mid_colors));
+        sem_first.cursor_visible = false;
+        sem_first.theme = mid_theme.clone();
+        let sem_layout_first = sem_first.layout_for_rows(0..1, Some(&mut cache));
+        let mut sem_second = element(semantic_snap)
+            .theme_transition_colors(Some(quarter_colors))
+            .semantic_configuration(true, scheme, SemanticShellDialect::Auto);
+        sem_second.cursor_visible = false;
+        sem_second.theme = quarter_theme;
+        let sem_layout_second = sem_second.layout_for_rows(0..1, Some(&mut cache));
+        assert!(
+            Arc::ptr_eq(
+                &sem_layout_first.cached_rows[0].layout,
+                &sem_layout_second.cached_rows[0].layout
+            ),
+            "semantic-colored rows must stay cache-warm across transition progress updates"
+        );
+        let sem_run = &sem_layout_first.cached_rows[0].layout.text_runs[0];
+        let expected_semantic_ansi = terminal_color_from_hex(light.tokens.terminal.green);
+        assert_eq!(
+            mid_colors.resolve_row_color(sem_run.transition_key, sem_run.style.color, mid_live_bg),
+            mid_colors.map_ansi_color(expected_semantic_ansi).unwrap()
+        );
+        let first_live_fg = mid_colors.resolve_row_color(
+            first_row.text_runs[0].transition_key,
             first_row.text_runs[0].style.color,
-            second_row.text_runs[0].style.color
+            mid_live_bg,
+        );
+        let second_live_fg = quarter_colors.resolve_row_color(
+            second_row.text_runs[0].transition_key,
+            second_row.text_runs[0].style.color,
+            quarter_live_bg,
+        );
+        assert_ne!(first_live_fg, second_live_fg);
+
+        let mut uncached_view = element(snap);
+        uncached_view.cursor_visible = false;
+        uncached_view.theme = mid_theme;
+        uncached_view.transition_colors = Some(mid_colors);
+        let uncached_layout = uncached_view.layout_for_rows(0..1, None);
+        assert_eq!(
+            uncached_layout.text_runs[0].style.color,
+            mid_colors.interpolated_foreground
         );
     }
 }

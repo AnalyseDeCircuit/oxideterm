@@ -43,6 +43,9 @@ pub fn is_surface_input(input: SettingsInput) -> bool {
     matches!(
         input,
         SettingsInput::SettingsSearch
+            | SettingsInput::SkillSearch
+            | SettingsInput::AiToolUseMaxRounds
+            | SettingsInput::AiModelContextWindow(_, _)
             | SettingsInput::KeybindingSearch
             | SettingsInput::KnownHostsSearch
             | SettingsInput::ConnectionImportTargetGroup
@@ -282,6 +285,10 @@ pub type SettingsEdit = Box<dyn FnOnce(&mut PersistedSettings)>;
 pub type SettingsWindowDispatch = Rc<dyn Fn(SettingsWindowRequest, &mut Window, &mut App)>;
 
 pub enum SettingsWindowRequest {
+    ConfirmAiEnable,
+    OpenAiTextEditor(crate::ai::text_editor::AiTextEditorDialog),
+    ProbeAcpAgent(String),
+    SetAiAgentConcurrency(usize),
     Edit(SettingsEdit),
     OpenSelect(SettingsSelect),
     SelectAnchor(OverlayAnchor),

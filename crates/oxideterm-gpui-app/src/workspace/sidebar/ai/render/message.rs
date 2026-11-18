@@ -23,7 +23,7 @@ impl WorkspaceApp {
         viewport: Option<AiMessageViewport>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.ai_entity.update(cx, |ai, cx| {
+        self.ai.state.update(cx, |ai, cx| {
             ai.retain_visible_history_body(owner.clone(), view.message.id.clone(), cx);
         });
         self.render_ai_history_message(
@@ -55,7 +55,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let view = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .archives
@@ -92,7 +92,7 @@ impl WorkspaceApp {
                         .cursor_pointer()
                         .child(self.i18n.t(key))
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            this.ai_entity.update(cx, |ai, _| {
+                            this.ai.state.update(cx, |ai, _| {
                                 ai.page_history_archive(
                                     conversation.clone(),
                                     message.clone(),
@@ -134,7 +134,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let (view, failed) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history_view(&owner)
             .map(|page| {
@@ -151,7 +151,7 @@ impl WorkspaceApp {
         }
         let id = description.id.clone();
         if !failed {
-            self.ai_entity.update(cx, |ai, _| {
+            self.ai.state.update(cx, |ai, _| {
                 ai.request_history_owned_body(owner.clone(), id.clone(), None, false)
             });
         }
@@ -179,7 +179,7 @@ impl WorkspaceApp {
                     description.storage_id
                 )))
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    this.ai_entity.update(cx, |ai, _| {
+                    this.ai.state.update(cx, |ai, _| {
                         ai.request_history_owned_body(owner.clone(), id.clone(), None, true)
                     });
                     cx.notify();
@@ -211,7 +211,7 @@ impl WorkspaceApp {
                 .t("ai.context.compacted_messages")
                 .replace("{{count}}", &original_count.to_string());
             let conversation = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .conversation_state()
                 .active_conversation_id
@@ -222,7 +222,7 @@ impl WorkspaceApp {
                 .as_ref()
                 .and_then(|metadata| metadata.original_ref.clone());
             let expanded = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .history
                 .archives
@@ -248,7 +248,7 @@ impl WorkspaceApp {
                                 .when_some(range, |row, range| {
                                     row.cursor_pointer().on_click(cx.listener(
                                         move |this, _, _, cx| {
-                                            this.ai_entity.update(cx, |ai, _| {
+                                            this.ai.state.update(cx, |ai, _| {
                                                 ai.toggle_history_archive(
                                                     archive_conversation.clone(),
                                                     archive_id.clone(),
@@ -329,7 +329,7 @@ impl WorkspaceApp {
         let editing = !read_only
             && user
             && self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .editing_message_id
@@ -383,7 +383,7 @@ impl WorkspaceApp {
             })
             .flatten();
         let thinking_expanded = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .thinking_expansion_state
@@ -834,7 +834,7 @@ impl WorkspaceApp {
         let workspace = cx.entity();
         let mut code_actions = self.markdown_mermaid_actions(cx);
         // Child output cannot infer authority over the currently selected terminal.
-        if self.ai_entity.read(cx).agents.detail.is_none() {
+        if self.ai.state.read(cx).agents.detail.is_none() {
             code_actions.on_run = Some(Arc::new(move |command, window, cx| {
                 let workspace = workspace.clone();
                 // Markdown action callbacks are plain event callbacks, not
@@ -1086,7 +1086,7 @@ impl WorkspaceApp {
             active || self.settings_store.settings().ai.thinking_default_expanded;
         let expanded = needs_attention
             || self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .thinking_expansion_state
@@ -1194,7 +1194,7 @@ impl WorkspaceApp {
         let mut shown = std::collections::HashSet::new();
         for (offset, part) in parts.iter().enumerate() {
             match part.get("type").and_then(serde_json::Value::as_str) {
-                Some("thinking") if self.ai_entity.read(cx).agents.detail.is_none() => {
+                Some("thinking") if self.ai.state.read(cx).agents.detail.is_none() => {
                     if let Some(text) = part
                         .get("text")
                         .and_then(serde_json::Value::as_str)
@@ -1256,7 +1256,7 @@ impl WorkspaceApp {
             .filter(|value| !value.trim().is_empty());
         let expanded_key = format!("{}-guardrail-{segment_index}", message.id);
         let expanded = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .tool_call_expansion_state
@@ -1304,7 +1304,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, _window, cx| {
-                            this.ai_entity.update(cx, |ai, _cx| {
+                            this.ai.state.update(cx, |ai, _cx| {
                                 ai.toggle_tool_call_expansion(toggle_key.clone());
                             });
                             cx.stop_propagation();
@@ -1334,7 +1334,7 @@ impl WorkspaceApp {
     ) -> AnyElement {
         let thinking_key = format!("{}-thinking-{segment_index}", message.id);
         let thinking_expanded = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .thinking_expansion_state
@@ -1458,7 +1458,7 @@ impl WorkspaceApp {
                 .to_string();
             let status = ai_tool_status_from_value(call.get("status"));
             let arguments = if status == AiToolStatus::PendingApproval {
-                self.ai_entity
+                self.ai.state
                     .read(cx)
                     .tool_approval_previews
                     .get(&(approval_generation, id.clone()))
@@ -1544,7 +1544,7 @@ impl WorkspaceApp {
             let tool_mono_font = settings_mono_font_family(self.settings_store.settings());
             let expansion_key = format!("{}:{id}", message.id);
             let expanded = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .tool_call_expansion_state
@@ -1825,7 +1825,7 @@ impl WorkspaceApp {
                     .get("acpFileWriteReview")
                     .and_then(serde_json::Value::as_bool)
                     .filter(|enabled| *enabled)
-                    .and_then(|_| self.acp_entity.read(cx).file_write_preview(&id));
+                    .and_then(|_| self.ai.acp.read(cx).file_write_preview(&id));
                 let output = file_write_preview.unwrap_or_else(|| {
                     result
                         .get("output")
@@ -1902,7 +1902,7 @@ impl WorkspaceApp {
             }
 
             if name == "ask_user" {
-                let active = self.ai_entity.read(cx).active_user_question()
+                let active = self.ai.state.read(cx).active_user_question()
                     == Some((approval_generation, id.clone()));
                 if active {
                     if let Some(question) = result
@@ -1930,7 +1930,7 @@ impl WorkspaceApp {
                                 format!("ai-question-{approval_generation}-{id}-{index}"),
                                 option.to_owned(),
                                 move |this, _, cx| {
-                                    this.ai_entity.update(cx, |ai, _| {
+                                    this.ai.state.update(cx, |ai, _| {
                                         ai.resolve_user_question(
                                             approval_generation,
                                             &call_id,
@@ -2100,7 +2100,7 @@ impl WorkspaceApp {
                     .cloned()
                     .unwrap_or_default();
                 let selection = self
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .chat_ui()
                     .tool_candidate_selection
@@ -2281,15 +2281,14 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target = WorkspaceImeTarget::AiMessageEdit;
         let save_disabled = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .editing_message_draft
             .trim()
             .is_empty();
-        let input = self.render_ai_multiline_input(target, String::new(), true, cx);
+        let input = self.ai.message_editor.clone();
 
         div()
             .flex()
@@ -2357,194 +2356,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_ai_sidebar_chat_header(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let active_title = self
-            .ai_entity
-            .read(cx)
-            .conversation_state()
-            .active_conversation()
-            .map(|conversation| conversation.title.clone());
-        div()
-            .w_full()
-            .min_w_0()
-            .min_h(px(36.0))
-            .flex()
-            .flex_none()
-            .items_center()
-            .justify_between()
-            .gap(px(8.0))
-            .px(px(12.0))
-            .py(px(6.0))
-            .border_b_1()
-            .border_color(rgba((self.tokens.ui.border << 8) | 0x4d))
-            .bg(self.context_sidebar_content_background(self.tokens.ui.shell_bg()))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_size(px(10.0))
-                            .font_weight(gpui::FontWeight::BOLD)
-                            .text_color(rgb(self.tokens.ui.text_muted))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::NonSelectable,
-                                "ai-chat-header",
-                                "label",
-                                self.i18n.t("ai.chat.header").to_uppercase(),
-                                self.tokens.ui.text_muted,
-                                cx,
-                            )),
-                    )
-                    .when_some(active_title, |row, title| {
-                        let workspace = cx.entity();
-                        row.child(
-                            div()
-                                .flex_none()
-                                .text_color(rgba((self.tokens.ui.border << 8) | 0x66))
-                                .child("·"),
-                        )
-                        .child(select_anchor_probe(
-                            SelectAnchorId::AiConversationList,
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .cursor_pointer()
-                                .truncate()
-                                .text_size(px(11.0))
-                                .text_color(rgba((self.tokens.ui.text_muted << 8) | 0x99))
-                                .hover(|style| style.text_color(rgb(self.tokens.ui.text)))
-                                .child(self.render_display_text_with_role_and_alpha(
-                                    SelectableTextRole::NonSelectable,
-                                    "ai-chat-header-title",
-                                    title.clone(),
-                                    title,
-                                    self.tokens.ui.text_muted,
-                                    0x99 as f32 / 255.0,
-                                    cx,
-                                ))
-                                .on_mouse_down(
-                                    MouseButton::Left,
-                                    cx.listener(|this, _event, _window, cx| {
-                                        let next_open = !this
-                                            .ai_entity
-                                            .read(cx)
-                                            .chat_ui()
-                                            .conversation_list_open;
-                                        this.close_ai_sidebar_popovers(cx);
-                                        this.ai_entity.update(cx, |ai, _cx| {
-                                            ai.set_chat_popover_open(
-                                                AiChatPopover::ConversationList,
-                                                next_open,
-                                            );
-                                        });
-                                        cx.stop_propagation();
-                                        cx.notify();
-                                    }),
-                                ),
-                            Self::deferred_ai_select_anchor_update(workspace),
-                        ))
-                    }),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(px(2.0))
-                    .child(self.render_ai_sidebar_header_button(
-                        LucideIcon::Plus,
-                        self.i18n.t("ai.chat.new_chat_tooltip"),
-                        Some(AiHeaderAction::NewChat),
-                        cx,
-                    ))
-                    .child(self.render_ai_sidebar_header_button(
-                        LucideIcon::MoreVertical,
-                        self.i18n.t("ai.chat.more_options"),
-                        Some(AiHeaderAction::Settings),
-                        cx,
-                    )),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_ai_sidebar_header_button(
-        &self,
-        icon: LucideIcon,
-        label: String,
-        action: Option<AiHeaderAction>,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let disabled = matches!(action, Some(AiHeaderAction::NewChat))
-            && self
-                .ai_entity
-                .read(cx)
-                .chat_initialization_error()
-                .is_some();
-        // Tauri AiChatPanel header buttons are title-backed icon buttons. Route
-        // tooltip ownership and disabled New Chat activation through the shared
-        // workspace helper so AI header actions match other toolbar buttons.
-        let button = self
-            .workspace_tooltip_icon_button(
-                icon,
-                14.0,
-                rgb(self.tokens.ui.text_muted),
-                IconButtonOptions {
-                    disabled,
-                    // Tauri AI header buttons use border/10 hover instead of the
-                    // default toolbar hover token.
-                    hover_background: Some(rgba((self.tokens.ui.border << 8) | 0x1a)),
-                    ..IconButtonOptions::opaque_toolbar(22.0, ButtonRadius::Md)
-                },
-                label,
-                "ai-sidebar-header-button",
-                false,
-                cx.listener(move |this, _event, window, cx| {
-                    match action {
-                        Some(AiHeaderAction::ArchivedConversations) => {
-                            this.ai_entity
-                                .update(cx, |ai, _| ai.show_archived_conversations(true));
-                        }
-                        Some(AiHeaderAction::NewChat) => {
-                            this.create_ai_sidebar_conversation(None, cx);
-                        }
-                        Some(AiHeaderAction::Settings) => {
-                            let next_open = !this.ai_entity.read(cx).chat_ui().menu_open;
-                            this.close_ai_sidebar_popovers(cx);
-                            this.ai_entity.update(cx, |ai, _cx| {
-                                ai.set_chat_popover_open(AiChatPopover::Menu, next_open);
-                            });
-                            window.focus(&this.focus_handle, cx);
-                            cx.notify();
-                        }
-                        None => {}
-                    }
-                    cx.stop_propagation();
-                }),
-                cx.entity(),
-            )
-            .into_any_element();
-
-        if matches!(action, Some(AiHeaderAction::Settings)) {
-            let workspace = cx.entity();
-            select_anchor_probe(
-                SelectAnchorId::AiChatMenu,
-                button,
-                Self::deferred_ai_select_anchor_update(workspace),
-            )
-            .into_any_element()
-        } else {
-            button.into_any_element()
-        }
-    }
-
     pub(in crate::workspace) fn ai_tool_status_label(&self, status: AiToolStatus) -> String {
         // Status fallback text must follow the active UI locale when the
         // streamed tool call has not provided a model-facing summary yet.
@@ -2578,7 +2389,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let (request, selections) = {
-            let ai = self.ai_entity.read(cx);
+            let ai = self.ai.state.read(cx);
             let pending = ai.pending_cursor_requests.get(&(generation, id.into()))?;
             if pending
                 .response_tx
@@ -2622,7 +2433,7 @@ impl WorkspaceApp {
                                 selected,
                             ),
                             move |this, _, cx| {
-                                this.ai_entity.update(cx, |ai, _| {
+                                this.ai.state.update(cx, |ai, _| {
                                     ai.select_cursor_option(
                                         generation,
                                         &call_id,
@@ -2704,7 +2515,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let route = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .pending_cursor_requests
             .get(&(generation, id.into()))
@@ -2718,7 +2529,7 @@ impl WorkspaceApp {
         let Some((conversation, assistant, method)) = route else {
             return;
         };
-        if self.ai_entity.update(cx, |ai, _| {
+        if self.ai.state.update(cx, |ai, _| {
             ai.resolve_cursor_request(generation, id, accepted)
         }) {
             self.apply_ai_tool_status(

@@ -1,16 +1,4 @@
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum PendingAiStreamTextKind {
-    Content,
-    Thinking,
-}
-
-pub(in crate::workspace) struct PendingAiStreamText {
-    generation: u64,
-    conversation_id: String,
-    assistant_id: String,
-    kind: PendingAiStreamTextKind,
-    text: String,
-}
+use oxideterm_gpui_ai::stream::{AiChatDeliveryBatch, AiStreamTextKind};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn apply_ai_chat_stream_deliveries(
@@ -19,37 +7,19 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut pending_text: Option<PendingAiStreamText> = None;
-        for delivery in deliveries {
-            if !self
-                .ai_entity
-                .read(cx)
-                .chat_stream_matches(delivery.generation, &delivery.conversation_id, &delivery.assistant_id)
-            {
-                // Dropping a stale delivery also drops any retained approval
-                // sender, matching the old generation-scoped receiver.
-                continue;
-            }
+        let mut batch = AiChatDeliveryBatch::new(deliveries);
+        while let Some(delivery) = self.ai.state.update(cx, |ai, _| batch.next_host_delivery(ai)) {
             match delivery.event {
-                AiStreamDeliveryEvent::ToolImages(images) => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    self.ai_entity.update(cx, |ai, _| {
-                        ai.update_chat_message(
-                            &delivery.conversation_id,
-                            &delivery.assistant_id,
-                            |message| {
-                                let mut attachments =
-                                    oxideterm_ai::message_images(message).to_vec();
-                                for image in images {
-                                    if !attachments.iter().any(|existing| existing.id == image.id) {
-                                        attachments.push(image);
-                                    }
-                                }
-                                oxideterm_ai::set_message_images(message, attachments);
-                            },
-                        );
-                        ai.persist_chat_state();
-                    });
+                AiStreamDeliveryEvent::ToolImages(_)
+                | AiStreamDeliveryEvent::HistoryBarrier(_)
+                | AiStreamDeliveryEvent::Checkpoint(_)
+                | AiStreamDeliveryEvent::PromptUsage { .. }
+                | AiStreamDeliveryEvent::Stream(
+                    AiStreamEvent::Content(_) | AiStreamEvent::Thinking(_) | AiStreamEvent::Usage { .. }
+                    | AiStreamEvent::ProviderResponsePart { .. } | AiStreamEvent::ToolCall { .. }
+                    | AiStreamEvent::ToolCallComplete { .. },
+                ) => {
+                    unreachable!("chat batch consumes local deliveries");
                 }
                 AiStreamDeliveryEvent::ToolResourcesRequested { tool_session_id, name, args, sender } => {
                     let result = self.ai_tool_resource_keys(delivery.generation, &tool_session_id, &name, &args, cx);
@@ -60,70 +30,11 @@ impl WorkspaceApp {
                         let _ = sender.send(ai_direction_changed_result(&call));
                         continue;
                     }
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.handle_ai_agent_command(delivery.generation, &tool_session_id, call, sender, cx);
                 }
-                AiStreamDeliveryEvent::HistoryBarrier(sender) => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    self.ai_entity.update(cx, |ai, _| { ai.persist_chat_state(); ai.history_barrier(sender); });
-                }
-                AiStreamDeliveryEvent::Checkpoint(checkpoint) => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    self.ai_entity.update(cx, |ai, _| {
-                        if ai.chat_stream_matches(delivery.generation, &delivery.conversation_id, &delivery.assistant_id) {
-                            ai.update_chat_message(&delivery.conversation_id, &delivery.assistant_id, |message| {
-                                oxideterm_ai::agent::set_message_checkpoint(message, &checkpoint);
-                            });
-                            ai.persist_chat_state();
-                        }
-                    });
-                }
-                AiStreamDeliveryEvent::PromptUsage {
-                    last_user_message_id,
-                    provider_id,
-                    model,
-                    breakdown,
-                    max_tokens,
-                } => {
-                    if self.ai_entity.read(cx).is_child_stream(delivery.generation) { continue; }
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                    let usage = AiPreparedPromptUsage {
-                        conversation_id: delivery.conversation_id,
-                        last_user_message_id,
-                        provider_id,
-                        model,
-                        breakdown: ai_context_token_breakdown_from_prompt(
-                            breakdown,
-                            max_tokens,
-                        ),
-                    };
-                    self.ai_entity
-                        .update(cx, |ai, _cx| ai.set_prepared_prompt_usage(usage));
-                }
-                AiStreamDeliveryEvent::Stream(AiStreamEvent::Content(chunk)) => {
-                    self.merge_or_flush_pending_ai_stream_text(
-                        &mut pending_text,
-                        delivery.generation,
-                        delivery.conversation_id,
-                        delivery.assistant_id,
-                        PendingAiStreamTextKind::Content,
-                        chunk,
-                        cx,
-                    );
-                }
-                AiStreamDeliveryEvent::Stream(AiStreamEvent::Thinking(chunk)) => {
-                    self.merge_or_flush_pending_ai_stream_text(
-                        &mut pending_text,
-                        delivery.generation,
-                        delivery.conversation_id,
-                        delivery.assistant_id,
-                        PendingAiStreamTextKind::Thinking,
-                        chunk,
-                        cx,
-                    );
-                }
                 AiStreamDeliveryEvent::Stream(event) => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.apply_ai_stream_event(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -135,8 +46,8 @@ impl WorkspaceApp {
                 AiStreamDeliveryEvent::AcpClientEvent { agent_id, event } => {
                     match event {
                         oxideterm_ai::AcpClientEvent::CursorRequest { request, response_tx } => {
-                            self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                            if !request.valid() || !self.ai_entity.read(cx).is_chat_stream_generation(delivery.generation) {
+                            self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
+                            if !request.valid() || !self.ai.state.read(cx).is_chat_stream_generation(delivery.generation) {
                                 let _ = response_tx.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
                                 continue;
                             }
@@ -152,7 +63,7 @@ impl WorkspaceApp {
                                 oxideterm_ai::CursorRequest::Questions(request) => vec![Vec::new(); request.questions.len()],
                                 oxideterm_ai::CursorRequest::Plan(_) => Vec::new(),
                             };
-                            self.ai_entity.update(cx, |ai, _| {
+                            self.ai.state.update(cx, |ai, _| {
                                 ai.pending_cursor_requests.insert((delivery.generation, id), crate::workspace::ai_state::AiPendingCursorRequest {
                                     conversation_id: delivery.conversation_id,
                                     assistant_id: delivery.assistant_id,
@@ -164,8 +75,8 @@ impl WorkspaceApp {
                             request,
                             response_tx,
                         } => {
-                            self.flush_pending_ai_stream_text(&mut pending_text, cx);
-                            if !self.ai_entity.read(cx).is_chat_stream_generation(delivery.generation)
+                            self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
+                            if !self.ai.state.read(cx).is_chat_stream_generation(delivery.generation)
                             {
                                 let _ = response_tx
                                     .send(Ok(oxideterm_ai::acp_permission_cancelled_response()));
@@ -204,7 +115,7 @@ impl WorkspaceApp {
                                 None,
                                 cx,
                             );
-                            self.ai_entity.update(cx, |ai, _cx| {
+                            self.ai.state.update(cx, |ai, _cx| {
                                 ai.register_acp_permission_choice(
                                     delivery.generation,
                                     projection.tool_call_id,
@@ -227,7 +138,7 @@ impl WorkspaceApp {
                         } => {
                             let owner_session_id = request.session_id.to_string();
                             let Some((workspace_root, policy)) =
-                                self.acp_entity
+                                self.ai.acp
                                     .read(cx)
                                     .session_context(&agent_id, &owner_session_id)
                             else {
@@ -257,10 +168,10 @@ impl WorkspaceApp {
                             mut request,
                             response_tx,
                         } => {
-                            self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                            self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                             let owner_session_id = request.session_id.to_string();
                             let Some((workspace_root, policy)) =
-                                self.acp_entity
+                                self.ai.acp
                                     .read(cx)
                                     .session_context(&agent_id, &owner_session_id)
                             else {
@@ -324,7 +235,7 @@ impl WorkspaceApp {
                                 .to_string();
                                 let registered = weak
                                     .update(cx, |workspace, cx| {
-                                        workspace.acp_entity.update(cx, |entity, _cx| {
+                                        workspace.ai.acp.update(cx, |entity, _cx| {
                                             entity.register_file_write_preview(
                                                 tool_call_id.clone(),
                                                 preview,
@@ -361,7 +272,7 @@ impl WorkspaceApp {
                                             None,
                                             cx,
                                         );
-                                        workspace.ai_entity.update(cx, |ai, _cx| {
+                                        workspace.ai.state.update(cx, |ai, _cx| {
                                             ai.register_acp_permission_choice(
                                                 generation,
                                                 tool_call_id.clone(),
@@ -406,7 +317,7 @@ impl WorkspaceApp {
                                 let succeeded = response.is_ok();
                                 let _ = response_tx.send(response);
                                 let _ = weak.update(cx, |workspace, cx| {
-                                    workspace.acp_entity.update(cx, |entity, _cx| {
+                                    workspace.ai.acp.update(cx, |entity, _cx| {
                                         entity.remove_file_write_preview(&tool_call_id);
                                     });
                                     workspace.apply_ai_tool_status(
@@ -442,10 +353,10 @@ impl WorkspaceApp {
                             request,
                             response_tx,
                         } => {
-                            self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                            self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                             let owner_session_id = request.session_id.to_string();
                             let Some((workspace_root, policy)) =
-                                self.acp_entity
+                                self.ai.acp
                                     .read(cx)
                                     .session_context(&agent_id, &owner_session_id)
                             else {
@@ -521,7 +432,7 @@ impl WorkspaceApp {
                                                 cx,
                                             ) {
                                             Ok((_workspace_session_id, session)) => {
-                                                workspace.acp_entity.update(
+                                                workspace.ai.acp.update(
                                                     cx,
                                                     |entity, _cx| {
                                                         entity.register_terminal(
@@ -560,7 +471,7 @@ impl WorkspaceApp {
                             let terminal_id =
                                 oxideterm_ai::acp_terminal_output_request_id(&request);
                             let terminal = self
-                                .acp_entity
+                                .ai.acp
                                 .read(cx)
                                 .terminal(&terminal_id, &agent_id, &owner_session_id);
                             let Some(terminal) = terminal else {
@@ -592,7 +503,7 @@ impl WorkspaceApp {
                             let owner_session_id = request.session_id.to_string();
                             let terminal_id =
                                 oxideterm_ai::acp_release_terminal_request_id(&request);
-                            let terminal = self.acp_entity.update(cx, |entity, _cx| {
+                            let terminal = self.ai.acp.update(cx, |entity, _cx| {
                                 entity.release_terminal(
                                     &terminal_id,
                                     &agent_id,
@@ -616,7 +527,7 @@ impl WorkspaceApp {
                             let terminal_id =
                                 oxideterm_ai::acp_kill_terminal_request_id(&request);
                             let terminal = self
-                                .acp_entity
+                                .ai.acp
                                 .read(cx)
                                 .terminal(&terminal_id, &agent_id, &owner_session_id);
                             let Some(terminal) = terminal else {
@@ -636,7 +547,7 @@ impl WorkspaceApp {
                             let terminal_id =
                                 oxideterm_ai::acp_wait_terminal_request_id(&request);
                             let terminal = self
-                                .acp_entity
+                                .ai.acp
                                 .read(cx)
                                 .terminal(&terminal_id, &agent_id, &owner_session_id);
                             let Some(terminal) = terminal else {
@@ -680,29 +591,31 @@ impl WorkspaceApp {
                             {
                                 match stream_event {
                                     AiStreamEvent::Content(chunk) => {
-                                        self.merge_or_flush_pending_ai_stream_text(
-                                            &mut pending_text,
-                                            delivery.generation,
-                                            delivery.conversation_id.clone(),
-                                            delivery.assistant_id.clone(),
-                                            PendingAiStreamTextKind::Content,
-                                            chunk,
-                                            cx,
-                                        );
+                                        self.ai.state.update(cx, |ai, _| {
+                                            batch.push_text(
+                                                ai,
+                                                delivery.generation,
+                                                delivery.conversation_id.clone(),
+                                                delivery.assistant_id.clone(),
+                                                AiStreamTextKind::Content,
+                                                chunk,
+                                            );
+                                        });
                                     }
                                     AiStreamEvent::Thinking(chunk) => {
-                                        self.merge_or_flush_pending_ai_stream_text(
-                                            &mut pending_text,
-                                            delivery.generation,
-                                            delivery.conversation_id.clone(),
-                                            delivery.assistant_id.clone(),
-                                            PendingAiStreamTextKind::Thinking,
-                                            chunk,
-                                            cx,
-                                        );
+                                        self.ai.state.update(cx, |ai, _| {
+                                            batch.push_text(
+                                                ai,
+                                                delivery.generation,
+                                                delivery.conversation_id.clone(),
+                                                delivery.assistant_id.clone(),
+                                                AiStreamTextKind::Thinking,
+                                                chunk,
+                                            );
+                                        });
                                     }
                                     event => {
-                                        self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                                        self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                                         self.apply_ai_stream_event(
                                             delivery.generation,
                                             &delivery.conversation_id,
@@ -723,7 +636,7 @@ impl WorkspaceApp {
                     session_modes,
                     agent_id,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     if self.apply_ai_acp_session_started(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -742,7 +655,7 @@ impl WorkspaceApp {
                     message,
                     raw_text,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.apply_ai_guardrail(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -762,7 +675,7 @@ impl WorkspaceApp {
                     retry_attempt,
                     hard_deny_triggered,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.persist_ai_assistant_round(
                         &delivery.conversation_id,
                         &delivery.assistant_id,
@@ -781,7 +694,7 @@ impl WorkspaceApp {
                     text,
                     metadata,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.apply_ai_round_summary(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -793,7 +706,7 @@ impl WorkspaceApp {
                     );
                 }
                 AiStreamDeliveryEvent::RoundStatefulMarker { round_id, marker } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.apply_ai_round_stateful_marker(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -808,7 +721,7 @@ impl WorkspaceApp {
                     round_id,
                     data,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.persist_ai_stream_diagnostic(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -832,7 +745,7 @@ impl WorkspaceApp {
                     round_id,
                     round_number,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.apply_ai_tool_status(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -853,13 +766,13 @@ impl WorkspaceApp {
                 }
                 AiStreamDeliveryEvent::UserQuestionRequested { call, dispatch, sender } => {
                     if sender.is_closed() || dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) { continue; }
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     let question = serde_json::from_str::<serde_json::Value>(&call.arguments).unwrap_or_default();
                     self.apply_ai_tool_status(delivery.generation, &delivery.conversation_id, &delivery.assistant_id,
                         &call.id, &call.name, &call.arguments, "waiting_user", Some(question), Some("read".into()),
                         Some(self.i18n.t("ai.questions.waiting")), false, None, None, None, cx);
                     self.notify_ai_agent_attention(&delivery.conversation_id, &delivery.assistant_id, "ai.questions.waiting", cx);
-                    self.ai_entity.update(cx, |ai, _| {
+                    self.ai.state.update(cx, |ai, _| {
                         ai.pending_user_questions.insert((delivery.generation, call.id), crate::workspace::ai_state::AiPendingUserQuestion {
                             conversation_id: delivery.conversation_id.clone(), dispatch, sender,
                         });
@@ -873,7 +786,7 @@ impl WorkspaceApp {
                     summary,
                     sender,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     self.apply_ai_tool_status(
                         delivery.generation,
                         &delivery.conversation_id,
@@ -891,7 +804,7 @@ impl WorkspaceApp {
                         None,
                         cx,
                     );
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.register_tool_approval(delivery.generation, tool_call_id, sender);
                     });
                 }
@@ -902,7 +815,7 @@ impl WorkspaceApp {
                     candidates,
                     sender,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     let candidate_count = candidates.len();
                     let result = serde_json::json!({
                         "ok": false,
@@ -929,7 +842,7 @@ impl WorkspaceApp {
                         None,
                         cx,
                     );
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.register_tool_candidate_selection(
                             delivery.generation,
                             tool_call_id,
@@ -937,7 +850,7 @@ impl WorkspaceApp {
                             sender,
                         );
                     });
-                    if self.ai_entity.read(cx).chat_stream_generation() == delivery.generation { window.focus(&self.focus_handle, cx); }
+                    if self.ai.state.read(cx).chat_stream_generation() == delivery.generation { window.focus(&self.focus_handle, cx); }
                     cx.notify();
                 }
                 AiStreamDeliveryEvent::ToolPreflightRequested {
@@ -947,7 +860,7 @@ impl WorkspaceApp {
                     args,
                     sender,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
                         delivery.generation,
                         &tool_session_id,
@@ -1012,7 +925,7 @@ impl WorkspaceApp {
                     dangerous_command_approved,
                     sender,
                 } => {
-                    self.flush_pending_ai_stream_text(&mut pending_text, cx);
+                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
                     if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
                         let _ = sender.send(rejected_ai_tool_result(tool_call_id, name, "agent_direction_changed", "Task direction changed before dispatch."));
                         continue;
@@ -1021,7 +934,7 @@ impl WorkspaceApp {
                         delivery.generation,
                         &tool_session_id,
                     );
-                    if !session_is_active || !self.ai_entity.read(cx).run_accepts_tools(delivery.generation) || leases.iter().any(|lease| !lease.is_current()) || sender.is_closed() {
+                    if !session_is_active || !self.ai.state.read(cx).run_accepts_tools(delivery.generation) || leases.iter().any(|lease| !lease.is_current()) || sender.is_closed() {
                         let _ = sender.send(rejected_ai_tool_result(
                             tool_call_id,
                             name,
@@ -1032,7 +945,7 @@ impl WorkspaceApp {
                     }
                     if name != "run_command" { for lease in &leases { lease.dispatched(); } }
                     if !leases.is_empty() {
-                        self.ai_entity.update(cx, |ai, _cx| { ai.agents.tool_leases.insert((tool_session_id.clone(), tool_call_id.clone()), leases); });
+                        self.ai.state.update(cx, |ai, _cx| { ai.agents.tool_leases.insert((tool_session_id.clone(), tool_call_id.clone()), leases); });
                     }
                     let raw_arguments = zeroize::Zeroizing::new(args.to_string());
                     oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
@@ -1060,61 +973,7 @@ impl WorkspaceApp {
                 }
             }
         }
-        self.flush_pending_ai_stream_text(&mut pending_text, cx);
-    }
-
-    pub(in crate::workspace) fn merge_or_flush_pending_ai_stream_text(
-        &mut self,
-        pending: &mut Option<PendingAiStreamText>,
-        generation: u64,
-        conversation_id: String,
-        assistant_id: String,
-        kind: PendingAiStreamTextKind,
-        chunk: String,
-        cx: &mut Context<Self>,
-    ) {
-        if chunk.is_empty() {
-            return;
-        }
-        if let Some(existing) = pending.as_mut()
-            && existing.generation == generation
-            && existing.conversation_id == conversation_id
-            && existing.assistant_id == assistant_id
-            && existing.kind == kind
-        {
-            existing.text.push_str(&chunk);
-            return;
-        }
-
-        self.flush_pending_ai_stream_text(pending, cx);
-        *pending = Some(PendingAiStreamText {
-            generation,
-            conversation_id,
-            assistant_id,
-            kind,
-            text: chunk,
-        });
-    }
-
-    pub(in crate::workspace) fn flush_pending_ai_stream_text(
-        &mut self,
-        pending: &mut Option<PendingAiStreamText>,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(pending) = pending.take() else {
-            return;
-        };
-        let event = match pending.kind {
-            PendingAiStreamTextKind::Content => AiStreamEvent::Content(pending.text),
-            PendingAiStreamTextKind::Thinking => AiStreamEvent::Thinking(pending.text),
-        };
-        self.apply_ai_stream_event(
-            pending.generation,
-            &pending.conversation_id,
-            &pending.assistant_id,
-            event,
-            cx,
-        );
+        self.ai.state.update(cx, |_, cx| cx.emit(oxideterm_gpui_ai::stream::AiChatBatchApplied));
     }
 
     pub(in crate::workspace) fn apply_ai_compaction_deliveries(
@@ -1123,7 +982,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         for delivery in deliveries {
-            if self.ai_entity.read(cx).history.compaction_runs.get(&delivery.conversation_id).is_none_or(|(generation, _)| *generation != delivery.generation) { continue; }
+            if self.ai.state.read(cx).history.compaction_runs.get(&delivery.conversation_id).is_none_or(|(generation, _)| *generation != delivery.generation) { continue; }
             match delivery.kind {
                 AiCompactionDeliveryKind::Compact => {
                     if let Some(plan) = delivery.plan {

@@ -84,6 +84,7 @@ pub(super) struct IdeWorkspaceEntity {
     shell_sources: HashMap<TabId, oxideterm_workspace::PaneId>,
     shell_open_tasks: HashMap<oxideterm_workspace::PaneId, gpui::Task<()>>,
     fs: NodeAgentIdeFileSystem,
+    automation_fs: NodeAgentIdeFileSystem,
     backend_runtime: Arc<tokio::runtime::Runtime>,
     surfaces_by_tab: BTreeMap<u64, IdeSurfaceEntry>,
     tabs_by_node: HashMap<NodeId, BTreeSet<u64>>,
@@ -128,6 +129,7 @@ impl IdeWorkspaceEntity {
         Self {
             shell_sources: HashMap::new(),
             shell_open_tasks: HashMap::new(),
+            automation_fs: fs.clone(),
             fs,
             backend_runtime,
             surfaces_by_tab: BTreeMap::new(),
@@ -339,6 +341,14 @@ impl IdeWorkspaceEntity {
         self.surfaces_by_tab
             .get(&tab_id.0)
             .map(|entry| entry.surface.clone())
+    }
+
+    pub(super) fn automation_file_system(&self) -> &NodeAgentIdeFileSystem {
+        &self.automation_fs
+    }
+
+    pub(super) fn set_automation_mode(&mut self, mode: NodeAgentMode) {
+        self.automation_fs.set_mode(mode);
     }
 
     /// Returns the existing IDE surface's filesystem owner for a capability

@@ -1,8 +1,8 @@
-use std::rc::Rc;
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use oxideterm_gpui_markdown::MarkdownVirtualListScrollHandle;
 
-use gpui::{App, AppContext, Entity, IntoElement, Window};
+use gpui::{App, AppContext, Entity, IntoElement, WeakEntity, Window};
 
 use crate::{
     SettingsInput, SettingsSelect,
@@ -24,6 +24,9 @@ use crate::{
 type FinishDialog = Rc<dyn Fn(bool, &mut App)>;
 
 pub struct SettingsViewBindings {
+    pub acp_probe_status: crate::ai::acp::AcpProbeStatus,
+    pub ai_mcp: crate::ai::mcp::AiMcpBindings,
+    pub ai_providers: crate::ai::providers::AiProviderBindings,
     pub surface: SettingsSurfaceBindings,
     pub native_update_notice: NativeUpdateNoticeBindings,
     pub theme_editor: ThemeEditorBindings,
@@ -39,6 +42,13 @@ pub struct SettingsViewBindings {
 
 /// Owns the mounted settings surface and its window-level views.
 pub struct SettingsViews {
+    pub acp_settings: Entity<crate::ai::acp::AcpSettingsView>,
+    acp_plugin_views: RefCell<HashMap<String, WeakEntity<crate::ai::acp::AcpSettingsView>>>,
+    pub ai_mcp_dialog: Entity<crate::ai::mcp_dialog::AiMcpDialogView>,
+    pub ai_mcp: Entity<crate::ai::mcp::AiMcpSettingsView>,
+    pub ai_providers: Entity<crate::ai::providers::AiProviderSettingsView>,
+    pub ai_confirm: Entity<crate::ai::confirm::AiSettingsConfirm>,
+    pub ai_text_editor: Entity<crate::ai::text_editor::AiTextEditor>,
     pub window_chrome: Entity<SettingsWindowChromeEntity>,
     pub surface: Entity<SettingsSurfaceView>,
     pub legal_notice_scroll: MarkdownVirtualListScrollHandle,
@@ -57,9 +67,50 @@ pub struct SettingsViews {
 }
 
 impl SettingsViews {
+    pub fn acp_plugin_settings(
+        &self,
+        plugin_id: &str,
+        cx: &mut App,
+    ) -> Entity<crate::ai::acp::AcpSettingsView> {
+        let mut views = self.acp_plugin_views.borrow_mut();
+        views.retain(|_, view| view.upgrade().is_some());
+        if let Some(view) = views.get(plugin_id).and_then(WeakEntity::upgrade) {
+            return view;
+        }
+        let build = self
+            .acp_settings
+            .read(cx)
+            .plugin_builder(plugin_id.to_owned());
+        let view = cx.new(build);
+        views.insert(plugin_id.to_owned(), view.downgrade());
+        view
+    }
+
+    pub fn notify_acp(&self, cx: &mut App) {
+        cx.notify(self.acp_settings.entity_id());
+        for view in self
+            .acp_plugin_views
+            .borrow()
+            .values()
+            .filter_map(WeakEntity::upgrade)
+        {
+            cx.notify(view.entity_id());
+        }
+    }
+
     /// Returns false when the input belongs to a different workspace surface.
     pub fn notify_input(&self, input: SettingsInput, cx: &mut App) -> bool {
-        if crate::terminal_triggers::is_terminal_trigger_input(input) {
+        if input.is_ai_mcp() {
+            self.ai_mcp_dialog.update(cx, |_, cx| cx.notify());
+        } else if matches!(
+            input,
+            SettingsInput::AiProviderApiKey(_)
+                | SettingsInput::AiProviderName(_)
+                | SettingsInput::AiProviderBaseUrl(_)
+                | SettingsInput::AiProviderNewModel(_)
+        ) {
+            self.ai_providers.update(cx, |_, cx| cx.notify());
+        } else if crate::terminal_triggers::is_terminal_trigger_input(input) {
             self.terminal_trigger_editor.update(cx, |_, cx| cx.notify());
         } else if crate::highlight_page::is_highlight_input(input) {
             self.highlight_editor.update(cx, |_, cx| cx.notify());
@@ -115,13 +166,53 @@ impl SettingsViews {
                 page(dialog.section(), None, cx)?.render_dialog(&state, dialog, cx)
             })
         };
+        let acp_controls = bindings.ai_providers.controls.clone();
+        let ai_providers = cx.new(|cx| {
+            cx.observe(settings, |_, _, cx| cx.notify()).detach();
+            crate::ai::providers::AiProviderSettingsView::new(bindings.ai_providers)
+        });
+        let surface = cx.new(|cx| {
+            cx.subscribe(
+                &ai_providers,
+                |_, _, _: &crate::ai::providers::ProviderLayoutChanged, cx| cx.notify(),
+            )
+            .detach();
+            SettingsSurfaceView::new(settings.clone(), bindings.surface, cx)
+        });
         Self {
+            ai_confirm: cx.new(|_| {
+                crate::ai::confirm::AiSettingsConfirm::new(
+                    oxideterm_theme::default_tokens(),
+                    oxideterm_i18n::I18n::default(),
+                )
+            }),
+            ai_providers,
+            ai_text_editor: cx.new(|_| crate::ai::text_editor::AiTextEditor::default()),
             legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
+            acp_settings: cx.new(|cx| {
+                crate::ai::acp::AcpSettingsView::new(
+                    settings.clone(),
+                    acp_controls,
+                    bindings.acp_probe_status,
+                    None,
+                    cx,
+                )
+            }),
+            acp_plugin_views: Default::default(),
+            ai_mcp_dialog: cx.new(|cx| {
+                crate::ai::mcp_dialog::AiMcpDialogView::new(
+                    settings.clone(),
+                    bindings.ai_mcp.controls.clone(),
+                    bindings.ai_mcp.request.clone(),
+                    cx,
+                )
+            }),
+            ai_mcp: cx.new(|_| crate::ai::mcp::AiMcpSettingsView::new(bindings.ai_mcp)),
             release_notes_scroll: MarkdownVirtualListScrollHandle::new(),
             native_update_notice: cx
                 .new(|cx| NativeUpdateNoticeView::new(settings, bindings.native_update_notice, cx)),
             window_chrome: cx.new(|cx| SettingsWindowChromeEntity::new(settings, cx)),
-            surface: cx.new(|cx| SettingsSurfaceView::new(settings.clone(), bindings.surface, cx)),
+            surface,
             terminal_trigger_editor: cx.new(|cx| {
                 TerminalTriggerEditor::new(settings, dialog(SettingsDialog::Trigger), cx)
             }),

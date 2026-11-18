@@ -7355,6 +7355,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-gpui-ai"
+version = "2.3.4-beta.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "gpui-pre",
+ "oxideterm-acp-host-tools",
+ "oxideterm-ai",
+ "oxideterm-ai-tasks",
+ "oxideterm-audit",
+ "oxideterm-editor-core",
+ "oxideterm-editor-syntax",
+ "oxideterm-gpui-editor",
+ "oxideterm-gpui-markdown",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-settings",
+ "oxideterm-settings-model",
+ "oxideterm-skills",
+ "oxideterm-theme",
+ "oxideterm-workspace",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "oxideterm-gpui-app"
 version = "2.3.4-beta.1"
 dependencies = [
@@ -7393,13 +7426,16 @@ dependencies = [
  "oxideterm-environment",
  "oxideterm-forwarding",
  "oxideterm-ftp",
+ "oxideterm-gpui-ai",
  "oxideterm-gpui-background",
  "oxideterm-gpui-cloud-sync",
  "oxideterm-gpui-connections",
  "oxideterm-gpui-editor",
+ "oxideterm-gpui-forwards",
  "oxideterm-gpui-host-tools",
  "oxideterm-gpui-ide",
  "oxideterm-gpui-markdown",
+ "oxideterm-gpui-onboarding",
  "oxideterm-gpui-platform",
  "oxideterm-gpui-remote-desktop",
  "oxideterm-gpui-settings-view",
@@ -7418,6 +7454,7 @@ dependencies = [
  "oxideterm-portable-runtime",
  "oxideterm-preview",
  "oxideterm-public-mcp",
+ "oxideterm-public-mcp-host",
  "oxideterm-quick-commands",
  "oxideterm-remote-desktop",
  "oxideterm-render-policy",
@@ -7570,6 +7607,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-gpui-forwards"
+version = "2.3.4-beta.1"
+dependencies = [
+ "gpui-pre",
+ "oxideterm-editor-core",
+ "oxideterm-forwarding",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-ssh",
+ "oxideterm-theme",
+ "oxideterm-workspace",
+]
+
+[[package]]
 name = "oxideterm-gpui-host-tools"
 version = "2.3.4-beta.1"
 dependencies = [
@@ -7633,6 +7684,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "oxideterm-gpui-onboarding"
+version = "2.3.4-beta.1"
+dependencies = [
+ "gpui-pre",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-settings",
+ "oxideterm-theme",
+]
+
+[[package]]
 name = "oxideterm-gpui-platform"
 version = "2.3.4-beta.1"
 dependencies = [
@@ -7687,6 +7749,7 @@ dependencies = [
  "oxideterm-connections",
  "oxideterm-editor-core",
  "oxideterm-gpui-background",
+ "oxideterm-gpui-editor",
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-platform",
  "oxideterm-gpui-terminal",
@@ -8045,6 +8108,44 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "uuid",
+ "zeroize",
+]
+
+[[package]]
+name = "oxideterm-public-mcp-host"
+version = "2.3.4-beta.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "chrono",
+ "image",
+ "oxideterm-atomic-file",
+ "oxideterm-audit",
+ "oxideterm-cloud-sync",
+ "oxideterm-connection-monitor",
+ "oxideterm-connections",
+ "oxideterm-editor-core",
+ "oxideterm-forwarding",
+ "oxideterm-ide-core",
+ "oxideterm-ide-fs",
+ "oxideterm-plugin-registry",
+ "oxideterm-public-mcp",
+ "oxideterm-quick-commands",
+ "oxideterm-remote-desktop",
+ "oxideterm-settings",
+ "oxideterm-sftp",
+ "oxideterm-ssh",
+ "oxideterm-terminal",
+ "oxideterm-terminal-recording",
+ "oxideterm-workspace",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "tokio",
+ "tokio-util",
  "zeroize",
 ]
 

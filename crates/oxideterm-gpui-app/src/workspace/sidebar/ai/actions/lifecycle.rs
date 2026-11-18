@@ -1,6 +1,6 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn ensure_ai_chat_initialized(&mut self, cx: &mut App) {
-        self.ai_entity.update(cx, |ai, cx| {
+        self.ai.state.update(cx, |ai, cx| {
             ai.ensure_chat_initialized(default_ai_conversations_path(), cx);
         });
     }
@@ -10,7 +10,7 @@ impl WorkspaceApp {
         // startup or every settings write. Keep native at the same user-visible
         // boundary so HTTP auth-token/keychain access only happens when the AI
         // surface is actually in use.
-        let registry = self.ai_entity.read(cx).mcp_registry().clone();
+        let registry = self.ai.state.read(cx).mcp_registry().clone();
         let configs = self.settings_store.settings().ai.mcp_servers.clone();
         self.forwarding_runtime.spawn(async move {
             registry.connect_all_values(&configs).await;
@@ -18,7 +18,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn clear_ai_sidebar_keyboard_focus(&mut self, cx: &mut App) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.blur_chat_input(false);
         });
         self.close_ai_model_selector(cx);
@@ -26,7 +26,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_ai_sidebar_popovers(&mut self, cx: &mut App) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.close_chat_popovers();
         });
         self.close_ai_model_selector(cx);
@@ -37,10 +37,10 @@ impl WorkspaceApp {
         // searchable input owner. Closing it must clear popup state, keyboard
         // focus origin, highlighted option, and any marked text together so Esc,
         // outside click, Tab, footer navigation, and row activation do not drift.
-        let restore_terminal_inline_prompt = self.ai_entity.read(cx).model_selector_scope()
+        let restore_terminal_inline_prompt = self.ai.state.read(cx).model_selector_scope()
             == Some(AiModelSelectorScope::TerminalInline)
-            && self.ai_entity.read(cx).terminal_inline_panel().open;
-        self.ai_entity.update(cx, |ai, _cx| {
+            && self.ai.state.read(cx).terminal_inline_panel().open;
+        self.ai.state.update(cx, |ai, _cx| {
             ai.close_model_selector();
         });
         self.ime_marked_text = None;
@@ -48,7 +48,7 @@ impl WorkspaceApp {
             // Tauri's inline command bar returns focus to its prompt after a
             // nested model picker closes; otherwise the next typed key appears
             // to vanish into the terminal surface.
-            self.ai_entity.update(cx, |ai, _cx| {
+            self.ai.state.update(cx, |ai, _cx| {
                 ai.terminal_inline_panel_mut().prompt_focused = true;
             });
         }
@@ -56,15 +56,15 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn cancel_ai_chat_stream(&mut self, cx: &mut Context<Self>) {
         self.cancel_ai_chat_stream_without_notify(cx);
-        self.ai_entity.read(cx).persist_chat_state();
+        self.ai.state.read(cx).persist_chat_state();
         cx.notify();
     }
 
     pub(in crate::workspace) fn select_ai_conversation(&mut self, id: String, cx: &mut App) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.select_conversation(id);
         });
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.reset_chat_for_conversation_selection();
         });
     }
@@ -77,7 +77,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let title_len = title.encode_utf16().count();
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.begin_conversation_rename(id, title);
         });
         self.ime_marked_text = None;
@@ -88,7 +88,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn save_ai_conversation_rename(&mut self, cx: &mut Context<Self>) {
         let (conversation_id, draft) = {
-            let ai = self.ai_entity.read(cx);
+            let ai = self.ai.state.read(cx);
             (
                 ai.chat_ui().renaming_conversation_id.clone(),
                 ai.chat_ui().renaming_conversation_draft.trim().to_string(),
@@ -97,7 +97,7 @@ impl WorkspaceApp {
         let Some(conversation_id) = conversation_id else {
             return;
         };
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             if draft.is_empty() {
                 ai.clear_conversation_rename();
             } else {
@@ -111,7 +111,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn cancel_ai_conversation_rename(&mut self, cx: &mut Context<Self>) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.clear_conversation_rename();
         });
         self.clear_ime_selection();
@@ -125,13 +125,13 @@ impl WorkspaceApp {
         archived: bool,
         cx: &mut App,
     ) {
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _| ai.set_conversation_archived(id, archived));
     }
 
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
-        let generations = self.ai_entity.read(cx).conversation_stream_generations(id);
-        self.ai_entity
+        let generations = self.ai.state.read(cx).conversation_stream_generations(id);
+        self.ai.state
             .update(cx, |ai, _cx| ai.cancel_chat_stream_for(id));
         self.ai_runtime_context.update(cx, |runtime, _cx| {
             for generation in generations {
@@ -141,18 +141,18 @@ impl WorkspaceApp {
                 );
             }
         });
-        self.ai_background_tasks.update(cx, |tasks, _cx| {
+        self.ai.background.update(cx, |tasks, _cx| {
             tasks.cancel_owner(id);
         });
-        self.acp_entity.update(cx, |entity, _cx| {
+        self.ai.acp.update(cx, |entity, _cx| {
             entity.close_thread(id, false);
         });
-        let has_conversations = self.ai_entity.update(cx, |ai, _cx| {
+        let has_conversations = self.ai.state.update(cx, |ai, _cx| {
             let has_conversations = ai.delete_conversation(id);
             ai.persist_chat_state();
             has_conversations
         });
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.reset_chat_after_conversation_delete(has_conversations);
         });
         if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
@@ -175,7 +175,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn clear_ai_conversations(&mut self, cx: &mut App) {
         let mut ids: std::collections::HashSet<String> = match self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .store
@@ -185,12 +185,12 @@ impl WorkspaceApp {
         {
             Ok(ids) => ids.unwrap_or_default().into_iter().collect(),
             Err(_) => {
-                self.ai_entity.update(cx, |ai, _| ai.history_load_failed());
+                self.ai.state.update(cx, |ai, _| ai.history_load_failed());
                 return;
             }
         };
         ids.extend(
-            self.ai_entity
+            self.ai.state
                 .read(cx)
                 .conversation_state()
                 .conversations
@@ -199,22 +199,22 @@ impl WorkspaceApp {
         );
         // Cancel the live generation before clearing its routing identifier.
         self.cancel_ai_chat_stream_without_notify(cx);
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _| ai.reset_conversation_lists_after_clear());
         for id in ids {
             self.delete_ai_conversation(&id, cx);
         }
-        self.acp_entity.update(cx, |entity, _cx| {
+        self.ai.acp.update(cx, |entity, _cx| {
             entity.close_all_threads(false);
         });
-        self.ai_background_tasks.update(cx, |tasks, _cx| {
+        self.ai.background.update(cx, |tasks, _cx| {
             tasks.cancel_all();
         });
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.clear_conversations();
             ai.persist_chat_state();
         });
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.clear_chat_expansions();
         });
         self.close_ai_sidebar_popovers(cx);
@@ -222,16 +222,16 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {
         let cancelled_generations = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation_id
             .as_deref()
-            .map(|id| self.ai_entity.read(cx).conversation_stream_generations(id))
+            .map(|id| self.ai.state.read(cx).conversation_stream_generations(id))
             .unwrap_or_default();
         let had_active_generation = !cancelled_generations.is_empty();
         let active_conversation_id = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -240,9 +240,9 @@ impl WorkspaceApp {
             // The ACP entity is the sole process/session owner. Route Stop to
             // it before invalidating the UI generation so the protocol cancel
             // reaches the still-live session.
-            let _ = self.acp_entity.read(cx).cancel_active_turn(conversation_id);
+            let _ = self.ai.acp.read(cx).cancel_active_turn(conversation_id);
         }
-        let (conversation_id, stopped_turns) = self.ai_entity.update(cx, |ai, _cx| {
+        let (conversation_id, stopped_turns) = self.ai.state.update(cx, |ai, _cx| {
             ai.cancel_chat_stream();
             ai.cancel_chat_conversation_state()
         });
@@ -307,7 +307,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn retry_ai_chat_initialization(&mut self, cx: &mut Context<Self>) {
-        self.ai_entity.update(cx, |ai, cx| {
+        self.ai.state.update(cx, |ai, cx| {
             ai.retry_chat_initialization(default_ai_conversations_path(), cx)
         });
         cx.notify();
@@ -320,7 +320,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn next_ai_chat_id(&mut self, now_ms: i64, cx: &mut App) -> String {
-        self.ai_entity.update(cx, |ai, _cx| ai.next_chat_id(now_ms))
+        self.ai.state.update(cx, |ai, _cx| ai.next_chat_id(now_ms))
     }
 
     pub(in crate::workspace) fn open_ai_settings(

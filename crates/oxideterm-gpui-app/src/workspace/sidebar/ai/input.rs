@@ -1,6 +1,6 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn active_ai_safety_mode(&self, cx: &App) -> AiSafetyMode {
-        self.ai_entity.read(cx).active_conversation_safety_mode()
+        self.ai.state.read(cx).active_conversation_safety_mode()
     }
 
     pub(in crate::workspace) fn render_ai_sidebar_model_bar(
@@ -21,11 +21,7 @@ impl WorkspaceApp {
             .border_t_1()
             .border_color(rgba((self.tokens.ui.border << 8) | 0x33))
             .bg(self.context_sidebar_content_background(self.tokens.ui.shell_bg()))
-            .child(self.render_ai_model_selector(
-                AiModelSelectorScope::Sidebar,
-                SelectAnchorId::AiModelSelector,
-                cx,
-            ))
+            .child(self.ai.model_picker.sidebar.clone())
             .when_some(self.render_ai_reasoning_indicator(cx), |bar, indicator| {
                 bar.child(indicator)
             })
@@ -49,22 +45,8 @@ impl WorkspaceApp {
             settings.ai.active_provider_id.is_some()
                 && active_model_selection(settings.ai.active_model.as_deref()).is_some()
         };
-        let placeholder = if !enabled {
-            self.i18n.t("ai.input.placeholder_disabled")
-        } else if !model_selected {
-            self.i18n.t("ai.model_selector.select_model")
-        } else if self.ai_entity.read(cx).active_user_question().is_some() {
-            self.i18n.t("ai.questions.hint")
-        } else {
-            self.i18n.t("ai.input.placeholder")
-        };
-        let input = self.render_ai_multiline_input(
-            WorkspaceImeTarget::AiChatInput,
-            placeholder,
-            enabled,
-            cx,
-        );
-        let images_allowed = self.ai_entity.read(cx).chat_ui().images.is_empty()
+        let input = self.ai.composer_editor.clone();
+        let images_allowed = self.ai.state.read(cx).chat_ui().images.is_empty()
             || self.resolve_ai_stream_config(cx).is_ok_and(|config| {
                 config.execution_backend == AiExecutionBackend::Acp
                     || oxideterm_ai::model_image_input(
@@ -76,19 +58,19 @@ impl WorkspaceApp {
         let send_disabled = !enabled
             || !model_selected
             || !images_allowed
-            || self.ai_entity.read(cx).chat_ui().image_import.is_some()
-            || (self.ai_entity.read(cx).chat_ui().draft.trim().is_empty()
-                && self.ai_entity.read(cx).chat_ui().images.is_empty());
-        let action_focused = self.ai_entity.read(cx).chat_ui().footer_focus
+            || self.ai.state.read(cx).chat_ui().image_import.is_some()
+            || (self.ai.state.read(cx).chat_ui().draft.trim().is_empty()
+                && self.ai.state.read(cx).chat_ui().images.is_empty());
+        let action_focused = self.ai.state.read(cx).chat_ui().footer_focus
             == Some(AiChatFooterAction::Submit)
-            && (self.ai_entity.read(cx).chat_is_loading() || !send_disabled);
-        let can_supplement = self.ai_entity.read(cx).can_supplement_agent()
-            && self.ai_entity.read(cx).chat_ui().images.is_empty();
-        let loading = self.ai_entity.read(cx).chat_is_loading();
+            && (self.ai.state.read(cx).chat_is_loading() || !send_disabled);
+        let can_supplement = self.ai.state.read(cx).can_supplement_agent()
+            && self.ai.state.read(cx).chat_ui().images.is_empty();
+        let loading = self.ai.state.read(cx).chat_is_loading();
         let action = ai_send_button(
             &self.tokens,
             self.i18n.t(
-                if self.ai_entity.read(cx).active_user_question().is_some() {
+                if self.ai.state.read(cx).active_user_question().is_some() {
                     "ai.questions.answer"
                 } else if loading {
                     "ai.queue.enqueue"
@@ -99,11 +81,11 @@ impl WorkspaceApp {
             send_disabled,
             action_focused,
         );
-        let focused = self.ai_entity.read(cx).chat_ui().input_focused;
+        let focused = self.ai.state.read(cx).chat_ui().input_focused;
         let frame = ai_chat_input_frame(&self.tokens, focused)
             .children(self.render_ai_image_controls(cx))
             .child(ai_chat_input_editor(&self.tokens, input));
-        let footer_leading = if self.ai_entity.read(cx).chat_is_loading() {
+        let footer_leading = if self.ai.state.read(cx).chat_is_loading() {
             div()
                 .flex()
                 .min_w_0()
@@ -122,7 +104,7 @@ impl WorkspaceApp {
                     "ai-input-footer",
                     "thinking",
                     self.i18n.t(
-                        if self.ai_entity.read(cx).active_user_question().is_some() {
+                        if self.ai.state.read(cx).active_user_question().is_some() {
                             "ai.questions.waiting"
                         } else {
                             "ai.input.thinking"
@@ -190,7 +172,7 @@ impl WorkspaceApp {
             .child(action.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, _event, _window, cx| {
-                    this.ai_entity.update(cx, |ai, _cx| {
+                    this.ai.state.update(cx, |ai, _cx| {
                         ai.clear_chat_footer_focus();
                     });
                     if !send_disabled {
@@ -239,173 +221,12 @@ impl WorkspaceApp {
         .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_ai_multiline_input(
-        &self,
-        target: WorkspaceImeTarget,
-        placeholder: String,
-        enabled: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let ai = self.ai_entity.read(cx);
-        let editing = target == WorkspaceImeTarget::AiMessageEdit;
-        let (focused, draft) = if editing {
-            (
-                ai.chat_ui().editing_message_focused,
-                ai.chat_ui().editing_message_draft.clone(),
-            )
-        } else {
-            (ai.chat_ui().input_focused, ai.chat_ui().draft.clone())
-        };
-        let marked_range = self.ime_marked_virtual_range_for_target(target, cx);
-        let selected_range = self.ime_selected_range_for_target(target, cx);
-        let showing_placeholder = draft.is_empty() && marked_range.is_none();
-        let input_text = if showing_placeholder {
-            placeholder
-        } else {
-            // IME composition is a virtual replacement of the draft selection.
-            // Render that projection inline instead of appending marked text as
-            // another visual line below the editor.
-            self.ime_text_with_marked_text_for_target(target, cx)
-                .unwrap_or(draft)
-        };
-        let caret_offset = selected_range
-            .as_ref()
-            .filter(|range| range.start == range.end)
-            .map(|range| range.start);
-        let wrap_width = self.ai_editor_text_width(target, cx);
-        let visual_lines = self.ai_editor_visual_lines(target, &input_text, cx);
-        let caret_line =
-            caret_offset.map(|offset| ai_input_line_index_for_offset(&visual_lines, offset));
-        if editing && focused {
-            let focus = marked_range
-                .as_ref()
-                .map(|range| range.end)
-                .or_else(|| self.ime_active_offset_for_target(target, cx))
-                .unwrap_or_else(|| input_text.encode_utf16().count());
-            let line = ai_input_line_index_for_offset(&visual_lines, focus);
-            let position = (focus, line, wrap_width.to_bits() as usize);
-            if ai
-                .chat_ui()
-                .editing_message_caret_position
-                .replace(Some(position))
-                != Some(position)
-            {
-                ai.chat_ui().editing_message_scroll.scroll_to_item(line);
-            }
-        }
-        let mut input = div()
-            .id(("ai-text-editor", target.anchor_id().0))
-            .w_full()
-            .min_h(px(20.0))
-            .flex()
-            .flex_col()
-            .overflow_hidden()
-            .text_size(px(13.0))
-            .line_height(px(20.0))
-            .text_color(if showing_placeholder {
-                rgba((self.tokens.ui.text_muted << 8) | 0x4d)
-            } else {
-                rgb(self.tokens.ui.text)
-            })
-            .opacity(if enabled { 1.0 } else { 0.5 })
-            .cursor(CursorStyle::IBeam)
-            .when(editing, |input| {
-                input
-                    .max_h(px(240.0))
-                    .overflow_y_scroll()
-                    .track_scroll(&ai.chat_ui().editing_message_scroll)
-                    .on_scroll(|_, _, cx| cx.stop_propagation())
-            });
-        for (index, visual_line) in visual_lines.iter().enumerate() {
-            let is_last_line = index + 1 == visual_lines.len();
-            let line = visual_line.text;
-            let line_len = visual_line.utf16_len();
-            let line_range = visual_line.utf16_start..visual_line.utf16_end;
-            let line_marked_range = marked_range
-                .as_ref()
-                .and_then(|marked| ai_input_local_marked_range(marked, &line_range));
-            let line_selection = if showing_placeholder || marked_range.is_some() {
-                None
-            } else {
-                selected_range.as_ref().and_then(|selection| {
-                    let start = selection.start.max(line_range.start).min(line_range.end);
-                    let end = selection.end.max(line_range.start).min(line_range.end);
-                    (start < end).then_some(start - line_range.start..end - line_range.start)
-                })
-            };
-            let line_caret = if showing_placeholder || marked_range.is_some() {
-                None
-            } else {
-                caret_offset
-                    .filter(|_| caret_line == Some(index))
-                    .map(|offset| offset.saturating_sub(line_range.start).min(line_len))
-            };
-            input = input.child(
-                div()
-                    .w_full()
-                    .min_w_0()
-                    .h(px(20.0))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .when(focused && showing_placeholder && index == 0, |line| {
-                        line.child(text_caret(&self.tokens, self.input_caret.visible()))
-                    })
-                    .child(ai_input_line_segments(
-                        &self.tokens,
-                        line,
-                        line_selection,
-                        line_caret,
-                        focused && self.input_caret.visible(),
-                        line_marked_range,
-                    ))
-                    .when(
-                        focused
-                            && is_last_line
-                            && !showing_placeholder
-                            && selected_range.is_none()
-                            && marked_range.is_none(),
-                        |line| line.child(text_caret(&self.tokens, self.input_caret.visible())),
-                    ),
-            );
-        }
-        let input = input
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
-                    this.ai_entity.update(cx, |ai, _cx| {
-                        if editing {
-                            ai.focus_message_edit();
-                        } else {
-                            ai.focus_chat_input();
-                        }
-                        ai.set_model_selector_search_focused(false);
-                    });
-                    this.ime_marked_text = None;
-                    window.focus(&this.focus_handle, cx);
-                    this.begin_ime_selection_from_mouse_down(target, event, window, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(
-                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
-                    this.update_ime_selection_drag_from_mouse_move(event, window, cx);
-                }),
-            );
-        text_input_anchor_probe(
-            target.anchor_id(),
-            input,
-            Self::deferred_ai_text_input_anchor_update(cx.entity()),
-        )
-        .into_any_element()
-    }
-
     pub(in crate::workspace) fn ai_editor_text_width(
         &self,
         target: WorkspaceImeTarget,
         cx: &App,
     ) -> f32 {
-        let sidebar_width = self.ai_entity.read(cx).chat_ui().sidebar_width;
+        let sidebar_width = self.ai.state.read(cx).chat_ui().sidebar_width;
         let text_width = if target == WorkspaceImeTarget::AiMessageEdit {
             self.text_input_anchors
                 .bounds(target.anchor_id())
@@ -442,7 +263,7 @@ impl WorkspaceApp {
     }
 
     fn render_ai_message_queue(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         let conversation = ai.conversation_state().active_conversation_id.clone()?;
         let turns = ai.queued_chat_turns.get(&conversation)?;
         if turns.is_empty() {
@@ -556,13 +377,13 @@ impl WorkspaceApp {
 
     fn render_ai_acp_authentication_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let conversation_id = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation_id
             .clone()?;
         let methods = self
-            .acp_entity
+            .ai.acp
             .read(cx)
             .authentication_methods(&conversation_id)?;
         if methods.is_empty() {
@@ -647,7 +468,7 @@ impl WorkspaceApp {
                                 ..ToolbarButtonOptions::default()
                             },
                             cx.listener(move |this, _event, _window, cx| {
-                                this.acp_entity.update(cx, |entity, _cx| {
+                                this.ai.acp.update(cx, |entity, _cx| {
                                     entity.authenticate(&target_conversation_id, method_id.clone());
                                 });
                                 cx.stop_propagation();
@@ -718,9 +539,9 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        let next_open = !this.ai_entity.read(cx).chat_ui().safety_menu_open;
+                        let next_open = !this.ai.state.read(cx).chat_ui().safety_menu_open;
                         this.close_ai_sidebar_popovers(cx);
-                        this.ai_entity.update(cx, |ai, _cx| {
+                        this.ai.state.update(cx, |ai, _cx| {
                             ai.set_chat_popover_open(AiChatPopover::Safety, next_open);
                         });
                         cx.stop_propagation();
@@ -950,7 +771,7 @@ impl WorkspaceApp {
         oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
             &self.tokens,
             "ai-safety-confirm-motion",
-            self.ai_entity
+            self.ai.state
                 .read(cx)
                 .chat_ui()
                 .safety_confirm_presence
@@ -1028,7 +849,7 @@ impl WorkspaceApp {
             self.settings_store.settings().ai.skills.enabled,
             self.ai_web_provider_id().is_ok(),
             &tool_policy,
-            self.ai_entity.read(cx).mcp_registry(),
+            self.ai.state.read(cx).mcp_registry(),
         );
         let label = if enabled {
             self.i18n
@@ -1098,9 +919,9 @@ impl WorkspaceApp {
             indicator.on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, _window, cx| {
-                    let next_open = !this.ai_entity.read(cx).chat_ui().context_popover_open;
+                    let next_open = !this.ai.state.read(cx).chat_ui().context_popover_open;
                     this.close_ai_sidebar_popovers(cx);
-                    this.ai_entity.update(cx, |ai, _cx| {
+                    this.ai.state.update(cx, |ai, _cx| {
                         ai.set_chat_popover_open(AiChatPopover::Context, next_open);
                     });
                     cx.stop_propagation();
@@ -1141,7 +962,7 @@ impl WorkspaceApp {
             return None;
         }
         let plan = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation()
@@ -1300,7 +1121,7 @@ impl WorkspaceApp {
                     )),
             )
             .when(
-                self.ai_entity
+                self.ai.state
                     .read(cx)
                     .conversation_state()
                     .active_conversation()
@@ -1352,7 +1173,7 @@ impl WorkspaceApp {
                                         .on_mouse_down(
                                             MouseButton::Left,
                                             cx.listener(|this, _event, _window, cx| {
-                                                this.ai_entity.update(cx, |ai, _cx| {
+                                                this.ai.state.update(cx, |ai, _cx| {
                                                     ai.set_chat_popover_open(
                                                         AiChatPopover::Context,
                                                         false,
@@ -1430,19 +1251,19 @@ impl WorkspaceApp {
             .map(|config| self.ai_active_model_context_window(config))
             .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
         let conversation_fingerprint = {
-            let ai = self.ai_entity.read(cx);
+            let ai = self.ai.state.read(cx);
             ai_conversation_token_fingerprint(
                 ai.conversation_state().active_conversation(),
                 &ai.chat_ui().message_signature_cache,
             )
         };
         let conversation = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation();
         if let Some(prepared) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .prepared_prompt_usage
@@ -1485,7 +1306,7 @@ impl WorkspaceApp {
         };
         {
             let cache = self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .context_token_cache
@@ -1574,7 +1395,7 @@ impl WorkspaceApp {
             }
         };
         let mut cache = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .context_token_cache
@@ -1660,7 +1481,7 @@ impl WorkspaceApp {
             model: config.model.clone(),
             breakdown,
         };
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _cx| ai.set_prepared_prompt_usage(usage));
     }
 
@@ -1687,11 +1508,11 @@ impl WorkspaceApp {
                     &self.tokens,
                     self.i18n.t("ai.input.context"),
                     AiTone::Accent,
-                    self.ai_entity.read(cx).chat_ui().include_context,
+                    self.ai.state.read(cx).chat_ui().include_context,
                     Self::render_lucide_icon(
                         LucideIcon::Terminal,
                         12.0,
-                        rgb(if self.ai_entity.read(cx).chat_ui().include_context {
+                        rgb(if self.ai.state.read(cx).chat_ui().include_context {
                             self.tokens.ui.accent
                         } else {
                             self.tokens.ui.text_muted
@@ -1701,7 +1522,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.ai_entity.update(cx, |ai, _cx| {
+                        this.ai.state.update(cx, |ai, _cx| {
                             ai.toggle_chat_context();
                         });
                         cx.stop_propagation();
@@ -1712,7 +1533,7 @@ impl WorkspaceApp {
             ));
         }
         if self.ai_active_tab_has_split_panes(cx)
-            && self.ai_entity.read(cx).chat_ui().include_context
+            && self.ai.state.read(cx).chat_ui().include_context
         {
             chips = chips.child(oxideterm_gpui_ui::motion::fade_in(
                 &self.tokens,
@@ -1721,11 +1542,11 @@ impl WorkspaceApp {
                     &self.tokens,
                     self.i18n.t("ai.input.panes"),
                     AiTone::Blue,
-                    self.ai_entity.read(cx).chat_ui().include_all_panes,
+                    self.ai.state.read(cx).chat_ui().include_all_panes,
                     Self::render_lucide_icon(
                         LucideIcon::SplitSquareHorizontal,
                         12.0,
-                        rgb(if self.ai_entity.read(cx).chat_ui().include_all_panes {
+                        rgb(if self.ai.state.read(cx).chat_ui().include_all_panes {
                             self.tokens.ui.info
                         } else {
                             self.tokens.ui.text_muted
@@ -1735,7 +1556,7 @@ impl WorkspaceApp {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _event, _window, cx| {
-                        this.ai_entity.update(cx, |ai, _cx| {
+                        this.ai.state.update(cx, |ai, _cx| {
                             ai.toggle_chat_all_panes();
                         });
                         cx.stop_propagation();
@@ -1784,7 +1605,7 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> Vec<AiAutocompleteCandidate> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         if !ai.chat_ui().input_focused || ai.chat_ui().autocomplete_suppressed {
             return Vec::new();
         }
@@ -1853,7 +1674,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let active_index = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .autocomplete_index
@@ -1895,7 +1716,7 @@ impl WorkspaceApp {
         candidate: &AiAutocompleteCandidate,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.apply_chat_autocomplete(candidate);
         });
         self.ime_marked_text = None;
@@ -1954,220 +1775,12 @@ mod context_usage_tests {
     }
 }
 
-pub(in crate::workspace) fn ai_input_line_segments(
-    tokens: &oxideterm_theme::ThemeTokens,
-    line: &str,
-    selection_range: Option<std::ops::Range<usize>>,
-    caret_offset: Option<usize>,
-    caret_visible: bool,
-    marked_range: Option<std::ops::Range<usize>>,
-) -> Div {
-    // Reuse the shared input renderer so caret and selection overlays never
-    // split the editable line into separate layout text runs.
-    let segments = if let Some(marked_range) = marked_range {
-        text_input_value_segments_with_marked_range(tokens, line, marked_range)
-    } else {
-        text_input_value_segments_with_color(
-            tokens,
-            line,
-            false,
-            selection_range,
-            caret_offset,
-            caret_visible,
-            Some(tokens.ui.text),
-        )
-    };
-    segments.min_w_0().max_w_full().flex().items_center()
-}
-
-pub(in crate::workspace) fn ai_input_local_marked_range(
-    marked_range: &std::ops::Range<usize>,
-    line_range: &std::ops::Range<usize>,
-) -> Option<std::ops::Range<usize>> {
-    // A composition may cross a soft-wrap boundary. Each rendered line owns
-    // only the intersecting UTF-16 segment of the virtual marked range.
-    let start = marked_range.start.max(line_range.start);
-    let end = marked_range.end.min(line_range.end);
-    (start < end).then(|| start - line_range.start..end - line_range.start)
-}
-
-#[derive(Clone, Copy)]
-pub(in crate::workspace) struct AiInputVisualLine<'a> {
-    text: &'a str,
-    utf16_start: usize,
-    utf16_end: usize,
-}
-
-impl AiInputVisualLine<'_> {
-    pub(in crate::workspace) fn utf16_len(&self) -> usize {
-        self.utf16_end.saturating_sub(self.utf16_start)
-    }
-
-    pub(in crate::workspace) fn utf16_range(&self) -> std::ops::Range<usize> {
-        self.utf16_start..self.utf16_end
-    }
-}
-
-fn ai_input_measured_visual_lines<'a>(
-    input: &'a str,
-    width: f32,
-    font: gpui::Font,
-    text_system: &gpui::WindowTextSystem,
-) -> Vec<AiInputVisualLine<'a>> {
-    let mut lines = Vec::new();
-    let mut utf16_start = 0;
-    for text in input.split('\n') {
-        let shaped = text_system.shape_line(
-            text.to_owned().into(),
-            px(13.0),
-            &[gpui::TextRun {
-                len: text.len(),
-                font: font.clone(),
-                color: gpui::black(),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-                letter_spacing: None,
-            }],
-            None,
-        );
-        let mut byte_start = 0;
-        let mut segment_start = utf16_start;
-        let mut offset = utf16_start;
-        let mut start_x = px(0.0);
-        let mut previous_x = px(0.0);
-        let mut glyphs = shaped.runs.iter().flat_map(|run| &run.glyphs).peekable();
-        for (byte, ch) in text.char_indices() {
-            // Walk shaped glyphs once; repeated x_for_index calls are quadratic for long lines.
-            let end = byte + ch.len_utf8();
-            while glyphs.peek().is_some_and(|glyph| glyph.index < end) {
-                glyphs.next();
-            }
-            let end_x = glyphs
-                .peek()
-                .map(|glyph| glyph.position.x)
-                .unwrap_or(shaped.width);
-            if byte > byte_start && end_x - start_x > px(width) {
-                lines.push(AiInputVisualLine {
-                    text: &text[byte_start..byte],
-                    utf16_start: segment_start,
-                    utf16_end: offset,
-                });
-                byte_start = byte;
-                segment_start = offset;
-                start_x = previous_x;
-            }
-            offset += ch.len_utf16();
-            previous_x = end_x;
-        }
-        lines.push(AiInputVisualLine {
-            text: &text[byte_start..],
-            utf16_start: segment_start,
-            utf16_end: offset,
-        });
-        utf16_start = offset + 1;
-    }
-    lines
-}
-
-pub(in crate::workspace) fn ai_input_line_index_for_offset(
-    lines: &[AiInputVisualLine<'_>],
-    offset: usize,
-) -> usize {
-    lines
-        .iter()
-        .rposition(|line| line.utf16_start <= offset)
-        .unwrap_or(0)
-}
-
-pub(in crate::workspace) const AI_INPUT_SOFT_WRAP_CHROME_PX: f32 = 56.0;
-pub(in crate::workspace) const AI_INPUT_SOFT_WRAP_HALF_WIDTH_PX: f32 = 7.0;
-pub(in crate::workspace) const AI_INPUT_SOFT_WRAP_MIN_COLUMNS: usize = 12;
-
-pub(in crate::workspace) fn ai_input_soft_wrap_columns(sidebar_width: f32) -> usize {
-    let text_width = (sidebar_width - AI_INPUT_SOFT_WRAP_CHROME_PX).max(80.0);
-    ((text_width / AI_INPUT_SOFT_WRAP_HALF_WIDTH_PX).floor() as usize)
-        .max(AI_INPUT_SOFT_WRAP_MIN_COLUMNS)
-}
-
-pub(in crate::workspace) fn ai_input_visual_lines(
-    input: &str,
-    wrap_columns: usize,
-) -> Vec<AiInputVisualLine<'_>> {
-    let wrap_columns = wrap_columns.max(AI_INPUT_SOFT_WRAP_MIN_COLUMNS);
-    let mut visual_lines = Vec::new();
-    let mut utf16_line_start = 0;
-
-    for line in input.split('\n') {
-        ai_push_wrapped_input_line(line, utf16_line_start, wrap_columns, &mut visual_lines);
-        utf16_line_start += line.encode_utf16().count() + 1;
-    }
-
-    if visual_lines.is_empty() {
-        visual_lines.push(AiInputVisualLine {
-            text: "",
-            utf16_start: 0,
-            utf16_end: 0,
-        });
-    }
-    visual_lines
-}
-
-pub(in crate::workspace) fn ai_push_wrapped_input_line<'a>(
-    line: &'a str,
-    utf16_line_start: usize,
-    wrap_columns: usize,
-    visual_lines: &mut Vec<AiInputVisualLine<'a>>,
-) {
-    if line.is_empty() {
-        visual_lines.push(AiInputVisualLine {
-            text: line,
-            utf16_start: utf16_line_start,
-            utf16_end: utf16_line_start,
-        });
-        return;
-    }
-
-    let mut segment_byte_start = 0;
-    let mut segment_utf16_start = utf16_line_start;
-    let mut segment_columns = 0;
-    let mut utf16_offset = utf16_line_start;
-
-    for (byte_index, ch) in line.char_indices() {
-        let char_columns = ai_input_char_columns(ch);
-        if segment_columns > 0 && segment_columns + char_columns > wrap_columns {
-            visual_lines.push(AiInputVisualLine {
-                text: &line[segment_byte_start..byte_index],
-                utf16_start: segment_utf16_start,
-                utf16_end: utf16_offset,
-            });
-            segment_byte_start = byte_index;
-            segment_utf16_start = utf16_offset;
-            segment_columns = 0;
-        }
-
-        segment_columns += char_columns;
-        utf16_offset += ch.len_utf16();
-    }
-
-    visual_lines.push(AiInputVisualLine {
-        text: &line[segment_byte_start..],
-        utf16_start: segment_utf16_start,
-        utf16_end: utf16_offset,
-    });
-}
-
-pub(in crate::workspace) fn ai_input_char_columns(ch: char) -> usize {
-    // GPUI does not expose textarea-style wrapping here, so this estimates
-    // terminal-adjacent text width with UTF-16-safe boundaries for IME state.
-    if ch == '\t' {
-        4
-    } else if ch.is_ascii() {
-        1
-    } else {
-        2
-    }
-}
+pub(in crate::workspace) use oxideterm_gpui_ai::sidebar::editor::{
+    AiInputVisualLine, ai_input_line_index_for_offset, ai_input_visual_lines,
+};
+use oxideterm_gpui_ai::sidebar::editor::{
+    AI_INPUT_SOFT_WRAP_CHROME_PX, ai_input_measured_visual_lines, ai_input_soft_wrap_columns,
+};
 
 pub(in crate::workspace) fn ai_format_tokens(tokens: usize) -> String {
     if tokens >= 1000 {
@@ -2189,22 +1802,7 @@ pub(in crate::workspace) fn ai_context_percent(tokens: usize, max_tokens: usize)
     }
 }
 
-pub(in crate::workspace) fn ai_context_token_breakdown_from_prompt(
-    breakdown: oxideterm_ai::AiPromptTokenBreakdown,
-    max_tokens: usize,
-) -> AiContextTokenBreakdown {
-    AiContextTokenBreakdown {
-        system_instructions: breakdown.system_instructions,
-        tool_definitions: breakdown.tool_definitions,
-        reserved_output: breakdown.reserved_output,
-        messages: breakdown.messages,
-        tool_results: breakdown.tool_results,
-        // The ring reports context already sent to the model. Output reserve
-        // remains visible in the popover but is not presented as used input.
-        total: breakdown.prompt_tokens(),
-        max_tokens,
-    }
-}
+use oxideterm_gpui_ai::stream::ai_context_token_breakdown_from_prompt;
 
 pub(in crate::workspace) fn ai_conversation_token_fingerprint(
     conversation: Option<&AiConversation>,
@@ -2235,63 +1833,4 @@ pub(in crate::workspace) fn ai_hash_text_shape(
     // Context usage cache correctness matters more than sampling a few bytes;
     // equal-length edits in the middle of a prompt must invalidate the entry.
     std::hash::Hash::hash(text.as_bytes(), hasher);
-}
-
-#[cfg(test)]
-mod input_render_tests {
-    use super::{
-        ai_input_line_index_for_offset, ai_input_local_marked_range,
-        ai_input_measured_visual_lines, ai_input_visual_lines,
-    };
-
-    #[gpui::test]
-    fn history_editor_wraps_measured_text_without_losing_unicode_or_empty_lines(
-        cx: &mut gpui::TestAppContext,
-    ) {
-        let system = gpui::WindowTextSystem::new(cx.update(|cx| cx.text_system().clone()));
-        let font = gpui::font("Arial");
-        let text = "W中😀\n\nZ";
-        let narrow = ai_input_measured_visual_lines(text, 1.0, font.clone(), &system);
-        assert_eq!(
-            narrow
-                .iter()
-                .map(|line| (line.text, line.utf16_range()))
-                .collect::<Vec<_>>(),
-            vec![
-                ("W", 0..1),
-                ("中", 1..2),
-                ("😀", 2..4),
-                ("", 5..5),
-                ("Z", 6..7)
-            ]
-        );
-        let wide = ai_input_measured_visual_lines(text, 1000.0, font, &system);
-        assert_eq!(
-            wide.iter()
-                .map(|line| (line.text, line.utf16_range()))
-                .collect::<Vec<_>>(),
-            vec![("W中😀", 0..4), ("", 5..5), ("Z", 6..7)]
-        );
-    }
-
-    #[test]
-    fn caret_belongs_to_next_soft_row_but_previous_hard_line_end() {
-        let lines = ai_input_visual_lines("abcdefghijklmnop\nZ", 12);
-        for (offset, row) in [(0, 0), (11, 0), (12, 1), (16, 1), (17, 2), (18, 2)] {
-            assert_eq!(
-                ai_input_line_index_for_offset(&lines, offset),
-                row,
-                "{offset}"
-            );
-        }
-    }
-
-    #[test]
-    fn marked_range_is_projected_once_across_visual_lines() {
-        let marked = 2..6;
-
-        assert_eq!(ai_input_local_marked_range(&marked, &(0..4)), Some(2..4));
-        assert_eq!(ai_input_local_marked_range(&marked, &(4..8)), Some(0..2));
-        assert_eq!(ai_input_local_marked_range(&marked, &(8..12)), None);
-    }
 }

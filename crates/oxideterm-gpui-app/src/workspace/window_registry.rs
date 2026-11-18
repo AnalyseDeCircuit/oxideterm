@@ -235,14 +235,10 @@ pub(in crate::workspace) enum AiWindowEffect {
     CompactionDeliveryReady,
     CompactionStateChanged,
     CredentialOperationReady,
-    KnowledgePageChanged,
-    KnowledgeReindexDeliveryReady,
     McpRuntimeChanged,
     ModelRefreshDeliveryReady,
     ProviderKeyStatusChanged,
     SelectorProviderStatusChanged,
-    SettingsConfirmChanged,
-    TerminalInlineDeliveryReady,
 }
 
 impl From<&ai_state::AiWorkspaceEvent> for AiWindowEffect {
@@ -258,10 +254,6 @@ impl From<&ai_state::AiWorkspaceEvent> for AiWindowEffect {
             ai_state::AiWorkspaceEvent::CompactionDeliveryReady => Self::CompactionDeliveryReady,
             ai_state::AiWorkspaceEvent::CompactionStateChanged => Self::CompactionStateChanged,
             ai_state::AiWorkspaceEvent::CredentialOperationReady => Self::CredentialOperationReady,
-            ai_state::AiWorkspaceEvent::KnowledgePageChanged => Self::KnowledgePageChanged,
-            ai_state::AiWorkspaceEvent::KnowledgeReindexDeliveryReady => {
-                Self::KnowledgeReindexDeliveryReady
-            }
             ai_state::AiWorkspaceEvent::McpRuntimeChanged => Self::McpRuntimeChanged,
             ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
                 Self::ModelRefreshDeliveryReady
@@ -269,10 +261,6 @@ impl From<&ai_state::AiWorkspaceEvent> for AiWindowEffect {
             ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged => Self::ProviderKeyStatusChanged,
             ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged => {
                 Self::SelectorProviderStatusChanged
-            }
-            ai_state::AiWorkspaceEvent::SettingsConfirmChanged => Self::SettingsConfirmChanged,
-            ai_state::AiWorkspaceEvent::TerminalInlineDeliveryReady => {
-                Self::TerminalInlineDeliveryReady
             }
         }
     }
@@ -291,10 +279,6 @@ impl AiWindowEffect {
             Self::CompactionDeliveryReady => ai_state::AiWorkspaceEvent::CompactionDeliveryReady,
             Self::CompactionStateChanged => ai_state::AiWorkspaceEvent::CompactionStateChanged,
             Self::CredentialOperationReady => ai_state::AiWorkspaceEvent::CredentialOperationReady,
-            Self::KnowledgePageChanged => ai_state::AiWorkspaceEvent::KnowledgePageChanged,
-            Self::KnowledgeReindexDeliveryReady => {
-                ai_state::AiWorkspaceEvent::KnowledgeReindexDeliveryReady
-            }
             Self::McpRuntimeChanged => ai_state::AiWorkspaceEvent::McpRuntimeChanged,
             Self::ModelRefreshDeliveryReady => {
                 ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady
@@ -302,10 +286,6 @@ impl AiWindowEffect {
             Self::ProviderKeyStatusChanged => ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged,
             Self::SelectorProviderStatusChanged => {
                 ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged
-            }
-            Self::SettingsConfirmChanged => ai_state::AiWorkspaceEvent::SettingsConfirmChanged,
-            Self::TerminalInlineDeliveryReady => {
-                ai_state::AiWorkspaceEvent::TerminalInlineDeliveryReady
             }
         }
     }
@@ -386,14 +366,10 @@ pub(in crate::workspace) enum AiWindowEffectKey {
     CompactionDelivery,
     CompactionState,
     CredentialOperation,
-    KnowledgePage,
-    KnowledgeReindex,
     McpRuntime,
     ModelRefresh,
     ProviderKeyStatus,
     SelectorProviderStatus,
-    SettingsConfirm,
-    TerminalInline,
 }
 
 impl WorkspaceWindowEffect {
@@ -415,18 +391,12 @@ impl WorkspaceWindowEffect {
                 AiWindowEffect::CompactionDeliveryReady => AiWindowEffectKey::CompactionDelivery,
                 AiWindowEffect::CompactionStateChanged => AiWindowEffectKey::CompactionState,
                 AiWindowEffect::CredentialOperationReady => AiWindowEffectKey::CredentialOperation,
-                AiWindowEffect::KnowledgePageChanged => AiWindowEffectKey::KnowledgePage,
-                AiWindowEffect::KnowledgeReindexDeliveryReady => {
-                    AiWindowEffectKey::KnowledgeReindex
-                }
                 AiWindowEffect::McpRuntimeChanged => AiWindowEffectKey::McpRuntime,
                 AiWindowEffect::ModelRefreshDeliveryReady => AiWindowEffectKey::ModelRefresh,
                 AiWindowEffect::ProviderKeyStatusChanged => AiWindowEffectKey::ProviderKeyStatus,
                 AiWindowEffect::SelectorProviderStatusChanged => {
                     AiWindowEffectKey::SelectorProviderStatus
                 }
-                AiWindowEffect::SettingsConfirmChanged => AiWindowEffectKey::SettingsConfirm,
-                AiWindowEffect::TerminalInlineDeliveryReady => AiWindowEffectKey::TerminalInline,
             })),
             Self::Plugin(effect) => Some(WorkspaceWindowEffectKey::Plugin(*effect)),
             Self::PublicMcpNode(_) => None,

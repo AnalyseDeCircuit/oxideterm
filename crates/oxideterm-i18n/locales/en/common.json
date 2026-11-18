@@ -1343,7 +1343,17 @@
     "knowledge_base": "Knowledge base and memory",
     "knowledge_base_desc": "Index Markdown or text collections for semantic search, embeddings, and OxideSens context.",
     "external_import": "External connection import",
-    "external_import_desc": "Import hosts from SSH config and supported third-party terminal managers with preview and duplicate handling."
+    "external_import_desc": "Import hosts from SSH config and supported third-party terminal managers with preview and duplicate handling.",
+    "step_overview": "Overview",
+    "step_disclaimer": "Notice",
+    "badge_open_source": "Free & Open Source · GPL-3.0",
+    "badge_pure_rust": "Pure Rust Native",
+    "badge_no_webview": "No WebView · GPUI",
+    "overview_intro": "A free, open-source desktop workspace built in pure Rust with GPUI — no Electron or WebView overhead. Unify remote shells, file transfers, tunnels, host tools, and AI in one window.",
+    "cat_connections": "Connections & Protocols",
+    "cat_files_dev": "Files & Remote Dev",
+    "cat_ops_ai": "Host Ops & AI",
+    "cat_security_ext": "Security, Sync & Extensions"
   },
   "zen_mode": {
     "exit": "Exit Zen Mode",

@@ -191,8 +191,13 @@ impl WorkspaceApp {
     }
 
     fn persist_app_lock(&mut self, locked: bool, cx: &App) -> bool {
-        if self.app_lock.set_locked(locked).is_ok() {
-            return true;
+        {
+            let admission = self.public_mcp.admission();
+            let mut suspended = admission.lock();
+            if self.app_lock.set_locked(locked).is_ok() {
+                *suspended = locked;
+                return true;
+            }
         }
         self.app_lock.error = Some(APP_LOCK_STATE_UNAVAILABLE.to_string());
         if locked {
@@ -882,7 +887,7 @@ impl WorkspaceApp {
     fn render_app_lock_hero(&self, interactive: bool, cx: &mut Context<Self>) -> gpui::Div {
         let blocked = self.app_lock.retry_blocked();
         let can_submit = interactive && !self.app_lock.pending && !blocked;
-        let description_key = if self.knowledge_workspace.read(cx).app_quit_pending() {
+        let description_key = if self.knowledge_state().read(cx).app_quit_pending() {
             "menu.unlock_to_finish_quit"
         } else {
             "settings_view.general.app_lock_locked_description"

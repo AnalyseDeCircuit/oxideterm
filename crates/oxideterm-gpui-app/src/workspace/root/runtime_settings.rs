@@ -139,8 +139,8 @@ impl WorkspaceApp {
             tab_host
                 .configure_terminal_output_highlight(settings.terminal.highlight_tab_on_new_output);
         });
-        self.ai_entity.update(cx, |ai, _cx| {
-            ai.set_agent_fs_mode(crate::workspace::ide::node_agent_mode_from_settings(
+        self.ide_workspace.update(cx, |ide, _cx| {
+            ide.set_automation_mode(crate::workspace::ide::node_agent_mode_from_settings(
                 &settings,
             ));
         });
@@ -161,7 +161,7 @@ impl WorkspaceApp {
             self.active_context_sidebar_panel,
         );
         let viewport_width = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .overlay_window_size
@@ -181,7 +181,7 @@ impl WorkspaceApp {
             AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
             AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
         );
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.set_chat_sidebar_width(ai_sidebar_width);
         });
         self.sidebar_motion.settle(if self.sidebar_rendered {

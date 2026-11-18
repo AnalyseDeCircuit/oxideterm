@@ -1,288 +1,39 @@
 use super::*;
+use oxideterm_gpui_settings_view::ai::confirm::AiSettingsConfirmIntent;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn render_ai_text_editor_modal(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let dialog = self
-            .ai_text_editor_dialog
-            .expect("AI text editor is rendered only while a dialog is open");
-        let editor = self
-            .ai_text_editor
-            .as_ref()
-            .expect("AI text editor entity exists while its dialog is open")
-            .clone();
-        let (title_key, description_key) = match dialog {
-            AiTextEditorDialog::SystemPrompt => (
-                "settings_view.ai.system_prompt_title",
-                "settings_view.ai.system_prompt_hint",
-            ),
-            AiTextEditorDialog::Memory => (
-                "settings_view.ai.memory_title",
-                "settings_view.ai.memory_hint",
-            ),
-        };
-        let modal = oxideterm_gpui_ui::modal_container(&self.tokens)
-            .w(px(AI_TEXT_EDITOR_MODAL_WIDTH))
-            .max_w_full()
-            .h(px(AI_TEXT_EDITOR_MODAL_HEIGHT))
-            .max_h_full()
-            .shadow(oxideterm_gpui_ui::theme_overlay_shadow(&self.tokens))
-            .flex()
-            .flex_col()
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .on_key_down(|_event, _window, cx| {
-                // The root capture layer yields document-editing keys to the
-                // focused editor; stop them here after the editor handles them
-                // so background panes and shortcuts cannot observe the event.
-                cx.stop_propagation();
-            })
-            .child(
-                dialog_header(&self.tokens)
-                    .child(dialog_title(&self.tokens, self.i18n.t(title_key)))
-                    .child(dialog_description(
-                        &self.tokens,
-                        self.i18n.t(description_key),
-                    )),
-            )
-            .child(
-                // TextEditorView owns the sole document scroll viewport. The
-                // modal body only constrains its available layout rectangle.
-                oxideterm_gpui_ui::modal::modal_body(&self.tokens)
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .overflow_hidden()
-                    .child(editor),
-            )
-            .child(
-                dialog_footer(&self.tokens)
-                    .justify_between()
-                    .child(if dialog == AiTextEditorDialog::Memory {
-                        self.workspace_toolbar_action_button(
-                            self.i18n.t("settings_view.ai.memory_clear"),
-                            None,
-                            ToolbarButtonOptions {
-                                button: ButtonOptions {
-                                    variant: ButtonVariant::Ghost,
-                                    size: ButtonSize::Sm,
-                                    radius: ButtonRadius::Md,
-                                    disabled: false,
-                                },
-                                ..ToolbarButtonOptions::default()
-                            },
-                            cx.listener(|this, _event, _window, cx| {
-                                if let Some(editor) = this.ai_text_editor.clone() {
-                                    editor.update(cx, |editor, cx| {
-                                        editor.replace_text_external(String::new(), cx);
-                                    });
-                                }
-                                cx.stop_propagation();
-                                cx.notify();
-                            }),
-                        )
-                        .into_any_element()
-                    } else {
-                        div().into_any_element()
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(self.tokens.metrics.modal_field_gap))
-                            .child(self.workspace_toolbar_action_button(
-                                self.i18n.t("settings_view.ai.editor_cancel"),
-                                None,
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Outline,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: false,
-                                    },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.close_ai_text_editor(false, cx);
-                                    cx.stop_propagation();
-                                }),
-                            ))
-                            .child(self.workspace_toolbar_action_button(
-                                self.i18n.t("settings_view.ai.editor_save"),
-                                None,
-                                ToolbarButtonOptions {
-                                    button: ButtonOptions {
-                                        variant: ButtonVariant::Default,
-                                        size: ButtonSize::Sm,
-                                        radius: ButtonRadius::Md,
-                                        disabled: false,
-                                    },
-                                    ..ToolbarButtonOptions::default()
-                                },
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.close_ai_text_editor(true, cx);
-                                    cx.stop_propagation();
-                                }),
-                            )),
-                    ),
-            );
-
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    this.close_ai_text_editor(false, cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .child(overlay_content_boundary(modal))
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn open_ai_text_editor(
+    pub(in crate::workspace) fn apply_ai_settings_confirmation(
         &mut self,
-        dialog: AiTextEditorDialog,
-        window: &mut Window,
+        intent: &AiSettingsConfirmIntent,
         cx: &mut Context<Self>,
     ) {
-        let value = match dialog {
-            AiTextEditorDialog::SystemPrompt => self
-                .settings_store
-                .settings()
-                .ai
-                .custom_system_prompt
-                .clone(),
-            AiTextEditorDialog::Memory => self
-                .settings_store
-                .settings()
-                .ai
-                .memory
-                .entries
-                .iter()
-                .find(|entry| entry.id == "manual-user-memory")
-                .map(|entry| entry.content.clone())
-                .unwrap_or_else(|| self.settings_store.settings().ai.memory.content.clone()),
-        };
-        self.prepare_modal_interaction_boundary(cx);
-        let tokens = self.tokens;
-        let runtime_settings = self.ide_runtime_settings();
-        let placeholder = self.i18n.t(match dialog {
-            AiTextEditorDialog::SystemPrompt => "settings_view.ai.system_prompt_placeholder",
-            AiTextEditorDialog::Memory => "settings_view.ai.memory_placeholder",
-        });
-        let context_menu_labels = oxideterm_gpui_editor::EditorContextMenuLabels {
-            copy: self.i18n.t("menu.copy"),
-            cut: self.i18n.t("fileManager.cut"),
-            paste: self.i18n.t("menu.paste"),
-            select_all: self.i18n.t("fileManager.selectAll"),
-        };
-        // The workspace owns the dialog editor; saving must not keep it alive.
-        let workspace = cx.weak_entity();
-        let editor = cx.new(|cx| {
-            let mut editor = oxideterm_gpui_editor::TextEditorView::new(value, &tokens, cx);
-            let mut editor_settings = oxideterm_gpui_editor::EditorSettings::default();
-            editor_settings.soft_wrap = true;
-            editor_settings.indentation_markers = false;
-            editor_settings.highlight_special_chars = false;
-            editor_settings.placeholder = Some(placeholder);
-            editor.set_settings(editor_settings, cx);
-            editor.set_context_menu_labels(context_menu_labels);
-            editor.apply_ide_runtime_settings(
-                &tokens,
-                runtime_settings.editor_font_family.clone(),
-                runtime_settings.editor_font_weight,
-                runtime_settings.editor_font_fallback.clone(),
-                runtime_settings.editor_font_size,
-                runtime_settings.editor_line_height,
-                true,
-                runtime_settings.background_active,
+        match intent {
+            AiSettingsConfirmIntent::Enable => self.edit_settings(
+                |settings| {
+                    settings.ai.enabled = true;
+                    settings.ai.enabled_confirmed = true;
+                },
                 cx,
-            );
-            editor.set_on_save(Box::new(move |text, _window, cx| {
-                let text = text.to_string();
-                let _ = workspace.update(cx, |this, cx| {
-                    this.persist_ai_text_editor(dialog, text, cx);
-                });
-                Ok(())
-            }));
-            editor
-        });
-        let focus_handle = editor.read(cx).focus_handle(cx);
-        self.ai_text_editor_dialog = Some(dialog);
-        self.ai_text_editor = Some(editor);
-        window.focus(&focus_handle, cx);
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn close_ai_text_editor(
-        &mut self,
-        save: bool,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(dialog) = self.ai_text_editor_dialog.take() else {
-            return;
-        };
-        let editor = self.ai_text_editor.take();
-        if save && let Some(editor) = editor {
-            let text = editor.read(cx).buffer().text();
-            self.persist_ai_text_editor(dialog, text, cx);
+            ),
+            AiSettingsConfirmIntent::RemoveProviderKey { provider_id } => {
+                self.remove_ai_provider_api_key(provider_id, cx);
+            }
+            AiSettingsConfirmIntent::RemoveProvider { provider_id } => {
+                self.remove_ai_provider(provider_id, cx)
+            }
         }
-        cx.notify();
     }
 
-    fn persist_ai_text_editor(
+    pub(in crate::workspace) fn open_ai_settings_confirm(
         &mut self,
-        dialog: AiTextEditorDialog,
-        text: String,
+        intent: AiSettingsConfirmIntent,
+        provider_name: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        // The editor owns transient text; persistence remains scoped to the
-        // selected AI document and never mutates the other modal draft.
-        self.edit_settings(
-            move |settings| match dialog {
-                AiTextEditorDialog::SystemPrompt => settings.ai.custom_system_prompt = text,
-                AiTextEditorDialog::Memory => {
-                    let now_ms = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
-                        .unwrap_or(0);
-                    settings.ai.memory.content.clear();
-                    if let Some(entry) = settings
-                        .ai
-                        .memory
-                        .entries
-                        .iter_mut()
-                        .find(|entry| entry.id == "manual-user-memory")
-                    {
-                        entry.content = text;
-                        entry.updated_at_ms = now_ms;
-                        entry.revision = entry.revision.saturating_add(1);
-                    } else if !text.trim().is_empty() {
-                        settings
-                            .ai
-                            .memory
-                            .entries
-                            .push(oxideterm_settings::AiMemoryEntry {
-                                id: "manual-user-memory".to_string(),
-                                content: text,
-                                scope_kind: oxideterm_settings::AiMemoryScopeKind::User,
-                                scope_id: None,
-                                memory_kind: oxideterm_settings::AiMemoryKind::LongTerm,
-                                source: oxideterm_settings::AiMemorySource::Manual,
-                                created_at_ms: now_ms,
-                                updated_at_ms: now_ms,
-                                last_used_at_ms: None,
-                                use_count: 0,
-                                expires_at_ms: None,
-                                revision: 1,
-                            });
-                    }
-                }
-            },
-            cx,
-        );
+        self.reset_standard_confirm_focus();
+        self.settings_views.ai_confirm.update(cx, |dialog, cx| {
+            dialog.open(intent, provider_name, self.tokens, self.i18n.clone(), cx);
+        });
     }
 
     pub(in crate::workspace) fn handle_ai_settings_confirm_key(
@@ -290,346 +41,31 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.ai_entity.read(cx).settings_confirm_is_open() {
+        if self.settings_views.ai_confirm.read(cx).state().is_some() {
             match self.handle_standard_confirm_key(event, cx) {
                 Some(ConfirmKeyboardAction::Cancel) => {
-                    self.close_ai_settings_dialog(false, cx);
+                    self.settings_views
+                        .ai_confirm
+                        .update(cx, |dialog, cx| dialog.begin_exit(false, cx));
                     true
                 }
                 Some(ConfirmKeyboardAction::Confirm) => {
-                    self.close_ai_settings_dialog(true, cx);
+                    self.settings_views
+                        .ai_confirm
+                        .update(cx, |dialog, cx| dialog.begin_exit(true, cx));
                     true
                 }
-                Some(ConfirmKeyboardAction::Handled) => true,
+                Some(ConfirmKeyboardAction::Handled) => {
+                    self.settings_views.ai_confirm.update(cx, |dialog, cx| {
+                        dialog.set_focus(self.standard_confirm_focus(), cx)
+                    });
+                    true
+                }
                 None => false,
             }
         } else {
             false
         }
-    }
-
-    pub(in crate::workspace) fn render_ai_enable_confirm_dialog(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let is_visible = self.ai_entity.read(cx).settings_confirm_is_visible();
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    // Tauri SettingsView AI confirm is a Radix Dialog bound to
-                    // setShowAiConfirm, so outside click is the Cancel path.
-                    this.close_ai_settings_dialog(false, cx);
-                    this.clear_standard_confirm_focus();
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .child(oxideterm_gpui_ui::motion::form_transition(
-                &self.tokens,
-                "ai-enable-confirm-form",
-                dialog_content(&self.tokens)
-                    .w(px(AI_CONFIRM_DIALOG_WIDTH))
-                    .max_w(relative(0.92))
-                    .flex()
-                    .flex_col()
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        dialog_header(&self.tokens)
-                            .child(dialog_title(
-                                &self.tokens,
-                                self.i18n.t("settings_view.ai_confirm.title"),
-                            ))
-                            .child(dialog_description(
-                                &self.tokens,
-                                self.i18n.t("settings_view.ai_confirm.description"),
-                            )),
-                    )
-                    .child(
-                        div()
-                            .p(px(16.0))
-                            .flex()
-                            .flex_col()
-                            .gap(px(16.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t("settings_view.ai_confirm.intro")),
-                            )
-                            .child(
-                                div()
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .border_1()
-                                    .border_color(rgba((self.tokens.ui.border << 8) | 0x80))
-                                    .bg(rgba((self.tokens.ui.bg_panel << 8) | 0x4d))
-                                    .p(px(12.0))
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(8.0))
-                                    .child(
-                                        self.ai_confirm_bullet(
-                                            "settings_view.ai_confirm.point_local",
-                                        ),
-                                    )
-                                    .child(self.ai_confirm_bullet(
-                                        "settings_view.ai_confirm.point_no_server",
-                                    ))
-                                    .child(self.ai_confirm_bullet(
-                                        "settings_view.ai_confirm.point_context",
-                                    )),
-                            ),
-                    )
-                    .child(
-                        dialog_footer(&self.tokens)
-                            .child(self.standard_footer_action_button(
-                                self.i18n.t("settings_view.ai_confirm.cancel"),
-                                ButtonVariant::Ghost,
-                                ConfirmDialogAction::Cancel,
-                                false,
-                                |this, _event, _window, cx| {
-                                    this.close_ai_settings_dialog(false, cx);
-                                },
-                                cx,
-                            ))
-                            .child(self.standard_footer_action_button(
-                                self.i18n.t("settings_view.ai_confirm.enable"),
-                                ButtonVariant::Default,
-                                ConfirmDialogAction::Confirm,
-                                false,
-                                |this, _event, _window, cx| {
-                                    this.close_ai_settings_dialog(true, cx);
-                                },
-                                cx,
-                            )),
-                    ),
-                is_visible,
-            ))
-            .when(!is_visible, settings_dialog_inert_overlay)
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn ai_confirm_bullet(&self, label_key: &str) -> AnyElement {
-        div()
-            .flex()
-            .items_start()
-            .gap(px(8.0))
-            .child(
-                div()
-                    .mt(px(6.0))
-                    .size(px(AI_CONFIRM_BULLET_SIZE))
-                    .rounded(px(AI_CONFIRM_BULLET_SIZE / 2.0))
-                    .bg(rgb(self.tokens.ui.text_muted)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .text_size(px(self.tokens.metrics.ui_text_xs))
-                    .text_color(rgb(self.tokens.ui.text_muted))
-                    .child(self.i18n.t(label_key)),
-            )
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_ai_provider_key_remove_confirm_dialog(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let is_visible = self.ai_entity.read(cx).settings_confirm_is_visible();
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    // Tauri provider-key removal uses the shared confirm
-                    // dialog; outside close cancels the pending removal.
-                    this.close_ai_settings_dialog(false, cx);
-                    this.clear_standard_confirm_focus();
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .child(oxideterm_gpui_ui::motion::form_transition(
-                &self.tokens,
-                "ai-provider-key-remove-form",
-                dialog_content(&self.tokens)
-                    .w(px(AI_KEY_REMOVE_DIALOG_WIDTH))
-                    .max_w(relative(0.92))
-                    .rounded(px(self.tokens.radii.lg))
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(px(12.0))
-                            .px(px(24.0))
-                            .pt(px(24.0))
-                            .pb(px(16.0))
-                            .child(
-                                div()
-                                    .size(px(AI_CONFIRM_ICON_WRAP))
-                                    .rounded(px(AI_CONFIRM_ICON_WRAP / 2.0))
-                                    .border_1()
-                                    .border_color(rgba((self.tokens.ui.error << 8) | 0x33))
-                                    .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::AlertTriangle,
-                                        AI_CONFIRM_ICON,
-                                        rgb(self.tokens.ui.error),
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .text_align(gpui::TextAlign::Center)
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .line_height(px(20.0))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t("settings_view.ai.remove_confirm")),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .border_t_1()
-                            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-                            .child(self.split_confirm_footer_action_button(
-                                self.i18n.t("common.actions.cancel"),
-                                ConfirmDialogAction::Cancel,
-                                false,
-                                true,
-                                |this, _event, _window, cx| {
-                                    this.close_ai_settings_dialog(false, cx);
-                                },
-                                cx,
-                            ))
-                            .child(self.split_confirm_footer_action_button(
-                                self.i18n.t("settings_view.ai.remove"),
-                                ConfirmDialogAction::Confirm,
-                                true,
-                                false,
-                                |this, _event, _window, cx| {
-                                    this.close_ai_settings_dialog(true, cx);
-                                },
-                                cx,
-                            )),
-                    ),
-                is_visible,
-            ))
-            .when(!is_visible, settings_dialog_inert_overlay)
-            .into_any_element()
-    }
-
-    pub(in crate::workspace) fn render_ai_provider_remove_confirm_dialog(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let title = {
-            let ai_workspace = self.ai_entity.read(cx);
-            let provider_name = ai_workspace
-                .settings_confirm_provider_name()
-                .unwrap_or_default();
-            self.i18n
-                .t("settings_view.ai.remove_provider_confirm")
-                .replace("{{name}}", provider_name)
-        };
-        let is_visible = self.ai_entity.read(cx).settings_confirm_is_visible();
-        dismissible_dialog_backdrop()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _event, _window, cx| {
-                    // Tauri remove-provider confirm is cancellable via
-                    // Dialog onOpenChange(false).
-                    this.close_ai_settings_dialog(false, cx);
-                    this.clear_standard_confirm_focus();
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .child(oxideterm_gpui_ui::motion::form_transition(
-                &self.tokens,
-                "ai-provider-remove-form",
-                dialog_content(&self.tokens)
-                    .w(px(AI_KEY_REMOVE_DIALOG_WIDTH))
-                    .max_w(relative(0.92))
-                    .rounded(px(self.tokens.radii.lg))
-                    .border_color(rgba((self.tokens.ui.border << 8) | 0x99))
-                    .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                        cx.stop_propagation();
-                    })
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(px(12.0))
-                            .px(px(24.0))
-                            .pt(px(24.0))
-                            .pb(px(16.0))
-                            .child(
-                                div()
-                                    .size(px(AI_CONFIRM_ICON_WRAP))
-                                    .rounded(px(AI_CONFIRM_ICON_WRAP / 2.0))
-                                    .border_1()
-                                    .border_color(rgba((self.tokens.ui.error << 8) | 0x33))
-                                    .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::AlertTriangle,
-                                        AI_CONFIRM_ICON,
-                                        rgb(self.tokens.ui.error),
-                                    )),
-                            )
-                            .child(
-                                div()
-                                    .text_align(gpui::TextAlign::Center)
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .line_height(px(20.0))
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(title),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .border_t_1()
-                            .border_color(rgba((self.tokens.ui.border << 8) | 0x66))
-                            .child(self.split_confirm_footer_action_button(
-                                self.i18n.t("common.actions.cancel"),
-                                ConfirmDialogAction::Cancel,
-                                false,
-                                true,
-                                |this, _event, _window, cx| {
-                                    this.close_ai_settings_dialog(false, cx);
-                                },
-                                cx,
-                            ))
-                            .child(self.split_confirm_footer_action_button(
-                                self.i18n.t("settings_view.ai.remove"),
-                                ConfirmDialogAction::Confirm,
-                                true,
-                                false,
-                                |this, _event, _window, cx| {
-                                    this.close_ai_settings_dialog(true, cx);
-                                },
-                                cx,
-                            )),
-                    ),
-                is_visible,
-            ))
-            .when(!is_visible, settings_dialog_inert_overlay)
-            .into_any_element()
     }
 
     pub(in crate::workspace) fn remove_ai_provider(
@@ -649,11 +85,17 @@ impl WorkspaceApp {
             return;
         };
         let provider_id = provider_id.to_string();
-        self.ai_entity.update(cx, |ai, cx| {
+        self.settings_workspace.update(cx, |state, cx| {
+            state.ai_context_windows.remove_provider(&provider_id);
+            cx.notify();
+        });
+        self.ai.state.update(cx, |ai, _| {
             ai.invalidate_provider_key_status(&provider_id);
             ai.invalidate_selector_provider_status(&provider_id);
-            ai.remove_settings_provider_view_state(&provider_id, cx);
         });
+        self.settings_views
+            .ai_providers
+            .update(cx, |view, cx| view.remove_provider(&provider_id, cx));
         self.edit_settings(
             |settings| {
                 ai_remove_provider_at_with_scoped_settings(
@@ -669,25 +111,8 @@ impl WorkspaceApp {
             cx,
         );
 
-        self.ai_entity.update(cx, |ai, cx| {
+        self.ai.state.update(cx, |ai, cx| {
             ai.remove_provider_key(provider_id, cx);
         });
-    }
-
-    /// Defers payload removal until the matching exit generation completes.
-    pub(in crate::workspace) fn close_ai_settings_dialog(
-        &mut self,
-        confirm: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.clear_standard_confirm_focus();
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
-        );
-        self.ai_entity.update(cx, |ai, cx| {
-            ai.begin_settings_confirm_exit(confirm, delay, cx);
-        });
-        cx.notify();
     }
 }

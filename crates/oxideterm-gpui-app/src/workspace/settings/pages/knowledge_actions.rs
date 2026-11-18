@@ -7,7 +7,7 @@ impl WorkspaceApp {
         page: usize,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, cx| {
+        self.knowledge_page(cx).update(cx, |ai, cx| {
             ai.set_knowledge_document_page(collection_id, page);
             cx.notify();
         });
@@ -22,7 +22,7 @@ impl WorkspaceApp {
         let error_message = self
             .i18n
             .t("settings_view.knowledge.error_create_collection");
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.create_knowledge_collection(error_message);
             cx.notify();
         });
@@ -36,7 +36,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let error_message = self.i18n.t("settings_view.knowledge.error_create_document");
-        let creation = self.ai_entity.update(cx, |entity, cx| {
+        let creation = self.knowledge_page(cx).update(cx, |entity, cx| {
             let creation = entity.create_blank_knowledge_document(error_message);
             cx.notify();
             creation
@@ -47,7 +47,7 @@ impl WorkspaceApp {
         };
         let document_id = document.id.clone();
         self.settings_input_draft.clear();
-        self.knowledge_workspace.update(cx, |workspace, _cx| {
+        self.knowledge_state().update(cx, |workspace, _cx| {
             workspace.insert_created_document(document);
         });
         self.refresh_knowledge_navigator(true, cx);
@@ -68,13 +68,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let error_message = self.i18n.t("settings_view.knowledge.error_delete");
-        let deleted = self.ai_entity.update(cx, |entity, cx| {
+        let deleted = self.knowledge_page(cx).update(cx, |entity, cx| {
             let deleted = entity.delete_knowledge_collection(&collection_id, error_message);
             cx.notify();
             deleted
         });
         if deleted {
-            self.knowledge_workspace.update(cx, |workspace, entity_cx| {
+            self.knowledge_state().update(cx, |workspace, entity_cx| {
                 workspace.remove_collection(&collection_id, entity_cx);
             });
             self.refresh_knowledge_navigator(true, cx);
@@ -88,13 +88,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let error_message = self.i18n.t("settings_view.knowledge.error_delete");
-        let deleted = self.ai_entity.update(cx, |entity, cx| {
+        let deleted = self.knowledge_page(cx).update(cx, |entity, cx| {
             let deleted = entity.delete_knowledge_document(&document_id, error_message);
             cx.notify();
             deleted
         });
         if deleted {
-            self.knowledge_workspace.update(cx, |workspace, _cx| {
+            self.knowledge_state().update(cx, |workspace, _cx| {
                 workspace.remove_document(&document_id);
             });
             self.refresh_knowledge_navigator(true, cx);
@@ -107,22 +107,15 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        let store = self.ai_entity.read(cx).rag_store();
-        self.ai_entity.update(cx, |entity, cx| {
-            if entity.request_knowledge_reindex(store, collection_id) {
-                entity.clear_knowledge_error();
-            }
-            cx.notify();
+        self.knowledge_page(cx).update(cx, |entity, cx| {
+            entity.request_knowledge_reindex(collection_id, cx);
         });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_cancel_reindex(&mut self, cx: &mut Context<Self>) {
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, _| {
             entity.cancel_knowledge_reindex();
-            cx.notify();
         });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_import_files(
@@ -146,10 +139,9 @@ impl WorkspaceApp {
             }
         };
         let error_message = self.i18n.t("settings_view.knowledge.error_import");
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.start_knowledge_import(paths, collection_id, error_message, cx);
         });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_generate_embeddings(
@@ -159,7 +151,7 @@ impl WorkspaceApp {
     ) {
         use oxideterm_gpui_settings_view::knowledge_page::EmbeddingJob;
         let job = EmbeddingJob::prepare(self.settings_store.settings(), &self.i18n);
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             match job {
                 Ok(job) => {
                     entity.start_knowledge_embeddings(
@@ -174,7 +166,6 @@ impl WorkspaceApp {
                 }
             }
         });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_open_external(
@@ -190,7 +181,7 @@ impl WorkspaceApp {
             .map(PathBuf::from)
             .unwrap_or_else(|| PathBuf::from("."))
             .join("rag-edit");
-        let prepared = self.ai_entity.update(cx, |entity, _cx| {
+        let prepared = self.knowledge_page(cx).update(cx, |entity, _cx| {
             entity.prepare_knowledge_external_edit(&document_id, edit_dir, error_message.clone())
         });
         let Some((path, edit)) = prepared else {
@@ -200,7 +191,7 @@ impl WorkspaceApp {
         // Launching the platform editor is a window adapter; document content
         // and edit ownership remain inside the AI entity.
         let opened = open_path_external(&path).is_ok();
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.finish_knowledge_external_open(edit, opened, error_message);
             cx.notify();
         });
@@ -213,36 +204,36 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let error_message = self.i18n.t("settings_view.knowledge.error_sync");
-        let outcome = self.ai_entity.update(cx, |entity, cx| {
+        let outcome = self.knowledge_page(cx).update(cx, |entity, cx| {
             let outcome = entity.sync_knowledge_external_edit(error_message);
             cx.notify();
             outcome
         });
         match outcome {
-            ai_state::knowledge::KnowledgeExternalSyncOutcome::NoChanges if notify_no_changes => {
+            oxideterm_gpui_ai::knowledge::page::KnowledgeExternalSyncOutcome::NoChanges if notify_no_changes => {
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.knowledge.doc_no_changes"),
                     TerminalNoticeVariant::Success,
                     cx,
                 );
             }
-            ai_state::knowledge::KnowledgeExternalSyncOutcome::Updated => {
+            oxideterm_gpui_ai::knowledge::page::KnowledgeExternalSyncOutcome::Updated => {
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.knowledge.doc_updated"),
                     TerminalNoticeVariant::Success,
                     cx,
                 );
             }
-            ai_state::knowledge::KnowledgeExternalSyncOutcome::NoEdit
-            | ai_state::knowledge::KnowledgeExternalSyncOutcome::NoChanges
-            | ai_state::knowledge::KnowledgeExternalSyncOutcome::Failed => {}
+            oxideterm_gpui_ai::knowledge::page::KnowledgeExternalSyncOutcome::NoEdit
+            | oxideterm_gpui_ai::knowledge::page::KnowledgeExternalSyncOutcome::NoChanges
+            | oxideterm_gpui_ai::knowledge::page::KnowledgeExternalSyncOutcome::Failed => {}
         }
         cx.notify();
     }
 
     pub(in crate::workspace) fn knowledge_confirm_delete(&mut self, cx: &mut Context<Self>) {
         let confirm = self
-            .ai_entity
+            .knowledge_page(cx)
             .update(cx, |entity, _cx| entity.take_knowledge_delete_confirm());
         let Some(confirm) = confirm else {
             cx.notify();

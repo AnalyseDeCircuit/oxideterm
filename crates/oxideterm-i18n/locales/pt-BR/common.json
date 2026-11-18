@@ -1249,7 +1249,17 @@
     "knowledge_base": "Base de conhecimento e memória",
     "knowledge_base_desc": "Indexe coleções Markdown ou texto para busca semântica, embeddings e contexto do OxideSens.",
     "external_import": "Importação de conexões externas",
-    "external_import_desc": "Importe hosts da configuração SSH e de gerenciadores de terminal compatíveis com prévia e tratamento de duplicados."
+    "external_import_desc": "Importe hosts da configuração SSH e de gerenciadores de terminal compatíveis com prévia e tratamento de duplicados.",
+    "step_overview": "Visão geral",
+    "step_disclaimer": "Avisos",
+    "badge_open_source": "Gratuito e código aberto · GPL-3.0",
+    "badge_pure_rust": "Nativo em Rust puro",
+    "badge_no_webview": "Sem WebView · GPUI",
+    "overview_intro": "Um espaço de trabalho gratuito e open source em Rust puro com GPUI, sem sobrecarga de WebView. Unifique terminais, arquivos, túneis, monitoramento e IA em uma só janela.",
+    "cat_connections": "Conexões e protocolos",
+    "cat_files_dev": "Arquivos e desenvolvimento remoto",
+    "cat_ops_ai": "Operação de hosts e IA",
+    "cat_security_ext": "Segurança, sincronização e extensões"
   },
   "migration": {
     "backup_notice": "O OxideTerm criou uma captura única dos seus dados anteriores à versão 2.0. Ela é uma cópia de recuperação, não uma reversão automática.",

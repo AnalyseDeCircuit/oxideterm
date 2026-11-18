@@ -47,6 +47,38 @@ impl WorkspaceApp {
     pub(super) fn settings_window_dispatch_for(owner: gpui::WeakEntity<Self>) -> SettingsWindowDispatch {
         Rc::new(move |request, window, cx| {
             let _ = owner.update(cx, |app, cx| match request {
+                SettingsWindowRequest::ProbeAcpAgent(agent_id) => app.test_ai_acp_agent(agent_id, cx),
+                SettingsWindowRequest::SetAiAgentConcurrency(limit) => {
+                    let limit = limit.clamp(1, oxideterm_ai::agent::MAX_AGENT_CONCURRENCY);
+                    app.edit_settings(move |settings| oxideterm_gpui_settings_view::ai::subagents::set_agent_concurrency(settings, limit), cx);
+                    app.ai.state.read(cx).agents.services.runtime.set_concurrency(limit);
+                }
+                SettingsWindowRequest::ConfirmAiEnable => {
+                    if !app.settings_store.settings().ai.enabled_confirmed {
+                        app.open_ai_settings_confirm(
+                            oxideterm_gpui_settings_view::ai::confirm::AiSettingsConfirmIntent::Enable,
+                            None, cx,
+                        );
+                    }
+                }
+                SettingsWindowRequest::OpenAiTextEditor(kind) => {
+                    app.prepare_modal_interaction_boundary(cx);
+                    let runtime = app.ide_runtime_settings();
+                    let style = oxideterm_gpui_settings_view::ai::text_editor::AiTextEditorStyle {
+                        tokens: app.tokens,
+                        i18n: app.i18n.clone(),
+                        font_family: runtime.editor_font_family,
+                        font_weight: runtime.editor_font_weight,
+                        font_fallback: runtime.editor_font_fallback,
+                        font_size: runtime.editor_font_size,
+                        line_height: runtime.editor_line_height,
+                        background_active: runtime.background_active,
+                    };
+                    let dispatch = Self::settings_window_dispatch(cx);
+                    app.settings_views.ai_text_editor.update(cx, |editor, cx| {
+                        editor.open(kind, app.settings_store.settings(), style, dispatch, window, cx);
+                    });
+                }
                 SettingsWindowRequest::Edit(edit) => app.edit_settings(edit, cx),
                 SettingsWindowRequest::OpenSelect(select) => {
                     app.open_settings_select_from_pointer(select, window.window_handle().window_id(), cx);
@@ -56,7 +88,13 @@ impl WorkspaceApp {
                     app.update_settings_select_anchor(window.window_handle().window_id(), anchor, cx);
                 }
                 SettingsWindowRequest::BeginInputSelection(input, event) => {
-                    let current = app.current_settings_input_value(input, cx);
+                    let current = if input.is_ai_mcp()
+                        || oxideterm_gpui_settings_view::ai::providers::is_provider_draft(input)
+                    {
+                        String::new()
+                    } else {
+                        app.current_settings_input_value(input, cx)
+                    };
                     app.focus_settings_input(input, current, cx);
                     app.ime_marked_text = None;
                     window.focus(&app.focus_handle, cx);
@@ -125,7 +163,7 @@ impl WorkspaceApp {
     ) -> Option<AnyElement> {
         let settings = self.settings_store.settings();
         let knowledge_dialog_visible = self
-            .ai_entity
+            .knowledge_page(cx)
             .read(cx)
             .knowledge_document_dialog_owned_by(window_id);
         let active_tab = if knowledge_dialog_visible {
@@ -152,13 +190,13 @@ impl WorkspaceApp {
                 SelectMenuRequest::RemoteShell(mode) => app.remote_shell_integration_mode_changed(mode, cx),
                 SelectMenuRequest::Trigger(clear_input, edit) => app.edit_terminal_trigger(clear_input, edit, cx),
                 SelectMenuRequest::KnowledgeCollectionScope(scope) => {
-                    app.ai_entity.update(cx, |entity, cx| {
+                    app.knowledge_page(cx).update(cx, |entity, cx| {
                         entity.set_knowledge_collection_connection_id(scope);
                         cx.notify();
                     });
                 }
                 SelectMenuRequest::KnowledgeDocumentFormat(format) => {
-                    app.ai_entity.update(cx, |entity, cx| {
+                    app.knowledge_page(cx).update(cx, |entity, cx| {
                         entity.set_knowledge_document_format(format.to_owned());
                         cx.notify();
                     });
@@ -166,13 +204,13 @@ impl WorkspaceApp {
                 SelectMenuRequest::External(action) => match action {
                     ExternalSelect::MarketplaceSort(sort) => app.set_plugin_marketplace_sort(sort, cx),
                     ExternalSelect::ProviderType(provider_type) => {
-                        app.ai_entity.update(cx, |ai, cx| ai.select_settings_provider_type(provider_type, cx));
+                        app.settings_views.ai_providers.update(cx, |view, cx| view.select_type(provider_type, cx));
                     }
                     ExternalSelect::McpTransport(transport) => {
-                        app.ai_entity.update(cx, |ai, cx| ai.set_mcp_transport(transport, cx));
+                        app.settings_workspace.update(cx, |state, cx| state.update_ai_mcp(|draft| draft.transport = transport, cx));
                     }
                     ExternalSelect::McpAuth(mode) => {
-                        app.ai_entity.update(cx, |ai, cx| ai.set_mcp_auth_mode(mode, cx));
+                        app.settings_workspace.update(cx, |state, cx| state.update_ai_mcp(|draft| draft.auth_header_mode = mode, cx));
                     }
                 },
                 SelectMenuRequest::CloseSemantic => app.close_semantic_scheme_editor(cx),
@@ -211,16 +249,16 @@ impl WorkspaceApp {
         } else {
             Vec::new()
         };
-        let ai = self.ai_entity.read(cx);
+        let ai = self.knowledge_page(cx).read(cx);
         let select_menu = SettingsSelectMenu {
             settings,
             i18n: &self.i18n,
             tokens: &self.tokens,
             settings_workspace: &self.settings_workspace,
             external: ExternalSelectInputs {
-                provider_type: ai.settings_new_provider_type(),
-                mcp_transport: ai.mcp_transport(),
-                mcp_auth: ai.mcp_auth_mode(),
+                provider_type: self.settings_views.ai_providers.read(cx).provider_type(),
+                mcp_transport: self.settings_workspace.read(cx).ai_mcp.draft().map(|draft| draft.transport),
+                mcp_auth: self.settings_workspace.read(cx).ai_mcp.draft().map(|draft| draft.auth_header_mode),
             },
             knowledge: KnowledgeSelectInputs {
                 connections: self.connection_store.connections(),
@@ -248,7 +286,7 @@ impl WorkspaceApp {
         self.clear_terminal_trigger_input_focus(cx);
         self.blur_highlight_input(oxideterm_gpui_settings_view::highlight_page::is_highlight_input, cx);
         self.focused_settings_input = None;
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.blur_settings_input(cx);
         });
         if self.open_settings_select == Some(select_id)
@@ -308,20 +346,6 @@ impl WorkspaceApp {
             }
             _ => false,
         }
-    }
-
-    pub(in crate::workspace) fn select_setting_row(
-        &self,
-        label_key: &str,
-        hint_key: &str,
-        select_id: SettingsSelect,
-        value: String,
-        width: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let control = self.settings_select_control(select_id, value, false, Some(width), cx);
-
-        self.setting_row(label_key, hint_key, control, cx)
     }
 
     pub(in crate::workspace) fn bool_row(

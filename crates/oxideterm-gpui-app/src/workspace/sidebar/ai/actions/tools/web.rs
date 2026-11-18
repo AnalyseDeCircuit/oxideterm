@@ -51,7 +51,7 @@ impl WorkspaceApp {
                 return;
             }
         };
-        let key_store = self.ai_entity.read(cx).key_store().clone();
+        let key_store = self.ai.state.read(cx).key_store().clone();
         let audit = oxideterm_audit::AuditContext::current_request();
         // The pending tool call owns this future. Dropping its receiver cancels HTTP and releases the key.
         self.forwarding_runtime.spawn(oxideterm_audit::AuditContext::scope_optional(audit, async move {

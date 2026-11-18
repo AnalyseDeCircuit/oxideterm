@@ -1,65 +1,40 @@
 use std::{
-    collections::{HashMap, VecDeque, hash_map::DefaultHasher},
-    hash::{Hash, Hasher},
+    collections::{HashMap, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
 
-use gpui::{
-    AnyElement, App, ClipboardItem, Context, KeyDownEvent, MouseButton, MouseDownEvent,
-    SharedString, Timer, Window, div, px, rgb,
-};
+use gpui::{AnyElement, App, Context, KeyDownEvent, Window};
 use oxideterm_forwarding::{
-    DetectedPort, ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardType,
-    ForwardUpdate, ForwardingManager, ForwardingRegistry, PortDetectionSnapshot,
+    ForwardEvent, ForwardRule, ForwardStats, ForwardStatus, ForwardUpdate,
+    ForwardingManager, ForwardingRegistry, PortDetectionSnapshot,
+};
+use oxideterm_gpui_forwards::{
+    FORWARDS_PORT_SCAN_INTERVAL, ForwardingQuickAction, ForwardingRuntimeSnapshot,
+    ForwardsPageState, ForwardsSampler, ForwardsSamplingDue, ForwardsViewBindings, ForwardsViews,
+    PortDetectionViewState,
 };
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
-use oxideterm_gpui_ui::{
-    ConfirmDialogVariant, ConfirmDialogView,
-    button::{
-        ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant as UiButtonVariant,
-        IconButtonOptions, ToolbarButtonOptions,
-    },
-    confirm_dialog,
-    modal::rounded_shell_child_radius,
-    surface::{
-        color_for_background, color_for_background_or_alpha, color_with_alpha,
-        tauri_glass_surface_shadow,
-    },
-    text_input::TextInputView,
-    typography::tauri_cjk_ui_font_family as forwards_cjk_ui_font_family,
-};
-use oxideterm_i18n::I18n;
 use oxideterm_ssh::{
     ConnectionConsumer, ConnectionState, NodeId, NodeReadiness, NodeRouter, PhaseResult,
 };
 use oxideterm_workspace::{Tab, TabId, TabKind, TabTitleSource};
 
-use super::ime::WorkspaceImeTarget;
-use super::{
-    ActiveSurface, FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT, FORWARDS_SECTION_LIST_OVERSCAN,
-    FORWARDS_TABLE_ROW_LIST_OVERSCAN, LucideIcon, TauriVirtualListSpec, WorkspaceApp,
-    settings_mono_font_family, settings_ui_font_family,
-    sync_tauri_variable_list_state_by_signatures, tauri_virtual_list,
-};
+use super::{ActiveSurface, WorkspaceApp};
 
-// Real modules keep forwarding UI dependencies and visibility boundaries compiler-checked.
 mod actions;
 mod ai;
-mod components;
 mod entity;
-mod forms;
-mod helpers;
+mod mount;
 mod pages;
 mod reconnect;
 mod runtime_service;
-mod surface;
-mod view_state;
 
 pub(in crate::workspace) use entity::{
     ForwardingDeliveryIntent, ForwardingPageScope, ForwardingWorkspaceEntity,
     ForwardingWorkspaceEvent,
 };
+pub(in crate::workspace) use oxideterm_gpui_forwards::{ForwardInput, ForwardingRuntimeOperation};
 pub(in crate::workspace) use reconnect::{
     cleanup_reconnect_created_forwards, forward_restore_failure_label,
     forward_restore_key_for_rule, forward_restore_key_for_snapshot_rule,
@@ -67,162 +42,11 @@ pub(in crate::workspace) use reconnect::{
     forward_rule_from_reconnect_snapshot, reconnect_forward_rule_from_rule,
     release_reconnect_forward_bindings,
 };
-use runtime_service::{ForwardingQuickAction, ForwardingRuntimeSnapshot};
 pub(in crate::workspace) use runtime_service::{
-    ForwardingRuntimeOperation, PublicMcpForwardMutation,
-};
-pub(in crate::workspace) use runtime_service::{
-    ForwardingRuntimeService, ReconnectForwardRestoreRequest,
+    ForwardingRuntimeService, PublicMcpForwardMutation, ReconnectForwardRestoreRequest,
 };
 
-const FORWARDS_PAGE_PADDING: f32 = 16.0; // Tauri p-4
-const FORWARDS_SECTION_GAP: f32 = 24.0; // Tauri space-y-6
-const FORWARDS_TABLE_HEADER_H: f32 = 34.0; // Tauri px-4 py-2 text-sm
-const FORWARDS_TABLE_ROW_H: f32 = 42.0;
-const FORWARDS_TYPE_BADGE_H: f32 = 20.0;
-const FORWARDS_PORT_SCAN_INTERVAL: Duration = Duration::from_secs(12);
-const FORWARDS_STATS_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
-const FORWARDS_SAMPLING_TICK_INTERVAL: Duration = Duration::from_secs(1);
-const FORWARDS_BG_ACTIVE_THEME_ALPHA: u32 = 0x99; // Nested fills share the tab's sidebar-bounded tint budget.
-const FORWARDS_BG_ACTIVE_HOVER_ALPHA: u32 = 0x80; // Tauri [data-bg-active] bg-hover 50%
-const FORWARDS_BG_ACTIVE_SUNKEN_ALPHA: u32 = 0x59; // Tauri [data-bg-active] bg-sunken 35%
-const FORWARDS_BG_ACTIVE_BORDER_ALPHA: u32 = 0xbf; // Tauri [data-bg-active] border 75%
-const FORWARDS_BG_ACTIVE_BORDER_HALF_ALPHA: u32 = 0x60; // Tauri border/50 after active border mix
-const FORWARDS_TW_ALPHA_05: u32 = 0x0d; // Tauri /5
-const FORWARDS_TW_ALPHA_30: u32 = 0x4d; // Tauri /30
-const FORWARDS_TW_ALPHA_40: u32 = 0x66; // Tauri /40
-const FORWARDS_TW_ALPHA_50: u32 = 0x80; // Tauri /50
-const FORWARDS_ALPHA_TRANSPARENT: u32 = 0x00; // Tauri transparent root when tab background is active
-const FORWARDS_DEFAULT_BIND_ADDRESS: &str = "localhost"; // Tauri create form default bindAddress
-const FORWARDS_DEFAULT_TARGET_HOST: &str = "localhost"; // Tauri create form default targetHost
 pub(super) const FORWARDS_NODE_SESSION_PREFIX: &str = "node:";
-// Tailwind palette literals used by the Tauri ForwardsView source.
-const TW_BLACK: u32 = 0x000000;
-const TW_BLUE_300: u32 = 0x93c5fd;
-const TW_BLUE_400: u32 = 0x60a5fa;
-const TW_BLUE_500: u32 = 0x3b82f6;
-const TW_BLUE_900: u32 = 0x1e3a8a;
-const TW_CYAN_500: u32 = 0x06b6d4;
-const TW_EMERALD_400: u32 = 0x34d399;
-const TW_EMERALD_800: u32 = 0x065f46;
-const TW_EMERALD_900: u32 = 0x064e3b;
-const TW_GREEN_400: u32 = 0x4ade80;
-const TW_GREEN_500: u32 = 0x22c55e;
-const TW_ORANGE_400: u32 = 0xfb923c;
-const TW_ORANGE_500: u32 = 0xf97316;
-const TW_PURPLE_400: u32 = 0xc084fc;
-const TW_PURPLE_900: u32 = 0x581c87;
-const TW_RED_400: u32 = 0xf87171;
-const TW_RED_500: u32 = 0xef4444;
-const TW_RED_900: u32 = 0x7f1d1d;
-const TW_RED_950: u32 = 0x450a0a;
-const TW_YELLOW_400: u32 = 0xfacc15;
-const TW_YELLOW_900: u32 = 0x713f12;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
-pub(super) enum ForwardInput {
-    CreateBindAddress,
-    CreateBindPort,
-    CreateTargetHost,
-    CreateTargetPort,
-    EditBindAddress,
-    EditBindPort,
-    EditTargetHost,
-    EditTargetPort,
-}
-
-impl ForwardInput {
-    pub(super) fn anchor_key(self) -> u64 {
-        match self {
-            Self::CreateBindAddress => 1,
-            Self::CreateBindPort => 2,
-            Self::CreateTargetHost => 3,
-            Self::CreateTargetPort => 4,
-            Self::EditBindAddress => 5,
-            Self::EditBindPort => 6,
-            Self::EditTargetHost => 7,
-            Self::EditTargetPort => 8,
-        }
-    }
-}
-
-#[derive(Debug)]
-pub(super) struct ForwardsViewState {
-    show_new_form: bool,
-    new_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    editing_forward: Option<ForwardRule>,
-    edit_form_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    pending_delete_forward: Option<ForwardRule>,
-    copied_forward_id: Option<String>,
-    forward_type: ForwardType,
-    bind_address: String,
-    bind_port: String,
-    target_host: String,
-    target_port: String,
-    skip_health_check: bool,
-    edit_bind_address: String,
-    edit_bind_port: String,
-    edit_target_host: String,
-    edit_target_port: String,
-    pub(super) focused_input: Option<ForwardInput>,
-    pub(super) error: Option<String>,
-    pending: bool,
-    pending_start: Option<(&'static str, bool, ForwardingRuntimeOperation)>,
-    start_after_save: Option<ForwardingRuntimeOperation>,
-    detected_ports: Vec<DetectedPort>,
-    new_ports: Vec<DetectedPort>,
-    has_scanned_ports: bool,
-    port_scan_pending: bool,
-    port_scan_error: Option<String>,
-    last_port_scan_started: Option<Instant>,
-    last_stats_refresh: Option<Instant>,
-}
-
-#[derive(Clone, Debug, Default)]
-pub(super) struct PortDetectionViewState {
-    connection_id: Option<String>,
-    detected_ports: Vec<DetectedPort>,
-    new_ports: Vec<DetectedPort>,
-    has_scanned_ports: bool,
-    port_scan_pending: bool,
-    port_scan_error: Option<String>,
-    last_port_scan_started: Option<Instant>,
-}
-
-impl Default for ForwardsViewState {
-    fn default() -> Self {
-        Self {
-            show_new_form: false,
-            new_form_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            editing_forward: None,
-            edit_form_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            pending_delete_forward: None,
-            copied_forward_id: None,
-            forward_type: ForwardType::Local,
-            bind_address: FORWARDS_DEFAULT_BIND_ADDRESS.to_string(),
-            bind_port: String::new(),
-            target_host: FORWARDS_DEFAULT_TARGET_HOST.to_string(),
-            target_port: String::new(),
-            skip_health_check: false,
-            edit_bind_address: FORWARDS_DEFAULT_BIND_ADDRESS.to_string(),
-            edit_bind_port: String::new(),
-            edit_target_host: FORWARDS_DEFAULT_TARGET_HOST.to_string(),
-            edit_target_port: String::new(),
-            focused_input: None,
-            error: None,
-            pending: false,
-            pending_start: None,
-            start_after_save: None,
-            detected_ports: Vec::new(),
-            new_ports: Vec::new(),
-            has_scanned_ports: false,
-            port_scan_pending: false,
-            port_scan_error: None,
-            last_port_scan_started: None,
-            last_stats_refresh: None,
-        }
-    }
-}
 
 pub(super) enum ForwardingWorkerResult {
     Operation {

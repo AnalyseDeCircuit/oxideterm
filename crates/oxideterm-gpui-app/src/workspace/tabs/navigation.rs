@@ -228,7 +228,7 @@ impl WorkspaceApp {
             }
             Some(TabKind::Forwards) => {
                 if let Some(id) = self.active_content_tab_id(cx) {
-                    self.forwarding.update(cx, |state, _| state.select_page(id));
+                    self.forwarding.update(cx, |state, cx| state.select_page(id, cx));
                 }
                 self.active_surface = ActiveSurface::Terminal;
                 if let Some(active_tab_id) = self.active_content_tab_id(cx)
@@ -614,8 +614,8 @@ impl WorkspaceApp {
             self.close_embedded_sftp_for_node(affected_node_id, cx);
         }
         for affected_node_id in &nodes_to_disconnect {
-            self.forwarding.update(cx, |forwarding, _cx| {
-                forwarding.untrack_port_profiler(affected_node_id);
+            self.forwarding.update(cx, |forwarding, cx| {
+                forwarding.untrack_port_profiler(affected_node_id, cx);
             });
             let forwarding_registry = self.forwarding_service.registry().clone();
             let forwarding_runtime = self.forwarding_runtime.clone();
@@ -1154,10 +1154,10 @@ impl WorkspaceApp {
             // surface's node consumer; shared node users remain registered.
             workspace.close_surface(tab.id, ide::IdeSurfaceCloseReason::UserProjectClose, cx);
         });
-        self.knowledge_workspace
+        self.knowledge_state()
             .update(cx, |workspace, _cx| workspace.close_tab(tab.id));
         self.forwarding
-            .update(cx, |forwarding, _cx| forwarding.unmap_tab(tab.id));
+            .update(cx, |forwarding, cx| forwarding.unmap_tab(tab.id, cx));
         let mut pane_ids = Vec::new();
         let mut session_ids = Vec::new();
         if let Some(root_pane) = &tab.root_pane {

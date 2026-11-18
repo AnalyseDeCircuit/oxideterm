@@ -1,45 +1,6 @@
 use super::*;
 
-pub(in crate::workspace) const ONBOARDING_TOTAL_STEPS: usize = 3;
-pub(in crate::workspace) const ONBOARDING_STEPS_MOTION_ID: &str = "onboarding-steps";
-pub(in crate::workspace) const ONBOARDING_ANIMATION_MOTION_ID: &str = "onboarding-animation";
-pub(in crate::workspace) const ONBOARDING_ACCENT_SUBTLE_ALPHA: u32 = 0x14;
-pub(in crate::workspace) const ONBOARDING_ACCENT_BORDER_ALPHA: u32 = 0x80;
-pub(in crate::workspace) const ONBOARDING_HAIRLINE_ALPHA: u32 = 0x4d;
-pub(in crate::workspace) const ONBOARDING_CARD_BORDER_ALPHA: u32 = 0x59;
-pub(in crate::workspace) const ONBOARDING_DISABLED_OPACITY: f32 = 0.45;
-
-pub(in crate::workspace) const ONBOARDING_FONT_OPTIONS: [(FontFamily, &str, bool); 4] = [
-    (FontFamily::Jetbrains, "JetBrains Mono NF (Subset)", true),
-    (FontFamily::Meslo, "MesloLGM NF (Subset)", true),
-    (FontFamily::Maple, "Maple Mono NF CN (Subset)", true),
-    (FontFamily::Custom, "Custom...", false),
-];
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum OnboardingStep {
-    Welcome,
-    Appearance,
-    Launch,
-}
-
-impl OnboardingStep {
-    pub(in crate::workspace) fn from_index(index: usize) -> Self {
-        match index {
-            0 => Self::Welcome,
-            1 => Self::Appearance,
-            _ => Self::Launch,
-        }
-    }
-
-    pub(in crate::workspace) fn title_key(self) -> &'static str {
-        match self {
-            Self::Welcome => "onboarding.step_welcome",
-            Self::Appearance => "onboarding.step_appearance",
-            Self::Launch => "onboarding.step_start",
-        }
-    }
-}
+pub(in crate::workspace) use oxideterm_gpui_onboarding::{ONBOARDING_TOTAL_STEPS, OnboardingStep};
 
 #[derive(Clone)]
 pub(in crate::workspace) struct OnboardingState {
@@ -52,7 +13,6 @@ pub(in crate::workspace) struct OnboardingState {
     pub(in crate::workspace) import_state: OnboardingImportState,
     pub(in crate::workspace) imported_count: usize,
     pub(in crate::workspace) host_count: Option<usize>,
-    pub(in crate::workspace) scroll_handle: ScrollHandle,
 }
 
 impl OnboardingState {
@@ -67,7 +27,6 @@ impl OnboardingState {
             import_state: OnboardingImportState::Idle,
             imported_count: 0,
             host_count: None,
-            scroll_handle: ScrollHandle::new(),
         }
     }
 
@@ -81,7 +40,6 @@ impl OnboardingState {
         self.import_state = OnboardingImportState::Idle;
         self.imported_count = 0;
         self.host_count = None;
-        self.scroll_handle = ScrollHandle::new();
     }
 }
 

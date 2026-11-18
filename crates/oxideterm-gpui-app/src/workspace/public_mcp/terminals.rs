@@ -2,21 +2,21 @@ use gpui::{App, Context, Entity, Window};
 use oxideterm_connections::ConnectionTerminalOptions;
 use oxideterm_gpui_terminal::{TerminalPane, TerminalSerialAction, TerminalTelnetAction};
 use oxideterm_public_mcp::{
-    DomainRequest, PublicTelnetControl, PublicToolCall, TerminalControlAction, TerminalOpenSource,
-    TerminalRef, ToolEnvelope, ToolGroup,
+    DomainRequest, PublicToolCall, TerminalControlAction, TerminalOpenSource, TerminalRef,
+    ToolEnvelope,
+};
+use oxideterm_public_mcp_host::{
+    PublicMcpTerminalSerialState, finish_terminal_read, telnet_control, terminal_projection,
 };
 use oxideterm_session_adapter::auth_method_from_saved_auth;
 use oxideterm_ssh::SshConfig;
-use oxideterm_terminal::{
-    SerialSessionConfig, TelnetControlCommand, TelnetSessionConfig, TerminalLifecycle,
-    TerminalSessionKind,
-};
+use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig, TerminalSessionKind};
 use serde_json::json;
 
 use super::{
     CONNECTION_KEY_DESKTOP_PREFIX, CONNECTION_KEY_MOSH_PREFIX, CONNECTION_KEY_SERIAL_PREFIX,
     CONNECTION_KEY_SSH_PREFIX, CONNECTION_KEY_TELNET_PREFIX, PublicMcpPendingTerminalOpen,
-    PublicMcpTerminalRecord, WorkspaceApp, finish_serialized, node_lease_for_client,
+    PublicMcpTerminalRecord, WorkspaceApp, finish_serialized,
 };
 use crate::workspace::{
     TerminalSessionId,
@@ -27,9 +27,6 @@ use crate::workspace::{
     },
 };
 
-const TERMINAL_READ_OUTPUT_LIMIT_BYTES: usize = 256 * 1024;
-const PUBLIC_MCP_TERMINAL_CAPACITY: usize = 128;
-const PUBLIC_MCP_TERMINAL_CAPACITY_PER_CLIENT: usize = 32;
 const PENDING_MOSH_OPENS_PER_CLIENT: usize = 8;
 
 pub(in crate::workspace) enum PublicMcpTerminalWindowEffect {
@@ -91,9 +88,6 @@ impl WorkspaceApp {
             return;
         };
         let terminal_ref = args.terminal_ref.clone();
-        let cursor = args.cursor;
-        let line_limit = args.line_limit as usize;
-        let tail = args.tail;
         let Ok((_, pane)) = self.public_mcp_terminal_pane(&request.client_ref, &terminal_ref, cx)
         else {
             request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
@@ -101,38 +95,13 @@ impl WorkspaceApp {
         };
         let pane = pane.read(cx);
         let snapshot = pane.ai_screen_snapshot();
-        if cursor == Some(snapshot.generation) {
-            finish_serialized(
-                request,
-                json!({
-                    "terminal_ref": terminal_ref,
-                    "cursor": snapshot.generation,
-                    "unchanged": true,
-                    "lines": [],
-                    "truncated": false,
-                }),
-            );
-            return;
-        }
-        let (lines, truncated) = bounded_terminal_lines(
-            &pane.visible_text_snapshot(),
-            line_limit,
-            tail,
-            TERMINAL_READ_OUTPUT_LIMIT_BYTES,
-        );
-        finish_serialized(
+        finish_terminal_read(
             request,
-            json!({
-                "terminal_ref": terminal_ref,
-                "cursor": snapshot.generation,
-                "unchanged": false,
-                "cols": snapshot.cols,
-                "rows": snapshot.rows,
-                "display_offset": snapshot.display_offset,
-                "alternate_buffer": pane.ai_screen_is_alternate_buffer(),
-                "lines": lines,
-                "truncated": truncated,
-            }),
+            snapshot.generation,
+            (snapshot.cols, snapshot.rows),
+            snapshot.display_offset,
+            pane.ai_screen_is_alternate_buffer(),
+            || pane.visible_text_snapshot(),
         );
     }
 
@@ -145,38 +114,16 @@ impl WorkspaceApp {
             return;
         };
         let terminal_ref = args.terminal_ref.clone();
-        let query = args.query.clone();
-        let limit = args.limit as usize;
-        let Ok((_, pane)) = self.public_mcp_terminal_pane(&request.client_ref, &terminal_ref, cx)
+        let Ok((record, pane)) =
+            self.public_mcp_terminal_pane(&request.client_ref, &terminal_ref, cx)
         else {
             request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
             return;
         };
-        let matches = pane.read(cx).shared_session().lock().search_matches(&query);
-        let truncated = matches.len() > limit;
-        let matches = matches
-            .into_iter()
-            .take(limit)
-            .map(|entry| {
-                json!({
-                    "line": entry.line,
-                    "start_col": entry.start_col,
-                    "end_col": entry.end_col,
-                    "ranges": entry.ranges.into_iter().map(|range| json!({
-                        "line": range.line,
-                        "start_col": range.start_col,
-                        "end_col": range.end_col,
-                    })).collect::<Vec<_>>(),
-                })
-            })
-            .collect::<Vec<_>>();
-        finish_serialized(
+        self.public_mcp.background().find_terminal(
             request,
-            json!({
-                "terminal_ref": terminal_ref,
-                "matches": matches,
-                "truncated": truncated,
-            }),
+            record.session_id,
+            pane.read(cx).shared_session(),
         );
     }
 
@@ -360,44 +307,8 @@ impl WorkspaceApp {
         if request.is_cancelled() {
             return;
         }
-        let session_group_enabled = self
-            .public_mcp
-            .clients()
-            .into_iter()
-            .find(|client| client.client_ref == request.client_ref)
-            .is_some_and(|client| {
-                client.enabled && client.tool_groups.contains(&ToolGroup::TerminalSession)
-            });
-        if !session_group_enabled {
-            request.finish(ToolEnvelope::failed(
-                "The MCP client authorization changed before the terminal opened",
-            ));
-            return;
-        }
-        let retained_total = self
-            .public_mcp
-            .terminals
-            .len()
-            .saturating_add(self.public_mcp.pending_terminal_opens.len());
-        let retained_for_client = self
-            .public_mcp
-            .terminals
-            .values()
-            .filter(|record| record.client_ref == request.client_ref)
-            .count()
-            .saturating_add(
-                self.public_mcp
-                    .pending_terminal_opens
-                    .values()
-                    .filter(|pending| pending.client_ref == request.client_ref)
-                    .count(),
-            );
-        if retained_total >= PUBLIC_MCP_TERMINAL_CAPACITY
-            || retained_for_client >= PUBLIC_MCP_TERMINAL_CAPACITY_PER_CLIENT
-        {
-            request.finish(ToolEnvelope::failed(
-                "The retained terminal session limit has been reached",
-            ));
+        if let Some(error) = self.public_mcp.terminal_open_rejection(&request.client_ref) {
+            request.finish(ToolEnvelope::failed(error));
             return;
         }
         let PublicToolCall::OpenTerminal(args) = &request.call else {
@@ -409,11 +320,7 @@ impl WorkspaceApp {
         let requested_title = args.title.clone();
         match source {
             TerminalOpenSource::Node { node_ref } => {
-                let Some(lease) = node_lease_for_client(
-                    &self.public_mcp.runtime_handles,
-                    &request.client_ref,
-                    &node_ref,
-                ) else {
+                let Some(lease) = self.public_mcp.node_lease(&request.client_ref, &node_ref) else {
                     request.finish(ToolEnvelope::failed("The node handle is unavailable"));
                     return;
                 };
@@ -696,16 +603,12 @@ impl WorkspaceApp {
             return;
         };
         let terminal_ref = args.terminal_ref.clone();
-        let Some(record) = self.public_mcp.terminals.get(&terminal_ref).cloned() else {
+        let Some(record) = self.public_mcp.terminal(&request.client_ref, &terminal_ref) else {
             request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
             return;
         };
-        if record.client_ref != request.client_ref {
-            request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
-            return;
-        }
         self.stop_public_mcp_recordings_for_terminal(&request.client_ref, &terminal_ref, cx);
-        self.public_mcp.terminals.remove(&terminal_ref);
+        self.public_mcp.remove_terminal(&terminal_ref);
         self.close_terminal_session(record.session_id, window, cx);
         finish_serialized(
             request,
@@ -743,7 +646,7 @@ impl WorkspaceApp {
         let _ = pane.update(cx, |pane, cx| {
             pane.resize_grid(usize::from(cols), usize::from(rows), cx)
         });
-        self.public_mcp.terminals.insert(
+        self.public_mcp.register_terminal(
             terminal_ref.clone(),
             PublicMcpTerminalRecord {
                 client_ref: request.client_ref.clone(),
@@ -830,20 +733,13 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         self.public_mcp.history.lock().revoke_client(client_ref);
-        let terminal_refs = self
-            .public_mcp
-            .terminals
-            .iter()
-            .filter_map(|(terminal_ref, record)| {
-                (&record.client_ref == client_ref).then_some(terminal_ref.clone())
-            })
-            .collect::<Vec<_>>();
+        let terminal_refs = self.public_mcp.client_terminals(client_ref);
         for terminal_ref in &terminal_refs {
             self.stop_public_mcp_recordings_for_terminal(client_ref, terminal_ref, cx);
         }
         let session_ids = terminal_refs
             .into_iter()
-            .filter_map(|terminal_ref| self.public_mcp.terminals.remove(&terminal_ref))
+            .filter_map(|terminal_ref| self.public_mcp.remove_terminal(&terminal_ref))
             .map(|record| record.session_id)
             .collect::<Vec<_>>();
         let pending_tokens = self
@@ -874,24 +770,12 @@ impl WorkspaceApp {
         session_id: TerminalSessionId,
         cx: &mut Context<Self>,
     ) {
-        let terminal_refs = self
-            .public_mcp
-            .terminals
-            .iter()
-            .filter_map(|(terminal_ref, record)| {
-                (record.session_id == session_id)
-                    .then_some((terminal_ref.clone(), record.client_ref.clone()))
-            })
-            .collect::<Vec<_>>();
+        let terminal_refs = self.public_mcp.terminals_for_session(session_id);
         for (terminal_ref, client_ref) in terminal_refs {
             // A UI-owned pane close revokes only its public handle; an SSH node
             // remains owned by NodeRouter and any other registered consumers.
             self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
-            self.public_mcp
-                .history
-                .lock()
-                .revoke_terminal(&terminal_ref, false);
-            self.public_mcp.terminals.remove(&terminal_ref);
+            self.public_mcp.remove_terminal(&terminal_ref);
         }
     }
 
@@ -900,20 +784,9 @@ impl WorkspaceApp {
         session_id: TerminalSessionId,
         cx: &mut Context<Self>,
     ) {
-        let terminal_refs = self
-            .public_mcp
-            .terminals
-            .iter()
-            .filter_map(|(terminal_ref, record)| {
-                (record.session_id == session_id)
-                    .then_some((terminal_ref.clone(), record.client_ref.clone()))
-            })
-            .collect::<Vec<_>>();
+        let terminal_refs = self.public_mcp.terminals_for_session(session_id);
         for (terminal_ref, client_ref) in terminal_refs {
-            self.public_mcp
-                .history
-                .lock()
-                .revoke_terminal(&terminal_ref, true);
+            self.public_mcp.revoke_terminal_history(&terminal_ref);
             // The public handle stays stable; recordings end at the old shell boundary.
             self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
         }
@@ -932,46 +805,23 @@ impl WorkspaceApp {
         let snapshot = pane.ai_screen_snapshot();
         let alternate_buffer = pane.ai_screen_is_alternate_buffer();
         let session_kind = pane.session_kind();
-        let serial = pane.serial_status().map(|status| {
-            json!({
-                "port_available": status.port_available,
-                "can_reconnect": status.can_reconnect,
-                "data_terminal_ready": status.control_state.data_terminal_ready,
-                "request_to_send": status.control_state.request_to_send,
-            })
-        });
-        let session = pane.shared_session();
-        let session = session.lock();
-        let lifecycle = session.lifecycle();
-        let (lifecycle_name, exit_code) = terminal_lifecycle_projection(&lifecycle);
-        let interactive = session.is_interactive();
-        let buffer_lines = session.buffer_line_count();
-        drop(session);
-        Ok(json!({
-            "terminal_ref": terminal_ref,
-            "transport": record.transport,
-            "title": record.title,
-            "lifecycle": lifecycle_name,
-            "exit_code": exit_code,
-            "interactive": interactive,
-            "cols": snapshot.cols,
-            "rows": snapshot.rows,
-            "buffer_lines": buffer_lines,
-            "alternate_buffer": alternate_buffer,
-            "node_ref": record.node_ref,
-            "serial": serial,
-            "capabilities": {
-                "read": true,
-                "history_read": true,
-                "find": true,
-                "input": interactive,
-                "resize": true,
-                "serial_control": session_kind == TerminalSessionKind::Serial,
-                "telnet_control": session_kind == TerminalSessionKind::Telnet,
-                "process_signals": session_kind == TerminalSessionKind::LocalPty,
-                "node_backed": session_kind == TerminalSessionKind::SshPty,
-            }
-        }))
+        let serial = pane
+            .serial_status()
+            .map(|status| PublicMcpTerminalSerialState {
+                port_available: status.port_available,
+                can_reconnect: status.can_reconnect,
+                data_terminal_ready: status.control_state.data_terminal_ready,
+                request_to_send: status.control_state.request_to_send,
+            });
+        Ok(terminal_projection(
+            &record,
+            terminal_ref,
+            (snapshot.cols, snapshot.rows),
+            alternate_buffer,
+            session_kind,
+            serial,
+            pane.shared_session(),
+        ))
     }
 
     pub(super) fn public_mcp_terminal_pane(
@@ -982,10 +832,7 @@ impl WorkspaceApp {
     ) -> Result<(PublicMcpTerminalRecord, Entity<TerminalPane>), String> {
         let record = self
             .public_mcp
-            .terminals
-            .get(terminal_ref)
-            .filter(|record| &record.client_ref == client_ref)
-            .cloned()
+            .terminal(client_ref, terminal_ref)
             .ok_or_else(|| "The terminal handle is unavailable".to_owned())?;
         let pane = self
             .terminal_pane_for_session(record.session_id, cx)
@@ -1005,51 +852,4 @@ impl WorkspaceApp {
             .get(&location.pane_id)
             .cloned()
     }
-}
-
-fn terminal_lifecycle_projection(lifecycle: &TerminalLifecycle) -> (&'static str, Option<i32>) {
-    match lifecycle {
-        TerminalLifecycle::Running => ("running", None),
-        TerminalLifecycle::Exited(exit_code) => ("exited", *exit_code),
-        TerminalLifecycle::Closed => ("closed", None),
-    }
-}
-
-fn telnet_control(control: PublicTelnetControl) -> TelnetControlCommand {
-    match control {
-        PublicTelnetControl::NoOperation => TelnetControlCommand::NoOperation,
-        PublicTelnetControl::Break => TelnetControlCommand::Break,
-        PublicTelnetControl::InterruptProcess => TelnetControlCommand::InterruptProcess,
-        PublicTelnetControl::AbortOutput => TelnetControlCommand::AbortOutput,
-        PublicTelnetControl::AreYouThere => TelnetControlCommand::AreYouThere,
-        PublicTelnetControl::EraseCharacter => TelnetControlCommand::EraseCharacter,
-        PublicTelnetControl::EraseLine => TelnetControlCommand::EraseLine,
-        PublicTelnetControl::GoAhead => TelnetControlCommand::GoAhead,
-    }
-}
-
-fn bounded_terminal_lines(
-    text: &str,
-    line_limit: usize,
-    tail: bool,
-    byte_limit: usize,
-) -> (Vec<String>, bool) {
-    let all_lines = text.lines().collect::<Vec<_>>();
-    let selected = if tail {
-        &all_lines[all_lines.len().saturating_sub(line_limit)..]
-    } else {
-        &all_lines[..all_lines.len().min(line_limit)]
-    };
-    let mut lines = Vec::with_capacity(selected.len());
-    let mut retained_bytes = 0usize;
-    for line in selected {
-        let next_bytes = line.len().saturating_add(1);
-        if retained_bytes.saturating_add(next_bytes) > byte_limit {
-            break;
-        }
-        lines.push((*line).to_owned());
-        retained_bytes += next_bytes;
-    }
-    let truncated = selected.len() < all_lines.len() || lines.len() < selected.len();
-    (lines, truncated)
 }

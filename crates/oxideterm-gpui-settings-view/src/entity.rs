@@ -404,6 +404,7 @@ pub struct SettingsWorkspaceEntity {
     pub portable_new_password: Zeroizing<String>,
     pub portable_confirm_password: Zeroizing<String>,
     pub settings_focused_input: Option<SettingsInput>,
+    provider_input_draft: Zeroizing<String>,
     pub terminal_triggers: crate::terminal_triggers::TerminalTriggersSettingsState,
     pub highlight: crate::highlight_page::HighlightSettingsState,
     trigger_input_draft: Zeroizing<String>,
@@ -485,6 +486,11 @@ pub struct SettingsWorkspaceEntity {
     keybinding_scope_filter: SettingsKeybindingScopeFilter,
     keybinding_search_query: String,
     pub skill_search_query: String,
+    pub ai_tool_policy_expanded: bool,
+    pub ai_context_windows: crate::ai::context_windows::AiContextWindowState,
+    pub ai_mcp: crate::ai::mcp_draft::McpDraftState,
+    pub ai_acp_expanded: bool,
+    pub ai_subagent_picker_open: bool,
     pub skill_scope_filter: Option<oxideterm_skills::SkillScope>,
     pub expanded_skill_paths: HashSet<PathBuf>,
     pub skill_diagnostics_expanded: bool,
@@ -539,6 +545,7 @@ pub struct ExternalStoreChange {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SettingsWorkspaceEvent {
+    SubmitAiMcp,
     ExternalStoresChanged(ExternalStoreChange),
     ResetNativeUpdateOverlay,
     ShowNativeUpdateNotification,
@@ -604,6 +611,7 @@ impl SettingsWorkspaceEntity {
             portable_new_password: Zeroizing::new(String::new()),
             portable_confirm_password: Zeroizing::new(String::new()),
             settings_focused_input: None,
+            provider_input_draft: Zeroizing::new(String::new()),
             terminal_cjk_font_custom: false,
             ide_cjk_font_custom: false,
             portable_dialog_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
@@ -682,6 +690,11 @@ impl SettingsWorkspaceEntity {
             keybinding_scope_filter: SettingsKeybindingScopeFilter::All,
             keybinding_search_query: String::new(),
             skill_search_query: String::new(),
+            ai_tool_policy_expanded: true,
+            ai_context_windows: Default::default(),
+            ai_mcp: Default::default(),
+            ai_acp_expanded: false,
+            ai_subagent_picker_open: false,
             skill_scope_filter: None,
             expanded_skill_paths: HashSet::new(),
             skill_diagnostics_expanded: false,
@@ -2183,6 +2196,16 @@ impl SettingsWorkspaceEntity {
     }
 
     pub fn settings_entity_input_value(&self, input: SettingsInput) -> Option<&str> {
+        if input.is_ai_mcp() {
+            return self.ai_mcp.input(input);
+        }
+        if crate::ai::providers::is_provider_draft(input) {
+            return Some(if self.settings_focused_input == Some(input) {
+                self.provider_input_draft.as_str()
+            } else {
+                ""
+            });
+        }
         if crate::highlight_page::is_highlight_input(input) {
             return (self.settings_focused_input == Some(input))
                 .then_some(self.highlight.input_draft.as_str());
@@ -2259,6 +2282,9 @@ impl SettingsWorkspaceEntity {
         input: SettingsInput,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.settings_focused_input != Some(input) {
+            self.provider_input_draft.zeroize();
+        }
         if crate::terminal_triggers::is_terminal_trigger_input(input) {
             if !self.terminal_triggers.editor_open {
                 return false;
@@ -2275,6 +2301,7 @@ impl SettingsWorkspaceEntity {
         }
         let portable_open = self.portable_dialog == Some(PortableSettingsDialog::ChangePassword);
         let can_focus = match input {
+            _ if input.is_ai_mcp() => self.ai_mcp.input(input).is_some(),
             SettingsInput::TerminalCommandSpecsJson => self.command_specs_open(),
             SettingsInput::SettingsSearch => self.settings_search_open,
             SettingsInput::CustomThemeName
@@ -2282,6 +2309,7 @@ impl SettingsWorkspaceEntity {
             | SettingsInput::CustomThemeUiColor(_) => self.theme_editor.is_some(),
             SettingsInput::KeybindingSearch => true,
             SettingsInput::SkillSearch => true,
+            SettingsInput::AiProviderApiKey(_) | SettingsInput::AiProviderNewModel(_) => true,
             SettingsInput::PortableCurrentPassword
             | SettingsInput::PortableNewPassword
             | SettingsInput::PortableConfirmPassword => portable_open,
@@ -2331,6 +2359,7 @@ impl SettingsWorkspaceEntity {
 
     pub fn focus_highlight_input(&mut self, input: SettingsInput, value: String, cx: &mut Context<Self>) {
         if self.settings_focused_input != Some(input) {
+            self.provider_input_draft.zeroize();
             self.trigger_input_draft.zeroize();
             self.highlight.input_draft = value;
             self.settings_focused_input = Some(input);
@@ -2351,11 +2380,29 @@ impl SettingsWorkspaceEntity {
     pub fn blur_settings_entity_input(&mut self, cx: &mut Context<Self>) -> bool {
         let changed = self.settings_focused_input.take().is_some();
         if changed {
+            self.provider_input_draft.zeroize();
             self.trigger_input_draft.zeroize();
             self.highlight.input_draft.clear();
             cx.notify();
         }
         changed
+    }
+
+    pub fn take_provider_key(&mut self, input: SettingsInput, cx: &mut Context<Self>) -> Option<Zeroizing<String>> {
+        if !matches!(input, SettingsInput::AiProviderApiKey(_)) || self.settings_focused_input != Some(input) {
+            return None;
+        }
+        self.settings_focused_input = None;
+        let secret = std::mem::take(&mut self.provider_input_draft);
+        cx.notify();
+        (!secret.trim().is_empty()).then_some(secret)
+    }
+
+    pub fn clear_provider_model_draft(&mut self, input: SettingsInput, cx: &mut Context<Self>) {
+        if matches!(input, SettingsInput::AiProviderNewModel(_)) && self.settings_focused_input == Some(input) {
+            self.provider_input_draft.zeroize();
+            cx.notify();
+        }
     }
 
     pub fn replace_settings_entity_input(
@@ -2451,6 +2498,12 @@ impl SettingsWorkspaceEntity {
     }
 
     fn settings_entity_input_mut(&mut self, input: SettingsInput) -> Option<&mut String> {
+        if input.is_ai_mcp() {
+            return self.ai_mcp.input_mut(input);
+        }
+        if crate::ai::providers::is_provider_draft(input) {
+            return Some(&mut self.provider_input_draft);
+        }
         if crate::highlight_page::is_highlight_input(input) {
             return Some(&mut self.highlight.input_draft);
         }

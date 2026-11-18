@@ -163,7 +163,7 @@ impl WorkspaceApp {
         args: &serde_json::Value,
         cx: &App,
     ) -> Result<Vec<oxideterm_ai::RuntimeOwnerKey>, String> {
-        if !self.ai_entity.read(cx).run_accepts_tools(generation)
+        if !self.ai.state.read(cx).run_accepts_tools(generation)
             || !self
                 .ai_runtime_context
                 .read(cx)
@@ -209,7 +209,7 @@ impl WorkspaceApp {
             .collect::<Result<Vec<_>, _>>()?;
         if keys.is_empty() {
             keys.push(
-                self.ai_entity
+                self.ai.state
                     .read(cx)
                     .agents
                     .services
@@ -239,7 +239,7 @@ impl WorkspaceApp {
             let key = lease.lease().resource.clone();
             let node_id = node_id.clone();
             let command_id = command_id.clone();
-            let resources = self.ai_entity.read(cx).agents.services.resources.clone();
+            let resources = self.ai.state.read(cx).agents.services.resources.clone();
             let monitor_key = key.clone();
             let task = cx.spawn(async move |weak, cx| {
                 loop {
@@ -292,9 +292,9 @@ impl WorkspaceApp {
                     });
                     if finished.unwrap_or(true) { break; }
                 }
-                let _ = weak.update(cx, |this, cx| { this.ai_entity.update(cx, |ai, _cx| { ai.agents.command_monitors.remove(&monitor_key); }); });
+                let _ = weak.update(cx, |this, cx| { this.ai.state.update(cx, |ai, _cx| { ai.agents.command_monitors.remove(&monitor_key); }); });
             });
-            self.ai_entity.update(cx, |ai, _cx| {
+            self.ai.state.update(cx, |ai, _cx| {
                 ai.agents.command_monitors.insert(key, task);
             });
         }

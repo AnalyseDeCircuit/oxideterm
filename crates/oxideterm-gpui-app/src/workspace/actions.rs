@@ -538,7 +538,7 @@ mod knowledge_dialog_key_tests {
         });
         let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
         let collection_id = workspace.read_with(cx, |workspace, cx| {
-            let store = workspace.ai_entity.read(cx).rag_store();
+            let store = workspace.ai.state.read(cx).rag_store();
             oxideterm_ai::rag_create_collection(
                 &store,
                 oxideterm_ai::RagCreateCollectionRequest {
@@ -554,7 +554,7 @@ mod knowledge_dialog_key_tests {
             workspace.update(cx, |workspace, cx| {
                 workspace.open_knowledge_workspace_tab(window, cx);
                 workspace.open_knowledge_document_dialog(collection_id.clone(), true, window, cx);
-                workspace.ai_entity.update(cx, |ai, cx| {
+                workspace.knowledge_page(cx).update(cx, |ai, cx| {
                     assert!(ai.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
                     assert!(ai.replace_settings_input(
                         SettingsInput::KnowledgeDocumentTitle,
@@ -572,11 +572,11 @@ mod knowledge_dialog_key_tests {
         workspace.read_with(cx, |workspace, cx| {
             assert!(
                 !workspace
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_document_dialog_open()
             );
-            let store = workspace.ai_entity.read(cx).rag_store();
+            let store = workspace.knowledge_page(cx).read(cx).rag_store();
             let documents =
                 oxideterm_ai::rag_list_documents(&store, &collection_id, None, None).unwrap();
             assert_eq!(documents.documents.len(), 1);
@@ -586,7 +586,7 @@ mod knowledge_dialog_key_tests {
         cx.update(|window, cx| {
             workspace.update(cx, |workspace, cx| {
                 workspace.open_knowledge_document_dialog(collection_id.clone(), true, window, cx);
-                workspace.ai_entity.update(cx, |ai, cx| {
+                workspace.knowledge_page(cx).update(cx, |ai, cx| {
                     assert!(ai.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
                 });
             });
@@ -597,7 +597,7 @@ mod knowledge_dialog_key_tests {
         workspace.read_with(cx, |workspace, cx| {
             assert!(
                 workspace
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_document_dialog_open()
             );
@@ -605,7 +605,7 @@ mod knowledge_dialog_key_tests {
 
         cx.update(|_window, cx| {
             workspace.update(cx, |workspace, cx| {
-                workspace.ai_entity.update(cx, |ai, cx| {
+                workspace.knowledge_page(cx).update(cx, |ai, cx| {
                     assert!(ai.replace_settings_input(
                         SettingsInput::KnowledgeDocumentTitle,
                         Some(0..0),
@@ -625,16 +625,16 @@ mod knowledge_dialog_key_tests {
         workspace.read_with(cx, |workspace, cx| {
             assert!(
                 workspace
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_document_dialog_open()
             );
-            let store = workspace.ai_entity.read(cx).rag_store();
+            let store = workspace.knowledge_page(cx).read(cx).rag_store();
             let documents =
                 oxideterm_ai::rag_list_documents(&store, &collection_id, None, None).unwrap();
             assert_eq!(documents.documents.len(), 1);
             assert_eq!(
-                workspace.ai_entity.read(cx).focused_settings_input(),
+                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle),
                 "a modified Enter must keep focus in the dialog input"
             );
@@ -649,7 +649,7 @@ mod knowledge_dialog_key_tests {
                 workspace.standard_confirm_focus_owner(),
                 Some(ConfirmDialogAction::Cancel)
             );
-            assert_eq!(workspace.ai_entity.read(cx).focused_settings_input(), None);
+            assert_eq!(workspace.knowledge_page(cx).read(cx).focused_settings_input(), None);
         });
         cx.simulate_keystrokes("tab");
         cx.run_until_parked();
@@ -664,7 +664,7 @@ mod knowledge_dialog_key_tests {
         workspace.read_with(cx, |workspace, cx| {
             assert_eq!(workspace.standard_confirm_focus_owner(), None);
             assert_eq!(
-                workspace.ai_entity.read(cx).focused_settings_input(),
+                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle)
             );
         });
@@ -675,7 +675,7 @@ mod knowledge_dialog_key_tests {
                 workspace.standard_confirm_focus_owner(),
                 Some(ConfirmDialogAction::Confirm)
             );
-            assert_eq!(workspace.ai_entity.read(cx).focused_settings_input(), None);
+            assert_eq!(workspace.knowledge_page(cx).read(cx).focused_settings_input(), None);
         });
         cx.simulate_keystrokes("shift-tab");
         cx.run_until_parked();
@@ -689,7 +689,7 @@ mod knowledge_dialog_key_tests {
         cx.run_until_parked();
         workspace.read_with(cx, |workspace, cx| {
             assert_eq!(
-                workspace.ai_entity.read(cx).focused_settings_input(),
+                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle)
             );
             assert_eq!(workspace.standard_confirm_focus_owner(), None);
@@ -699,7 +699,7 @@ mod knowledge_dialog_key_tests {
         // input instead of leaving neither the input nor the footer focused.
         cx.update(|_window, cx| {
             workspace.update(cx, |workspace, cx| {
-                workspace.ai_entity.update(cx, |ai, cx| {
+                workspace.knowledge_page(cx).update(cx, |ai, cx| {
                     assert!(ai.replace_settings_input(
                         SettingsInput::KnowledgeDocumentTitle,
                         Some(0..6),
@@ -716,12 +716,12 @@ mod knowledge_dialog_key_tests {
         workspace.read_with(cx, |workspace, cx| {
             assert!(
                 workspace
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_document_dialog_open()
             );
             assert_eq!(
-                workspace.ai_entity.read(cx).focused_settings_input(),
+                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
                 Some(SettingsInput::KnowledgeDocumentTitle),
                 "an empty title must keep keyboard ownership in the input"
             );
@@ -733,13 +733,13 @@ mod knowledge_dialog_key_tests {
         workspace.read_with(cx, |workspace, cx| {
             assert!(
                 !workspace
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_document_dialog_open()
             );
             assert!(
                 workspace
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .focused_settings_input()
                     .is_none()
@@ -767,7 +767,7 @@ mod knowledge_dialog_key_tests {
         // being swallowed with the input focused.
         cx.update(|window, cx| {
             workspace.update(cx, |workspace, cx| {
-                workspace.ai_entity.update(cx, |ai, cx| {
+                workspace.knowledge_page(cx).update(cx, |ai, cx| {
                     assert!(ai.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx));
                     assert!(
                         !ai.knowledge_document_dialog_open(),
@@ -783,7 +783,7 @@ mod knowledge_dialog_key_tests {
 
         workspace.read_with(cx, |workspace, cx| {
             assert_eq!(
-                workspace.ai_entity.read(cx).focused_settings_input(),
+                workspace.knowledge_page(cx).read(cx).focused_settings_input(),
                 None,
                 "Escape must release the focused dialog input"
             );
@@ -825,7 +825,7 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Control,
         );
-        let (started, effect) = self.ai_entity.update(cx, |ai, cx| {
+        let (started, effect) = self.ai.state.update(cx, |ai, cx| {
             ai.begin_chat_confirm_exit(confirmed, delay, cx)
         });
         if let Some(effect) = effect {
@@ -1428,7 +1428,7 @@ impl WorkspaceApp {
         }
 
         let terminal_panel_open = self.focused_search_pane(cx).is_some()
-            || self.ai_entity.read(cx).terminal_inline_panel().open
+            || self.ai.state.read(cx).terminal_inline_panel().open
             || self.context_sidebar_visible();
         if !crate::keybindings::action_allowed_by_terminal_behavior(
             definition,
@@ -1549,7 +1549,7 @@ impl WorkspaceApp {
             self.close_search(window, cx);
             return;
         }
-        if self.ai_entity.read(cx).terminal_inline_panel().open {
+        if self.ai.state.read(cx).terminal_inline_panel().open {
             self.close_terminal_ai_inline_panel(window, cx);
             return;
         }
@@ -1920,7 +1920,7 @@ impl WorkspaceApp {
                 .read(cx)
                 .settings_entity_focused_input()
                 .is_some()
-            || self.ai_entity.read(cx).focused_settings_input().is_some()
+            || self.knowledge_page(cx).read(cx).focused_settings_input().is_some()
         {
             let _ = self.handle_settings_input_key(event, cx);
             return;
@@ -1956,8 +1956,8 @@ impl WorkspaceApp {
         }
 
         if self.ai_sidebar_visible()
-            && (self.ai_entity.read(cx).chat_ui().input_focused
-                || self.ai_entity.read(cx).model_selector_search_focused())
+            && (self.ai.state.read(cx).chat_ui().input_focused
+                || self.ai.state.read(cx).model_selector_search_focused())
         {
             let _ = self.handle_ai_sidebar_key(event, cx);
             return;
@@ -2255,7 +2255,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.ai_entity.read(cx).knowledge_create_dialog_open() {
+        if !self.knowledge_page(cx).read(cx).knowledge_create_dialog_open() {
             return false;
         }
         let Some(action) = self.knowledge_dialog_input_key_action(
@@ -2271,7 +2271,7 @@ impl WorkspaceApp {
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::FocusInput => {
-                self.ai_entity.update(cx, |entity, cx| {
+                self.knowledge_page(cx).update(cx, |entity, cx| {
                     entity.focus_settings_input(SettingsInput::KnowledgeCollectionName, cx);
                 });
                 self.clear_standard_confirm_focus();
@@ -2292,7 +2292,7 @@ impl WorkspaceApp {
                     return true;
                 }
                 if self
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_new_collection_name()
                     .trim()
@@ -2301,7 +2301,7 @@ impl WorkspaceApp {
                     // The primary action is disabled for an empty value; return
                     // keyboard ownership to the input instead of leaving neither
                     // the input nor the footer focused.
-                    self.ai_entity.update(cx, |entity, cx| {
+                    self.knowledge_page(cx).update(cx, |entity, cx| {
                         entity.focus_settings_input(SettingsInput::KnowledgeCollectionName, cx);
                     });
                     self.reset_standard_confirm_focus();
@@ -2321,7 +2321,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.ai_entity.read(cx).knowledge_document_dialog_open() {
+        if !self.knowledge_page(cx).read(cx).knowledge_document_dialog_open() {
             return false;
         }
         let Some(action) = self.knowledge_dialog_input_key_action(
@@ -2337,7 +2337,7 @@ impl WorkspaceApp {
                 true
             }
             browser_behavior::ModalFooterInputKeyAction::FocusInput => {
-                self.ai_entity.update(cx, |entity, cx| {
+                self.knowledge_page(cx).update(cx, |entity, cx| {
                     entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx);
                 });
                 self.clear_standard_confirm_focus();
@@ -2358,7 +2358,7 @@ impl WorkspaceApp {
                     return true;
                 }
                 if self
-                    .ai_entity
+                    .knowledge_page(cx)
                     .read(cx)
                     .knowledge_new_document_title()
                     .trim()
@@ -2367,7 +2367,7 @@ impl WorkspaceApp {
                     // The primary action is disabled for an empty value; return
                     // keyboard ownership to the input instead of leaving neither
                     // the input nor the footer focused.
-                    self.ai_entity.update(cx, |entity, cx| {
+                    self.knowledge_page(cx).update(cx, |entity, cx| {
                         entity.focus_settings_input(SettingsInput::KnowledgeDocumentTitle, cx);
                     });
                     self.reset_standard_confirm_focus();
@@ -2392,7 +2392,7 @@ impl WorkspaceApp {
         if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
             return None;
         }
-        let input_focused = self.ai_entity.read(cx).focused_settings_input() == Some(input);
+        let input_focused = self.knowledge_page(cx).read(cx).focused_settings_input() == Some(input);
         browser_behavior::modal_footer_input_key_action(
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
@@ -2409,7 +2409,7 @@ impl WorkspaceApp {
         &mut self,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.blur_settings_input(cx);
         });
         self.ime_marked_text = None;
@@ -2423,14 +2423,14 @@ impl WorkspaceApp {
     /// the dialog disappears on the same frame the key is handled.
     fn dismiss_knowledge_collection_dialog(&mut self, cx: &mut Context<Self>) {
         self.clear_knowledge_dialog_input_state(cx);
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.close_knowledge_create_dialog(Duration::ZERO, cx);
         });
     }
 
     fn dismiss_knowledge_document_dialog(&mut self, cx: &mut Context<Self>) {
         self.clear_knowledge_dialog_input_state(cx);
-        self.ai_entity.update(cx, |entity, cx| {
+        self.knowledge_page(cx).update(cx, |entity, cx| {
             entity.close_knowledge_document_dialog(Duration::ZERO, cx);
         });
     }
@@ -2440,12 +2440,12 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.ai_entity.read(cx).knowledge_delete_confirm().is_none() {
+        if self.knowledge_page(cx).read(cx).knowledge_delete_confirm().is_none() {
             return false;
         }
         match self.handle_standard_confirm_key(event, cx) {
             Some(ConfirmKeyboardAction::Cancel) => {
-                self.ai_entity.update(cx, |entity, cx| {
+                self.knowledge_page(cx).update(cx, |entity, cx| {
                     entity.clear_knowledge_delete_confirm();
                     cx.notify();
                 });
@@ -2577,11 +2577,11 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.ai_entity.read(cx).chat_ui().safety_confirm_open {
+        if !self.ai.state.read(cx).chat_ui().safety_confirm_open {
             return false;
         }
         if self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .safety_confirm_presence
@@ -2612,11 +2612,11 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.ai_entity.read(cx).chat_ui().summarize_confirm_open {
+        if !self.ai.state.read(cx).chat_ui().summarize_confirm_open {
             return false;
         }
         if self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .summarize_confirm_presence
@@ -2647,7 +2647,7 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let key_action = self.ai_entity.update(cx, |ai, cx| {
+        let key_action = self.ai.state.update(cx, |ai, cx| {
             ai.handle_chat_confirm_key(
                 event.keystroke.key.as_str(),
                 event.keystroke.modifiers.shift,

@@ -950,13 +950,20 @@ pub fn terminal_semantic_color(
     class: SemanticClass,
     semantic_scheme: &CompiledSemanticScheme,
 ) -> u32 {
+    terminal_semantic_color_from_palette(theme.tokens.terminal, class, semantic_scheme)
+}
+
+pub(crate) fn terminal_semantic_color_from_palette(
+    terminal: oxideterm_theme::TerminalTheme,
+    class: SemanticClass,
+    semantic_scheme: &CompiledSemanticScheme,
+) -> u32 {
     if let Some(color) = semantic_scheme
         .color(class)
         .and_then(|color| u32::from_str_radix(color.strip_prefix('#')?, 16).ok())
     {
         return color;
     }
-    let terminal = theme.tokens.terminal;
     match class {
         SemanticClass::Command => terminal.green,
         SemanticClass::Keyword => terminal.bright_magenta,
@@ -990,10 +997,23 @@ pub fn terminal_semantic_variant_color(
     style_variant: Option<u8>,
     semantic_scheme: &CompiledSemanticScheme,
 ) -> u32 {
+    terminal_semantic_variant_color_from_palette(
+        theme.tokens.terminal,
+        class,
+        style_variant,
+        semantic_scheme,
+    )
+}
+
+pub(crate) fn terminal_semantic_variant_color_from_palette(
+    terminal: oxideterm_theme::TerminalTheme,
+    class: SemanticClass,
+    style_variant: Option<u8>,
+    semantic_scheme: &CompiledSemanticScheme,
+) -> u32 {
     let Some(depth) = style_variant.filter(|_| class == SemanticClass::Operator) else {
-        return terminal_semantic_color(theme, class, semantic_scheme);
+        return terminal_semantic_color_from_palette(terminal, class, semantic_scheme);
     };
-    let terminal = theme.tokens.terminal;
     // Six terminal-theme colors keep nested delimiters distinct without creating a second palette.
     match depth % NESTED_SEMANTIC_COLOR_COUNT {
         0 => terminal.yellow,
@@ -1010,16 +1030,20 @@ pub fn terminal_semantic_line_band(
     theme: &TerminalUiTheme,
     class: SemanticClass,
 ) -> Option<(u32, f32)> {
+    terminal_semantic_line_band_from_colors(theme.tokens.ui.error, theme.tokens.ui.warning, class)
+}
+
+pub(crate) fn terminal_semantic_line_band_from_colors(
+    error_color: u32,
+    warning_color: u32,
+    class: SemanticClass,
+) -> Option<(u32, f32)> {
     // Low-opacity bands retain the original terminal background and keep token text dominant.
     match class {
-        SemanticClass::Error => Some((
-            theme.tokens.ui.error,
-            TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY,
-        )),
-        SemanticClass::Warning => Some((
-            theme.tokens.ui.warning,
-            TERMINAL_SEMANTIC_WARNING_LINE_BAND_OPACITY,
-        )),
+        SemanticClass::Error => Some((error_color, TERMINAL_SEMANTIC_ERROR_LINE_BAND_OPACITY)),
+        SemanticClass::Warning => {
+            Some((warning_color, TERMINAL_SEMANTIC_WARNING_LINE_BAND_OPACITY))
+        }
         _ => None,
     }
 }
@@ -1195,19 +1219,40 @@ pub(crate) fn terminal_color_to_hsla(color: TerminalColor) -> Hsla {
     .into()
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
+pub(crate) enum TerminalTransitionColorKey {
+    Static,
+    TerminalBackground,
+    DefaultForeground,
+    DefaultDimForeground,
+    CursorBackground,
+    SelectionBackground,
+    PaletteColor(TerminalColor),
+}
+
 /// Maps already-resolved target snapshot colors to their mid-transition colors so
 /// the terminal view can animate cleanly after a single backend `set_palette`.
 #[derive(Clone, Copy)]
 pub(crate) struct TerminalTransitionColors {
     pub(crate) target_background: TerminalColor,
+    pub(crate) target_background_hsla: Hsla,
     pub(crate) target_foreground: TerminalColor,
+    pub(crate) target_foreground_hsla: Hsla,
     pub(crate) target_dim_foreground: TerminalColor,
-    pub(crate) interpolated_background: Hsla,
+    pub(crate) target_dim_foreground_hsla: Hsla,
+    pub(crate) target_header_foreground: Hsla,
+    pub(crate) target_selection_background: Hsla,
     pub(crate) interpolated_foreground: Hsla,
     pub(crate) interpolated_dim_foreground: Hsla,
+    pub(crate) interpolated_header_foreground: Hsla,
+    pub(crate) interpolated_selection_background: Hsla,
     pub(crate) ansi_pairs: [(TerminalColor, Hsla); 16],
     pub(crate) dim_ansi_pairs: [(TerminalColor, Hsla); 8],
-    pub(crate) signature: u64,
+    pub(crate) target_terminal: oxideterm_theme::TerminalTheme,
+    pub(crate) target_ui_error: u32,
+    pub(crate) target_ui_warning: u32,
+    /// Constant across the entire transition so `TerminalLayoutCache` keeps row layouts warm.
+    pub(crate) layout_signature: u64,
 }
 
 impl TerminalTransitionColors {
@@ -1220,31 +1265,45 @@ impl TerminalTransitionColors {
         let t = progress.clamp(0.0, 1.0);
         let from_fg = terminal_color_from_hex(from.foreground);
         let to_fg = terminal_color_from_hex(to.foreground);
+        let to_bg = terminal_color_from_hex(to.background);
+        let to_dim_fg = dim_terminal_color(to_fg);
         let from_ansi = terminal_theme_ansi_colors(from.tokens.terminal);
         let to_ansi = terminal_theme_ansi_colors(to.tokens.terminal);
         let interp_ansi = terminal_theme_ansi_colors(interpolated.tokens.terminal);
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        t.to_bits().hash(&mut hasher);
-        from.background.hash(&mut hasher);
-        to.background.hash(&mut hasher);
-        from.foreground.hash(&mut hasher);
-        to.foreground.hash(&mut hasher);
+        let mut layout_hasher = std::collections::hash_map::DefaultHasher::new();
+        from.background.hash(&mut layout_hasher);
+        to.background.hash(&mut layout_hasher);
+        from.foreground.hash(&mut layout_hasher);
+        to.foreground.hash(&mut layout_hasher);
+        from.header_foreground.hash(&mut layout_hasher);
+        to.header_foreground.hash(&mut layout_hasher);
+        to.selection_background.hash(&mut layout_hasher);
+        from_ansi.hash(&mut layout_hasher);
+        to_ansi.hash(&mut layout_hasher);
 
         Self {
-            target_background: terminal_color_from_hex(to.background),
+            target_background: to_bg,
+            target_background_hsla: terminal_color_to_hsla(to_bg),
             target_foreground: to_fg,
-            target_dim_foreground: dim_terminal_color(to_fg),
-            interpolated_background: terminal_color_to_hsla(terminal_color_from_hex(
-                interpolated.background,
+            target_foreground_hsla: terminal_color_to_hsla(to_fg),
+            target_dim_foreground: to_dim_fg,
+            target_dim_foreground_hsla: terminal_color_to_hsla(to_dim_fg),
+            target_header_foreground: terminal_color_to_hsla(terminal_color_from_hex(
+                to.header_foreground,
             )),
+            target_selection_background: to.selection_background,
             interpolated_foreground: terminal_color_to_hsla(terminal_color_from_hex(
                 interpolated.foreground,
             )),
             interpolated_dim_foreground: terminal_color_to_hsla(lerp_terminal_color(
                 dim_terminal_color(from_fg),
-                dim_terminal_color(to_fg),
+                to_dim_fg,
                 t,
             )),
+            interpolated_header_foreground: terminal_color_to_hsla(terminal_color_from_hex(
+                interpolated.header_foreground,
+            )),
+            interpolated_selection_background: interpolated.selection_background,
             ansi_pairs: std::array::from_fn(|index| {
                 (to_ansi[index], terminal_color_to_hsla(interp_ansi[index]))
             }),
@@ -1259,7 +1318,10 @@ impl TerminalTransitionColors {
                     terminal_color_to_hsla(interpolated_dim),
                 )
             }),
-            signature: hasher.finish(),
+            target_terminal: to.tokens.terminal,
+            target_ui_error: to.tokens.ui.error,
+            target_ui_warning: to.tokens.ui.warning,
+            layout_signature: layout_hasher.finish(),
         }
     }
 
@@ -1268,6 +1330,27 @@ impl TerminalTransitionColors {
             .iter()
             .chain(&self.dim_ansi_pairs)
             .find_map(|&(target, interpolated)| (target == color).then_some(interpolated))
+    }
+
+    pub(crate) fn resolve_row_color(
+        &self,
+        key: TerminalTransitionColorKey,
+        static_color: Hsla,
+        live_terminal_background: Hsla,
+    ) -> Hsla {
+        match key {
+            TerminalTransitionColorKey::Static => static_color,
+            TerminalTransitionColorKey::TerminalBackground => live_terminal_background,
+            TerminalTransitionColorKey::DefaultForeground => self.interpolated_foreground,
+            TerminalTransitionColorKey::DefaultDimForeground => self.interpolated_dim_foreground,
+            TerminalTransitionColorKey::CursorBackground => self.interpolated_header_foreground,
+            TerminalTransitionColorKey::SelectionBackground => {
+                self.interpolated_selection_background
+            }
+            TerminalTransitionColorKey::PaletteColor(color) => {
+                self.map_ansi_color(color).unwrap_or(static_color)
+            }
+        }
     }
 }
 

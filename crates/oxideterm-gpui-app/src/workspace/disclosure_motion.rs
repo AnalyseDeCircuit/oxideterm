@@ -251,7 +251,7 @@ impl WorkspaceApp {
         default_expanded: bool,
         cx: &mut Context<Self>,
     ) {
-        let expanded = self.ai_entity.update(cx, |ai, _| {
+        let expanded = self.ai.state.update(cx, |ai, _| {
             ai.toggle_thinking_expansion(key.clone(), default_expanded);
             ai.chat_ui()
                 .thinking_expansion_state
@@ -263,7 +263,7 @@ impl WorkspaceApp {
     }
 
     pub(super) fn toggle_ai_tool_with_motion(&mut self, key: String, cx: &mut Context<Self>) {
-        let expanded = self.ai_entity.update(cx, |ai, _| {
+        let expanded = self.ai.state.update(cx, |ai, _| {
             ai.toggle_tool_call_expansion(key.clone());
             ai.chat_ui().tool_call_expansion_state.contains(&key)
         });

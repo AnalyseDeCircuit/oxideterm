@@ -677,7 +677,7 @@ impl WorkspaceApp {
         &self,
         cx: &App,
     ) -> AiModelBackendServices {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         let settings = self.settings_store.settings();
         AiModelBackendServices {
             rag_store: ai.rag_store(),
@@ -849,7 +849,7 @@ impl WorkspaceApp {
         approved: bool,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.resolve_tool_approval(generation, &tool_call_id, approved);
         });
         cx.notify();
@@ -862,10 +862,10 @@ impl WorkspaceApp {
         option_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.resolve_acp_permission_choice(generation, &tool_call_id, option_id);
         });
-        self.acp_entity.update(cx, |entity, _cx| {
+        self.ai.acp.update(cx, |entity, _cx| {
             entity.remove_file_write_preview(&tool_call_id);
         });
         cx.notify();
@@ -878,7 +878,7 @@ impl WorkspaceApp {
         selected_index: Option<usize>,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.resolve_tool_candidate_selection(generation, &tool_call_id, selected_index);
         });
         cx.notify();
@@ -1379,7 +1379,7 @@ impl WorkspaceApp {
             .entry(conversation_id.to_string())
             .or_default()
             .insert(skill_id.to_string(), content_hash.to_string());
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             let Some(conversation) = ai
                 .conversation_state_mut()
                 .conversations
@@ -1418,7 +1418,7 @@ impl WorkspaceApp {
             .and_then(|skills| skills.get(skill_id))
             .cloned()
             .or_else(|| {
-                self.ai_entity
+                self.ai.state
                     .read(cx)
                     .conversation_state()
                     .conversations
@@ -1519,7 +1519,7 @@ impl WorkspaceApp {
                         "read",
                     );
                 };
-                let rag_store = self.ai_entity.read(cx).rag_store();
+                let rag_store = self.ai.state.read(cx).rag_store();
                 let results = oxideterm_ai::rag_search(
                     &rag_store,
                     oxideterm_ai::RagSearchRequest {
@@ -2611,7 +2611,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let execution_leases = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .agents
             .tool_leases
@@ -2979,9 +2979,9 @@ impl WorkspaceApp {
                 let wait_state = if recovering { "waiting_connection" } else if waiting_for_secret { "waiting_user" } else { "waiting_condition" };
                 if wait_state != previous_wait_state {
                     let _ = weak.update(cx, |this, cx| {
-                        if let Some(run) = this.ai_entity.read(cx).agent_run(owner.generation) {
+                        if let Some(run) = this.ai.state.read(cx).agent_run(owner.generation) {
                             let state = if recovering { AgentState::AwaitingConnection } else if waiting_for_secret { AgentState::AwaitingUser } else { AgentState::AwaitingCondition };
-                            let _ = this.ai_entity.read(cx).agents.services.runtime.set_state(&run, state);
+                            let _ = this.ai.state.read(cx).agents.services.runtime.set_state(&run, state);
                         }
                         this.apply_ai_tool_status(owner.generation,
                         &owner.conversation_id, &owner.assistant_id, &tool_call_id, &tool_name, &owner.arguments, wait_state,

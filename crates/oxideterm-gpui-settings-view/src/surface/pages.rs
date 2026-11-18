@@ -7,6 +7,7 @@ use oxideterm_settings_model::SettingsSectionId;
 use oxideterm_terminal::ShellInfo;
 
 use crate::{
+    ai::{AiSkillAction, AiSkillData, skills::AiSkillsPage},
     app_lock_page::{AppLockDialog, render_app_lock_settings},
     appearance_page::{AppearanceAction, AppearancePageData},
     background_page::{BackgroundPage, BackgroundRequest},
@@ -61,6 +62,13 @@ pub struct TriggerPageRuntime<'a> {
 }
 
 pub enum SettingsPageData<'a> {
+    AiBasic,
+    AiContext,
+    AiContextWindows(crate::components::SettingsControlsSource),
+    AiProviders(Entity<crate::ai::providers::AiProviderSettingsView>),
+    AiMcp(Entity<crate::ai::mcp::AiMcpSettingsView>),
+    AiSubagents,
+    AiSkills(AiSkillData),
     Connections(&'a ConnectionStore, Option<ConfirmDialogAction>),
     Credentials(&'a ConnectionStore),
     KnownHosts,
@@ -101,6 +109,7 @@ pub enum SettingsPageData<'a> {
 }
 
 pub enum SettingsPageAction<'a> {
+    AiSkills(AiSkillAction),
     Connection(ConnectionRequest),
     Credential(CredentialRequest),
     OpenKnownHostsFile(&'a Path),
@@ -192,6 +201,26 @@ impl SettingsPageFrame<'_> {
         } = self;
         let scroll = |key: &str| scroll(key, cx);
         Some(match data {
+            SettingsPageData::AiBasic => crate::ai::basic::basic_section(&controls, section, cx),
+            SettingsPageData::AiProviders(view) => view.into_any_element(),
+            SettingsPageData::AiMcp(view) => view.into_any_element(),
+            SettingsPageData::AiSubagents => crate::ai::subagents::render(&controls, state, cx),
+            SettingsPageData::AiContext => {
+                crate::ai::context::AiContextPage { controls, state }.render(section, cx)
+            }
+            SettingsPageData::AiContextWindows(source) => {
+                crate::ai::context_windows::render(&controls, state, source, cx)
+            }
+            SettingsPageData::AiSkills(data) => {
+                let enabled = controls.settings.ai.enabled;
+                let page = AiSkillsPage {
+                    controls,
+                    state,
+                    data,
+                    dispatch: Rc::new(move |request, cx| action(SettingsPageAction::AiSkills(request), cx)),
+                };
+                crate::ai::available(page.render(cx), enabled)
+            }
             SettingsPageData::Connections(store, footer_focus) => {
                 let page = ConnectionPage {
                     controls,

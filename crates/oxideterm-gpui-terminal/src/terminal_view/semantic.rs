@@ -14,20 +14,50 @@ use oxideterm_terminal_semantic::{
     SemanticScheme, built_in_scheme_document, compile_scheme_document, compiled_builtin_scheme,
 };
 
+#[cfg(test)]
+use crate::terminal_ui::TerminalUiTheme;
 use crate::terminal_ui::{
-    TerminalUiTheme, terminal_color_from_hex, terminal_semantic_color, terminal_semantic_line_band,
-    terminal_semantic_variant_color,
+    terminal_color_from_hex, terminal_semantic_color_from_palette,
+    terminal_semantic_line_band_from_colors, terminal_semantic_variant_color_from_palette,
 };
 use crate::terminal_view::element::{TerminalRect, to_hsla};
 use crate::terminal_view::highlight::{
-    TerminalHighlightLayout, build_logical_line, logical_line_range,
+    TerminalHighlightForeground, TerminalHighlightLayout, build_logical_line, logical_line_range,
 };
 
+#[cfg(test)]
 pub(super) fn append_terminal_semantics_for_rows(
     snapshot: &TerminalSnapshot,
     command_marks: &[TerminalCommandMark],
     rows: Range<usize>,
     theme: &TerminalUiTheme,
+    semantic_scheme: &CompiledSemanticScheme,
+    semantic_shell: SemanticShellDialect,
+    layout: &mut TerminalHighlightLayout,
+    cached_spans: Option<&[SemanticSpan]>,
+) {
+    append_terminal_semantics_with_palette(
+        snapshot,
+        command_marks,
+        rows,
+        theme.tokens.terminal,
+        theme.tokens.ui.error,
+        theme.tokens.ui.warning,
+        semantic_scheme,
+        semantic_shell,
+        layout,
+        cached_spans,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(super) fn append_terminal_semantics_with_palette(
+    snapshot: &TerminalSnapshot,
+    command_marks: &[TerminalCommandMark],
+    rows: Range<usize>,
+    terminal_palette: oxideterm_theme::TerminalTheme,
+    ui_error: u32,
+    ui_warning: u32,
     semantic_scheme: &CompiledSemanticScheme,
     semantic_shell: SemanticShellDialect,
     layout: &mut TerminalHighlightLayout,
@@ -82,7 +112,14 @@ pub(super) fn append_terminal_semantics_for_rows(
         if let Some(emphasis) = semantic_line_emphasis(text, role)
             && spans.iter().any(|span| span.class == emphasis)
         {
-            append_semantic_line_band(snapshot, line_range, theme, emphasis, layout);
+            append_semantic_line_band(
+                snapshot,
+                line_range,
+                ui_error,
+                ui_warning,
+                emphasis,
+                layout,
+            );
         }
         for span in spans {
             let start = columns.partition_point(|&(byte, _, _)| byte < span.range.start);
@@ -92,15 +129,20 @@ pub(super) fn append_terminal_semantics_for_rows(
                     .bytes()
                     .take_while(|&b| b == b'-')
                     .count();
-            let foreground = semantic_foreground_for_variant(
-                theme,
+            let foreground = semantic_foreground_for_variant_in_palette(
+                terminal_palette,
                 span.class,
                 span.style_variant,
                 semantic_scheme,
             );
             let operator_foreground =
-                matches!(span.class, SemanticClass::Timestamp | SemanticClass::Option)
-                    .then(|| semantic_foreground(theme, SemanticClass::Operator, semantic_scheme));
+                matches!(span.class, SemanticClass::Timestamp | SemanticClass::Option).then(|| {
+                    semantic_foreground_in_palette(
+                        terminal_palette,
+                        SemanticClass::Operator,
+                        semantic_scheme,
+                    )
+                });
             for &(byte, row, col) in &columns[start..end] {
                 let ch = text[byte..].chars().next().unwrap();
                 let class = semantic_component_class(span.class, ch, byte < option_prefix_end);
@@ -134,12 +176,14 @@ pub(super) fn append_terminal_semantics_for_rows(
 fn append_semantic_line_band(
     snapshot: &TerminalSnapshot,
     rows: Range<usize>,
-    theme: &TerminalUiTheme,
+    ui_error: u32,
+    ui_warning: u32,
     class: SemanticClass,
     layout: &mut TerminalHighlightLayout,
 ) {
     // Bands are intentionally quieter than token colors and remain behind selection/search paint.
-    let Some((color, opacity)) = terminal_semantic_line_band(theme, class) else {
+    let Some((color, opacity)) = terminal_semantic_line_band_from_colors(ui_error, ui_warning, class)
+    else {
         return;
     };
     let existing_background_overlaps = layout
@@ -223,23 +267,49 @@ pub(super) fn semantic_line_role_for_rows(
     SemanticLineRole::Unknown
 }
 
+#[cfg(test)]
 fn semantic_foreground(
     theme: &TerminalUiTheme,
     class: SemanticClass,
     semantic_scheme: &CompiledSemanticScheme,
-) -> gpui::Hsla {
-    let color = terminal_semantic_color(theme, class, semantic_scheme);
-    to_hsla(terminal_color_from_hex(color))
+) -> TerminalHighlightForeground {
+    semantic_foreground_in_palette(theme.tokens.terminal, class, semantic_scheme)
 }
 
-fn semantic_foreground_for_variant(
-    theme: &TerminalUiTheme,
+fn semantic_foreground_in_palette(
+    terminal: oxideterm_theme::TerminalTheme,
+    class: SemanticClass,
+    semantic_scheme: &CompiledSemanticScheme,
+) -> TerminalHighlightForeground {
+    let hex = terminal_semantic_color_from_palette(terminal, class, semantic_scheme);
+    let color = terminal_color_from_hex(hex);
+    let ansi_color = semantic_scheme.color(class).is_none().then_some(color);
+    TerminalHighlightForeground {
+        color: to_hsla(color),
+        ansi_color,
+    }
+}
+
+fn semantic_foreground_for_variant_in_palette(
+    terminal: oxideterm_theme::TerminalTheme,
     class: SemanticClass,
     style_variant: Option<u8>,
     semantic_scheme: &CompiledSemanticScheme,
-) -> gpui::Hsla {
-    let color = terminal_semantic_variant_color(theme, class, style_variant, semantic_scheme);
-    to_hsla(terminal_color_from_hex(color))
+) -> TerminalHighlightForeground {
+    if style_variant.is_some() && class == SemanticClass::Operator {
+        let hex = terminal_semantic_variant_color_from_palette(
+            terminal,
+            class,
+            style_variant,
+            semantic_scheme,
+        );
+        let color = terminal_color_from_hex(hex);
+        return TerminalHighlightForeground {
+            color: to_hsla(color),
+            ansi_color: Some(color),
+        };
+    }
+    semantic_foreground_in_palette(terminal, class, semantic_scheme)
 }
 
 #[cfg(test)]
@@ -253,6 +323,7 @@ mod tests {
     use oxideterm_theme::{ThemeTokens, theme_by_id};
 
     use super::*;
+    use crate::terminal_ui::terminal_semantic_line_band;
 
     fn cell(ch: char, foreground_explicit: bool) -> TerminalCell {
         styled_cell(ch, foreground_explicit, false)
@@ -574,7 +645,9 @@ mod tests {
     fn semantic_colors_do_not_replace_manual_foregrounds() {
         let snapshot = snapshot("failed", 0..0);
         let mut layout = TerminalHighlightLayout::empty();
-        let manual_color = to_hsla(terminal_color_from_hex(0x123456));
+        let manual_color = TerminalHighlightForeground::static_color(to_hsla(
+            terminal_color_from_hex(0x123456),
+        ));
         layout.foregrounds.insert((0, 0), manual_color);
 
         append_terminal_semantics_for_rows(
@@ -624,7 +697,7 @@ mod tests {
 
         assert_eq!(
             semantic_foreground(&TerminalUiTheme::default(), SemanticClass::Error, &scheme),
-            to_hsla(terminal_color_from_hex(0x123456))
+            TerminalHighlightForeground::static_color(to_hsla(terminal_color_from_hex(0x123456)))
         );
     }
 

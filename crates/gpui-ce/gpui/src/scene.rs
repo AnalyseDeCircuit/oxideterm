@@ -217,6 +217,7 @@ impl Scene {
     }
 
     /// Expands a cached glyph batch into sprites while retaining one replay operation.
+    #[cfg(test)]
     pub(crate) fn insert_prepared_glyph_batch(
         &mut self,
         batch: Arc<PreparedGlyphBatch>,
@@ -224,6 +225,25 @@ impl Scene {
         content_mask: ContentMask<ScaledPixels>,
         opacity: f32,
         enhance_glyph_edges: bool,
+    ) {
+        self.insert_prepared_glyph_batch_with_color(
+            batch,
+            origin,
+            content_mask,
+            opacity,
+            enhance_glyph_edges,
+            None,
+        );
+    }
+
+    pub(crate) fn insert_prepared_glyph_batch_with_color(
+        &mut self,
+        batch: Arc<PreparedGlyphBatch>,
+        origin: Point<ScaledPixels>,
+        content_mask: ContentMask<ScaledPixels>,
+        opacity: f32,
+        enhance_glyph_edges: bool,
+        color_override: Option<SceneHsla>,
     ) {
         let layer_order = self.layer_stack.last().copied();
         let effective_mask = scale_content_mask(content_mask, &self.scale_stack);
@@ -233,14 +253,15 @@ impl Scene {
         });
         let glyph_opacity = opacity.clamp(0.0, 1.0);
         for glyph in &batch.monochrome {
+            let color = color_override.unwrap_or(glyph.color);
             let mut sprite = MonochromeSprite {
                 order: 0,
                 enhance_glyph_edges: enhance_glyph_edges.into(),
                 bounds: glyph.bounds + origin,
                 content_mask: effective_mask,
                 color: SceneHsla {
-                    a: glyph.color.a * glyph_opacity,
-                    ..glyph.color
+                    a: color.a * glyph_opacity,
+                    ..color
                 },
                 tile: glyph.tile,
                 transformation: scale_matrix_with_stack(
@@ -263,14 +284,15 @@ impl Scene {
             self.monochrome_sprites.push(sprite);
         }
         for glyph in &batch.subpixel {
+            let color = color_override.unwrap_or(glyph.color);
             let mut sprite = SubpixelSprite {
                 order: 0,
                 pad: 0,
                 bounds: glyph.bounds + origin,
                 content_mask: effective_mask,
                 color: SceneHsla {
-                    a: glyph.color.a * glyph_opacity,
-                    ..glyph.color
+                    a: color.a * glyph_opacity,
+                    ..color
                 },
                 tile: glyph.tile,
                 transformation: scale_matrix_with_stack(
@@ -323,6 +345,7 @@ impl Scene {
                 content_mask,
                 opacity,
                 enhance_glyph_edges,
+                color_override,
             });
     }
 
@@ -336,12 +359,14 @@ impl Scene {
                     content_mask,
                     opacity,
                     enhance_glyph_edges,
-                } => self.insert_prepared_glyph_batch(
+                    color_override,
+                } => self.insert_prepared_glyph_batch_with_color(
                     batch.clone(),
                     *origin,
                     *content_mask,
                     *opacity,
                     *enhance_glyph_edges,
+                    *color_override,
                 ),
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
@@ -472,6 +497,7 @@ pub(crate) enum PaintOperation {
         content_mask: ContentMask<ScaledPixels>,
         opacity: f32,
         enhance_glyph_edges: bool,
+        color_override: Option<SceneHsla>,
     },
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
@@ -1760,6 +1786,38 @@ mod tests {
             u32::from(replayed.monochrome_sprites[0].enhance_glyph_edges),
             1
         );
+    }
+
+    #[test]
+    fn prepared_glyph_batch_recolors_monochrome_and_subpixel_sprites() {
+        let mut scene = Scene::default();
+        let glyph = prepared_monochrome_glyph(full_bounds());
+        let batch = Arc::new(PreparedGlyphBatch {
+            monochrome: vec![glyph],
+            subpixel: vec![glyph],
+            ..Default::default()
+        });
+        let recolored = crate::hsla(0.25, 0.6, 0.4, 0.8).into();
+        scene.insert_prepared_glyph_batch_with_color(
+            batch,
+            Point::default(),
+            mask(),
+            0.5,
+            true,
+            Some(recolored),
+        );
+
+        let expected = SceneHsla {
+            a: recolored.a * 0.5,
+            ..recolored
+        };
+        assert_eq!(scene.monochrome_sprites[0].color, expected);
+        assert_eq!(scene.subpixel_sprites[0].color, expected);
+
+        let mut replayed = Scene::default();
+        replayed.replay(0..scene.len(), &scene);
+        assert_eq!(replayed.monochrome_sprites[0].color, expected);
+        assert_eq!(replayed.subpixel_sprites[0].color, expected);
     }
 
     #[test]

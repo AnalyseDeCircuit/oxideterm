@@ -57,10 +57,7 @@ mod tests {
             let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
             WorkspaceWindowShell::new(workspace, window, cx)
         });
-        let (window_handle, workspace) = (
-            shell.window_handle(),
-            shell.read_with(cx, |shell, _| shell.session_entity()),
-        );
+        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
         cx.run_until_parked();
         workspace.read_with(cx, |this, cx| {
             assert!(this.onboarding.open);
@@ -80,14 +77,19 @@ mod tests {
                 .unwrap()
                 .id
         });
-        let _ = cx.update_window(window_handle, |_, window, cx| {
+        cx.update(|window, cx| {
             workspace.update(cx, |this, cx| {
-                // Closing or opening other surfaces must stay blocked until disclaimer acceptance.
+                // Closing or opening other surfaces must stay blocked until disclaimer acceptance,
+                // while users may review the intro and advance to the disclaimer step.
                 this.request_close_tab_by_id(onboarding_tab_id, window, cx);
                 this.open_settings(window, cx);
                 let _ = this.create_local_terminal_tab(window, cx);
-                this.onboarding_go_to_step(1, cx);
+                this.onboarding_go_to_step(OnboardingStep::DISCLAIMER_INDEX + 1, cx);
                 assert_eq!(this.onboarding.step, 0);
+                this.onboarding_next(cx);
+                assert_eq!(this.onboarding.step, OnboardingStep::DISCLAIMER_INDEX);
+                this.onboarding_next(cx);
+                assert_eq!(this.onboarding.step, OnboardingStep::DISCLAIMER_INDEX);
                 assert!(
                     this.tabs(cx)
                         .iter()
@@ -174,8 +176,8 @@ impl WorkspaceApp {
                 Tab {
                     id: tab_id,
                     kind: TabKind::Onboarding,
-                    title: self.i18n.t("onboarding.step_welcome"),
-                    title_source: TabTitleSource::I18nKey("onboarding.step_welcome"),
+                    title: self.i18n.t("onboarding.welcome"),
+                    title_source: TabTitleSource::I18nKey("onboarding.welcome"),
                     root_pane: None,
                     active_pane_id: None,
                 },
@@ -232,6 +234,7 @@ impl WorkspaceApp {
         self.onboarding
             .reset_for_open(self.settings_store.settings());
         self.ensure_onboarding_tab(window, cx);
+        self.notify_onboarding_view(cx);
         cx.notify();
     }
 
@@ -271,6 +274,7 @@ impl WorkspaceApp {
                 self.onboarding.save_failed = true;
             }
         }
+        gpui::App::notify(cx, self.onboarding_view.entity_id());
         cx.notify();
     }
 
@@ -291,23 +295,18 @@ impl WorkspaceApp {
         step: usize,
         cx: &mut Context<Self>,
     ) {
-        if step >= ONBOARDING_TOTAL_STEPS || (!self.onboarding.disclaimer_accepted && step > 0) {
+        if step >= ONBOARDING_TOTAL_STEPS
+            || (!self.onboarding.disclaimer_accepted && step > OnboardingStep::DISCLAIMER_INDEX)
+        {
             return;
         }
         if step == self.onboarding.step {
             return;
         }
-        self.begin_user_segmented_control_transition_from(
-            ONBOARDING_STEPS_MOTION_ID,
-            self.onboarding.step,
-            step,
-            cx,
-        );
         self.onboarding.step = step;
         self.close_settings_select();
         self.blur_text_inputs(cx);
         self.finish_settings_slider_drag(cx);
-        self.onboarding.scroll_handle = ScrollHandle::new();
         if OnboardingStep::from_index(step) == OnboardingStep::Launch {
             if self
                 .settings_workspace
@@ -320,11 +319,13 @@ impl WorkspaceApp {
                 self.refresh_onboarding_ssh_host_count(cx);
             }
         }
-        cx.notify();
+        self.notify_onboarding_view(cx);
     }
 
     pub(in crate::workspace) fn onboarding_next(&mut self, cx: &mut Context<Self>) {
-        if !self.onboarding.disclaimer_accepted {
+        if !self.onboarding.disclaimer_accepted
+            && self.onboarding.step >= OnboardingStep::DISCLAIMER_INDEX
+        {
             return;
         }
         if self.onboarding.step + 1 < ONBOARDING_TOTAL_STEPS {
@@ -365,6 +366,7 @@ impl WorkspaceApp {
                 && event.keystroke.key == "escape"
             {
                 self.close_settings_select();
+                self.notify_onboarding_view(cx);
                 cx.notify();
             }
             return true;
@@ -406,7 +408,7 @@ impl WorkspaceApp {
                 .unwrap_or(0);
             let _ = weak.update(cx, |this, cx| {
                 this.onboarding.host_count = Some(count);
-                cx.notify();
+                this.notify_onboarding_view(cx);
             });
         })
         .detach();
@@ -463,7 +465,7 @@ impl WorkspaceApp {
         self.onboarding.imported_count = imported;
         self.onboarding.import_state = OnboardingImportState::Done;
         self.onboarding.host_count = Some(imported);
-        cx.notify();
+        self.notify_onboarding_view(cx);
     }
 
     pub(in crate::workspace) fn onboarding_open_terminal(

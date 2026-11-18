@@ -1,32 +1,24 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use gpui::{AppContext, Context, Window};
-use image::{ExtendedColorType, ImageEncoder, codecs::png::PngEncoder};
-use oxideterm_connections::SecretString;
+use gpui::{Context, Window};
 use oxideterm_public_mcp::{
-    DesktopClipboardImageFormat, DesktopClipboardPayload, DesktopRef, DomainRequest,
-    PublicToolCall, ToolEnvelope, ToolGroup,
+    DesktopClipboardPayload, DesktopRef, DomainRequest, PublicToolCall, ToolEnvelope, ToolGroup,
 };
 use oxideterm_remote_desktop::{
-    RemoteDesktopClipboardFormat, RemoteDesktopConnectionProfile, RemoteDesktopEndpoint,
-    RemoteDesktopProtocol, RemoteDesktopSecret, RemoteDesktopSize,
+    RemoteDesktopConnectionProfile, RemoteDesktopSecret, RemoteDesktopSize,
 };
 use serde_json::json;
-use zeroize::Zeroizing;
 
-use super::{
-    CONNECTION_KEY_DESKTOP_PREFIX, PublicMcpDesktopRecord, WorkspaceApp, finish_serialized,
-};
+use super::{PublicMcpDesktopRecord, WorkspaceApp, finish_serialized};
 use crate::workspace::{
     TabId,
     remote_desktop::{RemoteDesktopPublicClipboardSnapshot, RemoteDesktopSshTunnelLease},
 };
 
-const PUBLIC_MCP_DESKTOP_MAX_FRAME_PIXELS: u64 = 16_777_216;
-const PUBLIC_MCP_DESKTOP_CLIPBOARD_IMAGE_LIMIT_BYTES: u64 = 16 * 1024 * 1024;
-const PUBLIC_MCP_DESKTOP_CAPACITY: usize = 32;
-const PUBLIC_MCP_DESKTOP_CAPACITY_PER_CLIENT: usize = 8;
+use oxideterm_public_mcp_host::{
+    PublicMcpClipboardSnapshot, PublicMcpDesktopFrame, PublicMcpDesktopOpen,
+};
 
 pub(in crate::workspace) enum PublicMcpDesktopWindowEffect {
     Open(DomainRequest),
@@ -87,7 +79,6 @@ impl WorkspaceApp {
             return;
         };
         let desktop_ref = args.desktop_ref.clone();
-        let after_generation = args.after_generation;
         let Ok((record, session)) =
             self.public_mcp_desktop_session(&request.client_ref, &desktop_ref, cx)
         else {
@@ -102,166 +93,17 @@ impl WorkspaceApp {
             ));
             return;
         };
-        let mut audit = session.read(cx).audit_context().map(|context| {
-            context.for_request().operation(
-                oxideterm_audit::AuditCategory::File,
-                "desktop_screenshot",
-                Some("png"),
-            )
-        });
-        if after_generation == Some(frame.generation) {
-            if let Some(audit) = audit.take() {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Unchanged,
-                    oxideterm_audit::AuditEvidence::Protocol,
-                    None,
-                    None,
-                );
-            }
-            finish_serialized(
-                request,
-                json!({
-                    "desktop_ref": desktop_ref,
-                    "generation": frame.generation,
-                    "graphics_epoch": frame.graphics_epoch,
-                    "unchanged": true,
-                }),
-            );
-            return;
-        }
-        let pixel_count = u64::from(frame.size.width).saturating_mul(u64::from(frame.size.height));
-        if pixel_count > PUBLIC_MCP_DESKTOP_MAX_FRAME_PIXELS {
-            if let Some(audit) = audit.take() {
-                audit.finish(
-                    oxideterm_audit::AuditOutcome::Failed,
-                    oxideterm_audit::AuditEvidence::Request,
-                    None,
-                    None,
-                );
-            }
-            request.finish(ToolEnvelope::failed(
-                "The remote framebuffer exceeds the supported artifact dimensions",
-            ));
-            return;
-        }
-        let artifact_store = self.public_mcp.state.artifacts.clone();
-        let client_ref = request.client_ref.clone();
-        let artifact_client_ref = client_ref.clone();
-        let width = frame.size.width;
-        let height = frame.size.height;
-        let generation = frame.generation;
-        let graphics_epoch = frame.graphics_epoch;
-        let encode_context = request.audit_context.clone();
-        let encode_task =
-            cx.background_executor()
-                .spawn(oxideterm_audit::AuditContext::scope_optional(
-                    encode_context,
-                    async move {
-                        let png = encode_public_mcp_desktop_png(frame)?;
-                        artifact_store
-                            .stage(
-                                artifact_client_ref,
-                                &png,
-                                "image/png".to_owned(),
-                                Some(format!("remote-desktop-{generation}.png")),
-                            )
-                            .map_err(|error| error.to_string())
-                    },
-                ));
-        cx.spawn(async move |workspace, cx| {
-            let result = encode_task.await;
-            let _ = workspace.update(cx, move |workspace, _cx| match result {
-                Ok(artifact) => {
-                    let artifact_store = workspace.public_mcp.state.artifacts.clone();
-                    let artifact_authorized = workspace
-                        .public_mcp
-                        .clients()
-                        .into_iter()
-                        .find(|client| client.client_ref == client_ref)
-                        .is_some_and(|client| {
-                            client.enabled
-                                && client.tool_groups.contains(&ToolGroup::DesktopObserve)
-                                && client.tool_groups.contains(&ToolGroup::ArtifactTransfer)
-                        });
-                    let live =
-                        workspace
-                            .public_mcp
-                            .desktops
-                            .get_mut(&desktop_ref)
-                            .filter(|current| {
-                                current.client_ref == client_ref
-                                    && current.tab_id == record.tab_id
-                                    && current.observing_frames
-                            });
-                    if request.is_cancelled() || !artifact_authorized || live.is_none() {
-                        if let Some(audit) = audit.take() {
-                            audit.finish(
-                                if request.is_cancelled() {
-                                    oxideterm_audit::AuditOutcome::Cancelled
-                                } else {
-                                    oxideterm_audit::AuditOutcome::Denied
-                                },
-                                oxideterm_audit::AuditEvidence::Lifecycle,
-                                None,
-                                None,
-                            );
-                        }
-                        workspace
-                            .public_mcp
-                            .state
-                            .artifacts
-                            .revoke(&client_ref, &artifact.artifact_ref);
-                        if !request.is_cancelled() {
-                            let error = if artifact_authorized {
-                                "The remote desktop handle is no longer available"
-                            } else {
-                                "The remote desktop artifact authorization changed"
-                            };
-                            request.finish(ToolEnvelope::failed(error));
-                        }
-                        return;
-                    }
-                    if let Some(live) = live {
-                        live.frame_artifacts.retain(|artifact_ref| {
-                            artifact_store.is_available(&client_ref, artifact_ref)
-                        });
-                        live.frame_artifacts.insert(artifact.artifact_ref.clone());
-                    }
-                    if let Some(audit) = audit.take() {
-                        audit.finish(
-                            oxideterm_audit::AuditOutcome::Succeeded,
-                            oxideterm_audit::AuditEvidence::Protocol,
-                            None,
-                            Some(artifact.size),
-                        );
-                    }
-                    finish_serialized(
-                        request,
-                        json!({
-                            "desktop_ref": desktop_ref,
-                            "generation": generation,
-                            "graphics_epoch": graphics_epoch,
-                            "width": width,
-                            "height": height,
-                            "unchanged": false,
-                            "artifact": artifact,
-                        }),
-                    );
-                }
-                Err(error) => {
-                    if let Some(audit) = audit.take() {
-                        audit.finish(
-                            oxideterm_audit::AuditOutcome::Failed,
-                            oxideterm_audit::AuditEvidence::Protocol,
-                            None,
-                            None,
-                        );
-                    }
-                    request.finish(ToolEnvelope::failed(error));
-                }
-            });
-        })
-        .detach();
+        self.public_mcp.background().desktop_frame(
+            request,
+            record.tab_id,
+            PublicMcpDesktopFrame {
+                size: frame.size,
+                generation: frame.generation,
+                graphics_epoch: frame.graphics_epoch,
+                bgra_bytes: zeroize::Zeroizing::new(frame.bgra_bytes),
+            },
+            session.read(cx).audit_context(),
+        );
     }
 
     pub(super) fn handle_public_mcp_desktop_input(
@@ -332,7 +174,7 @@ impl WorkspaceApp {
             return;
         };
         let desktop_ref = args.desktop_ref.clone();
-        let Ok((_, session)) =
+        let Ok((record, session)) =
             self.public_mcp_desktop_session(&request.client_ref, &desktop_ref, cx)
         else {
             request.finish(ToolEnvelope::failed(
@@ -340,60 +182,25 @@ impl WorkspaceApp {
             ));
             return;
         };
-        match session.read(cx).public_mcp_clipboard_snapshot(args.kind) {
+        let session = session.read(cx);
+        let snapshot = match session.public_mcp_clipboard_snapshot(args.kind) {
             Ok(RemoteDesktopPublicClipboardSnapshot::Text(text)) => {
-                session.read(cx).observe_desktop(
-                    oxideterm_audit::AuditCategory::File,
-                    "desktop_clipboard_transfer",
-                    "remote_to_mcp text",
-                    oxideterm_audit::AuditOutcome::Sent,
-                    Some(text.len() as u64),
-                );
-                finish_serialized(
-                    request,
-                    json!({ "desktop_ref": desktop_ref, "kind": "text", "text": text.as_str() }),
-                );
+                PublicMcpClipboardSnapshot::Text(text)
             }
             Ok(RemoteDesktopPublicClipboardSnapshot::Image { format, bytes }) => {
-                let media_type = remote_desktop_clipboard_media_type(format).to_owned();
-                let artifact_store = self.public_mcp.state.artifacts.clone();
-                match artifact_store.stage(
-                    request.client_ref.clone(),
-                    &bytes,
-                    media_type,
-                    Some("remote-clipboard".to_owned()),
-                ) {
-                    Ok(artifact) => {
-                        session.read(cx).observe_desktop(
-                            oxideterm_audit::AuditCategory::File,
-                            "desktop_clipboard_transfer",
-                            "remote_to_mcp image",
-                            oxideterm_audit::AuditOutcome::Sent,
-                            Some(bytes.len() as u64),
-                        );
-                        if let Some(record) = self.public_mcp.desktops.get_mut(&desktop_ref) {
-                            record.clipboard_artifacts.retain(|artifact_ref| {
-                                artifact_store.is_available(&request.client_ref, artifact_ref)
-                            });
-                            record
-                                .clipboard_artifacts
-                                .insert(artifact.artifact_ref.clone());
-                        }
-                        finish_serialized(
-                            request,
-                            json!({
-                                "desktop_ref": desktop_ref,
-                                "kind": "image",
-                                "format": remote_desktop_clipboard_format_name(format),
-                                "artifact": artifact,
-                            }),
-                        );
-                    }
-                    Err(error) => request.finish(ToolEnvelope::failed(error.to_string())),
-                }
+                PublicMcpClipboardSnapshot::Image { format, bytes }
             }
-            Err(error) => request.finish(ToolEnvelope::failed(error)),
-        }
+            Err(error) => {
+                request.finish(ToolEnvelope::failed(error));
+                return;
+            }
+        };
+        self.public_mcp.background().desktop_clipboard_read(
+            request,
+            record.tab_id,
+            snapshot,
+            session.audit_context(),
+        );
     }
 
     pub(super) fn handle_public_mcp_desktop_clipboard_write(
@@ -421,20 +228,15 @@ impl WorkspaceApp {
                 artifact_ref,
                 format,
             } => {
-                let expected_media_type = public_desktop_clipboard_media_type(*format);
-                match self.public_mcp.state.artifacts.read_all(
+                match self.public_mcp.desktop_clipboard_image(
                     &request.client_ref,
                     artifact_ref,
-                    PUBLIC_MCP_DESKTOP_CLIPBOARD_IMAGE_LIMIT_BYTES,
+                    *format,
                 ) {
-                    Ok(content) if content.projection.media_type == expected_media_type => {
-                        let format = public_desktop_clipboard_format(*format);
-                        session.update(cx, |session, _cx| {
-                            session.write_public_mcp_clipboard_image(format, &content.bytes)
-                        })
-                    }
-                    Ok(_) => Err("The clipboard artifact media type does not match format".into()),
-                    Err(error) => Err(error.to_string()),
+                    Ok((format, bytes)) => session.update(cx, |session, _cx| {
+                        session.write_public_mcp_clipboard_image(format, &bytes)
+                    }),
+                    Err(error) => Err(error),
                 }
             }
         };
@@ -507,29 +309,8 @@ impl WorkspaceApp {
         client_ref: &oxideterm_public_mcp::ClientRef,
         cx: &mut Context<Self>,
     ) {
-        let desktop_refs = self
-            .public_mcp
-            .desktops
-            .iter()
-            .filter_map(|(desktop_ref, record)| {
-                (&record.client_ref == client_ref).then_some(desktop_ref.clone())
-            })
-            .collect::<Vec<_>>();
-        let records = desktop_refs
-            .into_iter()
-            .filter_map(|desktop_ref| self.public_mcp.desktops.remove(&desktop_ref))
-            .collect::<Vec<_>>();
+        let records = self.public_mcp.remove_client_desktops(client_ref);
         for record in &records {
-            for artifact_ref in record
-                .frame_artifacts
-                .iter()
-                .chain(record.clipboard_artifacts.iter())
-            {
-                self.public_mcp
-                    .state
-                    .artifacts
-                    .revoke(client_ref, artifact_ref);
-            }
             if record.observing_frames
                 && let Some(session) = self.remote_desktop_session_entity(record.tab_id, cx)
             {
@@ -556,30 +337,7 @@ impl WorkspaceApp {
         enabled: bool,
         cx: &mut Context<Self>,
     ) {
-        let mut tab_ids = Vec::new();
-        let mut revoked_artifacts = Vec::new();
-        for record in self
-            .public_mcp
-            .desktops
-            .values_mut()
-            .filter(|record| &record.client_ref == client_ref)
-        {
-            if record.observing_frames == enabled {
-                continue;
-            }
-            record.observing_frames = enabled;
-            tab_ids.push(record.tab_id);
-            if !enabled {
-                revoked_artifacts.extend(record.frame_artifacts.drain());
-            }
-        }
-        for artifact_ref in revoked_artifacts {
-            self.public_mcp
-                .state
-                .artifacts
-                .revoke(client_ref, &artifact_ref);
-        }
-        for tab_id in tab_ids {
+        for tab_id in self.public_mcp.set_desktop_observation(client_ref, enabled) {
             if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
                 session.update(cx, |session, cx| {
                     if enabled {
@@ -597,13 +355,7 @@ impl WorkspaceApp {
         client_ref: &oxideterm_public_mcp::ClientRef,
         cx: &mut Context<Self>,
     ) {
-        let tab_ids = self
-            .public_mcp
-            .desktops
-            .values()
-            .filter_map(|record| (&record.client_ref == client_ref).then_some(record.tab_id))
-            .collect::<Vec<_>>();
-        for tab_id in tab_ids {
+        for tab_id in self.public_mcp.client_desktop_tabs(client_ref) {
             if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
                 session.update(cx, |session, _cx| session.release_public_mcp_inputs());
             }
@@ -615,24 +367,7 @@ impl WorkspaceApp {
         client_ref: &oxideterm_public_mcp::ClientRef,
         cx: &mut Context<Self>,
     ) {
-        let mut tab_ids = Vec::new();
-        let mut artifacts = Vec::new();
-        for record in self
-            .public_mcp
-            .desktops
-            .values_mut()
-            .filter(|record| &record.client_ref == client_ref)
-        {
-            tab_ids.push(record.tab_id);
-            artifacts.extend(record.clipboard_artifacts.drain());
-        }
-        for artifact_ref in artifacts {
-            self.public_mcp
-                .state
-                .artifacts
-                .revoke(client_ref, &artifact_ref);
-        }
-        for tab_id in tab_ids {
+        for tab_id in self.public_mcp.revoke_desktop_clipboard_content(client_ref) {
             if let Some(session) = self.remote_desktop_session_entity(tab_id, cx) {
                 session.update(cx, |session, _cx| session.clear_public_mcp_clipboard());
             }
@@ -643,31 +378,7 @@ impl WorkspaceApp {
         &mut self,
         tab_id: TabId,
     ) {
-        let desktop_refs = self
-            .public_mcp
-            .desktops
-            .iter()
-            .filter_map(|(desktop_ref, record)| {
-                (record.tab_id == tab_id).then_some(desktop_ref.clone())
-            })
-            .collect::<Vec<_>>();
-        for desktop_ref in desktop_refs {
-            let Some(record) = self.public_mcp.desktops.remove(&desktop_ref) else {
-                continue;
-            };
-            // The visible tab owns this helper session, so a UI close also revokes
-            // its public artifacts and handle without exposing the internal TabId.
-            for artifact_ref in record
-                .frame_artifacts
-                .iter()
-                .chain(record.clipboard_artifacts.iter())
-            {
-                self.public_mcp
-                    .state
-                    .artifacts
-                    .revoke(&record.client_ref, artifact_ref);
-            }
-        }
+        self.public_mcp.remove_closed_desktop(tab_id);
     }
 
     fn apply_public_mcp_desktop_open(
@@ -679,71 +390,27 @@ impl WorkspaceApp {
         if request.is_cancelled() {
             return;
         }
-        if let Some(error) = self.public_mcp_desktop_open_rejection(&request) {
+        if let Some(error) = self.public_mcp.desktop_open_rejection(&request.client_ref) {
             request.finish(ToolEnvelope::failed(error));
             return;
         }
         let PublicToolCall::OpenDesktop(args) = &request.call else {
             return;
         };
-        let connection_ref = args.connection_ref.clone();
-        let Some(connection_key) = self.public_mcp.connection_key(
+        let PublicMcpDesktopOpen {
+            mut profile,
+            password,
+            ssh_gateway_connection_id,
+        } = match self.public_mcp.desktop_profile(
             &request.client_ref,
-            &connection_ref,
+            &args.connection_ref,
             &self.connection_store,
-        ) else {
-            request.finish(ToolEnvelope::failed("The saved connection is unavailable"));
-            return;
-        };
-        let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX) else {
-            request.finish(ToolEnvelope::failed(
-                "The saved connection is not an RDP or VNC profile",
-            ));
-            return;
-        };
-        let Some(saved) = self
-            .connection_store
-            .get_remote_desktop_profile(profile_id)
-            .cloned()
-        else {
-            request.finish(ToolEnvelope::failed(
-                "The saved remote desktop profile is unavailable",
-            ));
-            return;
-        };
-        let ssh_gateway_connection_id = saved.ssh_gateway_connection_id.clone();
-        let password = match self
-            .connection_store
-            .get_remote_desktop_credential(profile_id)
-        {
-            Ok(secret) => secret
-                .map(SecretString::into_zeroizing)
-                .map(RemoteDesktopSecret::from),
-            Err(_) => {
-                request.finish(ToolEnvelope::failed(
-                    "The saved remote desktop credential is unavailable",
-                ));
+        ) {
+            Ok(profile) => profile,
+            Err(error) => {
+                request.finish(ToolEnvelope::failed(error));
                 return;
             }
-        };
-        if saved.protocol == RemoteDesktopProtocol::Rdp && password.is_none() {
-            request.finish(ToolEnvelope::failed(
-                "This RDP profile requires a device-local credential",
-            ));
-            return;
-        }
-        let mut profile = RemoteDesktopConnectionProfile {
-            id: saved.id.clone(),
-            label: saved.name.clone(),
-            protocol: saved.protocol,
-            endpoint: RemoteDesktopEndpoint::new(saved.host, saved.port),
-            transport_endpoint: None,
-            socks_proxy: None,
-            username: saved.username,
-            domain: saved.domain,
-            credential_ref: saved.credential_ref,
-            read_only: saved.read_only,
-            session_options: saved.session_options,
         };
         if let Some(ssh_gateway_connection_id) = ssh_gateway_connection_id {
             let pending_tunnel =
@@ -794,29 +461,6 @@ impl WorkspaceApp {
         self.finish_public_mcp_desktop_open(request, profile, password, None, window, cx);
     }
 
-    fn public_mcp_desktop_open_rejection(&self, request: &DomainRequest) -> Option<&'static str> {
-        let session_group_enabled = self
-            .public_mcp
-            .clients()
-            .into_iter()
-            .find(|client| client.client_ref == request.client_ref)
-            .is_some_and(|client| {
-                client.enabled && client.tool_groups.contains(&ToolGroup::DesktopSession)
-            });
-        if !session_group_enabled {
-            return Some("The MCP client authorization changed before the desktop opened");
-        }
-        let client_session_count = self
-            .public_mcp
-            .desktops
-            .values()
-            .filter(|record| record.client_ref == request.client_ref)
-            .count();
-        (self.public_mcp.desktops.len() >= PUBLIC_MCP_DESKTOP_CAPACITY
-            || client_session_count >= PUBLIC_MCP_DESKTOP_CAPACITY_PER_CLIENT)
-            .then_some("The retained remote desktop session limit has been reached")
-    }
-
     fn finish_public_mcp_desktop_open(
         &mut self,
         request: DomainRequest,
@@ -829,7 +473,7 @@ impl WorkspaceApp {
         if request.is_cancelled() {
             return;
         }
-        if let Some(error) = self.public_mcp_desktop_open_rejection(&request) {
+        if let Some(error) = self.public_mcp.desktop_open_rejection(&request.client_ref) {
             request.finish(ToolEnvelope::failed(error));
             return;
         }
@@ -872,16 +516,12 @@ impl WorkspaceApp {
             });
         }
         let desktop_ref = DesktopRef::new();
-        self.public_mcp.desktops.insert(
+        self.public_mcp.register_desktop(
             desktop_ref.clone(),
-            PublicMcpDesktopRecord {
-                client_ref: request.client_ref.clone(),
-                tab_id,
-                title,
-                observing_frames,
-                frame_artifacts: Default::default(),
-                clipboard_artifacts: Default::default(),
-            },
+            request.client_ref.clone(),
+            tab_id,
+            title,
+            observing_frames,
         );
         let _ = self
             .connection_store
@@ -919,27 +559,13 @@ impl WorkspaceApp {
         let desktop_ref = args.desktop_ref.clone();
         let Some(record) = self
             .public_mcp
-            .desktops
-            .get(&desktop_ref)
-            .filter(|record| record.client_ref == request.client_ref)
-            .cloned()
+            .remove_desktop(&request.client_ref, &desktop_ref)
         else {
             request.finish(ToolEnvelope::failed(
                 "The remote desktop handle is unavailable",
             ));
             return;
         };
-        self.public_mcp.desktops.remove(&desktop_ref);
-        for artifact_ref in record
-            .frame_artifacts
-            .iter()
-            .chain(record.clipboard_artifacts.iter())
-        {
-            self.public_mcp
-                .state
-                .artifacts
-                .revoke(&request.client_ref, artifact_ref);
-        }
         if record.observing_frames
             && let Some(session) = self.remote_desktop_session_entity(record.tab_id, cx)
         {
@@ -983,75 +609,11 @@ impl WorkspaceApp {
     > {
         let record = self
             .public_mcp
-            .desktops
-            .get(desktop_ref)
-            .filter(|record| &record.client_ref == client_ref)
-            .cloned()
+            .desktop(client_ref, desktop_ref)
             .ok_or_else(|| "The remote desktop handle is unavailable".to_owned())?;
         let session = self
             .remote_desktop_session_entity(record.tab_id, cx)
             .ok_or_else(|| "The remote desktop session is no longer live".to_owned())?;
         Ok((record, session))
-    }
-}
-
-fn encode_public_mcp_desktop_png(
-    frame: oxideterm_gpui_remote_desktop::RemoteDesktopFrameSnapshot,
-) -> Result<Zeroizing<Vec<u8>>, String> {
-    let mut rgba = Zeroizing::new(frame.bgra_bytes);
-    for pixel in rgba.chunks_exact_mut(4) {
-        pixel.swap(0, 2);
-    }
-    let mut png = Zeroizing::new(Vec::new());
-    PngEncoder::new(&mut *png)
-        .write_image(
-            &rgba,
-            frame.size.width,
-            frame.size.height,
-            ExtendedColorType::Rgba8,
-        )
-        .map_err(|_| "The remote framebuffer could not be encoded".to_owned())?;
-    Ok(png)
-}
-
-fn public_desktop_clipboard_format(
-    format: DesktopClipboardImageFormat,
-) -> RemoteDesktopClipboardFormat {
-    match format {
-        DesktopClipboardImageFormat::Png => RemoteDesktopClipboardFormat::ImagePng,
-        DesktopClipboardImageFormat::Jpeg => RemoteDesktopClipboardFormat::ImageJpeg,
-        DesktopClipboardImageFormat::Webp => RemoteDesktopClipboardFormat::ImageWebp,
-        DesktopClipboardImageFormat::Gif => RemoteDesktopClipboardFormat::ImageGif,
-        DesktopClipboardImageFormat::Svg => RemoteDesktopClipboardFormat::ImageSvg,
-        DesktopClipboardImageFormat::Bmp => RemoteDesktopClipboardFormat::ImageBmp,
-        DesktopClipboardImageFormat::Tiff => RemoteDesktopClipboardFormat::ImageTiff,
-    }
-}
-
-fn public_desktop_clipboard_media_type(format: DesktopClipboardImageFormat) -> &'static str {
-    remote_desktop_clipboard_media_type(public_desktop_clipboard_format(format))
-}
-
-fn remote_desktop_clipboard_format_name(format: RemoteDesktopClipboardFormat) -> &'static str {
-    match format {
-        RemoteDesktopClipboardFormat::ImagePng => "png",
-        RemoteDesktopClipboardFormat::ImageJpeg => "jpeg",
-        RemoteDesktopClipboardFormat::ImageWebp => "webp",
-        RemoteDesktopClipboardFormat::ImageGif => "gif",
-        RemoteDesktopClipboardFormat::ImageSvg => "svg",
-        RemoteDesktopClipboardFormat::ImageBmp => "bmp",
-        RemoteDesktopClipboardFormat::ImageTiff => "tiff",
-    }
-}
-
-fn remote_desktop_clipboard_media_type(format: RemoteDesktopClipboardFormat) -> &'static str {
-    match format {
-        RemoteDesktopClipboardFormat::ImagePng => "image/png",
-        RemoteDesktopClipboardFormat::ImageJpeg => "image/jpeg",
-        RemoteDesktopClipboardFormat::ImageWebp => "image/webp",
-        RemoteDesktopClipboardFormat::ImageGif => "image/gif",
-        RemoteDesktopClipboardFormat::ImageSvg => "image/svg+xml",
-        RemoteDesktopClipboardFormat::ImageBmp => "image/bmp",
-        RemoteDesktopClipboardFormat::ImageTiff => "image/tiff",
     }
 }

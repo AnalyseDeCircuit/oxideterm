@@ -679,15 +679,13 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|form| form.jump_server_form.is_some());
         let (ai_enable_phase, ai_provider_key_remove_phase, ai_provider_remove_phase, ai_confirm) = {
-            let ai = self.ai_entity.read(cx);
-            let phase = ai.settings_confirm_phase();
+            let ai = self.ai.state.read(cx);
+            use oxideterm_gpui_settings_view::ai::confirm::AiSettingsConfirmIntent;
+            let confirmation = self.settings_views.ai_confirm.read(cx).state();
             (
-                ai.settings_confirm_is_enable().then_some(phase),
-                ai.settings_confirm_is_provider_key_remove()
-                    .then_some(phase),
-                ai.settings_confirm_provider_name()
-                    .is_some()
-                    .then_some(phase),
+                confirmation.and_then(|(intent, phase)| matches!(intent, AiSettingsConfirmIntent::Enable).then_some(phase)),
+                confirmation.and_then(|(intent, phase)| matches!(intent, AiSettingsConfirmIntent::RemoveProviderKey { .. }).then_some(phase)),
+                confirmation.and_then(|(intent, phase)| matches!(intent, AiSettingsConfirmIntent::RemoveProvider { .. }).then_some(phase)),
                 ai.chat_confirm_owner_snapshot(),
             )
         };
@@ -730,24 +728,24 @@ impl WorkspaceApp {
             ai_provider_key_remove_phase,
             ai_provider_remove_phase,
             ai_safety_phase: self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .safety_confirm_open
                 .then_some(
-                    self.ai_entity
+                    self.ai.state
                         .read(cx)
                         .chat_ui()
                         .safety_confirm_presence
                         .phase(),
                 ),
             ai_summarize_phase: self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .summarize_confirm_open
                 .then_some(
-                    self.ai_entity
+                    self.ai.state
                         .read(cx)
                         .chat_ui()
                         .summarize_confirm_presence
@@ -800,7 +798,7 @@ impl WorkspaceApp {
                         .any(|client| client.client_ref.as_str() == client_ref)
                 }),
             quick_commands_manager_open: self.terminal.read(cx).quick_commands.manager_open(),
-            ai_text_editor_open: self.ai_text_editor_dialog.is_some(),
+            ai_text_editor_open: self.settings_views.ai_text_editor.read(cx).is_open(),
             oxide_import_phase,
             oxide_export_phase,
             batch_add_phase,
@@ -855,7 +853,7 @@ impl WorkspaceApp {
         let active_tab = self.active_content_tab(cx)?;
         match active_tab.kind {
             TabKind::Knowledge => {
-                if self.knowledge_workspace.read(cx).rename.is_some() {
+                if self.knowledge_input_owner(WorkspaceImeTarget::KnowledgeRename, cx).is_some() {
                     return Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::KnowledgeRename,
                         phase: visible,
@@ -867,7 +865,7 @@ impl WorkspaceApp {
                         phase: visible,
                     });
                 }
-                let ai = self.ai_entity.read(cx);
+                let ai = self.knowledge_page(cx).read(cx);
                 if ai.knowledge_delete_confirm().is_some() {
                     return Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::KnowledgeDelete,
@@ -896,7 +894,7 @@ impl WorkspaceApp {
             }
             TabKind::Settings => {
                 let settings = &self.settings_views.window_chrome.read(cx).state;
-                let ai = self.ai_entity.read(cx);
+                let ai = self.knowledge_page(cx).read(cx);
                 if let Some(phase) = settings.portable_password {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::PortablePassword,
@@ -931,10 +929,10 @@ impl WorkspaceApp {
                         kind: ActiveTabWindowModalKind::KnowledgeCollectionCreate,
                         phase: ai.knowledge_create_dialog_phase(),
                     })
-                } else if ai.mcp_dialog_is_open() {
+                } else if self.settings_workspace.read(cx).ai_mcp.draft().is_some() {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::AiMcpServer,
-                        phase: ai.mcp_dialog_presence().phase(),
+                        phase: self.settings_workspace.read(cx).ai_mcp.phase(),
                     })
                 } else if settings.navigation_editor {
                     Some(ActiveTabWindowModalSnapshot {
@@ -947,8 +945,7 @@ impl WorkspaceApp {
             }
             TabKind::SessionManager => self.session_manager_modal_owner(cx),
             TabKind::Forwards => {
-                let _scope = self.enter_forwarding_page(active_tab.id, cx);
-                let forwarding = self.forwarding.read(cx);
+                let forwarding = self.forwarding.read(cx).page_for(active_tab.id, cx)?;
                 if forwarding.delete_confirm_open() {
                     Some(ActiveTabWindowModalSnapshot {
                         kind: ActiveTabWindowModalKind::ForwardDelete,
@@ -1350,7 +1347,7 @@ impl WorkspaceApp {
             }
             ActiveWindowModalOwner::AiTextEditor => {
                 if event.keystroke.key.as_str() == "escape" {
-                    self.close_ai_text_editor(false, cx);
+                    self.settings_views.ai_text_editor.update(cx, |editor, cx| editor.dismiss(cx));
                 }
             }
             ActiveWindowModalOwner::OxideImport { .. } => {

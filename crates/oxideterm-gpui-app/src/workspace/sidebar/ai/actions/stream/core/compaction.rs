@@ -1,7 +1,7 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn start_ai_compact_conversation(&mut self, cx: &mut Context<Self>) {
         let Some(conversation_id) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation()
@@ -18,7 +18,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .conversations
@@ -57,7 +57,7 @@ impl WorkspaceApp {
         resume_after: Option<AiPendingChatStream>,
         cx: &mut Context<Self>,
     ) -> Result<(), Option<Box<AiPendingChatStream>>> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         if ai.history.quitting
             || ai.history.compaction_loads.contains_key(&conversation_id)
             || ai.compaction_in_progress(&conversation_id)
@@ -89,7 +89,7 @@ impl WorkspaceApp {
         let model = config.model;
         let runtime = self.forwarding_runtime.clone();
         let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.persist_chat_state();
             ai.history_barrier(sender);
         });
@@ -97,7 +97,7 @@ impl WorkspaceApp {
         let task = cx.spawn(async move |weak, cx| {
             if receiver.await != Ok(true) {
                 let _ = weak.update(cx, |this, cx| {
-                    this.ai_entity.update(cx, |ai, _| {
+                    this.ai.state.update(cx, |ai, _| {
                         ai.history.compaction_loads.remove(&conversation_id);
                         ai.set_conversation_loading(&conversation_id, false);
                     })
@@ -110,10 +110,10 @@ impl WorkspaceApp {
                 .spawn_blocking(move || store.model_context(&id, &source_branch, budget, &provider, &model))
                 .await;
             let _ = weak.update(cx, |this, cx| {
-                this.ai_entity.update(cx, |ai, _| {
+                this.ai.state.update(cx, |ai, _| {
                     ai.history.compaction_loads.remove(&conversation_id);
                 });
-                let ai = this.ai_entity.read(cx);
+                let ai = this.ai.state.read(cx);
                 if ai.history.quitting
                     || ai
                         .history
@@ -124,14 +124,14 @@ impl WorkspaceApp {
                     return;
                 }
                 let Ok(Ok(source)) = result else {
-                    this.ai_entity.update(cx, |ai, _| {
+                    this.ai.state.update(cx, |ai, _| {
                         ai.set_conversation_loading(&conversation_id, false);
                         ai.history_load_failed();
                     });
                     cx.notify();
                     return;
                 };
-                this.ai_entity.update(cx, |ai, _| {
+                this.ai.state.update(cx, |ai, _| {
                     ai.history
                         .compaction_sources
                         .insert(conversation_id.clone(), (branch, source));
@@ -140,7 +140,7 @@ impl WorkspaceApp {
                     if !this
                         .start_ai_summarize_conversation_from_history(conversation_id.clone(), cx)
                     {
-                        this.ai_entity.update(cx, |ai, _| {
+                        this.ai.state.update(cx, |ai, _| {
                             ai.history.compaction_sources.remove(&conversation_id);
                         });
                     }
@@ -151,14 +151,14 @@ impl WorkspaceApp {
                     resume_after,
                     cx,
                 ) {
-                    this.ai_entity.update(cx, |ai, _| {
+                    this.ai.state.update(cx, |ai, _| {
                         ai.history.compaction_sources.remove(&conversation_id);
                     });
                     this.resume_ai_chat_after_pre_send_compaction(resume.map(|pending| *pending), cx);
                 }
             });
         });
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.history.compaction_loads.insert(target, task);
         });
         Ok(())
@@ -175,7 +175,7 @@ impl WorkspaceApp {
         // Return an unconsumed pre-send request when compaction is skipped so
         // its zeroizing provider configuration never needs to be cloned.
         let mut messages = match self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .compaction_sources
@@ -188,7 +188,7 @@ impl WorkspaceApp {
             _ => return Err(resume_after.map(Box::new)),
         };
         if !self
-            .ai_entity
+            .ai.state
             .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
         {
             return Err(resume_after.map(Box::new));
@@ -197,7 +197,7 @@ impl WorkspaceApp {
         let config = match self.resolve_ai_summary_stream_config(true, cx) {
             Ok(config) => config,
             Err(error) => {
-                self.ai_entity
+                self.ai.state
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 if !silent {
                     self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
@@ -236,7 +236,7 @@ impl WorkspaceApp {
                 safety_margin: None,
             });
             if decision.level < 2 {
-                self.ai_entity
+                self.ai.state
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 return Err(resume_after.map(Box::new));
             }
@@ -247,12 +247,12 @@ impl WorkspaceApp {
             silent,
             &config.provider_type,
         ) else {
-            self.ai_entity
+            self.ai.state
                 .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
             return Err(resume_after.map(Box::new));
         };
         if silent {
-            self.ai_entity.update(cx, |ai, cx| {
+            self.ai.state.update(cx, |ai, cx| {
                 ai.set_compaction_notice_running(&conversation_id, cx);
             });
         }
@@ -262,7 +262,7 @@ impl WorkspaceApp {
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let ui_tx = self.ai_entity.read(cx).compaction_sender();
+        let ui_tx = self.ai.state.read(cx).compaction_sender();
         self.start_ai_compaction_stream_after_api_key_lookup(
             config,
             AiCompactionDeliveryKind::Compact,
@@ -282,7 +282,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -299,7 +299,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let (conversation_id, messages) = match self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .compaction_sources
@@ -314,7 +314,7 @@ impl WorkspaceApp {
             _ => return false,
         };
         if !self
-            .ai_entity
+            .ai.state
             .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
         {
             return false;
@@ -323,7 +323,7 @@ impl WorkspaceApp {
         let config = match self.resolve_ai_summary_stream_config(false, cx) {
             Ok(config) => config,
             Err(error) => {
-                self.ai_entity
+                self.ai.state
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 return false;
@@ -335,8 +335,8 @@ impl WorkspaceApp {
             .map(|message| message.id.clone())
             .collect::<Vec<_>>();
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let ui_tx = self.ai_entity.read(cx).compaction_sender();
-        self.ai_entity.update(cx, |ai, _cx| {
+        let ui_tx = self.ai.state.read(cx).compaction_sender();
+        self.ai.state.update(cx, |ai, _cx| {
             ai.set_conversation_loading(&conversation_id, true)
         });
         self.start_ai_compaction_stream_after_api_key_lookup(
@@ -375,12 +375,12 @@ impl WorkspaceApp {
     ) {
         let requires_key = ai_provider_chat_requires_key(&config.provider_type);
         let provider_id = config.provider_id.clone();
-        let key_store = self.ai_entity.read(cx).key_store().clone();
+        let key_store = self.ai.state.read(cx).key_store().clone();
         let runtime = self.forwarding_runtime.clone();
         let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
         let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
         let Some(generation) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .compaction_runs
@@ -402,7 +402,7 @@ impl WorkspaceApp {
             };
             let _ = weak.update(cx, |this, cx| {
                 if this
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .history
                     .compaction_runs
@@ -411,13 +411,13 @@ impl WorkspaceApp {
                 {
                     return;
                 }
-                this.ai_entity.update(cx, |ai, _| {
+                this.ai.state.update(cx, |ai, _| {
                     ai.history.compaction_key_loads.remove(&conversation_id);
                 });
-                if !this.ai_entity.read(cx).history_ready()
-                    || this.ai_entity.read(cx).history.quitting
+                if !this.ai.state.read(cx).history_ready()
+                    || this.ai.state.read(cx).history.quitting
                 {
-                    this.ai_entity.update(cx, |ai, _| {
+                    this.ai.state.update(cx, |ai, _| {
                         ai.finish_compaction(&conversation_id);
                         ai.history.compaction_sources.remove(&conversation_id);
                         ai.set_conversation_loading(&conversation_id, false);
@@ -427,15 +427,15 @@ impl WorkspaceApp {
                 match key_result {
                     Ok(api_key) => {
                         if requires_key && api_key.is_none() {
-                            this.ai_entity.update(cx, |ai, _cx| {
+                            this.ai.state.update(cx, |ai, _cx| {
                                 ai.finish_compaction(&conversation_id);
                                 ai.history.compaction_sources.remove(&conversation_id);
                             });
-                            this.ai_entity.update(cx, |ai, _cx| {
+                            this.ai.state.update(cx, |ai, _cx| {
                                 ai.set_conversation_loading(&conversation_id, false)
                             });
                             if silent {
-                                this.ai_entity.update(cx, |ai, cx| {
+                                this.ai.state.update(cx, |ai, cx| {
                                     ai.clear_compaction_notice_for(&conversation_id, cx);
                                 });
                             }
@@ -467,15 +467,15 @@ impl WorkspaceApp {
                         );
                     }
                     Err(_) if requires_key => {
-                        this.ai_entity.update(cx, |ai, _cx| {
+                        this.ai.state.update(cx, |ai, _cx| {
                             ai.finish_compaction(&conversation_id);
                             ai.history.compaction_sources.remove(&conversation_id);
                         });
-                        this.ai_entity.update(cx, |ai, _cx| {
+                        this.ai.state.update(cx, |ai, _cx| {
                             ai.set_conversation_loading(&conversation_id, false)
                         });
                         if silent {
-                            this.ai_entity.update(cx, |ai, cx| {
+                            this.ai.state.update(cx, |ai, cx| {
                                 ai.clear_compaction_notice_for(&conversation_id, cx);
                             });
                         }
@@ -509,7 +509,7 @@ impl WorkspaceApp {
                 }
             });
         });
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.history.compaction_key_loads.insert(target, task);
         });
     }
@@ -531,7 +531,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let Some(generation) = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .history
             .compaction_runs
@@ -581,7 +581,7 @@ impl WorkspaceApp {
                 silent,
             });
         });
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             if let Some((_, owner)) = ai.history.compaction_runs.get_mut(&target) {
                 *owner = Some(task);
             } else {

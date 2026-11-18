@@ -30,6 +30,20 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         use oxideterm_gpui_settings_view::input::SettingsInputKeyEffect::*;
+        if event.keystroke.key == "tab" && self.settings_workspace.read(cx).settings_entity_focused_input().is_some_and(SettingsInput::is_ai_mcp) {
+            if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
+                browser_behavior::modal_footer_input_key_action(
+                    "tab", event.keystroke.modifiers.shift, &CONFIRM_DIALOG_FOOTER_ACTIONS,
+                    true, true, self.standard_confirm_focus_owner(), ConfirmDialogAction::Cancel, None,
+                )
+            {
+                self.settings_workspace.update(cx, |state, cx| state.blur_settings_entity_input(cx));
+                self.set_standard_confirm_focus(action);
+                self.settings_views.ai_mcp_dialog.update(cx, |view, cx| view.set_focus(Some(action), cx));
+                self.show_active_input_caret(cx);
+            }
+            return true;
+        }
         if self
             .settings_workspace
             .read(cx)
@@ -60,7 +74,7 @@ impl WorkspaceApp {
             }
             return true;
         }
-        if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
+        if let Some(input) = self.knowledge_page(cx).read(cx).focused_settings_input() {
             let key = event.keystroke.key.as_str();
             let modifiers = event.keystroke.modifiers;
             if matches!(key, "tab" | "enter" | "escape") {
@@ -88,30 +102,8 @@ impl WorkspaceApp {
                 }
             }
             match key {
-                "tab" if input.is_ai_mcp() && self.ai_entity.read(cx).mcp_dialog_is_open() => {
-                    if let Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) =
-                        browser_behavior::modal_footer_input_key_action(
-                            key,
-                            event.keystroke.modifiers.shift,
-                            &CONFIRM_DIALOG_FOOTER_ACTIONS,
-                            true,
-                            true,
-                            self.standard_confirm_focus_owner(),
-                            ConfirmDialogAction::Cancel,
-                            None,
-                        )
-                    {
-                        self.ai_entity.update(cx, |ai, cx| {
-                            ai.blur_settings_input(cx);
-                        });
-                        self.set_standard_confirm_focus(action);
-                        self.show_active_input_caret(cx);
-                        cx.notify();
-                    }
-                    return true;
-                }
                 "escape" | "enter" => {
-                    self.ai_entity.update(cx, |ai, cx| {
+                    self.knowledge_page(cx).update(cx, |ai, cx| {
                         ai.blur_settings_input(cx);
                     });
                     self.clear_ime_selection();
@@ -119,7 +111,7 @@ impl WorkspaceApp {
                     return true;
                 }
                 "backspace" | "delete" if !modifiers.platform && !modifiers.control => {
-                    self.ai_entity.update(cx, |ai, cx| {
+                    self.knowledge_page(cx).update(cx, |ai, cx| {
                         ai.pop_settings_input(input, cx);
                     });
                     return true;
@@ -233,7 +225,7 @@ impl WorkspaceApp {
             }
         }
         if self
-            .ai_entity
+            .knowledge_page(cx)
             .update(cx, |ai, cx| ai.blur_settings_input(cx))
         {
             self.ime_marked_text = None;
@@ -288,9 +280,12 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self
-            .forwarding
-            .update(cx, |forwarding, _cx| forwarding.clear_input_focus())
+        if let Some(page) = self.forwarding_page(cx)
+            && page.update(cx, |page, cx| {
+                let changed = page.clear_input_focus();
+                if changed { cx.notify(); }
+                changed
+            })
         {
             self.ime_marked_text = None;
             changed = true;
@@ -316,20 +311,20 @@ impl WorkspaceApp {
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai_entity.read(cx).model_selector_search_focused()
-            || self.ai_entity.read(cx).model_selector_open()
+        if self.ai.state.read(cx).model_selector_search_focused()
+            || self.ai.state.read(cx).model_selector_open()
         {
             // The AI model selector can live either in the sidebar portal or
             // inside the terminal inline panel. A generic outside blur should
             // release the searchable select without restoring inline focus.
-            self.ai_entity.update(cx, |ai, _cx| {
+            self.ai.state.update(cx, |ai, _cx| {
                 ai.close_model_selector();
             });
             self.ime_marked_text = None;
             changed = true;
         }
         if self
-            .ai_entity
+            .ai.state
             .read(cx)
             .terminal_inline_panel()
             .prompt_focused
@@ -338,21 +333,21 @@ impl WorkspaceApp {
             // than as a normal form control, so it must explicitly join the
             // shared blur path or it remains the active IME target after an
             // outside click.
-            self.ai_entity.update(cx, |ai, _cx| {
+            self.ai.state.update(cx, |ai, _cx| {
                 ai.terminal_inline_panel_mut().prompt_focused = false;
             });
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai_entity.read(cx).chat_ui().input_focused {
-            self.ai_entity.update(cx, |ai, _cx| {
+        if self.ai.state.read(cx).chat_ui().input_focused {
+            self.ai.state.update(cx, |ai, _cx| {
                 ai.blur_chat_input(true);
             });
             self.ime_marked_text = None;
             changed = true;
         }
-        if self.ai_entity.read(cx).chat_ui().editing_message_focused {
-            self.ai_entity.update(cx, |ai, _cx| {
+        if self.ai.state.read(cx).chat_ui().editing_message_focused {
+            self.ai.state.update(cx, |ai, _cx| {
                 ai.blur_message_edit();
             });
             self.ime_marked_text = None;
@@ -399,7 +394,7 @@ impl WorkspaceApp {
                 .settings_entity_input_value(input)
                 .is_some();
         if entity_owned_input {
-            self.ai_entity.update(cx, |ai, cx| {
+            self.knowledge_page(cx).update(cx, |ai, cx| {
                 ai.blur_settings_input(cx);
             });
             if let Some(previous_input) = self.focused_settings_input.take() {
@@ -418,6 +413,8 @@ impl WorkspaceApp {
                 && !highlight_input
                 && !oxideterm_gpui_settings_view::theme_editor::is_theme_editor_input(input)
                 && !is_surface_input(input)
+                && !oxideterm_gpui_settings_view::ai::providers::is_provider_draft(input)
+                && !input.is_ai_mcp()
                 && !is_connection_key_input(input)
                 && !matches!(
                     input,
@@ -432,14 +429,14 @@ impl WorkspaceApp {
             }
             return;
         }
-        if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
+        if oxideterm_gpui_ai::knowledge::page::KnowledgePage::owns_settings_input(input) {
             if let Some(previous_input) = self.focused_settings_input.take() {
                 self.clear_settings_input_draft(previous_input);
             }
             self.settings_workspace.update(cx, |settings, cx| {
                 settings.blur_settings_entity_input(cx);
             });
-            self.ai_entity.update(cx, |ai, cx| {
+            self.knowledge_page(cx).update(cx, |ai, cx| {
                 ai.focus_settings_input(input, cx);
             });
             self.clear_ime_selection();
@@ -450,7 +447,7 @@ impl WorkspaceApp {
         self.settings_workspace.update(cx, |settings, cx| {
             settings.blur_settings_entity_input(cx);
         });
-        self.ai_entity.update(cx, |ai, cx| {
+        self.knowledge_page(cx).update(cx, |ai, cx| {
             ai.blur_settings_input(cx);
         });
         let app_lock_input = matches!(
@@ -591,7 +588,7 @@ impl WorkspaceApp {
         if is_terminal_trigger_input(input) {
             return String::new();
         }
-        if let Some(value) = self.ai_entity.read(cx).settings_input_value(input) {
+        if let Some(value) = self.knowledge_page(cx).read(cx).settings_input_value(input) {
             return value.to_owned();
         }
         if let Some(value) = self

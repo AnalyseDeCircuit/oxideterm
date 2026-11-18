@@ -6,7 +6,7 @@ impl WorkspaceApp {
         status: &str,
         cx: &App,
     ) {
-        let Some(message) = self.ai_entity.read(cx).conversation_state()
+        let Some(message) = self.ai.state.read(cx).conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)

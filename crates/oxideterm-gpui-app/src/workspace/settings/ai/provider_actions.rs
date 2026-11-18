@@ -7,10 +7,12 @@ impl WorkspaceApp {
         provider: AiProviderView,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.request_model_refresh(index, provider);
         });
-        cx.notify();
+        self.settings_views
+            .ai_providers
+            .update(cx, |_, cx| cx.notify());
     }
 
     pub(in crate::workspace) fn handle_ai_workspace_event(
@@ -22,7 +24,7 @@ impl WorkspaceApp {
         match event {
             ai_state::AiWorkspaceEvent::AcpAgentProbeDeliveryReady => {
                 let intents = self
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.take_acp_agent_probe_intents());
                 self.edit_settings(
                     move |settings| {
@@ -41,20 +43,21 @@ impl WorkspaceApp {
                     },
                     cx,
                 );
+                self.settings_views.notify_acp(cx);
             }
             ai_state::AiWorkspaceEvent::AcpModelDiscoveryDeliveryReady => {
                 let intents = self
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.take_acp_model_discovery_intents());
                 for intent in intents {
                     let conversation_exists = self
-                        .ai_entity
+                        .ai.state
                         .read(cx)
                         .conversation_state()
                         .conversations
                         .iter()
                         .any(|conversation| conversation.id == intent.conversation_id);
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.apply_acp_model_discovery(intent, conversation_exists);
                     });
                 }
@@ -64,16 +67,15 @@ impl WorkspaceApp {
                 // The window registry has already acquired a live window here. Drain only now so
                 // a failed nested window update cannot discard terminal tool or completion events.
                 let deliveries = self
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.take_chat_stream_deliveries());
                 if !deliveries.is_empty() {
                     self.apply_ai_chat_stream_deliveries(deliveries, window, cx);
-                    App::notify(cx, self.ai_sidebar_view.entity_id());
                 }
             }
             ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
                 let deliveries = self
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.take_compaction_deliveries());
                 self.apply_ai_compaction_deliveries(deliveries, cx);
                 cx.notify();
@@ -81,7 +83,7 @@ impl WorkspaceApp {
             ai_state::AiWorkspaceEvent::CompactionStateChanged => cx.notify(),
             ai_state::AiWorkspaceEvent::CredentialOperationReady => {
                 let intents = self
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.take_credential_intents());
                 for intent in intents {
                     match intent {
@@ -100,8 +102,22 @@ impl WorkspaceApp {
                         }
                         ai_state::AiCredentialIntent::ProviderKeyRemoved => {}
                         ai_state::AiCredentialIntent::McpServerReady { config } => {
+                            self.settings_workspace
+                                .update(cx, |state, cx| state.complete_ai_mcp_submission(None, cx));
                             self.edit_settings(
                                 move |settings| settings.ai.mcp_servers.push(config),
+                                cx,
+                            );
+                        }
+                        ai_state::AiCredentialIntent::McpServerSaveFailed { draft } => {
+                            self.settings_workspace.update(cx, |state, cx| {
+                                state.complete_ai_mcp_submission(Some(draft), cx)
+                            });
+                            let safe_error =
+                                self.i18n.t("settings_view.ai.acp_agent_error_unknown");
+                            self.push_ai_settings_toast(
+                                self.ai_i18n_error("settings_view.ai.save_failed", &safe_error),
+                                TerminalNoticeVariant::Error,
                                 cx,
                             );
                         }
@@ -118,8 +134,7 @@ impl WorkspaceApp {
                         }
                         ai_state::AiCredentialIntent::Failed(failure) => {
                             let message_key = match failure {
-                                ai_state::AiCredentialFailure::SaveProviderKey
-                                | ai_state::AiCredentialFailure::SaveMcpToken => {
+                                ai_state::AiCredentialFailure::SaveProviderKey => {
                                     "settings_view.ai.save_failed"
                                 }
                                 ai_state::AiCredentialFailure::RemoveProviderKey => {
@@ -140,35 +155,12 @@ impl WorkspaceApp {
                 }
                 cx.notify();
             }
-            ai_state::AiWorkspaceEvent::KnowledgeReindexDeliveryReady => {
-                let intents = self
-                    .ai_entity
-                    .update(cx, |ai, _cx| ai.take_knowledge_reindex_intents());
-                for intent in intents {
-                    match intent {
-                        ai_state::AiKnowledgeReindexIntent::Finished { failed } => {
-                            if failed {
-                                self.push_ai_settings_toast(
-                                    self.i18n.t("settings_view.knowledge.error_reindex"),
-                                    TerminalNoticeVariant::Error,
-                                    cx,
-                                );
-                            } else {
-                                self.ai_entity.update(cx, |entity, cx| {
-                                    entity.clear_knowledge_error();
-                                    cx.notify();
-                                });
-                            }
-                        }
-                    }
-                }
-                cx.notify();
+            ai_state::AiWorkspaceEvent::McpRuntimeChanged => {
+                self.settings_views.ai_mcp.update(cx, |_, cx| cx.notify());
             }
-            ai_state::AiWorkspaceEvent::KnowledgePageChanged => cx.notify(),
-            ai_state::AiWorkspaceEvent::McpRuntimeChanged => cx.notify(),
             ai_state::AiWorkspaceEvent::ModelRefreshDeliveryReady => {
                 let intents = self
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.take_model_refresh_intents());
                 for intent in intents {
                     match intent {
@@ -191,7 +183,7 @@ impl WorkspaceApp {
                             );
                         }
                         ai_state::AiModelRefreshIntent::MissingApiKey { provider_id } => {
-                            self.ai_entity.update(cx, |ai, _cx| {
+                            self.ai.state.update(cx, |ai, _cx| {
                                 ai.set_provider_key_status(provider_id, false);
                             });
                             self.push_ai_settings_toast(
@@ -209,39 +201,18 @@ impl WorkspaceApp {
                         }
                     }
                 }
-                cx.notify();
+                self.settings_views
+                    .ai_providers
+                    .update(cx, |_, cx| cx.notify());
             }
-            ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged
-            | ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged
-            | ai_state::AiWorkspaceEvent::TerminalInlineDeliveryReady => cx.notify(),
-            ai_state::AiWorkspaceEvent::SettingsConfirmChanged => {
-                let intents = self
-                    .ai_entity
-                    .update(cx, |ai, _cx| ai.take_settings_confirm_intents());
-                for intent in intents {
-                    match intent {
-                        ai_state::AiSettingsConfirmIntent::Enable => {
-                            self.edit_settings(
-                                |settings| {
-                                    settings.ai.enabled = true;
-                                    settings.ai.enabled_confirmed = true;
-                                },
-                                cx,
-                            );
-                        }
-                        ai_state::AiSettingsConfirmIntent::RemoveProviderKey {
-                            index,
-                            provider_id,
-                        } => {
-                            self.remove_ai_provider_api_key(index, &provider_id, cx);
-                        }
-                        ai_state::AiSettingsConfirmIntent::RemoveProvider { provider_id } => {
-                            self.remove_ai_provider(&provider_id, cx);
-                        }
-                    }
-                }
-                cx.notify();
+            ai_state::AiWorkspaceEvent::ProviderKeyStatusChanged => {
+                self.settings_views
+                    .ai_providers
+                    .update(cx, |_, cx| cx.notify());
+                self.settings_views.surface.update(cx, |_, cx| cx.notify());
+                App::notify(cx, self.ai_sidebar_view.entity_id());
             }
+            ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged => cx.notify(),
         }
     }
 

@@ -58,7 +58,7 @@ impl WorkspaceApp {
             None,
             cx,
         );
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.register_tool_approval(owner.generation, call_id.to_owned(), sender)
         });
         receiver
@@ -146,10 +146,10 @@ impl WorkspaceApp {
                     }
                 }
             }
-            let _ = weak.update(cx, |this, cx| this.ai_entity.update(cx, |ai, _| { ai.agents.local_commands.remove(&task_key); }));
+            let _ = weak.update(cx, |this, cx| this.ai.state.update(cx, |ai, _| { ai.agents.local_commands.remove(&task_key); }));
         });
         // The conversation owns both observation and the process abort handle, including after steering.
-        self.ai_entity.update(cx, |ai, _| {
+        self.ai.state.update(cx, |ai, _| {
             ai.agents.local_commands.insert(key, task);
         });
     }

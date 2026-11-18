@@ -24,25 +24,6 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn settings_text_input_control(
-        &self,
-        input: SettingsInput,
-        value: impl AsRef<str>,
-        placeholder: String,
-        width: f32,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.settings_text_input_control_inner(
-            input,
-            value,
-            placeholder,
-            Some(width),
-            TextInputContentAlign::Start,
-            false,
-            cx,
-        )
-    }
-
     pub(in crate::workspace) fn settings_text_input_control_fill(
         &self,
         input: SettingsInput,
@@ -166,13 +147,13 @@ impl oxideterm_gpui_settings_view::components::SettingsImeSource for WorkspaceAp
         cx: &'a App,
     ) -> oxideterm_gpui_settings_view::components::SettingsImeFrame<'a> {
         let workspace = self.settings_workspace.read(cx);
-        let ai = self.ai_entity.read(cx);
+        let ai = self.knowledge_page(cx).read(cx);
         let (display, focused) = if let Some(draft) = workspace.settings_entity_input_value(input) {
             (
                 draft,
                 workspace.settings_entity_focused_input() == Some(input),
             )
-        } else if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
+        } else if oxideterm_gpui_ai::knowledge::page::KnowledgePage::owns_settings_input(input) {
             (
                 ai.settings_input_value(input).unwrap_or(value),
                 ai.focused_settings_input() == Some(input),

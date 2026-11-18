@@ -71,15 +71,20 @@ pub(crate) fn paint_terminal_rect(
 pub(crate) fn paint_terminal_row_rect(
     row: usize,
     rect: &TerminalRowRect,
+    transition_colors: Option<&TerminalTransitionColors>,
+    live_terminal_background: Hsla,
     origin: gpui::Point<Pixels>,
     metrics: &TerminalMetrics,
     window: &mut Window,
 ) {
+    let color = transition_colors.map_or(rect.color, |transition| {
+        transition.resolve_row_color(rect.transition_key, rect.color, live_terminal_background)
+    });
     paint_terminal_rect_at(
         row,
         rect.col,
         rect.cells,
-        rect.color,
+        color,
         rect.powerline_cutout,
         origin,
         metrics,
@@ -807,6 +812,8 @@ struct TerminalPaintRun<'a> {
     text: &'a SharedString,
     cells: usize,
     style: &'a TextRun,
+    color: Hsla,
+    dilation_color_hint: Option<Hsla>,
     cache: Option<&'a TerminalTextRunCache>,
 }
 
@@ -825,6 +832,8 @@ fn paint_text_run_with_layer(
             text: &run.text,
             cells: run.cells,
             style: &run.style,
+            color: run.style.color,
+            dilation_color_hint: None,
             cache: run.cache.as_deref(),
         },
         origin,
@@ -857,6 +866,8 @@ fn paint_text_run_parts(
                     text: &spaces,
                     cells: run.cells,
                     style: &style,
+                    color: run.color,
+                    dilation_color_hint: run.dilation_color_hint,
                     cache: run.cache,
                 },
                 origin,
@@ -897,13 +908,39 @@ fn paint_text_run_parts(
         );
         let decoration = DecorationRun {
             len: run.style.len as u32,
-            color: run.style.color,
+            color: run.color,
             background_color: run.style.background_color,
             underline: run.style.underline,
             strikethrough: run.style.strikethrough,
         };
         let decorations = std::slice::from_ref(&decoration);
-        let _ = if establish_layer {
+        let _ = if run.dilation_color_hint.is_some() {
+            if establish_layer {
+                let row_bounds = Bounds::new(position, size(layout.width, metrics.line_height));
+                window.paint_layer(row_bounds, |window| {
+                    let _ = layout.paint_cached_in_current_layer_recolored(
+                        position,
+                        metrics.line_height,
+                        decorations,
+                        &cache.paint,
+                        run.dilation_color_hint,
+                        window,
+                        cx,
+                    );
+                });
+                Ok(())
+            } else {
+                layout.paint_cached_in_current_layer_recolored(
+                    position,
+                    metrics.line_height,
+                    decorations,
+                    &cache.paint,
+                    run.dilation_color_hint,
+                    window,
+                    cx,
+                )
+            }
+        } else if establish_layer {
             layout.paint_cached(
                 position,
                 metrics.line_height,
@@ -925,10 +962,15 @@ fn paint_text_run_parts(
         return;
     }
 
+    let adjusted_style = (run.color != run.style.color).then(|| TextRun {
+        color: run.color,
+        ..run.style.clone()
+    });
+    let style_slice = std::slice::from_ref(adjusted_style.as_ref().unwrap_or(run.style));
     let shaped = window.text_system().shape_line(
         run.text.clone(),
         metrics.font_size,
-        std::slice::from_ref(run.style),
+        style_slice,
         Some(metrics.cell_width),
     );
     position.y = aligned_run_position_y(
@@ -1017,7 +1059,7 @@ fn paint_cell_drawing_run(
             drawing.name.clone(),
             Some(drawing.svg.as_bytes()),
             gpui::TransformationMatrix::default(),
-            run.style.color,
+            run.color,
             cx,
         ) {
             eprintln!("Failed to paint terminal cell drawing: {error}");
@@ -1065,6 +1107,9 @@ pub(crate) fn paint_cached_text_runs_for_row(
     terminal_cols: usize,
     metrics: &TerminalMetrics,
     glyph_edge_exclusions: Option<&[Vec<bool>]>,
+    transition_colors: Option<&TerminalTransitionColors>,
+    dilation_settle_row: Option<usize>,
+    live_terminal_background: Hsla,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -1081,6 +1126,20 @@ pub(crate) fn paint_cached_text_runs_for_row(
     window.paint_layer(row_bounds, |window| {
         for run in runs {
             let enhance = enhance_run_glyph_edges(glyph_edge_exclusions, row, run.col, run.cells);
+            let live_color = transition_colors.map_or(run.style.color, |transition| {
+                transition.resolve_row_color(
+                    run.transition_key,
+                    run.style.color,
+                    live_terminal_background,
+                )
+            });
+            let dilation_color_hint = if transition_colors.is_some()
+                || dilation_settle_row.is_some_and(|settled_rows| row >= settled_rows)
+            {
+                Some(run.style.color)
+            } else {
+                None
+            };
             window.with_enhanced_glyph_edges(enhance, |window| {
                 paint_text_run_parts(
                     TerminalPaintRun {
@@ -1089,6 +1148,8 @@ pub(crate) fn paint_cached_text_runs_for_row(
                         text: &run.text,
                         cells: run.cells,
                         style: &run.style,
+                        color: live_color,
+                        dilation_color_hint,
                         cache: Some(&run.cache),
                     },
                     origin,
@@ -1275,7 +1336,7 @@ fn paint_powerline_separators(
                 let mut builder = PathBuilder::fill();
                 builder.add_polygon(&points, true);
                 if let Ok(path) = builder.build() {
-                    window.paint_path(path, run.style.color);
+                    window.paint_path(path, run.color);
                 }
             }
             (PowerlineShape::Triangle, PowerlineWeight::Thin) => {
@@ -1287,7 +1348,7 @@ fn paint_powerline_separators(
                 builder.line_to(points[2]);
                 builder.line_to(points[1]);
                 if let Ok(path) = builder.build() {
-                    window.paint_path(path, run.style.color);
+                    window.paint_path(path, run.color);
                 }
             }
             (PowerlineShape::HalfCircle, PowerlineWeight::Filled) => {
@@ -1300,7 +1361,7 @@ fn paint_powerline_separators(
                 push_half_circle_arc(&mut builder, &curve, true);
                 builder.close();
                 if let Ok(path) = builder.build() {
-                    window.paint_path(path, run.style.color);
+                    window.paint_path(path, run.color);
                 }
             }
             (PowerlineShape::HalfCircle, PowerlineWeight::Thin) => {
@@ -1311,7 +1372,7 @@ fn paint_powerline_separators(
                 builder.move_to(curve.start);
                 push_half_circle_arc(&mut builder, &curve, false);
                 if let Ok(path) = builder.build() {
-                    window.paint_path(path, run.style.color);
+                    window.paint_path(path, run.color);
                 }
             }
         }

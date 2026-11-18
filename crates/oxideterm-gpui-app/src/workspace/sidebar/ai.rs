@@ -1,22 +1,21 @@
 use std::{collections::HashMap, sync::Arc};
 
 use crate::workspace::ai_state::AiPendingChatStream;
-use crate::workspace::ai_state::{AiChatPopover, AiWorkspaceEntity, AiWorkspaceVisibility};
+use crate::workspace::ai_state::{AiChatPopover, AiWorkspaceVisibility};
 use crate::workspace::ime::WorkspaceImeTarget;
 use crate::workspace::*;
 use gpui::{Context, Div, MouseDownEvent, Rgba, Window};
 use oxideterm_ai::stream_state::*;
 use oxideterm_ai::{
-    AiAutocompleteCandidate, AiAutocompleteKind, AiChatMessage, AiChatMessageMetadata, AiChatRole,
-    AiChatStreamConfig, AiConversation, AiExecutionBackend, AiMessageBranches, AiPolicySafetyMode,
+    AiAutocompleteCandidate, AiAutocompleteKind, AiChatMessage, AiChatRole,
+    AiChatStreamConfig, AiConversation, AiExecutionBackend, AiPolicySafetyMode,
     AiProviderView, AiReasoningLevel, AiReferenceMatch, AiStreamEvent, AiToolCall, AiToolUsePolicy,
     ModelSelectorProviderProbe, ToolSessionId, active_model_selection, active_provider_view,
-    ai_autocomplete_candidates, ai_conversation_turn_count, ai_detected_intent_system_prompt,
+    ai_autocomplete_candidates, ai_detected_intent_system_prompt,
     ai_help_markdown as ai_help_markdown_core, ai_input_system_prompt, ai_input_token_at_cursor,
     ai_reference_context_block, ai_should_trigger_hard_deny, ai_user_explicitly_requested_json,
     ai_visible_suggestion_content, apply_chat_request_overrides, detect_ai_intent,
     extract_ai_error_context, generate_chat_title, infer_ai_cwd, model_reasoning_capability,
-    model_selector_display_name, model_selector_truncated_label,
     model_selector_visible_provider_groups, parse_ai_user_input,
     provider_chat_requires_key as ai_provider_chat_requires_key,
     provider_views as ai_provider_views, resolve_ai_policy_decision, resolve_ai_slash_command,
@@ -33,19 +32,13 @@ use oxideterm_gpui_settings_view::SettingsTab;
 use oxideterm_gpui_ui::{
     ConfirmDialogVariant, ConfirmDialogView, TextInputView,
     ai::{
-        AiContextUsage, AiModelSelectorPlacement, AiModelSelectorProviderState, AiSafetyMode,
+        AiContextUsage, AiSafetyMode,
         AiTone, AiToolCallView, AiToolRisk, AiToolStatus, ai_autocomplete_item,
         ai_autocomplete_popup, ai_chat_input_chips, ai_chat_input_editor, ai_chat_input_footer,
         ai_chat_input_frame, ai_chat_input_root_with_background, ai_chat_panel, ai_context_chip,
         ai_context_popover, ai_context_popover_header, ai_context_usage_indicator,
         ai_guardrail_block, ai_message_action, ai_message_author, ai_message_body,
-        ai_message_model_label, ai_message_time, ai_model_selector_dropdown,
-        ai_model_selector_empty_search, ai_model_selector_footer, ai_model_selector_key_status,
-        ai_model_selector_list, ai_model_selector_local_status, ai_model_selector_model_row,
-        ai_model_selector_models_panel, ai_model_selector_no_provider_button,
-        ai_model_selector_provider_header, ai_model_selector_provider_message,
-        ai_model_selector_refresh_button, ai_model_selector_root, ai_model_selector_search_bar,
-        ai_model_selector_trigger_compact, ai_raw_block, ai_safety_indicator, ai_send_button,
+        ai_message_model_label, ai_message_time, ai_raw_block, ai_safety_indicator, ai_send_button,
         ai_status_indicator, ai_stop_button, ai_thinking_block, ai_thinking_compact,
         ai_thinking_content, ai_thinking_header, ai_tool_approval_bar, ai_tool_approval_button,
         ai_tool_args_pre, ai_tool_block, ai_tool_details, ai_tool_heading, ai_tool_item,
@@ -57,75 +50,14 @@ use oxideterm_gpui_ui::{
     },
     context_menu::{ContextMenuActionableStyle, context_menu_action, context_menu_actionable_row},
     modal::overlay_content_boundary,
-    text_input::{
-        text_caret, text_input_anchor_probe, text_input_value_segments_with_color,
-        text_input_value_segments_with_marked_range,
-    },
+    text_input::text_input_anchor_probe,
 };
 use oxideterm_settings::{AcpAgentConfig, AcpAgentRuntimeState, AiActiveBackend, AiThinkingStyle};
 use oxideterm_settings_model::set_ai_model_reasoning_override;
 
-const AI_ACP_SESSION_METADATA_KEY: &str = "acp";
-const AI_REASONING_EFFORT_SESSION_METADATA_KEY: &str = "reasoningEffort";
-
-#[derive(Clone, Debug, Default, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(in crate::workspace) struct AiAcpSessionState {
-    pub(in crate::workspace) agent_id: String,
-    pub(in crate::workspace) session_id: String,
-    pub(in crate::workspace) metadata: Option<serde_json::Value>,
-    #[serde(default)]
-    pub(in crate::workspace) config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
-    #[serde(default)]
-    pub(in crate::workspace) model_selection: Option<oxideterm_ai::AcpSessionConfigSelection>,
-    #[serde(default)]
-    pub(in crate::workspace) config_selections: Vec<oxideterm_ai::AcpSessionConfigSelection>,
-    #[serde(default)]
-    pub(in crate::workspace) current_mode_id: Option<String>,
-    #[serde(default)]
-    pub(in crate::workspace) available_modes: Vec<oxideterm_ai::AcpSessionMode>,
-    #[serde(default)]
-    pub(in crate::workspace) available_commands: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub(in crate::workspace) plan: Option<serde_json::Value>,
-    #[serde(default)]
-    pub(in crate::workspace) usage: Option<serde_json::Value>,
-    #[serde(default)]
-    pub(in crate::workspace) title: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(in crate::workspace) handoff_cursor: Option<oxideterm_ai::AcpConversationHandoffCursor>,
-}
-
-pub(in crate::workspace) fn ai_acp_session_state(
-    conversation: &AiConversation,
-) -> Option<AiAcpSessionState> {
-    conversation
-        .session_metadata
-        .as_ref()?
-        .get(AI_ACP_SESSION_METADATA_KEY)
-        .cloned()
-        .and_then(|value| serde_json::from_value(value).ok())
-}
-
-pub(in crate::workspace) fn ai_message_backend_for_stream(
-    config: &AiChatStreamConfig,
-) -> oxideterm_ai::AiMessageBackendProvenance {
-    match config.execution_backend {
-        AiExecutionBackend::Provider => oxideterm_ai::AiMessageBackendProvenance {
-            kind: oxideterm_ai::AiMessageBackendKind::Provider,
-            backend_id: config
-                .provider_id
-                .clone()
-                .unwrap_or_else(|| config.provider_type.clone()),
-            model: config.model.clone(),
-        },
-        AiExecutionBackend::Acp => oxideterm_ai::AiMessageBackendProvenance {
-            kind: oxideterm_ai::AiMessageBackendKind::Acp,
-            backend_id: config.acp_agent_id.clone().unwrap_or_default(),
-            model: config.model.clone(),
-        },
-    }
-}
+pub(in crate::workspace) use oxideterm_gpui_ai::state::{
+    AiAcpSessionState, ai_acp_session_state, ai_message_backend_for_stream,
+};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::workspace) enum AiHeaderAction {
@@ -162,7 +94,7 @@ impl WorkspaceApp {
             disabled,
             loading,
             cx.listener(move |this, event, window, cx| {
-                this.ai_entity.update(cx, |ai, _cx| {
+                this.ai.state.update(cx, |ai, _cx| {
                     ai.set_chat_popover_open(AiChatPopover::Menu, false);
                     ai.set_chat_popover_open(AiChatPopover::ConversationList, false);
                     ai.set_chat_popover_open(AiChatPopover::Safety, false);

@@ -996,7 +996,7 @@ impl WorkspaceApp {
             self.close_ai_sidebar_popovers(cx);
             changed = true;
         } else if self
-            .ai_entity
+            .ai.state
             .read(cx)
             .model_selector_is_open(AiModelSelectorScope::TerminalInline)
         {

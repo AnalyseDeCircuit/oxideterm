@@ -818,7 +818,7 @@ impl InputHandler for WorkspaceInputHandler {
                 let byte = byte_index_for_utf16(&line, range_utf16.end.saturating_sub(range.start));
                 let x = view.shape_ime_text(target, &line, window).x_for_index(byte);
                 let scroll = view
-                    .ai_entity
+                    .ai.state
                     .read(cx)
                     .chat_ui()
                     .editing_message_scroll
@@ -933,6 +933,24 @@ impl WorkspaceApp {
                 .then(|| self.ime_text_with_marked_text_for_target(target, cx)).flatten(),
             update_anchor: Rc::new(move |anchor| anchors.update(anchor)),
         }
+    }
+
+
+    pub(in crate::workspace) fn forwards_ime_frame(
+        &self, page: super::TabId, input: ForwardInput, cx: &App,
+    ) -> Option<oxideterm_gpui_forwards::ForwardsImeFrame> {
+        let target = WorkspaceImeTarget::Forwards(page, input);
+        let anchor = target.anchor_id();
+        let anchors = self.text_input_anchors.clone();
+        Some(oxideterm_gpui_forwards::ForwardsImeFrame {
+            anchor,
+            viewport: anchors.viewport(anchor),
+            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
+            selection: self.ime_selected_range_for_target(target, cx),
+            composition: self.marked_text_for_target(target, cx).map(str::to_owned),
+            caret_visible: self.input_caret.visible(),
+            place_anchor: Rc::new(move |anchor| anchors.update(anchor)),
+        })
     }
 
     pub(super) fn settings_ime_frame<'a>(
@@ -1131,6 +1149,31 @@ impl WorkspaceApp {
     }
 
     pub(super) fn notify_ime_target(&self, target: WorkspaceImeTarget, cx: &mut Context<Self>) {
+        match target {
+            WorkspaceImeTarget::AiModelSelectorSearch => {
+                App::notify(cx, self.ai.model_picker.menu.entity_id());
+                return;
+            }
+            WorkspaceImeTarget::AiInlinePrompt => {
+                App::notify(cx, self.ai.inline_panel.entity_id());
+                return;
+            }
+            _ => {}
+        }
+        if let WorkspaceImeTarget::ReadOnlyText(group) = target
+            && self.notify_knowledge_preview_selection(group, cx) {
+                return;
+        }
+        if let WorkspaceImeTarget::Forwards(tab, _) = target {
+            if let Some(state) = self.forwarding.read(cx).page_state(tab) {
+                App::notify(cx, state.entity_id());
+            }
+            return;
+        }
+        if matches!(target, WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename) {
+            App::notify(cx, self.knowledge_workspace.view.entity_id());
+            return;
+        }
         if let WorkspaceImeTarget::SessionManager(input) = target {
             self.connections.notify_manager_input(input, cx);
             return;
@@ -1168,7 +1211,7 @@ impl WorkspaceApp {
         {
             return Some(WorkspaceImeTarget::Settings(input));
         }
-        if self.knowledge_workspace.read(cx).rename.is_some() {
+        if self.knowledge_input_owner(WorkspaceImeTarget::KnowledgeRename, cx).is_some() {
             return Some(WorkspaceImeTarget::KnowledgeRename);
         }
         if self.tab_rename_dialog.is_some() {
@@ -1207,8 +1250,8 @@ impl WorkspaceApp {
             self.onboarding.open && (!self.onboarding.disclaimer_accepted || onboarding_tab_visible);
         // Knowledge dialogs may be owned by a detached Knowledge or Settings window. The focused
         // window's WorkspaceImeElement decides which native window receives the shared draft.
-        let knowledge_dialog_visible = self.ai_entity.read(cx).knowledge_create_dialog_open()
-            || self.ai_entity.read(cx).knowledge_document_dialog_open();
+        let knowledge_dialog_visible = self.knowledge_page(cx).read(cx).knowledge_create_dialog_open()
+            || self.knowledge_page(cx).read(cx).knowledge_document_dialog_open();
         if (settings_tab_visible || onboarding_input_visible)
             && let Some(input) = self
                 .settings_workspace
@@ -1218,7 +1261,7 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Settings(input));
         }
         if settings_tab_visible || knowledge_dialog_visible {
-            if let Some(input) = self.ai_entity.read(cx).focused_settings_input() {
+            if let Some(input) = self.knowledge_page(cx).read(cx).focused_settings_input() {
                 return Some(WorkspaceImeTarget::Settings(input));
             }
         }
@@ -1228,10 +1271,7 @@ impl WorkspaceApp {
                 .selected_ime_range
                 .as_ref()
                 .is_some_and(|selection| selection.target == WorkspaceImeTarget::KnowledgeSearch))
-            && self
-                .knowledge_workspace
-                .read(cx)
-                .navigator_search_window
+            && self.knowledge_input_owner(WorkspaceImeTarget::KnowledgeSearch, cx)
                 .is_some_and(|owner| {
                     let main = self
                         .window_registry
@@ -1383,7 +1423,7 @@ impl WorkspaceApp {
 
         if let Some(page) = self.forwarding.read(cx).page_id()
             && self.tab_host.read(cx).surface_is_visible(page)
-            && let Some(input) = self.forwarding.read(cx).view().focused_input
+            && let Some(input) = self.forwarding.read(cx).page_for(page, cx).and_then(|state| state.focused_input())
         {
             return Some(WorkspaceImeTarget::Forwards(page, input));
         }
@@ -1412,10 +1452,10 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::Sftp(self.sftp_surface_id(), input));
         }
 
-        let terminal_inline_panel = self.ai_entity.read(cx).terminal_inline_panel();
+        let terminal_inline_panel = self.ai.state.read(cx).terminal_inline_panel();
         if (self.ai_sidebar_visible() || terminal_inline_panel.open)
-            && self.ai_entity.read(cx).model_selector_open()
-            && self.ai_entity.read(cx).model_selector_search_focused()
+            && self.ai.state.read(cx).model_selector_open()
+            && self.ai.state.read(cx).model_selector_search_focused()
         {
             return Some(WorkspaceImeTarget::AiModelSelectorSearch);
         }
@@ -1426,13 +1466,13 @@ impl WorkspaceApp {
 
         if self.ai_sidebar_visible()
             && self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .renaming_conversation_id
                 .is_some()
             && self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .renaming_conversation_focused
@@ -1440,18 +1480,18 @@ impl WorkspaceApp {
             return Some(WorkspaceImeTarget::AiConversationRename);
         }
 
-        if self.ai_sidebar_visible() && self.ai_entity.read(cx).chat_ui().input_focused {
+        if self.ai_sidebar_visible() && self.ai.state.read(cx).chat_ui().input_focused {
             return Some(WorkspaceImeTarget::AiChatInput);
         }
 
         if self.ai_sidebar_visible()
             && self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .editing_message_id
                 .is_some()
-            && self.ai_entity.read(cx).chat_ui().editing_message_focused
+            && self.ai.state.read(cx).chat_ui().editing_message_focused
         {
             return Some(WorkspaceImeTarget::AiMessageEdit);
         }
@@ -1508,14 +1548,6 @@ impl WorkspaceApp {
                 return None;
             }
         }
-        let knowledge = self.knowledge_workspace.read(cx);
-        let owner = match target {
-            WorkspaceImeTarget::KnowledgeSearch => knowledge.navigator_search_window,
-            WorkspaceImeTarget::KnowledgeRename => {
-                knowledge.rename.as_ref().map(|rename| rename.window_id)
-            }
-            _ => None,
-        };
         if target == WorkspaceImeTarget::AiInlinePrompt
             && self.terminal_ai_inline_window(cx) != Some(window_id)
         {
@@ -1525,7 +1557,7 @@ impl WorkspaceApp {
             target,
             WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename
         ) {
-            if owner != Some(window_id) {
+            if self.knowledge_input_owner(target, cx) != Some(window_id) {
                 return None;
             }
             let main_window = self
@@ -1543,7 +1575,7 @@ impl WorkspaceApp {
             target,
             WorkspaceImeTarget::Settings(SettingsInput::KnowledgeDocumentTitle)
         ) && !self
-            .ai_entity
+            .knowledge_page(cx)
             .read(cx)
             .knowledge_document_dialog_owned_by(window_id)
         {
@@ -1614,6 +1646,10 @@ impl WorkspaceApp {
                     None
                 }
             })
+    }
+
+    pub(super) fn ime_active_selection_offset(&self, target: WorkspaceImeTarget) -> Option<usize> {
+        self.ime_selection_for_target(target).map(|selection| selection.active_offset())
     }
 
     fn ime_selection_for_target(
@@ -2018,7 +2054,7 @@ impl WorkspaceApp {
         }
         let line_height = self.ime_target_line_height(target, bounds, lines.len());
         let scroll_y = if target == WorkspaceImeTarget::AiMessageEdit {
-            self.ai_entity
+            self.ai.state
                 .read(cx)
                 .chat_ui()
                 .editing_message_scroll
@@ -2330,18 +2366,9 @@ impl WorkspaceApp {
             WorkspaceImeTarget::ActiveSessionSearch => Some(self.session_search_query.clone()),
             WorkspaceImeTarget::AuditSearch => Some(self.audit.search.clone()),
             WorkspaceImeTarget::AuditPolicy(input) => Some(self.audit_policy_input_value(input)),
-            WorkspaceImeTarget::KnowledgeSearch => Some(
-                self.knowledge_workspace
-                    .read(cx)
-                    .navigator_query
-                    .to_string(),
-            ),
-            WorkspaceImeTarget::KnowledgeRename => self
-                .knowledge_workspace
-                .read(cx)
-                .rename
-                .as_ref()
-                .map(|rename| rename.name.clone()),
+            WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename => {
+                self.knowledge_input_text(target, cx)
+            }
             WorkspaceImeTarget::TerminalCommandSenderCompact => self
                 .terminal_command_sender
                 .read(cx)
@@ -2464,10 +2491,10 @@ impl WorkspaceApp {
                         .read(cx)
                         .settings_entity_input_value(input)
                         .map(|value| ime_text_snapshot(target, value))
-                } else if self.ai_entity.read(cx).focused_settings_input() == Some(input) {
+                } else if self.knowledge_page(cx).read(cx).focused_settings_input() == Some(input) {
                     // Platform IME receives only a length-preserving projection
                     // for secrets; the Entity remains the sole plaintext owner.
-                    self.ai_entity
+                    self.knowledge_page(cx)
                         .read(cx)
                         .settings_input_value(input)
                         .map(|value| ime_text_snapshot(target, value))
@@ -2480,17 +2507,9 @@ impl WorkspaceApp {
             WorkspaceImeTarget::SessionManager(input) => {
                 session_manager_ime_text(self.connections.session_manager.read(cx), input)
             }
-            WorkspaceImeTarget::Forwards(page, input) => {
-                if !self.forwarding.read(cx).has_page(page) {
-                    return None;
-                }
-                let _scope = self.enter_forwarding_page(page, cx);
-                if self.forwarding.read(cx).view().focused_input == Some(input) {
-                    Some(self.forward_input_value(input, cx).to_string())
-                } else {
-                    None
-                }
-            }
+            WorkspaceImeTarget::Forwards(page, input) => self.forwarding.read(cx).page_for(page, cx)
+                .filter(|state| state.focused_input() == Some(input))
+                .map(|state| state.input_value(input).to_owned()),
             WorkspaceImeTarget::FileManager(input) => {
                 let file_manager = self.file_manager.read(cx);
                 if file_manager.focused_input() == Some(input) {
@@ -2512,44 +2531,44 @@ impl WorkspaceApp {
                 .as_ref()
                 .map(|dialog| dialog.draft.clone()),
             WorkspaceImeTarget::AiModelSelectorSearch => self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .model_selector_search_focused()
                 .then(|| {
-                    self.ai_entity
+                    self.ai.state
                         .read(cx)
                         .model_selector_search_query()
                         .to_owned()
                 }),
             WorkspaceImeTarget::AiInlinePrompt => {
-                let panel = self.ai_entity.read(cx).terminal_inline_panel();
+                let panel = self.ai.state.read(cx).terminal_inline_panel();
                 panel.prompt_focused.then(|| panel.prompt.clone())
             }
             WorkspaceImeTarget::AiChatInput => self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .input_focused
-                .then(|| self.ai_entity.read(cx).chat_ui().draft.clone()),
+                .then(|| self.ai.state.read(cx).chat_ui().draft.clone()),
             WorkspaceImeTarget::AiConversationRename => self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .renaming_conversation_focused
                 .then(|| {
-                    self.ai_entity
+                    self.ai.state
                         .read(cx)
                         .chat_ui()
                         .renaming_conversation_draft
                         .clone()
                 }),
             WorkspaceImeTarget::AiMessageEdit => self
-                .ai_entity
+                .ai.state
                 .read(cx)
                 .chat_ui()
                 .editing_message_focused
                 .then(|| {
-                    self.ai_entity
+                    self.ai.state
                         .read(cx)
                         .chat_ui()
                         .editing_message_draft
@@ -3273,26 +3292,12 @@ impl WorkspaceApp {
                 self.show_active_input_caret(cx);
                 cx.notify();
             }
-            WorkspaceImeTarget::KnowledgeSearch => {
-                self.knowledge_workspace.update(cx, |state, _| {
-                    let mut query = state.navigator_query.to_string();
-                    replace_utf16(&mut query, replacement_range, text);
-                    state.navigator_query = query.into();
-                });
-                self.queue_knowledge_search(cx);
+            WorkspaceImeTarget::KnowledgeSearch | WorkspaceImeTarget::KnowledgeRename => {
+                if let Some(mut draft) = self.knowledge_input_text(target, cx) {
+                    replace_utf16(&mut draft, replacement_range, text);
+                    self.set_knowledge_input_text(target, draft, cx);
+                }
                 self.show_active_input_caret(cx);
-                cx.notify();
-            }
-            WorkspaceImeTarget::KnowledgeRename => {
-                self.knowledge_workspace.update(cx, |state, _| {
-                    if state.metadata_task.is_none()
-                        && let Some(rename) = state.rename.as_mut()
-                    {
-                        replace_utf16(&mut rename.name, replacement_range, text);
-                    }
-                });
-                self.show_active_input_caret(cx);
-                cx.notify();
             }
             WorkspaceImeTarget::AuditSearch => {
                 replace_utf16(&mut self.audit.search, replacement_range, text);
@@ -3500,8 +3505,8 @@ impl WorkspaceApp {
                     self.settings_workspace.update(cx, |settings, cx| {
                         settings.replace_settings_entity_input(input, replacement_range, text, cx);
                     });
-                } else if self.ai_entity.read(cx).focused_settings_input() == Some(input) {
-                    self.ai_entity.update(cx, |ai, cx| {
+                } else if self.knowledge_page(cx).read(cx).focused_settings_input() == Some(input) {
+                    self.knowledge_page(cx).update(cx, |ai, cx| {
                         ai.replace_settings_input(input, replacement_range, text, cx);
                     });
                 } else if self.focused_settings_input == Some(input) {
@@ -3536,16 +3541,14 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::Forwards(page, input) => {
-                if !self.forwarding.read(cx).has_page(page) {
-                    return;
-                }
-                let _scope = self.enter_forwarding_page(page, cx);
-                if self.forwarding.read(cx).view().focused_input == Some(input) {
-                    self.forwarding.update(cx, |forwarding, _cx| {
-                        forwarding.replace_input_text(input, replacement_range, text);
+                if let Some(state) = self.forwarding.read(cx).page_state(page)
+                    && state.read(cx).focused_input() == Some(input)
+                {
+                    state.update(cx, |state, cx| {
+                        state.replace_input_text(input, replacement_range, text);
+                        cx.notify();
                     });
                     self.show_active_input_caret(cx);
-                    cx.notify();
                 }
             }
             WorkspaceImeTarget::FileManager(input) => {
@@ -3575,35 +3578,29 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiModelSelectorSearch => {
-                if self.ai_entity.read(cx).model_selector_search_focused() {
-                    self.ai_entity.update(cx, |ai, _cx| {
+                if self.ai.state.read(cx).model_selector_search_focused() {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.replace_model_selector_search(replacement_range, text);
                     });
                     // Search changes rebuild the visible model rows; clear the
                     // Radix-style active item so keyboard focus cannot point at
                     // a filtered-out model.
                     self.show_active_input_caret(cx);
-                    cx.notify();
+                    self.notify_ime_target(target, cx);
                 }
             }
             WorkspaceImeTarget::AiInlinePrompt => {
-                let changed = self.ai_entity.update(cx, |ai, _cx| {
-                    let panel = ai.terminal_inline_panel_mut();
-                    if !panel.prompt_focused {
-                        return false;
-                    }
-                    replace_utf16(&mut panel.prompt, replacement_range, text);
-                    panel.error = None;
-                    true
+                let changed = self.ai.state.update(cx, |ai, _| {
+                    ai.replace_terminal_inline_prompt(replacement_range, text)
                 });
                 if changed {
                     self.show_active_input_caret(cx);
-                    cx.notify();
+                    self.notify_ime_target(target, cx);
                 }
             }
             WorkspaceImeTarget::AiChatInput => {
                 let changed = self
-                    .ai_entity
+                    .ai.state
                     .update(cx, |ai, _cx| ai.replace_chat_input(replacement_range, text));
                 if changed {
                     self.show_active_input_caret(cx);
@@ -3611,7 +3608,7 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiConversationRename => {
-                let changed = self.ai_entity.update(cx, |ai, _cx| {
+                let changed = self.ai.state.update(cx, |ai, _cx| {
                     ai.replace_conversation_rename(replacement_range, text)
                 });
                 if changed {
@@ -3620,7 +3617,7 @@ impl WorkspaceApp {
                 }
             }
             WorkspaceImeTarget::AiMessageEdit => {
-                let changed = self.ai_entity.update(cx, |ai, _cx| {
+                let changed = self.ai.state.update(cx, |ai, _cx| {
                     ai.replace_message_edit(replacement_range, text)
                 });
                 if changed {

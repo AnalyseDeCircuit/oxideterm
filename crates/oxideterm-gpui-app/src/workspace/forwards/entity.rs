@@ -3,16 +3,8 @@
 
 use super::*;
 use crate::workspace::delivery;
-use crate::workspace::{
-    FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT, FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT,
-    FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT, VirtualListSignatureCache,
-};
-use gpui::{ListAlignment, ListState};
-use std::{
-    cell::{Cell, RefCell},
-    ops::{Deref, DerefMut},
-    rc::Rc,
-};
+use gpui::{AppContext, Entity, Subscription};
+use std::{cell::Cell, rc::Rc};
 
 pub(in crate::workspace) enum ForwardingDeliveryIntent {
     Operation {
@@ -26,7 +18,6 @@ pub(in crate::workspace) enum ForwardingDeliveryIntent {
         binding: Option<(String, String, ConnectionConsumer)>,
     },
     PortScan {
-        node_id: NodeId,
         binding: Option<(String, String, ConnectionConsumer)>,
     },
     ReconnectRestore {
@@ -47,18 +38,14 @@ pub(in crate::workspace) enum ForwardingWorkspaceEvent {
     SamplingDue,
 }
 
-/// Owns forwarding UI delivery and sampling state without owning tunnel lifetime.
+/// Delivers runtime results and associates each presentation with its native tab.
 pub(in crate::workspace) struct ForwardingWorkspaceEntity {
-    pages: HashMap<TabId, ForwardingPageState>,
-    idle: ForwardingPageState,
+    pages: HashMap<TabId, ForwardingPage>,
     dispatch_page: Rc<Cell<Option<TabId>>>,
     selected_page: Option<TabId>,
     tab_nodes: HashMap<TabId, NodeId>,
-    sampling_visible: bool,
-    sampling_generation: u64,
-    sampling_task: Option<gpui::Task<()>>,
-    #[cfg(test)]
-    sampling_tick_count: usize,
+    sampler: Entity<ForwardsSampler>,
+    _sampler_subscription: Subscription,
     worker_tx: delivery::ActiveDeliverySender<ForwardingWorkerResult>,
     worker_rx: std::sync::mpsc::Receiver<ForwardingWorkerResult>,
     runtime_event_rx: std::sync::mpsc::Receiver<ForwardEvent>,
@@ -69,44 +56,16 @@ pub(in crate::workspace) struct ForwardingWorkspaceEntity {
     port_profiler_nodes: std::collections::HashSet<NodeId>,
 }
 
-pub(in crate::workspace) struct ForwardingPageState {
-    pub(super) view: ForwardsViewState,
-    pub(super) section_list_state: ListState,
-    pub(super) section_list_cache: RefCell<VirtualListSignatureCache>,
-    pub(super) table_row_list_state: ListState,
-    pub(super) table_row_list_cache: RefCell<VirtualListSignatureCache>,
-}
-impl ForwardingPageState {
-    fn new() -> Self {
-        Self {
-            view: ForwardsViewState::default(),
-            section_list_state: ListState::new(
-                FORWARDS_SECTION_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(FORWARDS_SECTION_LIST_ESTIMATED_HEIGHT),
-                    FORWARDS_SECTION_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            section_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-            table_row_list_state: ListState::new(
-                FORWARDS_TABLE_ROW_LIST_INITIAL_ITEM_COUNT,
-                ListAlignment::Top,
-                TauriVirtualListSpec::new(
-                    px(FORWARDS_TABLE_ROW_LIST_ESTIMATED_HEIGHT),
-                    FORWARDS_TABLE_ROW_LIST_OVERSCAN,
-                )
-                .overdraw(),
-            )
-            .measure_all(),
-            table_row_list_cache: RefCell::new(VirtualListSignatureCache::default()),
-        }
-    }
+type DeferredStart = (&'static str, bool, ForwardingRuntimeOperation);
+
+struct ForwardingPage {
+    state: Entity<ForwardsPageState>,
+    views: Option<ForwardsViews>,
+    pending_start: Option<DeferredStart>,
+    start_after_save: Option<ForwardingRuntimeOperation>,
 }
 
-/// Synchronous UI dispatch selects a page; async completions must capture and re-enter its ID.
+/// Synchronous keyboard routing selects a tab; worker results carry their own IDs.
 pub(in crate::workspace) struct ForwardingPageScope {
     slot: Rc<Cell<Option<TabId>>>,
     previous: Option<TabId>,
@@ -116,30 +75,6 @@ impl Drop for ForwardingPageScope {
         self.slot.set(self.previous);
     }
 }
-impl Deref for ForwardingWorkspaceEntity {
-    type Target = ForwardingPageState;
-    fn deref(&self) -> &Self::Target {
-        match self.page_id() {
-            Some(id) => self
-                .pages
-                .get(&id)
-                .expect("forwarding dispatch requires a live page"),
-            None => &self.idle,
-        }
-    }
-}
-impl DerefMut for ForwardingWorkspaceEntity {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        match self.page_id() {
-            Some(id) => self
-                .pages
-                .get_mut(&id)
-                .expect("forwarding dispatch requires a live page"),
-            None => &mut self.idle,
-        }
-    }
-}
-
 impl ForwardingWorkspaceEntity {
     pub(in crate::workspace) fn page_id(&self) -> Option<TabId> {
         self.dispatch_page.get().or(self.selected_page)
@@ -153,38 +88,88 @@ impl ForwardingWorkspaceEntity {
             previous: self.dispatch_page.replace(id),
         }
     }
-    pub(in crate::workspace) fn select_page(&mut self, id: TabId) {
+    pub(in crate::workspace) fn select_page(&mut self, id: TabId, cx: &mut App) {
         if self.selected_page != Some(id) {
-            if let Some(previous) = self.selected_page.and_then(|id| self.pages.get_mut(&id)) {
-                previous.view.focused_input = None;
+            if let Some(previous) = self.selected_page.and_then(|id| self.page_state(id)) {
+                previous.update(cx, |state, cx| {
+                    if state.clear_input_focus() {
+                        cx.notify();
+                    }
+                });
             }
             self.selected_page = Some(id);
         }
     }
 
+    pub(in crate::workspace) fn page_state(&self, id: TabId) -> Option<Entity<ForwardsPageState>> {
+        self.pages.get(&id).map(|page| page.state.clone())
+    }
+
+    pub(in crate::workspace) fn page_for<'a>(
+        &self,
+        id: TabId,
+        cx: &'a App,
+    ) -> Option<&'a ForwardsPageState> {
+        self.pages.get(&id).map(|page| page.state.read(cx))
+    }
+
+    pub(in crate::workspace) fn current_page<'a>(
+        &self,
+        cx: &'a App,
+    ) -> Option<&'a ForwardsPageState> {
+        self.page_for(self.page_id()?, cx)
+    }
+
+    pub(super) fn mount_page(&mut self, id: TabId, bindings: ForwardsViewBindings, cx: &mut App) {
+        if let Some(page) = self.pages.get_mut(&id)
+            && page.views.is_none()
+        {
+            page.views = Some(ForwardsViews::new(page.state.clone(), bindings, cx));
+        }
+    }
+
+    pub(super) fn views(&self, id: TabId) -> Option<&ForwardsViews> {
+        self.pages.get(&id)?.views.as_ref()
+    }
+
+    pub(super) fn set_deferred_start(&mut self, id: TabId, pending: DeferredStart) {
+        if let Some(page) = self.pages.get_mut(&id) {
+            page.pending_start = Some(pending);
+        }
+    }
+
+    pub(super) fn take_deferred_start(&mut self, id: TabId) -> Option<DeferredStart> {
+        self.pages.get_mut(&id)?.pending_start.take()
+    }
+
+    pub(super) fn set_start_after_save(
+        &mut self,
+        id: TabId,
+        operation: Option<ForwardingRuntimeOperation>,
+    ) {
+        if let Some(page) = self.pages.get_mut(&id) {
+            page.start_after_save = operation;
+        }
+    }
+
+    pub(super) fn take_start_after_save(
+        &mut self,
+        id: TabId,
+    ) -> Option<ForwardingRuntimeOperation> {
+        self.pages.get_mut(&id)?.start_after_save.take()
+    }
+
     #[cfg(test)]
-    pub(super) fn test_fixture() -> Self {
+    fn test_fixture(cx: &mut Context<Self>) -> Self {
         let (worker_tx, worker_rx) = delivery::ActiveDeliverySender::channel();
         let (_runtime_tx, runtime_event_rx) = std::sync::mpsc::channel();
-        Self {
-            pages: HashMap::new(),
-            idle: ForwardingPageState::new(),
-            dispatch_page: Rc::new(Cell::new(None)),
-            selected_page: None,
-            tab_nodes: HashMap::new(),
-            sampling_visible: false,
-            sampling_generation: 0,
-            sampling_task: None,
-            sampling_tick_count: 0,
+        Self::new(
             worker_tx,
             worker_rx,
             runtime_event_rx,
-            runtime_service: ForwardingRuntimeService::test_fixture(),
-            runtime_snapshots: HashMap::new(),
-            delivery_intents: VecDeque::new(),
-            port_detection_by_node: HashMap::new(),
-            port_profiler_nodes: std::collections::HashSet::new(),
-        }
+            ForwardingRuntimeService::test_fixture(),
+            cx,
+        )
     }
 
     pub(in crate::workspace) fn new(
@@ -194,17 +179,17 @@ impl ForwardingWorkspaceEntity {
         runtime_service: ForwardingRuntimeService,
         cx: &mut Context<Self>,
     ) -> Self {
+        let sampler = cx.new(|_| ForwardsSampler::default());
+        let sampler_subscription = cx.subscribe(&sampler, |_, _, _: &ForwardsSamplingDue, cx| {
+            cx.emit(ForwardingWorkspaceEvent::SamplingDue);
+        });
         let entity = Self {
             pages: HashMap::new(),
-            idle: ForwardingPageState::new(),
             dispatch_page: Rc::new(Cell::new(None)),
             selected_page: None,
             tab_nodes: HashMap::new(),
-            sampling_visible: false,
-            sampling_generation: 0,
-            sampling_task: None,
-            #[cfg(test)]
-            sampling_tick_count: 0,
+            sampler,
+            _sampler_subscription: sampler_subscription,
             worker_tx,
             worker_rx,
             runtime_event_rx,
@@ -227,7 +212,6 @@ impl ForwardingWorkspaceEntity {
         sync_saved_forwards_on_success: bool,
         operation: ForwardingRuntimeOperation,
     ) {
-        self.begin_operation();
         self.runtime_service.submit_operation(
             tab_id,
             node_id,
@@ -239,8 +223,9 @@ impl ForwardingWorkspaceEntity {
         );
     }
 
-    pub(in crate::workspace) fn operation_pending(&self) -> bool {
-        self.view.pending
+    pub(in crate::workspace) fn operation_pending(&self, id: TabId, cx: &App) -> bool {
+        self.page_for(id, cx)
+            .is_some_and(ForwardsPageState::pending)
     }
 
     pub(super) fn request_port_scan(
@@ -273,12 +258,13 @@ impl ForwardingWorkspaceEntity {
             .submit_reconnect_restore(request, self.worker_tx.clone());
     }
 
-    pub(super) fn refresh_runtime_snapshot(&mut self, node_id: &NodeId) -> bool {
+    pub(super) fn refresh_runtime_snapshot(&mut self, node_id: &NodeId, cx: &mut App) -> bool {
         let snapshot = self.runtime_service.snapshot_for_node(node_id);
         if self.runtime_snapshots.get(node_id) == Some(&snapshot) {
             return false;
         }
         self.runtime_snapshots.insert(node_id.clone(), snapshot);
+        self.notify_node(node_id, cx);
         true
     }
 
@@ -303,17 +289,24 @@ impl ForwardingWorkspaceEntity {
         &mut self,
         tab_id: TabId,
         node_id: NodeId,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
-        self.pages
-            .entry(tab_id)
-            .or_insert_with(ForwardingPageState::new);
+        self.pages.entry(tab_id).or_insert_with(|| ForwardingPage {
+            state: cx.new(|_| ForwardsPageState::new()),
+            views: None,
+            pending_start: None,
+            start_after_save: None,
+        });
         self.selected_page = Some(tab_id);
         self.tab_nodes.insert(tab_id, node_id.clone());
-        self.refresh_runtime_snapshot(&node_id);
+        self.refresh_runtime_snapshot(&node_id, cx);
     }
 
-    pub(in crate::workspace) fn unmap_tab(&mut self, tab_id: TabId) -> Option<NodeId> {
+    pub(in crate::workspace) fn unmap_tab(
+        &mut self,
+        tab_id: TabId,
+        cx: &mut App,
+    ) -> Option<NodeId> {
         // Removing a view mapping must not release the registry-owned tunnel.
         let removed = self.tab_nodes.remove(&tab_id);
         self.pages.remove(&tab_id);
@@ -327,10 +320,16 @@ impl ForwardingWorkspaceEntity {
             && !self.tab_nodes.values().any(|mapped| mapped == node_id)
         {
             self.runtime_snapshots.remove(node_id);
+            // A closed page releases its sampler, not the forwarding consumer.
+            if let Some(connection_id) = self.runtime_service.connection_id_for_node(node_id) {
+                self.runtime_service
+                    .registry()
+                    .stop_port_profiler(&connection_id);
+            }
         }
         if removed.is_some() && self.tab_nodes.is_empty() {
             // Cancel the page sampler without touching long-lived runtime state.
-            self.stop_sampling();
+            self.set_sampling_visible(false, cx);
         }
         removed
     }
@@ -342,75 +341,38 @@ impl ForwardingWorkspaceEntity {
     pub(in crate::workspace) fn set_sampling_visible(
         &mut self,
         visible: bool,
-        cx: &mut Context<Self>,
+        cx: &mut App,
     ) -> bool {
-        let should_sample = visible && !self.tab_nodes.is_empty();
-        if self.sampling_visible == should_sample {
-            return false;
-        }
-        if !should_sample {
-            self.stop_sampling();
-            return true;
-        }
-
-        self.sampling_visible = true;
-        self.sampling_generation = self.sampling_generation.wrapping_add(1);
-        self.view.last_stats_refresh = None;
-        for state in self.port_detection_by_node.values_mut() {
-            if !state.port_scan_pending {
-                state.last_port_scan_started = None;
-            }
-        }
-        self.schedule_sampling(self.sampling_generation, cx);
-        true
-    }
-
-    pub(in crate::workspace) fn sampling_visible(&self) -> bool {
-        self.sampling_visible
-    }
-
-    fn stop_sampling(&mut self) {
-        if !self.sampling_visible && self.sampling_task.is_none() {
-            return;
-        }
-        self.sampling_visible = false;
-        self.sampling_generation = self.sampling_generation.wrapping_add(1);
-        // Dropping the Entity-owned GPUI task cancels its pending Timer.
-        self.sampling_task.take();
-        for state in self.port_detection_by_node.values_mut() {
-            if !state.port_scan_pending {
-                state.last_port_scan_started = None;
-            }
-        }
-    }
-
-    fn schedule_sampling(&mut self, generation: u64, cx: &mut Context<Self>) {
-        self.sampling_task = Some(cx.spawn(async move |entity, cx| {
-            loop {
-                Timer::after(FORWARDS_SAMPLING_TICK_INTERVAL).await;
-                let keep_running = entity
-                    .update(cx, |entity, cx| entity.apply_sampling_tick(generation, cx))
-                    .unwrap_or(false);
-                if !keep_running {
-                    break;
+        let visible = visible && !self.tab_nodes.is_empty();
+        let changed = self
+            .sampler
+            .update(cx, |sampler, cx| sampler.set_visible(visible, cx));
+        if changed {
+            for state in self.port_detection_by_node.values_mut() {
+                if !state.port_scan_pending {
+                    state.last_port_scan_started = None;
                 }
             }
-        }));
+        }
+        changed
     }
 
-    fn apply_sampling_tick(&mut self, generation: u64, cx: &mut Context<Self>) -> bool {
-        if self.sampling_generation != generation
-            || !self.sampling_visible
-            || self.tab_nodes.is_empty()
-        {
-            return false;
+    pub(in crate::workspace) fn sampling_visible(&self, cx: &App) -> bool {
+        self.sampler.read(cx).visible()
+    }
+
+    pub(super) fn stats_due(&self, cx: &mut App) -> bool {
+        self.sampler.update(cx, |sampler, _| sampler.stats_due())
+    }
+
+    pub(super) fn notify_node(&self, node_id: &NodeId, cx: &mut App) {
+        for (tab, node) in &self.tab_nodes {
+            if node == node_id
+                && let Some(page) = self.pages.get(tab)
+            {
+                cx.notify(page.state.entity_id());
+            }
         }
-        #[cfg(test)]
-        {
-            self.sampling_tick_count = self.sampling_tick_count.saturating_add(1);
-        }
-        cx.emit(ForwardingWorkspaceEvent::SamplingDue);
-        true
     }
 
     pub(in crate::workspace) fn take_delivery_intents(
@@ -419,11 +381,7 @@ impl ForwardingWorkspaceEntity {
         std::mem::take(&mut self.delivery_intents)
     }
 
-    #[cfg(test)]
-    pub(in crate::workspace) fn port_detection_state(
-        &self,
-        node_id: &NodeId,
-    ) -> Option<PortDetectionViewState> {
+    pub(super) fn port_detection_state(&self, node_id: &NodeId) -> Option<PortDetectionViewState> {
         self.port_detection_by_node.get(node_id).cloned()
     }
 
@@ -431,9 +389,10 @@ impl ForwardingWorkspaceEntity {
         self.port_profiler_nodes.insert(node_id);
     }
 
-    pub(in crate::workspace) fn untrack_port_profiler(&mut self, node_id: &NodeId) {
+    pub(in crate::workspace) fn untrack_port_profiler(&mut self, node_id: &NodeId, cx: &mut App) {
         self.port_profiler_nodes.remove(node_id);
         self.port_detection_by_node.remove(node_id);
+        self.notify_node(node_id, cx);
     }
 
     pub(in crate::workspace) fn tracked_port_profiler_nodes(&self) -> Vec<NodeId> {
@@ -480,13 +439,18 @@ impl ForwardingWorkspaceEntity {
         }
     }
 
-    pub(in crate::workspace) fn dismiss_detected_port(&mut self, node_id: &NodeId, port: u16) {
+    pub(in crate::workspace) fn dismiss_detected_port(
+        &mut self,
+        node_id: &NodeId,
+        port: u16,
+        cx: &mut App,
+    ) {
         self.runtime_service
             .ignore_detected_port_for_node(node_id, port);
-        self.view.new_ports.retain(|detected| detected.port != port);
         if let Some(state) = self.port_detection_by_node.get_mut(node_id) {
             state.new_ports.retain(|detected| detected.port != port);
         }
+        self.notify_node(node_id, cx);
     }
 
     fn schedule_delivery(&self, cx: &mut Context<Self>) {
@@ -532,7 +496,7 @@ impl ForwardingWorkspaceEntity {
                     result,
                 } => {
                     if let Some(node_id) = self.node_for_tab(tab_id) {
-                        self.refresh_runtime_snapshot(&node_id);
+                        self.refresh_runtime_snapshot(&node_id, cx);
                     }
                     self.delivery_intents
                         .push_back(ForwardingDeliveryIntent::Operation {
@@ -552,10 +516,10 @@ impl ForwardingWorkspaceEntity {
                     binding,
                     result,
                 } => {
-                    self.apply_port_detection_result(&node_id, connection_id, result);
-                    self.refresh_runtime_snapshot(&node_id);
+                    self.apply_port_detection_result(&node_id, connection_id, result, cx);
+                    self.refresh_runtime_snapshot(&node_id, cx);
                     self.delivery_intents
-                        .push_back(ForwardingDeliveryIntent::PortScan { node_id, binding });
+                        .push_back(ForwardingDeliveryIntent::PortScan { binding });
                 }
                 ForwardingWorkerResult::ReconnectRestore {
                     node_id,
@@ -599,13 +563,14 @@ impl ForwardingWorkspaceEntity {
                         snapshot
                             .stats_by_forward_id
                             .insert(forward_id.clone(), stats.clone());
+                        self.notify_node(&node_id, cx);
                     }
                 }
                 ForwardEvent::StatusChanged { session_id, .. }
                 | ForwardEvent::SessionSuspended { session_id, .. } => {
                     if let Some(node_id) = ForwardingRuntimeService::node_id_for_session(session_id)
                     {
-                        self.refresh_runtime_snapshot(&node_id);
+                        self.refresh_runtime_snapshot(&node_id, cx);
                     }
                 }
                 ForwardEvent::PortDetected { .. } => {}
@@ -615,7 +580,6 @@ impl ForwardingWorkspaceEntity {
         }
         if !self.delivery_intents.is_empty() {
             cx.emit(ForwardingWorkspaceEvent::DeliveryReady);
-            cx.notify();
         }
         worker_drain.outcome.backlog_remaining || event_drain.outcome.backlog_remaining
     }
@@ -625,54 +589,13 @@ impl ForwardingWorkspaceEntity {
         node_id: &NodeId,
         connection_id: Option<String>,
         result: Result<PortDetectionSnapshot, String>,
+        cx: &mut App,
     ) {
-        let state = self
-            .port_detection_by_node
+        self.port_detection_by_node
             .entry(node_id.clone())
-            .or_default();
-        if connection_id.is_some() && state.connection_id != connection_id {
-            // Detection is connection-scoped. Reconnect must discard samples
-            // and dismissals associated with the previous transport.
-            state.connection_id = connection_id;
-            state.detected_ports.clear();
-            state.new_ports.clear();
-            state.has_scanned_ports = false;
-            state.port_scan_error = None;
-        }
-        state.port_scan_pending = false;
-        match result {
-            Ok(snapshot) => {
-                state.has_scanned_ports = snapshot.has_scanned;
-                state.detected_ports = snapshot.all_ports;
-                if !snapshot.new_ports.is_empty() {
-                    let existing = state
-                        .new_ports
-                        .iter()
-                        .map(|port| port.port)
-                        .collect::<std::collections::HashSet<_>>();
-                    state.new_ports.extend(
-                        snapshot
-                            .new_ports
-                            .into_iter()
-                            .filter(|port| !existing.contains(&port.port)),
-                    );
-                }
-                if !snapshot.closed_ports.is_empty() {
-                    let closed = snapshot
-                        .closed_ports
-                        .iter()
-                        .map(|port| port.port)
-                        .collect::<std::collections::HashSet<_>>();
-                    state.new_ports.retain(|port| !closed.contains(&port.port));
-                }
-                state.port_scan_error = None;
-            }
-            Err(_error) => {
-                // Sampling failures are retried while the surface is visible;
-                // they do not replace user-action errors in the form.
-                state.port_scan_error = None;
-            }
-        }
+            .or_default()
+            .apply(connection_id, result);
+        self.notify_node(node_id, cx);
     }
 }
 
@@ -682,88 +605,11 @@ impl gpui::EventEmitter<ForwardingWorkspaceEvent> for ForwardingWorkspaceEntity 
 mod tests {
     use super::*;
     use gpui::{AppContext, TestAppContext};
-
-    #[test]
-    fn connection_handoff_discards_previous_detection_state() {
-        let mut entity = ForwardingWorkspaceEntity::test_fixture();
-        let node_id = NodeId::new("forward-test");
-        entity.apply_port_detection_result(
-            &node_id,
-            Some("connection-a".to_string()),
-            Ok(PortDetectionSnapshot {
-                new_ports: vec![DetectedPort {
-                    port: 3000,
-                    bind_addr: "127.0.0.1".to_string(),
-                    process_name: None,
-                    pid: None,
-                }],
-                closed_ports: Vec::new(),
-                all_ports: Vec::new(),
-                has_scanned: true,
-            }),
-        );
-
-        entity.apply_port_detection_result(
-            &node_id,
-            Some("connection-b".to_string()),
-            Ok(PortDetectionSnapshot::default()),
-        );
-
-        let state = entity.port_detection_state(&node_id).unwrap();
-        assert_eq!(state.connection_id.as_deref(), Some("connection-b"));
-        assert!(state.new_ports.is_empty());
-    }
-
-    #[gpui::test]
-    fn page_form_exit_keeps_other_page_drafts_and_runtime_mapping(cx: &mut TestAppContext) {
-        let entity = cx.new(|_| ForwardingWorkspaceEntity::test_fixture());
-        let [a, b] = [TabId(1), TabId(2)];
-        entity.update(cx, |state, cx| {
-            for (id, port) in [(a, "8081"), (b, "8082")] {
-                state.map_tab_to_node(id, NodeId::new("shared-node"), cx);
-                let _scope = state.enter_page(Some(id));
-                state.open_create_form();
-                state.focus_input(ForwardInput::CreateBindPort);
-                state.replace_input_text(ForwardInput::CreateBindPort, None, port);
-            }
-            let _scope = state.enter_page(Some(a));
-            assert!(state.begin_create_form_exit(Duration::from_millis(100), cx));
-        });
-        cx.run_until_parked();
-        cx.executor().advance_clock(Duration::from_millis(120));
-        cx.run_until_parked();
-        entity.update(cx, |state, cx| {
-            {
-                let _scope = state.enter_page(Some(a));
-                assert!(!state.view().show_new_form);
-                assert_eq!(state.view().bind_port, "8081");
-            }
-            assert!(state.view().show_new_form);
-            assert_eq!(state.view().bind_port, "8082");
-            assert_eq!(
-                state.view().focused_input,
-                Some(ForwardInput::CreateBindPort)
-            );
-            {
-                let _scope = state.enter_page(Some(a));
-                state.open_create_form();
-                assert!(state.begin_create_form_exit(Duration::from_millis(100), cx));
-            }
-            state.unmap_tab(a);
-        });
-        cx.run_until_parked();
-        cx.executor().advance_clock(Duration::from_millis(120));
-        cx.run_until_parked();
-        entity.read_with(cx, |state, _| {
-            assert_eq!(state.node_for_tab(b), Some(NodeId::new("shared-node")));
-            assert!(state.view().show_new_form);
-            assert_eq!(state.view().bind_port, "8082");
-        });
-    }
+    use oxideterm_forwarding::DetectedPort;
 
     #[gpui::test]
     fn closing_tab_removes_only_the_view_mapping(cx: &mut TestAppContext) {
-        let entity = cx.new(|_cx| ForwardingWorkspaceEntity::test_fixture());
+        let entity = cx.new(ForwardingWorkspaceEntity::test_fixture);
         let tab_id = TabId(7);
         let node_id = NodeId::new("shared-forward");
         entity.update(cx, |entity, cx| {
@@ -774,18 +620,14 @@ mod tests {
         cx.read(|cx| {
             assert_eq!(entity.read(cx).node_for_tab(tab_id), Some(node_id.clone()));
             assert!(entity.read(cx).runtime_snapshots.contains_key(&node_id));
-            assert!(entity.read(cx).sampling_visible);
-            assert_eq!(entity.read(cx).sampling_generation, 1);
-            assert!(entity.read(cx).sampling_task.is_some());
+            assert!(entity.read(cx).sampling_visible(cx));
         });
-        let removed = entity.update(cx, |entity, _cx| entity.unmap_tab(tab_id));
+        let removed = entity.update(cx, |entity, cx| entity.unmap_tab(tab_id, cx));
         assert_eq!(removed, Some(node_id.clone()));
         cx.read(|cx| {
             assert!(entity.read(cx).node_for_tab(tab_id).is_none());
             assert!(!entity.read(cx).runtime_snapshots.contains_key(&node_id));
-            assert!(!entity.read(cx).sampling_visible);
-            assert_eq!(entity.read(cx).sampling_generation, 2);
-            assert!(entity.read(cx).sampling_task.is_none());
+            assert!(!entity.read(cx).sampling_visible(cx));
         });
 
         // The Entity deliberately has no stop/remove call here; a tab close
@@ -817,25 +659,19 @@ mod tests {
                 .entry(node_id.clone())
                 .or_default()
                 .last_port_scan_started = Some(Instant::now());
-            entity.view.last_stats_refresh = Some(Instant::now());
+            assert!(entity.stats_due(cx));
+            assert!(!entity.stats_due(cx));
         });
 
-        let visible_generation = cx.read(|cx| entity.read(cx).sampling_generation);
         entity.update(cx, |entity, cx| {
-            assert!(entity.apply_sampling_tick(visible_generation, cx));
-            assert_eq!(entity.sampling_tick_count, 1);
             assert!(entity.set_sampling_visible(false, cx));
-            assert!(!entity.sampling_visible);
-            assert!(entity.sampling_task.is_none());
+            assert!(!entity.sampling_visible(cx));
             assert!(
                 entity
                     .port_detection_by_node
                     .get(&node_id)
                     .is_some_and(|state| state.last_port_scan_started.is_none())
             );
-            // A queued tick from the canceled generation cannot wake sampling.
-            assert!(!entity.apply_sampling_tick(visible_generation, cx));
-            assert_eq!(entity.sampling_tick_count, 1);
         });
 
         worker_tx
@@ -862,7 +698,7 @@ mod tests {
 
         // Closing the view removes only its mapping; reliable runtime delivery
         // remains owned by the Entity and is independent from tunnel lifetime.
-        let removed = entity.update(cx, |entity, _cx| entity.unmap_tab(tab_id));
+        let removed = entity.update(cx, |entity, cx| entity.unmap_tab(tab_id, cx));
         assert_eq!(removed, Some(node_id.clone()));
         worker_tx
             .send(ForwardingWorkerResult::ReconnectRestore {
@@ -889,11 +725,8 @@ mod tests {
         entity.update(cx, |entity, cx| {
             entity.map_tab_to_node(tab_id, node_id, cx);
             assert!(entity.set_sampling_visible(true, cx));
-            assert!(entity.sampling_task.is_some());
-            assert!(entity.view.last_stats_refresh.is_none());
-            let resumed_generation = entity.sampling_generation;
-            assert!(entity.apply_sampling_tick(resumed_generation, cx));
-            assert_eq!(entity.sampling_tick_count, 2);
+            assert!(entity.sampling_visible(cx));
+            assert!(entity.stats_due(cx));
         });
     }
 

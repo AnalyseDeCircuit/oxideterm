@@ -23,41 +23,6 @@ const REMOTE_DESKTOP_TUNNEL_DESCRIPTION_PREFIX: &str =
     "__oxideterm_internal_remote_desktop_tunnel_v1__:";
 const WORKSPACE_SESSION_SERVICE_SHUTDOWN_GRACE_PERIOD: Duration = Duration::from_secs(5);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum ForwardingQuickAction {
-    Jupyter,
-    Tensorboard,
-    Vscode,
-}
-
-#[derive(Debug)]
-pub(in crate::workspace) enum ForwardingRuntimeOperation {
-    Save {
-        rule: ForwardRule,
-    },
-    Create {
-        rule: ForwardRule,
-        check_health: bool,
-    },
-    Update {
-        forward_id: String,
-        update: ForwardUpdate,
-    },
-    Delete {
-        forward_id: String,
-    },
-    Stop {
-        forward_id: String,
-    },
-    Restart {
-        forward_id: String,
-    },
-    Quick {
-        action: ForwardingQuickAction,
-        port: u16,
-    },
-}
-
 pub(in crate::workspace) struct ReconnectForwardRestoreRequest {
     pub(in crate::workspace) root_node_id: NodeId,
     pub(in crate::workspace) snapshots: Vec<ReconnectForwardRuleSnapshot>,
@@ -65,13 +30,6 @@ pub(in crate::workspace) struct ReconnectForwardRestoreRequest {
     pub(in crate::workspace) owner_connection_ids: HashMap<String, Option<String>>,
     pub(in crate::workspace) cancellation: Arc<AtomicBool>,
     pub(in crate::workspace) job_id: String,
-}
-
-#[derive(Clone, Default, Eq, PartialEq)]
-pub(super) struct ForwardingRuntimeSnapshot {
-    pub(super) rules: Vec<ForwardRule>,
-    pub(super) names: HashMap<String, String>,
-    pub(super) stats_by_forward_id: HashMap<String, ForwardStats>,
 }
 
 pub(in crate::workspace) struct PublicMcpForwardMutation {

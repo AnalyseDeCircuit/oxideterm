@@ -1249,7 +1249,17 @@
     "knowledge_base": "Kho tri thức và bộ nhớ",
     "knowledge_base_desc": "Lập chỉ mục bộ sưu tập Markdown hoặc văn bản cho tìm kiếm ngữ nghĩa, embedding và ngữ cảnh OxideSens.",
     "external_import": "Nhập kết nối bên ngoài",
-    "external_import_desc": "Nhập host từ cấu hình SSH và trình quản lý terminal bên thứ ba được hỗ trợ, có xem trước và xử lý trùng lặp."
+    "external_import_desc": "Nhập host từ cấu hình SSH và trình quản lý terminal bên thứ ba được hỗ trợ, có xem trước và xử lý trùng lặp.",
+    "step_overview": "Tổng quan",
+    "step_disclaimer": "Lưu ý",
+    "badge_open_source": "Miễn phí & Mã nguồn mở · GPL-3.0",
+    "badge_pure_rust": "Rust thuần gốc",
+    "badge_no_webview": "Không WebView · GPUI",
+    "overview_intro": "Không gian làm việc miễn phí mã nguồn mở viết bằng Rust thuần và GPUI, không WebView. Hợp nhất terminal, truyền tệp, tunnel, giám sát máy chủ và AI trong một cửa sổ.",
+    "cat_connections": "Kết nối & Giao thức",
+    "cat_files_dev": "Tệp & Phát triển từ xa",
+    "cat_ops_ai": "Vận hành máy chủ & AI",
+    "cat_security_ext": "Bảo mật, đồng bộ & Mở rộng"
   },
   "migration": {
     "backup_notice": "OxideTerm đã tạo một bản chụp duy nhất cho dữ liệu trước phiên bản 2.0 của bạn. Đây là bản sao phục hồi, không phải cơ chế tự động quay lại phiên bản cũ.",

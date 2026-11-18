@@ -186,7 +186,7 @@ mod agent_loop_tests {
             (200, completed(json!([call("question-wire", "ask_user", json!({"question":"Which environment?","options":["Staging","Production"]}))]))),
             (200, completed(json!([{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Using staging."}]}]))),
         ]).await;
-        let mut config = crate::workspace::ai_state::entity_tests::queued_turn("task").config;
+        let mut config = loop_test_chat_config();
         config.api_protocol = oxideterm_ai::AiApiProtocol::Responses;
         config.base_url = url;
         config.tool_policy.enabled = true;
@@ -494,7 +494,7 @@ mod agent_loop_tests {
                 }
             }
         });
-        let mut config = crate::workspace::ai_state::entity_tests::queued_turn("task").config;
+        let mut config = loop_test_chat_config();
         config.tool_policy.enabled = true;
         let call=AiToolCall { id:"write".into(),name:"run_command".into(),arguments:serde_json::json!({"command":"touch /tmp/result","handle_id":"rt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}).to_string() };
         let temp = tempfile::tempdir().unwrap();
@@ -548,7 +548,7 @@ mod agent_loop_tests {
             json!([{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Finished"}]}]),
         );
         let (url, server) = model_server(vec![(200, first), (503, json!({})), (200, last)]).await;
-        let mut config = crate::workspace::ai_state::entity_tests::queued_turn("task").config;
+        let mut config = loop_test_chat_config();
         config.api_protocol = oxideterm_ai::AiApiProtocol::Responses;
         config.base_url = url;
         config.tool_policy.enabled = true;
@@ -696,7 +696,7 @@ mod agent_loop_tests {
                 response["incomplete_details"] = json!({"reason":"max_output_tokens"});
             }
             let (url, server) = model_server(vec![(200, response)]).await;
-            let mut config = crate::workspace::ai_state::entity_tests::queued_turn("task").config;
+            let mut config = loop_test_chat_config();
             config.api_protocol = oxideterm_ai::AiApiProtocol::Responses;
             config.base_url = url;
             let mut task = agent_chat_message(
@@ -796,7 +796,7 @@ mod agent_loop_tests {
             )
         ]));
         let (url, server) = model_server(vec![(200, first)]).await;
-        let mut config = crate::workspace::ai_state::entity_tests::queued_turn("task").config;
+        let mut config = loop_test_chat_config();
         config.api_protocol = oxideterm_ai::AiApiProtocol::Responses;
         config.base_url = url;
         config.tool_policy.enabled = true;
@@ -883,7 +883,7 @@ mod agent_loop_tests {
     async fn benchmark_read_dispatch() {
         let temp = tempfile::tempdir().unwrap();
         let backend = services(temp.path());
-        let mut config = crate::workspace::ai_state::entity_tests::queued_turn("benchmark").config;
+        let mut config = loop_test_chat_config();
         config.tool_policy.enabled = true;
         let available = std::collections::HashSet::from(["read_resource".to_string()]);
         let calls=(0..4).map(|index|AiToolCall{id:format!("call-{index}"),name:"read_resource".into(),arguments:json!({"resource":"file","path":format!("/file-{index}"),"handle_id":"rt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}).to_string()}).collect::<Vec<_>>();
@@ -990,5 +990,32 @@ mod agent_loop_tests {
                 samples[1]
             );
         }
+    }
+}
+
+#[cfg(test)]
+fn loop_test_chat_config() -> oxideterm_ai::AiChatStreamConfig {
+    oxideterm_ai::AiChatStreamConfig {
+        api_protocol: oxideterm_ai::AiApiProtocol::default(),
+        image_input: Default::default(),
+        omit_history_images: false,
+        execution_backend: Default::default(),
+        provider_id: Some("provider".into()),
+        acp_agent_id: None,
+        acp_session_id: None,
+        acp_config_selection: None,
+        provider_type: "openai".into(),
+        base_url: String::new(),
+        model: "queued-model".into(),
+        api_key: None,
+        max_response_tokens: None,
+        reasoning_effort: None,
+        safety_mode: Default::default(),
+        profile_id: None,
+        memory_context: None,
+        memory_entry_ids: Vec::new(),
+        tool_policy: Default::default(),
+        tools: Vec::new(),
+        tool_choice: oxideterm_ai::AiToolChoice::Auto,
     }
 }

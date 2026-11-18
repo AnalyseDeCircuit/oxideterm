@@ -84,7 +84,7 @@ impl WorkspaceApp {
         prompt: AiStickyPrompt,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         let conversation = ai.conversation_state().active_conversation()?;
         if conversation.id != conversation_id {
             return None;
@@ -131,7 +131,7 @@ impl WorkspaceApp {
                 body.cursor_pointer(),
                 move |this, _, cx| {
                     if this
-                        .ai_entity
+                        .ai.state
                         .read(cx)
                         .conversation_state()
                         .active_conversation_id

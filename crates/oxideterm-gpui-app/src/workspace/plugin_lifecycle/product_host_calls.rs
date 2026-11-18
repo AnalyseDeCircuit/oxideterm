@@ -354,7 +354,7 @@ impl WorkspaceApp {
                     // material before the existing AI workflow builds model context.
                     let content = Zeroizing::new(content.to_string());
                     let sanitized = oxideterm_ai::sanitize_for_ai(content.as_str());
-                    self.ai_entity.update(cx, |ai, _cx| {
+                    self.ai.state.update(cx, |ai, _cx| {
                         ai.set_chat_draft(sanitized);
                     });
                     self.send_ai_chat_draft(cx);

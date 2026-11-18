@@ -175,7 +175,7 @@ impl WorkspaceApp {
                 if let Some(id) = self.active_pane_id(cx) {
                     self.hide_search(id, cx);
                 }
-                if self.ai_entity.read(cx).terminal_inline_panel().open {
+                if self.ai.state.read(cx).terminal_inline_panel().open {
                     self.close_terminal_ai_inline_panel(window, cx);
                 }
                 self.close_terminal_command_overlays(cx);

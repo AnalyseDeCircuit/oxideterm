@@ -214,7 +214,7 @@ impl WorkspaceApp {
     ) -> bool {
         let mut scrolled = false;
         if let Some(delta) = self.selectable_text_ai_chat_autoscroll_delta(position, cx) {
-            self.ai_entity
+            self.ai.state
                 .read(cx)
                 .chat_ui()
                 .message_list_state
@@ -256,7 +256,7 @@ impl WorkspaceApp {
             return None;
         }
         let bounds = self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_ui()
             .message_list_state

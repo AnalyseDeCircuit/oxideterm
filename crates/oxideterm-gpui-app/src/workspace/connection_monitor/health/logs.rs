@@ -7,7 +7,7 @@ impl WorkspaceApp {
         let mono_font_family = settings_mono_font_family(self.settings_store.settings());
         let selectable_text = self.host_tools_selectable_text(cx);
         let show_context_columns =
-            self.ai_entity.read(cx).chat_ui().sidebar_width >= HOST_LOG_CONTEXT_COLUMNS_MIN_WIDTH;
+            self.ai.state.read(cx).chat_ui().sidebar_width >= HOST_LOG_CONTEXT_COLUMNS_MIN_WIDTH;
         let search_ime = self
             .host_tools_plain_text_ime_frame(HostToolsTextInput::LogSearch, cx)
             .expect("log search is a non-secret Host Tools input");

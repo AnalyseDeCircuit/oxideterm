@@ -151,7 +151,7 @@ impl WorkspaceApp {
             })
             .unwrap_or_default();
         let diff = self.cloud_sync_sources().diff_render_data(
-            self.ai_entity.read(cx).key_store(),
+            self.ai.state.read(cx).key_store(),
             &self.i18n,
             cx,
         );

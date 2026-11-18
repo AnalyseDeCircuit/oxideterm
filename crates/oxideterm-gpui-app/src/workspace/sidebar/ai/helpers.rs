@@ -1,9 +1,4 @@
-pub(in crate::workspace) fn ai_now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(i64::MAX as u128) as i64)
-        .unwrap_or_default()
-}
+pub(in crate::workspace) use oxideterm_gpui_ai::state::ai_now_ms;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn cached_ai_markdown_document(
@@ -14,7 +9,7 @@ impl WorkspaceApp {
         cx: &App,
     ) -> AiCachedMarkdownDocument {
         use std::hash::{Hash, Hasher};
-        let ai = self.ai_entity.read(cx);
+        let ai = self.ai.state.read(cx);
         let conversation = ai
             .conversation_state()
             .active_conversation_id

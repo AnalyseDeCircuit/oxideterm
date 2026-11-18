@@ -1,198 +1,3 @@
-impl AiWorkspaceEntity {
-    fn apply_compaction_result(
-        &mut self,
-        conversation_id: &str,
-        base_ids: &[String],
-        plan: AiCompactionPlan,
-        summary: &str,
-        anchor_id: &str,
-        now_ms: i64,
-    ) -> Option<(serde_json::Value, Option<String>, Option<String>, usize)> {
-        let through_message = plan.compact_messages.last()?.id.clone();
-        let (source_branch, source) = self.history.compaction_sources.remove(conversation_id)?;
-        if self.history.branches.get(conversation_id).is_some_and(|branch| branch != &source_branch)
-            || !source.messages.iter().map(|message| &message.id).eq(base_ids.iter())
-        { return None; }
-        self.capture_history_before_edit(conversation_id);
-        let conversation = self
-            .conversation_state_mut()
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)?;
-        let last_source = base_ids.last()?;
-        let suffix_start = conversation.messages.iter().position(|message| &message.id == last_source)
-            .map(|index| index + 1).unwrap_or(conversation.messages.len());
-        let appended = conversation
-            .messages
-            .iter()
-            .skip(suffix_start)
-            .cloned()
-            .collect::<Vec<_>>();
-        let summary_source_transcript_ref =
-            ai_summary_source_transcript_ref(&plan.compact_messages, conversation_id);
-        let summary_round_id = ai_latest_summary_round_id(&plan.compact_messages);
-        let compacted_until_entry_id =
-            ai_transcript_boundary_id(plan.compact_messages.last(), "end");
-        let total_compacted = ai_compaction_original_count(&plan.compact_messages);
-        let total_compacted_turns = ai_conversation_turn_count(&plan.compact_messages);
-        let original_ref = oxideterm_ai::AiHistoryRange { branch_id:source_branch,first_message_id:plan.compact_messages.first().map(|message| message.id.clone()),last_message_id:plan.compact_messages.last().map(|message| message.id.clone()) };
-        let summary_entry_id = format!("transcript-summary-created-{anchor_id}");
-        let transcript_ref = serde_json::json!({
-            "conversationId": conversation_id,
-            "endEntryId": summary_entry_id,
-        });
-        let summary_ref = serde_json::json!({
-            "kind": "compaction",
-            "roundId": summary_round_id,
-            "transcriptRef": summary_source_transcript_ref,
-        });
-        let anchor = AiChatMessage {
-            id: anchor_id.to_string(),
-            role: AiChatRole::System,
-            content: summary.to_string(),
-            timestamp_ms: now_ms,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: Some(AiChatMessageMetadata {
-                kind: "compaction-anchor".to_string(),
-                original_count: Some(total_compacted),
-                compacted_at_ms: Some(now_ms),
-                original_ref: Some(original_ref),
-                original_messages: None,
-                original_user_count: Some(total_compacted_turns),
-                images: Vec::new(),
-            }),
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: Some(transcript_ref),
-            summary_ref: Some(summary_ref),
-            branches: None,
-            suggestions: Vec::new(),
-        };
-        conversation.messages = std::iter::once(anchor)
-            .chain(plan.keep_messages)
-            .chain(appended)
-            .collect();
-        conversation.updated_at_ms = now_ms;
-        conversation.message_count = conversation.messages.len();
-        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
-        let metadata = conversation
-            .session_metadata
-            .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
-        if let Some(object) = metadata.as_object_mut() {
-            object.insert(
-                "conversationId".to_string(),
-                serde_json::json!(conversation_id),
-            );
-            object.insert("lastSummaryAt".to_string(), serde_json::json!(now_ms));
-            if let Some(compacted_until_entry_id) = compacted_until_entry_id.as_deref() {
-                object.insert(
-                    "lastCompactedUntilEntryId".to_string(),
-                    serde_json::json!(compacted_until_entry_id),
-                );
-            }
-            if let Some(summary_round_id) = summary_round_id.as_deref() {
-                object.insert(
-                    "lastSummaryRoundId".to_string(),
-                    serde_json::json!(summary_round_id),
-                );
-            }
-        }
-        if let Some(conversation) = self.conversation_state().conversations.iter().find(|conversation| conversation.id == conversation_id) {
-            self.history.model_contexts.insert(conversation_id.to_owned(),conversation.clone());
-        }
-        self.compact_history(conversation_id,through_message);
-        self.persist_chat_state();
-        Some((
-            summary_source_transcript_ref,
-            summary_round_id,
-            compacted_until_entry_id,
-            total_compacted,
-        ))
-    }
-
-    fn apply_conversation_summary(
-        &mut self,
-        conversation_id: &str,
-        base_ids: &[String],
-        summary_id: &str,
-        summary: &str,
-        prefix: &str,
-        now_ms: i64,
-    ) -> Option<(serde_json::Value, Option<String>)> {
-        let through_message = base_ids.last()?.clone();
-        let (source_branch, source) = self.history.compaction_sources.remove(conversation_id)?;
-        if self.history.branches.get(conversation_id).is_some_and(|branch| branch != &source_branch)
-            || !source.messages.iter().map(|message| &message.id).eq(base_ids.iter())
-        { return None; }
-        self.capture_history_before_edit(conversation_id);
-        let conversation = self
-            .conversation_state_mut()
-            .conversations
-            .iter_mut()
-            .find(|conversation| conversation.id == conversation_id)?;
-        let summary_source_transcript_ref =
-            ai_summary_source_transcript_ref(&source.messages, conversation_id);
-        let summary_round_id = ai_latest_summary_round_id(&source.messages);
-        let original_user_count = ai_conversation_turn_count(&source.messages);
-        let summary_entry_id = format!("transcript-summary-created-{summary_id}");
-        let transcript_ref = serde_json::json!({
-            "conversationId": conversation_id,
-            "endEntryId": summary_entry_id,
-        });
-        // Tauri keeps a source transcript reference on manual summaries so
-        // later prompt compaction can ask the model to trust the visible summary.
-        let summary_ref = serde_json::json!({
-            "kind": "conversation",
-            "roundId": summary_round_id,
-            "transcriptRef": summary_source_transcript_ref,
-            "originalUserCount": original_user_count,
-        });
-        conversation.messages = vec![AiChatMessage {
-            id: summary_id.to_string(),
-            role: AiChatRole::Assistant,
-            content: format!("\u{1f4cb} **{prefix}**\n\n{summary}"),
-            timestamp_ms: now_ms,
-            model: None,
-            context: None,
-            is_streaming: false,
-            thinking_content: None,
-            metadata: None,
-            tool_call_id: None,
-            tool_calls: Vec::new(),
-            turn: None,
-            transcript_ref: Some(transcript_ref),
-            summary_ref: Some(summary_ref),
-            branches: None,
-            suggestions: Vec::new(),
-        }];
-        let metadata = conversation
-            .session_metadata
-            .get_or_insert_with(|| serde_json::json!({ "conversationId": conversation_id }));
-        if let Some(object) = metadata.as_object_mut() {
-            object.insert("lastSummaryAt".to_string(), serde_json::json!(now_ms));
-            if let Some(summary_round_id) = summary_round_id.as_deref() {
-                object.insert(
-                    "lastSummaryRoundId".to_string(),
-                    serde_json::json!(summary_round_id),
-                );
-            }
-        }
-        conversation.updated_at_ms = now_ms;
-        conversation.message_count = conversation.messages.len();
-        conversation.turn_count = ai_conversation_turn_count(&conversation.messages);
-        if let Some(conversation) = self.conversation_state().conversations.iter().find(|conversation| conversation.id == conversation_id) {
-            self.history.model_contexts.insert(conversation_id.to_owned(),conversation.clone());
-        }
-        self.compact_history(conversation_id,through_message);
-        self.persist_chat_state();
-        Some((summary_source_transcript_ref, summary_round_id))
-    }
-}
-
 impl WorkspaceApp {
     pub(in crate::workspace) fn finish_ai_compaction(
         &mut self,
@@ -205,12 +10,12 @@ impl WorkspaceApp {
         silent: bool,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
         if failed {
-            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
+            self.ai.state.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             if silent {
-                self.ai_entity.update(cx, |ai, cx| {
+                self.ai.state.update(cx, |ai, cx| {
                     ai.clear_compaction_notice_for(&conversation_id, cx);
                 });
             }
@@ -226,9 +31,9 @@ impl WorkspaceApp {
             return;
         }
         if summary.trim().is_empty() {
-            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
+            self.ai.state.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             if silent {
-                self.ai_entity.update(cx, |ai, cx| {
+                self.ai.state.update(cx, |ai, cx| {
                     ai.clear_compaction_notice_for(&conversation_id, cx);
                 });
             }
@@ -238,7 +43,7 @@ impl WorkspaceApp {
         }
         let now = ai_now_ms();
         let anchor_id = self.next_ai_chat_id(now, cx);
-        let compaction_result = self.ai_entity.update(cx, |ai, _cx| {
+        let compaction_result = self.ai.state.update(cx, |ai, _cx| {
             ai.apply_compaction_result(
                 &conversation_id,
                 &base_ids,
@@ -256,7 +61,7 @@ impl WorkspaceApp {
         )) = compaction_result
         else {
             if silent {
-                self.ai_entity.update(cx, |ai, cx| {
+                self.ai.state.update(cx, |ai, cx| {
                     ai.clear_compaction_notice_for(&conversation_id, cx);
                 });
             }
@@ -278,7 +83,7 @@ impl WorkspaceApp {
             cx,
         );
         if silent {
-            self.ai_entity.update(cx, |ai, cx| {
+            self.ai.state.update(cx, |ai, cx| {
                 ai.set_compaction_notice_done(&conversation_id, total_compacted, cx);
             });
         }
@@ -295,7 +100,7 @@ impl WorkspaceApp {
             return;
         };
         if !self
-            .ai_entity
+            .ai.state
             .read(cx)
             .chat_launch_matches(&pending.conversation_id, pending.launch_id.as_deref())
         {
@@ -320,11 +125,11 @@ impl WorkspaceApp {
         failed: bool,
         cx: &mut Context<Self>,
     ) {
-        self.ai_entity
+        self.ai.state
             .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-        self.ai_entity.update(cx, |ai, _cx| ai.set_conversation_loading(&conversation_id, false));
+        self.ai.state.update(cx, |ai, _cx| ai.set_conversation_loading(&conversation_id, false));
         if failed {
-            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
+            self.ai.state.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             self.push_ai_settings_toast(
                 self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                 TerminalNoticeVariant::Error,
@@ -334,7 +139,7 @@ impl WorkspaceApp {
             return;
         }
         if summary.trim().is_empty() {
-            self.ai_entity.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
+            self.ai.state.update(cx, |ai, _| { ai.history.compaction_sources.remove(&conversation_id); });
             cx.notify();
             return;
         }
@@ -345,7 +150,7 @@ impl WorkspaceApp {
             .i18n
             .t("ai.context.summary_prefix")
             .replace("{{count}}", &original_count.to_string());
-        let summary_result = self.ai_entity.update(cx, |ai, _cx| {
+        let summary_result = self.ai.state.update(cx, |ai, _cx| {
             ai.apply_conversation_summary(
                 &conversation_id,
                 &base_ids,
@@ -359,7 +164,7 @@ impl WorkspaceApp {
             cx.notify();
             return;
         };
-        self.ai_entity.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, _cx| {
             ai.set_model_switch_warning(None);
         });
         self.persist_ai_summary_created(

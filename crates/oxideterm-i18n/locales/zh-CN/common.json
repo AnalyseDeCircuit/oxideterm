@@ -1343,7 +1343,17 @@
     "knowledge_base": "知识库与记忆",
     "knowledge_base_desc": "索引 Markdown 或文本集合，用于语义检索、嵌入向量和 OxideSens 上下文。",
     "external_import": "外部连接导入",
-    "external_import_desc": "从 SSH 配置和支持的第三方终端管理器导入主机，带预览和冲突处理。"
+    "external_import_desc": "从 SSH 配置和支持的第三方终端管理器导入主机，带预览和冲突处理。",
+    "step_overview": "产品介绍",
+    "step_disclaimer": "使用须知",
+    "badge_open_source": "免费开源 · GPL-3.0",
+    "badge_pure_rust": "纯 Rust 原生开发",
+    "badge_no_webview": "无 WebView · GPUI 渲染",
+    "overview_intro": "基于纯 Rust 与 GPUI 打造的免费开源原生工作台，无 Electron 与 WebView 负担。在一个窗口内统一管理远程终端、文件传输、隧道、主机监控与 AI 助手。",
+    "cat_connections": "连接与多协议",
+    "cat_files_dev": "文件与远程开发",
+    "cat_ops_ai": "主机运维与 AI",
+    "cat_security_ext": "安全、同步与原生扩展"
   },
   "zen_mode": {
     "exit": "退出禅模式",

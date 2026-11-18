@@ -1343,7 +1343,17 @@
     "knowledge_base": "지식 베이스와 메모리",
     "knowledge_base_desc": "Markdown 또는 텍스트 컬렉션을 색인화해 의미 검색, 임베딩, OxideSens 컨텍스트에 사용합니다.",
     "external_import": "외부 연결 가져오기",
-    "external_import_desc": "SSH 설정과 지원되는 타사 터미널 관리자에서 미리보기와 중복 처리와 함께 호스트를 가져옵니다."
+    "external_import_desc": "SSH 설정과 지원되는 타사 터미널 관리자에서 미리보기와 중복 처리와 함께 호스트를 가져옵니다.",
+    "step_overview": "소개",
+    "step_disclaimer": "이용 안내",
+    "badge_open_source": "무료 오픈소스 · GPL-3.0",
+    "badge_pure_rust": "순수 Rust 네이티브",
+    "badge_no_webview": "WebView 없음 · GPUI",
+    "overview_intro": "순수 Rust와 GPUI로 만든 무료 오픈소스 네이티브 워크스페이스입니다. WebView 부담 없이 원격 터미널, 파일 전송, 터널, 호스트 모니터링, AI를 한 창에서 다룹니다.",
+    "cat_connections": "연결 및 프로토콜",
+    "cat_files_dev": "파일 및 원격 개발",
+    "cat_ops_ai": "호스트 운영 및 AI",
+    "cat_security_ext": "보안, 동기화 및 확장"
   },
   "zen_mode": {
     "exit": "Zen 모드 종료",

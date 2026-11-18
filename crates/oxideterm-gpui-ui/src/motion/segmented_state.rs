@@ -3,6 +3,30 @@ use std::{cell::Cell, collections::HashMap, rc::Rc};
 use gpui::{Animation, AnimationExt, AnyElement, IntoElement, Styled, px};
 use oxideterm_theme::ThemeTokens;
 
+#[cfg(test)]
+mod tests {
+    use super::UserSegmentedControlMotionState;
+
+    #[test]
+    fn transitions_are_bounded_per_control_and_target() {
+        let mut state = UserSegmentedControlMotionState::default();
+        state.begin_with_vertical_offset("first", 1, None);
+        assert!(state.is_active_for("first", 1));
+        assert!(!state.is_active_for("first", 2));
+
+        let mut latest = 0;
+        for target_index in 0..1_000 {
+            latest = state.begin_with_vertical_offset("second", target_index, None);
+        }
+
+        assert_eq!(state.active_transitions.len(), 2);
+        assert!(state.is_active_for("first", 1));
+        assert_eq!(state.transition_for("second", 999), Some((latest, None)));
+        state.clear("first");
+        assert_eq!(state.active_transitions.len(), 1);
+    }
+}
+
 #[derive(Default)]
 pub struct UserSegmentedControlMotionState {
     next_generation: u64,

@@ -1,0 +1,41 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-ai"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-ai = { path = "../oxideterm-ai" }
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+oxideterm-ai-tasks = { path = "../oxideterm-ai-tasks" }
+oxideterm-acp-host-tools = { path = "../oxideterm-acp-host-tools" }
+oxideterm-skills = { path = "../oxideterm-skills" }
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-settings-model = { path = "../oxideterm-settings-model" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+tracing.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+
+anyhow.workspace = true
+async-trait.workspace = true
+parking_lot.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio-util.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3"

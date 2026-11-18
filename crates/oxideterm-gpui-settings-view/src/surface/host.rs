@@ -33,6 +33,9 @@ pub type McpTargetLabel = Rc<dyn Fn(&oxideterm_public_mcp::ClientRef, &str, &App
 
 /// Supplies live application data and accepts operations that belong to the window or runtime.
 pub trait SettingsSurfaceHost: Sized + 'static {
+    fn ai_providers(&self) -> Entity<crate::ai::providers::AiProviderSettingsView>;
+    fn ai_mcp(&self) -> Entity<crate::ai::mcp::AiMcpSettingsView>;
+    fn ai_skills(&self) -> crate::ai::AiSkillData;
     fn settings_state(&self) -> &Entity<SettingsWorkspaceEntity>;
     fn controls(&self, owner: Entity<Self>, cx: &App) -> SettingsControls<'_>;
     fn document_text(&self, owner: Entity<Self>, cx: &App) -> SettingsDocumentText;
@@ -64,7 +67,6 @@ pub trait SettingsSurfaceHost: Sized + 'static {
         cx: &mut Context<Self>,
     ) -> KnowledgeSection;
     fn active_theme_preview(&self, cx: &App) -> Option<String>;
-    fn render_ai(&mut self, section: SettingsSectionId, cx: &mut Context<Self>) -> AnyElement;
     fn keybinding_note(&mut self, note: String, color: u32, cx: &mut Context<Self>) -> AnyElement;
     fn on_scroll(&mut self, cx: &mut Context<Self>);
     fn surface_request(
@@ -133,11 +135,6 @@ impl SettingsSurfaceBindings {
                     }
                     _ => None,
                 }
-            }),
-            extension_section: bind!(|weak, tab, section, cx| {
-                (tab == SettingsTab::Ai)
-                    .then(|| weak.update(cx, |host, cx| host.render_ai(section, cx)).ok())
-                    .flatten()
             }),
             scrolled: bind!(|weak, cx| {
                 let _ = weak.update(cx, |host, cx| host.on_scroll(cx));
@@ -218,6 +215,13 @@ impl<'a> SettingsPageFrame<'a> {
         let host = owner.read(cx);
         let state = host.settings_state().read(cx);
         let data = match section {
+            AiGeneralSettings | AiGeneralPrivacy | AiToolsWebSearch => SettingsPageData::AiBasic,
+            AiContextControls | AiContextSystemPrompt | AiContextMemory | AiToolsToolUse => SettingsPageData::AiContext,
+            AiContextModelWindows => SettingsPageData::AiContextWindows(settings_controls_source(weak.clone())),
+            AiProvidersSettings => SettingsPageData::AiProviders(host.ai_providers()),
+            AiToolsMcpServers => SettingsPageData::AiMcp(host.ai_mcp()),
+            AiToolsAgents => SettingsPageData::AiSubagents,
+            AiToolsSkills => SettingsPageData::AiSkills(host.ai_skills()),
             GeneralAppLock => {
                 let (configured, pending, error) = host.app_lock();
                 SettingsPageData::AppLock(configured, pending, error)

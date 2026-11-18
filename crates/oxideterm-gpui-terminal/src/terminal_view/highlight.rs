@@ -16,12 +16,27 @@ use crate::terminal_ui::{
 use crate::terminal_view::element::{TerminalRect, to_hsla};
 use oxideterm_terminal::{TerminalColor, TerminalRow, TerminalSnapshot};
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct TerminalHighlightForeground {
+    pub(crate) color: Hsla,
+    pub(crate) ansi_color: Option<TerminalColor>,
+}
+
+impl TerminalHighlightForeground {
+    pub(crate) fn static_color(color: Hsla) -> Self {
+        Self {
+            color,
+            ansi_color: None,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct TerminalHighlightLayout {
     pub(crate) backgrounds: Vec<TerminalRect>,
     pub(crate) underlines: Vec<TerminalRect>,
     pub(crate) outlines: Vec<TerminalRect>,
-    pub(crate) foregrounds: HashMap<(usize, usize), Hsla>,
+    pub(crate) foregrounds: HashMap<(usize, usize), TerminalHighlightForeground>,
 }
 
 impl TerminalHighlightLayout {
@@ -34,7 +49,11 @@ impl TerminalHighlightLayout {
         }
     }
 
-    pub(crate) fn foreground_for_cell(&self, row: usize, col: usize) -> Option<Hsla> {
+    pub(crate) fn foreground_for_cell(
+        &self,
+        row: usize,
+        col: usize,
+    ) -> Option<TerminalHighlightForeground> {
         self.foregrounds.get(&(row, col)).copied()
     }
 }
@@ -505,7 +524,10 @@ fn apply_matches(
         let paint_cells = &line.map[matched.start..end];
         for cell in paint_cells {
             if let Some(foreground) = foreground {
-                layout.foregrounds.insert((cell.row, cell.col), foreground);
+                layout.foregrounds.insert(
+                    (cell.row, cell.col),
+                    TerminalHighlightForeground::static_color(foreground),
+                );
             }
         }
         match matched.rule.source.render_mode {

@@ -60,6 +60,23 @@ struct PreparedLinePaintKey {
     subpixel_rendering: SmallVec<[bool; 16]>,
 }
 
+impl PreparedLinePaintKey {
+    fn matches_for_recolor(&self, other: &Self) -> bool {
+        self.layout_identity == other.layout_identity
+            && self.renderer_resource_identity == other.renderer_resource_identity
+            && self.renderer_resource_generation == other.renderer_resource_generation
+            && self.scale_factor_bits == other.scale_factor_bits
+            && self.line_height_bits == other.line_height_bits
+            && self.origin_phase_x_bits == other.origin_phase_x_bits
+            && self.origin_phase_y_bits == other.origin_phase_y_bits
+            && self.subpixel_rendering == other.subpixel_rendering
+            && matches!(
+                (self.decorations.as_slice(), other.decorations.as_slice()),
+                ([left], [right]) if left.len == right.len
+            )
+    }
+}
+
 #[inline]
 fn device_pixel_phase(value: f32) -> f32 {
     value.rem_euclid(1.0)
@@ -84,6 +101,7 @@ fn prepare_line_glyphs(
     line_height: Pixels,
     device_origin: Point<ScaledPixels>,
     subpixel_rendering: &[bool],
+    dilation_color_hint: Option<Hsla>,
     window: &mut Window,
 ) -> Result<PreparedGlyphBatch> {
     let baseline_y = (line_height - layout.ascent - layout.descent) / 2.0 + layout.ascent;
@@ -91,7 +109,7 @@ fn prepare_line_glyphs(
     let mut run_end = 0;
     let color = black();
     let mut prepared_color: SceneHsla = color.into();
-    let mut dilation = window.glyph_dilation_for_color(color);
+    let mut dilation = window.glyph_dilation_for_color(dilation_color_hint.unwrap_or(color));
     // A scrolling row can need new device-phase data on consecutive frames.
     // Reserve once per channel rather than growing each run's small vectors.
     let mut counts = [0; 3];
@@ -124,7 +142,8 @@ fn prepare_line_glyphs(
                 if let Some(style_run) = style_run {
                     run_end += style_run.len as usize;
                     prepared_color = style_run.color.into();
-                    dilation = window.glyph_dilation_for_color(style_run.color);
+                    dilation = window
+                        .glyph_dilation_for_color(dilation_color_hint.unwrap_or(style_run.color));
                 } else {
                     run_end = layout.len;
                 }
@@ -575,6 +594,8 @@ impl LineLayout {
                     line_height,
                     decoration,
                     cache,
+                    false,
+                    None,
                     window,
                     cx,
                 );
@@ -601,6 +622,8 @@ impl LineLayout {
                 line_height,
                 decoration_runs,
                 cache,
+                false,
+                None,
                 window,
                 cx,
             )
@@ -617,6 +640,54 @@ impl LineLayout {
         window: &mut Window,
         cx: &mut App,
     ) -> Result<()> {
+        self.paint_cached_in_current_layer_with_options(
+            origin,
+            line_height,
+            decoration_runs,
+            cache,
+            false,
+            None,
+            window,
+            cx,
+        )
+    }
+
+    /// Paints a line layout inside the caller's layer, recoloring an existing single-run glyph
+    /// batch in place during theme transitions instead of rasterizing intermediate gray levels.
+    pub fn paint_cached_in_current_layer_recolored(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        decoration_runs: &[DecorationRun],
+        cache: &LinePaintCache,
+        dilation_color_hint: Option<Hsla>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
+        self.paint_cached_in_current_layer_with_options(
+            origin,
+            line_height,
+            decoration_runs,
+            cache,
+            true,
+            dilation_color_hint,
+            window,
+            cx,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn paint_cached_in_current_layer_with_options(
+        &self,
+        origin: Point<Pixels>,
+        line_height: Pixels,
+        decoration_runs: &[DecorationRun],
+        cache: &LinePaintCache,
+        allow_recolor: bool,
+        dilation_color_hint: Option<Hsla>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Result<()> {
         if decoration_runs
             .iter()
             .any(|run| run.underline.is_some() || run.strikethrough.is_some())
@@ -630,6 +701,8 @@ impl LineLayout {
                     line_height,
                     decoration,
                     cache,
+                    allow_recolor,
+                    dilation_color_hint,
                     window,
                     cx,
                 );
@@ -655,17 +728,22 @@ impl LineLayout {
             line_height,
             decoration_runs,
             cache,
+            allow_recolor,
+            dilation_color_hint,
             window,
             cx,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint_uniform_decoration_cached(
         &self,
         origin: Point<Pixels>,
         line_height: Pixels,
         decoration: &DecorationRun,
         cache: &LinePaintCache,
+        allow_recolor: bool,
+        dilation_color_hint: Option<Hsla>,
         window: &mut Window,
         cx: &mut App,
     ) -> Result<()> {
@@ -679,6 +757,8 @@ impl LineLayout {
                     line_height,
                     std::slice::from_ref(decoration),
                     cache,
+                    allow_recolor,
+                    dilation_color_hint,
                     window,
                     cx,
                 )?;
@@ -737,12 +817,15 @@ impl LineLayout {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint_cached_in_current_layer_impl(
         &self,
         origin: Point<Pixels>,
         line_height: Pixels,
         decoration_runs: &[DecorationRun],
         cache: &LinePaintCache,
+        allow_recolor: bool,
+        dilation_color_hint: Option<Hsla>,
         window: &mut Window,
         _cx: &mut App,
     ) -> Result<()> {
@@ -794,7 +877,26 @@ impl LineLayout {
             subpixel_rendering,
         };
 
-        let glyphs = {
+        let recolor_override = allow_recolor.then_some(()).and_then(|()| {
+            let [run] = decoration_runs else {
+                return None;
+            };
+            let existing = prepared.as_ref()?;
+            existing.key.matches_for_recolor(&key).then(|| {
+                (existing.key.decorations != key.decorations).then(|| SceneHsla::from(run.color))
+            })
+        });
+
+        let (glyphs, color_override) = if let Some(color_override) = recolor_override {
+            (
+                prepared
+                    .as_ref()
+                    .expect("recolor hit guarantees prepared cache entry")
+                    .glyphs
+                    .clone(),
+                color_override,
+            )
+        } else {
             if prepared.as_ref().is_none_or(|prepared| prepared.key != key) {
                 let glyphs = prepare_line_glyphs(
                     self,
@@ -803,6 +905,7 @@ impl LineLayout {
                     line_height,
                     device_origin,
                     &key.subpixel_rendering,
+                    dilation_color_hint,
                     window,
                 )?;
                 let replacement = PreparedLinePaint {
@@ -816,14 +919,17 @@ impl LineLayout {
                     *prepared = Some(Box::new(replacement));
                 }
             }
-            prepared
-                .as_ref()
-                .expect("prepared line paint is initialized above")
-                .glyphs
-                .clone()
+            (
+                prepared
+                    .as_ref()
+                    .expect("prepared line paint is initialized above")
+                    .glyphs
+                    .clone(),
+                None,
+            )
         };
         drop(prepared);
-        window.paint_prepared_glyph_batch(device_origin, glyphs);
+        window.paint_prepared_glyph_batch(device_origin, glyphs, color_override);
         Ok(())
     }
 

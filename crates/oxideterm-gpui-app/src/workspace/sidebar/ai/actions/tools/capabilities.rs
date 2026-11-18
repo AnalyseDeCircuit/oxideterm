@@ -580,15 +580,7 @@ pub(in crate::workspace) fn normalized_ai_select_target_kind(
 }
 
 
-pub(in crate::workspace) fn ai_rag_query_arg(args: &serde_json::Value) -> &str {
-    // Tauri uses `options.query ?? options.path ?? ''` for RAG reads and does
-    // not trim the selected string before passing it to ragSearch.
-    args.get("query")
-        .or_else(|| args.get("path"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("")
-}
-
+use oxideterm_ai::chat_tools::ai_rag_query_arg;
 pub(in crate::workspace) fn is_ai_command_like_query(query: &str) -> bool {
     let trimmed = query.trim();
     if trimmed.is_empty() {
@@ -783,102 +775,7 @@ pub(in crate::workspace) fn risk_to_capability(risk: &str) -> Option<&'static st
     }
 }
 
-pub(in crate::workspace) fn trim_tail_chars(value: &str, max_chars: usize) -> String {
-    if value.chars().count() <= max_chars {
-        return value.to_string();
-    }
-    let tail = value.chars().rev().take(max_chars).collect::<Vec<_>>();
-    let omitted = value.chars().count().saturating_sub(max_chars);
-    format!(
-        "[trimmed {omitted} chars]\n{}",
-        tail.into_iter().rev().collect::<String>()
-    )
-}
-
-pub(in crate::workspace) fn truncate_for_model(value: String, max_chars: usize) -> String {
-    let char_count = value.chars().count();
-    if char_count <= max_chars {
-        return value;
-    }
-    let head = value.chars().take(max_chars).collect::<String>();
-    format!(
-        "{head}\n[truncated {} chars]",
-        char_count.saturating_sub(max_chars)
-    )
-}
-
-pub(in crate::workspace) fn ai_line_count(value: &str) -> usize {
-    if value.is_empty() {
-        0
-    } else {
-        value.split('\n').count()
-    }
-}
-
-pub(in crate::workspace) fn ai_head_tail_preview(value: &str, max_chars: usize) -> String {
-    let char_count = value.chars().count();
-    if char_count <= max_chars {
-        return value.to_string();
-    }
-    let marker = format!(
-        "\n\n[output truncated: {} chars omitted; showing head and tail]\n\n",
-        char_count.saturating_sub(max_chars)
-    );
-    let marker_chars = marker.chars().count();
-    let available = max_chars.saturating_sub(marker_chars);
-    let head_chars = (available * 55).div_ceil(100);
-    let tail_chars = available.saturating_sub(head_chars);
-    let head = value.chars().take(head_chars).collect::<String>();
-    let tail = value
-        .chars()
-        .rev()
-        .take(tail_chars)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    format!("{head}{marker}{tail}")
-}
-
-pub(in crate::workspace) fn prepare_ai_tool_output(
-    value: &str,
-) -> (String, Option<String>, serde_json::Value, bool) {
-    const FULL_OUTPUT_MAX_CHARS: usize = 24 * 1024;
-    const RAW_OUTPUT_PERSIST_MAX_CHARS: usize = 256 * 1024;
-    const MODEL_OUTPUT_PREVIEW_MAX_CHARS: usize = 12_000;
-
-    let char_count = value.chars().count();
-    let line_count = ai_line_count(value);
-    if char_count <= FULL_OUTPUT_MAX_CHARS {
-        return (
-            value.to_string(),
-            None,
-            serde_json::json!({
-                "strategy": "full",
-                "charCount": char_count,
-                "lineCount": line_count,
-                "rawOutputStored": false,
-            }),
-            false,
-        );
-    }
-
-    let output = ai_head_tail_preview(value, MODEL_OUTPUT_PREVIEW_MAX_CHARS);
-    let raw_output_stored = char_count <= RAW_OUTPUT_PERSIST_MAX_CHARS;
-    (
-        output.clone(),
-        raw_output_stored.then(|| value.to_string()),
-        serde_json::json!({
-            "strategy": "head_tail",
-            "charCount": char_count,
-            "lineCount": line_count,
-            "omittedChars": char_count.saturating_sub(output.chars().count()),
-            "rawOutputStored": raw_output_stored,
-        }),
-        true,
-    )
-}
-
+use oxideterm_ai::tool_result_protocol::{prepare_ai_tool_output, trim_tail_chars, truncate_for_model};
 pub(in crate::workspace) fn ai_next_action_json(
     action: &serde_json::Value,
 ) -> Option<serde_json::Value> {

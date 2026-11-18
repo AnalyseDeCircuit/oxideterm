@@ -1,27 +1,27 @@
-use super::helpers::parse_port;
-use super::{
-    App, ConnectionConsumer, ConnectionState, Context, DetectedPort, FORWARDS_DEFAULT_BIND_ADDRESS,
-    FORWARDS_DEFAULT_TARGET_HOST, FORWARDS_PORT_SCAN_INTERVAL, FORWARDS_STATS_REFRESH_INTERVAL,
-    ForwardEvent, ForwardInput, ForwardRule, ForwardStatus, ForwardType, ForwardUpdate,
-    ForwardingDeliveryIntent, ForwardingRuntimeOperation, ForwardingWorkspaceEvent, KeyDownEvent,
-    NodeId, NodeReadiness, PortDetectionSnapshot, TabId, TerminalNotice, TerminalNoticeVariant,
-    WorkspaceApp,
-};
+use super::*;
 use crate::workspace::ConfirmKeyboardAction;
+use oxideterm_gpui_forwards::ForwardsInputKey;
+use oxideterm_gpui_ui::motion::{self, MotionDuration};
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn handle_forward_edit_modal_key(
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.forwarding.read(cx).edit_form_open() {
+        let Some(page) = self.forwarding_page(cx) else {
+            return false;
+        };
+        if !page.read(cx).edit_form_open() {
             return false;
         }
         if self.handle_forwards_key(event, cx) {
             return true;
         }
         if event.keystroke.key.as_str() == "escape" {
-            self.begin_forward_edit_form_exit(cx);
+            let delay = motion::duration(&self.tokens, MotionDuration::Overlay);
+            page.update(cx, |page, cx| page.begin_edit_form_exit(delay, cx));
+            self.ime_marked_text = None;
             return true;
         }
         false
@@ -32,33 +32,33 @@ impl WorkspaceApp {
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.forwarding.read(cx).delete_confirm_open() {
+        let forwarding = self.forwarding.read(cx);
+        let Some(tab_id) = forwarding.page_id() else {
+            return false;
+        };
+        let (Some(page), Some(node_id)) = (
+            forwarding.page_state(tab_id),
+            forwarding.node_for_tab(tab_id),
+        ) else {
+            return false;
+        };
+        if !page.read(cx).delete_confirm_open() {
             return false;
         }
         match self.handle_standard_confirm_key(event, cx) {
             Some(ConfirmKeyboardAction::Cancel) => {
-                self.forwarding
-                    .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
-                cx.notify();
+                page.update(cx, |page, cx| {
+                    page.clear_pending_delete();
+                    cx.notify();
+                });
                 true
             }
             Some(ConfirmKeyboardAction::Confirm) => {
-                let Some(tab_id) = self.forwarding.read(cx).page_id() else {
-                    return true;
-                };
-                let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id) else {
-                    return true;
-                };
-                let forward_id = self
-                    .forwarding
-                    .read(cx)
-                    .view()
-                    .pending_delete_forward
-                    .as_ref()
-                    .map(|rule| rule.id.clone());
-                self.forwarding
-                    .update(cx, |forwarding, _cx| forwarding.clear_pending_delete());
-                if let Some(forward_id) = forward_id {
+                if let Some(forward_id) = page.update(cx, |page, cx| {
+                    let id = page.take_delete();
+                    cx.notify();
+                    id
+                }) {
                     self.start_forward_operation(
                         tab_id,
                         node_id,
@@ -75,67 +75,29 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn submit_forward_create(
+    pub(super) fn create_forward(
         &mut self,
         tab_id: TabId,
         node_id: NodeId,
+        rule: ForwardRule,
         start: bool,
+        check_health: bool,
         cx: &mut Context<Self>,
     ) {
-        let (
-            forward_type,
-            bind_address,
-            bind_port_value,
-            target_host,
-            target_port_value,
-            skip_health_check,
-        ) = {
-            let view = self.forwarding.read(cx).view();
-            (
-                view.forward_type,
-                view.bind_address.clone(),
-                view.bind_port.clone(),
-                view.target_host.clone(),
-                view.target_port.clone(),
-                view.skip_health_check,
-            )
-        };
-        let Some((bind_port, target_port)) =
-            self.validate_forward_form(forward_type, &bind_port_value, &target_port_value, cx)
-        else {
-            cx.notify();
+        if self.forwarding.read(cx).operation_pending(tab_id, cx) {
             return;
-        };
-        let rule = match forward_type {
-            ForwardType::Local => ForwardRule::local(
-                bind_address,
-                bind_port,
-                target_host,
-                target_port.unwrap_or(0),
-            ),
-            ForwardType::Remote => ForwardRule::remote(
-                bind_address,
-                bind_port,
-                target_host,
-                target_port.unwrap_or(0),
-            ),
-            ForwardType::Dynamic => ForwardRule {
-                target_host: "0.0.0.0".to_string(),
-                ..ForwardRule::dynamic(bind_address, bind_port)
-            },
-        };
-        let check_health = !skip_health_check;
+        }
         let can_save = self
             .ssh_nodes
             .get(&node_id)
             .is_some_and(|node| node.saved_connection_id.is_some());
         let operation = if can_save {
+            let deferred = start.then(|| ForwardingRuntimeOperation::Create {
+                rule: rule.clone(),
+                check_health,
+            });
             self.forwarding.update(cx, |forwarding, _| {
-                forwarding.view.start_after_save =
-                    start.then(|| ForwardingRuntimeOperation::Create {
-                        rule: rule.clone(),
-                        check_health,
-                    });
+                forwarding.set_start_after_save(tab_id, deferred)
             });
             ForwardingRuntimeOperation::Save { rule }
         } else {
@@ -150,139 +112,6 @@ impl WorkspaceApp {
             cx,
         );
     }
-
-    pub(super) fn create_local_forward_for_detected_port(
-        &mut self,
-        tab_id: TabId,
-        node_id: NodeId,
-        port: DetectedPort,
-        cx: &mut Context<Self>,
-    ) {
-        let mut rule = ForwardRule::local(
-            FORWARDS_DEFAULT_BIND_ADDRESS,
-            port.port,
-            FORWARDS_DEFAULT_TARGET_HOST,
-            port.port,
-        );
-        rule.description = port
-            .process_name
-            .as_ref()
-            .map(|process| format!("{process} ({})", self.i18n.t("forwards.detection.auto")))
-            .unwrap_or_else(|| {
-                format!(
-                    "{} {} ({})",
-                    self.i18n.t("forwards.detection.port"),
-                    port.port,
-                    self.i18n.t("forwards.detection.auto")
-                )
-            });
-        self.dismiss_detected_port(port.port, cx);
-        self.start_forward_operation(
-            tab_id,
-            node_id,
-            "forwards.messages.created",
-            true,
-            ForwardingRuntimeOperation::Create {
-                rule,
-                check_health: true,
-            },
-            cx,
-        );
-    }
-
-    pub(super) fn dismiss_detected_port(&mut self, port: u16, cx: &mut Context<Self>) {
-        if let Some(tab_id) = self.forwarding.read(cx).page_id()
-            && let Some(node_id) = self.forwarding.read(cx).node_for_tab(tab_id)
-        {
-            self.forwarding.update(cx, |forwarding, _cx| {
-                forwarding.dismiss_detected_port(&node_id, port);
-            });
-        }
-    }
-
-    pub(super) fn submit_forward_edit(
-        &mut self,
-        tab_id: TabId,
-        node_id: NodeId,
-        cx: &mut Context<Self>,
-    ) {
-        let (editing, edit_bind_address, edit_bind_port, edit_target_host, edit_target_port) = {
-            let view = self.forwarding.read(cx).view();
-            let Some(editing) = view.editing_forward.clone() else {
-                return;
-            };
-            (
-                editing,
-                view.edit_bind_address.clone(),
-                view.edit_bind_port.clone(),
-                view.edit_target_host.clone(),
-                view.edit_target_port.clone(),
-            )
-        };
-        let Some((bind_port, target_port)) = self.validate_forward_form(
-            editing.forward_type,
-            &edit_bind_port,
-            &edit_target_port,
-            cx,
-        ) else {
-            cx.notify();
-            return;
-        };
-        let update = ForwardUpdate {
-            bind_address: Some(edit_bind_address),
-            bind_port: Some(bind_port),
-            target_host: (editing.forward_type != ForwardType::Dynamic).then_some(edit_target_host),
-            target_port,
-            ..ForwardUpdate::default()
-        };
-        let forward_id = editing.id;
-        self.start_forward_operation(
-            tab_id,
-            node_id,
-            "forwards.messages.updated",
-            true,
-            ForwardingRuntimeOperation::Update { forward_id, update },
-            cx,
-        );
-    }
-
-    fn validate_forward_form(
-        &mut self,
-        forward_type: ForwardType,
-        bind_port: &str,
-        target_port: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<(u16, Option<u16>)> {
-        let Some(bind_port) = parse_port(bind_port) else {
-            let error = self.i18n.t(if bind_port.trim().is_empty() {
-                "forwards.form.port_required"
-            } else {
-                "forwards.form.port_invalid"
-            });
-            self.forwarding
-                .update(cx, |forwarding, _cx| forwarding.set_error(error));
-            return None;
-        };
-        if forward_type == ForwardType::Dynamic {
-            self.forwarding
-                .update(cx, |forwarding, _cx| forwarding.clear_error());
-            return Some((bind_port, None));
-        }
-        let Some(target_port) = parse_port(target_port) else {
-            let error = self.i18n.t(if target_port.trim().is_empty() {
-                "forwards.form.port_required"
-            } else {
-                "forwards.form.port_invalid"
-            });
-            self.forwarding
-                .update(cx, |forwarding, _cx| forwarding.set_error(error));
-            return None;
-        };
-        self.forwarding
-            .update(cx, |forwarding, _cx| forwarding.clear_error());
-        Some((bind_port, Some(target_port)))
-    }
-
     pub(in crate::workspace) fn start_forward_operation(
         &mut self,
         tab_id: TabId,
@@ -292,7 +121,10 @@ impl WorkspaceApp {
         operation: ForwardingRuntimeOperation,
         cx: &mut Context<Self>,
     ) {
-        if self.forwarding.read(cx).view().pending {
+        let Some(page) = self.forwarding.read(cx).page_state(tab_id) else {
+            return;
+        };
+        if page.read(cx).pending() {
             return;
         }
         let needs_connection = matches!(
@@ -305,24 +137,33 @@ impl WorkspaceApp {
             // Only an explicit start requests SSH. Authentication and jump-host
             // handling stay with the existing connection flow; no shell is opened.
             if self.ensure_node_connection_started(&node_id, cx) {
-                self.forwarding.update(cx, |forwarding, _| {
-                    forwarding.begin_operation();
-                    forwarding.view.pending_start =
-                        Some((message_key, sync_saved_forwards_on_success, operation));
+                page.update(cx, |page, cx| {
+                    page.begin_operation();
+                    cx.notify();
                 });
-                cx.notify();
+                self.forwarding.update(cx, |forwarding, _| {
+                    forwarding.set_deferred_start(
+                        tab_id,
+                        (message_key, sync_saved_forwards_on_success, operation),
+                    );
+                });
                 return;
             }
             let error = self.i18n.t("forwards.messages.node_not_ready");
-            self.forwarding
-                .update(cx, |forwarding, _cx| forwarding.set_error(error));
-            cx.notify();
+            page.update(cx, |page, cx| {
+                page.set_error(error);
+                cx.notify();
+            });
             return;
         }
         let owner_connection_id = self
             .ssh_nodes
             .get(&node_id)
             .and_then(|node| node.saved_connection_id.clone());
+        page.update(cx, |page, cx| {
+            page.begin_operation();
+            cx.notify();
+        });
         self.forwarding.update(cx, |forwarding, _cx| {
             forwarding.request_operation(
                 tab_id,
@@ -333,7 +174,6 @@ impl WorkspaceApp {
                 operation,
             );
         });
-        cx.notify();
     }
 
     pub(in crate::workspace) fn resume_forward_starts(
@@ -357,17 +197,21 @@ impl WorkspaceApp {
             .filter(|(_, node)| *node == node_id)
             .map(|(tab, _)| *tab)
             .collect::<Vec<_>>();
+        self.forwarding.update(cx, |forwarding, cx| {
+            forwarding.refresh_runtime_snapshot(node_id, cx);
+            forwarding.notify_node(node_id, cx);
+        });
         for tab_id in tabs {
-            let _scope = self.enter_forwarding_page(tab_id, cx);
-            let pending = self.forwarding.update(cx, |forwarding, _| {
-                let pending = forwarding.view.pending_start.take();
-                if pending.is_some() {
-                    forwarding.finish_operation();
-                }
-                forwarding.refresh_runtime_snapshot(node_id);
-                pending
-            });
+            let pending = self
+                .forwarding
+                .update(cx, |forwarding, _| forwarding.take_deferred_start(tab_id));
             if let Some((message, sync, operation)) = pending {
+                if let Some(page) = self.forwarding.read(cx).page_state(tab_id) {
+                    page.update(cx, |page, cx| {
+                        page.finish_operation();
+                        cx.notify();
+                    });
+                }
                 if *state == NodeReadiness::Ready {
                     self.start_forward_operation(
                         tab_id,
@@ -379,8 +223,12 @@ impl WorkspaceApp {
                     );
                 } else {
                     let error = self.i18n.t("forwards.messages.connection_not_ready");
-                    self.forwarding
-                        .update(cx, |forwarding, _| forwarding.set_error(error));
+                    if let Some(page) = self.forwarding.read(cx).page_state(tab_id) {
+                        page.update(cx, |page, cx| {
+                            page.set_error(error);
+                            cx.notify();
+                        });
+                    }
                 }
             }
         }
@@ -392,7 +240,6 @@ impl WorkspaceApp {
         self.forwarding.update(cx, |forwarding, _cx| {
             forwarding.track_port_profiler(node_id.clone());
         });
-        self.sync_forwarding_view_port_detection(&node_id, cx);
         self.start_port_scan(node_id, true, cx);
     }
 
@@ -404,7 +251,6 @@ impl WorkspaceApp {
         self.forwarding.update(cx, |forwarding, _cx| {
             forwarding.track_port_profiler(node_id.clone());
         });
-        self.sync_forwarding_view_port_detection(&node_id, cx);
     }
 
     pub(in crate::workspace) fn maybe_start_forwards_port_scan(&mut self, cx: &mut Context<Self>) {
@@ -450,19 +296,13 @@ impl WorkspaceApp {
             .filter(|(tab_id, _)| self.forwards_tab_is_visible(**tab_id, cx))
             .map(|(_, node_id)| node_id.clone())
             .collect::<Vec<_>>();
-        let changed = self.forwarding.update(cx, |forwarding, _cx| {
-            if !forwarding.mark_stats_refreshed_if_due(FORWARDS_STATS_REFRESH_INTERVAL) {
-                return false;
+        self.forwarding.update(cx, |forwarding, cx| {
+            if forwarding.stats_due(cx) {
+                for node_id in &visible_nodes {
+                    forwarding.refresh_runtime_snapshot(node_id, cx);
+                }
             }
-            let mut changed = false;
-            for node_id in &visible_nodes {
-                changed |= forwarding.refresh_runtime_snapshot(node_id);
-            }
-            changed
         });
-        if changed {
-            cx.notify();
-        }
     }
 
     pub(in crate::workspace) fn sync_forwarding_sampling_visibility(&mut self, cx: &mut App) {
@@ -503,11 +343,10 @@ impl WorkspaceApp {
         // usePortDetection hook. A restored Forwards tab should stay passive
         // until the user reconnects the node explicitly.
         if !self.node_is_ready_for_forwarding(&node_id) {
-            self.forwarding.update(cx, |forwarding, _cx| {
+            self.forwarding.update(cx, |forwarding, cx| {
                 forwarding.mark_port_scan_not_ready(node_id.clone());
+                forwarding.notify_node(&node_id, cx);
             });
-            self.sync_forwarding_view_port_detection(&node_id, cx);
-            cx.notify();
             return;
         }
 
@@ -515,15 +354,14 @@ impl WorkspaceApp {
             .ssh_nodes
             .get(&node_id)
             .and_then(|node| node.saved_connection_id.clone());
-        self.forwarding.update(cx, |forwarding, _cx| {
+        self.forwarding.update(cx, |forwarding, cx| {
             forwarding.request_port_scan(
                 node_id.clone(),
                 owner_connection_id,
                 restart_degraded_profiler,
             );
+            forwarding.notify_node(&node_id, cx);
         });
-        self.sync_forwarding_view_port_detection(&node_id, cx);
-        cx.notify();
     }
 
     pub(in crate::workspace) fn node_is_ready_for_forwarding(&self, node_id: &NodeId) -> bool {
@@ -551,7 +389,7 @@ impl WorkspaceApp {
             ForwardingWorkspaceEvent::DeliveryReady => {}
             ForwardingWorkspaceEvent::SamplingDue => {
                 self.sync_forwarding_sampling_visibility(cx);
-                if !self.forwarding.read(cx).sampling_visible() {
+                if !self.forwarding.read(cx).sampling_visible(cx) {
                     return;
                 }
                 // The Entity owns cadence; the root only supplies the current
@@ -575,75 +413,43 @@ impl WorkspaceApp {
                     result,
                 } => {
                     self.remember_forwarding_binding(binding);
-                    let live_page = self.forwarding.read(cx).has_page(tab_id);
-                    let _scope = live_page.then(|| self.enter_forwarding_page(tab_id, cx));
-                    if live_page {
-                        self.forwarding
-                            .update(cx, |forwarding, _cx| forwarding.finish_operation());
+                    let visible = self.forwards_tab_is_visible(tab_id, cx);
+                    let delay = motion::duration(&self.tokens, MotionDuration::Overlay);
+                    if let Some(page) = self.forwarding.read(cx).page_state(tab_id) {
+                        page.update(cx, |page, cx| {
+                            page.complete_operation(result.clone(), visible, delay, cx)
+                        });
                     }
+                    let start = self
+                        .forwarding
+                        .update(cx, |forwarding, _| forwarding.take_start_after_save(tab_id));
                     match result {
                         Ok(()) => {
                             if sync_saved_forwards_on_success {
-                                // Persisted mutations are durable even when the initiating tab
-                                // becomes hidden before the worker completes.
                                 self.queue_cloud_sync_dirty_refresh(cx);
                             }
-                            if self.forwards_tab_is_visible(tab_id, cx) {
-                                let _ = message_key;
-                                let (show_new_form, editing_forward) = {
-                                    let view = self.forwarding.read(cx).view();
-                                    (view.show_new_form, view.editing_forward.is_some())
-                                };
-                                if show_new_form {
-                                    self.begin_forward_create_form_exit(cx);
-                                }
-                                if editing_forward {
-                                    self.begin_forward_edit_form_exit(cx);
-                                }
-                                self.forwarding.update(cx, |forwarding, _cx| {
-                                    forwarding.reset_completed_operation_form();
-                                });
-                                changed = true;
-                            }
-                            if live_page {
-                                let start = self.forwarding.update(cx, |forwarding, _| {
-                                    forwarding.view.start_after_save.take()
-                                });
-                                if let Some(operation) = start
-                                    && let Some(node) =
-                                        self.forwarding.read(cx).node_for_tab(tab_id)
-                                {
-                                    self.start_forward_operation(
-                                        tab_id,
-                                        node,
-                                        "forwards.messages.created",
-                                        true,
-                                        operation,
-                                        cx,
-                                    );
-                                }
-                            }
-                        }
-                        Err(error) => {
-                            if live_page {
-                                self.forwarding.update(cx, |forwarding, _| {
-                                    forwarding.view.start_after_save = None;
-                                });
-                            }
-                            if self.forwards_tab_is_visible(tab_id, cx) {
-                                self.forwarding.update(cx, |forwarding, _cx| {
-                                    forwarding.set_error(error);
-                                });
-                                changed = true;
-                            } else {
-                                self.push_forward_status_notice(
-                                    self.i18n.t("forwards.toast.error_title"),
-                                    Some(error),
-                                    TerminalNoticeVariant::Error,
+                            if let Some(operation) = start
+                                && let Some(node) = self.forwarding.read(cx).node_for_tab(tab_id)
+                            {
+                                self.start_forward_operation(
+                                    tab_id,
+                                    node,
+                                    message_key,
+                                    true,
+                                    operation,
                                     cx,
                                 );
                             }
                         }
+                        Err(error) if !visible => {
+                            self.push_forward_status_notice(
+                                self.i18n.t("forwards.toast.error_title"),
+                                Some(error),
+                                TerminalNoticeVariant::Error,
+                                cx,
+                            );
+                        }
+                        Err(_) => {}
                     }
                     self.flush_ssh_tunnel_stops(cx);
                     if let Some(node) = self.forwarding.read(cx).node_for_tab(tab_id) {
@@ -652,14 +458,9 @@ impl WorkspaceApp {
                 }
                 ForwardingDeliveryIntent::Binding { binding } => {
                     self.remember_forwarding_binding(binding);
-                    changed = true;
                 }
-                ForwardingDeliveryIntent::PortScan { node_id, binding } => {
-                    self.remember_forwarding_binding(binding);
-                    if self.active_forwards_tab_matches_node(&node_id, cx) {
-                        self.sync_forwarding_view_port_detection(&node_id, cx);
-                        changed = true;
-                    }
+                ForwardingDeliveryIntent::PortScan { binding } => {
+                    self.remember_forwarding_binding(binding)
                 }
                 ForwardingDeliveryIntent::ReconnectRestore {
                     node_id,
@@ -682,47 +483,34 @@ impl WorkspaceApp {
                     );
                 }
                 ForwardingDeliveryIntent::Runtime(ForwardEvent::StatusChanged {
-                    session_id,
                     status,
                     error,
                     ..
-                }) => {
-                    let visible = self.active_forwards_tab_matches_session(&session_id, cx);
-                    match status {
-                        ForwardStatus::Suspended => {
-                            let description = self.i18n.t("forwards.toast.suspended_desc");
-                            self.push_forward_status_notice(
-                                self.i18n.t("forwards.toast.suspended_title"),
-                                Some(description),
-                                TerminalNoticeVariant::Warning,
-                                cx,
-                            );
-                        }
-                        ForwardStatus::Error => {
-                            self.push_forward_status_notice(
-                                self.i18n.t("forwards.toast.error_title"),
-                                error,
-                                TerminalNoticeVariant::Error,
-                                cx,
-                            );
-                        }
-                        _ => {}
+                }) => match status {
+                    ForwardStatus::Suspended => {
+                        let description = self.i18n.t("forwards.toast.suspended_desc");
+                        self.push_forward_status_notice(
+                            self.i18n.t("forwards.toast.suspended_title"),
+                            Some(description),
+                            TerminalNoticeVariant::Warning,
+                            cx,
+                        );
                     }
-                    changed |= visible;
-                }
-                ForwardingDeliveryIntent::Runtime(ForwardEvent::StatsUpdated {
-                    session_id,
+                    ForwardStatus::Error => {
+                        self.push_forward_status_notice(
+                            self.i18n.t("forwards.toast.error_title"),
+                            error,
+                            TerminalNoticeVariant::Error,
+                            cx,
+                        );
+                    }
+                    _ => {}
+                },
+                ForwardingDeliveryIntent::Runtime(ForwardEvent::StatsUpdated { .. }) => {}
+                ForwardingDeliveryIntent::Runtime(ForwardEvent::SessionSuspended {
+                    forward_ids,
                     ..
                 }) => {
-                    if self.active_forwards_tab_matches_session(&session_id, cx) {
-                        changed = true;
-                    }
-                }
-                ForwardingDeliveryIntent::Runtime(ForwardEvent::SessionSuspended {
-                    session_id,
-                    forward_ids,
-                }) => {
-                    let visible = self.active_forwards_tab_matches_session(&session_id, cx);
                     // Tauri handles sessionSuspended as a toast-only runtime
                     // event. Keep inline form errors reserved for create/edit
                     // validation and operation failures.
@@ -736,7 +524,6 @@ impl WorkspaceApp {
                         TerminalNoticeVariant::Warning,
                         cx,
                     );
-                    changed |= visible;
                 }
                 ForwardingDeliveryIntent::Runtime(ForwardEvent::PortDetected {
                     connection_id,
@@ -748,7 +535,7 @@ impl WorkspaceApp {
                     else {
                         continue;
                     };
-                    self.forwarding.update(cx, |forwarding, _cx| {
+                    self.forwarding.update(cx, |forwarding, cx| {
                         forwarding.apply_port_detection_result(
                             &node_id,
                             Some(connection_id),
@@ -758,12 +545,9 @@ impl WorkspaceApp {
                                 all_ports,
                                 has_scanned: true,
                             }),
+                            cx,
                         );
                     });
-                    if self.active_forwards_tab_matches_node(&node_id, cx) {
-                        self.sync_forwarding_view_port_detection(&node_id, cx);
-                        changed = true;
-                    }
                 }
             }
         }
@@ -793,27 +577,6 @@ impl WorkspaceApp {
             },
             cx,
         );
-    }
-
-    fn active_forwards_tab_matches_session(&self, session_id: &str, cx: &App) -> bool {
-        self.forwarding
-            .read(cx)
-            .tab_node_mappings()
-            .iter()
-            .any(|(tab_id, node_id)| {
-                self.forwards_tab_is_visible(*tab_id, cx)
-                    && self.forwarding_session_id_for_node(node_id) == session_id
-            })
-    }
-
-    fn active_forwards_tab_matches_node(&self, node_id: &NodeId, cx: &App) -> bool {
-        self.forwarding
-            .read(cx)
-            .tab_node_mappings()
-            .iter()
-            .any(|(tab_id, visible_node_id)| {
-                visible_node_id == node_id && self.forwards_tab_is_visible(*tab_id, cx)
-            })
     }
 
     fn forwards_node_has_visible_tab(&self, node_id: &NodeId, cx: &App) -> bool {
@@ -849,23 +612,6 @@ impl WorkspaceApp {
         self.forwarding_service.release_binding_for_node(node_id)
     }
 
-    fn sync_forwarding_view_port_detection(&mut self, node_id: &NodeId, cx: &mut Context<Self>) {
-        let pages = self
-            .forwarding
-            .read(cx)
-            .tab_node_mappings()
-            .iter()
-            .filter(|(_, node)| *node == node_id)
-            .map(|(id, _)| *id)
-            .collect::<Vec<_>>();
-        for page in pages {
-            let _scope = self.enter_forwarding_page(page, cx);
-            self.forwarding.update(cx, |forwarding, _| {
-                forwarding.sync_active_port_detection(node_id)
-            });
-        }
-    }
-
     pub(in crate::workspace) fn remember_forwarding_binding(
         &mut self,
         binding: Option<(String, String, ConnectionConsumer)>,
@@ -885,52 +631,21 @@ impl WorkspaceApp {
         super::ForwardingRuntimeService::session_id_for_node(node_id)
     }
 
-    pub(super) fn open_forward_edit_form(&mut self, rule: ForwardRule, cx: &mut Context<Self>) {
-        self.forwarding
-            .update(cx, |forwarding, _cx| forwarding.open_edit_form(rule));
-        cx.notify();
-    }
-
     pub(in crate::workspace) fn handle_forwards_key(
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
     ) -> bool {
-        let Some(input) = self.forwarding.read(cx).view().focused_input else {
+        let Some(page) = self.forwarding_page(cx) else {
             return false;
         };
-        let key = event.keystroke.key.as_str();
-        if event.keystroke.modifiers.platform || event.keystroke.modifiers.control {
-            return false;
-        }
-        match key {
-            "escape" => {
-                self.forwarding
-                    .update(cx, |forwarding, _cx| forwarding.clear_input_focus());
+        match page.update(cx, |page, cx| page.handle_input_key(event, cx)) {
+            ForwardsInputKey::Unhandled => false,
+            ForwardsInputKey::Handled => true,
+            ForwardsInputKey::Blur => {
                 self.ime_marked_text = None;
-                cx.notify();
                 true
             }
-            "backspace" => {
-                let changed = self
-                    .forwarding
-                    .update(cx, |forwarding, _cx| forwarding.backspace_input(input));
-                if changed {
-                    // Empty Backspace is only visible if it also clears an
-                    // existing validation error.
-                    cx.notify();
-                }
-                true
-            }
-            _ => false,
         }
-    }
-
-    pub(in crate::workspace) fn forward_input_value<'a>(
-        &self,
-        input: ForwardInput,
-        cx: &'a App,
-    ) -> &'a str {
-        self.forwarding.read(cx).input_value(input)
     }
 }

@@ -6,7 +6,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
         run: impl FnOnce(&mut CloudSyncRuntime<'_>, &mut App) -> R,
     ) -> R {
-        let ai_keys = self.ai_entity.read(cx).key_store().clone();
+        let ai_keys = self.ai.state.read(cx).key_store().clone();
         let mut runtime = CloudSyncRuntime {
             cloud_sync: self.cloud_sync.clone(),
             connection_store: &mut self.connection_store,
@@ -288,7 +288,7 @@ impl WorkspaceApp {
     ) {
         let settings = self.settings_store.settings().clone();
         self.apply_loaded_settings_to_runtime(previous, &settings, cx);
-        self.ai_entity.read(cx).key_store().clear_cache();
+        self.ai.state.read(cx).key_store().clear_cache();
         self.terminal.update(cx, |terminal, _| {
             terminal.quick_commands.store.reload_from_store()
         });

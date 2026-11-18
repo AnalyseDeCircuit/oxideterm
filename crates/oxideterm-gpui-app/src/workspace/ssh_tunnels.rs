@@ -568,8 +568,7 @@ impl WorkspaceApp {
             .and_then(|host| self.saved_ssh_nodes.get(host))
             .and_then(|node| self.forwarding.read(cx).tab_for_node(node))
             .is_some_and(|tab| {
-                let _scope = self.enter_forwarding_page(tab, cx);
-                self.forwarding.read(cx).operation_pending()
+                self.forwarding.read(cx).operation_pending(tab, cx)
             });
         if busy || self.ssh_tunnels.jobs.contains_key(id) {
             self.ssh_tunnels

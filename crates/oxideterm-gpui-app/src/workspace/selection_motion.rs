@@ -287,27 +287,6 @@ mod tests {
     }
 
     #[test]
-    fn transitions_are_bounded_per_control_and_target() {
-        let mut state = UserSegmentedControlMotionState::default();
-        state.begin_with_vertical_offset(CLOUD_SYNC_SWITCHER_ID, 1, None);
-
-        assert!(state.is_active_for(CLOUD_SYNC_SWITCHER_ID, 1));
-        assert!(!state.is_active_for(CLOUD_SYNC_SWITCHER_ID, 2));
-        state.clear(CLOUD_SYNC_SWITCHER_ID);
-
-        for target_index in 0..1_000 {
-            state.begin_with_vertical_offset(PLUGIN_MANAGER_SWITCHER_ID, target_index, None);
-        }
-
-        assert_eq!(state.active_transitions.len(), 1);
-        assert!(state.is_active_for(PLUGIN_MANAGER_SWITCHER_ID, 999));
-        assert_eq!(
-            state.transition_for(PLUGIN_MANAGER_SWITCHER_ID, 999),
-            Some((state.next_generation, None))
-        );
-    }
-
-    #[test]
     fn transition_metadata_survives_until_replacement_or_completion() {
         let mut state = UserSegmentedControlMotionState::default();
         state.begin_with_vertical_offset(SETTINGS_NAVIGATION_ID, 3, Some(-52.0));

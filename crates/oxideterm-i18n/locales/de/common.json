@@ -1343,7 +1343,17 @@
     "knowledge_base": "Wissensbasis und Speicher",
     "knowledge_base_desc": "Indexieren Sie Markdown- oder Textsammlungen für semantische Suche, Embeddings und OxideSens-Kontext.",
     "external_import": "Externer Verbindungsimport",
-    "external_import_desc": "Importieren Sie Hosts aus SSH-Konfigurationen und unterstützten Terminal-Managern mit Vorschau und Duplikatbehandlung."
+    "external_import_desc": "Importieren Sie Hosts aus SSH-Konfigurationen und unterstützten Terminal-Managern mit Vorschau und Duplikatbehandlung.",
+    "step_overview": "Überblick",
+    "step_disclaimer": "Hinweise",
+    "badge_open_source": "Kostenlos & Open Source · GPL-3.0",
+    "badge_pure_rust": "Reines natives Rust",
+    "badge_no_webview": "Kein WebView · GPUI",
+    "overview_intro": "Ein kostenloser Open-Source-Arbeitsbereich in reinem Rust mit GPUI – ganz ohne WebView-Ballast. Vereint Terminals, Dateiübertragung, Tunnel, Host-Tools und KI in einem Fenster.",
+    "cat_connections": "Verbindungen & Protokolle",
+    "cat_files_dev": "Dateien & Remote-IDE",
+    "cat_ops_ai": "Host-Betrieb & KI",
+    "cat_security_ext": "Sicherheit, Sync & Erweiterungen"
   },
   "zen_mode": {
     "exit": "Zen-Modus beenden",

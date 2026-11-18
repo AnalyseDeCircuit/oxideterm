@@ -104,8 +104,7 @@ pub struct SettingsSurfaceFrame {
     pub groups: Vec<Vec<SettingsTab>>,
 }
 
-/// The application publishes a render frame and supplies the content of page
-/// sections it still owns. The surface owns GPUI view identity and layout.
+/// The application supplies data and window operations; the surface owns page layout.
 pub struct SettingsSurfaceBindings {
     pub frame: Rc<dyn Fn(&App) -> Option<SettingsSurfaceFrame>>,
     pub page: Rc<
@@ -116,9 +115,6 @@ pub struct SettingsSurfaceBindings {
         ) -> Option<SettingsPageFrame<'a>>,
     >,
     pub prepare_page: Rc<dyn Fn(SettingsSectionId, &mut App) -> Option<PreparedSettingsPage>>,
-    // AI settings still have an application-owned surface during their extraction.
-    pub extension_section:
-        Rc<dyn Fn(SettingsTab, SettingsSectionId, &mut App) -> Option<AnyElement>>,
     pub scrolled: Rc<dyn Fn(&mut App)>,
     pub keybinding_note: Rc<dyn Fn(String, u32, &mut App) -> Option<AnyElement>>,
     pub dispatch: Rc<dyn Fn(SettingsSurfaceRequest, &mut Window, &mut App)>,
@@ -135,9 +131,6 @@ pub enum SettingsSurfaceRequest {
     Tooltip(String, Option<Point<Pixels>>),
 }
 
-/// Intermediate counts change the settings list; completion also updates the document workspace.
-pub struct KnowledgeSettingsProgress;
-
 pub struct SettingsSurfaceView {
     settings: Entity<SettingsWorkspaceEntity>,
     bindings: SettingsSurfaceBindings,
@@ -150,12 +143,12 @@ pub struct SettingsSurfaceView {
 }
 
 impl SettingsSurfaceView {
-    pub fn follow_knowledge_progress<T: gpui::EventEmitter<KnowledgeSettingsProgress> + 'static>(
+    pub fn follow_knowledge_progress<T: 'static>(
         &self,
         source: &Entity<T>,
         cx: &mut Context<Self>,
     ) {
-        cx.subscribe(source, |surface, _, _: &KnowledgeSettingsProgress, cx| {
+        cx.observe(source, |surface, _, cx| {
             if surface.settings.read(cx).route_snapshot().active_tab == SettingsTab::Knowledge {
                 cx.notify();
             }
@@ -296,7 +289,6 @@ impl Render for SettingsSurfaceView {
         let navigation = self.render_settings_nav(&frame, cx);
         let page = self.bindings.page.clone();
         let prepare_page = self.bindings.prepare_page.clone();
-        let extension_section = self.bindings.extension_section.clone();
         let settings_owner = self.settings.clone();
         let scrolled = self.bindings.scrolled.clone();
         let keybinding_note = self.bindings.keybinding_note.clone();
@@ -354,17 +346,21 @@ impl Render for SettingsSurfaceView {
                             if let Some(page) = page(id, prepared, cx) {
                                 page.render(&settings_owner, id, cx)
                             } else {
-                                extension_section(tab, id, cx)
-                                    .unwrap_or_else(|| div().into_any_element())
+                                div().into_any_element()
                             }
                         }
                         None => div().into_any_element(),
                     }
                 };
                 let padding = tokens.metrics.settings_content_padding;
+                let section = index.checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
+                    .and_then(|index| settings_tab_section_at(tab, index, frame.counts));
                 div()
                     .w_full()
                     .min_w(px(0.0))
+                    .debug_selector(move || {
+                        format!("{section:?}")
+                    })
                     .px(px(padding))
                     .pb(px(if index + 1 == count {
                         padding
@@ -499,7 +495,6 @@ mod tests {
                     frame: Rc::new(|_| None),
                     page: Rc::new(|_, _, _| None),
                     prepare_page: Rc::new(|_, _| None),
-                    extension_section: Rc::new(|_, _, _| None),
                     scrolled: Rc::new(|_| {}),
                     keybinding_note: Rc::new(|_, _, _| None),
                     dispatch: Rc::new(|_, _, _| {}),
@@ -587,15 +582,6 @@ mod tests {
                     }),
                     page: Rc::new(|_, _, _| None),
                     prepare_page: Rc::new(|_, _| None),
-                    extension_section: Rc::new(|_, section, _| {
-                        assert_ne!(section, SettingsSectionId::TerminalPageSwitcher);
-                        Some(
-                            div()
-                                .h(px(44.0))
-                                .debug_selector(move || format!("{section:?}"))
-                                .into_any_element(),
-                        )
-                    }),
                     scrolled: Rc::new(|_| {}),
                     keybinding_note: Rc::new(|_, _, _| None),
                     dispatch: Rc::new(|request, _, _| {
@@ -609,7 +595,7 @@ mod tests {
         });
         cx.simulate_resize(gpui::size(px(1280.0), px(750.0)));
         cx.update(|window, app| window.draw(app).clear(app));
-        assert!(cx.debug_bounds("TerminalDisplayFont").is_some());
+        assert!(cx.debug_bounds("Some(TerminalDisplayFont)").is_some());
         let logging = cx
             .debug_bounds(TerminalSettingsPage::Logging.label_key())
             .unwrap();
@@ -623,7 +609,7 @@ mod tests {
             settings.read_with(cx, |state, _| state.route_snapshot().terminal_page),
             TerminalSettingsPage::Logging
         );
-        assert!(cx.debug_bounds("TerminalLoggingSession").is_some());
-        assert!(cx.debug_bounds("TerminalDisplayFont").is_none());
+        assert!(cx.debug_bounds("Some(TerminalLoggingSession)").is_some());
+        assert!(cx.debug_bounds("Some(TerminalDisplayFont)").is_none());
     }
 }
