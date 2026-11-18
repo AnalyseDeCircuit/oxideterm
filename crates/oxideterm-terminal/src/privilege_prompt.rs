@@ -102,52 +102,107 @@ impl Default for TerminalPrivilegePromptStream {
 impl TerminalPrivilegePromptStream {
     pub(crate) fn observe(&mut self, output: &[u8]) -> Vec<TerminalPrivilegePromptEvent> {
         let mut events = Vec::new();
-        let decoded = String::from_utf8_lossy(output);
-        let mut remaining = decoded.as_ref();
-        while !remaining.is_empty() {
-            if self.control_state == ControlSequenceState::Ground {
-                let printable = remaining
-                    .as_bytes()
-                    .iter()
-                    .position(|byte| !matches!(byte, b' '..=b'9' | b';'..=b'~'))
-                    .unwrap_or(remaining.len());
-                if printable > 0 {
+        let remaining = self.observe_chunk::<false>(output, &mut events);
+        // UTF-8 passthrough can end inside a code point. Preserve the previous lossy
+        // replacement behavior per transport chunk without allocating a decoded copy.
+        for chunk in remaining.utf8_chunks() {
+            self.observe_chunk::<true>(chunk.valid().as_bytes(), &mut events);
+            if !chunk.invalid().is_empty() {
+                self.observe_character('\u{fffd}', &mut events);
+            }
+        }
+        events
+    }
+
+    fn observe_chunk<'a, const VALID_UTF8: bool>(
+        &mut self,
+        mut bytes: &'a [u8],
+        events: &mut Vec<TerminalPrivilegePromptEvent>,
+    ) -> &'a [u8] {
+        while let Some(&first) = bytes.first() {
+            match self.control_state {
+                ControlSequenceState::Ground if plain_prompt_byte::<VALID_UTF8>(first) => {
+                    let end = prompt_text_prefix::<VALID_UTF8>(bytes);
+                    let rest = &bytes[end..];
                     if self.pending_carriage_return {
                         self.current_line.clear();
                         self.emitted_line = None;
                         self.pending_carriage_return = false;
                     }
-                    let mut text = &remaining[..printable];
-                    while !text.is_empty() {
-                        // Match scalar truncation boundaries without retaining a whole output chunk.
-                        let take = text
-                            .len()
-                            .min(MAX_PROMPT_LINE_BYTES + 1 - self.current_line.len());
-                        self.current_line.push_str(&text[..take]);
-                        self.bound_current_line();
-                        text = &text[take..];
+                    // Without a visible prompt, a plain completed line cannot emit a
+                    // dismissal or a retry, and has no trailing prompt delimiter.
+                    if !self.prompt_visible
+                        && (rest.starts_with(b"\n") || rest.starts_with(b"\r\n"))
+                    {
+                        self.current_line.clear();
+                        self.emitted_line = None;
+                    } else {
+                        // SAFETY: the prefix is printable ASCII or part of a
+                        // validated UTF-8 chunk, ending before the next lead byte.
+                        let span = unsafe { std::str::from_utf8_unchecked(&bytes[..end]) };
+                        if VALID_UTF8 {
+                            self.append_printable_text(span);
+                        } else {
+                            self.append_printable_ascii(span);
+                        }
                     }
-                    remaining = &remaining[printable..];
-                    continue;
+                    bytes = rest;
                 }
-            } else if self.control_state == ControlSequenceState::Csi {
-                let Some(final_byte) = remaining
-                    .as_bytes()
-                    .iter()
-                    .position(|byte| matches!(byte, b'@'..=b'~'))
-                else {
-                    break;
-                };
-                // ASCII final bytes cannot occur inside a multibyte UTF-8 character.
-                remaining = &remaining[final_byte + 1..];
-                self.control_state = ControlSequenceState::Ground;
-                continue;
+                ControlSequenceState::Csi => {
+                    let Some(end) = bytes.iter().position(|byte| matches!(byte, b'@'..=b'~')) else {
+                        return &[];
+                    };
+                    // UTF-8 cannot conceal an ASCII CSI final byte.
+                    self.control_state = ControlSequenceState::Ground;
+                    bytes = &bytes[end + 1..];
+                }
+                _ if first.is_ascii() => {
+                    self.observe_character(first as char, events);
+                    bytes = &bytes[1..];
+                }
+                _ if VALID_UTF8 => {
+                    // SAFETY: this mode is used only on Utf8Chunk::valid().
+                    let text = unsafe { std::str::from_utf8_unchecked(bytes) };
+                    let character = text.chars().next().unwrap();
+                    self.observe_character(character, events);
+                    bytes = &bytes[character.len_utf8()..];
+                }
+                _ => break,
             }
-            let character = remaining.chars().next().unwrap();
-            self.observe_character(character, &mut events);
-            remaining = &remaining[character.len_utf8()..];
         }
-        events
+        bytes
+    }
+
+    fn append_printable_text(&mut self, mut text: &str) {
+        while !text.is_empty() {
+            let limit = (MAX_PROMPT_LINE_BYTES + 1 - self.current_line.len()).min(text.len());
+            let end = text.ceil_char_boundary(limit);
+            self.current_line.push_str(&text[..end]);
+            self.bound_current_line();
+            text = &text[end..];
+        }
+    }
+
+    fn append_printable_ascii(&mut self, mut text: &str) {
+        let first = MAX_PROMPT_LINE_BYTES + 1 - self.current_line.len();
+        if text.len() < first {
+            self.current_line.push_str(text);
+            return;
+        }
+        self.current_line.push_str(&text[..first]);
+        self.bound_current_line();
+        text = &text[first..];
+
+        // After one more trim, the entire retained window is ASCII from this span.
+        // Skip complete watermark cycles, keeping the same tail as scalar appends.
+        let next = MAX_PROMPT_LINE_BYTES + 1 - self.current_line.len();
+        if text.len() >= next {
+            let cycle = MAX_PROMPT_LINE_BYTES + 1 - RETAINED_PROMPT_LINE_BYTES;
+            let last_trim = next + (text.len() - next) / cycle * cycle;
+            self.current_line.clear();
+            text = &text[last_trim - RETAINED_PROMPT_LINE_BYTES..];
+        }
+        self.current_line.push_str(text);
     }
 
     fn observe_character(
@@ -299,6 +354,53 @@ impl TerminalPrivilegePromptStream {
         self.current_line.drain(..start);
         self.emitted_line = None;
     }
+}
+
+fn plain_prompt_byte<const VALID_UTF8: bool>(byte: u8) -> bool {
+    if VALID_UTF8 {
+        // C2 can start a C1 control; EF can start the fullwidth colon.
+        byte >= b' ' && !matches!(byte, b':' | 0x7f | 0xc2 | 0xef)
+    } else {
+        matches!(byte, b' '..=b'9' | b';'..=b'~')
+    }
+}
+
+fn prompt_text_prefix<const VALID_UTF8: bool>(bytes: &[u8]) -> usize {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    const SPACE_TEST: u64 = 0x6060_6060_6060_6060;
+    const ONE: u64 = 0x0101_0101_0101_0101;
+    const COLON: u64 = 0x3a3a_3a3a_3a3a_3a3a;
+    const DEL: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    const C2: u64 = 0xc2c2_c2c2_c2c2_c2c2;
+    const EF: u64 = 0xefef_efef_efef_efef;
+
+    let (words, tail) = bytes.as_chunks::<8>();
+    let scalar = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .position(|&byte| !plain_prompt_byte::<VALID_UTF8>(byte))
+            .unwrap_or(bytes.len())
+    };
+    let has_zero_lane = |word: u64| word.wrapping_sub(ONE) & !word & HIGH != 0;
+
+    for (index, word) in words.iter().enumerate() {
+        let word = u64::from_ne_bytes(*word);
+        let special = if VALID_UTF8 {
+            let low = (word & !HIGH).wrapping_add(SPACE_TEST);
+            !(low | word) & HIGH != 0
+                || has_zero_lane(word ^ DEL)
+                || has_zero_lane(word ^ C2)
+                || has_zero_lane(word ^ EF)
+        } else {
+            word & HIGH != 0
+                || word.wrapping_add(SPACE_TEST) & HIGH != HIGH
+                || word.wrapping_add(ONE) & HIGH != 0
+        };
+        if special || has_zero_lane(word ^ COLON) {
+            return index * 8 + scalar(&bytes[index * 8..index * 8 + 8]);
+        }
+    }
+    words.len() * 8 + scalar(tail)
 }
 
 /// Classifies a normalized terminal line as a standard password prompt.
@@ -542,6 +644,27 @@ fn looks_like_retry_notice(line: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunked_prompt_observation_agrees_with_scalar_dispatch_at_trims_and_invalid_utf8() {
+        let padding = "界".repeat(350) + &" ".repeat(MAX_PROMPT_LINE_BYTES * 4);
+        let mut bytes = padding.into_bytes();
+        bytes.extend_from_slice(b"[sudo] password for deploy:\r\nSorry, try again.\n");
+        bytes.extend_from_slice("密码：\x1b[0m\r\n".as_bytes());
+        bytes.extend_from_slice(b"finished\xff\n");
+        for width in [7, 1027, 8192, bytes.len()] {
+            let mut batch = TerminalPrivilegePromptStream::default();
+            let mut scalar = TerminalPrivilegePromptStream::default();
+            for chunk in bytes.chunks(width) {
+                let mut expected = Vec::new();
+                for character in String::from_utf8_lossy(chunk).chars() {
+                    scalar.observe_character(character, &mut expected);
+                }
+                assert_eq!(batch.observe(chunk), expected);
+                assert!(batch.current_line.as_str() == scalar.current_line.as_str());
+            }
+        }
+    }
 
     #[test]
     fn batched_text_preserves_prompt_transitions_across_chunks() {

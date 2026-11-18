@@ -8213,6 +8213,7 @@ dependencies = [
  "criterion 0.5.1",
  "crossbeam-channel",
  "fernomade-predict",
+ "foldhash 0.2.0",
  "futures-util",
  "libc",
  "memchr",
@@ -8276,6 +8277,9 @@ dependencies = [
 [[package]]
 name = "oxideterm-terminal-model"
 version = "2.3.4-beta.1"
+dependencies = [
+ "foldhash 0.2.0",
+]
 
 [[package]]
 name = "oxideterm-terminal-recording"

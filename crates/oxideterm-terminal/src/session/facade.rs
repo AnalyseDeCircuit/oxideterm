@@ -508,7 +508,7 @@ impl TerminalSession {
         &mut self,
         rules: Option<Arc<oxideterm_terminal_triggers::CompiledTriggerSet>>,
     ) {
-        self.backend.set_trigger_rules(rules);
+        self.backend.set_trigger_rules(rules.filter(|rules| rules.has_output_triggers()));
     }
 
     pub fn serial_runtime_options(&self) -> Option<SerialRuntimeOptions> {

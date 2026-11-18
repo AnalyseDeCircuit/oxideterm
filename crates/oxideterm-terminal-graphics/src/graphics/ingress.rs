@@ -160,6 +160,40 @@ impl GraphicsIngress {
         self.advance_ordered_inner(bytes, &mut emit, &mut cursor);
     }
 
+    /// Advance the ingress state for a verbatim text chunk without touching the grid.
+    /// On success the caller must apply queued grid changes before and after parsing it.
+    pub fn try_advance_plain_bytes(&mut self, bytes: &[u8]) -> bool {
+        if !self.options.enabled
+            || self.sync_buffer.is_some()
+            || bytes.is_empty()
+            || !matches!(self.state, ParserState::Ground)
+        {
+            return false;
+        }
+
+        // Leave possible OSC/DCS/APC prefixes and split escapes to the ordered parser.
+        if memchr::memchr2(0x1b, 0x90, bytes).is_some()
+            && (bytes.last() == Some(&0x1b)
+                || memchr::memmem::find(bytes, b"\x1b]").is_some()
+                || memchr::memchr3_iter(b'P', b'?', 0x90, bytes).any(|index| {
+                    match bytes[index] {
+                        b'P' => index > 0 && bytes[index - 1] == 0x1b,
+                        0x90 => utf8_tail_pending(&bytes[..index], self.utf8_remaining) == 0,
+                        _ => index >= 2 && bytes[index - 2..].starts_with(SYNC_BEGIN),
+                    }
+                })
+                || memchr::memmem::find(bytes, b"\x1b_").is_some()
+                || (2..SYNC_BEGIN.len()).any(|len| {
+                    bytes.len() >= len && SYNC_BEGIN.starts_with(&bytes[bytes.len() - len..])
+                }))
+        {
+            return false;
+        }
+
+        self.utf8_remaining = utf8_tail_pending(bytes, self.utf8_remaining);
+        true
+    }
+
     fn advance_ordered_inner<'a>(
         &mut self,
         bytes: &'a [u8],
@@ -179,35 +213,13 @@ impl GraphicsIngress {
             self.commit_synchronized(&mut emit, &mut cursor);
         }
 
-        if self.sync_buffer.is_none()
-            && !bytes.is_empty()
-            && matches!(self.state, ParserState::Ground)
-        {
-            // SIMD substring searches let ordinary CSI output stay borrowed. Leave
-            // possible OSC/DCS/APC prefixes and split escapes to the state machine.
-            if memchr::memchr2(0x1b, 0x90, bytes).is_none()
-                || (bytes.last() != Some(&0x1b)
-                    && memchr::memmem::find(bytes, b"\x1b]").is_none()
-                    && !memchr::memchr3_iter(b'P', b'?', 0x90, bytes).any(|index| {
-                        match bytes[index] {
-                            b'P' => index > 0 && bytes[index - 1] == 0x1b,
-                            0x90 => utf8_tail_pending(&bytes[..index], self.utf8_remaining) == 0,
-                            _ => index >= 2 && bytes[index - 2..].starts_with(SYNC_BEGIN),
-                        }
-                    })
-                    && memchr::memmem::find(bytes, b"\x1b_").is_none()
-                    && !(2..SYNC_BEGIN.len()).any(|len| {
-                        bytes.len() >= len && SYNC_BEGIN.starts_with(&bytes[bytes.len() - len..])
-                    }))
-            {
-                self.utf8_remaining = utf8_tail_pending(bytes, self.utf8_remaining);
-                emit(TerminalGraphicsSegment::Terminal(bytes.into()));
-                if self.grid_events.is_some() {
-                    let _ = cursor();
-                }
-                self.emit_grid_changes(&mut emit);
-                return;
+        if self.try_advance_plain_bytes(bytes) {
+            emit(TerminalGraphicsSegment::Terminal(bytes.into()));
+            if self.grid_events.is_some() {
+                let _ = cursor();
             }
+            self.emit_grid_changes(&mut emit);
+            return;
         }
 
         let mut terminal_bytes = Vec::with_capacity(bytes.len());

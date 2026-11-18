@@ -1,4 +1,8 @@
-use std::time::{Duration, Instant};
+use std::{
+    collections::hash_map::DefaultHasher,
+    hash::{BuildHasher, Hash, Hasher},
+    time::{Duration, Instant},
+};
 
 use alacritty_terminal::{
     event::VoidListener,
@@ -621,10 +625,38 @@ fn benchmark_terminal_snapshots(criterion: &mut Criterion) {
     group.finish();
 }
 
+fn benchmark_row_signatures(criterion: &mut Criterion) {
+    let terminal = snapshot_benchmark_session();
+    let snapshot = terminal.snapshot();
+    let state = foldhash::quality::RandomState::default();
+    fn hash_rows<H: Hasher>(
+        rows: &[oxideterm_terminal_model::TerminalRow],
+        mut hasher: impl FnMut() -> H,
+    ) {
+        for row in rows {
+            let mut signature = hasher();
+            row.wrapped.hash(&mut signature);
+            row.active_input.hash(&mut signature);
+            row.cells.hash(&mut signature);
+            black_box(signature.finish());
+        }
+    }
+    let mut group = criterion.benchmark_group("row_signature");
+    group.throughput(Throughput::Elements(snapshot.lines.len() as u64));
+    group.bench_function("siphash", |b| {
+        b.iter(|| hash_rows(black_box(&snapshot.lines), DefaultHasher::new));
+    });
+    group.bench_function("foldhash", |b| {
+        b.iter(|| hash_rows(black_box(&snapshot.lines), || state.build_hasher()));
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     benchmark_terminal_pipeline,
     benchmark_terminal_input_breakdown,
-    benchmark_terminal_snapshots
+    benchmark_terminal_snapshots,
+    benchmark_row_signatures
 );
 criterion_main!(benches);

@@ -169,12 +169,17 @@ fn link_styling_respects_explicit_links_application_colors_and_hover() {
     }
     prompt.lines[0].refresh_signature();
     let path = selection_snapshot("open ./crates/oxideterm-gpui-app/src/main.rs");
+    let path_hover = display_link_ranges_with_path_detection(&path, true)
+        .into_iter()
+        .next()
+        .expect("path link");
 
-    for (case, snapshot, hover, text, color, underline) in [
-        ("OSC8 on color", explicit, false, "click", None, true),
+    for (case, snapshot, hover, paths_enabled, text, color, underline) in [
+        ("OSC8 on color", explicit, false, false, "click", None, true),
         (
             "detected URL",
             selection_snapshot("open https://example.com"),
+            false,
             false,
             "https://example.com",
             None,
@@ -184,6 +189,7 @@ fn link_styling_respects_explicit_links_application_colors_and_hover() {
             "application foreground",
             suggestion,
             false,
+            true,
             "https://example.com",
             Some(0x687078),
             false,
@@ -192,33 +198,49 @@ fn link_styling_respects_explicit_links_application_colors_and_hover() {
             "path without hover",
             path.clone(),
             false,
+            true,
             "./crates/oxideterm-gpui-app/src/main.rs",
             None,
             false,
         ),
         (
             "hovered path",
-            path,
+            path.clone(),
+            true,
             true,
             "./crates/oxideterm-gpui-app/src/main.rs",
             None,
             true,
         ),
         (
+            "path disabled after hover",
+            path,
+            true,
+            false,
+            "./crates/oxideterm-gpui-app/src/main.rs",
+            None,
+            false,
+        ),
+        (
+            "row changed after hover",
+            selection_snapshot("open ./crates/oxideterm-gpui-app/src/test.rs"),
+            true,
+            true,
+            "./crates/oxideterm-gpui-app/src/test.rs",
+            None,
+            false,
+        ),
+        (
             "painted prompt",
             prompt,
             false,
+            true,
             "~/Documents/OxideTerm",
             Some(0xffffff),
             false,
         ),
     ] {
-        let hovered = hover.then(|| {
-            display_link_ranges_with_path_detection(&snapshot, true)
-                .into_iter()
-                .next()
-                .expect("path link")
-        });
+        let hovered = hover.then(|| path_hover.clone());
         let layout = TerminalElement::new(
             snapshot,
             None,
@@ -231,6 +253,7 @@ fn link_styling_respects_explicit_links_application_colors_and_hover() {
             hovered,
             None,
         )
+        .detect_file_paths_as_links(paths_enabled)
         .layout();
         let run = layout
             .text_runs

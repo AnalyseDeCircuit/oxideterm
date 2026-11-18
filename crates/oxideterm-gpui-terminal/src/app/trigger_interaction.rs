@@ -99,6 +99,7 @@ impl TerminalPane {
                 end_col,
                 target: matched.trigger_id().to_owned().into(),
                 kind: TerminalLinkKind::Trigger,
+                detected_path_row_signature: None,
             },
             matched,
             action: action.clone(),

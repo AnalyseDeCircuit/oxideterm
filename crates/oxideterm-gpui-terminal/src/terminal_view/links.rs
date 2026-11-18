@@ -22,6 +22,8 @@ pub(crate) struct TerminalLinkRange {
     // Cached visible link ranges are rebuilt every frame, so targets must remain cheap to clone.
     pub(crate) target: SharedString,
     pub(crate) kind: TerminalLinkKind,
+    // A path hit may outlive the snapshot that the pointer was over.
+    pub(crate) detected_path_row_signature: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -86,14 +88,22 @@ pub(crate) fn display_link_ranges_for_rows_with_path_detection(
     )
 }
 
+pub(super) fn persistent_link_ranges_for_rows(
+    snapshot: &TerminalSnapshot,
+    rows: Range<usize>,
+) -> Vec<TerminalLinkRange> {
+    filter_display_link_ranges(
+        snapshot,
+        detect_link_ranges_for_rows_with_path_detection(snapshot, rows, false),
+    )
+}
+
 fn filter_display_link_ranges(
     snapshot: &TerminalSnapshot,
-    links: Vec<TerminalLinkRange>,
+    mut links: Vec<TerminalLinkRange>,
 ) -> Vec<TerminalLinkRange> {
+    links.retain(|link| should_display_link(snapshot, link));
     links
-        .into_iter()
-        .filter(|link| should_display_link(snapshot, link))
-        .collect()
 }
 
 fn should_display_link(snapshot: &TerminalSnapshot, link: &TerminalLinkRange) -> bool {
@@ -120,7 +130,8 @@ pub(super) fn detect_link_ranges_for_rows_with_path_detection(
         let url_ranges = detect_url_ranges(row_index, &link_text, &links[row_links_start..]);
         links.extend(url_ranges);
         if detect_file_paths {
-            let path_ranges = detect_path_ranges(row_index, &link_text, &links[row_links_start..]);
+            let path_ranges =
+                detect_path_ranges(row_index, row.signature, &link_text, &links[row_links_start..]);
             links.extend(path_ranges);
         }
     }
@@ -189,6 +200,7 @@ pub(crate) fn detect_osc8_ranges(
             end_col: col,
             target: uri.into(),
             kind: terminal_link_kind_for_target(uri),
+            detected_path_row_signature: None,
         });
     }
     ranges
@@ -246,6 +258,7 @@ fn detect_url_ranges(
                 end_col,
                 target: chars[start..end].iter().collect::<String>().into(),
                 kind: TerminalLinkKind::Url,
+                detected_path_row_signature: None,
             });
         }
     }
@@ -254,6 +267,7 @@ fn detect_url_ranges(
 
 fn detect_path_ranges(
     row: usize,
+    row_signature: u64,
     link_text: &LinkText,
     existing_links: &[TerminalLinkRange],
 ) -> Vec<TerminalLinkRange> {
@@ -300,6 +314,7 @@ fn detect_path_ranges(
                 end_col,
                 target: token.into(),
                 kind: TerminalLinkKind::Path,
+                detected_path_row_signature: Some(row_signature),
             });
         }
     }

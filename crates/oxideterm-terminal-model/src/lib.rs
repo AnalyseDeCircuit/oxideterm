@@ -8,10 +8,13 @@
 //! the complete terminal runtime dependency graph.
 
 use std::{
-    collections::hash_map::DefaultHasher,
-    hash::{Hash, Hasher},
-    sync::Arc,
+    hash::{BuildHasher, Hash, Hasher},
+    sync::{Arc, LazyLock},
 };
+
+// Adjacent snapshots must agree on a seed; render cache signatures stay process-local.
+static ROW_SIGNATURE_HASHER: LazyLock<foldhash::quality::RandomState> =
+    LazyLock::new(foldhash::quality::RandomState::default);
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 pub struct TerminalCell {
@@ -237,7 +240,7 @@ impl TerminalRow {
     }
 
     pub fn compute_signature(&self) -> u64 {
-        let mut hasher = DefaultHasher::new();
+        let mut hasher = ROW_SIGNATURE_HASHER.build_hasher();
         self.wrapped.hash(&mut hasher);
         self.active_input.hash(&mut hasher);
         self.cells.hash(&mut hasher);

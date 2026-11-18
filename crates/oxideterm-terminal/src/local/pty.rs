@@ -1415,7 +1415,6 @@ fn snapshot_row_from_term<T: EventListener>(
 struct SnapshotRowSource {
     source_id: usize,
     populated_cols: usize,
-    wrapped: bool,
 }
 
 fn snapshot_row_source<T: EventListener>(
@@ -1436,16 +1435,10 @@ fn snapshot_row_source<T: EventListener>(
         .take(size.cols)
         .rposition(|cell| cell != &default_cell)
         .map_or(0, |column| column + 1);
-    let wrapped = terminal_row
-        .iter()
-        .take(populated_cols)
-        .any(|cell| cell.flags.contains(Flags::WRAPLINE));
-
     Some(SnapshotRowSource {
         // Emulator-owned identity survives scrolling and cannot alias recycled cell storage.
         source_id: terminal_row.identity(),
         populated_cols,
-        wrapped,
     })
 }
 
@@ -1464,8 +1457,11 @@ fn snapshot_row_from_source<T: EventListener>(
     let mut recent_styles = [None, None];
     let mut next_style_slot = 0;
     let mut previous_extra = None;
+    let mut wrapped = false;
     // Default trailing cells have fixed paint data, so skip color and metadata conversion.
     for cell in terminal_row.iter().take(source.populated_cols) {
+        // A wrap flag makes the cell non-default, even on a wide-character spacer.
+        wrapped |= cell.flags.contains(Flags::WRAPLINE);
         let spacer = cell
             .flags
             .intersects(Flags::WIDE_CHAR_SPACER | Flags::LEADING_WIDE_CHAR_SPACER);
@@ -1545,7 +1541,7 @@ fn snapshot_row_from_source<T: EventListener>(
         line_id: 0,
         source_id: source.source_id,
         absolute_line: i64::from(grid_line),
-        wrapped: source.wrapped,
+        wrapped,
         active_input: false,
         signature: 0,
         cells: Arc::new(cells),
@@ -1650,6 +1646,27 @@ mod incremental_snapshot_tests {
     use alacritty_terminal::vte::ansi::{Processor, StdSyncHandler};
 
     use super::*;
+
+    #[test]
+    fn snapshot_keeps_wrap_on_a_wide_spacer_before_the_default_tail() {
+        let size = TerminalSize {
+            cols: 8,
+            rows: 1,
+            cell_width: 8,
+            cell_height: 16,
+        };
+        let mut term = Term::new(Config::default(), &size, VoidListener);
+        let mut parser = Processor::<StdSyncHandler>::new();
+        parser.advance(&mut term, "界".as_bytes());
+        term.grid_mut()[Line(0)]
+            .cell_mut(Column(1))
+            .flags
+            .insert(Flags::WRAPLINE);
+        let row = snapshot_row_from_term(&term, size, &TerminalPalette::default(), 0, 0);
+        assert!(row.wrapped);
+        assert!(row.cells[0].wide);
+        assert_eq!(row.text(), "界       ");
+    }
 
     #[test]
     fn predecessor_wrap_changes_invalidate_an_unchanged_logical_line() {

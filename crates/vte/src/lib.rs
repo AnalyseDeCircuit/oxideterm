@@ -47,6 +47,31 @@ const MAX_OSC_RAW: usize = 1024;
 const MIN_BATCH_TEXT_BYTES: usize = 4;
 const MIN_BATCH_LINES_BYTES: usize = 128;
 
+// The high bits make the two range tests independent in each byte lane.
+// Non-ASCII words are rejected before the additions, so no lane can carry into its neighbor.
+#[inline]
+fn printable_ascii_prefix(bytes: &[u8]) -> usize {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    const BELOW_SPACE: u64 = 0x6060_6060_6060_6060;
+    const DEL: u64 = 0x0101_0101_0101_0101;
+
+    let mut words = bytes.chunks_exact(8);
+    let mut offset = 0;
+    for chunk in &mut words {
+        let word = u64::from_ne_bytes(chunk.try_into().unwrap());
+        if (word & HIGH) != 0
+            || (word.wrapping_add(BELOW_SPACE) & HIGH) != HIGH
+            || (word.wrapping_add(DEL) & HIGH) != 0
+        {
+            return offset
+                + chunk.iter().copied().take_while(|&byte| matches!(byte, b' '..=b'~')).count();
+        }
+        offset += 8;
+    }
+    offset
+        + words.remainder().iter().copied().take_while(|&byte| matches!(byte, b' '..=b'~')).count()
+}
+
 /// Parser for raw _VTE_ protocol which delegates actions to a [`Perform`]
 ///
 /// [`Perform`]: trait.Perform.html
@@ -849,48 +874,51 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
             return;
         }
 
-        let mut printable_start = 0;
-
-        // ASCII terminal output can forward long printable spans without decoding each byte.
-        if text.is_ascii() {
-            for (index, byte) in text.bytes().enumerate() {
-                if byte <= 0x1f || byte == 0x7f {
-                    if printable_start < index {
-                        Self::dispatch_printable_text(performer, &text[printable_start..index]);
-                    }
-                    if byte <= 0x1f {
-                        performer.execute(byte);
-                    } else {
-                        performer.print(byte as char);
-                    }
-                    printable_start = index + 1;
-                }
+        let mut remaining = text;
+        while let Some(&first) = remaining.as_bytes().first() {
+            match first {
+                0..=0x1f => {
+                    performer.execute(first);
+                    remaining = &remaining[1..];
+                },
+                0x7f => {
+                    performer.print(first as char);
+                    remaining = &remaining[1..];
+                },
+                0x20..=0x7e => {
+                    let ascii = printable_ascii_prefix(remaining.as_bytes());
+                    Self::dispatch_printable_text(performer, &remaining[..ascii]);
+                    remaining = &remaining[ascii..];
+                },
+                _ => {
+                    Self::ground_dispatch_utf8(performer, remaining);
+                    return;
+                },
             }
-        } else {
-            let mut ascii_start = None;
-            for (index, character) in text.char_indices() {
-                if character == ' ' || character.is_ascii_graphic() {
-                    ascii_start.get_or_insert(index);
-                    continue;
-                }
+        }
+    }
 
-                if let Some(start) = ascii_start.take() {
-                    Self::dispatch_printable_text(performer, &text[start..index]);
-                }
-                match character {
-                    '\x00'..='\x1f' | '\u{80}'..='\u{9f}' => performer.execute(character as u8),
-                    _ => performer.print(character),
-                }
+    #[inline]
+    fn ground_dispatch_utf8<P: Perform>(performer: &mut P, text: &str) {
+        // Unicode-heavy output needs only one character walk.
+        let mut ascii_start = None;
+        for (index, character) in text.char_indices() {
+            if matches!(character, ' '..='~') {
+                ascii_start.get_or_insert(index);
+                continue;
             }
 
-            if let Some(start) = ascii_start {
-                Self::dispatch_printable_text(performer, &text[start..]);
+            if let Some(start) = ascii_start.take() {
+                Self::dispatch_printable_text(performer, &text[start..index]);
             }
-            return;
+            match character {
+                '\x00'..='\x1f' | '\u{80}'..='\u{9f}' => performer.execute(character as u8),
+                _ => performer.print(character),
+            }
         }
 
-        if printable_start < text.len() {
-            Self::dispatch_printable_text(performer, &text[printable_start..]);
+        if let Some(start) = ascii_start {
+            Self::dispatch_printable_text(performer, &text[start..]);
         }
     }
 
@@ -914,22 +942,21 @@ impl<const OSC_RAW_BUF_SIZE: usize> Parser<OSC_RAW_BUF_SIZE> {
         let Some(last_newline) = memchr::memrchr(b'\n', bytes) else {
             return 0;
         };
+        let complete_prefix = &bytes[..=last_newline];
         let mut line_breaks = 0;
         let mut line_start = 0;
         let mut max_line_length = 0;
         let mut index = 0;
 
-        while index <= last_newline {
-            match bytes[index] {
-                b' '..=b'~' => index += 1,
-                b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
-                    line_breaks += 1;
-                    max_line_length = max_line_length.max(index - line_start);
-                    index += 2;
-                    line_start = index;
-                },
-                _ => break,
+        while index < complete_prefix.len() {
+            index += printable_ascii_prefix(&complete_prefix[index..]);
+            if !complete_prefix[index..].starts_with(b"\r\n") {
+                break;
             }
+            line_breaks += 1;
+            max_line_length = max_line_length.max(index - line_start);
+            index += 2;
+            line_start = index;
         }
 
         if line_breaks < 2 {
@@ -1136,7 +1163,7 @@ mod tests {
     #[derive(Debug, PartialEq, Eq)]
     enum TextDispatch {
         Print(String),
-        PrintLines(String),
+        PrintLines(String, usize, usize),
         PrintCharacter(char),
         Execute(u8),
     }
@@ -1155,8 +1182,12 @@ mod tests {
             self.dispatched.push(TextDispatch::Print(text.to_owned()));
         }
 
-        fn print_text_lines(&mut self, text: &str, _line_count: usize, _max_line_length: usize) {
-            self.dispatched.push(TextDispatch::PrintLines(text.to_owned()));
+        fn print_text_lines(&mut self, text: &str, line_count: usize, max_line_length: usize) {
+            self.dispatched.push(TextDispatch::PrintLines(
+                text.to_owned(),
+                line_count,
+                max_line_length,
+            ));
         }
 
         fn execute(&mut self, byte: u8) {
@@ -1190,11 +1221,11 @@ mod tests {
     fn ground_dispatch_batches_complete_ascii_lines() {
         let mut dispatcher = TextDispatcher::default();
         let mut parser = Parser::new();
-        let text = format!("{}\r\n{}\r\n", "a".repeat(64), "b".repeat(64));
+        let text = format!("{}\r\n{}\r\n", "a".repeat(63), "b".repeat(68));
 
         parser.advance(&mut dispatcher, text.as_bytes());
 
-        assert_eq!(dispatcher.dispatched, vec![TextDispatch::PrintLines(text)]);
+        assert_eq!(dispatcher.dispatched, vec![TextDispatch::PrintLines(text, 2, 68)]);
     }
 
     #[test]
@@ -1205,7 +1236,7 @@ mod tests {
             let mut parser = Parser::new();
             parser.advance(&mut dispatcher, format!("{lines}{suffix}").as_bytes());
             let mut expected = vec![
-                TextDispatch::PrintLines(lines.clone()),
+                TextDispatch::PrintLines(lines.clone(), 2, 64),
                 TextDispatch::Print("tail".into()),
             ];
             if suffix.ends_with('中') {

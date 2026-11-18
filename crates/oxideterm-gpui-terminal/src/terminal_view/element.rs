@@ -1084,15 +1084,23 @@ impl TerminalElement {
         let marked_text = self.marked_text_run(ime_cursor_bounds.is_some());
         #[cfg(feature = "bench")]
         let links_started = Instant::now();
-        let link_ranges = if let Some(cache) = cache.as_deref_mut() {
+        let mut link_ranges = if let Some(cache) = cache.as_deref_mut() {
             self.cached_link_ranges_for_rows(visible_rows.clone(), cache)
         } else {
-            display_link_ranges_for_rows_with_path_detection(
-                &self.snapshot,
-                visible_rows.clone(),
-                self.detect_file_paths_as_links,
-            )
+            persistent_link_ranges_for_rows(&self.snapshot, visible_rows.clone())
         };
+        // Paths are hit-tested by the pointer handlers, not by the frame layout.
+        // Keep persistent links first so an explicit hyperlink still wins.
+        if let Some(path) = self.hovered_link.as_ref().filter(|link| {
+            self.detect_file_paths_as_links
+                && visible_rows.contains(&link.row)
+                && self.snapshot.lines.get(link.row).is_some_and(|row| {
+                    !row.active_input && link.detected_path_row_signature == Some(row.signature)
+                })
+        }) {
+            let index = link_ranges.partition_point(|range| range.row <= path.row);
+            link_ranges.insert(index, path.clone());
+        }
 
         #[cfg(feature = "bench")]
         if let Some(cache) = cache.as_deref_mut() {
@@ -1371,10 +1379,9 @@ impl TerminalElement {
             let key = self.row_link_cache_key(row_index);
             let row_layout =
                 cache.get_or_insert_links_with(key, self.performance_metrics_enabled, || {
-                    relative_link_layout(display_link_ranges_for_rows_with_path_detection(
+                    relative_link_layout(persistent_link_ranges_for_rows(
                         &self.snapshot,
                         row_index..row_index + 1,
-                        self.detect_file_paths_as_links,
                     ))
                 });
             ranges.extend(row_layout.ranges.iter().map(|range| TerminalLinkRange {
@@ -1383,6 +1390,7 @@ impl TerminalElement {
                 end_col: range.end_col,
                 target: range.target.clone(),
                 kind: range.kind,
+                detected_path_row_signature: None,
             }));
         }
         ranges
@@ -1836,7 +1844,6 @@ impl TerminalElement {
             row.line_id.hash(&mut hasher);
             row.signature.hash(&mut hasher);
         }
-        self.detect_file_paths_as_links.hash(&mut hasher);
         TerminalRowLinkCacheKey {
             signature: hasher.finish(),
         }

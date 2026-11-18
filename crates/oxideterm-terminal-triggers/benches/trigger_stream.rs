@@ -123,6 +123,12 @@ fn benchmark_trigger_stream(criterion: &mut Criterion) {
 
     let mut group = criterion.benchmark_group("terminal_trigger_stream");
     benchmark_case(&mut group, "disabled_plain", &plain, None);
+    let mut tooltip = trigger("tooltip", "READY", TerminalTriggerMatchMode::Literal);
+    tooltip.action = TerminalTriggerAction::ShowTooltip { text: "Ready".into() };
+    benchmark_case(&mut group, "interactive_only_plain", &plain, compile(vec![tooltip]));
+    benchmark_case(
+        &mut group, "literal_unbroken", &vec![b'x'; BENCHMARK_CORPUS_BYTES], literal.clone(),
+    );
     benchmark_case(&mut group, "literal_plain", &plain, literal.clone());
     benchmark_case(&mut group, "literal_ansi", &ansi, literal.clone());
     benchmark_case(&mut group, "literal_unicode", &unicode, literal.clone());

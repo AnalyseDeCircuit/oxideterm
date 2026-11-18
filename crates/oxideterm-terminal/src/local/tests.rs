@@ -121,6 +121,56 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn local_output_preprocessing_does_not_hold_the_grid_lock() {
+        use std::time::{Duration, Instant};
+
+        let config = crate::LocalPtyConfig {
+            shell: Some(crate::ShellInfo::new("test-sh", "Test", "/bin/sh").with_args(vec![
+                "-c".into(),
+                r#"stty -echo; printf 'READY\r\n'; IFS= read -r line; printf '\rsample\r\n'; IFS= read -r stay"#.into(),
+            ])),
+            load_profile: false,
+            ..Default::default()
+        };
+        let mut session = LocalPtySession::spawn_with_config_graphics_and_encoding(
+            80,
+            6,
+            config,
+            Default::default(),
+            Default::default(),
+            100,
+        )
+        .unwrap();
+        let wait_for = |session: &LocalPtySession, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if session.snapshot().lines.iter().any(|row| {
+                    let line: String = row.cells.iter().map(|cell| cell.ch).collect();
+                    line.trim_end() == expected
+                }) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            false
+        };
+        assert!(wait_for(&session, "READY"), "PTY did not reach its read");
+        let grid = session.term.clone();
+        let (checked, check) = std::sync::mpsc::sync_channel(1);
+        session.set_output_processor(Some(std::sync::Arc::new(move |bytes| {
+            let _ = checked.try_send(grid.try_lock_unfair().is_some());
+            bytes.to_ascii_uppercase()
+        })));
+        session.write_input(b"go\n").unwrap();
+        let unlocked = check.recv_timeout(Duration::from_secs(5));
+        let rendered = wait_for(&session, "SAMPLE");
+        session.shutdown();
+        assert_eq!(unlocked, Ok(true), "preprocessing ran with the grid locked");
+        assert!(rendered, "the grid did not receive the transformed output");
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn local_color_and_size_probes_finish_without_a_ui_event_drain() {
         let expected =
             b"\x1b]10;rgb:3333/3333/3333\x07\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[4;120;800t";

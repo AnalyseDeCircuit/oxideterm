@@ -162,97 +162,125 @@ where
     }
 
     fn advance_guarded_bytes(
+        &self,
         state: &mut LocalGraphicsState,
-        terminal: &mut Term<U>,
         bytes: &[u8],
-        size: TerminalSize,
-        magic_tx: &CrossbeamSender<TerminalMagicKind>,
-        event_tx: &CrossbeamSender<TerminalEvent>,
-        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+        lock_wait: &mut Duration,
+        expire_sync: bool,
     ) -> (usize, bool) {
         for kind in state.magic_scan.scan(bytes) {
-            let _ = magic_tx.send(kind);
+            let _ = self.magic_tx.send(kind);
         }
 
-        state.graphics.attach_grid(terminal.graphics_events());
+        let size = self.size;
+        let event_tx = &self.event_tx;
+        let mut observe_encoding = |bytes: &[u8]| {
+            if let Some(hint) = state.encoding_detector.observe(bytes) {
+                let _ = event_tx.send(TerminalEvent::EncodingHint(hint));
+            }
+        };
+        let mut observe_decoded = |decoded: &[u8]| {
+            if let Some(stream) = state.trigger_stream.as_mut() {
+                stream.observe_bytes(decoded, |matched| {
+                    let _ = event_tx.send(TerminalEvent::TriggerMatched(matched));
+                });
+            }
+            for event in state.privilege_prompt.observe(decoded) {
+                let _ = event_tx.send(TerminalEvent::PrivilegePrompt(event));
+            }
+        };
+        let graphics = &mut state.graphics;
+        let output_decoder = &mut state.output_decoder;
+        // Only text that graphics ingress can pass through verbatim is decoded here.
+        // Mixed graphics/text must keep their cursor and grid changes in wire order.
+        let prepared = graphics.try_advance_plain_bytes(bytes).then(|| {
+            observe_encoding(bytes);
+            let decoded = output_decoder.decode_to_utf8_bytes(bytes);
+            observe_decoded(decoded.as_ref());
+            decoded
+        });
+        let lock_started = Instant::now();
+        let mut terminal = self.terminal.lock();
+        *lock_wait += lock_started.elapsed();
+        graphics.attach_grid(terminal.graphics_events());
+        let terminal = &mut *terminal;
         let cursor = Cell::new(graphics_cursor_from_term(terminal, size));
         let mut parsed_bytes = 0usize;
         let mut graphics_events = Vec::new();
         let mut priority_writes = Vec::new();
         {
-            let graphics = &mut state.graphics;
             let protocol = &state.protocol;
             let parser = &mut state.parser;
-            let encoding_detector = &mut state.encoding_detector;
-            let output_decoder = &mut state.output_decoder;
             let output_events_enabled = state.output_events_enabled;
             let recording_sink = state.recording_sink.as_ref();
             let recording_pending = state.recording_pending.clone();
             let record_output = output_events_enabled
                 || recording_sink.is_some_and(oxideterm_audit::RecordingSink::is_enabled);
-            let trigger_stream = &mut state.trigger_stream;
-            let privilege_prompt = &mut state.privilege_prompt;
             let shell_integration = &mut state.shell_integration;
-            graphics.advance_ordered(
-                bytes,
-                |segment| match segment {
-                    TerminalGraphicsSegment::Terminal(terminal_bytes) => {
-                        if let Some(hint) = encoding_detector.observe(&terminal_bytes) {
-                            let _ = event_tx.send(TerminalEvent::EncodingHint(hint));
-                        }
-                        let decoded = output_decoder.decode_to_utf8_bytes(&terminal_bytes);
-                        parsed_bytes += terminal_bytes.len();
-                        if let Some(stream) = trigger_stream.as_mut() {
-                            stream.observe_bytes(decoded.as_ref(), |matched| {
-                                let _ = event_tx.send(TerminalEvent::TriggerMatched(matched));
-                            });
-                        }
-                        for event in privilege_prompt.observe(decoded.as_ref()) {
-                            let _ = event_tx.send(TerminalEvent::PrivilegePrompt(event));
-                        }
-                        if record_output {
-                            // Persist only bytes released by the shell-integration
-                            // scanner so invisible private clipboard OSC cannot enter recordings.
-                            let (_, recordable) = shell_integration.advance_with_recording(
-                                parser,
-                                terminal,
-                                decoded.as_ref(),
-                                |event| {
-                                    let _ = event_tx.send(event);
-                                },
-                            );
-                            if !recordable.is_empty() {
-                                if let Some(pending) = &recording_pending {
-                                    pending.borrow_mut().output(&recordable);
-                                }
-                                if output_events_enabled {
-                                    let _ = event_tx.send(TerminalEvent::Output(recordable));
-                                }
+            let mut advance = |segment: TerminalGraphicsSegment<'_>| match segment {
+                TerminalGraphicsSegment::Terminal(terminal_bytes) => {
+                    parsed_bytes += terminal_bytes.len();
+                    let decoded_late;
+                    let decoded = if let Some(decoded) = &prepared {
+                        decoded.as_ref()
+                    } else {
+                        observe_encoding(&terminal_bytes);
+                        decoded_late = output_decoder.decode_to_utf8_bytes(&terminal_bytes);
+                        observe_decoded(decoded_late.as_ref());
+                        decoded_late.as_ref()
+                    };
+                    if record_output {
+                        // Persist only bytes released by the shell-integration
+                        // scanner so invisible private clipboard OSC cannot enter recordings.
+                        let (_, recordable) = shell_integration.advance_with_recording(
+                            parser,
+                            terminal,
+                            decoded,
+                            |event| {
+                                let _ = event_tx.send(event);
+                            },
+                        );
+                        if !recordable.is_empty() {
+                            if let Some(pending) = &recording_pending {
+                                pending.borrow_mut().output(&recordable);
                             }
-                        } else {
-                            shell_integration.advance(
-                                parser,
-                                terminal,
-                                decoded.as_ref(),
-                                |event| {
-                                    let _ = event_tx.send(event);
-                                },
-                            );
+                            if output_events_enabled {
+                                let _ = event_tx.send(TerminalEvent::Output(recordable));
+                            }
                         }
-                        priority_writes.extend(protocol.drain(terminal, size));
-                        cursor.set(graphics_cursor_from_term(terminal, size));
+                    } else {
+                        shell_integration.advance(
+                            parser,
+                            terminal,
+                            decoded,
+                            |event| {
+                                let _ = event_tx.send(event);
+                            },
+                        );
                     }
-                    TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Respond(bytes)) => {
-                        priority_writes.push(Cow::Owned(bytes));
-                    }
-                    TerminalGraphicsSegment::Event(event) => {
-                        crate::apply_graphics_terminal_event(terminal, &event);
-                        cursor.set(graphics_cursor_from_term(terminal, size));
-                        graphics_events.push(event);
-                    }
-                },
-                || cursor.get(),
-            );
+                    priority_writes.extend(protocol.drain(terminal, size));
+                    cursor.set(graphics_cursor_from_term(terminal, size));
+                }
+                TerminalGraphicsSegment::Event(TerminalGraphicsEvent::Respond(bytes)) => {
+                    priority_writes.push(Cow::Owned(bytes));
+                }
+                TerminalGraphicsSegment::Event(event) => {
+                    crate::apply_graphics_terminal_event(terminal, &event);
+                    cursor.set(graphics_cursor_from_term(terminal, size));
+                    graphics_events.push(event);
+                }
+            };
+            if prepared.is_some() {
+                for event in graphics.synchronize_grid() {
+                    advance(TerminalGraphicsSegment::Event(event));
+                }
+                advance(TerminalGraphicsSegment::Terminal(Cow::Borrowed(bytes)));
+                for event in graphics.synchronize_grid() {
+                    advance(TerminalGraphicsSegment::Event(event));
+                }
+            } else {
+                graphics.advance_ordered(bytes, advance, || cursor.get());
+            }
         }
 
         state.push_priority_writes(priority_writes);
@@ -261,20 +289,20 @@ where
         if graphics_changed {
             // Keep screen switches and graphics commands in wire order, and prevent
             // the UI drain budget from exposing half of a frame's delete/put pair.
-            let _ = graphics_tx.send(TerminalGraphicsEvent::Batch(graphics_events));
+            let _ = self.graphics_tx.send(TerminalGraphicsEvent::Batch(graphics_events));
+        }
+        if expire_sync {
+            state.parser.stop_sync(terminal);
         }
 
         (parsed_bytes, graphics_changed)
     }
 
     fn advance_plain_output(
+        &self,
         state: &mut LocalGraphicsState,
-        terminal: &mut Term<U>,
         bytes: &[u8],
-        size: TerminalSize,
-        magic_tx: &CrossbeamSender<TerminalMagicKind>,
-        event_tx: &CrossbeamSender<TerminalEvent>,
-        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+        lock_wait: &mut Duration,
     ) -> (usize, bool) {
         let processed_output = state.process_output(bytes);
         let processed_output = processed_output.as_ref();
@@ -282,15 +310,7 @@ where
         let mut parsed = 0;
         let mut changed = false;
         for bytes in guarded.chunks() {
-            let (count, next_changed) = Self::advance_guarded_bytes(
-                state,
-                terminal,
-                bytes,
-                size,
-                magic_tx,
-                event_tx,
-                graphics_tx,
-            );
+            let (count, next_changed) = self.advance_guarded_bytes(state, bytes, lock_wait, false);
             parsed += count;
             changed |= next_changed;
         }
@@ -298,34 +318,20 @@ where
     }
 
     fn advance_processed_output(
+        &self,
         state: &mut LocalGraphicsState,
-        terminal: &mut Term<U>,
         bytes: &[u8],
-        size: TerminalSize,
-        magic_tx: &CrossbeamSender<TerminalMagicKind>,
-        event_tx: &CrossbeamSender<TerminalEvent>,
-        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+        lock_wait: &mut Duration,
     ) -> (usize, bool) {
         let events = state.modem_consumer.process_server_output(bytes);
-        Self::handle_modem_consumer_events(
-            state,
-            terminal,
-            events,
-            size,
-            magic_tx,
-            event_tx,
-            graphics_tx,
-        )
+        self.handle_modem_consumer_events(state, events, lock_wait)
     }
 
     fn handle_modem_consumer_events(
+        &self,
         state: &mut LocalGraphicsState,
-        terminal: &mut Term<U>,
         events: Vec<ModemConsumerEvent>,
-        size: TerminalSize,
-        magic_tx: &CrossbeamSender<TerminalMagicKind>,
-        event_tx: &CrossbeamSender<TerminalEvent>,
-        graphics_tx: &CrossbeamSender<TerminalGraphicsEvent>,
+        lock_wait: &mut Duration,
     ) -> (usize, bool) {
         let mut parsed_bytes = 0usize;
         let mut graphics_changed = false;
@@ -347,15 +353,8 @@ where
                     let result = controller.advance(
                         &bytes,
                         |terminal_bytes| {
-                            let (_, changed) = Self::advance_plain_output(
-                                state,
-                                terminal,
-                                terminal_bytes,
-                                size,
-                                magic_tx,
-                                event_tx,
-                                graphics_tx,
-                            );
+                            let (_, changed) =
+                                self.advance_plain_output(state, terminal_bytes, lock_wait);
                             graphics_changed |= changed;
                         },
                         record_output,
@@ -368,7 +367,7 @@ where
                                     return;
                                 }
                             }
-                            let _ = event_tx.send(event);
+                            let _ = self.event_tx.send(event);
                         },
                     );
                     state.tmux_controller = Some(controller);
@@ -376,8 +375,9 @@ where
                         Ok(outcome) => {
                             if outcome.entered {
                                 state.utf8_guard = Utf8ResidualGuard::default();
-                                let _ =
-                                    graphics_tx.send(TerminalGraphicsEvent::Delete { id: None });
+                                let _ = self
+                                    .graphics_tx
+                                    .send(TerminalGraphicsEvent::Delete { id: None });
                             }
                             state.push_tmux_writes(outcome.commands, outcome.replies);
                             graphics_changed |= outcome.changed;
@@ -395,8 +395,9 @@ where
                 }
                 ModemConsumerEvent::TransferStarted(request) => {
                     if let Some(transfer) = state.modem_consumer.active_transfer().cloned() {
-                        let _ =
-                            event_tx.send(TerminalEvent::ModemTransferPrompt { request, transfer });
+                        let _ = self
+                            .event_tx
+                            .send(TerminalEvent::ModemTransferPrompt { request, transfer });
                     }
                 }
                 ModemConsumerEvent::TransferDataQueued => {}
@@ -418,19 +419,9 @@ where
             return false;
         }
 
-        let terminal_lease = self.terminal.lease();
-        let mut terminal = self.terminal.lock_unfair();
-        let (parsed_bytes, graphics_changed) = Self::handle_modem_consumer_events(
-            state,
-            &mut terminal,
-            events,
-            self.size,
-            &self.magic_tx,
-            &self.event_tx,
-            &self.graphics_tx,
-        );
-        drop(terminal);
-        drop(terminal_lease);
+        let mut lock_wait = Duration::ZERO;
+        let (parsed_bytes, graphics_changed) =
+            self.handle_modem_consumer_events(state, events, &mut lock_wait);
         if graphics_changed || parsed_bytes > 0 {
             self.event_proxy.send_event(Event::Wakeup);
         }
@@ -536,19 +527,9 @@ where
                     if !trailing_output.is_empty() {
                         // The protocol terminator and next prompt can arrive in
                         // one PTY read, so render bytes the worker did not consume.
-                        let terminal_lease = self.terminal.lease();
-                        let mut terminal = self.terminal.lock_unfair();
-                        let (parsed_bytes, graphics_changed) = Self::advance_plain_output(
-                            state,
-                            &mut terminal,
-                            &trailing_output,
-                            self.size,
-                            &self.magic_tx,
-                            &self.event_tx,
-                            &self.graphics_tx,
-                        );
-                        drop(terminal);
-                        drop(terminal_lease);
+                        let mut lock_wait = Duration::ZERO;
+                        let (parsed_bytes, graphics_changed) =
+                            self.advance_plain_output(state, &trailing_output, &mut lock_wait);
                         if graphics_changed || parsed_bytes > 0 {
                             self.event_proxy.send_event(Event::Wakeup);
                         }
@@ -580,7 +561,6 @@ where
                 ..Default::default()
             });
         }
-        let mut unprocessed = 0;
         let mut processed = 0;
         let mut raw_bytes = 0;
         let mut max_data_chunk_bytes = 0;
@@ -588,70 +568,40 @@ where
         let mut terminal_lock_wait_duration = Duration::ZERO;
         let mut graphics_changed = false;
         let mut budget_exhausted = false;
-        let terminal_lease = self.terminal.lease();
-        let mut terminal = None;
 
         loop {
             #[cfg(target_os = "macos")]
-            let read = self.read_ahead.read(&mut buf[unprocessed..]);
+            let read = self.read_ahead.read(buf);
             #[cfg(not(target_os = "macos"))]
-            let read = self.pty.reader().read(&mut buf[unprocessed..]);
-            match read {
-                Ok(0) if unprocessed == 0 => {
+            let read = self.pty.reader().read(buf);
+            let chunk_bytes = match read {
+                Ok(0) => {
                     self.read_eof = true;
                     break;
                 }
-                Ok(got) => {
-                    unprocessed += got;
-                    raw_bytes += got;
-                }
+                Ok(got) => got,
                 Err(err) => match err.kind() {
-                    ErrorKind::Interrupted | ErrorKind::WouldBlock if unprocessed == 0 => break,
-                    ErrorKind::Interrupted | ErrorKind::WouldBlock => {}
+                    ErrorKind::Interrupted | ErrorKind::WouldBlock => break,
                     _ => return Err(err),
                 },
-            }
-
-            let terminal = match &mut terminal {
-                Some(terminal) => terminal,
-                None => terminal.insert(match self.terminal.try_lock_unfair() {
-                    None if unprocessed >= LOCAL_PTY_READ_BUFFER_BYTES => {
-                        let lock_started = Instant::now();
-                        let terminal = self.terminal.lock_unfair();
-                        terminal_lock_wait_duration += lock_started.elapsed();
-                        terminal
-                    }
-                    None => continue,
-                    Some(terminal) => terminal,
-                }),
             };
 
-            let chunk_bytes = unprocessed;
+            raw_bytes += chunk_bytes;
             let processing_started = Instant::now();
-            let (parsed_bytes, changed) = Self::advance_processed_output(
-                state,
-                terminal,
-                &buf[..unprocessed],
-                self.size,
-                &self.magic_tx,
-                &self.event_tx,
-                &self.graphics_tx,
-            );
-            output_processing_duration += processing_started.elapsed();
+            let mut lock_wait = Duration::ZERO;
+            let (parsed_bytes, changed) =
+                self.advance_processed_output(state, &buf[..chunk_bytes], &mut lock_wait);
+            terminal_lock_wait_duration += lock_wait;
+            output_processing_duration += processing_started.elapsed().saturating_sub(lock_wait);
             max_data_chunk_bytes = max_data_chunk_bytes.max(chunk_bytes);
             graphics_changed |= changed;
 
             processed += parsed_bytes;
-            unprocessed = 0;
-
             if !state.flush_recording() || processed >= LOCAL_MAX_LOCKED_PARSE_BYTES {
                 budget_exhausted = true;
                 break;
             }
         }
-
-        drop(terminal);
-        drop(terminal_lease);
 
         if state.needs_write() {
             self.pty_write(state)?;
@@ -685,25 +635,17 @@ where
         };
         let raw_bytes = residual.len();
 
-        let size = self.size;
-        let magic_tx = self.magic_tx.clone();
-        let graphics_tx = self.graphics_tx.clone();
-        let event_tx = self.event_tx.clone();
-        let lock_started = Instant::now();
-        let mut terminal = self.terminal.lock_unfair();
-        let terminal_lock_wait_duration = lock_started.elapsed();
+        let mut terminal_lock_wait_duration = Duration::ZERO;
         let processing_started = Instant::now();
-        let (processed, graphics_changed) = Self::advance_guarded_bytes(
+        let (processed, graphics_changed) = self.advance_guarded_bytes(
             state,
-            &mut *terminal,
             &residual,
-            size,
-            &magic_tx,
-            &event_tx,
-            &graphics_tx,
+            &mut terminal_lock_wait_duration,
+            false,
         );
-        let output_processing_duration = processing_started.elapsed();
-        drop(terminal);
+        let output_processing_duration = processing_started
+            .elapsed()
+            .saturating_sub(terminal_lock_wait_duration);
 
         if state.needs_write() {
             self.pty_write(state)?;
@@ -885,17 +827,13 @@ where
                         && !modem_output_flushed
                         && !child_exited
                     {
-                        let mut terminal = self.terminal.lock();
-                        Self::advance_guarded_bytes(
+                        let mut lock_wait = Duration::ZERO;
+                        self.advance_guarded_bytes(
                             &mut state,
-                            &mut terminal,
                             &[],
-                            self.size,
-                            &self.magic_tx,
-                            &self.event_tx,
-                            &self.graphics_tx,
+                            &mut lock_wait,
+                            true,
                         );
-                        state.parser.stop_sync(&mut *terminal);
                         self.event_proxy.send_event(Event::Wakeup);
                         // Recording capacity can return through a poll notification
                         // without any fd events. Still refresh PTY interest below;

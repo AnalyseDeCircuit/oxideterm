@@ -16,6 +16,38 @@ const RETAINED_LOGICAL_LINE_BYTES: usize = 8 * 1024;
 const MAX_RETAINED_MATCH_RANGES: usize = 512;
 const MAX_PENDING_MATCHES: usize = 128;
 
+// In validated UTF-8, controls are either single-byte ASCII or begin with C2
+// (U+0080..U+009F). Stopping at C2 also keeps each span on a code point boundary.
+fn plain_text_prefix(text: &str) -> usize {
+    const HIGH: u64 = 0x8080_8080_8080_8080;
+    const SPACE_TEST: u64 = 0x6060_6060_6060_6060;
+    const ONE: u64 = 0x0101_0101_0101_0101;
+    const DEL: u64 = 0x7f7f_7f7f_7f7f_7f7f;
+    const C2: u64 = 0xc2c2_c2c2_c2c2_c2c2;
+
+    let bytes = text.as_bytes();
+    let (words, tail) = bytes.as_chunks::<8>();
+    let scalar = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .position(|&byte| byte < b' ' || matches!(byte, 0x7f | 0xc2))
+            .unwrap_or(bytes.len())
+    };
+    for (index, word) in words.iter().enumerate() {
+        let word = u64::from_ne_bytes(*word);
+        let del = word ^ DEL;
+        let c2 = word ^ C2;
+        let low = (word & !HIGH).wrapping_add(SPACE_TEST);
+        if !(low | word) & HIGH != 0
+            || del.wrapping_sub(ONE) & !del & HIGH != 0
+            || c2.wrapping_sub(ONE) & !c2 & HIGH != 0
+        {
+            return index * 8 + scalar(&bytes[index * 8..index * 8 + 8]);
+        }
+    }
+    words.len() * 8 + scalar(tail)
+}
+
 #[derive(Clone, Copy, Default, Eq, PartialEq)]
 enum ControlSequenceState {
     #[default]
@@ -172,6 +204,9 @@ impl TerminalTriggerStream {
         now: Instant,
         mut sink: impl FnMut(TriggerMatched),
     ) {
+        if !self.rules.has_output_triggers() {
+            return;
+        }
         if self.utf8_pending.is_empty() {
             if let Ok(decoded) = std::str::from_utf8(output) {
                 self.observe_at(decoded, now, sink);
@@ -190,11 +225,66 @@ impl TerminalTriggerStream {
     }
 
     #[doc(hidden)]
-    pub fn observe_at(&mut self, output: &str, now: Instant, mut sink: impl FnMut(TriggerMatched)) {
-        for character in output.chars() {
+    pub fn observe_at(
+        &mut self,
+        mut output: &str,
+        now: Instant,
+        mut sink: impl FnMut(TriggerMatched),
+    ) {
+        if !self.rules.has_output_triggers() {
+            return;
+        }
+        while !output.is_empty() {
+            if self.control_state == ControlSequenceState::Ground {
+                let first = output.as_bytes()[0];
+                if first >= b' ' && !matches!(first, 0x7f | 0xc2) {
+                    let end = plain_text_prefix(output);
+                    if self.pending_carriage_return {
+                        self.reset_line();
+                        self.pending_carriage_return = false;
+                    }
+                    self.append_plain_text(&output[..end], now, &mut sink);
+                    output = &output[end..];
+                    continue;
+                }
+            } else if self.control_state == ControlSequenceState::Csi {
+                let Some(end) = output
+                    .as_bytes()
+                    .iter()
+                    .position(|byte| matches!(byte, b'@'..=b'~'))
+                else {
+                    break;
+                };
+                self.control_state = ControlSequenceState::Ground;
+                output = &output[end + 1..];
+                continue;
+            }
+            let character = output.chars().next().unwrap();
             self.observe_character(character, now, &mut sink);
+            output = &output[character.len_utf8()..];
         }
         self.scan_current_line(now, false, &mut sink);
+    }
+
+    fn append_plain_text(
+        &mut self,
+        mut span: &str,
+        now: Instant,
+        sink: &mut impl FnMut(TriggerMatched),
+    ) {
+        while !span.is_empty() {
+            let mut end = span.len().min(MAX_LOGICAL_LINE_BYTES + 1 - self.current_line.len());
+            // Scan at exactly the same code point that would first exceed the limit.
+            while !span.is_char_boundary(end) {
+                end += 1;
+            }
+            self.current_line.push_str(&span[..end]);
+            if self.current_line.len() > MAX_LOGICAL_LINE_BYTES {
+                self.scan_current_line(now, false, sink);
+                self.bound_current_line();
+            }
+            span = &span[end..];
+        }
     }
 
     fn observe_utf8_slice(
@@ -790,17 +880,19 @@ mod tests {
 
     #[test]
     fn keeps_long_lines_bounded_and_matches_the_retained_tail() {
-        let mut stream = make_stream(vec![rule(
-            "bounded",
-            "TAIL-MATCH",
-            TerminalTriggerMatchMode::Literal,
-        )]);
-        let mut input = "x".repeat(MAX_LOGICAL_LINE_BYTES * 3);
-        input.push_str("TAIL-MATCH");
+        let mut stream = make_stream(vec![
+            rule("head", "HEAD-MATCH", TerminalTriggerMatchMode::Literal),
+            rule("tail", "TAIL-MATCH", TerminalTriggerMatchMode::Literal),
+        ]);
+        let mut input = "HEAD-MATCH".to_owned();
+        input.push_str(&"x".repeat(MAX_LOGICAL_LINE_BYTES - input.len() - 1));
+        input.push('界'); // The first code point past the watermark straddles it in bytes.
+        input.push_str(&"x".repeat(MAX_LOGICAL_LINE_BYTES * 2));
+        input.push_str("TAIL-\u{9b}0mMATCH");
 
         let events = observe_at(&mut stream, &input, Instant::now());
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].capture("match"), Some("TAIL-MATCH"));
+        let matches: Vec<_> = events.iter().map(|event| event.capture("match")).collect();
+        assert_eq!(matches, [Some("HEAD-MATCH"), Some("TAIL-MATCH")]);
         assert!(stream.current_line.len() <= MAX_LOGICAL_LINE_BYTES);
     }
 
