@@ -1169,3 +1169,57 @@ sleep 2
         PluginRuntimeLifecycleState::Error
     );
 }
+
+#[cfg(windows)]
+mod windows_process_command {
+    use super::super::process::build_process_command;
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    // Windows packaging rewrites the manifest entry to the cmd.exe launcher;
+    // std refuses to spawn .cmd/.bat targets directly, so the wrapper must
+    // engage for those extensions and only for those extensions.
+    #[test]
+    fn cmd_launcher_entries_spawn_through_cmd_exe() {
+        let command = build_process_command(Path::new("bin/plugin.cmd"));
+        assert_eq!(command.as_std().get_program(), "cmd");
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            [OsString::from("/C"), OsString::from("bin/plugin.cmd")]
+        );
+    }
+
+    // resolve_process_runtime_entry canonicalizes the entry, so Windows hands
+    // us a verbatim (\\?\-prefixed) path. cmd.exe cannot resolve verbatim
+    // targets, so the wrapper must strip the prefix before spawning.
+    #[test]
+    fn verbatim_canonicalized_launcher_targets_spawn_as_plain_paths() {
+        let command = build_process_command(Path::new(r"\\?\C:\plugins\demo\bin\plugin.cmd"));
+        assert_eq!(command.as_std().get_program(), "cmd");
+        assert_eq!(
+            command.as_std().get_args().collect::<Vec<_>>(),
+            [
+                OsString::from("/C"),
+                OsString::from(r"C:\plugins\demo\bin\plugin.cmd")
+            ]
+        );
+    }
+
+    #[test]
+    fn bat_launcher_entries_spawn_through_cmd_exe() {
+        let command = build_process_command(Path::new("bin\\plugin.bat"));
+        assert_eq!(command.as_std().get_program(), "cmd");
+    }
+
+    #[test]
+    fn binary_and_shell_entries_spawn_directly() {
+        for entry in ["bin/plugin.exe", "bin/plugin", "bin/plugin.cmdx"] {
+            let command = build_process_command(Path::new(entry));
+            assert_eq!(
+                command.as_std().get_program(),
+                Path::new(entry),
+                "entry {entry} must not route through cmd.exe"
+            );
+        }
+    }
+}

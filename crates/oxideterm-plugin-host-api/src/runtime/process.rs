@@ -12,6 +12,40 @@ const PROCESS_OUTPUT_QUEUE_CAPACITY: usize = 32;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
+/// Builds the spawn command for a resolved runtime entry.
+///
+/// Windows packaging points the manifest entry at a `cmd.exe` launcher
+/// (`plugin.cmd`) so the plugin can locate its platform binary; `std` refuses
+/// to spawn `.bat`/`.cmd` targets directly since the CVE-2024-24576 hardening,
+/// so those entries must go through `cmd.exe /C`. Every later protocol exchange
+/// happens over stdin, so no plugin-controlled argument ever reaches the
+/// command line and the wrapper adds no argument-injection surface.
+pub(super) fn build_process_command(executable: &Path) -> tokio::process::Command {
+    #[cfg(windows)]
+    {
+        let launches_through_cmd = executable
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
+            });
+        if launches_through_cmd {
+            // resolve_process_runtime_entry canonicalizes the entry, which
+            // yields a verbatim (\\?\-prefixed) path on Windows. cmd.exe cannot
+            // resolve verbatim paths as a command target, so the launcher must
+            // receive the plain drive-letter form.
+            let verbatim_target = executable.to_string_lossy();
+            let target = verbatim_target
+                .strip_prefix(r"\\?\")
+                .unwrap_or(&verbatim_target);
+            let mut command = tokio::process::Command::new("cmd");
+            command.arg("/C").arg(target);
+            return command;
+        }
+    }
+    tokio::process::Command::new(executable)
+}
+
 pub struct NativeProcessPluginRuntime {
     plugin_dir: PathBuf,
     entry: String,
@@ -101,7 +135,7 @@ impl NativeProcessPluginRuntime {
             // Process plugins communicate over host-owned stdio. Do not inherit
             // workspace stdio, because plugin logs/results must be captured and
             // classified by the runtime bridge instead of leaking to the app.
-            let mut command = tokio::process::Command::new(executable);
+            let mut command = build_process_command(&executable);
             command
                 .current_dir(&self.plugin_dir)
                 .stdin(Stdio::piped())
