@@ -1,18 +1,21 @@
-use crate::{bridge::*, PathCompletionState};
+use crate::{PathCompletionState, bridge::*};
 use gpui::prelude::*;
-use gpui::{self, *};
+use gpui::{
+    self, AnchoredPositionMode, AnyElement, AnyView, App, ClipboardItem, Context, Corner,
+    CursorStyle, ElementId, Entity, EventEmitter, IntoElement, KeyDownEvent, ListAlignment,
+    ListState, MouseButton, MouseDownEvent, MouseMoveEvent, ObjectFit, ParentElement,
+    PathPromptOptions, Pixels, Point, Render, Rgba, ScrollEvent, ScrollHandle, SharedString,
+    Styled, StyledImage, Subscription, Task, Timer, UniformListScrollHandle, Window, anchored,
+    deferred, div, px, relative, rgb, rgba, svg,
+};
 use oxideterm_editor_core::utf16::replace_utf16;
 use oxideterm_gpui_editor::{EditorContextMenuLabels, TextEditorView};
+#[cfg(test)]
+use oxideterm_gpui_markdown::MarkdownDocument;
 use oxideterm_gpui_markdown::MarkdownPreviewCache;
 use oxideterm_gpui_markdown::{MarkdownOptions, MarkdownVirtualListScrollHandle, highlight};
 use oxideterm_gpui_ui::{
-    breadcrumb_scroll::scroll_breadcrumb_by_wheel,
-    confirm::{
-        ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView,
-        confirm_dialog_with_focus_motion,
-    },
-    icons::LucideIcon,
-    scroll::vertical_scrollbar_layer as selectable_vertical_scrollbar_layer,
+    breadcrumb_scroll::scroll_breadcrumb_by_wheel, confirm::ConfirmDialogAction, icons::LucideIcon,
     virtual_list::*,
 };
 use oxideterm_gpui_ui::{
@@ -23,10 +26,14 @@ use oxideterm_gpui_ui::{
         staged_dialog_overlay, staged_overlay_root, staged_overlay_scrim,
     },
     scroll::ScrollableElement,
-    surface::{color_for_background, color_with_background_scaled_alpha},
+    surface::{
+        MaterialRole, color_for_background, color_with_background_scaled_alpha, material_surface,
+    },
     text_input::TextInputView,
 };
+#[cfg(test)]
 use oxideterm_i18n::I18n;
+use oxideterm_i18n::Locale;
 use oxideterm_local_files::{
     BOOKMARKS_FILENAME as FILE_MANAGER_BOOKMARKS_FILENAME, LocalArchiveEntry, LocalArchiveInfo,
     LocalBookmark, LocalChecksumResult, LocalClipboardMode, LocalDrive, LocalFileEntry,
@@ -35,7 +42,8 @@ use oxideterm_local_files::{
 };
 use oxideterm_local_files::{
     PathCompletionCandidate, append_local_preview_chunk, local_file_audit_context,
-    local_file_properties, local_path_completion_request, open_path_external, reveal_path_external,
+    local_file_operation, local_file_properties, local_path_completion_request, open_path_external,
+    reveal_path_external,
 };
 use oxideterm_preview::{
     AudioPreviewBackend, AudioPreviewCommand, AudioPreviewState, RodioAudioPreviewBackend,
@@ -51,15 +59,11 @@ use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
     collections::{HashSet, hash_map::DefaultHasher},
-    fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::{Duration, Instant, SystemTime},
+    sync::Arc,
+    time::Duration,
 };
 
 mod actions;
@@ -101,7 +105,6 @@ const FILE_MANAGER_SIZE_COL: f32 = 80.0;
 const FILE_MANAGER_MODIFIED_COL: f32 = 96.0;
 const FILE_MANAGER_CONTEXT_MENU_WIDTH: f32 = 180.0; // Tauri min-w-[180px].
 const FILE_MANAGER_CONTEXT_MENU_MAX_HEIGHT: f32 = 520.0; // Tauri max-h-[80vh], clamped per viewport.
-const FILE_MANAGER_CONTEXT_MENU_PADDING: f32 = 4.0;
 const FILE_MANAGER_CONTEXT_MENU_ITEM_HEIGHT: f32 = 30.0;
 const FILE_MANAGER_DIALOG_WIDTH_SM: f32 = 384.0;
 const FILE_MANAGER_QUICKLOOK_WIDTH: f32 = 1000.0; // Tauri QuickLook width: min(90vw, 1000px).
@@ -501,7 +504,7 @@ impl FileManagerState {
         if let Err(error) = self.preview_audio.command(AudioPreviewCommand::Stop) {
             cx.emit(FileManagerWorkspaceEvent::Error(error));
         }
-        self.preview_video_surface.detach();
+        (self.preview_video_surface.detach)();
         if delay.is_zero() {
             self.finish_rich_dialog_exit(generation, cx);
             return true;
@@ -985,11 +988,7 @@ impl FileManagerState {
             operation_rx: Some(operation_rx),
             ..Self::default()
         };
-        if let Ok(bytes) = std::fs::read(&state.bookmarks_path)
-            && let Ok(bookmarks) = serde_json::from_slice::<Vec<LocalBookmark>>(&bytes)
-        {
-            state.bookmarks = bookmarks;
-        }
+        state.bookmarks = oxideterm_local_files::load_local_bookmarks(&state.bookmarks_path);
         state.schedule_operation_delivery(cx);
         state
     }
@@ -1374,6 +1373,16 @@ impl FileManagerInput {
 }
 
 #[cfg(test)]
+struct TestFileManagerRoot(Entity<FileManagerView>);
+
+#[cfg(test)]
+impl Render for TestFileManagerRoot {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        self.0.clone()
+    }
+}
+
+#[cfg(test)]
 fn test_views(
     path: &Path,
     dispatch: impl Fn(FileManagerRequest, &mut App) + 'static,
@@ -1386,6 +1395,7 @@ fn test_views(
         background: false,
         modal_background: false,
         chrome_divider: rgb(tokens.ui.border),
+        ui_font_family: "monospace".into(),
         mono_font_family: "monospace".into(),
         mono_font_size: 13.0,
         editor: FileManagerEditorFonts {

@@ -159,32 +159,9 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn knowledge_generate_embeddings(
-        &mut self,
-        collection_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        use oxideterm_gpui_settings_view::knowledge_page::EmbeddingJob;
-        let job = EmbeddingJob::prepare(self.settings_store.settings(), &self.i18n);
-        self.knowledge_page(cx).update(cx, |entity, cx| match job {
-            Ok(job) => {
-                entity.start_knowledge_embeddings(
-                    collection_id,
-                    job.provider,
-                    job.model,
-                    job.requires_api_key,
-                    job.missing_key_error,
-                    job.retrieval_error,
-                    job.partial_failure,
-                    cx,
-                );
-            }
-            Err(message) => {
-                entity.expand_knowledge_embedding_config();
-                entity.set_knowledge_error(message);
-                cx.notify();
-            }
-        });
+    pub(in crate::workspace) fn knowledge_generate_embeddings(&mut self, collection_id: String, cx: &mut Context<Self>) {
+        let job = oxideterm_gpui_ai::knowledge::page::EmbeddingJob::prepare(self.settings_store.settings(), &self.i18n);
+        self.knowledge_page(cx).update(cx, |page, cx| page.request_embeddings(collection_id, job, cx));
     }
 
     pub(in crate::workspace) fn knowledge_open_external(

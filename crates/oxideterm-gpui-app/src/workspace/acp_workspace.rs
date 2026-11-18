@@ -5,7 +5,6 @@ use oxideterm_sftp::TextDiffLineKind;
 
 use super::sidebar::handle_acp_application_tool_call;
 
-pub(in crate::workspace) use acp::{AcpThreadStart, AcpTurnRoute};
 pub(in crate::workspace) type AcpWorkspaceEntity = acp::AcpWorkspaceEntity<SharedTerminalSession>;
 
 pub(in crate::workspace) fn new_acp_workspace(

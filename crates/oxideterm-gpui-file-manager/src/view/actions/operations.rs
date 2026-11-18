@@ -9,11 +9,7 @@ impl FileManagerView {
                 file_manager.path.clone(),
             )
         };
-        let audit = local_file_operation("file_mkdir", &join_local_path(&current_path, &name));
-        let result = validate_local_name(&name)
-            .map(|_| join_local_path(&current_path, &name))
-            .and_then(|path| std::fs::create_dir(&path).map_err(|error| error.to_string()));
-        audit.result(&result);
+        let result = oxideterm_local_files::create_local_folder(&current_path, &name);
         match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
@@ -43,33 +39,7 @@ impl FileManagerView {
                 file_manager.path.clone(),
             )
         };
-        let audit = local_file_operation(
-            "file_save",
-            &format!(
-                "path={}; mode=create_new",
-                join_local_path(&current_path, &name)
-            ),
-        );
-        let result = validate_local_name(&name)
-            .map(|_| join_local_path(&current_path, &name))
-            .and_then(|path| {
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            });
-        audit.finish(
-            if result.is_ok() {
-                oxideterm_audit::AuditOutcome::Succeeded
-            } else {
-                oxideterm_audit::AuditOutcome::Failed
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            result.is_ok().then_some(0),
-        );
+        let result = oxideterm_local_files::create_local_file(&current_path, &name);
         match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
@@ -103,12 +73,7 @@ impl FileManagerView {
                 file_manager.path.clone(),
             )
         };
-        let old_path = join_local_path(&current_path, &old_name);
-        let new_path = join_local_path(&current_path, &new_name);
-        let audit = local_file_operation("file_rename", &format!("{old_path} → {new_path}"));
-        let result = validate_local_name(&new_name)
-            .and_then(|_| std::fs::rename(&old_path, &new_path).map_err(|error| error.to_string()));
-        audit.result(&result);
+        let result = oxideterm_local_files::rename_local_entry(&current_path, &old_name, &new_name);
         match result {
             Ok(()) => {
                 self.close_file_manager_dialog(cx);
@@ -136,60 +101,7 @@ impl FileManagerView {
         cx: &mut Context<Self>,
     ) {
         let current_path = self.file_manager.read(cx).path.clone();
-        let context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        let mut audit = oxideterm_audit::AuditOperation::in_context(
-            context.as_ref(),
-            oxideterm_audit::AuditCategory::File,
-            "file_delete_recursive",
-            Some(&format!("path={current_path}; requested={}", names.len())),
-        );
-        let child_context = context.map(|mut context| {
-            context.parent_id = audit.id().map(str::to_owned);
-            context
-        });
-        let mut error = None;
-        let mut removed = 0usize;
-        let mut failed_path = None;
-        for name in &names {
-            let path = join_local_path(&current_path, name);
-            let path_ref = std::path::Path::new(&path);
-            let is_directory = path_ref.is_dir();
-            let child = oxideterm_audit::AuditOperation::in_context(
-                child_context.as_ref(),
-                oxideterm_audit::AuditCategory::File,
-                if is_directory {
-                    "file_delete_recursive"
-                } else {
-                    "file_delete"
-                },
-                Some(&path),
-            );
-            let result = if is_directory {
-                std::fs::remove_dir_all(path_ref)
-            } else {
-                std::fs::remove_file(path_ref)
-            };
-            child.result(&result);
-            if let Err(err) = result {
-                error = Some(err.to_string());
-                failed_path = Some(path);
-                break;
-            }
-            removed += 1;
-        }
-        audit.summary(&format!("path={current_path}; requested={}; removed={removed}; unprocessed={}; failed_path={}; nested_items=unavailable:remove_dir_all", names.len(), names.len().saturating_sub(removed + usize::from(error.is_some())), failed_path.as_deref().unwrap_or("none")));
-        audit.finish(
-            if error.is_none() {
-                oxideterm_audit::AuditOutcome::Succeeded
-            } else if removed > 0 {
-                oxideterm_audit::AuditOutcome::Partial
-            } else {
-                oxideterm_audit::AuditOutcome::Failed
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            None,
-        );
+        let error = oxideterm_local_files::delete_local_entries(&current_path, &names);
         match error {
             Some(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),

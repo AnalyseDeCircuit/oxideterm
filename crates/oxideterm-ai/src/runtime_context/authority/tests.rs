@@ -12,10 +12,7 @@ fn tool_sessions_are_isolated_and_same_run_replacement_revokes_old_authority() {
     assert!(!entity.is_active_tool_session(7, &first));
     assert!(entity.is_active_tool_session(7, &replacement));
     assert!(entity.is_active_tool_session(8, &second));
-    entity.finish_tool_session(
-        7,
-        crate::RuntimeRevocationReason::ToolSessionCancelled,
-    );
+    entity.finish_tool_session(7, crate::RuntimeRevocationReason::ToolSessionCancelled);
     assert!(!entity.is_active_tool_session(7, &replacement));
     assert!(entity.is_active_tool_session(8, &second));
 }
@@ -386,10 +383,7 @@ fn closed_app_surface_handle_cannot_focus_another_tab() {
         .expect("remaining surface handle issues");
     assert_eq!(
         entity
-            .validate_app_surface_handle(
-                &tool_session_id,
-                Some(second_handle.handle_id.as_str()),
-            )
+            .validate_app_surface_handle(&tool_session_id, Some(second_handle.handle_id.as_str()),)
             .expect("remaining surface stays valid"),
         second_tab
     );

@@ -1,13 +1,26 @@
 use std::hash::Hash;
 
+mod acp_turn;
+pub use acp_turn::AiAcpChatLaunch;
+mod provider;
+pub use provider::AiProviderTurn;
+
 use gpui::{App, Entity};
-use oxideterm_ai::AiRuntimeAuthority;
+use oxideterm_ai::{AiRuntimeAuthority, stream_state::AiStoppedAssistantTurn};
 
 use crate::{
     acp::AcpWorkspaceEntity,
     background::AiBackgroundTaskEntity,
-    state::{AiModelSelectorScope, AiStoppedAssistantTurn, AiWorkspaceEntity},
+    state::{AiModelSelectorScope, AiWorkspaceEntity},
 };
+
+pub enum AiChatCompletion {
+    None,
+    NextTurn(crate::state::AiPendingChatStream),
+    AutoCompact,
+    AgentFailed,
+    Error(String),
+}
 
 /// Coordinates feature-owned conversations without access to workspace tabs or panes.
 pub struct AiConversationController<Node: 'static, Terminal: Clone + 'static> {
@@ -17,14 +30,95 @@ pub struct AiConversationController<Node: 'static, Terminal: Clone + 'static> {
     background: Entity<AiBackgroundTaskEntity>,
 }
 
-impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static> AiConversationController<Node, Terminal> {
+impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
+    AiConversationController<Node, Terminal>
+{
     pub fn new(
         state: Entity<AiWorkspaceEntity>,
         authority: Entity<AiRuntimeAuthority<Node>>,
         acp: Entity<AcpWorkspaceEntity<Terminal>>,
         background: Entity<AiBackgroundTaskEntity>,
     ) -> Self {
-        Self { state, authority, acp, background }
+        Self {
+            state,
+            authority,
+            acp,
+            background,
+        }
+    }
+
+    pub fn apply_stream_event(
+        &self,
+        generation: u64,
+        conversation_id: &str,
+        message_id: &str,
+        event: oxideterm_ai::AiStreamEvent,
+        safe_error: Option<String>,
+        chat_enabled: bool,
+        diagnostic_base: impl Fn(serde_json::Value) -> serde_json::Value,
+        cx: &mut App,
+    ) -> AiChatCompletion {
+        use crate::state::AiStreamApplyOutcome;
+        let child = self.state.read(cx).is_agent_message(message_id);
+        let outcome = self.state.update(cx, |ai, _| {
+            ai.apply_stream_event_state(generation, conversation_id, message_id, event, safe_error)
+        });
+        if matches!(
+            outcome,
+            AiStreamApplyOutcome::Applied | AiStreamApplyOutcome::Stale
+        ) {
+            return AiChatCompletion::None;
+        }
+        self.authority.update(cx, |authority, _| {
+            authority.finish_tool_session(
+                generation,
+                oxideterm_ai::RuntimeRevocationReason::ToolSessionFinished,
+            );
+        });
+        self.state.update(cx, |ai, cx| {
+            cx.notify();
+            if child {
+                ai.persist_agent_records();
+                return match outcome {
+                    AiStreamApplyOutcome::Failed(_) => AiChatCompletion::AgentFailed,
+                    _ => AiChatCompletion::None,
+                };
+            }
+            match outcome {
+                AiStreamApplyOutcome::Completed => {
+                    ai.persist_ai_assistant_turn_end(conversation_id, message_id, "complete");
+                    if let Some(pending) =
+                        ai.prepare_next_queued_turn(conversation_id, chat_enabled)
+                    {
+                        AiChatCompletion::NextTurn(pending)
+                    } else {
+                        AiChatCompletion::AutoCompact
+                    }
+                }
+                AiStreamApplyOutcome::Failed(error) => {
+                    ai.persist_ai_assistant_turn_end(conversation_id, message_id, "error");
+                    let now = crate::state::ai_now_ms();
+                    ai.persist_diagnostic_events(
+                        conversation_id.to_owned(),
+                        vec![oxideterm_ai::stream_state::ai_diagnostic_event(
+                            format!("diagnostic-error-{message_id}-{now}"),
+                            conversation_id,
+                            "error",
+                            Some(message_id.to_owned()),
+                            None,
+                            now,
+                            diagnostic_base(
+                                serde_json::json!({"requestKind": "chat", "message": &error}),
+                            ),
+                        )],
+                    );
+                    AiChatCompletion::Error(error)
+                }
+                AiStreamApplyOutcome::Applied | AiStreamApplyOutcome::Stale => {
+                    unreachable!("handled before releasing authority")
+                }
+            }
+        })
     }
 
     pub fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
@@ -73,7 +167,8 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static> AiConversatio
     }
 
     pub fn clear_ai_conversations(&mut self, cx: &mut App) {
-        let mut ids: std::collections::HashSet<String> = match self.state
+        let mut ids: std::collections::HashSet<String> = match self
+            .state
             .read(cx)
             .history
             .store
@@ -123,7 +218,8 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static> AiConversatio
     }
 
     pub fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {
-        let cancelled_generations = self.state
+        let cancelled_generations = self
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -131,7 +227,8 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static> AiConversatio
             .map(|id| self.state.read(cx).conversation_stream_generations(id))
             .unwrap_or_default();
         let had_active_generation = !cancelled_generations.is_empty();
-        let active_conversation_id = self.state
+        let active_conversation_id = self
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -203,12 +300,12 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static> AiConversatio
             }
         }
     }
-
 }
 
 impl AiWorkspaceEntity {
     pub fn dismiss_model_selector(&mut self) {
-        let restore_prompt = self.model_selector_scope() == Some(AiModelSelectorScope::TerminalInline)
+        let restore_prompt = self.model_selector_scope()
+            == Some(AiModelSelectorScope::TerminalInline)
             && self.terminal_inline_panel().open;
         self.close_model_selector();
         if restore_prompt {

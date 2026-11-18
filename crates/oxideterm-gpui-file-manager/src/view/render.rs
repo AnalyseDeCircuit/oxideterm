@@ -615,7 +615,7 @@ impl FileManagerView {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target = (input);
+        let target = input;
         let control = self
             .workspace_text_input(
                 target,
@@ -788,7 +788,7 @@ impl FileManagerView {
                 file_manager.filter.clone(),
             )
         };
-        let target = (input);
+        let target = input;
         self.sidebar_search_row(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
             .child(
                 self.text_input_with_workspace_ime(
@@ -1198,6 +1198,7 @@ impl FileManagerView {
 mod tests {
     use super::*;
     use gpui::TestAppContext;
+    use std::fs;
 
     #[gpui::test]
     fn dragging_favorites_reorders_without_navigating_and_click_still_opens(
@@ -1207,7 +1208,7 @@ mod tests {
         for id in ["a", "b", "c"] {
             fs::create_dir(dir.path().join(id)).unwrap();
         }
-        let (body, cx) = cx.add_window_view(|_, cx| {
+        let (root, cx) = cx.add_window_view(|_, cx| {
             let views = test_views(&dir.path().join("settings.json"), |_, _| {}, cx);
             views.body.update(cx, |view, cx| {
                 view.set_file_manager_path(dir.path().to_string_lossy().into_owned(), cx)
@@ -1224,8 +1225,9 @@ mod tests {
                     .collect();
                 cx.notify();
             });
-            views.body
+            TestFileManagerRoot(views.body)
         });
+        let body = root.read_with(cx, |root, _| root.0.clone());
         cx.update(|window, cx| window.draw(cx).clear(cx));
         let initial = body.read_with(cx, |view, cx| view.file_manager.read(cx).path.clone());
         let row_a = cx.debug_bounds("file-manager-bookmark-a").unwrap();

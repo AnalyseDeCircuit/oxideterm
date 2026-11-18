@@ -20,5 +20,8 @@ zip.workspace = true
 oxideterm-audit = { path = "../oxideterm-audit" }
 zeroize.workspace = true
 
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+serde_json.workspace = true
+
 [dev-dependencies]
 tempfile = "3.23"

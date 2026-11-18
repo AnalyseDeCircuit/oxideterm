@@ -859,7 +859,7 @@ impl FileManagerView {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target = (FileManagerInput::DialogValue);
+        let target = FileManagerInput::DialogValue;
         let (dialog, dialog_value, focused) = {
             let file_manager = self.file_manager.read(cx);
             (
@@ -916,7 +916,7 @@ impl FileManagerView {
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target = (FileManagerInput::DialogValue);
+        let target = FileManagerInput::DialogValue;
         let (dialog_value, focused) = {
             let file_manager = self.file_manager.read(cx);
             (

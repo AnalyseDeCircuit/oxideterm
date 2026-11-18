@@ -298,47 +298,6 @@ impl WorkspaceApp {
         std::hash::Hasher::finish(&hasher)
     }
 
-    pub(in crate::workspace) fn record_ai_prepared_prompt_usage(
-        &mut self,
-        conversation_id: &str,
-        config: &AiChatStreamConfig,
-        history: &[AiChatMessage],
-        max_tokens: usize,
-        cx: &mut Context<Self>,
-    ) {
-        let reserved_output = config
-            .max_response_tokens
-            .and_then(|tokens| usize::try_from(tokens).ok())
-            .filter(|tokens| *tokens > 0)
-            .unwrap_or_else(|| ai_response_reserve(max_tokens));
-        let breakdown = ai_context_token_breakdown_from_prompt(
-            ai_prompt_token_breakdown(
-                history,
-                &config.tools,
-                &config.provider_type,
-                reserved_output,
-            ),
-            max_tokens,
-        );
-        let usage = AiPreparedPromptUsage {
-            conversation_id: conversation_id.to_string(),
-            last_user_message_id: history
-                .iter()
-                .rev()
-                .find(|message| message.role == AiChatRole::User)
-                .map(|message| message.id.clone()),
-            provider_id: config
-                .provider_id
-                .clone()
-                .unwrap_or_else(|| config.provider_type.clone()),
-            model: config.model.clone(),
-            breakdown,
-        };
-        self.ai
-            .state
-            .update(cx, |ai, _cx| ai.set_prepared_prompt_usage(usage));
-    }
-
     pub(in crate::workspace) fn ai_chat_autocomplete_items(
         &self,
         cx: &App,

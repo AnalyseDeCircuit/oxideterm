@@ -154,6 +154,13 @@ impl WorkspaceApp {
                     });
                 }
             }),
+            embedding_job: Rc::new({
+                let owner = owner.clone();
+                move |cx| {
+                    let app = owner.upgrade()?.read(cx);
+                    Some(oxideterm_gpui_ai::knowledge::page::EmbeddingJob::prepare(app.settings_store.settings(), &app.i18n))
+                }
+            }),
             request: Rc::new(move |request, window, cx| {
                 let owner = owner.clone();
                 if let Some(window) = window {
@@ -169,21 +176,7 @@ impl WorkspaceApp {
                             KnowledgeRequest::Import(id) => {
                                 app.knowledge_import_files(id, window, cx)
                             }
-                            KnowledgeRequest::Embed(id) => {
-                                app.knowledge_generate_embeddings(id, cx)
-                            }
-                            KnowledgeRequest::Reindex(id) => app.knowledge_reindex(id, cx),
-                            KnowledgeRequest::DeleteDocument(id, title) => {
-                                app.knowledge_page(cx).update(cx, |ai, _| {
-                                    ai.request_delete_knowledge_document(id, title)
-                                });
-                                app.reset_standard_confirm_focus();
-                                cx.notify();
-                            }
-                            KnowledgeRequest::DeleteNotebook(id, title) => {
-                                app.knowledge_page(cx).update(cx, |ai, _| {
-                                    ai.request_delete_knowledge_collection(id, title)
-                                });
+                            KnowledgeRequest::FocusDeleteConfirmation => {
                                 app.reset_standard_confirm_focus();
                                 cx.notify();
                             }
@@ -372,14 +365,11 @@ impl WorkspaceApp {
         {
             return false;
         }
-        let editor = self.knowledge_state().read(cx).editor.clone();
-        if !editor.is_some_and(|editor| editor.read(cx).is_dirty()) {
+        if !self.knowledge_state().update(cx, |knowledge, cx| {
+            knowledge.request_close_if_dirty(tab_id, window.window_handle(), cx)
+        }) {
             return false;
         }
-        self.knowledge_state().update(cx, |knowledge, cx| {
-            knowledge.request_close(tab_id, window.window_handle());
-            cx.notify();
-        });
         if self.tab_host.read(cx).is_detached(knowledge_tab) {
             self.tab_host
                 .update(cx, |host, _| host.focus_content_page(knowledge_tab));
@@ -392,14 +382,9 @@ impl WorkspaceApp {
     }
 
     pub(crate) fn guard_dirty_knowledge_app_quit(&mut self, cx: &mut Context<Self>) -> bool {
-        let editor = self.knowledge_state().read(cx).editor.clone();
-        if !editor.is_some_and(|editor| editor.read(cx).is_dirty()) {
+        if !self.knowledge_state().update(cx, |knowledge, cx| knowledge.request_quit_if_dirty(cx)) {
             return false;
         }
-        self.knowledge_state().update(cx, |knowledge, cx| {
-            knowledge.request_app_quit();
-            cx.notify();
-        });
         let knowledge_tab_id = self.knowledge_state().read(cx).tab_id();
         if let Some(knowledge_tab_id) = knowledge_tab_id
             && !self.focus_detached_tab_window(knowledge_tab_id, cx)

@@ -1249,3 +1249,62 @@ mod settings_pagination_tests {
         );
     }
 }
+
+pub struct EmbeddingJob {
+    pub provider: oxideterm_ai::AiProviderView,
+    pub model: String,
+    pub requires_api_key: bool,
+    pub missing_key_error: String,
+    pub retrieval_error: String,
+    pub partial_failure: String,
+}
+
+impl EmbeddingJob {
+    pub fn prepare(settings: &oxideterm_settings::PersistedSettings, i18n: &oxideterm_i18n::I18n) -> Result<Self, String> {
+        let resolved = oxideterm_ai::resolve_ai_embedding_provider(
+            &settings.ai.providers,
+            settings.ai.active_provider_id.as_deref(),
+            settings.ai.embedding_config.as_ref(),
+            None,
+        );
+        let provider = resolved
+            .provider
+            .ok_or_else(|| i18n.t("settings_view.knowledge.error_no_embedding_support"))?;
+        match resolved.reason {
+            oxideterm_ai::AiEmbeddingProviderReason::NoProvider
+            | oxideterm_ai::AiEmbeddingProviderReason::UnsupportedProvider => {
+                return Err(i18n.t("settings_view.knowledge.error_no_embedding_support"));
+            }
+            oxideterm_ai::AiEmbeddingProviderReason::MissingModel => {
+                return Err(i18n.t("settings_view.knowledge.error_no_embedding_model"));
+            }
+            oxideterm_ai::AiEmbeddingProviderReason::Ready | oxideterm_ai::AiEmbeddingProviderReason::MissingApiKey => {}
+        }
+        Ok(Self {
+            requires_api_key: oxideterm_ai::ai_embedding_requires_api_key(&provider),
+            provider,
+            model: resolved.model,
+            missing_key_error: i18n.t("settings_view.knowledge.error_no_embedding_api_key"),
+            retrieval_error: i18n.t("settings_view.knowledge.error_generate_embeddings"),
+            partial_failure: i18n.t("settings_view.knowledge.embedding_partial_failure"),
+        })
+    }
+}
+
+impl KnowledgePage {
+    pub fn request_embeddings(&mut self, collection_id: String, job: Result<EmbeddingJob, String>, cx: &mut Context<Self>) {
+        match job {
+            Ok(job) => {
+                self.start_knowledge_embeddings(
+                    collection_id, job.provider, job.model, job.requires_api_key, job.missing_key_error,
+                    job.retrieval_error, job.partial_failure, cx,
+                );
+            }
+            Err(message) => {
+                self.expand_knowledge_embedding_config();
+                self.set_knowledge_error(message);
+                cx.notify();
+            }
+        }
+    }
+}

@@ -59,26 +59,3 @@ pub fn append_local_preview_text(
         lines.extend(parts);
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preview_chunks_keep_unicode_and_unterminated_lines_across_reads() {
-        let mut lines = Vec::new();
-        let mut text = String::new();
-        let mut carry = Vec::new();
-        let bytes = "one\nstréam\nlast".as_bytes();
-        append_local_preview_chunk(
-            &mut lines,
-            &mut text,
-            &mut carry,
-            bytes[..8].to_vec(),
-            false,
-        );
-        assert_eq!(lines, ["one"]);
-        append_local_preview_chunk(&mut lines, &mut text, &mut carry, bytes[8..].to_vec(), true);
-        assert_eq!(lines, ["one", "stréam", "last"]);
-    }
-}

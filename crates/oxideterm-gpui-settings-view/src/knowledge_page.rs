@@ -20,7 +20,7 @@ use std::{ops::Deref, rc::Rc};
 
 pub mod dialog;
 mod section;
-pub use section::{EmbeddingJob, KnowledgeSection, selected_collection};
+pub use section::{KnowledgeSection, selected_collection};
 
 const KNOWLEDGE_ACTION_BUTTON_HEIGHT: f32 = 28.0; // Tauri size="sm" outline action buttons.
 const KNOWLEDGE_DOCUMENT_HEADER_INFO_MIN_WIDTH: f32 = 160.0; // Keep collection identity readable before action chips wrap.

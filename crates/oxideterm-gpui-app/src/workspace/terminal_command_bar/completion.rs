@@ -5,42 +5,25 @@ use super::actions::classify_command_risk;
 use super::*;
 use oxideterm_ai::infer_ai_cwd;
 use oxideterm_sftp::{FileType as RemotePathFileType, ListFilter, SortOrder};
+use oxideterm_terminal::TerminalShellParseResult;
+use oxideterm_terminal::command_completion::{
+    completion_provider_scope, infer_terminal_ssh_identity_from_buffer, terminal_cwd_looks_remote,
+    clear_terminal_path_request_pending, get_cached_terminal_path_entries, mark_terminal_path_request_pending,
+    normalize_terminal_path_token, put_cached_terminal_path_entries, should_run_terminal_path_provider,
+    terminal_path_cache_key, terminal_path_entries_to_suggestions, TerminalFigArgType, TerminalPathEntry,
+    put_terminal_history_entry, terminal_history_suggestions, TerminalHistoryEntry, TerminalHistorySource,
+};
 
-mod common;
 mod engine;
-mod fig_provider;
-mod fig_specs;
 mod history_provider;
 mod path_provider;
-mod quick_command_provider;
 mod render;
 mod types;
 
-pub(self) use common::{
-    normalize_terminal_command_suggestions, put_terminal_history_entry,
-    terminal_command_risk_score_penalty,
-};
-pub(self) use fig_provider::{active_fig_arg_type, terminal_command_fig_suggestions};
-pub(self) use fig_specs::{
-    normalize_terminal_path_token, should_run_terminal_path_provider, terminal_command_bar_now_ms,
-};
-pub(self) use oxideterm_terminal::{TerminalShellParseResult, TerminalShellToken};
-pub(self) use oxideterm_terminal::{
-    escape_terminal_path_for_shell, load_local_shell_history_commands,
-    normalize_terminal_autosuggest_command, terminal_autosuggest_fuzzy_score,
-    tokenize_terminal_command_line,
-};
-pub(self) use quick_command_provider::{
-    infer_terminal_ssh_identity_from_buffer, terminal_cwd_looks_remote,
-};
-pub(self) use types::{
-    TerminalCommandContext, TerminalCommandContextType, TerminalFigArgType, TerminalFigOptionSpec,
-    TerminalFigSpec, TerminalFigSubcommandSpec, TerminalHistoryEntry, TerminalHistorySource,
-    TerminalPathCacheEntry, TerminalPathCompletionCache, TerminalPathEntry, TerminalPathParts,
-};
+use types::{TerminalCommandContext, TerminalCommandContextType};
 
-// Preserve the settings UI path while keeping the implementation module private.
-pub(in crate::workspace) use fig_specs::{
+// Settings reads the same registry as completion.
+pub(in crate::workspace) use oxideterm_terminal::command_completion::{
     built_in_terminal_fig_specs, normalize_terminal_command_specs_json,
     terminal_command_specs_editor_initial_json, terminal_command_specs_example_json,
     terminal_command_specs_path, user_terminal_fig_specs_count,

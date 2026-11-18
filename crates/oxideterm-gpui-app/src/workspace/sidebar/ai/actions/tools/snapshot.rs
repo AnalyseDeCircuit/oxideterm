@@ -86,63 +86,23 @@ impl WorkspaceApp {
         }
 
         for (node_id, node) in &self.ssh_nodes {
-            let terminal_id = node.terminal_ids.first().copied();
             let resolved_connection = self.node_router.resolve_connection_now(node_id).ok();
             let sftp_session_id = resolved_connection
                 .as_ref()
                 .and_then(|resolved| resolved.sftp_session_id.clone());
-            if node.saved_connection_id.is_some() || node.readiness == NodeReadiness::Ready {
-                let runtime_status = match node.readiness {
-                    NodeReadiness::Ready => "connected",
-                    NodeReadiness::Connecting => "connecting",
-                    NodeReadiness::Error => "error",
-                    NodeReadiness::Disconnected => "disconnected",
-                };
-                let mut refs = BTreeMap::new();
-                refs.insert("nodeId".to_string(), node_id.0.clone());
-                if let Some(saved_connection_id) = node.saved_connection_id.as_ref() {
-                    refs.insert("connectionId".to_string(), saved_connection_id.clone());
+            let readiness = match node.readiness {
+                NodeReadiness::Ready => oxideterm_workspace::ActiveSessionReadiness::Ready,
+                NodeReadiness::Connecting => oxideterm_workspace::ActiveSessionReadiness::Connecting,
+                NodeReadiness::Error => oxideterm_workspace::ActiveSessionReadiness::Error,
+                NodeReadiness::Disconnected => oxideterm_workspace::ActiveSessionReadiness::Disconnected,
+            };
+            targets.extend(oxideterm_ai::tool_resources::ai_ssh_node_target(
+                oxideterm_ai::tool_resources::AiSshNodeTargetInput {
+                    node_id: &node_id.0, connection_id: node.saved_connection_id.as_deref(), readiness,
+                    host: &node.endpoint.host, port: node.endpoint.port, username: &node.endpoint.username,
+                    title: &node.title, terminal_ids: &node.terminal_ids, sftp_session_id: sftp_session_id.as_deref(),
                 }
-                if let Some(session_id) = terminal_id {
-                    refs.insert("sessionId".to_string(), session_id.0.to_string());
-                }
-                let mut metadata = serde_json::json!({
-                    "host": node.endpoint.host,
-                    "port": node.endpoint.port,
-                    "username": node.endpoint.username,
-                    "status": runtime_status,
-                    "terminalIds": node.terminal_ids.iter().map(|id| id.0).collect::<Vec<_>>(),
-                    "title": node.title,
-                });
-                if let Some(sftp_session_id) = sftp_session_id.as_ref()
-                    && let Some(object) = metadata.as_object_mut()
-                {
-                    object.insert(
-                        "sftpSessionId".to_string(),
-                        serde_json::json!(sftp_session_id),
-                    );
-                }
-                targets.push(AiOrchestratorTarget {
-                    id: format!("ssh-node:{}", node_id.0),
-                    kind: "ssh-node".to_string(),
-                    label: format!(
-                        "{}@{}:{}",
-                        node.endpoint.username, node.endpoint.host, node.endpoint.port
-                    ),
-                    state: match node.readiness {
-                        NodeReadiness::Ready => "connected",
-                        NodeReadiness::Connecting => "opening",
-                        NodeReadiness::Error => "stale",
-                        NodeReadiness::Disconnected => "unavailable",
-                    }
-                    .to_string(),
-                    capabilities: vec!["node.inspect".to_string(), "state.list".to_string()],
-                    refs,
-                    metadata,
-                    terminal_buffer: None,
-                    terminal_screen: None,
-                });
-            }
+            ));
             if let Some(sftp_session_id) = sftp_session_id {
                 targets.push(ai_sftp_target_for_node(node_id, node, sftp_session_id));
             }
@@ -864,16 +824,6 @@ impl WorkspaceApp {
             )
     }
 
-    pub(in crate::workspace) fn record_ai_loaded_skill(
-        &mut self,
-        conversation_id: &str,
-        skill_id: &str,
-        content_hash: &str,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai.state.update(cx, |ai, _| ai.record_ai_loaded_skill(conversation_id, skill_id, content_hash));
-    }
-
     /// Executes only stable, non-live reads on the UI-owned broker. Live file
     /// and SFTP operations remain unavailable until their real owners expose
     /// capability adapters.
@@ -973,80 +923,12 @@ impl WorkspaceApp {
     }
 
     fn execute_ai_get_state(
-        &self,
-        tool_session_id: &ToolSessionId,
-        args: &serde_json::Value,
-        cx: &mut Context<Self>,
+        &self, tool_session_id: &ToolSessionId, args: &serde_json::Value, cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        if args.get("scope").and_then(serde_json::Value::as_str) != Some("target") {
-            return snapshot.get_state(args);
-        }
-        if args.get("handle_id").is_some() {
-            return match self.ai.authority.read(cx).validate_state_handle(
-                tool_session_id,
-                args.get("handle_id").and_then(serde_json::Value::as_str),
-            ) {
-                Ok(handle) => snapshot.ok(
-                    "Read current target state.",
-                    serde_json::to_string_pretty(&handle).unwrap_or_default(),
-                    serde_json::to_value(handle).unwrap_or(serde_json::Value::Null),
-                    "read",
-                ),
-                Err(error) => snapshot.fail(
-                    "Runtime target is unavailable.",
-                    error.public_code(),
-                    "Rediscover current targets before retrying.",
-                    "read",
-                ),
-            };
-        }
-
-        let Some(resource_ref) = args.get("resource_ref").cloned().and_then(|value| {
-            serde_json::from_value::<oxideterm_ai::StableResourceRef>(value).ok()
-        }) else {
-            return snapshot.fail(
-                "Target authority is required.",
-                "runtime_handle_missing",
-                "Provide one current handle or durable resource reference.",
-                "read",
-            );
-        };
-        if resource_ref.kind() == oxideterm_ai::StableResourceKind::SavedConnection
-            && !self
-                .connection_store
-                .connections()
-                .iter()
-                .any(|connection| connection.id == resource_ref.id())
-        {
-            return snapshot.fail(
-                "Saved resource no longer exists.",
-                "resource_removed",
-                "Rediscover saved connections before retrying.",
-                "read",
-            );
-        }
-        let state = snapshot
-            .targets
-            .iter()
-            .find(|target| {
-                ai_stable_resource_ref_for_target(target).as_ref() == Some(&resource_ref)
-            })
-            .and_then(|target| snapshot.model_target_json(target))
-            .unwrap_or_else(|| {
-                serde_json::json!({
-                    "authority": {
-                        "kind": "stable_resource",
-                        "resource_ref": resource_ref,
-                    },
-                    "state": "available",
-                })
-            });
-        snapshot.ok(
-            "Read durable target state.",
-            serde_json::to_string_pretty(&state).unwrap_or_default(),
-            state,
-            "read",
+        oxideterm_ai::tool_resources::ai_target_state(
+            &snapshot, self.ai.authority.read(cx), tool_session_id, args,
+            |id| self.connection_store.get(id).is_some(),
         )
     }
 

@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 
 mod discovery;
 pub use discovery::*;
+mod memory;
+pub use memory::*;
 mod snapshot;
 pub use snapshot::*;
 

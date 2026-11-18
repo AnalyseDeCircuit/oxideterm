@@ -627,11 +627,7 @@ impl KnowledgeWorkspaceView {
                     .selected_collection
                     .clone()
                 {
-                    (self.bindings.request)(
-                        KnowledgeRequest::DeleteNotebook(col.id, col.name),
-                        Some(window),
-                        cx,
-                    );
+                    self.confirm_knowledge_delete(true, col.id, col.name, window, cx);
                 }
             }
             KnowledgeAction::Import => {
@@ -640,13 +636,13 @@ impl KnowledgeWorkspaceView {
                 }
             }
             KnowledgeAction::Embeddings => {
-                if let Some(id) = collection {
-                    (self.bindings.request)(KnowledgeRequest::Embed(id), Some(window), cx);
+                if let Some(id) = collection && let Some(job) = (self.bindings.embedding_job)(cx) {
+                    self.bindings.page.update(cx, |page, cx| page.request_embeddings(id, job, cx));
                 }
             }
             KnowledgeAction::Reindex => {
                 if let Some(id) = collection {
-                    (self.bindings.request)(KnowledgeRequest::Reindex(id), Some(window), cx);
+                    self.bindings.page.update(cx, |page, cx| page.request_knowledge_reindex(id, cx));
                 }
             }
             KnowledgeAction::Settings => {
@@ -662,11 +658,7 @@ impl KnowledgeWorkspaceView {
             KnowledgeAction::CutNote(id) => self.copy_knowledge_note(id, true, cx),
             KnowledgeAction::PasteNote => self.paste_knowledge_note(cx),
             KnowledgeAction::DeleteNote(id, title) => {
-                (self.bindings.request)(
-                    KnowledgeRequest::DeleteDocument(id, title),
-                    Some(window),
-                    cx,
-                );
+                self.confirm_knowledge_delete(false, id, title, window, cx);
             }
             KnowledgeAction::MoveTo(target) => self.save_knowledge_metadata(None, Some(target), cx),
         }

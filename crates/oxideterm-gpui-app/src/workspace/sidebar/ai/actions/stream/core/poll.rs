@@ -8,7 +8,9 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let mut batch = AiChatDeliveryBatch::new(deliveries);
-        while let Some(delivery) = self.ai.state.update(cx, |ai, _| batch.next_host_delivery(ai)) {
+        while let Some(delivery) = self.ai.state.update(cx, |ai, cx| {
+            batch.next_window_delivery(ai, |data| self.ai_diagnostic_base(data), cx)
+        }) {
             match delivery.event {
                 AiStreamDeliveryEvent::ToolImages(_)
                 | AiStreamDeliveryEvent::HistoryBarrier(_)
@@ -650,87 +652,12 @@ impl WorkspaceApp {
                         cx.notify();
                     }
                 }
-                AiStreamDeliveryEvent::Guardrail {
-                    code,
-                    message,
-                    raw_text,
-                } => {
-                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
-                    self.apply_ai_guardrail(
-                        delivery.generation,
-                        &delivery.conversation_id,
-                        &delivery.assistant_id,
-                        &code,
-                        &message,
-                        raw_text,
-                        cx,
-                    );
-                }
-                AiStreamDeliveryEvent::AssistantRound {
-                    round_id,
-                    round_number,
-                    response_length,
-                    tool_call_ids,
-                    synthetic,
-                    retry_attempt,
-                    hard_deny_triggered,
-                } => {
-                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
-                    self.persist_ai_assistant_round(
-                        &delivery.conversation_id,
-                        &delivery.assistant_id,
-                        round_id,
-                        round_number,
-                        response_length,
-                        tool_call_ids,
-                        synthetic,
-                        retry_attempt,
-                        hard_deny_triggered,
-                        cx,
-                    );
-                }
-                AiStreamDeliveryEvent::RoundSummary {
-                    round_id,
-                    text,
-                    metadata,
-                } => {
-                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
-                    self.apply_ai_round_summary(
-                        delivery.generation,
-                        &delivery.conversation_id,
-                        &delivery.assistant_id,
-                        &round_id,
-                        &text,
-                        metadata,
-                        cx,
-                    );
-                }
-                AiStreamDeliveryEvent::RoundStatefulMarker { round_id, marker } => {
-                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
-                    self.apply_ai_round_stateful_marker(
-                        delivery.generation,
-                        &delivery.conversation_id,
-                        &delivery.assistant_id,
-                        &round_id,
-                        marker,
-                        cx,
-                    );
-                }
-                AiStreamDeliveryEvent::Diagnostic {
-                    event_type,
-                    round_id,
-                    data,
-                } => {
-                    self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
-                    self.persist_ai_stream_diagnostic(
-                        delivery.generation,
-                        &delivery.conversation_id,
-                        &delivery.assistant_id,
-                        &event_type,
-                        round_id,
-                        data,
-                        cx,
-                    );
+                AiStreamDeliveryEvent::Guardrail { .. }
+                | AiStreamDeliveryEvent::AssistantRound { .. }
+                | AiStreamDeliveryEvent::RoundSummary { .. }
+                | AiStreamDeliveryEvent::RoundStatefulMarker { .. }
+                | AiStreamDeliveryEvent::Diagnostic { .. } => {
+                    unreachable!("chat batch consumes local records");
                 }
                 AiStreamDeliveryEvent::ToolStatus {
                     tool_call_id,
@@ -974,40 +901,5 @@ impl WorkspaceApp {
             }
         }
         self.ai.state.update(cx, |_, cx| cx.emit(oxideterm_gpui_ai::stream::AiChatBatchApplied));
-    }
-
-    pub(in crate::workspace) fn apply_ai_compaction_deliveries(
-        &mut self,
-        deliveries: VecDeque<AiCompactionDelivery>,
-        cx: &mut Context<Self>,
-    ) {
-        for delivery in deliveries {
-            if self.ai.state.read(cx).history.compaction_runs.get(&delivery.conversation_id).is_none_or(|(generation, _)| *generation != delivery.generation) { continue; }
-            match delivery.kind {
-                AiCompactionDeliveryKind::Compact => {
-                    if let Some(plan) = delivery.plan {
-                        self.finish_ai_compaction(
-                            delivery.conversation_id,
-                            delivery.base_ids,
-                            plan,
-                            delivery.summary,
-                            delivery.failed,
-                            delivery.resume_after,
-                            delivery.silent,
-                            cx,
-                        );
-                    }
-                }
-                AiCompactionDeliveryKind::Summary => {
-                    self.finish_ai_summary(
-                        delivery.conversation_id,
-                        delivery.base_ids,
-                        delivery.summary,
-                        delivery.failed,
-                        cx,
-                    );
-                }
-            }
-        }
     }
 }

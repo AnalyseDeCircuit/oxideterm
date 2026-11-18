@@ -1,31 +1,4 @@
 impl WorkspaceApp {
-    fn begin_ai_chat_stream_with_authority(
-        &mut self,
-        conversation_id: &str,
-        assistant_id: &str,
-        cx: &mut Context<Self>,
-    ) -> (u64, AiStreamDeliverySender, ToolSessionId) {
-        let (replaced_generation, generation, sender) = self.ai.state.update(cx, |ai, _cx| {
-            let replaced_generation = ai.conversation_stream_generations(conversation_id);
-            let (generation, sender) =
-                ai.begin_chat_stream(conversation_id.to_owned(), assistant_id.to_owned());
-            ai.set_conversation_loading(conversation_id, true);
-            (replaced_generation, generation, sender)
-        });
-        let tool_session = self.ai.authority.update(cx, |runtime, _cx| {
-            // The UI run owner chooses which stream was replaced. The broker
-            // must not infer that starting a stream cancels every other run.
-            for generation in replaced_generation {
-                runtime.finish_tool_session(
-                    generation,
-                    oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
-                );
-            }
-            runtime.begin_tool_session(generation)
-        });
-        (generation, sender, tool_session)
-    }
-
     pub(in crate::workspace) fn start_acp_chat_thread(
         &mut self,
         conversation_id: String,
@@ -64,390 +37,60 @@ impl WorkspaceApp {
                 return;
             }
         };
-        let request_message = self
-            .ai.state
-            .read(cx)
-            .history
-            .model_contexts
-            .get(&conversation_id)
-            .and_then(|conversation| {
-                conversation
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|message| message.role == AiChatRole::User)
-                    .cloned()
-            });
-        let mut images = request_message
-            .as_ref()
-            .map(|m| oxideterm_ai::message_images(m).to_vec())
-            .unwrap_or_default();
-        let user_request = request_content
-            .or_else(|| {
-                request_message
-                    .as_ref()
-                    .map(|message| message.content.clone())
-            })
-            .filter(|request| !request.trim().is_empty() || !images.is_empty());
-        let Some(user_request) = user_request else {
+        let skill_catalog = self.ai_skill_catalog_prompt();
+        let services = self.ai_model_backend_services(cx);
+        if !self.ai.conversations.start_acp_turn(
+            conversation_id,
+            config,
+            request_content,
+            task_system_prompt,
+            launch,
+            skill_catalog,
+            services,
+            cx,
+        ) {
             self.push_ai_settings_toast(
                 self.i18n.t("settings_view.ai.acp_agent_error_unknown"),
                 TerminalNoticeVariant::Error,
                 cx,
             );
-            return;
-        };
-        let acp_agent_id = launch.launch_config.id.clone();
-        let pending_skill_catalog = self.ai_skill_catalog_prompt().and_then(|catalog| {
-            use sha2::Digest as _;
-
-            let catalog_hash = format!("{:x}", sha2::Sha256::digest(catalog.as_bytes()));
-            let already_known = self
-                .ai.state
-                .read(cx)
-                .conversation_state()
-                .conversations
-                .iter()
-                .find(|conversation| conversation.id == conversation_id)
-                .and_then(|conversation| conversation.session_metadata.as_ref())
-                .and_then(|metadata| metadata.get("acpSkillCatalogs"))
-                .and_then(|catalogs| catalogs.get(&acp_agent_id))
-                .and_then(serde_json::Value::as_str)
-                == Some(catalog_hash.as_str());
-            (!already_known).then_some((catalog, catalog_hash))
-        });
-
-        let handoff = self
-            .ai.state
-            .read(cx)
-            .history
-            .model_contexts
-            .get(&conversation_id)
-            .and_then(|conversation| {
-                let cursor = ai_acp_session_state(conversation)
-                    .filter(|state| state.agent_id == launch.launch_config.id)
-                    .and_then(|state| state.handoff_cursor);
-                oxideterm_ai::build_acp_conversation_handoff(
-                    conversation,
-                    request_message
-                        .as_ref()
-                        .map(|message| message.id.as_str())?,
-                    cursor.as_ref(),
-                )
-            });
-        let mut prompt = zeroize::Zeroizing::new(String::new());
-        if let Some((handoff, historical_images)) = handoff {
-            prompt.push_str(handoff.as_str());
-            images.splice(0..0, historical_images);
         }
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.model_contexts.remove(&conversation_id);
-        });
-        {
-            let mut append_prompt_section = |heading: &str, value: &str| {
-                let safe_value = zeroize::Zeroizing::new(oxideterm_ai::sanitize_for_ai(value));
-                if !prompt.is_empty() {
-                    prompt.push_str("\n\n");
-                }
-                prompt.push_str("## ");
-                prompt.push_str(heading);
-                prompt.push('\n');
-                prompt.push_str(safe_value.as_str());
-            };
-            if let Some(instructions) = task_system_prompt.filter(|value| !value.trim().is_empty())
-            {
-                append_prompt_section("OxideTerm Instructions", &instructions);
-            }
-            if let Some(memory) = config
-                .memory_context
-                .as_deref()
-                .filter(|value| !value.trim().is_empty())
-            {
-                append_prompt_section("OxideTerm Scoped Memory", memory);
-            }
-            if let Some((skill_catalog, _catalog_hash)) = pending_skill_catalog.as_ref() {
-                append_prompt_section("OxideTerm Agent Skills", &skill_catalog);
-            }
-            if let Some(context) = request_message
-                .as_ref()
-                .and_then(|message| message.context.as_deref())
-                .filter(|value| !value.trim().is_empty())
-            {
-                append_prompt_section("OxideTerm Current Context", context);
-            }
-            append_prompt_section("User Request", &user_request);
-        }
-
-        let now = ai_now_ms();
-        let assistant_id = self.next_ai_chat_id(now, cx);
-        let backend = ai_message_backend_for_stream(&config);
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.begin_assistant_turn(
-                &conversation_id,
-                AiChatMessage {
-                    id: assistant_id.clone(),
-                    role: AiChatRole::Assistant,
-                    content: String::new(),
-                    timestamp_ms: now,
-                    model: Some(config.model.clone()),
-                    context: None,
-                    is_streaming: true,
-                    thinking_content: None,
-                    metadata: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                    turn: None,
-                    transcript_ref: None,
-                    summary_ref: None,
-                    branches: None,
-                    suggestions: Vec::new(),
-                },
-                0,
-                backend,
-            );
-            ai.set_conversation_loading(&conversation_id, true);
-        });
-        let (generation, ui_tx, tool_session_id) =
-            self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
-        let turn_id = format!("{conversation_id}:{generation}");
-        let mut config_selections = self
-            .ai.state
-            .read(cx)
-            .conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .and_then(ai_acp_session_state)
-            .map(|state| state.config_selections)
-            .unwrap_or_default();
-        if config_selections.is_empty()
-            && let Some(model_selection) = config.acp_config_selection
-        {
-            config_selections.push(model_selection);
-        }
-        let mode_id = self
-            .ai.state
-            .read(cx)
-            .conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .and_then(ai_acp_session_state)
-            .and_then(|state| state.current_mode_id);
-        let application_tool_services = self.ai_model_backend_services(cx);
-        let started = self.ai.acp.update(cx, |entity, _cx| {
-            entity.start_turn(crate::workspace::acp_workspace::AcpThreadStart {
-                route: crate::workspace::acp_workspace::AcpTurnRoute {
-                    generation,
-                    conversation_id: conversation_id.clone(),
-                    assistant_id: assistant_id.clone(),
-                },
-                launch_config: launch.launch_config,
-                host_policy: launch.host_policy,
-                application_tool_definitions: config.tools.clone(),
-                application_tool_turn: AcpApplicationToolTurn {
-                    services: application_tool_services,
-                    tool_policy: config.tool_policy.clone(),
-                    safety_mode: config.safety_mode,
-                    profile_id: config.profile_id.clone(),
-                    ui_tx,
-                    generation,
-                    tool_session_id,
-                    conversation_id: conversation_id.clone(),
-                    assistant_id: assistant_id.clone(),
-                    cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                },
-                request: oxideterm_ai::AcpManagedPromptRequest {
-                    images,
-                    thread_id: conversation_id.clone(),
-                    turn_id,
-                    existing_session_id: config.acp_session_id,
-                    cwd: launch.session_cwd,
-                    config_selections,
-                    mode_id,
-                    mcp_servers: Vec::new(),
-                    prompt,
-                },
-            })
-        });
-        if started && let Some((skill_catalog, catalog_hash)) = pending_skill_catalog {
-            if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
-                .or_else(oxideterm_audit::AuditContext::current)
-            {
-                context.source = oxideterm_audit::AuditSource::Ai;
-                context.agent_id = Some(oxideterm_audit::redact(&conversation_id));
-                context.observe(
-                    oxideterm_audit::AuditCategory::Automation,
-                    "ai_context_provided",
-                    Some(&format!("provider=skills bytes={}", skill_catalog.len())),
-                    oxideterm_audit::AuditOutcome::Sent,
-                    oxideterm_audit::AuditEvidence::Dispatch,
-                    oxideterm_audit::AuditAuthorization::NotRequired,
-                );
-            }
-            self.ai.state.update(cx, |ai, _cx| {
-                let Some(conversation) = ai
-                    .conversation_state_mut()
-                    .conversations
-                    .iter_mut()
-                    .find(|conversation| conversation.id == conversation_id)
-                else {
-                    return;
-                };
-                let metadata = conversation
-                    .session_metadata
-                    .get_or_insert_with(|| serde_json::json!({}));
-                let Some(metadata) = metadata.as_object_mut() else {
-                    return;
-                };
-                let catalogs = metadata
-                    .entry("acpSkillCatalogs")
-                    .or_insert_with(|| serde_json::json!({}));
-                let Some(catalogs) = catalogs.as_object_mut() else {
-                    return;
-                };
-                catalogs.insert(acp_agent_id, serde_json::Value::String(catalog_hash));
-            });
-        }
-        if !started {
-            self.ai.state.update(cx, |ai, _cx| {
-                ai.enqueue_chat_stream_delivery(AiStreamDelivery {
-                    generation,
-                    conversation_id,
-                    assistant_id,
-                    event: AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(
-                        "stream_failed".to_string(),
-                    )),
-                });
-            });
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn start_ai_chat_stream_after_rag_lookup(
-        &mut self,
-        conversation_id: String,
-        config: AiChatStreamConfig,
-        request_content: Option<String>,
-        task_system_prompt: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        let rag_query = request_content
-            .clone()
-            .filter(|query| query.trim().chars().count() >= 4);
-        let Some(rag_query) = rag_query else {
-            self.start_ai_chat_stream_after_budget_preflight(
-                conversation_id,
-                config,
-                request_content,
-                task_system_prompt,
-                None,
-                true,
-                cx,
-            );
-            return;
-        };
-
-        let launch = self
-            .ai.state
-            .read(cx)
-            .chat_launches
-            .get(&conversation_id)
-            .cloned();
-        let services = self.ai_model_backend_services(cx);
-        let (rag_tx, rag_rx) = std::sync::mpsc::channel();
-        self.forwarding_runtime.spawn(async move {
-            let rag_system_prompt = tokio::time::timeout(
-                std::time::Duration::from_millis(3000),
-                services.build_rag_system_prompt(Some(&rag_query), &config),
-            )
-            .await
-            .ok()
-            .flatten();
-            // Return the unique configuration with the lookup result instead
-            // of cloning a handle that extends the provider-key lifetime.
-            let _ = rag_tx.send((config, rag_system_prompt));
-        });
-        cx.spawn(async move |weak, cx| {
-            let Some((config, rag_system_prompt)) = (loop {
-                match rag_rx.try_recv() {
-                    Ok(result) => break Some(result),
-                    Err(std::sync::mpsc::TryRecvError::Empty) => {
-                        Timer::after(Duration::from_millis(16)).await;
-                    }
-                    Err(std::sync::mpsc::TryRecvError::Disconnected) => break None,
-                }
-            }) else {
-                return;
-            };
-            let _ = weak.update(cx, |this, cx| {
-                if !this
-                    .ai.state
-                    .read(cx)
-                    .chat_launch_matches(&conversation_id, launch.as_deref())
-                {
-                    return;
-                }
-                this.start_ai_chat_stream_after_budget_preflight(
-                    conversation_id,
-                    config,
-                    request_content,
-                    task_system_prompt,
-                    rag_system_prompt,
-                    true,
-                    cx,
-                );
-            });
-        })
-        .detach();
-        cx.notify();
     }
 
     pub(in crate::workspace) fn start_ai_chat_stream_after_budget_preflight(
         &mut self,
         conversation_id: String,
-        mut config: AiChatStreamConfig,
+        config: AiChatStreamConfig,
         request_content: Option<String>,
         task_system_prompt: Option<String>,
         rag_system_prompt: Option<String>,
         allow_pre_send_compaction: bool,
         cx: &mut Context<Self>,
     ) {
-        if !config.omit_history_images
-            && oxideterm_ai::model_image_input(
-                &config.provider_type,
-                &config.model,
-                config.image_input,
-            ) == Some(false)
-            && self
-                .ai.state
-                .read(cx)
-                .history
-                .model_contexts
-                .get(&conversation_id)
-                .is_some_and(|history| {
-                    history
-                        .messages
-                        .iter()
-                        .any(|m| !oxideterm_ai::message_images(m).is_empty())
-                })
-        {
-            self.ai.state.update(cx, |ai, _| {
-                ai.pending_image_requests.insert(
-                    conversation_id.clone(),
-                    AiPendingChatStream {
-                        launch_id: ai.chat_launches.get(&conversation_id).cloned(),
-                        conversation_id,
-                        config,
-                        request_content,
-                        task_system_prompt,
-                        rag_system_prompt,
-                    },
-                );
-            });
-            cx.notify();
+        let Some(pending) = self.ai.state.update(cx, |ai, cx| {
+            let launch_id = ai.chat_launches.get(&conversation_id).cloned();
+            ai.defer_for_unsupported_images(
+                AiPendingChatStream {
+                    launch_id,
+                    conversation_id,
+                    config,
+                    request_content,
+                    task_system_prompt,
+                    rag_system_prompt,
+                },
+                cx,
+            )
+        }) else {
             return;
-        }
+        };
+        let AiPendingChatStream {
+            conversation_id,
+            config,
+            request_content,
+            task_system_prompt,
+            rag_system_prompt,
+            launch_id,
+        } = pending;
         if allow_pre_send_compaction
             && self.should_force_ai_pre_send_compaction(
                 &conversation_id,
@@ -459,12 +102,7 @@ impl WorkspaceApp {
             )
         {
             let pending = AiPendingChatStream {
-                launch_id: self
-                    .ai.state
-                    .read(cx)
-                    .chat_launches
-                    .get(&conversation_id)
-                    .cloned(),
+                launch_id,
                 conversation_id: conversation_id.clone(),
                 config,
                 request_content,
@@ -504,43 +142,10 @@ impl WorkspaceApp {
         ) else {
             return;
         };
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.model_contexts.remove(&conversation_id);
-        });
-        if trimmed_count > 0 {
-            self.show_ai_trim_notice(trimmed_count, cx);
-        }
         let context_window = self.ai_active_model_context_window(&config);
-        self.record_ai_prepared_prompt_usage(
-            &conversation_id,
-            &config,
-            &history,
-            context_window,
-            cx,
-        );
-        let now = ai_now_ms();
-        let assistant_id = self.next_ai_chat_id(now, cx);
-        let request_message = self
-            .ai.state
-            .read(cx)
-            .conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .and_then(|conversation| {
-                conversation
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|message| message.role == AiChatRole::User)
-                    .cloned()
-            });
-        let request_message_id = request_message
-            .as_ref()
-            .map(|message| message.id.clone())
-            .unwrap_or_else(|| format!("{assistant_id}-request"));
         let (budget_decision, budget_diagnostic_payload) = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .conversations
@@ -577,122 +182,23 @@ impl WorkspaceApp {
                 });
                 (decision, payload)
             });
-        let budget_level = budget_decision.map(|decision| decision.level).unwrap_or(0);
-        let backend = ai_message_backend_for_stream(&config);
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.begin_assistant_turn(
-                &conversation_id,
-                AiChatMessage {
-                    id: assistant_id.clone(),
-                    role: AiChatRole::Assistant,
-                    content: String::new(),
-                    timestamp_ms: now,
-                    model: Some(config.model.clone()),
-                    context: None,
-                    is_streaming: true,
-                    thinking_content: None,
-                    metadata: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                    turn: None,
-                    transcript_ref: None,
-                    summary_ref: None,
-                    branches: None,
-                    suggestions: Vec::new(),
-                },
-                budget_level,
-                backend,
-            );
-        });
-        let mut transcript_entries = Vec::new();
-        let mut diagnostic_events = Vec::new();
-        if let Some(request_message) = request_message.as_ref() {
-            transcript_entries.push(ai_transcript_entry(
-                format!("transcript-user-{}", request_message.id),
-                &conversation_id,
-                "user_message",
-                serde_json::json!({
-                    "messageId": request_message.id,
-                    "role": "user",
-                    "content": request_content.as_deref().unwrap_or(&request_message.content),
-                    "hasContext": request_message.context.as_ref().is_some_and(|context| !context.is_empty()),
-                }),
-                None,
-                None,
-                request_message.timestamp_ms,
-            ));
-            diagnostic_events.push(ai_diagnostic_event(
-                format!("diagnostic-user-{}", request_message.id),
-                &conversation_id,
-                "user_message",
-                None,
-                None,
-                request_message.timestamp_ms,
-                self.ai_diagnostic_base(serde_json::json!({
-                    "messageId": request_message.id,
-                    "role": "user",
-                    "contentLength": request_content.as_deref().unwrap_or(&request_message.content).len(),
-                    "hasContext": request_message.context.as_ref().is_some_and(|context| !context.is_empty()),
-                })),
-            ));
-        }
-        transcript_entries.push(ai_transcript_entry(
-            format!("transcript-assistant-start-{assistant_id}"),
-            &conversation_id,
-            "assistant_turn_start",
-            serde_json::json!({
-                "messageId": assistant_id,
-                "requestMessageId": request_message_id,
-                "conversationTurnId": assistant_id,
-            }),
-            Some(assistant_id.clone()),
-            Some(request_message_id),
-            now,
-        ));
-        diagnostic_events.push(ai_diagnostic_event(
-            format!("diagnostic-budget-{assistant_id}"),
-            &conversation_id,
-            "budget_level_changed",
-            Some(assistant_id.clone()),
-            None,
-            now,
-            self.ai_diagnostic_base(budget_diagnostic_payload),
-        ));
-        self.persist_ai_transcript_entries(conversation_id.clone(), transcript_entries, cx);
-        self.persist_ai_diagnostic_events(conversation_id.clone(), diagnostic_events, cx);
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_conversation_loading(&conversation_id, true)
-        });
-        // Every model turn receives a fresh authority lease. The token remains
-        // transient and never enters conversation history or diagnostics.
-        let (generation, ui_tx, tool_session_id) =
-            self.begin_ai_chat_stream_with_authority(&conversation_id, &assistant_id, cx);
-        let model_runtime = AiModelRuntimeState { context_window };
-        let services = self.ai_model_backend_services(cx);
-        let execution = self.start_ai_agent_group(
-            generation,
-            &conversation_id,
-            &assistant_id,
-            &mut config,
-            &services,
-            &tool_session_id,
+        let provider_turn = oxideterm_gpui_ai::conversation::AiProviderTurn {
+            conversation_id,
+            config,
+            request_content,
+            history,
+            trimmed_count,
             context_window,
+            budget_level: budget_decision.map(|decision| decision.level).unwrap_or(0),
+            budget_diagnostic_payload,
+            services: self.ai_model_backend_services(cx),
+            agent_options: self.global_agent_options(),
+            agent_concurrency: self.agent_concurrency(),
+        };
+        self.ai.conversations.launch_provider_turn(
+            provider_turn,
+            |data| self.ai_diagnostic_base(data),
             cx,
         );
-        let task = self.forwarding_runtime.spawn(run_ai_chat_tool_loop(
-            config,
-            history,
-            model_runtime,
-            services,
-            budget_decision.map(|decision| decision.level).unwrap_or(0),
-            generation,
-            tool_session_id,
-            conversation_id,
-            assistant_id,
-            ui_tx,
-            Some(execution),
-        ));
-        self.ai.state
-            .update(cx, |ai, _cx| ai.set_chat_stream_task(generation, task));
     }
 }

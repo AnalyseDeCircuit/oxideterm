@@ -31,3 +31,48 @@ pub fn now_ms() -> u64 {
         .map(|duration| duration.as_millis() as u64)
         .unwrap_or_default()
 }
+
+use super::LocalBookmark;
+
+pub fn load_local_bookmarks(path: &Path) -> Vec<LocalBookmark> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        .unwrap_or_default()
+}
+
+pub fn save_local_bookmarks(path: &Path, bookmarks: &[LocalBookmark]) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(bookmarks).map_err(|error| error.to_string())?;
+    oxideterm_atomic_file::durable_write(path, &bytes).map_err(|error| error.to_string())
+}
+
+pub fn reorder_local_bookmarks(
+    bookmarks: &mut Vec<LocalBookmark>,
+    path: &Path,
+    source: &str,
+    target: &str,
+    after: bool,
+) -> Result<bool, String> {
+    let Some(from) = bookmarks.iter().position(|bookmark| bookmark.id == source) else {
+        return Ok(false);
+    };
+    let Some(target) = bookmarks.iter().position(|bookmark| bookmark.id == target) else {
+        return Ok(false);
+    };
+    if from == target {
+        return Ok(false);
+    }
+    let slot = target + usize::from(after);
+    let to = slot - usize::from(from < slot);
+    if from == to {
+        return Ok(false);
+    }
+    let previous = bookmarks.clone();
+    let moved = bookmarks.remove(from);
+    bookmarks.insert(to, moved);
+    if let Err(error) = save_local_bookmarks(path, bookmarks) {
+        *bookmarks = previous;
+        return Err(error);
+    }
+    Ok(true)
+}

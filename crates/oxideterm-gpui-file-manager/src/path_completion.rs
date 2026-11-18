@@ -148,7 +148,10 @@ impl PathCompletionState {
     }
 }
 
-use gpui::{AnyElement, App, Corner, AnchoredPositionMode, Bounds, Pixels, anchored, deferred, div, px, rgb, rgba, svg, prelude::*};
+use gpui::{
+    AnchoredPositionMode, AnyElement, App, Bounds, Corner, MouseButton, Pixels, anchored, deferred,
+    div, prelude::*, px, rgb, rgba, svg,
+};
 use oxideterm_gpui_ui::icons::LucideIcon;
 use oxideterm_theme::ThemeTokens;
 
@@ -159,101 +162,107 @@ const PATH_COMPLETION_BG_ALPHA: u32 = 0xf2;
 const PATH_COMPLETION_HOVER_ALPHA: u32 = 0x99;
 
 fn render_lucide_icon(icon: LucideIcon, size: f32, color: gpui::Rgba) -> AnyElement {
-    svg().path(icon.path()).size(px(size)).text_color(color).into_any_element()
+    svg()
+        .path(icon.path())
+        .size(px(size))
+        .text_color(color)
+        .into_any_element()
 }
 
 pub fn render_completion_popup(
-    id: &'static str, tokens: &ThemeTokens, bounds: Bounds<Pixels>,
-    selected_index: Option<usize>, scroll_handle: ScrollHandle,
-    suggestions: &[PathCompletionCandidate], accept: impl Fn(usize, &mut App) + Clone + 'static,
+    id: &'static str,
+    tokens: &ThemeTokens,
+    bounds: Bounds<Pixels>,
+    selected_index: Option<usize>,
+    scroll_handle: ScrollHandle,
+    suggestions: &[PathCompletionCandidate],
+    accept: impl Fn(usize, &mut App) + Clone + 'static,
 ) -> AnyElement {
-        let theme = tokens.ui;
-        let mut popup = div()
-            .id(id)
-            .w(bounds.size.width)
-            .max_h(px(
-                PATH_COMPLETION_ROW_HEIGHT * PATH_COMPLETION_VISIBLE_ROWS as f32
-            ))
-            .flex()
-            .flex_col()
-            .overflow_y_scroll()
-            .track_scroll(&scroll_handle)
-            .rounded(px(tokens.radii.md))
-            .border_1()
-            .border_color(rgb(theme.border))
-            .bg(rgba((theme.bg_elevated << 8) | PATH_COMPLETION_BG_ALPHA))
-            .shadow_lg()
-            // Deferred drawing alone does not prevent the file list behind the popup from hit-testing.
-            .occlude();
+    let theme = tokens.ui;
+    let mut popup = div()
+        .id(id)
+        .w(bounds.size.width)
+        .max_h(px(
+            PATH_COMPLETION_ROW_HEIGHT * PATH_COMPLETION_VISIBLE_ROWS as f32
+        ))
+        .flex()
+        .flex_col()
+        .overflow_y_scroll()
+        .track_scroll(&scroll_handle)
+        .rounded(px(tokens.radii.md))
+        .border_1()
+        .border_color(rgb(theme.border))
+        .bg(rgba((theme.bg_elevated << 8) | PATH_COMPLETION_BG_ALPHA))
+        .shadow_lg()
+        // Deferred drawing alone does not prevent the file list behind the popup from hit-testing.
+        .occlude();
 
-        for (index, candidate) in suggestions.iter().enumerate() {
-            let label = if candidate.is_directory {
-                format!("{}/", candidate.name)
-            } else {
-                candidate.name.clone()
-            };
-            popup = popup.child(
-                div()
-                    .h(px(PATH_COMPLETION_ROW_HEIGHT))
-                    .px(px(8.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(6.0))
-                    .cursor_pointer()
-                    .bg(if Some(index) == selected_index {
-                        rgba((theme.bg_hover << 8) | PATH_COMPLETION_HOVER_ALPHA)
+    for (index, candidate) in suggestions.iter().enumerate() {
+        let label = if candidate.is_directory {
+            format!("{}/", candidate.name)
+        } else {
+            candidate.name.clone()
+        };
+        popup = popup.child(
+            div()
+                .h(px(PATH_COMPLETION_ROW_HEIGHT))
+                .px(px(8.0))
+                .flex()
+                .items_center()
+                .gap(px(6.0))
+                .cursor_pointer()
+                .bg(if Some(index) == selected_index {
+                    rgba((theme.bg_hover << 8) | PATH_COMPLETION_HOVER_ALPHA)
+                } else {
+                    rgba(theme.bg_hover << 8)
+                })
+                .hover(move |row| row.bg(rgba((theme.bg_hover << 8) | PATH_COMPLETION_HOVER_ALPHA)))
+                .child(render_lucide_icon(
+                    if candidate.is_directory {
+                        LucideIcon::Folder
                     } else {
-                        rgba(theme.bg_hover << 8)
-                    })
-                    .hover(move |row| {
-                        row.bg(rgba((theme.bg_hover << 8) | PATH_COMPLETION_HOVER_ALPHA))
-                    })
-                    .child(render_lucide_icon(
-                        if candidate.is_directory {
-                            LucideIcon::Folder
-                        } else {
-                            LucideIcon::File
-                        },
-                        13.0,
-                        rgb(if candidate.is_directory {
-                            theme.accent
-                        } else {
-                            theme.text_muted
-                        }),
-                    ))
-                    .child(
-                        div()
-                            .min_w(px(0.0))
-                            .truncate()
-                            .text_size(px(12.0))
-                            .text_color(rgb(theme.text))
-                            .child(label),
-                    )
-                    .on_mouse_down(MouseButton::Left, {
-                        let accept = accept.clone();
-                        move |_, _, cx| {
-                            accept(index, cx);
-                            cx.stop_propagation();
-                        }
+                        LucideIcon::File
+                    },
+                    13.0,
+                    rgb(if candidate.is_directory {
+                        theme.accent
+                    } else {
+                        theme.text_muted
                     }),
-            );
-        }
-
-        let popup = oxideterm_gpui_ui::motion::popover_zoom_enter(
-            tokens,
-            "path-completion-popup",
-            div().child(oxideterm_gpui_ui::modal::overlay_content_boundary(popup)),
-            -4.0,
-            gpui::point(0.5, 0.0),
+                ))
+                .child(
+                    div()
+                        .min_w(px(0.0))
+                        .truncate()
+                        .text_size(px(12.0))
+                        .text_color(rgb(theme.text))
+                        .child(label),
+                )
+                .on_mouse_down(MouseButton::Left, {
+                    let accept = accept.clone();
+                    move |_, _, cx| {
+                        accept(index, cx);
+                        cx.stop_propagation();
+                    }
+                }),
         );
-        deferred(
-                anchored()
-                    .anchor(Corner::TopLeft)
-                    .position(bounds.bottom_left())
-                    .offset(gpui::point(px(0.0), px(PATH_COMPLETION_POPUP_GAP)))
-                    .position_mode(AnchoredPositionMode::Window)
-                    .child(popup),
-            )
-            .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
-            .into_any_element()
     }
+
+    let popup = oxideterm_gpui_ui::motion::popover_zoom_enter(
+        tokens,
+        "path-completion-popup",
+        div().child(oxideterm_gpui_ui::modal::overlay_content_boundary(popup)),
+        -4.0,
+        gpui::point(0.5, 0.0),
+    );
+    deferred(
+        anchored()
+            .anchor(Corner::TopLeft)
+            .position(bounds.bottom_left())
+            .offset(gpui::point(px(0.0), px(PATH_COMPLETION_POPUP_GAP)))
+            .position_mode(AnchoredPositionMode::Window)
+            .child(popup),
+    )
+    .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY)
+    .into_any_element()
+}

@@ -1,10 +1,5 @@
 use gpui::{AnyElement, App, IntoElement, div};
-use oxideterm_ai::{
-    AiEmbeddingProviderReason, AiProviderView, RagCollectionResponse, RagPaginatedDocuments,
-    RagStatsResponse, RagStore,
-};
-use oxideterm_i18n::I18n;
-use oxideterm_settings::PersistedSettings;
+use oxideterm_ai::{RagCollectionResponse, RagPaginatedDocuments, RagStatsResponse, RagStore};
 use oxideterm_settings_model::SettingsSectionId;
 
 use super::KnowledgeSettingsPage;
@@ -92,46 +87,5 @@ impl KnowledgeSection {
                 stats,
             } => page.knowledge_documents_card(&collection, documents, index, stats, true, cx),
         }
-    }
-}
-
-pub struct EmbeddingJob {
-    pub provider: AiProviderView,
-    pub model: String,
-    pub requires_api_key: bool,
-    pub missing_key_error: String,
-    pub retrieval_error: String,
-    pub partial_failure: String,
-}
-
-impl EmbeddingJob {
-    pub fn prepare(settings: &PersistedSettings, i18n: &I18n) -> Result<Self, String> {
-        let resolved = oxideterm_ai::resolve_ai_embedding_provider(
-            &settings.ai.providers,
-            settings.ai.active_provider_id.as_deref(),
-            settings.ai.embedding_config.as_ref(),
-            None,
-        );
-        let provider = resolved
-            .provider
-            .ok_or_else(|| i18n.t("settings_view.knowledge.error_no_embedding_support"))?;
-        match resolved.reason {
-            AiEmbeddingProviderReason::NoProvider
-            | AiEmbeddingProviderReason::UnsupportedProvider => {
-                return Err(i18n.t("settings_view.knowledge.error_no_embedding_support"));
-            }
-            AiEmbeddingProviderReason::MissingModel => {
-                return Err(i18n.t("settings_view.knowledge.error_no_embedding_model"));
-            }
-            AiEmbeddingProviderReason::Ready | AiEmbeddingProviderReason::MissingApiKey => {}
-        }
-        Ok(Self {
-            requires_api_key: oxideterm_ai::ai_embedding_requires_api_key(&provider),
-            provider,
-            model: resolved.model,
-            missing_key_error: i18n.t("settings_view.knowledge.error_no_embedding_api_key"),
-            retrieval_error: i18n.t("settings_view.knowledge.error_generate_embeddings"),
-            partial_failure: i18n.t("settings_view.knowledge.embedding_partial_failure"),
-        })
     }
 }

@@ -1,6 +1,4 @@
-use oxideterm_gpui_ai::state::{
-    AiStreamApplyOutcome, detect_ai_cli_agent_kind, sanitize_ai_tool_arguments_for_approval,
-};
+use oxideterm_gpui_ai::state::{detect_ai_cli_agent_kind, sanitize_ai_tool_arguments_for_approval};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn apply_ai_acp_session_started(
@@ -47,6 +45,7 @@ impl WorkspaceApp {
         event: AiStreamEvent,
         cx: &mut Context<Self>,
     ) {
+        use oxideterm_gpui_ai::conversation::AiChatCompletion;
         let safe_error = match &event {
             AiStreamEvent::Error(error) => Some(
                 self.ai_stream_error_text(error)
@@ -54,139 +53,29 @@ impl WorkspaceApp {
             ),
             _ => None,
         };
-        let child_message = self.ai.state.read(cx).is_agent_message(message_id);
-        let outcome = self.ai.state.update(cx, |ai, _cx| {
-            ai.apply_stream_event_state(generation, conversation_id, message_id, event, safe_error)
-        });
-        match outcome {
-            // The delivery batch invalidates the assistant view once after
-            // applying its deltas. Only lifecycle effects below reach the shell.
-            AiStreamApplyOutcome::Applied => return,
-            AiStreamApplyOutcome::Completed => {
-                self.ai.authority.update(cx, |runtime, _cx| {
-                    runtime.finish_tool_session(
-                        generation,
-                        oxideterm_ai::RuntimeRevocationReason::ToolSessionFinished,
-                    );
-                });
-                if child_message {
-                    self.ai.state.read(cx).persist_agent_records();
-                    return;
-                }
-                self.persist_ai_assistant_turn_end(conversation_id, message_id, "complete", cx);
-                if !self.send_next_queued_ai_message(conversation_id, cx) {
-                    self.maybe_start_ai_auto_compaction(conversation_id, cx);
-                }
+        let completion = self.ai.conversations.apply_stream_event(
+            generation,
+            conversation_id,
+            message_id,
+            event,
+            safe_error,
+            self.settings_store.settings().ai.enabled,
+            |payload| self.ai_diagnostic_base(payload),
+            cx,
+        );
+        match completion {
+            AiChatCompletion::None => {}
+            AiChatCompletion::NextTurn(pending) => self.launch_prepared_queued_turn(pending, cx),
+            AiChatCompletion::AutoCompact => {
+                self.maybe_start_ai_auto_compaction(conversation_id, cx)
             }
-            AiStreamApplyOutcome::Failed(safe_error) => {
-                self.ai.authority.update(cx, |runtime, _cx| {
-                    runtime.finish_tool_session(
-                        generation,
-                        oxideterm_ai::RuntimeRevocationReason::ToolSessionFinished,
-                    );
-                });
-                if child_message {
-                    self.notify_ai_agent_attention(
-                        conversation_id,
-                        message_id,
-                        "ai.agents.failed",
-                        cx,
-                    );
-                    self.ai.state.read(cx).persist_agent_records();
-                    return;
-                }
-                // Provider errors may contain response bodies or request
-                // metadata. Only a localized stable category reaches the
-                // conversation, diagnostics, notifications, and persistence.
-                self.persist_ai_assistant_turn_end(conversation_id, message_id, "error", cx);
-                self.persist_ai_diagnostic_events(
-                    conversation_id.to_string(),
-                    vec![ai_diagnostic_event(
-                        format!("diagnostic-error-{message_id}-{}", ai_now_ms()),
-                        conversation_id,
-                        "error",
-                        Some(message_id.to_string()),
-                        None,
-                        ai_now_ms(),
-                        self.ai_diagnostic_base(serde_json::json!({
-                            "requestKind": "chat",
-                            "message": safe_error.as_str(),
-                        })),
-                    )],
-                    cx,
-                );
-                self.push_ai_settings_toast(safe_error, TerminalNoticeVariant::Error, cx);
+            AiChatCompletion::AgentFailed => {
+                self.notify_ai_agent_attention(conversation_id, message_id, "ai.agents.failed", cx)
             }
-            AiStreamApplyOutcome::Stale => return,
+            AiChatCompletion::Error(message) => {
+                self.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx)
+            }
         }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn apply_ai_round_summary(
-        &mut self,
-        generation: u64,
-        conversation_id: &str,
-        message_id: &str,
-        round_id: &str,
-        text: &str,
-        metadata: serde_json::Value,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai.state.update(cx, |state, cx| {
-            state.apply_ai_round_summary(
-                generation,
-                conversation_id,
-                message_id,
-                round_id,
-                text,
-                metadata,
-                cx,
-            );
-        });
-    }
-
-    pub(in crate::workspace) fn apply_ai_round_stateful_marker(
-        &mut self,
-        generation: u64,
-        conversation_id: &str,
-        message_id: &str,
-        round_id: &str,
-        marker: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai.state.update(cx, |state, cx| {
-            state.apply_ai_round_stateful_marker(
-                generation,
-                conversation_id,
-                message_id,
-                round_id,
-                marker,
-                cx,
-            );
-        });
-    }
-
-    pub(in crate::workspace) fn persist_ai_stream_diagnostic(
-        &self,
-        generation: u64,
-        conversation_id: &str,
-        message_id: &str,
-        event_type: &str,
-        round_id: Option<String>,
-        data: serde_json::Value,
-        cx: &mut App,
-    ) {
-        self.ai.state.update(cx, |state, _| {
-            state.persist_ai_stream_diagnostic(
-                generation,
-                conversation_id,
-                message_id,
-                event_type,
-                round_id,
-                data,
-                |data| self.ai_diagnostic_base(data),
-            );
-        });
     }
 
     pub(in crate::workspace) fn apply_ai_tool_status(
@@ -228,30 +117,6 @@ impl WorkspaceApp {
                 _raw_text,
                 round_id_override,
                 round_number_override,
-                |data| self.ai_diagnostic_base(data),
-                cx,
-            );
-        });
-    }
-
-    pub(in crate::workspace) fn apply_ai_guardrail(
-        &mut self,
-        generation: u64,
-        conversation_id: &str,
-        message_id: &str,
-        code: &str,
-        message: &str,
-        raw_text: Option<String>,
-        cx: &mut Context<Self>,
-    ) {
-        self.ai.state.update(cx, |state, cx| {
-            state.apply_ai_guardrail(
-                generation,
-                conversation_id,
-                message_id,
-                code,
-                message,
-                raw_text,
                 |data| self.ai_diagnostic_base(data),
                 cx,
             );

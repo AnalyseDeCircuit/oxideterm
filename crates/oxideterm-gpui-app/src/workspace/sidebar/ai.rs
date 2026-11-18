@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 
 use crate::workspace::ai_state::AiPendingChatStream;
 use crate::workspace::ai_state::{AiChatPopover, AiWorkspaceVisibility};
@@ -18,7 +18,7 @@ use oxideterm_ai::{
     provider_chat_requires_key as ai_provider_chat_requires_key,
     provider_views as ai_provider_views, resolve_ai_policy_decision, resolve_ai_slash_command,
     resolve_model_selector_provider_probe, select_provider_model as ai_select_provider_model,
-    stream_chat_completion, tool_policy_from_parts,
+    tool_policy_from_parts,
 };
 use oxideterm_gpui_settings_view::SettingsTab;
 use oxideterm_gpui_ui::{ai::AiSafetyMode, modal::overlay_content_boundary};

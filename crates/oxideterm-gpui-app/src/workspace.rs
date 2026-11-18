@@ -114,7 +114,7 @@ use self::{
 use anyhow::Result;
 use gpui::{
     AnchoredPositionMode, Animation, AnimationExt, AnyElement, AnyWindowHandle, App, Bounds,
-    ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable, FollowMode,
+    ClipboardItem, Context, Corner, CursorStyle, Entity, FocusHandle, Focusable,
     FontWeight, Image, IntoElement, KeyDownEvent, KeyUpEvent, ListAlignment, ListState,
     ModifiersChangedEvent, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit,
     ParentElement, PathPromptOptions, Pixels, Point, Render, RenderImage, Rgba, ScrollEvent,
@@ -337,7 +337,7 @@ const NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE: f32 = 72.0;
 const NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN: usize = 10;
 use oxideterm_gpui_ai::state::AiChatMessageSignatureCache;
 
-use oxideterm_gpui_ai::state::{AiContextTokenBreakdown, AiContextTokenBreakdownKey, AiPreparedPromptUsage};
+use oxideterm_gpui_ai::state::{AiContextTokenBreakdown, AiContextTokenBreakdownKey};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ConfirmKeyboardAction {
@@ -848,33 +848,7 @@ impl WorkspaceApp {
     }
 }
 
-// Suggestion values can contain credentials embedded in commands, so diagnostics must not format them.
-#[allow(dead_code)]
-#[derive(Clone)]
-struct TerminalCommandSuggestion {
-    kind: TerminalCommandSuggestionKind,
-    label: String,
-    insert_text: String,
-    description: Option<String>,
-    executable: bool,
-    replacement: std::ops::Range<usize>,
-    group_label_key: &'static str,
-    source_label_key: &'static str,
-    score: f64,
-    risk: Option<&'static str>,
-    inline_safe: bool,
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum TerminalCommandSuggestionKind {
-    History,
-    Command,
-    Subcommand,
-    Option,
-    File,
-    Directory,
-}
+use oxideterm_terminal::command_completion::{TerminalCommandSuggestion, TerminalCommandSuggestionKind};
 
 #[derive(Clone)]
 pub(crate) struct AiRuntimeCommandRecord {

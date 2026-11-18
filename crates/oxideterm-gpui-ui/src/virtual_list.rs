@@ -288,7 +288,9 @@ mod tests {
     }
 }
 
-use gpui::{ElementId, Point, ScrollStrategy, UniformList, UniformListScrollHandle, px, uniform_list};
+use gpui::{
+    ElementId, Point, ScrollStrategy, UniformList, UniformListScrollHandle, px, uniform_list,
+};
 use std::ops::Range;
 
 const BROWSER_DRAG_AUTOSCROLL_EDGE_PX: f32 = 48.0;

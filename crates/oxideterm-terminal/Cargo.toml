@@ -35,6 +35,7 @@ parking_lot.workspace = true
 polling.workspace = true
 serialport.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

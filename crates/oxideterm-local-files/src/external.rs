@@ -111,3 +111,12 @@ fn configure_file_manager_external_bridge(command: &mut std::process::Command) {
     // the user's associated application.
     command.creation_flags(FILE_MANAGER_EXTERNAL_BRIDGE_CREATE_NO_WINDOW);
 }
+
+pub fn local_file_operation(action: &str, detail: &str) -> oxideterm_audit::AuditOperation {
+    oxideterm_audit::AuditOperation::in_context(
+        local_file_audit_context(oxideterm_audit::AuditSource::User).as_ref(),
+        oxideterm_audit::AuditCategory::File,
+        action,
+        Some(detail),
+    )
+}

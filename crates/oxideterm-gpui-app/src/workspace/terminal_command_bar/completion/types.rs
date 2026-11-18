@@ -1,32 +1,5 @@
 use super::*;
 
-#[derive(Clone)]
-pub(super) struct TerminalHistoryEntry {
-    pub(super) command: String,
-    pub(super) source: TerminalHistorySource,
-    pub(super) last_used_at: i64,
-    pub(super) uses: usize,
-    pub(super) sequence: usize,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum TerminalHistorySource {
-    Runtime,
-    LocalHistory,
-}
-
-impl TerminalHistorySource {
-    pub(super) fn label_key(self) -> &'static str {
-        match self {
-            Self::Runtime => "terminal.command_bar.source_runtime",
-            // Tauri's command-bar history provider preserves these underlying
-            // autosuggest sources internally, but renders completion rows with
-            // the generic history source badge.
-            Self::LocalHistory => "terminal.command_bar.source_history",
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum TerminalCommandContextType {
     Terminal,
@@ -55,76 +28,13 @@ impl TerminalCommandContext {
     }
 
     pub(super) fn provider_scope_id(&self) -> String {
-        self.node_id
-            .as_ref()
-            .map(|node_id| node_id.0.clone())
-            .or_else(|| self.session_id.map(|session_id| session_id.0.to_string()))
-            .or_else(|| self.pane_id.map(|pane_id| pane_id.0.to_string()))
-            .or_else(|| self.tab_id.map(|tab_id| tab_id.0.to_string()))
-            .unwrap_or_default()
+        completion_provider_scope(
+            self.node_id.as_ref().map(|node| node.0.as_str()),
+            self.session_id.map(|id| id.0),
+            self.pane_id.map(|id| id.0),
+            self.tab_id.map(|id| id.0),
+        )
     }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[derive(Default)]
-pub(super) enum TerminalFigArgType {
-    #[serde(alias = "none")]
-    #[default]
-    None,
-    Path,
-    File,
-    Directory,
-    Value,
-    Command,
-}
-
-#[derive(Clone)]
-pub(super) struct TerminalFigOptionSpec {
-    pub(super) name: String,
-    pub(super) description: Option<String>,
-    pub(super) args: TerminalFigArgType,
-}
-
-#[derive(Clone)]
-pub(super) struct TerminalFigSubcommandSpec {
-    pub(super) name: String,
-    pub(super) description: Option<String>,
-    pub(super) options: Vec<TerminalFigOptionSpec>,
-    pub(super) args: TerminalFigArgType,
-}
-
-#[derive(Clone)]
-pub(in crate::workspace) struct TerminalFigSpec {
-    pub(super) name: String,
-    pub(super) description: String,
-    pub(super) subcommands: Vec<TerminalFigSubcommandSpec>,
-    pub(super) options: Vec<TerminalFigOptionSpec>,
-    pub(super) args: TerminalFigArgType,
-}
-
-pub(super) struct TerminalPathParts {
-    pub(super) directory: String,
-    pub(super) query: String,
-    pub(super) display_prefix: String,
-}
-
-#[derive(Clone)]
-pub(super) struct TerminalPathEntry {
-    pub(super) name: String,
-    pub(super) path: String,
-    pub(super) is_directory: bool,
-}
-
-pub(super) struct TerminalPathCacheEntry {
-    pub(super) created_at: std::time::Instant,
-    pub(super) entries: Vec<TerminalPathEntry>,
-}
-
-#[derive(Default)]
-pub(super) struct TerminalPathCompletionCache {
-    pub(super) entries: HashMap<String, TerminalPathCacheEntry>,
-    pub(super) pending: HashSet<String>,
 }
 
 #[cfg(test)]

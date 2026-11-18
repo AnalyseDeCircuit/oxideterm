@@ -48,6 +48,7 @@ pub struct FileManagerEnvironment {
     pub background: bool,
     pub modal_background: bool,
     pub chrome_divider: Rgba,
+    pub ui_font_family: SharedString,
     pub mono_font_family: SharedString,
     pub mono_font_size: f32,
     pub editor: FileManagerEditorFonts,

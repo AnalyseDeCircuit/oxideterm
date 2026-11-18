@@ -1,13 +1,16 @@
 use std::collections::HashMap;
 
-use crate::tool_resources::{AiStableResourceOperation, ai_live_resource_operation, ai_rejects_legacy_live_target_argument, ai_stable_resource_operation};
-use oxideterm_workspace::{TabId, TerminalSessionId};
+use crate::tool_resources::{
+    AiStableResourceOperation, ai_live_resource_operation, ai_rejects_legacy_live_target_argument,
+    ai_stable_resource_operation,
+};
 use crate::{
     RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError, RuntimeHandleId,
     RuntimeHandleProjection, RuntimeOwnerGeneration, RuntimeOwnerKey, RuntimeOwnerKind,
     RuntimeOwnerRegistration, RuntimeRevocationReason, RuntimeValidationError,
     RuntimeValidationFailure, ToolSessionId,
 };
+use oxideterm_workspace::{TabId, TerminalSessionId};
 
 #[derive(Clone, Debug)]
 struct TerminalRuntimeOwner {
@@ -135,10 +138,7 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
     }
 
     /// Authority belongs to one run. Replacing that run cannot revoke another agent's lease.
-    pub fn begin_tool_session(
-        &mut self,
-        stream_generation: u64,
-    ) -> ToolSessionId {
+    pub fn begin_tool_session(&mut self, stream_generation: u64) -> ToolSessionId {
         self.finish_tool_session(
             stream_generation,
             RuntimeRevocationReason::ToolSessionCancelled,
@@ -149,11 +149,7 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
         tool_session_id
     }
 
-    pub fn finish_tool_session(
-        &mut self,
-        stream_generation: u64,
-        reason: RuntimeRevocationReason,
-    ) {
+    pub fn finish_tool_session(&mut self, stream_generation: u64, reason: RuntimeRevocationReason) {
         if let Some(tool_session_id) = self.tool_sessions.remove(&stream_generation) {
             self.registry.finish_tool_session(&tool_session_id, reason);
         }
@@ -189,9 +185,7 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
         handle: &str,
     ) -> Result<(crate::RuntimeOwnerKey, String), crate::RuntimeValidationError> {
         let handle = crate::RuntimeHandleId::parse(handle.to_owned()).map_err(|_| {
-            crate::RuntimeValidationError::new(
-                crate::RuntimeValidationFailure::UnknownHandle,
-            )
+            crate::RuntimeValidationError::new(crate::RuntimeValidationFailure::UnknownHandle)
         })?;
         let label = self
             .registry
@@ -241,11 +235,7 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
     /// Registers the terminal session itself rather than its tab or pane mount.
     /// Detach/return may change presentation ownership, but must not replace the
     /// physical terminal capability.
-    pub fn register_terminal_session(
-        &mut self,
-        session_id: TerminalSessionId,
-        label: String,
-    ) {
+    pub fn register_terminal_session(&mut self, session_id: TerminalSessionId, label: String) {
         let owner =
             self.terminal_owners
                 .entry(session_id)
@@ -755,8 +745,7 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
         saved_connection_exists: impl Fn(&str) -> bool,
         connected_saved_node: impl Fn(&str) -> bool,
     ) -> Result<(), RuntimeValidationError> {
-        if self
-            .is_agent_scoped_session(tool_session_id)
+        if self.is_agent_scoped_session(tool_session_id)
             && (args.get("resource_ref").is_some()
                 || (tool_name == "get_state"
                     && args.get("scope").and_then(serde_json::Value::as_str) != Some("target")))
@@ -795,20 +784,15 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
         if tool_name == "transfer_resource" {
             let operation = ai_live_resource_operation(tool_name, args)?;
             let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-            self.validate_sftp_handle(
-                tool_session_id,
-                raw_handle_id,
-                operation.capability(),
-            )?;
+            self.validate_sftp_handle(tool_session_id, raw_handle_id, operation.capability())?;
             return Ok(());
         }
         if tool_name == "open_app_surface" {
             if args.get("handle_id").is_some() {
-                self
-                    .validate_app_surface_handle(
-                        tool_session_id,
-                        args.get("handle_id").and_then(serde_json::Value::as_str),
-                    )?;
+                self.validate_app_surface_handle(
+                    tool_session_id,
+                    args.get("handle_id").and_then(serde_json::Value::as_str),
+                )?;
             } else {
                 ai_stable_resource_operation(tool_name, args)?;
             }
@@ -821,8 +805,7 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
                     crate::RuntimeValidationFailure::CapabilityUnavailable,
                 ));
             };
-            if !saved_connection_exists(resource_ref.id())
-            {
+            if !saved_connection_exists(resource_ref.id()) {
                 return Err(crate::RuntimeValidationError::new(
                     crate::RuntimeValidationFailure::CapabilityUnavailable,
                 ));
@@ -866,10 +849,16 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
             if let Some(handle) = args.get("handle_id").and_then(serde_json::Value::as_str) {
                 self.validate_node_handle(tool_session_id, Some(handle))?;
             } else {
-                let id = args.pointer("/resource_ref/id").and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| RuntimeValidationError::new(RuntimeValidationFailure::CapabilityUnavailable))?;
+                let id = args
+                    .pointer("/resource_ref/id")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| {
+                        RuntimeValidationError::new(RuntimeValidationFailure::CapabilityUnavailable)
+                    })?;
                 if !connected_saved_node(id) {
-                    return Err(RuntimeValidationError::new(RuntimeValidationFailure::OwnerClosed));
+                    return Err(RuntimeValidationError::new(
+                        RuntimeValidationFailure::OwnerClosed,
+                    ));
                 }
             }
             return Ok(());
@@ -877,8 +866,7 @@ impl<N: Clone + Eq + std::hash::Hash> AiRuntimeAuthority<N> {
         let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
         match tool_name {
             "run_command" => {
-                self
-                    .validate_run_command_handle(tool_session_id, raw_handle_id)?;
+                self.validate_run_command_handle(tool_session_id, raw_handle_id)?;
             }
             "observe_terminal" | "get_transport_session_state" => {
                 self.validate_terminal_handle(

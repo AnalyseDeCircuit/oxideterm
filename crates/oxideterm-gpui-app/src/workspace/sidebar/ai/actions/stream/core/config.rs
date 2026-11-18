@@ -571,54 +571,6 @@ impl WorkspaceApp {
             .map(ai_build_transcript_lookup_prompt_reference)
     }
 
-    pub(in crate::workspace) fn show_ai_trim_notice(
-        &mut self,
-        count: usize,
-        cx: &mut Context<Self>,
-    ) {
-        let sequence = self
-            .ai
-            .state
-            .update(cx, |ai, _cx| ai.show_context_trim_notice(count));
-        cx.spawn(async move |weak, cx| {
-            Timer::after(Duration::from_secs(5)).await;
-            let _ = weak.update(cx, |this, cx| {
-                let cleared = this
-                    .ai
-                    .state
-                    .update(cx, |ai, _cx| ai.clear_context_trim_notice(sequence));
-                if cleared {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    pub(in crate::workspace) fn persist_ai_transcript_entries(
-        &self,
-        conversation_id: String,
-        entries: Vec<oxideterm_ai::PersistedTranscriptEntry>,
-        cx: &App,
-    ) {
-        self.ai
-            .state
-            .read(cx)
-            .persist_transcript_entries(conversation_id, entries);
-    }
-
-    pub(in crate::workspace) fn persist_ai_diagnostic_events(
-        &self,
-        conversation_id: String,
-        events: Vec<oxideterm_ai::PersistedDiagnosticEvent>,
-        cx: &App,
-    ) {
-        self.ai
-            .state
-            .read(cx)
-            .persist_diagnostic_events(conversation_id, events);
-    }
-
     pub(in crate::workspace) fn ai_diagnostic_base(
         &self,
         data: serde_json::Value,

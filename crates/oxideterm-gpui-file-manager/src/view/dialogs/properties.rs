@@ -4,7 +4,7 @@ impl FileManagerView {
     pub(super) fn render_file_manager_properties_dialog(
         &self,
         entry: LocalFileEntry,
-        details: FileManagerProperties,
+        details: oxideterm_local_files::LocalFileProperties,
         has_background: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {

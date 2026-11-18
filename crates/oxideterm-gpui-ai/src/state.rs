@@ -48,6 +48,9 @@ pub use model::*;
 pub use stream_apply::*;
 mod stream_apply;
 mod stream_records;
+mod conversation_queue;
+pub mod compaction;
+pub mod launch;
 pub mod skills;
 
 pub mod agents;
@@ -397,6 +400,10 @@ struct AiChatStreamRun {
 
 impl AiWorkspaceEntity {
     /// Returns the protected provider key store without copying key material.
+    pub(crate) fn task_runtime(&self) -> &Arc<tokio::runtime::Runtime> {
+        &self.task_runtime
+    }
+
     pub fn key_store(&self) -> &oxideterm_ai::AiProviderKeyStore {
         &self.key_store
     }
@@ -3908,8 +3915,15 @@ impl AiWorkspaceEntity {
             AI_CHAT_STREAM_DELIVERY_BUDGET,
         );
         if !drain.items.is_empty() {
-            self.chat_stream_deliveries.extend(drain.items);
-            cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+            let mut deliveries = std::mem::take(&mut self.chat_stream_deliveries);
+            deliveries.extend(drain.items);
+            if crate::stream::AiChatDeliveryBatch::apply_local_prefix(&mut deliveries, self) {
+                cx.notify();
+            }
+            self.chat_stream_deliveries = deliveries;
+            if !self.chat_stream_deliveries.is_empty() {
+                cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+            }
         }
         drain.outcome.backlog_remaining
     }
@@ -5284,6 +5298,11 @@ mod entity_tests {
                 model_selector_surface: true,
                 settings_surface: false,
             });
+            entity.create_chat_conversation("conversation-a".into(), None, 1);
+            let mut message = oxideterm_ai::tool_loop::agent_chat_message(oxideterm_ai::AiChatRole::Assistant, String::new());
+            message.id = "assistant-a".into();
+            message.is_streaming = true;
+            entity.add_message("conversation-a", message);
             let stream = entity.begin_chat_stream("conversation-a".into(), "assistant-a".into());
             entity.set_workspace_visibility(AiWorkspaceVisibility::default());
             stream
@@ -5299,16 +5318,33 @@ mod entity_tests {
             })
             .unwrap();
 
+        worker_tx
+            .send(AiStreamDelivery {
+                generation,
+                conversation_id: "conversation-a".into(),
+                assistant_id: "assistant-a".into(),
+                event: AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Done),
+            })
+            .unwrap();
+        worker_tx
+            .send(AiStreamDelivery {
+                generation,
+                conversation_id: "conversation-a".into(),
+                assistant_id: "assistant-a".into(),
+                event: AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content("late".into())),
+            })
+            .unwrap();
         cx.run_until_parked();
 
-        let deliveries = entity.update(cx, |entity, _cx| entity.take_chat_stream_deliveries());
-        assert_eq!(deliveries.len(), 1);
-        assert!(matches!(
-            &deliveries.front().expect("chat delivery").event,
-            AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content(chunk))
-                if chunk == "chunk"
-        ));
         entity.update(cx, |entity, _cx| {
+            let mut queued = entity.take_chat_stream_deliveries();
+            assert!(matches!(queued.pop_front().unwrap().event,
+                AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Done)));
+            assert!(matches!(queued.pop_front().unwrap().event,
+                AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content(chunk)) if chunk == "late"));
+            let message = entity.conversation_state().active_conversation().unwrap()
+                .messages.iter().find(|message| message.id == "assistant-a").unwrap();
+            assert_eq!(message.content, "chunk");
             assert!(entity.complete_chat_stream(generation));
             assert!(!entity.is_chat_stream_generation(generation));
             assert!(!entity.complete_chat_stream(generation));

@@ -121,6 +121,7 @@ fn file_manager_base_environment(
         background: false,
         modal_background: false,
         chrome_divider: rgb(tokens.ui.border),
+        ui_font_family: settings_ui_font_family(&settings.appearance.ui_font_family),
         mono_font_family: mono_font_family.clone(),
         mono_font_size: settings.terminal.font_size as f32,
         editor: FileManagerEditorFonts {
@@ -128,7 +129,7 @@ fn file_manager_base_environment(
             editor_font_weight: settings.terminal.font_weight as f32,
             editor_font_fallback: None,
             editor_font_size: settings.terminal.font_size as f32,
-            editor_line_height: settings.terminal.resolved_ide_line_height(),
+            editor_line_height: settings.terminal.resolved_ide_line_height() as f32,
             word_wrap: settings.ide.word_wrap,
             background_active: false,
         },
@@ -266,7 +267,9 @@ impl WorkspaceApp {
     fn handle_file_manager_request(&mut self, request: FileManagerRequest, cx: &mut Context<Self>) {
         match request {
             FileManagerRequest::ClearIme => {
-                if self.ime_marked_text.take().is_some() { cx.notify(); }
+                if self.ime_marked_text.take().is_some() {
+                    cx.notify();
+                }
             }
             FileManagerRequest::ClearImeSelection => {
                 if self.clear_ime_selection() {
@@ -478,16 +481,6 @@ impl WorkspaceApp {
         self.file_manager
             .body
             .update(cx, |view, cx| view.refresh_file_manager_path_completion(cx));
-    }
-
-    pub(in crate::workspace) fn accept_file_manager_path_completion(
-        &mut self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        self.file_manager.body.update(cx, |view, cx| {
-            view.accept_file_manager_path_completion(index, cx)
-        });
     }
 
     pub(in crate::workspace) fn file_manager_bookmarks_resize_active(

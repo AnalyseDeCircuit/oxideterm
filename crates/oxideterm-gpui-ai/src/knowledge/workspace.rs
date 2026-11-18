@@ -78,11 +78,8 @@ pub enum KnowledgeRequest {
     SaveEditorPreferences(KnowledgeEditorUiState),
     CreateNotebook,
     CreateDocument(String),
-    DeleteNotebook(String, String),
-    DeleteDocument(String, String),
+    FocusDeleteConfirmation,
     Import(String),
-    Embed(String),
-    Reindex(String),
     Settings,
 }
 
@@ -108,6 +105,7 @@ pub struct KnowledgeBindings {
     pub frame: Rc<dyn Fn(KnowledgeInput, &App) -> Option<KnowledgeInputFrame>>,
     pub input: Rc<dyn Fn(KnowledgeInputRequest, &mut Window, &mut App)>,
     pub request: Rc<dyn Fn(KnowledgeRequest, Option<&mut Window>, &mut App)>,
+    pub embedding_job: Rc<dyn Fn(&App) -> Option<Result<super::page::EmbeddingJob, String>>>,
 }
 
 pub struct KnowledgeViews {
@@ -360,11 +358,7 @@ impl KnowledgeWorkspaceView {
             false,
             false,
             move |this, _, window, cx| {
-                (this.bindings.request)(
-                    KnowledgeRequest::DeleteDocument(delete_id.clone(), document.title.clone()),
-                    Some(window),
-                    cx,
-                );
+                this.confirm_knowledge_delete(false, delete_id.clone(), document.title.clone(), window, cx);
                 cx.stop_propagation();
             },
             cx,
@@ -1405,3 +1399,17 @@ fn knowledge_document_matches(title: &str, content: &str, terms: &[String]) -> b
 
 #[cfg(test)]
 mod tests;
+
+impl KnowledgeWorkspaceView {
+    fn confirm_knowledge_delete(&mut self, notebook: bool, id: String, title: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.bindings.page.update(cx, |page, cx| {
+            if notebook {
+                page.request_delete_knowledge_collection(id, title);
+            } else {
+                page.request_delete_knowledge_document(id, title);
+            }
+            cx.notify();
+        });
+        (self.bindings.request)(KnowledgeRequest::FocusDeleteConfirmation, Some(window), cx);
+    }
+}

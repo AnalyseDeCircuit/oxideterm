@@ -40,6 +40,130 @@ impl AiOrchestratorRuntimeSnapshot {
     }
 }
 
+/// Application surfaces are durable navigation destinations, not live tab identities.
+pub fn ai_app_surface_stable_resources() -> Vec<crate::StableResourceRef> {
+    const SURFACES: &[(&str, &str)] = &[
+        ("settings", "Settings"),
+        ("connection_manager", "Connection manager"),
+        ("connection_pool", "Connection pool"),
+        ("connection_monitor", "Connection monitor"),
+        ("sftp", "SFTP"),
+        ("ide", "IDE"),
+        ("file_manager", "File manager"),
+        ("local_terminal", "Local terminal"),
+        ("terminal", "Terminal"),
+    ];
+
+    SURFACES
+        .iter()
+        .filter_map(|(id, label)| {
+            crate::StableResourceRef::new(
+                crate::StableResourceKind::AppSurface,
+                (*id).to_string(),
+                Some((*label).to_string()),
+            )
+            .ok()
+        })
+        .collect()
+}
+
+pub fn ai_transfer_path_looks_directory(path: &str) -> bool {
+    // Tauri uses /[\\/]$/ so both POSIX and Windows-style trailing separators
+    // select directory transfer semantics.
+    path.ends_with('/') || path.ends_with('\\')
+}
+
+pub fn ai_application_action_result(
+    snapshot: &AiOrchestratorRuntimeSnapshot,
+    result: Result<serde_json::Value, String>,
+    summary: &str,
+    risk: &'static str,
+) -> AiActionResultLite {
+    match result {
+        Ok(data) => snapshot.ok(
+            summary,
+            serde_json::to_string_pretty(&data).unwrap_or_default(),
+            data,
+            risk,
+        ),
+        Err(message) => snapshot.fail(summary, "application_tool_failed", message, risk),
+    }
+}
+
+pub fn ai_target_state<N: Clone + Eq + std::hash::Hash>(
+    snapshot: &AiOrchestratorRuntimeSnapshot,
+    authority: &crate::AiRuntimeAuthority<N>,
+    tool_session_id: &crate::ToolSessionId,
+    args: &serde_json::Value,
+    saved_connection_exists: impl Fn(&str) -> bool,
+) -> AiActionResultLite {
+    if args.get("scope").and_then(serde_json::Value::as_str) != Some("target") {
+        return snapshot.get_state(args);
+    }
+    if args.get("handle_id").is_some() {
+        return match authority.validate_state_handle(
+            tool_session_id,
+            args.get("handle_id").and_then(serde_json::Value::as_str),
+        ) {
+            Ok(handle) => snapshot.ok(
+                "Read current target state.",
+                serde_json::to_string_pretty(&handle).unwrap_or_default(),
+                serde_json::to_value(handle).unwrap_or(serde_json::Value::Null),
+                "read",
+            ),
+            Err(error) => snapshot.fail(
+                "Runtime target is unavailable.",
+                error.public_code(),
+                "Rediscover current targets before retrying.",
+                "read",
+            ),
+        };
+    }
+
+    let Some(resource_ref) = args
+        .get("resource_ref")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<crate::StableResourceRef>(value).ok())
+    else {
+        return snapshot.fail(
+            "Target authority is required.",
+            "runtime_handle_missing",
+            "Provide one current handle or durable resource reference.",
+            "read",
+        );
+    };
+    if resource_ref.kind() == crate::StableResourceKind::SavedConnection
+        && !saved_connection_exists(resource_ref.id())
+    {
+        return snapshot.fail(
+            "Saved resource no longer exists.",
+            "resource_removed",
+            "Rediscover saved connections before retrying.",
+            "read",
+        );
+    }
+    let state = snapshot
+        .targets
+        .iter()
+        .find(|target| ai_stable_resource_ref_for_target(target).as_ref() == Some(&resource_ref))
+        .and_then(|target| snapshot.model_target_json(target))
+        .unwrap_or_else(|| {
+            serde_json::json!({
+                "authority": {
+                    "kind": "stable_resource",
+                    "resource_ref": resource_ref,
+                },
+                "state": "available",
+            })
+        });
+    snapshot.ok(
+        "Read durable target state.",
+        serde_json::to_string_pretty(&state).unwrap_or_default(),
+        state,
+        "read",
+    )
+}
+
 impl AiOrchestratorRuntimeSnapshot {
     pub fn list_targets(&self, args: &serde_json::Value) -> AiActionResultLite {
         let view = normalized_ai_target_view(args.get("view").and_then(serde_json::Value::as_str));

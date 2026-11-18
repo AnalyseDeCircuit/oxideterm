@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{collections::HashSet, path::PathBuf, sync::Arc};
 
 use oxideterm_ai::tool_resources::{AiActionResultLite, AiOrchestratorRuntimeSnapshot};
 use oxideterm_skills::{SkillDiscoveryOptions, SkillRegistry};
@@ -20,7 +20,12 @@ impl AiSkillCatalog {
         }
     }
 
-    pub fn refresh(&self, settings_path: PathBuf, plugin_roots: Vec<PathBuf>, disabled_paths: Vec<PathBuf>) {
+    pub fn refresh(
+        &self,
+        settings_path: PathBuf,
+        plugin_roots: Vec<PathBuf>,
+        disabled_paths: HashSet<PathBuf>,
+    ) {
         let registry = SkillRegistry::discover(&SkillDiscoveryOptions {
             workspace_root: self.workspace_root.clone(),
             settings_path: Some(settings_path),
@@ -257,18 +262,13 @@ impl AiWorkspaceEntity {
         );
     }
 
-    fn ai_loaded_skill_hash(
-        &self,
-        conversation_id: &str,
-        skill_id: &str,
-    ) -> Option<String> {
+    fn ai_loaded_skill_hash(&self, conversation_id: &str, skill_id: &str) -> Option<String> {
         self.loaded_skill_versions
             .get(conversation_id)
             .and_then(|skills| skills.get(skill_id))
             .cloned()
             .or_else(|| {
-                self
-                    .conversation_state()
+                self.conversation_state()
                     .conversations
                     .iter()
                     .find(|conversation| conversation.id == conversation_id)
@@ -313,5 +313,4 @@ impl AiWorkspaceEntity {
             }
         }
     }
-
 }

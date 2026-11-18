@@ -139,7 +139,7 @@ impl FileManagerView {
         );
         let label = self.i18n.t("fileManager.resizeFavorites");
         panel = panel.child(
-            sidebar::sidebar_resize_hotzone_chrome(
+            oxideterm_gpui_ui::separator::sidebar_resize_hotzone_chrome(
                 "file-manager-bookmarks-resize",
                 file_manager_border(theme.border, has_background),
                 true,
@@ -476,7 +476,7 @@ impl FileManagerView {
                 .rounded(px(self.tokens.radii.sm))
                 .bg(rgba((theme.accent << 8) | FILE_MANAGER_SELECTED_BG_ALPHA));
             self.render_vertical_selection_surface(
-                selection_motion::FILE_MANAGER_NAVIGATION_ID,
+                FILE_MANAGER_NAVIGATION_ID,
                 item_geometry.transition_index,
                 surface,
             )
@@ -497,7 +497,7 @@ impl FileManagerView {
             .file_manager_sidebar_geometry_for_path(&current_path, cx)
             .map(|source_geometry| source_geometry.top - target_geometry.top);
         self.begin_user_segmented_control_transition_with_vertical_offset(
-            selection_motion::FILE_MANAGER_NAVIGATION_ID,
+            FILE_MANAGER_NAVIGATION_ID,
             target_geometry.transition_index,
             vertical_offset_y,
             cx,

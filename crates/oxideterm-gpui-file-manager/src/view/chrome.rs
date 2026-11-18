@@ -1,58 +1,17 @@
 use super::*;
+use gpui::Div;
 use oxideterm_gpui_ui::text_input::{
     TextInputAnchorProbe, text_input_anchor_probe, text_input_with_viewport,
 };
 
 pub(super) mod browser_behavior {
-    use super::*;
-    pub(super) use oxideterm_gpui_ui::confirm::{
+    pub(in crate::view) use oxideterm_gpui_ui::confirm::{
         ModalFooterInputKeyAction, ModalFooterKeyAction, modal_footer_input_key_action,
         modal_footer_key_action,
     };
-    pub(super) struct BrowserOverlayPlacement {
-        pub x: f32,
-        pub y: f32,
-    }
-    pub(super) fn preserve_or_move_context_selection<T>(
-        selected: &mut HashSet<T>,
-        target: T,
-    ) -> bool
-    where
-        T: Clone + Eq + Hash,
-    {
-        // Browser file/table context menus keep an existing multi-selection when
-        // the secondary-click target is already selected, and otherwise move the
-        // selection to the target before opening the menu.
-        if selected.contains(&target) {
-            false
-        } else {
-            selected.clear();
-            selected.insert(target);
-            true
-        }
-    }
-
-    pub(super) fn clamp_context_menu_position(
-        pointer_x: f32,
-        pointer_y: f32,
-        viewport_width: f32,
-        viewport_height: f32,
-        menu_width: f32,
-        menu_height: f32,
-        viewport_margin: f32,
-    ) -> BrowserOverlayPlacement {
-        // Browser/Radix context menus collide against the viewport instead of
-        // letting the menu spill off-screen. Native popovers use window coordinates,
-        // so clamp once here and keep every file/tree/table menu on the same rule.
-        BrowserOverlayPlacement {
-            x: pointer_x
-                .min(viewport_width - menu_width - viewport_margin)
-                .max(viewport_margin),
-            y: pointer_y
-                .min(viewport_height - menu_height - viewport_margin)
-                .max(viewport_margin),
-        }
-    }
+    pub(in crate::view) use oxideterm_gpui_ui::context_menu::{
+        clamp_context_menu_position, preserve_or_move_context_selection,
+    };
 }
 
 pub(super) fn selectable_text_id(scope: &str, key: impl Hash) -> u64 {
@@ -65,9 +24,6 @@ pub(super) fn selectable_text_id(scope: &str, key: impl Hash) -> u64 {
 pub(super) trait SelectableTextScrollExt:
     StatefulInteractiveElement + ScrollableElement + Sized
 {
-    fn selectable_overflow_y_scroll(self, handle: &ScrollHandle) -> Self {
-        self.overflow_y_scroll().track_scroll(handle)
-    }
     fn selectable_overflow_y_scrollbar(self, handle: &ScrollHandle) -> Self {
         self.overflow_y_scroll()
             .track_scroll(handle)
@@ -160,12 +116,23 @@ impl FileManagerView {
     ) -> Option<AnyElement> {
         let bounds = self.ime[FileManagerInput::Path.index()].anchor?.bounds;
         let state = &self.file_manager.read(cx).path_completion;
-        if !state.is_visible() { return None; }
+        if !state.is_visible() {
+            return None;
+        }
         let view = cx.weak_entity();
-        Some(crate::render_completion_popup("file-manager-path-completion", &self.tokens, bounds,
-            state.selected_index(), state.scroll_handle.clone(), state.suggestions(), move |index, cx| {
-                let _ = view.update(cx, |view, cx| view.accept_file_manager_path_completion(index, cx));
-            }))
+        Some(crate::render_completion_popup(
+            "file-manager-path-completion",
+            &self.tokens,
+            bounds,
+            state.selected_index(),
+            state.scroll_handle.clone(),
+            state.suggestions(),
+            move |index, cx| {
+                let _ = view.update(cx, |view, cx| {
+                    view.accept_file_manager_path_completion(index, cx)
+                });
+            },
+        ))
     }
 
     pub(super) fn ime_selected_range_for_target(
@@ -233,6 +200,8 @@ impl FileManagerView {
                 self.render_selectable_display_text(scope, key, text, color, cx)
             }
             SelectableTextRole::NonSelectable => div()
+                .min_w_0()
+                .font_family(self.ui_font_family.clone())
                 .text_color(rgb(color))
                 .child(text.into())
                 .into_any_element(),
@@ -266,7 +235,8 @@ impl FileManagerView {
         color: u32,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.render_selectable_text_scoped(scope, key, text.into(), color, cx)
+        let text = text.into();
+        self.render_selectable_text_scoped(scope, (key, text.as_str()), text.clone(), color, cx)
     }
     pub(super) fn render_row_safe_selectable_display_text_in_group(
         &self,
@@ -292,13 +262,21 @@ impl FileManagerView {
 
     pub(super) fn queue_workspace_tooltip(
         &mut self,
-        id: String,
+        id: impl Into<String>,
         label: String,
         x: f32,
         y: f32,
         cx: &mut Context<Self>,
     ) {
-        self.request(FileManagerRequest::Tooltip { id, label, x, y }, cx);
+        self.request(
+            FileManagerRequest::Tooltip {
+                id: id.into(),
+                label,
+                x,
+                y,
+            },
+            cx,
+        );
     }
     pub(super) fn clear_workspace_tooltip(&self, id: &str, cx: &mut Context<Self>) {
         self.request(FileManagerRequest::ClearTooltip(id.to_owned()), cx);
@@ -339,7 +317,7 @@ impl FileManagerView {
         .detach();
     }
 
-    fn workspace_tooltip_icon_button(
+    pub(in crate::view) fn workspace_tooltip_icon_button(
         &self,
         icon: LucideIcon,
         icon_size: f32,
@@ -401,7 +379,7 @@ impl FileManagerView {
         .into_any_element()
     }
 
-    fn workspace_icon_action_button(
+    pub(in crate::view) fn workspace_icon_action_button(
         &self,
         icon: LucideIcon,
         icon_size: f32,
@@ -432,7 +410,7 @@ impl FileManagerView {
         })
     }
 
-    fn workspace_toolbar_action_button(
+    pub(in crate::view) fn workspace_toolbar_action_button(
         &self,
         label: String,
         icon: Option<AnyElement>,
@@ -448,7 +426,7 @@ impl FileManagerView {
         )
     }
 
-    fn workspace_confirm_footer_action_button(
+    pub(in crate::view) fn workspace_confirm_footer_action_button(
         &self,
         label: String,
         variant: oxideterm_gpui_ui::button::ButtonVariant,
@@ -505,7 +483,7 @@ impl FileManagerView {
         )
     }
 
-    fn workspace_context_menu_backdrop(
+    pub(in crate::view) fn workspace_context_menu_backdrop(
         &self,
         menu: impl gpui::IntoElement,
         cx: &mut Context<Self>,
@@ -525,14 +503,15 @@ impl FileManagerView {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, _event, window, cx| {
-                    this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+                    this.dismiss_file_manager_context_menu(cx);
+                    this.pointer(FileManagerPointer::DismissTransient, window, cx);
                     cx.stop_propagation();
                 }),
             )
             .child(menu)
     }
 
-    fn workspace_context_menu_styled_action(
+    pub(in crate::view) fn workspace_context_menu_styled_action(
         &self,
         item: gpui::Div,
         disabled: bool,

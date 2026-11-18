@@ -851,37 +851,3 @@ async fn start_sftp_directory_transfer(
         "transfer": snapshot,
     }))
 }
-
-/// Application surfaces are durable navigation destinations, not live tab identities.
-pub(in crate::workspace) fn ai_app_surface_stable_resources() -> Vec<oxideterm_ai::StableResourceRef>
-{
-    const SURFACES: &[(&str, &str)] = &[
-        ("settings", "Settings"),
-        ("connection_manager", "Connection manager"),
-        ("connection_pool", "Connection pool"),
-        ("connection_monitor", "Connection monitor"),
-        ("sftp", "SFTP"),
-        ("ide", "IDE"),
-        ("file_manager", "File manager"),
-        ("local_terminal", "Local terminal"),
-        ("terminal", "Terminal"),
-    ];
-
-    SURFACES
-        .iter()
-        .filter_map(|(id, label)| {
-            oxideterm_ai::StableResourceRef::new(
-                oxideterm_ai::StableResourceKind::AppSurface,
-                (*id).to_string(),
-                Some((*label).to_string()),
-            )
-            .ok()
-        })
-        .collect()
-}
-
-pub(in crate::workspace) fn ai_transfer_path_looks_directory(path: &str) -> bool {
-    // Tauri uses /[\\/]$/ so both POSIX and Windows-style trailing separators
-    // select directory transfer semantics.
-    path.ends_with('/') || path.ends_with('\\')
-}

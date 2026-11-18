@@ -519,8 +519,15 @@ impl WorkspaceApp {
         let model_picker = Self::mount_ai_model_picker(&ai_entity, cx);
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
-            |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
-                workspace.enqueue_ai_window_effect(event, cx);
+            |workspace, ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
+                match event {
+                    ai_state::AiWorkspaceEvent::CompactionDeliveryReady => {
+                        let deliveries = ai_entity.update(cx, |state, _| state.take_compaction_deliveries());
+                        workspace.apply_ai_compaction_deliveries(deliveries, cx);
+                    }
+                    ai_state::AiWorkspaceEvent::CompactionStateChanged => {}
+                    _ => workspace.enqueue_ai_window_effect(event, cx),
+                }
             },
         );
         let acp_entity =

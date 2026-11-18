@@ -1,11 +1,11 @@
-pub(super) fn terminal_cwd_looks_remote(cwd: &str) -> bool {
+pub fn terminal_cwd_looks_remote(cwd: &str) -> bool {
     cwd.starts_with("/home/")
         || cwd.starts_with("/root/")
         || cwd.starts_with("/srv/")
         || cwd.starts_with("/var/www/")
 }
 
-pub(super) fn infer_terminal_ssh_identity_from_buffer(buffer: &str) -> Option<String> {
+pub fn infer_terminal_ssh_identity_from_buffer(buffer: &str) -> Option<String> {
     let tail_start = buffer
         .char_indices()
         .rev()

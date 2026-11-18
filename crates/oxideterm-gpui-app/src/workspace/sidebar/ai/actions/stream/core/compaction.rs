@@ -1,16 +1,19 @@
+use oxideterm_gpui_ai::state::compaction::{
+    AiCompactionBindings, AiCompactionEffect, AiCompactionProfile, AiCompactionRequest,
+};
+
 impl WorkspaceApp {
     pub(in crate::workspace) fn start_ai_compact_conversation(&mut self, cx: &mut Context<Self>) {
-        let Some(conversation_id) = self
+        let id = self
             .ai
             .state
             .read(cx)
             .conversation_state()
-            .active_conversation()
-            .map(|conversation| conversation.id.clone())
-        else {
-            return;
-        };
-        let _ = self.start_ai_compact_conversation_for(conversation_id, false, true, None, cx);
+            .active_conversation_id
+            .clone();
+        if let Some(id) = id {
+            let _ = self.start_ai_compact_conversation_for(id, false, true, None, cx);
+        }
     }
 
     pub(in crate::workspace) fn maybe_start_ai_auto_compaction(
@@ -18,25 +21,15 @@ impl WorkspaceApp {
         conversation_id: &str,
         cx: &mut Context<Self>,
     ) {
-        if self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .conversations
-            .iter()
-            .find(|conversation| conversation.id == conversation_id)
-            .is_none_or(|conversation| conversation.message_count < 6)
-        {
-            return;
+        if self.ai.state.read(cx).should_auto_compact(conversation_id) {
+            let _ = self.start_ai_compact_conversation_for(
+                conversation_id.to_owned(),
+                true,
+                false,
+                None,
+                cx,
+            );
         }
-        let _ = self.start_ai_compact_conversation_for(
-            conversation_id.to_string(),
-            true,
-            false,
-            None,
-            cx,
-        );
     }
 
     pub(in crate::workspace) fn start_ai_compact_conversation_for(
@@ -47,544 +40,123 @@ impl WorkspaceApp {
         resume_after: Option<AiPendingChatStream>,
         cx: &mut Context<Self>,
     ) -> Result<(), Option<Box<AiPendingChatStream>>> {
-        self.load_ai_compaction_history(conversation_id, false, silent, force, resume_after, cx)
-    }
-
-    fn load_ai_compaction_history(
-        &mut self,
-        conversation_id: String,
-        summary: bool,
-        silent: bool,
-        force: bool,
-        resume_after: Option<AiPendingChatStream>,
-        cx: &mut Context<Self>,
-    ) -> Result<(), Option<Box<AiPendingChatStream>>> {
-        let ai = self.ai.state.read(cx);
-        if ai.history.quitting
-            || ai.history.compaction_loads.contains_key(&conversation_id)
-            || ai.compaction_in_progress(&conversation_id)
-        {
-            return Err(resume_after.map(Box::new));
-        }
-        let Some(store) = ai.history.store.clone() else {
-            return Err(resume_after.map(Box::new));
-        };
-        let branch = ai
-            .history
-            .branches
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_else(|| "main".into());
-        let config = match self.resolve_ai_summary_stream_config(!summary, cx) {
-            Ok(config) => config,
-            Err(error) => {
-                if !silent {
-                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
-                }
-                return Err(resume_after.map(Box::new));
-            }
-        };
-        let budget = self
-            .ai_active_model_context_window(&config)
-            .saturating_mul(2);
-        let provider = config.provider_type;
-        let model = config.model;
-        let runtime = self.forwarding_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.ai.state.update(cx, |ai, _| {
-            ai.persist_chat_state();
-            ai.history_barrier(sender);
-        });
-        let target = conversation_id.clone();
-        let task = cx.spawn(async move |weak, cx| {
-            if receiver.await != Ok(true) {
-                let _ = weak.update(cx, |this, cx| {
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.history.compaction_loads.remove(&conversation_id);
-                        ai.set_conversation_loading(&conversation_id, false);
-                    })
-                });
-                return;
-            }
-            let id = conversation_id.clone();
-            let source_branch = branch.clone();
-            let result = runtime
-                .spawn_blocking(move || {
-                    store.model_context(&id, &source_branch, budget, &provider, &model)
-                })
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.compaction_loads.remove(&conversation_id);
-                });
-                let ai = this.ai.state.read(cx);
-                if ai.history.quitting
-                    || ai
-                        .history
-                        .branches
-                        .get(&conversation_id)
-                        .is_some_and(|current| current != &branch)
-                {
-                    return;
-                }
-                let Ok(Ok(source)) = result else {
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.set_conversation_loading(&conversation_id, false);
-                        ai.history_load_failed();
-                    });
-                    cx.notify();
-                    return;
-                };
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history
-                        .compaction_sources
-                        .insert(conversation_id.clone(), (branch, source));
-                });
-                if summary {
-                    if !this
-                        .start_ai_summarize_conversation_from_history(conversation_id.clone(), cx)
-                    {
-                        this.ai.state.update(cx, |ai, _| {
-                            ai.history.compaction_sources.remove(&conversation_id);
-                        });
-                    }
-                } else if let Err(resume) = this.start_ai_compact_conversation_from_history(
-                    conversation_id.clone(),
-                    silent,
-                    force,
-                    resume_after,
-                    cx,
-                ) {
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.history.compaction_sources.remove(&conversation_id);
-                    });
-                    this.resume_ai_chat_after_pre_send_compaction(
-                        resume.map(|pending| *pending),
-                        cx,
-                    );
-                }
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.compaction_loads.insert(target, task);
-        });
-        Ok(())
-    }
-
-    fn start_ai_compact_conversation_from_history(
-        &mut self,
-        conversation_id: String,
-        silent: bool,
-        force: bool,
-        resume_after: Option<AiPendingChatStream>,
-        cx: &mut Context<Self>,
-    ) -> Result<(), Option<Box<AiPendingChatStream>>> {
-        // Return an unconsumed pre-send request when compaction is skipped so
-        // its zeroizing provider configuration never needs to be cloned.
-        let mut messages = match self
-            .ai
-            .state
-            .read(cx)
-            .history
-            .compaction_sources
-            .get(&conversation_id)
-            .map(|(_, conversation)| conversation)
-        {
-            // The worker needs owned messages, but not the conversation's
-            // metadata, title, session state, or branch bookkeeping.
-            Some(conversation) if conversation.messages.len() >= 4 => conversation.messages.clone(),
-            _ => return Err(resume_after.map(Box::new)),
-        };
-        if !self
-            .ai
-            .state
-            .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
-        {
-            return Err(resume_after.map(Box::new));
-        }
-
-        let config = match self.resolve_ai_summary_stream_config(true, cx) {
-            Ok(config) => config,
-            Err(error) => {
-                self.ai
-                    .state
-                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-                if !silent {
-                    self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
-                }
-                return Err(resume_after.map(Box::new));
-            }
-        };
-        oxideterm_ai::scope_responses_history(&mut messages, &config);
-        let context_window = self.ai_active_model_context_window(&config);
-        if silent && !force {
-            let total_tokens = messages
-                .iter()
-                .map(|message| ai_message_payload_estimated_tokens(message, &config.provider_type))
-                .sum::<usize>();
-            let reserve = ai_response_reserve(context_window);
-            let prompt_budget = compute_ai_prompt_budget(context_window, reserve, 0, None);
-            let auto_compact_threshold = if prompt_budget.usable_prompt_budget > 0 {
-                (context_window as f32 * AI_COMPACTION_TRIGGER_THRESHOLD)
-                    / prompt_budget.usable_prompt_budget as f32
-            } else {
-                AI_COMPACTION_TRIGGER_THRESHOLD
-            };
-            let decision = determine_ai_compression_level(AiPromptBudgetInput {
-                context_window,
-                response_reserve: reserve,
-                system_budget: 0,
-                history_tokens: total_tokens,
-                trimmable_history_tokens: None,
-                summary_eligible_tokens: Some(total_tokens),
-                can_summarize: true,
-                can_lookup_transcript: false,
-                in_tool_loop: false,
-                auto_compact_threshold: Some(auto_compact_threshold),
-                transcript_lookup_threshold: None,
-                tool_loop_stop_threshold: None,
-                safety_margin: None,
-            });
-            if decision.level < 2 {
-                self.ai
-                    .state
-                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-                return Err(resume_after.map(Box::new));
-            }
-        }
-        let Some(plan) = ai_compaction_plan_for_provider(
-            &messages,
-            context_window,
-            silent,
-            &config.provider_type,
-        ) else {
-            self.ai
-                .state
-                .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-            return Err(resume_after.map(Box::new));
-        };
-        if silent {
-            self.ai.state.update(cx, |ai, cx| {
-                ai.set_compaction_notice_running(&conversation_id, cx);
-            });
-        }
-        let summary_messages = ai_compaction_summary_messages(&plan.compact_messages);
-        let base_ids = messages
-            .iter()
-            .map(|message| message.id.clone())
-            .collect::<Vec<_>>();
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let ui_tx = self.ai.state.read(cx).compaction_sender();
-        self.start_ai_compaction_stream_after_api_key_lookup(
-            config,
-            AiCompactionDeliveryKind::Compact,
-            conversation_id,
-            base_ids,
-            Some(plan),
-            summary_messages,
-            resume_after,
-            silent,
-            tx,
-            rx,
-            ui_tx,
+        self.request_ai_compaction(
+            AiCompactionRequest {
+                conversation_id,
+                summarize: false,
+                silent,
+                force,
+                resume_after,
+            },
             cx,
-        );
-        Ok(())
+        )
     }
 
     pub(in crate::workspace) fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
-        let Some(id) = self
+        let id = self
             .ai
             .state
             .read(cx)
             .conversation_state()
             .active_conversation_id
-            .clone()
-        else {
-            return;
-        };
-        let _ = self.load_ai_compaction_history(id, true, false, true, None, cx);
-    }
-
-    fn start_ai_summarize_conversation_from_history(
-        &mut self,
-        target: String,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        let (conversation_id, messages) = match self
-            .ai
-            .state
-            .read(cx)
-            .history
-            .compaction_sources
-            .get(&target)
-            .map(|(_, conversation)| conversation)
-        {
-            // Summarization consumes message history only; keep unrelated
-            // conversation metadata inside the Entity.
-            Some(conversation) if conversation.messages.len() >= 4 => {
-                (conversation.id.clone(), conversation.messages.clone())
-            }
-            _ => return false,
-        };
-        if !self
-            .ai
-            .state
-            .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
-        {
-            return false;
+            .clone();
+        if let Some(conversation_id) = id {
+            let _ = self.request_ai_compaction(
+                AiCompactionRequest {
+                    conversation_id,
+                    summarize: true,
+                    silent: false,
+                    force: true,
+                    resume_after: None,
+                },
+                cx,
+            );
         }
-
-        let config = match self.resolve_ai_summary_stream_config(false, cx) {
-            Ok(config) => config,
-            Err(error) => {
-                self.ai
-                    .state
-                    .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
-                self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
-                return false;
-            }
-        };
-        let summary_messages = ai_conversation_summary_messages(&messages);
-        let base_ids = messages
-            .iter()
-            .map(|message| message.id.clone())
-            .collect::<Vec<_>>();
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let ui_tx = self.ai.state.read(cx).compaction_sender();
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.set_conversation_loading(&conversation_id, true)
-        });
-        self.start_ai_compaction_stream_after_api_key_lookup(
-            config,
-            AiCompactionDeliveryKind::Summary,
-            conversation_id,
-            base_ids,
-            None,
-            summary_messages,
-            None,
-            false,
-            tx,
-            rx,
-            ui_tx,
-            cx,
-        );
-        cx.notify();
-        true
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(in crate::workspace) fn start_ai_compaction_stream_after_api_key_lookup(
+    fn read_ai_compaction_profile(
+        &self,
+        compact: bool,
+        cx: &App,
+    ) -> Result<AiCompactionProfile, String> {
+        let config = self.resolve_ai_summary_stream_config(compact, cx)?;
+        let context_window = self.ai_active_model_context_window(&config);
+        Ok(AiCompactionProfile {
+            config,
+            context_window,
+        })
+    }
+
+    fn request_ai_compaction(
         &mut self,
-        mut config: AiChatStreamConfig,
-        kind: AiCompactionDeliveryKind,
-        conversation_id: String,
-        base_ids: Vec<String>,
-        plan: Option<AiCompactionPlan>,
-        summary_messages: Vec<AiChatMessage>,
-        resume_after: Option<AiPendingChatStream>,
-        silent: bool,
-        tx: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
-        rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
-        ui_tx: AiCompactionDeliverySender,
+        request: AiCompactionRequest,
         cx: &mut Context<Self>,
-    ) {
-        let requires_key = ai_provider_chat_requires_key(&config.provider_type);
-        let provider_id = config.provider_id.clone();
-        let key_store = self.ai.state.read(cx).key_store().clone();
-        let runtime = self.forwarding_runtime.clone();
-        let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
-        let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
-        let Some(generation) = self
-            .ai
-            .state
-            .read(cx)
-            .history
-            .compaction_runs
-            .get(&conversation_id)
-            .map(|(generation, _)| *generation)
-        else {
-            return;
+    ) -> Result<(), Option<Box<AiPendingChatStream>>> {
+        let profile = self.read_ai_compaction_profile(!request.summarize, cx);
+        let owner = cx.weak_entity();
+        let effects = owner.clone();
+        let bindings = AiCompactionBindings {
+            i18n: self.i18n.clone(),
+            current_profile: Rc::new(move |compact, cx| {
+                Some(
+                    owner
+                        .upgrade()?
+                        .read(cx)
+                        .read_ai_compaction_profile(compact, cx),
+                )
+            }),
+            dispatch: Rc::new(move |effect, cx| {
+                let _ = effects.update(cx, |app, cx| app.handle_ai_compaction_effect(effect, cx));
+            }),
         };
-        let target = conversation_id.clone();
-        let task = cx.spawn(async move |weak, cx| {
-            let key_result = if let Some(provider_id) = provider_id {
-                runtime
-                    .spawn_blocking(move || key_store.get_provider_key(&provider_id))
-                    .await
-                    .map_err(|error| error.to_string())
-                    .and_then(|result| result.map_err(|error| error.to_string()))
-            } else {
-                Ok(None)
-            };
-            let _ = weak.update(cx, |this, cx| {
-                if this
+        self.ai.state.update(cx, |state, cx| {
+            state.start_compaction_request(request, profile, bindings, cx)
+        })
+    }
+
+    fn handle_ai_compaction_effect(&mut self, effect: AiCompactionEffect, cx: &mut Context<Self>) {
+        match effect {
+            AiCompactionEffect::ShowError(message) => {
+                self.push_ai_settings_toast(message, TerminalNoticeVariant::Error, cx)
+            }
+            AiCompactionEffect::Resume(pending) => {
+                if self
                     .ai
                     .state
                     .read(cx)
-                    .history
-                    .compaction_runs
-                    .get(&conversation_id)
-                    .is_none_or(|(current, _)| *current != generation)
+                    .chat_launch_matches(&pending.conversation_id, pending.launch_id.as_deref())
                 {
-                    return;
+                    self.start_ai_chat_stream_after_budget_preflight(
+                        pending.conversation_id,
+                        pending.config,
+                        pending.request_content,
+                        pending.task_system_prompt,
+                        pending.rag_system_prompt,
+                        false,
+                        cx,
+                    );
                 }
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.compaction_key_loads.remove(&conversation_id);
-                });
-                if !this.ai.state.read(cx).history_ready()
-                    || this.ai.state.read(cx).history.quitting
-                {
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.finish_compaction(&conversation_id);
-                        ai.history.compaction_sources.remove(&conversation_id);
-                        ai.set_conversation_loading(&conversation_id, false);
-                    });
-                    return;
-                }
-                match key_result {
-                    Ok(api_key) => {
-                        if requires_key && api_key.is_none() {
-                            this.ai.state.update(cx, |ai, _cx| {
-                                ai.finish_compaction(&conversation_id);
-                                ai.history.compaction_sources.remove(&conversation_id);
-                            });
-                            this.ai.state.update(cx, |ai, _cx| {
-                                ai.set_conversation_loading(&conversation_id, false)
-                            });
-                            if silent {
-                                this.ai.state.update(cx, |ai, cx| {
-                                    ai.clear_compaction_notice_for(&conversation_id, cx);
-                                });
-                            }
-                            if !silent {
-                                this.push_ai_settings_toast(
-                                    api_key_not_found,
-                                    TerminalNoticeVariant::Error,
-                                    cx,
-                                );
-                            }
-                            this.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
-                            cx.notify();
-                            return;
-                        }
-                        config.api_key = api_key.map(oxideterm_ai::SharedAiProviderKey::new);
-                        this.start_ai_compaction_stream_with_config(
-                            config,
-                            kind,
-                            conversation_id,
-                            base_ids,
-                            plan,
-                            summary_messages,
-                            resume_after,
-                            silent,
-                            tx,
-                            rx,
-                            ui_tx,
-                            cx,
-                        );
-                    }
-                    Err(_) if requires_key => {
-                        this.ai.state.update(cx, |ai, _cx| {
-                            ai.finish_compaction(&conversation_id);
-                            ai.history.compaction_sources.remove(&conversation_id);
-                        });
-                        this.ai.state.update(cx, |ai, _cx| {
-                            ai.set_conversation_loading(&conversation_id, false)
-                        });
-                        if silent {
-                            this.ai.state.update(cx, |ai, cx| {
-                                ai.clear_compaction_notice_for(&conversation_id, cx);
-                            });
-                        }
-                        if !silent {
-                            this.push_ai_settings_toast(
-                                failed_to_get_key,
-                                TerminalNoticeVariant::Error,
-                                cx,
-                            );
-                        }
-                        this.resume_ai_chat_after_pre_send_compaction(resume_after, cx);
-                        cx.notify();
-                    }
-                    Err(_) => {
-                        config.api_key = None;
-                        this.start_ai_compaction_stream_with_config(
-                            config,
-                            kind,
-                            conversation_id,
-                            base_ids,
-                            plan,
-                            summary_messages,
-                            resume_after,
-                            silent,
-                            tx,
-                            rx,
-                            ui_tx,
-                            cx,
-                        );
-                    }
-                }
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.compaction_key_loads.insert(target, task);
-        });
+            }
+        }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(in crate::workspace) fn start_ai_compaction_stream_with_config(
+    pub(in crate::workspace) fn apply_ai_compaction_deliveries(
         &mut self,
-        config: AiChatStreamConfig,
-        kind: AiCompactionDeliveryKind,
-        conversation_id: String,
-        base_ids: Vec<String>,
-        plan: Option<AiCompactionPlan>,
-        summary_messages: Vec<AiChatMessage>,
-        resume_after: Option<AiPendingChatStream>,
-        silent: bool,
-        tx: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
-        rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
-        ui_tx: AiCompactionDeliverySender,
+        deliveries: VecDeque<AiCompactionDelivery>,
         cx: &mut Context<Self>,
     ) {
-        let Some(generation) = self
-            .ai
-            .state
-            .read(cx)
-            .history
-            .compaction_runs
-            .get(&conversation_id)
-            .map(|(generation, _)| *generation)
-        else {
-            return;
-        };
-        let target = conversation_id.clone();
-        let model = tokio_util::task::AbortOnDropHandle::new(
-            self.forwarding_runtime
-                .spawn(stream_chat_completion(config, summary_messages, tx)),
-        );
-        let task = self.forwarding_runtime.spawn(async move {
-            let _model = model;
-            let (summary, failed) = collect_ai_compaction_summary(rx).await;
-            let _ = ui_tx.send(AiCompactionDelivery {
-                generation,
-                kind,
-                conversation_id,
-                base_ids,
-                plan,
-                summary,
-                failed,
-                resume_after,
-                silent,
+        for delivery in deliveries {
+            let effects = self.ai.state.update(cx, |state, cx| {
+                state.apply_compaction_delivery(
+                    delivery,
+                    &self.i18n,
+                    |data| self.ai_diagnostic_base(data),
+                    cx,
+                )
             });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            if let Some((_, owner)) = ai.history.compaction_runs.get_mut(&target) {
-                *owner = Some(task);
-            } else {
-                task.abort();
+            for effect in effects {
+                self.handle_ai_compaction_effect(effect, cx);
             }
-        });
+        }
     }
 }

@@ -14,7 +14,8 @@ pub use archive::{
 };
 pub use bookmarks::{
     BOOKMARKS_FILENAME, bookmark_name_for_path, default_file_manager_bookmarks_path,
-    new_file_manager_bookmark_id, now_ms,
+    load_local_bookmarks, new_file_manager_bookmark_id, now_ms, reorder_local_bookmarks,
+    save_local_bookmarks,
 };
 pub use checksum::calculate_local_checksum;
 pub use drives::{directory_stats, local_drives};
@@ -26,7 +27,8 @@ pub use model::{
     LocalSortField,
 };
 pub use operations::{
-    copy_recursively, copy_recursively_with_progress, local_operation_unit_count,
+    copy_recursively, copy_recursively_with_progress, create_local_file, create_local_folder,
+    delete_local_entries, local_operation_unit_count, rename_local_entry,
 };
 pub use paths::{
     default_download_path, home_path, join_local_path, local_parent_path, local_path_segments,
@@ -40,7 +42,9 @@ pub use preview::{
 mod external;
 mod path_completion;
 mod preview_stream;
-pub use external::{local_file_audit_context, open_path_external, reveal_path_external};
+pub use external::{
+    local_file_audit_context, local_file_operation, open_path_external, reveal_path_external,
+};
 pub use path_completion::{
     PathCompletionCandidate, PathCompletionRequest, local_path_completion_request,
     split_path_completion_request,

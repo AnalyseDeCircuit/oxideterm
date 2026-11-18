@@ -2,10 +2,7 @@ use super::*;
 
 impl FileManagerState {
     fn save_bookmarks(&self) -> Result<(), String> {
-        let bytes =
-            serde_json::to_vec_pretty(&self.bookmarks).map_err(|error| error.to_string())?;
-        oxideterm_atomic_file::durable_write(&self.bookmarks_path, &bytes)
-            .map_err(|error| error.to_string())
+        oxideterm_local_files::save_local_bookmarks(&self.bookmarks_path, &self.bookmarks)
     }
 
     fn reorder_bookmark(
@@ -14,36 +11,13 @@ impl FileManagerState {
         target: &str,
         after: bool,
     ) -> Result<bool, String> {
-        let Some(from) = self
-            .bookmarks
-            .iter()
-            .position(|bookmark| bookmark.id == source)
-        else {
-            return Ok(false);
-        };
-        let Some(target) = self
-            .bookmarks
-            .iter()
-            .position(|bookmark| bookmark.id == target)
-        else {
-            return Ok(false);
-        };
-        if from == target {
-            return Ok(false);
-        }
-        let slot = target + usize::from(after);
-        let to = slot - usize::from(from < slot);
-        if from == to {
-            return Ok(false);
-        }
-        let previous = self.bookmarks.clone();
-        let moved = self.bookmarks.remove(from);
-        self.bookmarks.insert(to, moved);
-        if let Err(error) = self.save_bookmarks() {
-            self.bookmarks = previous;
-            return Err(error);
-        }
-        Ok(true)
+        oxideterm_local_files::reorder_local_bookmarks(
+            &mut self.bookmarks,
+            &self.bookmarks_path,
+            source,
+            target,
+            after,
+        )
     }
 }
 
@@ -252,7 +226,7 @@ impl FileManagerView {
         match result {
             Ok(true) => {
                 self.segmented_control_user_motion
-                    .clear(selection_motion::FILE_MANAGER_NAVIGATION_ID);
+                    .clear(FILE_MANAGER_NAVIGATION_ID);
                 cx.notify();
             }
             Ok(false) => {}
@@ -265,7 +239,7 @@ impl FileManagerView {
         }
     }
 
-    fn persist_file_manager_bookmarks(&mut self, cx: &App) {
+    fn persist_file_manager_bookmarks(&mut self, cx: &mut App) {
         match self.file_manager.read(cx).save_bookmarks() {
             Ok(()) => {}
             Err(error) => self.push_file_manager_toast(

@@ -32,6 +32,42 @@ impl AiChatDeliveryBatch {
         }
     }
 
+    /// Consume a prefix that needs neither the window nor a live owner.
+    /// Leave the first host request and everything behind it in order.
+    pub(crate) fn apply_local_prefix(
+        deliveries: &mut VecDeque<AiStreamDelivery>,
+        ai: &mut AiWorkspaceEntity,
+    ) -> bool {
+        let local_count = deliveries
+            .iter()
+            .take_while(|delivery| {
+                matches!(
+                    delivery.event,
+                    AiStreamDeliveryEvent::ToolImages(_)
+                        | AiStreamDeliveryEvent::HistoryBarrier(_)
+                        | AiStreamDeliveryEvent::Checkpoint(_)
+                        | AiStreamDeliveryEvent::PromptUsage { .. }
+                        | AiStreamDeliveryEvent::Stream(
+                            AiStreamEvent::Content(_)
+                                | AiStreamEvent::Thinking(_)
+                                | AiStreamEvent::Usage { .. }
+                                | AiStreamEvent::ProviderResponsePart { .. }
+                                | AiStreamEvent::ToolCall { .. }
+                                | AiStreamEvent::ToolCallComplete { .. }
+                        )
+                )
+            })
+            .count();
+        if local_count == 0 {
+            return false;
+        }
+        let local = deliveries.drain(..local_count).collect();
+        let mut batch = Self::new(local);
+        let host = batch.next_host_delivery(ai);
+        debug_assert!(host.is_none());
+        true
+    }
+
     /// Apply conversation-owned deliveries up to the next operation that needs
     /// the window or the live runtime. Do not advance further until that
     /// operation has had a chance to cancel or replace its generation.
@@ -143,6 +179,136 @@ impl AiChatDeliveryBatch {
             }
         }
         self.flush_text(ai);
+        None
+    }
+
+    pub fn next_window_delivery(
+        &mut self,
+        ai: &mut AiWorkspaceEntity,
+        diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
+        cx: &mut gpui::Context<AiWorkspaceEntity>,
+    ) -> Option<AiStreamDelivery> {
+        while let Some(delivery) = self.next_host_delivery(ai) {
+            match delivery.event {
+                AiStreamDeliveryEvent::Guardrail {
+                    code,
+                    message,
+                    raw_text,
+                } => {
+                    self.flush_text(ai);
+                    ai.apply_ai_guardrail(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &code,
+                        &message,
+                        raw_text,
+                        &diagnostic,
+                        cx,
+                    );
+                }
+                AiStreamDeliveryEvent::AssistantRound {
+                    round_id,
+                    round_number,
+                    response_length,
+                    tool_call_ids,
+                    synthetic,
+                    retry_attempt,
+                    hard_deny_triggered,
+                } => {
+                    self.flush_text(ai);
+                    ai.persist_ai_assistant_round(
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        round_id,
+                        round_number,
+                        response_length,
+                        tool_call_ids,
+                        synthetic,
+                        retry_attempt,
+                        hard_deny_triggered,
+                        &diagnostic,
+                    );
+                }
+                AiStreamDeliveryEvent::RoundSummary {
+                    round_id,
+                    text,
+                    metadata,
+                } => {
+                    self.flush_text(ai);
+                    ai.apply_ai_round_summary(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &round_id,
+                        &text,
+                        metadata,
+                        cx,
+                    );
+                }
+                AiStreamDeliveryEvent::RoundStatefulMarker { round_id, marker } => {
+                    self.flush_text(ai);
+                    ai.apply_ai_round_stateful_marker(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &round_id,
+                        marker,
+                        cx,
+                    );
+                }
+                AiStreamDeliveryEvent::Diagnostic {
+                    event_type,
+                    round_id,
+                    data,
+                } => {
+                    self.flush_text(ai);
+                    ai.persist_ai_stream_diagnostic(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &event_type,
+                        round_id,
+                        data,
+                        &diagnostic,
+                    );
+                }
+                AiStreamDeliveryEvent::ToolStatus {
+                    tool_call_id,
+                    name,
+                    arguments,
+                    status,
+                    result,
+                    risk,
+                    summary,
+                    synthetic_denied,
+                    raw_text,
+                    round_id,
+                    round_number,
+                } if status != "pending_user_approval" => {
+                    self.flush_text(ai);
+                    ai.apply_ai_tool_status(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &tool_call_id,
+                        &name,
+                        &arguments,
+                        &status,
+                        result,
+                        risk,
+                        summary,
+                        synthetic_denied,
+                        raw_text,
+                        round_id,
+                        round_number,
+                        &diagnostic,
+                        cx,
+                    );
+                }
+                event => return Some(AiStreamDelivery { event, ..delivery }),
+            }
+        }
         None
     }
 

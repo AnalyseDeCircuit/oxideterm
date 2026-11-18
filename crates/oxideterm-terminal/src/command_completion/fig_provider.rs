@@ -1,6 +1,7 @@
-use super::*;
+use crate::TerminalShellParseResult;
+use super::{TerminalCommandSuggestion, TerminalCommandSuggestionKind, TerminalFigArgType, TerminalFigSpec, TerminalFigSubcommandSpec};
 
-pub(super) fn terminal_command_fig_suggestions(
+pub fn terminal_command_fig_suggestions(
     parsed: &TerminalShellParseResult,
     specs: &[TerminalFigSpec],
 ) -> Vec<TerminalCommandSuggestion> {
@@ -100,7 +101,7 @@ pub(super) fn terminal_command_fig_suggestions(
     suggestions
 }
 
-pub(super) fn active_fig_arg_type(
+pub fn active_fig_arg_type(
     parsed: &TerminalShellParseResult,
     specs: &[TerminalFigSpec],
 ) -> TerminalFigArgType {

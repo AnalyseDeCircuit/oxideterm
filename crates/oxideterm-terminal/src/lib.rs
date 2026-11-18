@@ -42,6 +42,7 @@ mod search;
 mod selection;
 mod session;
 mod shell_channel;
+pub mod command_completion;
 mod shell_completion;
 pub use shell_channel::{ShellChannel, ShellChannelAcquisition};
 mod shell_integration;

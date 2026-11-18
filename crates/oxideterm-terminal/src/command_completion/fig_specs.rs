@@ -1,4 +1,4 @@
-use super::*;
+use super::{TerminalFigArgType, TerminalFigOptionSpec, TerminalFigSpec, TerminalFigSubcommandSpec};
 
 const TERMINAL_COMMAND_SPECS_FILENAME: &str = "terminal-command-specs.json";
 
@@ -159,21 +159,19 @@ fn terminal_fig_arg_type_value(arg_type: TerminalFigArgType) -> &'static str {
     }
 }
 
-impl WorkspaceApp {
-    pub(super) fn terminal_fig_specs(&self) -> Vec<TerminalFigSpec> {
-        let mut specs = built_in_terminal_fig_specs();
-        for custom in load_user_terminal_fig_specs(self.settings_store.path()) {
-            if let Some(existing) = specs.iter_mut().find(|spec| spec.name == custom.name) {
-                *existing = custom;
-            } else {
-                specs.push(custom);
-            }
+pub fn terminal_fig_specs(settings_path: &std::path::Path) -> Vec<TerminalFigSpec> {
+    let mut specs = built_in_terminal_fig_specs();
+    for custom in load_user_terminal_fig_specs(settings_path) {
+        if let Some(existing) = specs.iter_mut().find(|spec| spec.name == custom.name) {
+            *existing = custom;
+        } else {
+            specs.push(custom);
         }
-        specs
     }
+    specs
 }
 
-pub(in crate::workspace) fn terminal_command_specs_path(
+pub fn terminal_command_specs_path(
     settings_path: &std::path::Path,
 ) -> std::path::PathBuf {
     settings_path
@@ -182,7 +180,7 @@ pub(in crate::workspace) fn terminal_command_specs_path(
         .join(TERMINAL_COMMAND_SPECS_FILENAME)
 }
 
-pub(in crate::workspace) fn terminal_command_specs_example_json() -> String {
+pub fn terminal_command_specs_example_json() -> String {
     serde_json::to_string_pretty(&serde_json::json!({
         "specs": [
             {
@@ -208,7 +206,7 @@ pub(in crate::workspace) fn terminal_command_specs_example_json() -> String {
     .unwrap_or_else(|_| "{\n  \"specs\": []\n}".to_string())
 }
 
-pub(in crate::workspace) fn terminal_command_specs_editor_initial_json(value: &str) -> String {
+pub fn terminal_command_specs_editor_initial_json(value: &str) -> String {
     // The native settings editor paints the example as real editable content
     // when no custom spec file exists; keep hit-testing and button actions tied
     // to the same text the user sees.
@@ -219,7 +217,7 @@ pub(in crate::workspace) fn terminal_command_specs_editor_initial_json(value: &s
     }
 }
 
-pub(in crate::workspace) fn normalize_terminal_command_specs_json(
+pub fn normalize_terminal_command_specs_json(
     value: &str,
 ) -> Result<String, String> {
     let trimmed = value.trim();
@@ -243,7 +241,7 @@ pub(in crate::workspace) fn normalize_terminal_command_specs_json(
         .map_err(|error| error.to_string())
 }
 
-pub(in crate::workspace) fn user_terminal_fig_specs_count(
+pub fn user_terminal_fig_specs_count(
     settings_path: &std::path::Path,
 ) -> usize {
     load_user_terminal_fig_specs(settings_path).len()
@@ -373,7 +371,7 @@ fn terminal_fig_spec(
     }
 }
 
-pub(in crate::workspace) fn built_in_terminal_fig_specs() -> Vec<TerminalFigSpec> {
+pub fn built_in_terminal_fig_specs() -> Vec<TerminalFigSpec> {
     use TerminalFigArgType::{Command, Directory, File, None as NoArg, Path, Value};
     vec![
         terminal_fig_spec(
@@ -1077,79 +1075,6 @@ pub(in crate::workspace) fn built_in_terminal_fig_specs() -> Vec<TerminalFigSpec
             NoArg,
         ),
     ]
-}
-
-pub(super) fn should_run_terminal_path_provider(
-    token: &TerminalShellToken,
-    active_arg_type: TerminalFigArgType,
-) -> bool {
-    looks_terminal_path_like(&token.value)
-        || matches!(
-            active_arg_type,
-            TerminalFigArgType::Path | TerminalFigArgType::File | TerminalFigArgType::Directory
-        )
-}
-
-fn looks_terminal_path_like(token: &str) -> bool {
-    token.starts_with('/')
-        || token.starts_with("./")
-        || token.starts_with("../")
-        || token.starts_with('~')
-        || token.contains('/')
-}
-
-pub(super) fn normalize_terminal_path_token(
-    token: &TerminalShellToken,
-    cwd: Option<&str>,
-) -> Option<TerminalPathParts> {
-    let value = token.value.as_str();
-    let home = cwd.and_then(infer_terminal_home_from_cwd);
-    let expanded = if value.starts_with('~') {
-        home.map(|home| format!("{home}{}", &value[1..]))
-            .unwrap_or_else(|| value.to_string())
-    } else {
-        value.to_string()
-    };
-    if let Some(slash_index) = expanded.rfind('/') {
-        let directory = if slash_index == 0 {
-            "/".to_string()
-        } else {
-            expanded[..slash_index].to_string()
-        };
-        let query = expanded[slash_index + 1..].to_string();
-        let display_prefix = value
-            .rfind('/')
-            .map(|index| value[..=index].to_string())
-            .unwrap_or_default();
-        return Some(TerminalPathParts {
-            directory,
-            query,
-            display_prefix,
-        });
-    }
-    let cwd = cwd.unwrap_or(".");
-    Some(TerminalPathParts {
-        directory: cwd.to_string(),
-        query: expanded,
-        display_prefix: String::new(),
-    })
-}
-
-fn infer_terminal_home_from_cwd(cwd: &str) -> Option<String> {
-    for prefix in ["/Users/", "/home/"] {
-        if let Some(rest) = cwd.strip_prefix(prefix) {
-            let user = rest.split('/').next().filter(|user| !user.is_empty())?;
-            return Some(format!("{prefix}{user}"));
-        }
-    }
-    cwd.starts_with("/root").then(|| "/root".to_string())
-}
-
-pub(super) fn terminal_command_bar_now_ms() -> i64 {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

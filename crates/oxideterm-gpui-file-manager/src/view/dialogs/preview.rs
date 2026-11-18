@@ -1233,9 +1233,19 @@ mod tests {
     fn local_code_preview_shows_language_notice_and_keeps_files_read_only(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let fixture_dir = directory.path();
-        let (view, cx) = cx.add_window_view(|_window, cx| {
-            super::super::test_views(&fixture_dir.join("settings.json"), |_, _| {}, cx).dialog
+        let (root, cx) = cx.add_window_view(|_window, cx| {
+            oxideterm_gpui_editor::EditorLanguagePlugins::set_labels(
+                "Missing {{language}} language support".into(),
+                "Failed to load".into(),
+                "Manage".into(),
+                "Dismiss".into(),
+                cx,
+            );
+            TestFileManagerRoot(
+                test_views(&fixture_dir.join("settings.json"), |_, _| {}, cx).dialog,
+            )
         });
+        let view = root.read_with(cx, |root, _| root.0.clone());
         let source = "fn main() {}\n";
         let path = fixture_dir.join("missing.rs");
         std::fs::write(&path, source).unwrap();
@@ -1248,18 +1258,8 @@ mod tests {
             readonly: false,
             symlink_target: None,
         };
-        view.update(cx, |view, cx| {
-            view.open_file_manager_preview(entry.clone(), cx)
-        });
-        cx.draw(
-            gpui::Point::default(),
-            gpui::size(px(800.0), px(600.0)),
-            |window, cx| {
-                view.update(cx, |view, cx| {
-                    view.render_file_manager_preview_content(entry.clone(), false, window, cx)
-                })
-            },
-        );
+        view.update(cx, |view, cx| view.open_file_manager_preview(entry, cx));
+        cx.update(|window, cx| window.draw(cx).clear(cx));
         let bounds = cx
             .debug_bounds("editor-language-notice")
             .expect("missing Rust support must be visible in local preview");

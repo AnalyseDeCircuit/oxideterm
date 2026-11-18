@@ -1,5 +1,5 @@
 use oxideterm_ai::agent::{
-    AgentExecution, AgentId, AgentMessageKind, AgentModel, AgentRecord, AgentResult, AgentRunRef,
+    AgentExecution, AgentId, AgentMessageKind, AgentRecord, AgentResult, AgentRunRef,
     AgentState, AgentText,
 };
 
@@ -57,71 +57,6 @@ impl WorkspaceApp {
             )),
         );
     }
-    fn start_ai_agent_group(
-        &mut self,
-        generation: u64,
-        conversation_id: &str,
-        assistant_id: &str,
-        config: &mut AiChatStreamConfig,
-        services: &AiModelBackendServices,
-        session: &ToolSessionId,
-        context_window: usize,
-        cx: &mut Context<Self>,
-    ) -> AgentExecution {
-        let runtime = self.ai.state.read(cx).agents.services.runtime.clone();
-        runtime.set_concurrency(self.agent_concurrency());
-        let scope = self.ai.authority.read(cx).agent_scope(
-            session,
-            config
-                .tools
-                .iter()
-                .filter(|tool| !config.tool_policy.disabled_tools.contains(&tool.name))
-                .map(|tool| tool.name.clone())
-                .collect(),
-        );
-        let options = self.global_agent_options();
-        if config.tool_policy.enabled {
-            config.tools.extend(oxideterm_ai::agent::agent_tool_definitions(false).into_iter()
-                .filter(|tool| (options.enabled || tool.name == "ask_user")
-                    && !config.tool_policy.disabled_tools.contains(&tool.name)));
-        }
-        let run = runtime.create_group(
-            conversation_id.to_owned(),
-            AgentModel {
-                provider_id: config.provider_id.clone().unwrap_or_default(),
-                model: config.model.clone(),
-            },
-            scope,
-            config
-                .tool_policy
-                .max_rounds
-                .unwrap_or(oxideterm_settings::DEFAULT_AI_TOOL_MAX_ROUNDS)
-                .clamp(
-                    oxideterm_settings::MIN_AI_TOOL_MAX_ROUNDS,
-                    oxideterm_settings::MAX_AI_TOOL_MAX_ROUNDS,
-                ) as usize,
-        );
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.bind_agent_run(generation, run.clone(), false);
-            ai.agents.groups.insert(
-                run.group_id.clone(),
-                crate::workspace::ai_state::agents::AiAgentGroup {
-                    parent: run.clone(),
-                    parent_message_id: assistant_id.to_owned(),
-                    config: config.clone(),
-                    services: services.clone(),
-                    context_window,
-                },
-            );
-        });
-        AgentExecution::new(
-            runtime,
-            run,
-            self.ai.state.read(cx).agents.services.resources.clone(),
-        )
-        .expect("new parent run is active")
-    }
-
     fn handle_ai_agent_command(
         &mut self,
         generation: u64,

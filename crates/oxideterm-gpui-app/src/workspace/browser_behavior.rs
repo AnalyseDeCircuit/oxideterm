@@ -1,14 +1,18 @@
-use std::{collections::HashSet, hash::Hash};
+#[cfg(test)]
+use oxideterm_gpui_ui::context_menu::BrowserOverlayPlacement;
+pub(crate) use oxideterm_gpui_ui::context_menu::{
+    clamp_context_menu_position, preserve_or_move_context_selection,
+};
 
 use super::WorkspaceApp;
 use gpui::Context;
 
+#[cfg(test)]
+use oxideterm_gpui_ui::select::browser_focus_visible;
 pub(crate) use oxideterm_gpui_ui::select::{
     BrowserFocusOrigin, BrowserSelectKeyDirection, browser_select_next_index,
     close_browser_trigger_select,
 };
-#[cfg(test)]
-use oxideterm_gpui_ui::select::browser_focus_visible;
 
 #[cfg(test)]
 use oxideterm_gpui_ui::confirm::FocusCycle;
@@ -96,12 +100,6 @@ pub(crate) enum BrowserPointerCaptureOwner {
     TabDrag,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct BrowserOverlayPlacement {
-    pub x: f32,
-    pub y: f32,
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 struct BrowserPointerCaptureState {
     sidebar_resizing: bool,
@@ -117,44 +115,6 @@ struct BrowserPointerCaptureState {
     text_selection_dragging: bool,
     sftp_file_dragging: bool,
     tab_dragging: bool,
-}
-
-pub(crate) fn preserve_or_move_context_selection<T>(selected: &mut HashSet<T>, target: T) -> bool
-where
-    T: Clone + Eq + Hash,
-{
-    // Browser file/table context menus keep an existing multi-selection when
-    // the secondary-click target is already selected, and otherwise move the
-    // selection to the target before opening the menu.
-    if selected.contains(&target) {
-        false
-    } else {
-        selected.clear();
-        selected.insert(target);
-        true
-    }
-}
-
-pub(crate) fn clamp_context_menu_position(
-    pointer_x: f32,
-    pointer_y: f32,
-    viewport_width: f32,
-    viewport_height: f32,
-    menu_width: f32,
-    menu_height: f32,
-    viewport_margin: f32,
-) -> BrowserOverlayPlacement {
-    // Browser/Radix context menus collide against the viewport instead of
-    // letting the menu spill off-screen. Native popovers use window coordinates,
-    // so clamp once here and keep every file/tree/table menu on the same rule.
-    BrowserOverlayPlacement {
-        x: pointer_x
-            .min(viewport_width - menu_width - viewport_margin)
-            .max(viewport_margin),
-        y: pointer_y
-            .min(viewport_height - menu_height - viewport_margin)
-            .max(viewport_margin),
-    }
 }
 
 pub(crate) fn pointer_capture_needs_workspace_overlay(owner: BrowserPointerCaptureOwner) -> bool {

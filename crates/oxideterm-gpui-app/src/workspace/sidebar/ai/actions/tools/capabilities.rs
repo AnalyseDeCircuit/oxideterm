@@ -1,6 +1,6 @@
 use oxideterm_ai::tool_resources::{
     AiActionResultLite, AiStableResourceOperation, ai_live_resource_operation,
-    ai_rejects_legacy_live_target_argument, ai_run_command_preflight_risk,
+    ai_run_command_preflight_risk,
     ai_stable_resource_operation, ai_target_from_projection, ai_target_projection,
 };
 use sha2::Digest as _;
@@ -176,30 +176,6 @@ pub(in crate::workspace) fn configure_ai_local_command_process(
     {
         let _ = process;
     }
-}
-
-pub(in crate::workspace) fn ai_memory_settings_json(
-    enabled: bool,
-    content: &str,
-    entries: &[oxideterm_settings::AiMemoryEntry],
-) -> serde_json::Value {
-    // Keep the legacy content field while exposing the itemized model.
-    serde_json::json!({
-        "enabled": enabled,
-        "content": content,
-        "entries": entries.iter().map(ai_memory_entry_json).collect::<Vec<_>>(),
-    })
-}
-
-pub(in crate::workspace) fn ai_memory_content(memory: &serde_json::Value) -> &str {
-    memory
-        .get("content")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-}
-
-pub(in crate::workspace) fn ai_memory_trimmed_content(memory: &serde_json::Value) -> &str {
-    ai_memory_content(memory).trim()
 }
 
 pub(in crate::workspace) fn truncate_ai_local_exec_output(value: &str) -> String {

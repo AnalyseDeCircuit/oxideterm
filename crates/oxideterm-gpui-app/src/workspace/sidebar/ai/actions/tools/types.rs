@@ -1,5 +1,4 @@
 use oxideterm_ai::tool_resources::AiOrchestratorTarget;
-use std::collections::BTreeMap;
 
 pub(in crate::workspace) const AI_RUNTIME_STABLE_RESOURCE_LIMIT: usize = 128;
 use oxideterm_ai::tool_loop::{AiModelBackendServices, AiModelRuntimeState};
@@ -14,11 +13,7 @@ pub(in crate::workspace) struct AiLiveToolServices {
     pub(in crate::workspace) backend_runtime: std::sync::Arc<tokio::runtime::Runtime>,
 }
 
-pub(in crate::workspace) struct AiAcpChatLaunch {
-    pub(in crate::workspace) launch_config: oxideterm_ai::AcpLaunchConfig,
-    pub(in crate::workspace) session_cwd: std::path::PathBuf,
-    pub(in crate::workspace) host_policy: oxideterm_ai::AcpHostCapabilityPolicy,
-}
+use oxideterm_gpui_ai::conversation::AiAcpChatLaunch;
 
 pub(in crate::workspace) enum AiRemoteFileWriteError {
     OwnerReplaced,

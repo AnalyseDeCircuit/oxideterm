@@ -732,3 +732,6 @@ mod terminal_inline_tests {
         assert_eq!(placement.top, 396.0);
     }
 }
+
+pub use request::{resolve_terminal_ai_inline_config, truncate_ai_inline_context};
+mod request;

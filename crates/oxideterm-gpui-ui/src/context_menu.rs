@@ -1,3 +1,5 @@
+use std::{collections::HashSet, hash::Hash};
+
 use gpui::{
     App, CursorStyle, Div, FontWeight, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, ParentElement, Rgba, Styled, Window, div, prelude::*, px, rgb,
@@ -15,6 +17,50 @@ use crate::{
 const CONTEXT_MENU_DISABLED_OPACITY: f32 = 0.5;
 const CONTEXT_MENU_RADIO_DOT_SIZE: f32 = 6.0;
 const CONTEXT_MENU_LINE_HEIGHT_RATIO: f32 = 1.4;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct BrowserOverlayPlacement {
+    pub x: f32,
+    pub y: f32,
+}
+
+pub fn preserve_or_move_context_selection<T>(selected: &mut HashSet<T>, target: T) -> bool
+where
+    T: Clone + Eq + Hash,
+{
+    // Browser file/table context menus keep an existing multi-selection when
+    // the secondary-click target is already selected, and otherwise move the
+    // selection to the target before opening the menu.
+    if selected.contains(&target) {
+        false
+    } else {
+        selected.clear();
+        selected.insert(target);
+        true
+    }
+}
+
+pub fn clamp_context_menu_position(
+    pointer_x: f32,
+    pointer_y: f32,
+    viewport_width: f32,
+    viewport_height: f32,
+    menu_width: f32,
+    menu_height: f32,
+    viewport_margin: f32,
+) -> BrowserOverlayPlacement {
+    // Browser/Radix context menus collide against the viewport instead of
+    // letting the menu spill off-screen. Native popovers use window coordinates,
+    // so clamp once here and keep every file/tree/table menu on the same rule.
+    BrowserOverlayPlacement {
+        x: pointer_x
+            .min(viewport_width - menu_width - viewport_margin)
+            .max(viewport_margin),
+        y: pointer_y
+            .min(viewport_height - menu_height - viewport_margin)
+            .max(viewport_margin),
+    }
+}
 
 pub fn context_menu_line_height(tokens: &ThemeTokens) -> f32 {
     // Menu overlays can be mounted under terminal/editor roots that set their

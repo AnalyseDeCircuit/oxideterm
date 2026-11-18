@@ -6,9 +6,16 @@ use oxideterm_ai::tool_loop::{
 #[cfg(test)]
 use oxideterm_ai::tool_loop::{record_completed_ai_tool_call, send_ai_tool_status_with_payload};
 use oxideterm_ai::tool_resources::{
+    ai_app_surface_stable_resources, ai_application_action_result, ai_memory_entry_content,
+    ai_memory_entry_json, ai_memory_entry_mut, ai_memory_expected_revision, ai_memory_expiry,
+    ai_memory_id, ai_memory_kind_from_arguments, ai_memory_kind_label, ai_memory_now_ms,
+    ai_memory_scope_from_arguments, ai_memory_scope_label, ai_memory_settings_json,
+    ai_memory_trimmed_content, ai_normalized_memory_content, ai_stable_resource_ref_for_target,
+    ai_transfer_path_looks_directory,
+};
+use oxideterm_ai::tool_resources::{
     ai_model_safe_runtime_text, ai_model_visible_settings_projection,
     ai_runtime_validation_public_code, ai_runtime_validation_recovery_message,
-    ai_stable_resource_ref_for_target,
 };
 #[cfg(test)]
 use oxideterm_ai::tool_result_protocol::parse_ai_tool_args;

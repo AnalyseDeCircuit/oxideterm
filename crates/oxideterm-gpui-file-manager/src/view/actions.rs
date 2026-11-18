@@ -6,15 +6,6 @@ mod bookmarks;
 const FILE_MANAGER_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
 
-fn local_file_operation(action: &str, detail: &str) -> oxideterm_audit::AuditOperation {
-    oxideterm_audit::AuditOperation::in_context(
-        super::local_file_audit_context(oxideterm_audit::AuditSource::User).as_ref(),
-        oxideterm_audit::AuditCategory::File,
-        action,
-        Some(detail),
-    )
-}
-
 impl FileManagerView {
     pub fn open_location(&mut self, initial_path: Option<String>, cx: &mut Context<Self>) {
         if let Some(path) = initial_path {
@@ -591,7 +582,11 @@ impl FileManagerView {
         });
     }
 
-    pub fn accept_file_manager_path_completion(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn accept_file_manager_path_completion(
+        &mut self,
+        index: usize,
+        cx: &mut Context<Self>,
+    ) {
         self.accept_file_manager_path_completion_without_context(index, cx);
     }
 
@@ -889,8 +884,11 @@ impl FileManagerView {
             );
         }
         let audit = local_file_operation("file_preview", &entry.path);
-        let preview = oxideterm_local_files::local_inspection_preview(&entry.path, oxideterm_preview::inspection_mime_type)
-            .unwrap_or_else(|| read_local_preview(&entry.path));
+        let preview = oxideterm_local_files::local_inspection_preview(
+            &entry.path,
+            oxideterm_preview::inspection_mime_type,
+        )
+        .unwrap_or_else(|| read_local_preview(&entry.path));
         audit.finish(
             match &preview {
                 LocalPreview::Error(_) => oxideterm_audit::AuditOutcome::Failed,
@@ -1292,7 +1290,7 @@ impl FileManagerView {
         title: String,
         description: Option<String>,
         variant: FileManagerNoticeKind,
-        cx: &App,
+        cx: &mut App,
     ) {
         self.request(
             FileManagerRequest::Notice {
