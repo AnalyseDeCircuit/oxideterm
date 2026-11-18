@@ -21,6 +21,8 @@ use crate::{
     components::SettingsControls, entity::SettingsWorkspaceEntity, surface::nav::render_icon, *,
 };
 
+mod actions;
+
 const SETTINGS_NETWORK_FIELD_WIDTH: f32 = 320.0; // Desktop preference for normal proxy fields.
 const SETTINGS_NETWORK_PORT_FIELD_WIDTH: f32 = 140.0; // Ports should stay compact instead of sharing a full row.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -57,6 +59,7 @@ pub enum ProxyRequest {
     Test,
     SavePassword,
     RemovePassword,
+    Auth(NetworkProxyAuthMode),
 }
 
 pub struct ProxyPage<'a> {
@@ -74,6 +77,15 @@ impl<'a> Deref for ProxyPage<'a> {
 }
 
 impl ProxyPage<'_> {
+    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+        use oxideterm_settings_model::SettingsSectionId::*;
+        match section {
+            NetworkSharedProxy => self.shared_proxy(self.settings.network.upstream_proxy.as_ref(), cx),
+            NetworkRouting => self.routing(cx),
+            _ => div().into_any_element(),
+        }
+    }
+
     fn press(
         &self,
         request: ProxyRequest,
@@ -92,7 +104,7 @@ impl ProxyPage<'_> {
         placeholder: String,
         cx: &App,
     ) -> AnyElement {
-        (self.field)(
+        self.field(
             input,
             &value,
             placeholder,

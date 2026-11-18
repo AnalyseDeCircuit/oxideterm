@@ -56,7 +56,7 @@ impl WorkspaceApp {
             .knowledge_document_dialog_owned_by(window_id);
         match tab_kind {
             TabKind::Settings => {
-                let chrome = &self.settings_window_chrome.read(cx).state;
+                let chrome = &self.settings_views.window_chrome.read(cx).state;
                 let (navigation, reset, managed_key, portable_password) = (
                     chrome.navigation_editor,
                     chrome.keybinding_reset.is_some(),
@@ -64,7 +64,7 @@ impl WorkspaceApp {
                     chrome.portable_password.is_some(),
                 );
                 if navigation {
-                    modals.push(self.settings_navigation_editor.clone().into_any_element());
+                    modals.push(self.settings_views.navigation_editor.clone().into_any_element());
                 }
                 if let Some(modal) = self.render_ai_mcp_add_server_dialog(cx) {
                     modals.push(modal);
@@ -87,7 +87,7 @@ impl WorkspaceApp {
                     modals.push(modal);
                 }
                 if portable_password {
-                    modals.push(self.portable_password_dialog.clone().into_any_element());
+                    modals.push(self.settings_views.portable_password_dialog.clone().into_any_element());
                 }
             }
             TabKind::Knowledge => {
@@ -174,6 +174,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.advance_theme_transition(window, cx);
         let window_id = window.window_handle().window_id();
         let previous_tab = self.active_tab_id(cx);
         self.sync_tab_scope(cx);
@@ -345,7 +346,7 @@ impl WorkspaceApp {
         let window_background_layer =
             self.render_workspace_window_background(window_background, window, cx);
         let has_window_background = window_background_layer.is_some();
-        let native_update_notification = self.render_native_update_notification(cx);
+        let native_update_notification = self.settings_views.native_update_notice.clone().into_any_element();
         let show_connection_cards = !self
             .connection_flow
             .read(cx)
@@ -382,7 +383,7 @@ impl WorkspaceApp {
         let mut key_context = gpui::KeyContext::new_with_defaults(cx.platform_info().os);
         key_context.add("Workspace");
         #[cfg(target_os = "macos")]
-        if self.settings_window_chrome.read(cx).state.recording_keybinding {
+        if self.settings_views.window_chrome.read(cx).state.recording_keybinding {
             key_context.add("KeybindingRecording");
         }
         if self.active_window_modal_owner(cx).is_some() && !self.ide_modal_owns_input(cx) {
@@ -1347,7 +1348,7 @@ impl WorkspaceApp {
                 |root| root.child(self.render_settings_reset_confirm_dialog(cx)),
             )
             .when_some(
-                self.settings_window_chrome.read(cx).state.data_directory
+                self.settings_views.window_chrome.read(cx).state.data_directory
                     .and_then(|_| self.render_settings_data_directory_confirm_dialog(cx)),
                 |root, dialog| root.child(dialog),
             )
@@ -1470,13 +1471,13 @@ impl WorkspaceApp {
             .when_some(self.render_terminal_cast_player(cx), |root, player| {
                 root.child(player)
             })
-            .when(self.settings_window_chrome.read(cx).state.theme_editor.is_some(), |root| {
+            .when(self.settings_views.window_chrome.read(cx).state.theme_editor.is_some(), |root| {
                 // Theme editing is a workspace modal, not a settings-pane overlay.
                 // Mount it here so the backdrop covers every persistent chrome region.
-                root.child(self.theme_editor_dialog.clone())
+                root.child(self.settings_views.theme_editor_dialog.clone())
             })
             .when_some(
-                self.settings_window_chrome.read(cx).state.ssh_import
+                self.settings_views.window_chrome.read(cx).state.ssh_import
                     .and_then(|_| self.render_settings_ssh_config_import_dialog(cx)),
                 |root, modal| {
                     // Both Settings and Connections launch the same workspace
@@ -1484,20 +1485,20 @@ impl WorkspaceApp {
                     root.child(modal)
                 },
             )
-            .when(self.settings_window_chrome.read(cx).state.command_specs, |root| {
+            .when(self.settings_views.window_chrome.read(cx).state.command_specs, |root| {
                 // Structured command specs use the same workspace-wide modal
                 // ownership so the settings list never contains a nested editor.
-                root.child(self.command_specs_dialog.clone())
+                root.child(self.settings_views.command_specs_dialog.clone())
             })
-            .when(self.settings_window_chrome.read(cx).state.terminal_trigger_editor, |root| {
-                root.child(self.terminal_trigger_editor.clone())
+            .when(self.settings_views.window_chrome.read(cx).state.terminal_trigger_editor, |root| {
+                root.child(self.settings_views.terminal_trigger_editor.clone())
             })
             .when({
-                let settings = &self.settings_window_chrome.read(cx).state;
+                let settings = &self.settings_views.window_chrome.read(cx).state;
                 settings.semantic_scheme_editor || settings.highlight_rule_editor_index.is_some()
-            }, |root| root.child(self.highlight_editor.clone()))
+            }, |root| root.child(self.settings_views.highlight_editor.clone()))
             .when_some(
-                self.settings_window_chrome.read(cx).state.public_mcp_client.is_some()
+                self.settings_views.window_chrome.read(cx).state.public_mcp_client.is_some()
                     .then(|| self.render_public_mcp_client_editor_modal(cx)).flatten(),
                 |root, modal| root.child(modal),
             )

@@ -400,7 +400,6 @@ pub(in crate::workspace) struct ActiveWindowModalProjection {
     pub(in crate::workspace) shortcuts_open: bool,
     pub(in crate::workspace) app_lock_dialog_open: bool,
     pub(in crate::workspace) mermaid_zoom_open: bool,
-    pub(in crate::workspace) native_update_toast_visible: bool,
 }
 
 impl ActiveWindowModalProjection {
@@ -607,7 +606,6 @@ impl ActiveWindowModalProjection {
         // handoffs, the broadcast menu, and AI floating controls are excluded.
         // They are transient nonblocking layers and keep their own focused
         // input or Escape handling instead of consuming every window key.
-        let _native_update_toast_visible = self.native_update_toast_visible;
         [
             new_connection_owner,
             local_shell_owner,
@@ -693,7 +691,7 @@ impl WorkspaceApp {
                 ai.chat_confirm_owner_snapshot(),
             )
         };
-        let settings_chrome = &self.settings_window_chrome.read(cx).state;
+        let settings_chrome = &self.settings_views.window_chrome.read(cx).state;
         let cloud_sync_phase = self.cloud_sync_confirm.read(cx).phase();
         let native_plugin_phase = {
             let plugins = self.plugin_entity.read(cx);
@@ -816,7 +814,6 @@ impl WorkspaceApp {
                     .handle_for_role(window_registry::WindowRole::Main)
                     .is_some_and(|handle| handle.window_id() == state.window_id)
             }),
-            native_update_toast_visible: self.native_update_notification_open,
         }
         .top_owner()
     }
@@ -894,7 +891,7 @@ impl WorkspaceApp {
                 None
             }
             TabKind::Settings => {
-                let settings = &self.settings_window_chrome.read(cx).state;
+                let settings = &self.settings_views.window_chrome.read(cx).state;
                 let ai = self.ai_entity.read(cx);
                 if let Some(phase) = settings.portable_password {
                     Some(ActiveTabWindowModalSnapshot {

@@ -1,8 +1,7 @@
 use super::*;
 pub(in crate::workspace) use oxideterm_gpui_settings_view::local_terminal::expand_local_terminal_cwd;
 use oxideterm_gpui_settings_view::local_terminal::{
-    LOCAL_GIT_BASH_ID, LocalTerminalPage, LocalTerminalRequest, effective_local_shells,
-    resolve_local_shell,
+    LOCAL_GIT_BASH_ID, LocalTerminalRequest, effective_local_shells, resolve_local_shell,
 };
 
 impl WorkspaceApp {
@@ -30,65 +29,28 @@ impl WorkspaceApp {
         )
     }
 
-    fn with_local_terminal_page<R>(
-        &self,
-        cx: &Context<Self>,
-        render: impl FnOnce(LocalTerminalPage<'_>, &App) -> R,
-    ) -> R {
-        let owner = cx.entity().downgrade();
-        let dispatch = Rc::new(move |request, window: &mut Window, cx: &mut App| {
-            let _ = owner.update(cx, |app, cx| match request {
-                LocalTerminalRequest::BrowseShell(id) => {
-                    app.blur_text_inputs(cx);
-                    app.pick_local_shell_path(id, cx);
-                }
-                LocalTerminalRequest::ResetShell(id) => {
-                    app.blur_text_inputs(cx);
-                    app.set_local_shell_path(&id, None, cx);
-                }
-                LocalTerminalRequest::OpenPrivilegeCredentials => app
-                    .open_privilege_credentials_settings(
-                        Some(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string()),
-                        window,
-                        cx,
-                    ),
-            });
-        });
-        self.with_settings_controls(cx, |controls, cx| {
-            render(
-                LocalTerminalPage {
-                    controls,
-                    shells: self
-                        .effective_local_shells_for_settings(self.settings_store.settings()),
-                    focused_input: self
-                        .focused_settings_input
-                        .map(|input| (input, self.settings_input_draft.as_str())),
-                    privilege_credential_count: self
-                        .connection_store
-                        .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
-                        .map(|credentials| credentials.len())
-                        .unwrap_or_default(),
-                    dispatch,
-                },
-                cx,
-            )
-        })
-    }
-
-    pub(in crate::workspace) fn settings_local_section(
-        &self,
-        section: SettingsSectionId,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        self.with_local_terminal_page(cx, |page, cx| page.settings_local_section(section, cx))
-    }
-
-    pub(in crate::workspace) fn settings_reconnect_section(
-        &self,
-        section: usize,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        self.with_local_terminal_page(cx, |page, cx| page.settings_reconnect_section(section, cx))
+    pub(super) fn handle_local_terminal_settings_request(
+        &mut self,
+        request: LocalTerminalRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match request {
+            LocalTerminalRequest::BrowseShell(id) => {
+                self.blur_text_inputs(cx);
+                self.pick_local_shell_path(id, cx);
+            }
+            LocalTerminalRequest::ResetShell(id) => {
+                self.blur_text_inputs(cx);
+                self.set_local_shell_path(&id, None, cx);
+            }
+            LocalTerminalRequest::OpenPrivilegeCredentials => self
+                .open_privilege_credentials_settings(
+                    Some(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string()),
+                    window,
+                    cx,
+                ),
+        }
     }
 
     pub(in crate::workspace) fn set_local_shell_path(
@@ -119,21 +81,13 @@ impl WorkspaceApp {
     }
 
     fn pick_local_shell_path(&mut self, shell_id: String, cx: &mut Context<Self>) {
-        let receiver = cx.prompt_for_paths(PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: false,
-            prompt: Some(
-                self.i18n
-                    .t("settings_view.local_terminal.browse_shell")
-                    .into(),
-            ),
-        });
+        let selection = oxideterm_gpui_settings_view::entity::picker::pick_path(
+            cx,
+            self.i18n.t("settings_view.local_terminal.browse_shell"),
+            false,
+        );
         cx.spawn(async move |workspace, cx| {
-            let Ok(Ok(Some(paths))) = receiver.await else {
-                return;
-            };
-            let Some(path) = paths.into_iter().next() else {
+            let Some(path) = selection.await else {
                 return;
             };
             let _ = workspace.update(cx, |this, cx| {
@@ -141,71 +95,5 @@ impl WorkspaceApp {
             });
         })
         .detach();
-    }
-
-    pub(in crate::workspace) fn local_terminal_config(&self) -> LocalPtyConfig {
-        let settings = &self.settings_store.settings().local_terminal;
-        let effective_shells = effective_local_shells(
-            &self.local_shells,
-            settings.git_bash_path.as_deref(),
-            &settings.shell_paths,
-        );
-        let shell = settings
-            .default_shell_id
-            .as_deref()
-            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
-            .cloned();
-        let cwd = settings
-            .default_cwd
-            .as_deref()
-            .map(str::trim)
-            .filter(|cwd| !cwd.is_empty())
-            .map(expand_local_terminal_cwd);
-        let env = settings
-            .custom_env_vars
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.clone(),
-                    value
-                        .as_str()
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_else(|| value.to_string()),
-                )
-            })
-            .collect();
-
-        LocalPtyConfig {
-            command: None,
-            shell,
-            cwd,
-            env,
-            remove_env: Vec::new(),
-            load_profile: settings.load_shell_profile,
-            current_directory_shell_integration: self
-                .settings_store
-                .settings()
-                .terminal
-                .command_bar
-                .current_directory_awareness,
-            oh_my_posh_enabled: settings.oh_my_posh_enabled,
-            oh_my_posh_theme: settings.oh_my_posh_theme.clone(),
-        }
-    }
-
-    pub(in crate::workspace) fn local_terminal_tab_title(&self) -> String {
-        let settings = &self.settings_store.settings().local_terminal;
-        let effective_shells = effective_local_shells(
-            &self.local_shells,
-            settings.git_bash_path.as_deref(),
-            &settings.shell_paths,
-        );
-        settings
-            .default_shell_id
-            .as_deref()
-            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
-            .or_else(|| effective_shells.first())
-            .map(|shell| shell.label.clone())
-            .unwrap_or_else(|| "Local".to_string())
     }
 }

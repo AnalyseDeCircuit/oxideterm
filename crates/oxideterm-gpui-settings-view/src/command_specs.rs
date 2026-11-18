@@ -42,7 +42,8 @@ pub struct CommandSpecsFrame {
 
 pub struct CommandSpecsBindings {
     pub frame: Rc<dyn Fn(&App) -> Option<CommandSpecsFrame>>,
-    pub editor: Rc<dyn Fn(&str, &App) -> AnyElement>,
+    pub controls: crate::components::SettingsControlsSource,
+    pub scroll: Rc<dyn Fn(&str, &App) -> ScrollHandle>,
     pub dispatch: Rc<dyn Fn(TerminalCommandSpecsAction, &mut Window, &mut App)>,
 }
 
@@ -79,7 +80,22 @@ impl Render for CommandSpecsDialog {
         let Some(frame) = (self.bindings.frame)(cx) else {
             return div().into_any_element();
         };
-        let editor = (self.bindings.editor)(draft.value.as_str(), cx);
+        let Some(controls) = (self.bindings.controls)(cx) else {
+            return div().into_any_element();
+        };
+        let frame_ime =
+            controls
+                .ime
+                .frame(SettingsInput::TerminalCommandSpecsJson, &draft.value, cx);
+        let scroll =
+            (self.bindings.scroll)(&format!("multiline-input-{}", frame_ime.anchor_id.0), cx);
+        let editor = crate::components::settings_multiline_field(
+            controls.tokens,
+            frame_ime,
+            frame.mono_font.clone(),
+            &scroll,
+            controls.dispatch,
+        );
         CommandSpecsBody {
             frame,
             dispatch: &self.bindings.dispatch,
@@ -261,7 +277,68 @@ pub(crate) struct CommandSpecsDraft {
     summary: String,
 }
 
+pub enum CommandSpecsOutcome {
+    Inactive,
+    Closed,
+    Focus,
+    Saved,
+    Error(String),
+}
+
 impl SettingsWorkspaceEntity {
+    pub fn apply_command_specs_action(
+        &mut self,
+        action: TerminalCommandSpecsAction,
+        path: &std::path::Path,
+        example: fn() -> String,
+        normalize: fn(&str) -> Result<String, String>,
+        summary: impl FnOnce() -> String,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) -> CommandSpecsOutcome {
+        let Some(draft) = self.command_specs.as_ref() else {
+            return CommandSpecsOutcome::Inactive;
+        };
+        match action {
+            TerminalCommandSpecsAction::Close => {
+                self.close_command_specs(cx);
+                CommandSpecsOutcome::Closed
+            }
+            TerminalCommandSpecsAction::Example => {
+                self.update_command_specs(Zeroizing::new(example()), None, true, cx);
+                CommandSpecsOutcome::Focus
+            }
+            TerminalCommandSpecsAction::Format | TerminalCommandSpecsAction::Save => {
+                let pretty = match normalize(&draft.value) {
+                    Ok(pretty) => Zeroizing::new(pretty),
+                    Err(error) => {
+                        return CommandSpecsOutcome::Error(format!(
+                            "{} {}",
+                            i18n.t("settings_view.terminal.command_specs_invalid"),
+                            error
+                        ));
+                    }
+                };
+                if action == TerminalCommandSpecsAction::Format {
+                    self.update_command_specs(pretty, None, true, cx);
+                    return CommandSpecsOutcome::Focus;
+                }
+                let saved = path
+                    .parent()
+                    .map(std::fs::create_dir_all)
+                    .transpose()
+                    .and_then(|_| std::fs::write(path, pretty.as_bytes()));
+                match saved {
+                    Ok(()) => {
+                        self.update_command_specs(pretty, Some(summary()), false, cx);
+                        CommandSpecsOutcome::Saved
+                    }
+                    Err(error) => CommandSpecsOutcome::Error(error.to_string()),
+                }
+            }
+        }
+    }
+
     pub fn open_command_specs(
         &mut self,
         path: String,

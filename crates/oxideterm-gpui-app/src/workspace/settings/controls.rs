@@ -1,12 +1,13 @@
-use oxideterm_gpui_settings_view::select_menu::{LocalShellOption, SelectMenuRequest, SettingsSelectMenu};
+use oxideterm_gpui_settings_view::select_menu::{
+    ExternalSelect, ExternalSelectInputs, KnowledgeSelectInputs, LocalShellOption, SelectMenuRequest, SettingsSelectMenu,
+    settings_select_popover,
+};
 use super::*;
 use oxideterm_gpui_settings_view::components::{SettingsWindowDispatch, SettingsWindowRequest};
-use oxideterm_gpui_settings_view::theme_picker::{SettingsThemePicker, SettingsThemePickerFrame};
-
-const KNOWLEDGE_SCOPE_SELECT_MAX_HEIGHT: f32 = 320.0;
+use oxideterm_gpui_settings_view::theme_picker::{SettingsThemePickerFrame};
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn mount_settings_theme_picker(cx: &mut Context<Self>) -> Entity<SettingsThemePicker> {
+    pub(in crate::workspace) fn theme_picker_bindings(cx: &Context<Self>) -> (Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>, Rc<dyn Fn(SettingsSelect, String, &mut App)>) {
         let owner = cx.entity().downgrade();
         let frame = Rc::new({
             let owner = owner.clone();
@@ -36,7 +37,7 @@ impl WorkspaceApp {
                 }
             });
         });
-        cx.new(|_| SettingsThemePicker::new(frame, apply))
+        (frame, apply)
     }
 
     pub(super) fn settings_window_dispatch(cx: &Context<Self>) -> SettingsWindowDispatch {
@@ -64,11 +65,16 @@ impl WorkspaceApp {
                 SettingsWindowRequest::DragInputSelection(event) => {
                     app.update_ime_selection_drag_from_mouse_move(&event, window, cx);
                 }
+                SettingsWindowRequest::DismissInput(input) => {
+                    if app.settings_workspace.read(cx).settings_entity_focused_input() == Some(input) {
+                        app.blur_text_inputs(cx);
+                    }
+                }
                 SettingsWindowRequest::SliderAnchor(anchor) => app.update_select_anchor(anchor, cx),
                 SettingsWindowRequest::BeginSlider(slider, position) => {
                     app.close_settings_select();
                     app.focused_settings_input = None;
-                    app.settings_slider_drag = Some(slider);
+                    app.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(Some(slider)));
                     app.apply_settings_slider_from_position(slider, position, cx);
                 }
                 SettingsWindowRequest::MoveSlider(event) => app.update_settings_slider_drag(&event, cx),
@@ -97,51 +103,17 @@ impl WorkspaceApp {
         let width =
             f32::from(anchor.bounds.size.width).max(self.tokens.metrics.ui_select_min_width);
         let popup = if open_select.theme_target().is_some() {
-            self.settings_theme_picker.clone().into_any_element()
+            self.settings_views.theme_picker.clone().into_any_element()
         } else {
             self.render_settings_select_popup(open_select, window_id, width, cx)?
         };
 
-        Some(
-            popover_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, window, cx| {
-                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .on_mouse_down(
-                    MouseButton::Right,
-                    cx.listener(|this, _event, window, cx| {
-                        this.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
-                        cx.stop_propagation();
-                    }),
-                )
-                .child(
-                    deferred(
-                        anchored()
-                            .anchor(Corner::TopLeft)
-                            .position(anchor.bounds.bottom_left())
-                            .offset(point(
-                                px(0.0),
-                                px(self.tokens.metrics.settings_select_popup_gap),
-                            ))
-                            .position_mode(AnchoredPositionMode::Window)
-                            .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
-                                &self.tokens,
-                                SharedString::from(format!(
-                                    "settings-select-popup-{open_select:?}"
-                                )),
-                                div().child(popup),
-                                -6.0,
-                                point(0.5, 0.0),
-                            )),
-                    )
-                    .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
-                )
-                .into_any_element(),
-        )
+        let owner = cx.entity().downgrade();
+        Some(settings_select_popover(&self.tokens, open_select, anchor, popup, move |window, cx| {
+            let _ = owner.update(cx, |app, cx| {
+                app.dismiss_transient_workspace_overlays_from_outside_pointer(window, cx);
+            });
+        }))
     }
 
     fn render_settings_select_popup(
@@ -179,10 +151,49 @@ impl WorkspaceApp {
                 SelectMenuRequest::Background(edit) => app.edit_background_style(edit, cx),
                 SelectMenuRequest::RemoteShell(mode) => app.remote_shell_integration_mode_changed(mode, cx),
                 SelectMenuRequest::Trigger(clear_input, edit) => app.edit_terminal_trigger(clear_input, edit, cx),
+                SelectMenuRequest::KnowledgeCollectionScope(scope) => {
+                    app.ai_entity.update(cx, |entity, cx| {
+                        entity.set_knowledge_collection_connection_id(scope);
+                        cx.notify();
+                    });
+                }
+                SelectMenuRequest::KnowledgeDocumentFormat(format) => {
+                    app.ai_entity.update(cx, |entity, cx| {
+                        entity.set_knowledge_document_format(format.to_owned());
+                        cx.notify();
+                    });
+                }
+                SelectMenuRequest::External(action) => match action {
+                    ExternalSelect::MarketplaceSort(sort) => app.set_plugin_marketplace_sort(sort, cx),
+                    ExternalSelect::ProviderType(provider_type) => {
+                        app.ai_entity.update(cx, |ai, cx| ai.select_settings_provider_type(provider_type, cx));
+                    }
+                    ExternalSelect::McpTransport(transport) => {
+                        app.ai_entity.update(cx, |ai, cx| ai.set_mcp_transport(transport, cx));
+                    }
+                    ExternalSelect::McpAuth(mode) => {
+                        app.ai_entity.update(cx, |ai, cx| ai.set_mcp_auth_mode(mode, cx));
+                    }
+                },
                 SelectMenuRequest::CloseSemantic => app.close_semantic_scheme_editor(cx),
                 SelectMenuRequest::CloseHighlight => app.close_highlight_rule_editor(cx),
-                SelectMenuRequest::Highlight(index, edit) => app.edit_highlight_rule(index, edit, cx),
-                SelectMenuRequest::HighlightPreset(rules) => app.add_highlight_preset(rules, cx),
+                SelectMenuRequest::Highlight(index, edit) => app.edit_settings(|settings| {
+                    let _ = oxideterm_gpui_settings_view::highlight_page::HighlightEdit::Rule(index, edit).apply(settings);
+                }, cx),
+                SelectMenuRequest::HighlightPreset(rules) => app.edit_settings(|settings| {
+                    let _ = oxideterm_gpui_settings_view::highlight_page::HighlightEdit::Preset(rules).apply(settings);
+                }, cx),
+                SelectMenuRequest::ProxyAuth(mode) => app.handle_proxy_request(
+                    oxideterm_gpui_settings_view::proxy_page::ProxyRequest::Auth(mode), cx,
+                ),
+                SelectMenuRequest::SftpPresentation(preference) => {
+                    app.edit_settings(|settings| settings.sftp.presentation = preference, cx);
+                    if preference != oxideterm_settings::SftpPresentationPreference::Sidebar
+                        && let Some(node_id) = app.embedded_sftp_node_id.clone()
+                    {
+                        app.close_embedded_sftp_for_node(&node_id, cx);
+                    }
+                }
             });
         });
         let shells = if matches!(open_select, SettingsSelect::LocalShell | SettingsSelect::LocalShellSemanticScheme(_)) {
@@ -200,626 +211,29 @@ impl WorkspaceApp {
         } else {
             Vec::new()
         };
+        let ai = self.ai_entity.read(cx);
         let select_menu = SettingsSelectMenu {
             settings,
             i18n: &self.i18n,
             tokens: &self.tokens,
             settings_workspace: &self.settings_workspace,
+            external: ExternalSelectInputs {
+                provider_type: ai.settings_new_provider_type(),
+                mcp_transport: ai.mcp_transport(),
+                mcp_auth: ai.mcp_auth_mode(),
+            },
+            knowledge: KnowledgeSelectInputs {
+                connections: self.connection_store.connections(),
+                collection_scope: ai.knowledge_new_collection_connection_id(),
+                document_format: ai.knowledge_new_document_format(),
+            },
+            totp_credentials: self.connection_store.totp_credentials(),
             shells,
             first_command: commands.first().map(|command| command.id.clone()).unwrap_or_default(),
             trigger_commands,
             dispatch,
         };
-        if let Some(popup) = select_menu.render(active_tab, open_select, width, cx) {
-            return Some(popup);
-        }
-
-        let popup = match (active_tab, open_select) {
-            (_, SettingsSelect::PluginMarketplaceSort) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for sort in [
-                    oxideterm_settings::PluginMarketplaceSort::Name,
-                    oxideterm_settings::PluginMarketplaceSort::RecentUpdates,
-                    oxideterm_settings::PluginMarketplaceSort::NewestListings,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.i18n
-                                .t(plugin_manager::plugin_marketplace_sort_label(sort)),
-                            sort == settings.plugin_marketplace_sort,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _, _, cx| {
-                            this.close_settings_select();
-                            this.set_plugin_marketplace_sort(sort, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ai, SettingsSelect::IdeAgentMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for mode in [
-                    IdeAgentMode::Ask,
-                    IdeAgentMode::Enabled,
-                    IdeAgentMode::Disabled,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            ide_agent_label(mode, &self.i18n),
-                            mode == settings.ide.agent_mode,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(|settings| settings.ide.agent_mode = mode, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegePromptType) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = self.settings_workspace.read(cx).privilege_prompt_type();
-                for prompt_type in [
-                    PrivilegePromptType::Sudo,
-                    PrivilegePromptType::Su,
-                    PrivilegePromptType::Custom,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.settings_privilege_prompt_type_label(prompt_type),
-                            current == prompt_type,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.settings_workspace.update(cx, |settings, cx| {
-                                settings.set_privilege_prompt_type(prompt_type, cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeResponseMode) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = self.settings_workspace.read(cx).privilege_response_mode();
-                for response_mode in [
-                    PrivilegeResponseMode::PasswordOnly,
-                    PrivilegeResponseMode::PasswordThenTotp,
-                    PrivilegeResponseMode::PasswordWithTotp,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            self.settings_privilege_response_mode_label(response_mode),
-                            current == response_mode,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.settings_workspace.update(cx, |settings, cx| {
-                                settings.set_privilege_response_mode(response_mode, cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeTotpCredential) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let selected = self
-                    .settings_workspace
-                    .read(cx)
-                    .privilege_snapshot()
-                    .totp_credential_id;
-                popup = popup.child(select_option_action(
-                    select_option(
-                        &self.tokens,
-                        self.i18n
-                            .t("sessionManager.privilege_credentials.totp_none"),
-                        selected.is_none(),
-                    ),
-                    false,
-                    false,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_settings_select();
-                        this.settings_workspace.update(cx, |settings, cx| {
-                            settings.set_privilege_totp_credential(None, cx);
-                        });
-                        cx.stop_propagation();
-                    }),
-                ));
-                for credential in self.connection_store.totp_credentials() {
-                    let credential_id = credential.id.clone();
-                    let label = if credential.enabled {
-                        credential.name.clone()
-                    } else {
-                        format!(
-                            "{} ({})",
-                            credential.name,
-                            self.i18n.t("settings_view.privilege_credentials.disabled")
-                        )
-                    };
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            label,
-                            selected.as_deref() == Some(credential_id.as_str()),
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            let credential_id = credential_id.clone();
-                            this.settings_workspace.update(cx, |settings, cx| {
-                                settings.set_privilege_totp_credential(Some(credential_id), cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Connections, SettingsSelect::ConnectionImportSource) => {
-                let selected_source = self.settings_workspace.read(cx).connection_import_source();
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for source in connection_import_source_options().iter().copied() {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            connection_import_source_label(source, &self.i18n),
-                            source == selected_source,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.set_connection_import_source(source, cx);
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Connections, SettingsSelect::ConnectionImportDuplicateStrategy) => {
-                let selected_strategy = self
-                    .settings_workspace
-                    .read(cx)
-                    .connection_import_duplicate_strategy();
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for strategy in [
-                    ConnectionImportDuplicateStrategy::Skip,
-                    ConnectionImportDuplicateStrategy::Rename,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            connection_import_duplicate_strategy_label(strategy, &self.i18n),
-                            strategy == selected_strategy,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.settings_workspace.update(cx, |settings, cx| {
-                                settings.set_connection_import_duplicate_strategy(strategy, cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Network, SettingsSelect::NetworkProxyAuth) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                let current = settings
-                    .network
-                    .upstream_proxy
-                    .as_ref()
-                    .map(|proxy| match &proxy.auth {
-                        SettingsUpstreamProxyAuth::None => NetworkProxyAuthMode::None,
-                        SettingsUpstreamProxyAuth::Password { .. } => {
-                            NetworkProxyAuthMode::Password
-                        }
-                    })
-                    .unwrap_or(NetworkProxyAuthMode::None);
-                let has_saved_password =
-                    settings
-                        .network
-                        .upstream_proxy
-                        .as_ref()
-                        .is_some_and(|proxy| {
-                            matches!(
-                                &proxy.auth,
-                                SettingsUpstreamProxyAuth::Password {
-                                    keychain_id: Some(_),
-                                    ..
-                                }
-                            )
-                        });
-                for mode in [NetworkProxyAuthMode::None, NetworkProxyAuthMode::Password] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            network_proxy_auth_label(mode, &self.i18n),
-                            mode == current,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.settings_workspace.update(cx, |settings, cx| {
-                                settings.finish_network_proxy_password_action(None, cx);
-                            });
-                            if mode == NetworkProxyAuthMode::None
-                                && has_saved_password
-                                && let Err(error) = this
-                                    .connection_store
-                                    .delete_global_upstream_proxy_password()
-                            {
-                                this.settings_workspace.update(cx, |settings, cx| {
-                                    settings.set_network_proxy_password_status(
-                                        Some(error.to_string()),
-                                        cx,
-                                    );
-                                });
-                                cx.stop_propagation();
-                                return;
-                            }
-                            this.edit_settings(
-                                move |settings| {
-                                    if let Some(proxy) = settings.network.upstream_proxy.as_mut() {
-                                        proxy.auth = match mode {
-                                            NetworkProxyAuthMode::None => {
-                                                SettingsUpstreamProxyAuth::None
-                                            }
-                                            NetworkProxyAuthMode::Password => {
-                                                SettingsUpstreamProxyAuth::Password {
-                                                    username: String::new(),
-                                                    keychain_id: None,
-                                                }
-                                            }
-                                        };
-                                    }
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ai, SettingsSelect::AiProviderTemplate) => {
-                let mut popup = select_overlay_popup(&self.tokens, width.max(AI_PROVIDER_SELECT_W));
-                for template in AI_PROVIDER_TEMPLATES {
-                    let provider_type = template.provider_type;
-                    let is_selected =
-                        self.ai_entity.read(cx).settings_new_provider_type() == provider_type;
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, self.i18n.t(template.label_key), is_selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.ai_entity.update(cx, |ai, cx| {
-                                ai.select_settings_provider_type(provider_type, cx);
-                            });
-                            cx.stop_propagation();
-                            // WorkspaceApp owns the surrounding settings render.
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Knowledge, SettingsSelect::AiEmbeddingProvider) => {
-                let current = settings
-                    .ai
-                    .embedding_config
-                    .as_ref()
-                    .and_then(|config| config.get("providerId"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string);
-                let mut popup = select_panel_overlay_popup_with_max_height(
-                    &self.tokens,
-                    width.max(AI_PROVIDER_SELECT_W),
-                    320.0,
-                );
-                popup = popup.child(select_option_action(
-                    select_option(
-                        &self.tokens,
-                        self.i18n
-                            .t("settings_view.knowledge.auto_embedding_provider"),
-                        current.is_none(),
-                    ),
-                    false,
-                    false,
-                    cx.listener(move |this, _event, _window, cx| {
-                        this.close_settings_select();
-                        this.edit_settings(
-                            |settings| {
-                                let model = settings
-                                    .ai
-                                    .embedding_config
-                                    .as_ref()
-                                    .and_then(|config| config.get("model"))
-                                    .and_then(serde_json::Value::as_str)
-                                    .unwrap_or_default()
-                                    .to_string();
-                                settings.ai.embedding_config = Some(serde_json::json!({
-                                    "providerId": null,
-                                    "model": model
-                                }));
-                            },
-                            cx,
-                        );
-                        cx.stop_propagation();
-                    }),
-                ));
-                for provider in ai_provider_views(settings) {
-                    let provider_id = provider.id.clone();
-                    let selected = current.as_deref() == Some(provider.id.as_str());
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, provider.name, selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            let provider_id = provider_id.clone();
-                            this.close_settings_select();
-                            this.edit_settings(
-                                move |settings| {
-                                    let model = settings
-                                        .ai
-                                        .embedding_config
-                                        .as_ref()
-                                        .and_then(|config| config.get("model"))
-                                        .and_then(serde_json::Value::as_str)
-                                        .unwrap_or_default()
-                                        .to_string();
-                                    settings.ai.embedding_config = Some(serde_json::json!({
-                                        "providerId": provider_id,
-                                        "model": model
-                                    }));
-                                },
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Knowledge, SettingsSelect::KnowledgeCollectionScope) => {
-                let selected_connection_id = self
-                    .ai_entity
-                    .read(cx)
-                    .knowledge_new_collection_connection_id()
-                    .map(str::to_string);
-                let connection_options = self
-                    .connection_store
-                    .connections()
-                    .iter()
-                    .map(|connection| (connection.id.clone(), connection.name.clone()))
-                    .collect::<Vec<_>>();
-                let mut popup = select_panel_overlay_popup_with_max_height(
-                    &self.tokens,
-                    width.max(220.0),
-                    KNOWLEDGE_SCOPE_SELECT_MAX_HEIGHT,
-                )
-                .child(select_option_action(
-                    select_option(
-                        &self.tokens,
-                        self.i18n.t("settings_view.knowledge.scope_global"),
-                        selected_connection_id.is_none(),
-                    ),
-                    false,
-                    false,
-                    cx.listener(|this, _event, _window, cx| {
-                        this.close_settings_select();
-                        this.ai_entity.update(cx, |entity, cx| {
-                            entity.set_knowledge_collection_connection_id(None);
-                            cx.notify();
-                        });
-                        cx.stop_propagation();
-                        cx.notify();
-                    }),
-                ));
-                for (connection_id, connection_name) in connection_options {
-                    let selected = selected_connection_id.as_deref() == Some(&connection_id);
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, connection_name, selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.ai_entity.update(cx, |entity, cx| {
-                                entity.set_knowledge_collection_connection_id(Some(
-                                    connection_id.clone(),
-                                ));
-                                cx.notify();
-                            });
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Knowledge, SettingsSelect::KnowledgeDocumentFormat) => {
-                let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
-                for format in ["markdown", "plaintext"] {
-                    let label = match format {
-                        "plaintext" => self.i18n.t("settings_view.knowledge.format_plain_text"),
-                        _ => self.i18n.t("settings_view.knowledge.format_markdown"),
-                    };
-                    let selected =
-                        self.ai_entity.read(cx).knowledge_new_document_format() == format;
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, label, selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.ai_entity.update(cx, |entity, cx| {
-                                entity.set_knowledge_document_format(format.to_string());
-                                cx.notify();
-                            });
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ai, SettingsSelect::AiWebSearchProvider) => {
-                let current = settings.ai.web_search.provider_id.clone();
-                let mut popup = select_panel_overlay_popup_with_max_height(
-                    &self.tokens,
-                    width.max(AI_PROVIDER_SELECT_W),
-                    320.0,
-                );
-                let options =
-                    std::iter::once((None, self.i18n.t("settings_view.ai.web_provider_none")))
-                        .chain(
-                            ai_provider_views(settings)
-                                .into_iter()
-                                .filter(oxideterm_ai::web::official_deepseek_provider)
-                                .map(|provider| (Some(provider.id), provider.name)),
-                        );
-                for (provider_id, label) in options {
-                    let selected = current == provider_id;
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, label, selected),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            let provider_id = provider_id.clone();
-                            this.close_settings_select();
-                            this.edit_settings(
-                                move |settings| settings.ai.web_search.provider_id = provider_id,
-                                cx,
-                            );
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ai, SettingsSelect::AiMcpTransport) => {
-                let current = self
-                    .ai_entity
-                    .read(cx)
-                    .mcp_transport()
-                    .unwrap_or(oxideterm_ai::McpTransport::Stdio);
-                let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
-                for (transport, label) in [
-                    (oxideterm_ai::McpTransport::Stdio, "stdio"),
-                    (
-                        oxideterm_ai::McpTransport::StreamableHttp,
-                        "Streamable HTTP (auto fallback)",
-                    ),
-                    (oxideterm_ai::McpTransport::LegacySse, "Legacy SSE"),
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, label, transport == current),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.ai_entity.update(cx, |ai, cx| {
-                                ai.set_mcp_transport(transport, cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Ai, SettingsSelect::AiMcpAuthMode) => {
-                let current = self
-                    .ai_entity
-                    .read(cx)
-                    .mcp_auth_mode()
-                    .unwrap_or(oxideterm_ai::McpAuthHeaderMode::Bearer);
-                let mut popup = select_overlay_popup(&self.tokens, width.max(220.0));
-                for (mode, label) in [
-                    (
-                        oxideterm_ai::McpAuthHeaderMode::Bearer,
-                        self.i18n.t("settings_view.mcp.auth_header_mode_bearer"),
-                    ),
-                    (
-                        oxideterm_ai::McpAuthHeaderMode::Raw,
-                        self.i18n.t("settings_view.mcp.auth_header_mode_raw"),
-                    ),
-                    (
-                        oxideterm_ai::McpAuthHeaderMode::None,
-                        self.i18n.t("settings_view.mcp.auth_header_mode_none"),
-                    ),
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(&self.tokens, label, mode == current),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.ai_entity.update(cx, |ai, cx| {
-                                ai.set_mcp_auth_mode(mode, cx);
-                            });
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            (SettingsTab::Sftp, SettingsSelect::SftpPresentation) => {
-                let mut popup = select_overlay_popup(&self.tokens, width);
-                for preference in [
-                    oxideterm_settings::SftpPresentationPreference::Ask,
-                    oxideterm_settings::SftpPresentationPreference::Tab,
-                    oxideterm_settings::SftpPresentationPreference::Sidebar,
-                ] {
-                    popup = popup.child(select_option_action(
-                        select_option(
-                            &self.tokens,
-                            oxideterm_gpui_settings_view::sftp_page::sftp_presentation_label(preference, &self.i18n),
-                            preference == settings.sftp.presentation,
-                        ),
-                        false,
-                        false,
-                        cx.listener(move |this, _event, _window, cx| {
-                            this.close_settings_select();
-                            this.edit_settings(
-                                |settings| settings.sftp.presentation = preference,
-                                cx,
-                            );
-                            if preference != oxideterm_settings::SftpPresentationPreference::Sidebar
-                                && let Some(node_id) = this.embedded_sftp_node_id.clone()
-                            {
-                                this.close_embedded_sftp_for_node(&node_id, cx);
-                            }
-                            cx.stop_propagation();
-                        }),
-                    ));
-                }
-                Some(popup)
-            }
-            _ => None,
-        }?;
-        Some(overlay_content_boundary(popup).into_any_element())
+        select_menu.render(active_tab, open_select, width, cx)
     }
 
     pub(in crate::workspace) fn open_settings_select_from_pointer(
@@ -845,7 +259,7 @@ impl WorkspaceApp {
         }
         if select_id.theme_target().is_some() {
             let settings = self.settings_store.settings();
-            self.settings_theme_picker.update(cx, |picker, cx| picker.open(select_id, settings, cx));
+            self.settings_views.theme_picker.update(cx, |picker, cx| picker.open(select_id, settings, cx));
         }
         self.open_settings_select = Some(select_id);
         self.open_settings_select_owner_window_id = Some(owner_window_id);
@@ -879,7 +293,7 @@ impl WorkspaceApp {
                 true
             }
             "enter" | "space" | " " => {
-                if let Some(id) = self.settings_theme_picker.read(cx).preview().map(str::to_owned) {
+                if let Some(id) = self.settings_views.theme_picker.read(cx).preview().map(str::to_owned) {
                     self.close_settings_select();
                     self.edit_settings(
                         |settings| target.apply_for_scheme(settings, system_dark, id),
@@ -889,7 +303,7 @@ impl WorkspaceApp {
                 true
             }
             "up" | "arrowup" | "down" | "arrowdown" | "home" | "end" => {
-                self.settings_theme_picker.update(cx, |picker, cx| picker.navigate(&event.keystroke.key, cx));
+                self.settings_views.theme_picker.update(cx, |picker, cx| picker.navigate(&event.keystroke.key, cx));
                 true
             }
             _ => false,

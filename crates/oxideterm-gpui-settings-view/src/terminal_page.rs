@@ -23,6 +23,28 @@ use crate::{
 
 pub const SETTINGS_TERMINAL_CUSTOM_FONT_INPUT_WIDTH: f32 = 300.0;
 
+pub fn terminal_session_log_root_directory(
+    settings_path: &std::path::Path,
+    configured_directory: Option<&str>,
+) -> std::path::PathBuf {
+    if let Some(directory) = configured_directory
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+    {
+        let directory = std::path::PathBuf::from(directory);
+        if directory.is_absolute() {
+            return directory;
+        }
+    }
+
+    // A path synchronized from another operating system may not be absolute here.
+    settings_path
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .join("logs")
+        .join("terminal")
+}
+
 pub enum TerminalSettingsSection {
     Font {
         custom_cjk: bool,

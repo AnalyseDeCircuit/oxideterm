@@ -33,12 +33,7 @@ fn app_lock_failure_cooldown(failed_attempts: u32) -> Duration {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum AppLockDialog {
-    Configure,
-    Change,
-    Remove,
-}
+pub(super) use oxideterm_gpui_settings_view::app_lock_page::AppLockDialog;
 
 pub(super) struct AppLockState {
     store: AppLockStore,
@@ -763,114 +758,8 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    pub(in crate::workspace) fn render_app_lock_settings_card(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let configured = self.app_lock.configured;
-        let status_label = self.i18n.t(if configured {
-            "settings_view.general.app_lock_configured"
-        } else {
-            "settings_view.general.app_lock_not_configured"
-        });
-        let status_color = if configured {
-            self.tokens.ui.success
-        } else {
-            self.tokens.ui.text_muted
-        };
-        let mut actions = div().flex().flex_row().flex_wrap().gap(px(8.0));
-        if configured {
-            actions = actions
-                .child(self.app_lock_settings_action_button(
-                    "settings_view.general.app_lock_change_password",
-                    ButtonVariant::Outline,
-                    AppLockDialog::Change,
-                    cx,
-                ))
-                .child(self.app_lock_settings_action_button(
-                    "settings_view.general.app_lock_remove",
-                    ButtonVariant::Destructive,
-                    AppLockDialog::Remove,
-                    cx,
-                ));
-        } else {
-            actions = actions.child(self.app_lock_settings_action_button(
-                "settings_view.general.app_lock_set_password",
-                ButtonVariant::Default,
-                AppLockDialog::Configure,
-                cx,
-            ));
-        }
-
-        let mut rows = vec![
-            oxideterm_gpui_settings_view::settings_row(
-                &self.tokens,
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap(px(8.0))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Lock,
-                        16.0,
-                        rgb(self.tokens.ui.text),
-                    ))
-                    .child(
-                        div()
-                            .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                            .child(self.i18n.t("settings_view.general.app_lock_label")),
-                    )
-                    .child(self.text_badge(status_label, status_color))
-                    .into_any_element(),
-                Some(
-                    div()
-                        .child(self.i18n.t("settings_view.general.app_lock_description"))
-                        .into_any_element(),
-                ),
-                actions.into_any_element(),
-            ),
-            self.card_separator(),
-            self.bool_row(
-                "settings_view.general.app_lock_show_sidebar_icon",
-                "settings_view.general.app_lock_show_sidebar_icon_hint",
-                self.settings_store.settings().sidebar_ui.show_app_lock_icon,
-                |settings, enabled| settings.sidebar_ui.show_app_lock_icon = enabled,
-                cx,
-            ),
-        ];
-        if let Some(error) = self.app_lock.error.clone() {
-            rows.push(self.app_lock_error_message(error));
-        }
-
-        self.settings_card("settings_view.general.app_lock_title", "", rows)
-    }
-
-    fn app_lock_settings_action_button(
-        &self,
-        label_key: &'static str,
-        variant: ButtonVariant,
-        dialog: AppLockDialog,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        self.workspace_toolbar_action_button(
-            self.i18n.t(label_key),
-            None,
-            ToolbarButtonOptions {
-                button: ButtonOptions {
-                    variant,
-                    size: ButtonSize::Sm,
-                    radius: ButtonRadius::Md,
-                    disabled: self.app_lock.pending,
-                },
-                ..ToolbarButtonOptions::default()
-            },
-            cx.listener(move |this, _event, window, cx| {
-                this.open_app_lock_dialog(dialog, false, window, cx);
-                cx.stop_propagation();
-            }),
-        )
-        .into_any_element()
+    pub(super) fn settings_app_lock_state(&self) -> (bool, bool, Option<String>) {
+        (self.app_lock.configured, self.app_lock.pending, self.app_lock.error.clone())
     }
 
     pub(in crate::workspace) fn render_app_lock_dialog(
@@ -1301,23 +1190,7 @@ impl WorkspaceApp {
     }
 
     fn app_lock_error_message(&self, error: String) -> AnyElement {
-        let message = if error.starts_with("settings_view.") {
-            self.i18n.t(&error)
-        } else {
-            error
-        };
-        div()
-            .w_full()
-            .rounded(px(self.tokens.radii.md))
-            .border_1()
-            .border_color(rgba((self.tokens.ui.error << 8) | 0x4d))
-            .bg(rgba((self.tokens.ui.error << 8) | 0x1a))
-            .px(px(10.0))
-            .py(px(8.0))
-            .text_size(px(self.tokens.metrics.ui_text_sm))
-            .text_color(rgb(self.tokens.ui.error))
-            .child(message)
-            .into_any_element()
+        oxideterm_gpui_settings_view::app_lock_page::render_app_lock_error(&self.tokens, &self.i18n, error)
     }
 }
 

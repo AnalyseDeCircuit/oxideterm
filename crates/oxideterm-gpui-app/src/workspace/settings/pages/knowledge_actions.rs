@@ -12,17 +12,9 @@ impl WorkspaceApp {
             cx.notify();
         });
         self.sync_settings_section_list_state(cx);
-        if let Some(item_ix) = settings_section_list_item_index(
-            SettingsTab::Knowledge,
-            SettingsSectionId::KnowledgeDocuments,
-            self.settings_dynamic_section_counts(cx),
-        ) {
-            self.settings_workspace.read(cx).section_list.state()
-                .scroll_to(gpui::ListOffset {
-                    item_ix,
-                    offset_in_item: px(0.0),
-                });
-        }
+        self.settings_workspace.read(cx).section_list.scroll_to_section(
+            SettingsTab::Knowledge, SettingsSectionId::KnowledgeDocuments, self.settings_dynamic_section_counts(cx),
+        );
         cx.notify();
     }
 
@@ -165,74 +157,22 @@ impl WorkspaceApp {
         collection_id: String,
         cx: &mut Context<Self>,
     ) {
-        let settings = self.settings_store.settings();
-        let resolved = oxideterm_ai::resolve_ai_embedding_provider(
-            &settings.ai.providers,
-            settings.ai.active_provider_id.as_deref(),
-            settings.ai.embedding_config.as_ref(),
-            None,
-        );
-        let Some(provider) = resolved.provider else {
-            self.report_knowledge_embedding_configuration_error(
-                "settings_view.knowledge.error_no_embedding_support",
-                cx,
-            );
-            return;
-        };
-        match resolved.reason {
-            oxideterm_ai::AiEmbeddingProviderReason::NoProvider
-            | oxideterm_ai::AiEmbeddingProviderReason::UnsupportedProvider => {
-                self.report_knowledge_embedding_configuration_error(
-                    "settings_view.knowledge.error_no_embedding_support",
-                    cx,
-                );
-                return;
-            }
-            oxideterm_ai::AiEmbeddingProviderReason::MissingModel => {
-                self.report_knowledge_embedding_configuration_error(
-                    "settings_view.knowledge.error_no_embedding_model",
-                    cx,
-                );
-                return;
-            }
-            oxideterm_ai::AiEmbeddingProviderReason::Ready
-            | oxideterm_ai::AiEmbeddingProviderReason::MissingApiKey => {}
-        }
-        let requires_api_key = oxideterm_ai::ai_embedding_requires_api_key(&provider);
-        let missing_key_error = self
-            .i18n
-            .t("settings_view.knowledge.error_no_embedding_api_key");
-        let embedding_error = self
-            .i18n
-            .t("settings_view.knowledge.error_generate_embeddings");
-        let partial_failure_template = self
-            .i18n
-            .t("settings_view.knowledge.embedding_partial_failure");
+        use oxideterm_gpui_settings_view::knowledge_page::EmbeddingJob;
+        let job = EmbeddingJob::prepare(self.settings_store.settings(), &self.i18n);
         self.ai_entity.update(cx, |entity, cx| {
-            entity.start_knowledge_embeddings(
-                collection_id,
-                provider,
-                resolved.model,
-                requires_api_key,
-                missing_key_error,
-                embedding_error,
-                partial_failure_template,
-                cx,
-            );
-        });
-        cx.notify();
-    }
-
-    fn report_knowledge_embedding_configuration_error(
-        &mut self,
-        message_key: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let message = self.i18n.t(message_key);
-        self.ai_entity.update(cx, |entity, cx| {
-            entity.expand_knowledge_embedding_config();
-            entity.set_knowledge_error(message);
-            cx.notify();
+            match job {
+                Ok(job) => {
+                    entity.start_knowledge_embeddings(
+                        collection_id, job.provider, job.model, job.requires_api_key,
+                        job.missing_key_error, job.retrieval_error, job.partial_failure, cx,
+                    );
+                }
+                Err(message) => {
+                    entity.expand_knowledge_embedding_config();
+                    entity.set_knowledge_error(message);
+                    cx.notify();
+                }
+            }
         });
         cx.notify();
     }

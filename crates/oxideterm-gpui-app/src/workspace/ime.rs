@@ -44,6 +44,7 @@ use oxideterm_gpui_ui::{
 use zeroize::{Zeroize, Zeroizing};
 
 mod history;
+mod focus;
 use history::{InputHistory, InputSnapshot};
 
 const READ_ONLY_TEXT_EM_WIDTH: f32 = 16.0;
@@ -1098,51 +1099,12 @@ impl WorkspaceApp {
     }
 
     pub(super) fn notify_ime_target(&self, target: WorkspaceImeTarget, cx: &mut Context<Self>) {
-        if matches!(
-            target,
-            WorkspaceImeTarget::Settings(input)
-                if oxideterm_gpui_settings_view::terminal_triggers::is_terminal_trigger_input(input)
-        ) {
-            self.terminal_trigger_editor.update(cx, |_, cx| cx.notify());
-        } else if matches!(
-            target,
-            WorkspaceImeTarget::Settings(input)
-                if oxideterm_gpui_settings_view::highlight_page::is_highlight_input(input)
-        ) {
-            self.highlight_editor.update(cx, |_, cx| cx.notify());
-            self.settings_surface.update(cx, |_, cx| cx.notify());
-        } else if matches!(
-            target,
-            WorkspaceImeTarget::Settings(input)
-                if oxideterm_gpui_settings_view::theme_editor::is_theme_editor_input(input)
-        ) {
-            self.theme_editor_dialog.update(cx, |_, cx| cx.notify());
-        } else if matches!(
-            target,
-            WorkspaceImeTarget::Settings(input)
-                if oxideterm_gpui_settings_view::components::is_connection_key_input(input)
-        ) {
-            self.managed_key_dialog_view.update(cx, |_, cx| cx.notify());
-        } else if target == WorkspaceImeTarget::Settings(SettingsInput::TerminalCommandSpecsJson) {
-            self.command_specs_dialog.update(cx, |_, cx| cx.notify());
-        } else if matches!(
-            target,
-            WorkspaceImeTarget::Settings(input)
-                if oxideterm_gpui_settings_view::components::is_surface_input(input)
-        ) {
-            self.settings_surface.update(cx, |_, cx| cx.notify());
-        } else if matches!(
-            target,
-            WorkspaceImeTarget::Settings(
-                SettingsInput::PortableCurrentPassword
-                    | SettingsInput::PortableNewPassword
-                    | SettingsInput::PortableConfirmPassword
-            )
-        ) {
-            self.portable_password_dialog.update(cx, |_, cx| cx.notify());
-        } else {
-            cx.notify();
+        if let WorkspaceImeTarget::Settings(input) = target
+            && self.settings_views.notify_input(input, cx)
+        {
+            return;
         }
+        cx.notify();
     }
 
     pub(super) fn active_ime_target(&self, cx: &App) -> Option<WorkspaceImeTarget> {

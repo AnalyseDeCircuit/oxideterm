@@ -14,10 +14,9 @@ impl WorkspaceApp {
         } else {
             value.as_str()
         };
-        let frame = self.settings_ime_frame(input, display_value, focused, cx);
         self.settings_components().text_field(
-            frame,
-            value.to_owned(),
+            self.settings_ime_frame(input, display_value, focused, cx),
+            value.clone(),
             TextInputContentAlign::Center,
             false,
             |input| input.w(px(width)),
@@ -51,8 +50,6 @@ impl WorkspaceApp {
         placeholder: String,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        // Responsive form fields own their width at the parent flex layer.
-        // Filling that slot avoids fixed-width inputs inside growing columns.
         self.settings_text_input_control_inner(
             input,
             value,
@@ -74,14 +71,13 @@ impl WorkspaceApp {
         secret: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.render_settings_field(
+        self.settings_controls_for(cx.entity(), cx).field(
             input,
             value.as_ref(),
             placeholder,
             width,
             align,
             secret,
-            Self::settings_window_dispatch(cx),
             cx,
         )
     }
@@ -100,97 +96,92 @@ impl WorkspaceApp {
         cx: &App,
         render: impl FnOnce(oxideterm_gpui_settings_view::components::SettingsControls<'_>, &App) -> R,
     ) -> R {
-        use oxideterm_gpui_settings_view::components::SettingsControls;
-        let dispatch = Self::settings_window_dispatch_for(owner.downgrade());
-        let field = |input, value: &str, placeholder, width, align, secret, cx: &App| {
-            self.render_settings_field(
-                input,
-                value,
-                placeholder,
-                width,
-                align,
-                secret,
-                dispatch.clone(),
-                cx,
-            )
-        };
+        render(self.settings_controls_for(owner, cx), cx)
+    }
+
+    pub(super) fn settings_document_text(
+        &self,
+        owner: Entity<Self>,
+        cx: &App,
+    ) -> Rc<
+        dyn Fn(
+            oxideterm_gpui_settings_view::keybinding_page::KeybindingTextRole,
+            u64,
+            String,
+            u32,
+        ) -> AnyElement,
+    > {
+        use oxideterm_gpui_settings_view::keybinding_page::KeybindingTextRole;
         let text = self.selectable_text_render_state_for_entity(owner, cx);
-        let label = |scope: &str, key: &str, value: String, color, _: &App| {
-            let id = selectable_text::selectable_text_id(scope, (key, value.as_str()));
+        Rc::new(move |role, id, value, color| {
+            let role = match role {
+                KeybindingTextRole::PlainDocument => SelectableTextRole::PlainDocument,
+                KeybindingTextRole::NonSelectable => SelectableTextRole::NonSelectable,
+            };
             text.render_display_text_with_id_in_group(
-                SelectableTextRole::PlainDocument,
+                role,
                 selectable_text::selectable_document_group_id(),
                 id,
                 0,
                 value,
                 color,
             )
-        };
-        render(
-            SettingsControls {
-                components: self.settings_components(),
-                open_select: self.open_settings_select,
-                select_origin: self.settings_select_focus_origin,
-                dispatch: dispatch.clone(),
-                field: &field,
-                label: &label,
-            },
-            cx,
-        )
+        })
     }
 
-    fn render_settings_field(
+    pub(super) fn settings_controls_for(
         &self,
-        input: SettingsInput,
-        value: &str,
-        placeholder: String,
-        width: Option<f32>,
-        align: TextInputContentAlign,
-        secret: bool,
-        dispatch: oxideterm_gpui_settings_view::components::SettingsWindowDispatch,
+        owner: Entity<Self>,
         cx: &App,
-    ) -> AnyElement {
-        let settings_workspace = self.settings_workspace.read(cx);
-        let entity_value = settings_workspace.settings_entity_input_value(input);
-        let settings_entity_owned = entity_value.is_some();
-        let ai_entity_owned = ai_state::AiWorkspaceEntity::owns_settings_input(input);
-        let ai_entity = self.ai_entity.read(cx);
-        let ai_entity_value = ai_entity_owned
-            .then(|| ai_entity.settings_input_value(input))
-            .flatten();
-        let focused = if settings_entity_owned {
-            settings_workspace.settings_entity_focused_input() == Some(input)
-        } else if ai_entity_owned {
-            ai_entity.focused_settings_input() == Some(input)
-        } else {
-            self.focused_settings_input == Some(input)
-        };
-        let display_value = if let Some(entity_value) = entity_value {
-            // Borrow Entity-owned drafts for this frame instead of cloning them
-            // into root rendering snapshots, especially for secret inputs.
-            entity_value
-        } else if let Some(ai_entity_value) = ai_entity_value {
-            // Knowledge and AI dialogs keep their drafts in AiWorkspaceEntity.
-            // Render from that same owner so IME replacements are visible immediately.
-            ai_entity_value
-        } else if focused {
-            self.settings_input_draft.as_str()
-        } else {
-            value
-        };
-        let frame = self.settings_ime_frame(input, display_value, focused, cx);
-        self.settings_components().text_field(
-            frame,
-            placeholder,
-            align,
-            secret,
-            |input| {
-                input
-                    .when_some(width, |input, width| input.w(px(width)).max_w_full())
-                    .when(width.is_none(), |input| input.w_full())
-                    .min_w(px(0.0))
-            },
+    ) -> oxideterm_gpui_settings_view::components::SettingsControls<'_> {
+        use oxideterm_gpui_settings_view::components::SettingsControls;
+        let dispatch = Self::settings_window_dispatch_for(owner.downgrade());
+        let text = self.selectable_text_render_state_for_entity(owner, cx);
+        SettingsControls {
+            components: self.settings_components(),
+            open_select: self.open_settings_select,
+            select_origin: self.settings_select_focus_origin,
             dispatch,
-        )
+            ime: self,
+            label: Rc::new(move |scope, key, value, color, _| {
+                let id = selectable_text::selectable_text_id(scope, (key, value.as_str()));
+                text.render_display_text_with_id_in_group(
+                    SelectableTextRole::PlainDocument,
+                    selectable_text::selectable_document_group_id(),
+                    id,
+                    0,
+                    value,
+                    color,
+                )
+            }),
+        }
+    }
+}
+
+impl oxideterm_gpui_settings_view::components::SettingsImeSource for WorkspaceApp {
+    fn frame<'a>(
+        &'a self,
+        input: SettingsInput,
+        value: &'a str,
+        cx: &'a App,
+    ) -> oxideterm_gpui_settings_view::components::SettingsImeFrame<'a> {
+        let workspace = self.settings_workspace.read(cx);
+        let ai = self.ai_entity.read(cx);
+        let (display, focused) = if let Some(draft) = workspace.settings_entity_input_value(input) {
+            (
+                draft,
+                workspace.settings_entity_focused_input() == Some(input),
+            )
+        } else if ai_state::AiWorkspaceEntity::owns_settings_input(input) {
+            (
+                ai.settings_input_value(input).unwrap_or(value),
+                ai.focused_settings_input() == Some(input),
+            )
+        } else if self.focused_settings_input == Some(input) {
+            (self.settings_input_draft.as_str(), true)
+        } else {
+            (value, false)
+        };
+        self.settings_ime_frame(input, display, focused, cx)
     }
 }

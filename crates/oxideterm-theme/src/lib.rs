@@ -25,6 +25,38 @@ pub struct TerminalTheme {
     pub bright_white: u32,
 }
 
+impl TerminalTheme {
+    pub fn interpolate(self, target: Self, progress: f32) -> Self {
+        let blend = |from, to| mix(to, from, progress.clamp(0.0, 1.0));
+        Self {
+            background: blend(self.background, target.background),
+            foreground: blend(self.foreground, target.foreground),
+            cursor: blend(self.cursor, target.cursor),
+            selection_background: if progress >= 0.5 {
+                target.selection_background
+            } else {
+                self.selection_background
+            },
+            black: blend(self.black, target.black),
+            red: blend(self.red, target.red),
+            green: blend(self.green, target.green),
+            yellow: blend(self.yellow, target.yellow),
+            blue: blend(self.blue, target.blue),
+            magenta: blend(self.magenta, target.magenta),
+            cyan: blend(self.cyan, target.cyan),
+            white: blend(self.white, target.white),
+            bright_black: blend(self.bright_black, target.bright_black),
+            bright_red: blend(self.bright_red, target.bright_red),
+            bright_green: blend(self.bright_green, target.bright_green),
+            bright_yellow: blend(self.bright_yellow, target.bright_yellow),
+            bright_blue: blend(self.bright_blue, target.bright_blue),
+            bright_magenta: blend(self.bright_magenta, target.bright_magenta),
+            bright_cyan: blend(self.bright_cyan, target.bright_cyan),
+            bright_white: blend(self.bright_white, target.bright_white),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppUiColors {
@@ -1155,6 +1187,15 @@ mod tests {
         let base_2xs = tokens.metrics.ui_text_2xs;
         tokens.apply_ui_font_scale(18.0 / 14.0);
         assert!(tokens.metrics.ui_text_2xs > base_2xs);
+
+        let dark = theme_by_id("default").terminal;
+        let light = theme_by_id("solarized-light").terminal;
+        let mid = dark.interpolate(light, 0.5);
+        assert_ne!(mid.background, dark.background);
+        assert_ne!(mid.background, light.background);
+        assert_ne!(mid.red, dark.red);
+        assert_ne!(mid.red, light.red);
+        assert_eq!(dark.interpolate(light, 1.0).background, light.background);
     }
 
     #[test]

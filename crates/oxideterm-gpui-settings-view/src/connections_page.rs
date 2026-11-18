@@ -32,6 +32,7 @@ use oxideterm_gpui_ui::{
 use oxideterm_i18n::I18n;
 use oxideterm_settings::PersistedSettings;
 use std::{collections::HashSet, ops::Deref, rc::Rc};
+mod actions;
 mod importer;
 pub use importer::{
     connection_import_duplicate_strategy_label, connection_import_source_label,
@@ -52,22 +53,27 @@ pub enum ConnectionRequest {
     ProxyCommand(bool),
     OpenSsh,
     CloseSsh,
+    PickImport(bool),
+    PickKey,
+    CloseKey,
+    ClearFooterFocus,
+    Local(ConnectionAction),
+}
+
+#[derive(Clone)]
+pub enum ConnectionAction {
     ImportSelectedSsh,
     ImportSsh(String),
-    PickImport(bool),
     PreviewImport,
     ApplyImport,
     OpenKeyFile,
     OpenKeyPaste,
     OpenKeyRename(String, String),
     OpenKeyDelete(ManagedSshKeyInfo),
-    PickKey,
     ImportKeyFile,
     ImportKeyPaste,
     RenameKey,
     DeleteKey,
-    CloseKey,
-    ClearFooterFocus,
 }
 
 pub struct ConnectionPage<'a> {
@@ -76,7 +82,6 @@ pub struct ConnectionPage<'a> {
     pub store: &'a ConnectionStore,
     pub dispatch: Rc<dyn Fn(ConnectionRequest, &mut App)>,
     pub scroll: &'a dyn Fn(&str) -> ScrollHandle,
-    pub private_key: &'a dyn Fn(&App) -> AnyElement,
     pub footer_focus: Option<ConfirmDialogAction>,
 }
 
@@ -89,6 +94,26 @@ impl<'a> Deref for ConnectionPage<'a> {
 }
 
 impl ConnectionPage<'_> {
+    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+        use oxideterm_settings_model::SettingsSectionId::*;
+        match section {
+            ConnectionsDefaults => self.settings_card(
+                "settings_view.connections.title",
+                "settings_view.connections.description",
+                vec![self.connection_defaults_section(self.settings, cx)],
+            ),
+            ConnectionsIdleTimeout => self.settings_card(
+                "settings_view.connections.idle_timeout.title",
+                "settings_view.connections.idle_timeout.description",
+                vec![self.connection_idle_timeout_control(self.settings, cx)],
+            ),
+            ConnectionsSshKeys => self.settings_ssh_section(0, cx),
+            ConnectionsSshConfigImport => self.ssh_config_import_section(cx),
+            ConnectionsImporters => self.connection_importers_section(cx),
+            _ => div().into_any_element(),
+        }
+    }
+
     fn press(
         &self,
         request: ConnectionRequest,
@@ -600,7 +625,7 @@ impl ConnectionPage<'_> {
                 font_size: Some(self.tokens.metrics.ui_text_xs),
                 ..ToolbarButtonOptions::default()
             },
-            self.press(ConnectionRequest::ImportSelectedSsh),
+            self.press(ConnectionRequest::Local(ConnectionAction::ImportSelectedSsh)),
         )
         .into_any_element()
     }
@@ -720,7 +745,7 @@ impl ConnectionPage<'_> {
                 font_size: Some(self.tokens.metrics.ui_text_sm),
                 ..ToolbarButtonOptions::default()
             },
-            self.press(ConnectionRequest::ImportSsh(alias.clone())),
+            self.press(ConnectionRequest::Local(ConnectionAction::ImportSsh(alias.clone()))),
         )
         .rounded_full()
         .into_any_element()
@@ -904,14 +929,14 @@ impl ConnectionPage<'_> {
                 "settings_view.ssh_keys.import_file",
                 ButtonVariant::Outline,
                 cx,
-                self.press(ConnectionRequest::OpenKeyFile),
+                self.press(ConnectionRequest::Local(ConnectionAction::OpenKeyFile)),
             ))
             .child(self.managed_key_action_button(
                 "lucide/shield-check.svg",
                 "settings_view.ssh_keys.paste_key",
                 ButtonVariant::Outline,
                 cx,
-                self.press(ConnectionRequest::OpenKeyPaste),
+                self.press(ConnectionRequest::Local(ConnectionAction::OpenKeyPaste)),
             ))
             .child(self.managed_key_action_button(
                 "lucide/refresh-cw.svg",
@@ -1052,10 +1077,10 @@ impl ConnectionPage<'_> {
                         14.0,
                         rgb(theme.text),
                         IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md),
-                        self.press(ConnectionRequest::OpenKeyRename(
+                        self.press(ConnectionRequest::Local(ConnectionAction::OpenKeyRename(
                             key.id.clone(),
                             key.name.clone(),
-                        )),
+                        ))),
                         cx,
                     ))
                     .child(self.workspace_icon_action_button(
@@ -1066,7 +1091,7 @@ impl ConnectionPage<'_> {
                             hover_background: Some(rgba((theme.error << 8) | 0x14)),
                             ..IconButtonOptions::opaque_toolbar(30.0, ButtonRadius::Md)
                         },
-                        self.press(ConnectionRequest::OpenKeyDelete(key)),
+                        self.press(ConnectionRequest::Local(ConnectionAction::OpenKeyDelete(key))),
                         cx,
                     )),
             )
@@ -1180,7 +1205,7 @@ impl ConnectionPage<'_> {
             ],
             self.i18n.t("modals.managed_key.import"),
             can_import,
-            self.press(ConnectionRequest::ImportKeyFile),
+            self.press(ConnectionRequest::Local(ConnectionAction::ImportKeyFile)),
             presence.phase(),
             cx,
         )
@@ -1206,7 +1231,30 @@ impl ConnectionPage<'_> {
                     420.0,
                     cx,
                 ),
-                (self.private_key)(cx),
+                div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(8.0))
+                        .child(
+                            div()
+                                .text_size(px(self.tokens.metrics.ui_text_sm))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(rgb(self.tokens.ui.text))
+                                .child(self.i18n.t("modals.managed_key.paste.private_key")),
+                        )
+                        .child({
+                            let input = SettingsInput::ManagedKeyPastePrivateKey;
+                            let state = self.state.read(cx);
+                            let value = state.settings_entity_input_value(input)
+                                .expect("managed private-key draft belongs to settings");
+                            let frame = self.ime.frame(input, value, cx);
+                            let scroll = (self.scroll)(&format!("multiline-input-{}", frame.anchor_id.0));
+                            crate::components::settings_multiline_field(
+                                self.tokens, frame, crate::components::settings_mono_font_family(self.settings),
+                                &scroll, self.controls.dispatch.clone(),
+                            )
+                        })
+                        .into_any_element(),
                 self.settings_managed_key_secret_input_field(
                     "modals.managed_key.passphrase",
                     SettingsInput::ManagedKeyPastePassphrase,
@@ -1219,7 +1267,7 @@ impl ConnectionPage<'_> {
             ],
             self.i18n.t("modals.managed_key.import"),
             can_import,
-            self.press(ConnectionRequest::ImportKeyPaste),
+            self.press(ConnectionRequest::Local(ConnectionAction::ImportKeyPaste)),
             presence.phase(),
             cx,
         )
@@ -1245,7 +1293,7 @@ impl ConnectionPage<'_> {
             )],
             self.i18n.t("settings_view.ssh_keys.rename"),
             can_save,
-            self.press(ConnectionRequest::RenameKey),
+            self.press(ConnectionRequest::Local(ConnectionAction::RenameKey)),
             presence.phase(),
             cx,
         )
@@ -1290,7 +1338,7 @@ impl ConnectionPage<'_> {
             ],
             self.i18n.t("settings_view.ssh_keys.delete"),
             can_delete,
-            self.press(ConnectionRequest::DeleteKey),
+            self.press(ConnectionRequest::Local(ConnectionAction::DeleteKey)),
             presence.phase(),
             cx,
         )
@@ -1419,7 +1467,7 @@ impl ConnectionPage<'_> {
                     .text_color(rgb(self.tokens.ui.text))
                     .child(self.i18n.t(label_key)),
             )
-            .child((self.field)(
+            .child(self.field(
                 input,
                 value.as_ref(),
                 placeholder,

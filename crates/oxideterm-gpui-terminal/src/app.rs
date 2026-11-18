@@ -493,6 +493,13 @@ fn terminal_latency_percentiles(samples: &VecDeque<u64>) -> (u64, u64, u64) {
     (percentile(50), percentile(95), percentile(99))
 }
 
+struct TerminalThemeTransition {
+    from: TerminalUiTheme,
+    to: TerminalUiTheme,
+    started_at: Instant,
+    duration: Duration,
+}
+
 pub struct TerminalPane {
     terminal: Arc<Mutex<TerminalSession>>,
     // The backend kind is immutable for the pane's full lifetime.
@@ -517,6 +524,7 @@ pub struct TerminalPane {
     preferences: TerminalUiPreferences,
     settings: TerminalUiSettings,
     theme: TerminalUiTheme,
+    theme_transition: Option<TerminalThemeTransition>,
     snapshot: TerminalSnapshot,
     render_mode: TermMode,
     snapshot_dirty: bool,
@@ -632,6 +640,7 @@ pub struct TerminalPane {
     scrollbar_drag: Option<ScrollbarDrag>,
     scrollbar_visible: bool,
     scrollbar_hovered: bool,
+    scrollbar_hide_deadline: Option<Instant>,
     scrollbar_hide_task: Option<gpui::Task<()>>,
     // Horizontal panning belongs to the visual timestamp overlay and never
     // changes the backing PTY grid or remote window size.
@@ -873,27 +882,28 @@ fn assign_initial_snapshot_line_ids(snapshot: &mut TerminalSnapshot, next_line_i
     }
 }
 
-fn reconcile_snapshot_line_ids(
+fn reconcile_snapshot_line_ids_from_sources(
     snapshot: &mut TerminalSnapshot,
-    previous: &TerminalSnapshot,
+    previous_sources: &[&TerminalSnapshot],
     next_line_id: &mut u64,
 ) {
     if snapshot.lines.iter().all(|row| row.line_id != 0) {
         return;
     }
 
-    let previous_by_source = previous
-        .lines
-        .iter()
-        .filter(|row| row.source_id != 0 && row.line_id != 0)
-        .map(|row| (row.source_id, row))
-        .collect::<HashMap<_, _>>();
-    let previous_by_grid_line = previous
-        .lines
-        .iter()
-        .filter(|row| row.line_id != 0)
-        .map(|row| (row.absolute_line, row))
-        .collect::<HashMap<_, _>>();
+    let mut previous_by_source = HashMap::new();
+    let mut previous_by_grid_line = HashMap::new();
+    for previous in previous_sources.iter().rev() {
+        for row in &previous.lines {
+            if row.line_id == 0 {
+                continue;
+            }
+            if row.source_id != 0 {
+                previous_by_source.insert(row.source_id, row);
+            }
+            previous_by_grid_line.insert(row.absolute_line, row);
+        }
+    }
     let mut used_line_ids = snapshot
         .lines
         .iter()
@@ -921,6 +931,15 @@ fn reconcile_snapshot_line_ids(
         row.line_id = inherited_line_id.unwrap_or_else(|| take_snapshot_line_id(next_line_id));
         used_line_ids.insert(row.line_id);
     }
+}
+
+#[cfg(test)]
+fn reconcile_snapshot_line_ids(
+    snapshot: &mut TerminalSnapshot,
+    previous: &TerminalSnapshot,
+    next_line_id: &mut u64,
+) {
+    reconcile_snapshot_line_ids_from_sources(snapshot, &[previous], next_line_id);
 }
 
 include!("app_recording.rs");
@@ -1325,6 +1344,7 @@ impl TerminalPane {
             preferences: preferences.clone(),
             settings: TerminalUiSettings::from_preferences(&preferences),
             theme: preferences.theme.clone(),
+            theme_transition: None,
             snapshot,
             render_mode,
             snapshot_dirty: false,
@@ -1433,6 +1453,7 @@ impl TerminalPane {
             scrollbar_drag: None,
             scrollbar_visible: false,
             scrollbar_hovered: false,
+            scrollbar_hide_deadline: None,
             scrollbar_hide_task: None,
             horizontal_scroll_offset_px: px(0.0),
             horizontal_scrollbar_drag: None,
@@ -1620,11 +1641,19 @@ impl TerminalPane {
         self.snapshot_deferred_since = None;
         self.sync_selection_from_range(selection);
         let backend_reused_rows = snapshot.lines.iter().any(|row| row.line_id != 0);
-        reconcile_snapshot_line_ids(
-            &mut snapshot,
-            &self.snapshot,
-            &mut self.next_snapshot_line_id,
-        );
+        if let Some(cached) = &self.smooth_scroll_snapshot_cache {
+            reconcile_snapshot_line_ids_from_sources(
+                &mut snapshot,
+                &[&self.snapshot, &cached.snapshot],
+                &mut self.next_snapshot_line_id,
+            );
+        } else {
+            reconcile_snapshot_line_ids_from_sources(
+                &mut snapshot,
+                &[&self.snapshot],
+                &mut self.next_snapshot_line_id,
+            );
+        }
         // Raw backend snapshots are stateless; the pane owns frame generation
         // so future render caches can invalidate without changing backends.
         if !backend_reused_rows {
@@ -2255,7 +2284,7 @@ impl TerminalPane {
             self.clear_smooth_scroll_remainder();
         }
         self.settings = next_settings;
-        self.theme = preferences.theme.clone();
+        self.apply_theme_transition(preferences.theme.clone(), cx);
         self.command_history = preferences.command_history.clone();
         self.image_cache
             .set_byte_limit(preferences.render_policy.image_cache_bytes);
@@ -2287,11 +2316,63 @@ impl TerminalPane {
             self.terminal.lock().set_palette(palette);
             self.snapshot_dirty = true;
         }
-        self.theme = theme.clone();
+        self.apply_theme_transition(theme.clone(), cx);
         self.preferences.theme = theme;
         self.preferences.background = background;
         self.preferences.transparent_background = transparent_background;
         cx.notify();
+    }
+
+    fn apply_theme_transition(&mut self, next_theme: TerminalUiTheme, cx: &App) {
+        if !next_theme.tokens.motion.enabled
+            || cx.reduce_motion()
+            || self.theme.visual_colors_eq(&next_theme)
+        {
+            self.theme = next_theme;
+            self.theme_transition = None;
+            return;
+        }
+        let duration = oxideterm_gpui_ui::motion::duration(
+            &next_theme.tokens,
+            oxideterm_gpui_ui::motion::MotionDuration::Overlay,
+        );
+        if duration.is_zero() {
+            self.theme = next_theme;
+            self.theme_transition = None;
+            return;
+        }
+        // Keep `self.theme` at the current visual state and advance via VSync in `render`.
+        self.theme_transition = Some(TerminalThemeTransition {
+            from: self.theme.clone(),
+            to: next_theme,
+            started_at: Instant::now(),
+            duration,
+        });
+    }
+
+    pub(super) fn advance_theme_transition(
+        &mut self,
+        now: Instant,
+    ) -> Option<TerminalTransitionColors> {
+        let transition = self.theme_transition.as_ref()?;
+        let elapsed = now.saturating_duration_since(transition.started_at);
+        let progress = if transition.duration.is_zero() {
+            1.0
+        } else {
+            (elapsed.as_secs_f32() / transition.duration.as_secs_f32()).min(1.0)
+        };
+        if progress >= 1.0 {
+            let transition = self.theme_transition.take()?;
+            self.theme = transition.to;
+            return None;
+        }
+        // Match the workspace appearance transition's smoothstep easing.
+        let eased = progress * progress * (3.0 - 2.0 * progress);
+        let interpolated = TerminalUiTheme::interpolate(&transition.from, &transition.to, eased);
+        let transition_colors =
+            TerminalTransitionColors::new(&transition.from, &transition.to, &interpolated, eased);
+        self.theme = interpolated;
+        Some(transition_colors)
     }
 
     pub fn with_preference_overrides(
@@ -6190,6 +6271,59 @@ mod tests {
                 );
             });
         }
+    }
+
+    #[gpui::test]
+    fn theme_change_animates_visual_colors_across_vsync_frames_and_settles(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_window, _cx| TerminalTestRoot);
+        let dark = TerminalUiTheme::from_tokens(oxideterm_theme::ThemeTokens::from_builtin(
+            oxideterm_theme::theme_by_id("default"),
+        ));
+        let light = TerminalUiTheme::from_tokens(oxideterm_theme::ThemeTokens::from_builtin(
+            oxideterm_theme::theme_by_id("solarized-light"),
+        ));
+        let mut initial_preferences = TerminalUiPreferences::default();
+        initial_preferences.theme = dark.clone();
+        let pane = cx.update(|window, cx| {
+            cx.new(|cx| {
+                TerminalPane::new_recording_playback(
+                    DEFAULT_COLS,
+                    DEFAULT_ROWS,
+                    initial_preferences,
+                    window,
+                    cx,
+                )
+                .unwrap()
+            })
+        });
+
+        pane.update(cx, |pane, cx| {
+            pane.set_appearance(light.clone(), None, false, cx);
+            assert_eq!(pane.theme.background, dark.background);
+            assert_eq!(pane.preferences.theme.background, light.background);
+            let transition = pane.theme_transition.as_ref().expect("theme transition");
+            let started = transition.started_at;
+            let duration = transition.duration;
+
+            let mid_colors = pane
+                .advance_theme_transition(started + duration / 2)
+                .expect("mid-transition colors");
+            assert_ne!(pane.theme.background, dark.background);
+            assert_ne!(pane.theme.background, light.background);
+            assert_ne!(pane.theme.tokens.terminal.red, dark.tokens.terminal.red);
+            assert_ne!(pane.theme.tokens.terminal.red, light.tokens.terminal.red);
+            assert_ne!(
+                mid_colors
+                    .map_ansi_color(terminal_color_from_hex(light.tokens.terminal.red))
+                    .unwrap(),
+                terminal_color_to_hsla(terminal_color_from_hex(light.tokens.terminal.red))
+            );
+
+            assert!(pane.advance_theme_transition(started + duration).is_none());
+            assert!(pane.theme_transition.is_none());
+            assert_eq!(pane.theme.background, light.background);
+            assert_eq!(pane.theme.tokens.terminal.red, light.tokens.terminal.red);
+        });
     }
 
     #[gpui::test]

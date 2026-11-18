@@ -1,6 +1,12 @@
 use std::rc::Rc;
 
+mod external;
+pub use external::{ExternalSelect, ExternalSelectInputs, plugin_marketplace_sort_label};
+mod knowledge;
+pub use knowledge::KnowledgeSelectInputs;
+
 use gpui::{AnyElement, App, Entity, MouseDownEvent, Window, prelude::*};
+use oxideterm_connections::{ConnectionImportDuplicateStrategy, PrivilegePromptType, PrivilegeResponseMode, totp::TotpCredential};
 use oxideterm_gpui_platform::vibrancy::available_modes;
 use oxideterm_gpui_ui::{
     modal::overlay_content_boundary,
@@ -13,7 +19,7 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     BackgroundStyle, FrostedGlassMode, HighlightRule, Language, PersistedSettings,
     RemoteShellIntegrationMode, SettingsApplicationProxyMode, SettingsUpstreamProxyProtocol,
-    TerminalSemanticScheme, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
+    SettingsUpstreamProxyAuth, SftpPresentationPreference, TerminalSemanticScheme, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
 };
 use oxideterm_settings_model::{
     SEMANTIC_CLASSES, SemanticRuleContext, edit_custom_semantic_scheme,
@@ -26,7 +32,10 @@ use oxideterm_terminal_triggers::{
 use oxideterm_theme::{BUILT_IN_THEMES, ThemeTokens};
 
 use crate::{
+    connections_page::{connection_import_duplicate_strategy_label, connection_import_source_label, connection_import_source_options},
+    credentials_page::{settings_privilege_prompt_type_label, settings_privilege_response_mode_label},
     entity::SettingsWorkspaceEntity,
+    proxy_page::{NetworkProxyAuthMode, network_proxy_auth_label},
     highlight_page::{semantic_class_label, semantic_context_label},
     terminal_triggers::TerminalTriggersSettingsState,
     *,
@@ -40,10 +49,52 @@ pub enum SelectMenuRequest {
     Background(Box<dyn FnOnce(&mut BackgroundStyle)>),
     RemoteShell(RemoteShellIntegrationMode),
     Trigger(bool, Box<dyn FnOnce(&mut TerminalTriggersSettingsState)>),
+    External(ExternalSelect),
+    KnowledgeCollectionScope(Option<String>),
+    KnowledgeDocumentFormat(&'static str),
     CloseSemantic,
     CloseHighlight,
     Highlight(usize, Box<dyn FnOnce(&mut HighlightRule)>),
     HighlightPreset(Vec<HighlightRule>),
+    ProxyAuth(NetworkProxyAuthMode),
+    SftpPresentation(SftpPresentationPreference),
+}
+
+
+pub fn settings_select_popover(
+    tokens: &ThemeTokens,
+    select: SettingsSelect,
+    anchor: oxideterm_gpui_ui::select::OverlayAnchor,
+    content: AnyElement,
+    dismiss: impl Fn(&mut Window, &mut App) + Clone + 'static,
+) -> AnyElement {
+    use gpui::{AnchoredPositionMode, Corner, MouseButton, SharedString, anchored, deferred, div, point, px};
+    use oxideterm_gpui_ui::modal::{TAURI_POPOVER_LAYER_PRIORITY, popover_backdrop};
+    popover_backdrop()
+        .on_mouse_down(MouseButton::Left, {
+            let dismiss = dismiss.clone();
+            move |_, window, cx| {
+                dismiss(window, cx);
+                cx.stop_propagation();
+            }
+        })
+        .on_mouse_down(MouseButton::Right, move |_, window, cx| {
+            dismiss(window, cx);
+            cx.stop_propagation();
+        })
+        .child(deferred(
+            anchored()
+                .anchor(Corner::TopLeft)
+                .position(anchor.bounds.bottom_left())
+                .offset(point(px(0.0), px(tokens.metrics.settings_select_popup_gap)))
+                .position_mode(AnchoredPositionMode::Window)
+                .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                    tokens,
+                    SharedString::from(format!("settings-select-popup-{select:?}")),
+                    div().child(content), -6.0, point(0.5, 0.0),
+                )),
+        ).with_priority(TAURI_POPOVER_LAYER_PRIORITY))
+        .into_any_element()
 }
 
 pub type SelectMenuDispatch = Rc<dyn Fn(SelectMenuRequest, &mut Window, &mut App)>;
@@ -64,6 +115,9 @@ pub struct SettingsSelectMenu<'a> {
     pub tokens: &'a ThemeTokens,
     pub i18n: &'a I18n,
     pub settings_workspace: &'a Entity<SettingsWorkspaceEntity>,
+    pub external: ExternalSelectInputs<'a>,
+    pub knowledge: KnowledgeSelectInputs<'a>,
+    pub totp_credentials: &'a [TotpCredential],
     pub shells: Vec<LocalShellOption>,
     pub trigger_commands: Vec<(String, String)>,
     pub first_command: String,
@@ -97,6 +151,212 @@ impl SettingsSelectMenu<'_> {
     ) -> Option<AnyElement> {
         let settings = self.settings;
         let popup = match (active_tab, open_select) {
+            (_, SettingsSelect::PluginMarketplaceSort)
+            | (SettingsTab::Ai, SettingsSelect::IdeAgentMode | SettingsSelect::AiProviderTemplate
+                | SettingsSelect::AiWebSearchProvider | SettingsSelect::AiMcpTransport
+                | SettingsSelect::AiMcpAuthMode) => self.external_popup(open_select, width),
+            (SettingsTab::Knowledge, SettingsSelect::AiEmbeddingProvider
+                | SettingsSelect::KnowledgeCollectionScope | SettingsSelect::KnowledgeDocumentFormat) =>
+            {
+                self.knowledge_popup(open_select, width)
+            }
+            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegePromptType) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = self.settings_workspace.read(cx).privilege_prompt_type();
+                for prompt_type in [
+                    PrivilegePromptType::Sudo,
+                    PrivilegePromptType::Su,
+                    PrivilegePromptType::Custom,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            settings_privilege_prompt_type_label(self.i18n, prompt_type),
+                            current == prompt_type,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_privilege_prompt_type(prompt_type, cx);
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeResponseMode) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let current = self.settings_workspace.read(cx).privilege_response_mode();
+                for response_mode in [
+                    PrivilegeResponseMode::PasswordOnly,
+                    PrivilegeResponseMode::PasswordThenTotp,
+                    PrivilegeResponseMode::PasswordWithTotp,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            settings_privilege_response_mode_label(self.i18n, response_mode),
+                            current == response_mode,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_privilege_response_mode(response_mode, cx);
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Privilege, SettingsSelect::LocalPrivilegeTotpCredential) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                let selected = self
+                    .settings_workspace
+                    .read(cx)
+                    .privilege_snapshot()
+                    .totp_credential_id;
+                popup = popup.child(select_option_action(
+                    select_option(
+                        &self.tokens,
+                        self.i18n
+                            .t("sessionManager.privilege_credentials.totp_none"),
+                        selected.is_none(),
+                    ),
+                    false,
+                    false,
+                    self.action(|this, _event, _window, cx| {
+                        this.send(SelectMenuRequest::Close, _window, cx);
+                        this.settings_workspace.update(cx, |settings, cx| {
+                            settings.set_privilege_totp_credential(None, cx);
+                        });
+                        cx.stop_propagation();
+                    }),
+                ));
+                for credential in self.totp_credentials {
+                    let credential_id = credential.id.clone();
+                    let label = if credential.enabled {
+                        credential.name.clone()
+                    } else {
+                        format!(
+                            "{} ({})",
+                            credential.name,
+                            self.i18n.t("settings_view.privilege_credentials.disabled")
+                        )
+                    };
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            label,
+                            selected.as_deref() == Some(credential_id.as_str()),
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            let credential_id = credential_id.clone();
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_privilege_totp_credential(Some(credential_id), cx);
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Connections, SettingsSelect::ConnectionImportSource) => {
+                let selected_source = self.settings_workspace.read(cx).connection_import_source();
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for source in connection_import_source_options().iter().copied() {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            connection_import_source_label(source, &self.i18n),
+                            source == selected_source,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.settings_workspace.update(cx, |settings, cx| settings.set_connection_import_source(source, cx));
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Connections, SettingsSelect::ConnectionImportDuplicateStrategy) => {
+                let selected_strategy = self
+                    .settings_workspace
+                    .read(cx)
+                    .connection_import_duplicate_strategy();
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for strategy in [
+                    ConnectionImportDuplicateStrategy::Skip,
+                    ConnectionImportDuplicateStrategy::Rename,
+                ] {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            connection_import_duplicate_strategy_label(strategy, &self.i18n),
+                            strategy == selected_strategy,
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, _window, cx| {
+                            this.send(SelectMenuRequest::Close, _window, cx);
+                            this.settings_workspace.update(cx, |settings, cx| {
+                                settings.set_connection_import_duplicate_strategy(strategy, cx);
+                            });
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Network, SettingsSelect::NetworkProxyAuth) => {
+                let mut popup = select_overlay_popup(self.tokens, width);
+                let current = settings.network.upstream_proxy.as_ref().map(|proxy| {
+                    match proxy.auth {
+                        SettingsUpstreamProxyAuth::None => NetworkProxyAuthMode::None,
+                        SettingsUpstreamProxyAuth::Password {..} => NetworkProxyAuthMode::Password,
+                    }
+                }).unwrap_or(NetworkProxyAuthMode::None);
+                for mode in [NetworkProxyAuthMode::None, NetworkProxyAuthMode::Password] {
+                    popup = popup.child(select_option_action(
+                        select_option(self.tokens, network_proxy_auth_label(mode, self.i18n), mode == current),
+                        false,
+                        false,
+                        self.action(move |this, _, window, cx| {
+                            this.send(SelectMenuRequest::Close, window, cx);
+                            this.send(SelectMenuRequest::ProxyAuth(mode), window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
+            (SettingsTab::Sftp, SettingsSelect::SftpPresentation) => {
+                let mut popup = select_overlay_popup(self.tokens, width);
+                for preference in [SftpPresentationPreference::Ask, SftpPresentationPreference::Tab, SftpPresentationPreference::Sidebar] {
+                    popup = popup.child(select_option_action(
+                        select_option(self.tokens, crate::sftp_page::sftp_presentation_label(preference, self.i18n), preference == settings.sftp.presentation),
+                        false,
+                        false,
+                        self.action(move |this, _, window, cx| {
+                            this.send(SelectMenuRequest::Close, window, cx);
+                            this.send(SelectMenuRequest::SftpPresentation(preference), window, cx);
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (_, SettingsSelect::Language) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for language in language_options() {

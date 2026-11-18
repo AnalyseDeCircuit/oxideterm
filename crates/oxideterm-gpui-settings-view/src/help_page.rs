@@ -1,3 +1,6 @@
+mod documents;
+pub use documents::SettingsMarkdownDialog;
+
 use std::{ops::Deref, rc::Rc};
 
 use gpui::{

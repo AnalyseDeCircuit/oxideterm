@@ -602,15 +602,24 @@ impl TerminalPane {
                 self.physical_scroll_offset(offset)
             });
             let mut terminal = self.terminal.lock();
-            let delta = terminal_scroll_delta(scroll_delta.rows);
             if let Some(offset) = folded_offset {
-                terminal.scroll_to_display_offset(offset);
-                terminal.snapshot()
-            } else if self.snapshot_dirty {
-                terminal.scroll_lines(delta);
-                terminal.snapshot()
+                if self.snapshot_dirty {
+                    terminal.scroll_to_display_offset(offset);
+                    terminal.snapshot()
+                } else {
+                    let physical_delta = (offset as i64 - self.snapshot.display_offset as i64)
+                        .clamp(i64::from(i32::MIN), i64::from(i32::MAX))
+                        as i32;
+                    terminal.scroll_lines_snapshot_incremental(physical_delta, &self.snapshot)
+                }
             } else {
-                terminal.scroll_lines_snapshot_incremental(delta, &self.snapshot)
+                let delta = terminal_scroll_delta(scroll_delta.rows);
+                if self.snapshot_dirty {
+                    terminal.scroll_lines(delta);
+                    terminal.snapshot()
+                } else {
+                    terminal.scroll_lines_snapshot_incremental(delta, &self.snapshot)
+                }
             }
         };
         if let Some(snapshot_started) = snapshot_started {
@@ -1212,18 +1221,55 @@ impl TerminalPane {
     }
 
     fn show_scrollbar(&mut self, cx: &mut Context<Self>) {
+        let was_visible = self.scrollbar_visible;
         self.scrollbar_visible = true;
-        // The pane owns the timer; replacing it cancels the previous deadline.
-        self.scrollbar_hide_task = Some(cx.spawn(async move |pane, cx| {
-            cx.background_executor().timer(SCROLLBAR_HIDE_DELAY).await;
-            let _ = pane.update(cx, |pane, cx| {
-                if pane.scrollbar_drag.is_none() && !pane.scrollbar_hovered {
-                    pane.scrollbar_visible = false;
-                    cx.notify();
+        self.scrollbar_hide_deadline = Some(cx.background_executor().now() + SCROLLBAR_HIDE_DELAY);
+        if self.scrollbar_hide_task.is_none() {
+            // Reuse one timer task across high-frequency scroll events instead of
+            // spawning and cancelling a task on every trackpad tick.
+            self.scrollbar_hide_task = Some(cx.spawn(async move |pane, cx| {
+                loop {
+                    let now = cx.background_executor().now();
+                    let Ok(remaining) = pane.read_with(cx, |pane, _| {
+                        pane.scrollbar_hide_deadline
+                            .map(|deadline| deadline.saturating_duration_since(now))
+                    }) else {
+                        break;
+                    };
+                    let Some(remaining) = remaining else {
+                        break;
+                    };
+                    if !remaining.is_zero() {
+                        cx.background_executor().timer(remaining).await;
+                        continue;
+                    }
+                    let Ok(finished) = pane.update(cx, |pane, cx| {
+                        let now = cx.background_executor().now();
+                        if pane
+                            .scrollbar_hide_deadline
+                            .is_some_and(|deadline| now < deadline)
+                        {
+                            return false;
+                        }
+                        pane.scrollbar_hide_deadline = None;
+                        pane.scrollbar_hide_task = None;
+                        if pane.scrollbar_drag.is_none() && !pane.scrollbar_hovered {
+                            pane.scrollbar_visible = false;
+                            cx.notify();
+                        }
+                        true
+                    }) else {
+                        break;
+                    };
+                    if finished {
+                        break;
+                    }
                 }
-            });
-        }));
-        cx.notify();
+            }));
+        }
+        if !was_visible {
+            cx.notify();
+        }
     }
 
     pub(super) fn set_scrollbar_hovered(&mut self, hovered: bool, cx: &mut Context<Self>) {
@@ -1233,6 +1279,7 @@ impl TerminalPane {
         self.scrollbar_hovered = hovered;
         if hovered {
             self.scrollbar_visible = true;
+            self.scrollbar_hide_deadline = None;
             self.scrollbar_hide_task = None;
             self.clear_terminal_hover(cx);
             self.hovered_link = None;

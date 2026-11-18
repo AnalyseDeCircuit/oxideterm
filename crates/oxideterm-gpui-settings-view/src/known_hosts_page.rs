@@ -103,7 +103,7 @@ impl SettingsControls<'_> {
             .flex_wrap()
             .items_center()
             .gap(px(8.0))
-            .child(div().flex_1().min_w(px(180.0)).child((self.field)(
+            .child(div().flex_1().min_w(px(180.0)).child(self.field(
                 SettingsInput::KnownHostsSearch,
                 &query_value,
                 self.i18n.t("settings_view.known_hosts.search"),

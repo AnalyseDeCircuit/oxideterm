@@ -1572,6 +1572,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.advance_theme_transition(window, cx);
         self.sync_terminal_render_caches(cx);
         let active_ime_target =
             self.active_ime_target_for_window(window.window_handle().window_id(), cx);

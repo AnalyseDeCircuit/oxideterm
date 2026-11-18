@@ -55,18 +55,7 @@ impl WorkspaceApp {
         let catalog = self.keybinding_definitions(cx);
         let owner = cx.entity().downgrade();
         let dispatch = Rc::new(move |request, cx: &mut App| {
-            let _ = owner.update(cx, |app, cx| match request {
-                KeybindingRequest::Import => app.import_keybindings(cx),
-                KeybindingRequest::Export => app.export_keybindings(cx),
-                KeybindingRequest::Reset(id) => app.reset_keybinding(&id, cx),
-                KeybindingRequest::Unbind(id) => app.unbind_keybinding(&id, cx),
-                KeybindingRequest::CommitRecording => app.confirm_keybinding_recording(cx),
-                KeybindingRequest::CloseReset { apply } => {
-                    if app.begin_keybinding_reset_all_confirm_exit(cx) && apply {
-                        app.reset_all_keybindings(cx);
-                    }
-                }
-            });
+            let _ = owner.update(cx, |app, cx| app.handle_keybinding_request(request, cx));
         });
         let input_dispatch = Self::settings_window_dispatch(cx);
         let search = |cx: &App| {
@@ -110,14 +99,23 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn settings_keybindings_section(
-        &self,
-        section: SettingsSectionId,
-        cx: &Context<Self>,
-    ) -> AnyElement {
-        self.with_keybinding_page(cx, |page, cx| {
-            page.settings_keybindings_section(section, cx)
-        })
+    pub(in crate::workspace::settings) fn handle_keybinding_request(
+        &mut self,
+        request: KeybindingRequest,
+        cx: &mut Context<Self>,
+    ) {
+        match request {
+            KeybindingRequest::Import => self.import_keybindings(cx),
+            KeybindingRequest::Export => self.export_keybindings(cx),
+            KeybindingRequest::Reset(id) => self.reset_keybinding(&id, cx),
+            KeybindingRequest::Unbind(id) => self.unbind_keybinding(&id, cx),
+            KeybindingRequest::CommitRecording => self.confirm_keybinding_recording(cx),
+            KeybindingRequest::CloseReset { apply } => {
+                if self.begin_keybinding_reset_all_confirm_exit(cx) && apply {
+                    self.reset_all_keybindings(cx);
+                }
+            }
+        }
     }
 
     pub(in crate::workspace) fn render_keybinding_reset_all_confirm_dialog(

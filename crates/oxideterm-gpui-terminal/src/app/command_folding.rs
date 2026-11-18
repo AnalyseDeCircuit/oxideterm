@@ -212,11 +212,17 @@ impl TerminalPane {
             return;
         }
         if self.command_reflow_pending {
+            if !self.command_folding.ranges.is_empty() {
+                self.smooth_scroll_snapshot_cache = None;
+            }
             self.command_folding.ranges.clear();
             self.command_folding.snapshot = None;
             return;
         }
         if self.command_folding.collapsed.is_empty() {
+            if !self.command_folding.ranges.is_empty() {
+                self.smooth_scroll_snapshot_cache = None;
+            }
             self.command_folding.ranges.clear();
             self.command_folding.snapshot = None;
             return;
@@ -264,6 +270,9 @@ impl TerminalPane {
         {
             return;
         }
+        if self.command_folding.ranges != ranges {
+            self.smooth_scroll_snapshot_cache = None;
+        }
         self.command_folding.ranges = ranges;
         self.command_folding.snapshot = if self.command_folding.ranges.is_empty() {
             None
@@ -310,7 +319,11 @@ impl TerminalPane {
             .saturating_sub(self.command_folding.physical_line(top))
     }
 
-    pub(super) fn folded_snapshot(&self, offset: usize, rows: usize) -> Option<TerminalSnapshot> {
+    pub(super) fn folded_snapshot(
+        &mut self,
+        offset: usize,
+        rows: usize,
+    ) -> Option<TerminalSnapshot> {
         let map = &self.command_folding;
         let history = map.history(&self.snapshot);
         let offset = offset.min(history);
@@ -440,6 +453,19 @@ impl TerminalPane {
                 break;
             }
             visible += added;
+        }
+        if let Some(previous) = &self.command_folding.snapshot {
+            reconcile_snapshot_line_ids_from_sources(
+                &mut result,
+                &[previous, &self.snapshot],
+                &mut self.next_snapshot_line_id,
+            );
+        } else {
+            reconcile_snapshot_line_ids_from_sources(
+                &mut result,
+                &[&self.snapshot],
+                &mut self.next_snapshot_line_id,
+            );
         }
         Some(result)
     }
@@ -805,7 +831,7 @@ mod tests {
         TerminalCommandMarkDetectionSource, TerminalCommandPosition,
     };
 
-    fn foldable_mark(id: &str) -> TerminalCommandMark {
+    pub(super) fn foldable_mark(id: &str) -> TerminalCommandMark {
         TerminalCommandMark {
             command_id: id.to_string(),
             command: Some("ls -la".to_string()),
@@ -941,6 +967,76 @@ mod semantic_context_tests {
             assert_eq!(context.rows[0].columns[0], (0, 0));
             assert_eq!(context.rows[1].columns[0], (10, 0));
             assert_eq!(context.rows[2].columns[0], (20, 0));
+        });
+    }
+
+    #[gpui::test]
+    fn folded_scroll_reuses_incremental_rows_and_caches_overscan(cx: &mut TestAppContext) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            TerminalPane::new_recording_playback(
+                20,
+                6,
+                TerminalUiPreferences {
+                    command_folding_enabled: true,
+                    ..Default::default()
+                },
+                window,
+                cx,
+            )
+            .expect("test terminal pane")
+        });
+        pane.update(cx, |pane, cx| {
+            let initial = {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(
+                    b"cmd\r\nout1\r\nout2\r\nafter1\r\nafter2\r\nafter3\r\nafter4\r\nafter5\r\nafter6\r\nafter7",
+                );
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(initial);
+            pane.snapshot_dirty = false;
+            let mut mark = super::tests::foldable_mark("cmd-fold");
+            mark.output_end = Some(oxideterm_terminal::TerminalCommandPosition {
+                line: 3,
+                column: 0,
+            });
+            mark.end_line = Some(3);
+            pane.command_marks.push(mark);
+            pane.toggle_command_fold("cmd-fold", cx);
+            assert!(pane.folding_active());
+
+            let before_cells = pane
+                .snapshot
+                .lines
+                .iter()
+                .map(|row| (row.line_id, Arc::clone(&row.cells)))
+                .collect::<Vec<_>>();
+            pane.handle_scroll(
+                &gpui::ScrollEvent {
+                    delta: gpui::ScrollDelta::Lines(gpui::point(0.0, 1.0)),
+                    touch_phase: gpui::TouchPhase::Moved,
+                    ..Default::default()
+                },
+                cx,
+            );
+            assert_eq!(pane.snapshot.display_offset, 1);
+            for index in 1..pane.snapshot.lines.len() {
+                assert_eq!(pane.snapshot.lines[index].line_id, before_cells[index - 1].0);
+                assert!(Arc::ptr_eq(
+                    &pane.snapshot.lines[index].cells,
+                    &before_cells[index - 1].1
+                ));
+            }
+
+            pane.smooth_scroll_offset_px = gpui::px(4.0);
+            let (first_overscan, _, _) = pane.render_snapshot_for_smooth_scroll();
+            assert!(pane.smooth_scroll_snapshot_cache.is_some());
+            let first_top_cells = Arc::clone(&first_overscan.lines[0].cells);
+            let (second_overscan, _, _) = pane.render_snapshot_for_smooth_scroll();
+            assert!(Arc::ptr_eq(&second_overscan.lines[0].cells, &first_top_cells));
+
+            pane.toggle_command_fold("cmd-fold", cx);
+            assert!(pane.smooth_scroll_snapshot_cache.is_none());
         });
     }
 }

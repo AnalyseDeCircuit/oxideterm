@@ -45,6 +45,7 @@ mod quick_commands;
 mod remote_desktop;
 mod runtime_entity;
 mod root {
+    pub(super) mod runtime_settings;
     pub(super) mod background;
     pub(super) mod helpers;
     pub(super) mod host_tools;
@@ -140,7 +141,7 @@ use oxideterm_gpui_platform::{
 use oxideterm_gpui_terminal::{
     BackgroundImageRenderCache, PrivilegePromptMatch, SemanticShellDialect,
     SharedTerminalCommandHistory, SharedTerminalSession, TerminalAutosuggestLabels,
-    TerminalBackgroundFit, TerminalBackgroundPreferences, TerminalBroadcastInputKind,
+    TerminalBackgroundPreferences, TerminalBroadcastInputKind,
     TerminalCommandSelectionLabels, TerminalContextAction, TerminalHighlightMatchScope,
     TerminalHighlightRenderMode, TerminalHighlightRule as UiHighlightRule,
     TerminalHighlightRuleSetOverride, TerminalHistoryStore, TerminalInputBroadcaster,
@@ -190,15 +191,14 @@ use oxideterm_session_adapter::{
     terminal_encoding_from_settings as session_terminal_encoding,
 };
 use oxideterm_settings::{
-    AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundFit, BackgroundScope,
+    AI_SIDEBAR_ABSOLUTE_MAX_WIDTH, AI_SIDEBAR_ABSOLUTE_MIN_WIDTH, BackgroundScope,
     CursorStyle as SettingsCursorStyle, FontFamily, FrostedGlassMode, GLOBAL_HIGHLIGHT_RULE_SET_ID,
     HighlightRule, HighlightRuleMatchScope, HighlightRuleRenderMode, Language,
-    MAX_TERMINAL_BACKGROUND_OPACITY, MIN_TERMINAL_BACKGROUND_OPACITY,
     PersistedSettings, SettingsStore, background_images_directory,
     default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_settings_model::{
-    AiMcpServerDraft, AiProviderKeyStatusDelivery, SettingsNavigationLayout,
+    AiMcpServerDraft, AiProviderKeyStatusDelivery,
 };
 use oxideterm_sftp::{
     BackgroundTransferDirection, BackgroundTransferKind, BackgroundTransferSnapshot,
@@ -229,7 +229,7 @@ use oxideterm_terminal::{
     TerminalLifecycle, load_local_shell_history_commands, scan_shells,
 };
 use oxideterm_theme::{
-    AppUiColors, TerminalTheme, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
+    AppUiColors, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
 };
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
@@ -295,7 +295,7 @@ use crate::{
 use crate::{assets::LucideIcon, bundled_fonts};
 use oxideterm_gpui_markdown::{
     MarkdownBlockLayout, MarkdownCodeBlockActions, MarkdownDocument, MarkdownMermaidZoomHandler,
-    MarkdownOptions, MarkdownVirtualListScrollHandle, markdown_virtual_with_code_actions,
+    MarkdownOptions, MarkdownVirtualListScrollHandle,
 };
 
 const MERMAID_MODAL_RASTER_SCALE: f32 = 3.0;
@@ -323,7 +323,6 @@ use virtual_list::{
     sync_tauri_virtual_list_state_by_signatures,
 };
 
-const SETTINGS_PERCENT_SCALE: f64 = 100.0;
 const SETTINGS_SCROLL_CARET_PAUSE_MS: u64 = 700;
 const AI_PROVIDER_MODEL_ROW_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const AI_PROVIDER_MODEL_ROW_LIST_ESTIMATED_HEIGHT: f32 = 48.0;
@@ -753,6 +752,14 @@ pub(super) struct SelectableTextFragmentState {
     pub anchor: TextInputAnchor,
 }
 
+#[derive(Clone, Copy)]
+pub(super) struct ThemeTransitionState {
+    pub from: ThemeTokens,
+    pub to: ThemeTokens,
+    pub started: std::time::Instant,
+    pub duration: Duration,
+}
+
 pub(crate) struct WorkspaceApp {
     focus_handle: FocusHandle,
     main_window_tabs: WorkspaceWindowTabState,
@@ -804,19 +811,7 @@ pub(crate) struct WorkspaceApp {
     onboarding: OnboardingState,
     shortcuts_modal: ShortcutsModalState,
     settings_workspace: Entity<settings::SettingsWorkspaceEntity>,
-    settings_window_chrome: Entity<oxideterm_gpui_settings_view::window_chrome::SettingsWindowChromeEntity>,
-    settings_surface: Entity<oxideterm_gpui_settings_view::surface::SettingsSurfaceView>,
-    terminal_trigger_editor:
-        Entity<oxideterm_gpui_settings_view::terminal_triggers::TerminalTriggerEditor>,
-    highlight_editor: Entity<oxideterm_gpui_settings_view::highlight_page::HighlightEditor>,
-    theme_editor_dialog: Entity<oxideterm_gpui_settings_view::theme_editor::ThemeEditorDialog>,
-    ssh_import_dialog_view: Entity<oxideterm_gpui_settings_view::connections_page::ConnectionDialog>,
-    managed_key_dialog_view: Entity<oxideterm_gpui_settings_view::connections_page::ConnectionDialog>,
-    mcp_client_dialog: Entity<oxideterm_gpui_settings_view::mcp_page::McpClientDialog>,
-    settings_navigation_editor:
-        Entity<oxideterm_gpui_settings_view::navigation_editor::SettingsNavigationEditor>,
-    portable_password_dialog:
-        Entity<oxideterm_gpui_settings_view::portable_runtime::dialog::PortablePasswordDialog>,
+    settings_views: oxideterm_gpui_settings_view::views::SettingsViews,
     _settings_workspace_subscription: Subscription,
     segmented_control_user_motion: selection_motion::UserSegmentedControlMotionState,
     // Prompt and memory documents are edited outside the virtual settings list.
@@ -895,7 +890,6 @@ pub(crate) struct WorkspaceApp {
     active_session_sidebar_list_cache: RefCell<VirtualListSignatureCache>,
     knowledge_workspace_list_state: ListState,
     open_settings_select: Option<SettingsSelect>,
-    settings_theme_picker: Entity<oxideterm_gpui_settings_view::theme_picker::SettingsThemePicker>,
     // A root-mounted select portal must only use the trigger geometry from the
     // native window that opened it.
     open_settings_select_owner_window_id: Option<gpui::WindowId>,
@@ -925,15 +919,9 @@ pub(crate) struct WorkspaceApp {
     settings_input_draft: String,
     // The large command-spec document and highlight/semantic rule editors live
     // in workspace modals so the settings virtual list stays compact and single-scroll.
-    command_specs_dialog: Entity<oxideterm_gpui_settings_view::command_specs::CommandSpecsDialog>,
-    settings_slider_drag: Option<SettingsSlider>,
     workspace_input: Entity<ime::WorkspaceInputEntity>,
     _workspace_input_observation: Subscription,
     input_caret: ime::WorkspaceCaretVisibility,
-    native_update_notification_open: bool,
-    native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    native_update_release_notes_scroll: MarkdownVirtualListScrollHandle,
-    settings_legal_notice_scroll: MarkdownVirtualListScrollHandle,
     _window_intents: Entity<WorkspaceWindowIntentEntity>,
     _window_intent_subscription: Subscription,
     _window_button_layout_subscription: Subscription,
@@ -1007,7 +995,7 @@ pub(crate) struct WorkspaceApp {
     _cloud_sync_subscription: Subscription,
     i18n: I18n,
     tokens: ThemeTokens,
-    theme_transition_task: Option<Task<()>>,
+    theme_transition: Option<ThemeTransitionState>,
     system_dark: bool,
     active_background: oxideterm_settings::BackgroundStyle,
     detected_graphics: DetectedGraphics,

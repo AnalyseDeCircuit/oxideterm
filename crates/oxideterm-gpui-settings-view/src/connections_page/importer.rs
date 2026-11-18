@@ -183,7 +183,7 @@ impl ConnectionPage<'_> {
                 },
                 ..ToolbarButtonOptions::default()
             },
-            self.press(ConnectionRequest::PreviewImport),
+            self.press(ConnectionRequest::Local(ConnectionAction::PreviewImport)),
         )
         .into_any_element()
     }
@@ -373,7 +373,7 @@ impl ConnectionPage<'_> {
                 font_size: Some(self.tokens.metrics.ui_text_xs),
                 ..ToolbarButtonOptions::default()
             },
-            self.press(ConnectionRequest::ApplyImport),
+            self.press(ConnectionRequest::Local(ConnectionAction::ApplyImport)),
         )
         .into_any_element()
     }

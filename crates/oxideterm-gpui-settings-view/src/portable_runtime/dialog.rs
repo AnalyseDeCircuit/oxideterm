@@ -32,7 +32,7 @@ pub struct PortablePasswordDialog {
     settings: Entity<SettingsWorkspaceEntity>,
     frame: Rc<dyn Fn(&App) -> Option<PortablePasswordFrame>>,
     // The native IME adapter borrows the secret for the input renderer only.
-    field: Rc<dyn Fn(SettingsInput, &App) -> AnyElement>,
+    controls: crate::components::SettingsControlsSource,
     dispatch: Rc<dyn Fn(bool, &mut App)>,
     _settings_changed: Subscription,
 }
@@ -41,7 +41,7 @@ impl PortablePasswordDialog {
     pub fn new(
         settings: Entity<SettingsWorkspaceEntity>,
         frame: Rc<dyn Fn(&App) -> Option<PortablePasswordFrame>>,
-        field: Rc<dyn Fn(SettingsInput, &App) -> AnyElement>,
+        controls: crate::components::SettingsControlsSource,
         dispatch: Rc<dyn Fn(bool, &mut App)>,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -53,7 +53,7 @@ impl PortablePasswordDialog {
         Self {
             settings,
             frame,
-            field,
+            controls,
             dispatch,
             _settings_changed: settings_changed,
         }
@@ -213,6 +213,18 @@ impl PortablePasswordDialog {
         input: SettingsInput,
         cx: &App,
     ) -> AnyElement {
+        let Some(controls) = (self.controls)(cx) else {
+            return div().into_any_element();
+        };
+        let input_frame = controls.ime.frame(input, "", cx);
+        let field = controls.text_field(
+            input_frame,
+            String::new(),
+            oxideterm_gpui_ui::text_input::TextInputContentAlign::Start,
+            true,
+            |field| field.w_full(),
+            controls.dispatch.clone(),
+        );
         div()
             .flex()
             .flex_col()
@@ -224,7 +236,7 @@ impl PortablePasswordDialog {
                     .text_color(rgb(frame.tokens.ui.text))
                     .child(frame.i18n.t(label_key)),
             )
-            .child((self.field)(input, cx))
+            .child(field)
             .into_any_element()
     }
 }

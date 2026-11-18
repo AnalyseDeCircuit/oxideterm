@@ -1,127 +1,48 @@
 use super::*;
+use oxideterm_gpui_settings_view::knowledge_page::dialog::{
+    KnowledgeDialog, KnowledgeDialogAction, KnowledgeDialogContent,
+};
 
 impl WorkspaceApp {
+    fn render_knowledge_dialog(
+        &self,
+        content: KnowledgeDialogContent<'_>,
+        dispatch: impl Fn(&mut Self, KnowledgeDialogAction, &mut Context<Self>) + 'static,
+        cx: &Context<Self>,
+    ) -> AnyElement {
+        let owner = cx.entity().downgrade();
+        self.with_settings_controls(cx, |controls, cx| {
+            KnowledgeDialog {
+                controls,
+                focus: self.standard_confirm_focus(),
+                dispatch: Rc::new(move |action, cx| {
+                    let _ = owner.update(cx, |app, cx| {
+                        app.clear_standard_confirm_focus();
+                        dispatch(app, action, cx);
+                    });
+                }),
+            }.render(content, cx)
+        })
+    }
+
     pub(in crate::workspace) fn render_knowledge_create_collection_dialog(
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.ai_entity.read(cx).knowledge_create_dialog_open() {
-            return None;
-        }
-        let collection_name = self
-            .ai_entity
-            .read(cx)
-            .knowledge_new_collection_name()
-            .to_string();
-        let can_create = !collection_name.trim().is_empty();
-        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event, _window, cx| {
-                // Tauri DocumentManager uses Dialog onOpenChange for
-                // create collection; outside close matches Cancel.
-                this.close_knowledge_create_dialog(cx);
-                this.clear_standard_confirm_focus();
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        );
-        let form = dialog_content(&self.tokens)
-            .w(px(KNOWLEDGE_DIALOG_WIDTH))
-            .max_w(relative(0.92))
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
-                dialog_header(&self.tokens)
-                    .child(dialog_title(
-                        &self.tokens,
-                        self.i18n.t("settings_view.knowledge.create_collection"),
-                    ))
-                    .child(dialog_description(
-                        &self.tokens,
-                        self.i18n.t("settings_view.knowledge.create_description"),
-                    )),
-            )
-            .child(
-                div()
-                    .px(px(24.0))
-                    .py(px(18.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t("settings_view.knowledge.collection_name")),
-                            )
-                            .child(
-                                self.settings_text_input_control(
-                                    SettingsInput::KnowledgeCollectionName,
-                                    collection_name,
-                                    self.i18n
-                                        .t("settings_view.knowledge.collection_name_placeholder"),
-                                    420.0,
-                                    cx,
-                                ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t("settings_view.knowledge.scope")),
-                            )
-                            .child(self.ai_settings_select_control(
-                                SettingsSelect::KnowledgeCollectionScope,
-                                self.knowledge_collection_scope_label(cx),
-                                420.0,
-                                cx,
-                            )),
-                    ),
-            )
-            .child(
-                dialog_footer(&self.tokens)
-                    .child(self.standard_footer_action_button(
-                        self.i18n.t("common.actions.cancel"),
-                        ButtonVariant::Outline,
-                        ConfirmDialogAction::Cancel,
-                        false,
-                        |this, _event, _window, cx| {
-                            this.close_knowledge_create_dialog(cx);
-                        },
-                        cx,
-                    ))
-                    .child(self.standard_footer_action_button(
-                        self.i18n.t("settings_view.knowledge.create_collection"),
-                        ButtonVariant::Default,
-                        ConfirmDialogAction::Confirm,
-                        !can_create,
-                        |this, _event, _window, cx| {
-                            this.knowledge_create_collection(cx);
-                            this.close_knowledge_create_dialog(cx);
-                        },
-                        cx,
-                    )),
-            );
-        Some(settings_dialog_transition(
-            &self.tokens,
-            "knowledge-create-dialog-form",
-            backdrop,
-            form,
-            self.ai_entity.read(cx).knowledge_create_presence().phase(),
+        let ai = self.ai_entity.read(cx);
+        ai.knowledge_create_dialog_open().then(|| self.render_knowledge_dialog(
+            KnowledgeDialogContent::Collection {
+                name: ai.knowledge_new_collection_name(),
+                scope_label: self.knowledge_collection_scope_label(cx),
+                phase: ai.knowledge_create_presence().phase(),
+            },
+            |app, action, cx| {
+                if matches!(action, KnowledgeDialogAction::Confirm) {
+                    app.knowledge_create_collection(cx);
+                }
+                app.close_knowledge_create_dialog(cx);
+            },
+            cx,
         ))
     }
 
@@ -129,139 +50,20 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        if !self.ai_entity.read(cx).knowledge_document_dialog_open() {
-            return None;
-        }
-        let document_title = self
-            .ai_entity
-            .read(cx)
-            .knowledge_new_document_title()
-            .to_string();
-        let creation_error = self
-            .ai_entity
-            .read(cx)
-            .knowledge_new_document_error()
-            .map(str::to_string);
-        let can_create = !document_title.trim().is_empty();
-        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event, _window, cx| {
-                // Tauri new-document Dialog closes through
-                // setNewDocDialogOpen(false) on backdrop click.
-                this.close_knowledge_document_dialog(cx);
-                this.clear_standard_confirm_focus();
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        );
-        let form = dialog_content(&self.tokens)
-            .w(px(KNOWLEDGE_DIALOG_WIDTH))
-            .max_w(relative(0.92))
-            .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                cx.stop_propagation();
-            })
-            .child(
-                dialog_header(&self.tokens)
-                    .child(dialog_title(
-                        &self.tokens,
-                        self.i18n.t("settings_view.knowledge.new_document"),
-                    ))
-                    .child(dialog_description(
-                        &self.tokens,
-                        self.i18n
-                            .t("settings_view.knowledge.new_document_description"),
-                    )),
-            )
-            .child(
-                div()
-                    .px(px(24.0))
-                    .py(px(18.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(12.0))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(
-                                        self.i18n.t("settings_view.knowledge.new_document_title"),
-                                    ),
-                            )
-                            .child(
-                                self.settings_text_input_control(
-                                    SettingsInput::KnowledgeDocumentTitle,
-                                    document_title,
-                                    self.i18n.t(
-                                        "settings_view.knowledge.new_document_title_placeholder",
-                                    ),
-                                    420.0,
-                                    cx,
-                                ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(8.0))
-                            .child(
-                                div()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(rgb(self.tokens.ui.text))
-                                    .child(self.i18n.t("settings_view.knowledge.format")),
-                            )
-                            .child(self.ai_settings_select_control(
-                                SettingsSelect::KnowledgeDocumentFormat,
-                                self.knowledge_document_format_label(cx),
-                                420.0,
-                                cx,
-                            )),
-                    )
-                    .when_some(creation_error, |content, error| {
-                        content.child(self.knowledge_error_row(&error))
-                    }),
-            )
-            .child(
-                dialog_footer(&self.tokens)
-                    .child(self.standard_footer_action_button(
-                        self.i18n.t("common.actions.cancel"),
-                        ButtonVariant::Outline,
-                        ConfirmDialogAction::Cancel,
-                        false,
-                        |this, _event, _window, cx| {
-                            this.close_knowledge_document_dialog(cx);
-                        },
-                        cx,
-                    ))
-                    .child(self.standard_footer_action_button(
-                        self.i18n.t("settings_view.knowledge.new_document"),
-                        ButtonVariant::Default,
-                        ConfirmDialogAction::Confirm,
-                        !can_create,
-                        |this, _event, _window, cx| {
-                            if this.knowledge_create_blank_document(cx) {
-                                this.close_knowledge_document_dialog(cx);
-                            }
-                        },
-                        cx,
-                    )),
-            );
-        Some(settings_dialog_transition(
-            &self.tokens,
-            "knowledge-document-dialog-form",
-            backdrop,
-            form,
-            self.ai_entity
-                .read(cx)
-                .knowledge_document_presence()
-                .phase(),
+        let ai = self.ai_entity.read(cx);
+        ai.knowledge_document_dialog_open().then(|| self.render_knowledge_dialog(
+            KnowledgeDialogContent::Document {
+                title: ai.knowledge_new_document_title(),
+                format_label: self.knowledge_document_format_label(cx),
+                error: ai.knowledge_new_document_error(),
+                phase: ai.knowledge_document_presence().phase(),
+            },
+            |app, action, cx| {
+                if !matches!(action, KnowledgeDialogAction::Confirm) || app.knowledge_create_blank_document(cx) {
+                    app.close_knowledge_document_dialog(cx);
+                }
+            },
+            cx,
         ))
     }
 
@@ -331,74 +133,21 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let confirm = self.ai_entity.read(cx).knowledge_delete_confirm()?.clone();
-        let message_key = match confirm.target {
-            KnowledgeDeleteTarget::Collection => {
-                "settings_view.knowledge.delete_collection_confirm"
-            }
-            KnowledgeDeleteTarget::Document => "settings_view.knowledge.delete_document_confirm",
-        };
-        let message = self.i18n.t(message_key).replace("{{name}}", &confirm.name);
-        Some(
-            dismissible_dialog_backdrop()
-                .on_mouse_down(
-                    MouseButton::Left,
-                    cx.listener(|this, _event, _window, cx| {
-                        // Tauri delete confirm uses onOpenChange(false) to
-                        // clear the pending delete target.
-                        this.ai_entity.update(cx, |entity, cx| {
-                            entity.clear_knowledge_delete_confirm();
-                            cx.notify();
-                        });
-                        this.clear_standard_confirm_focus();
-                        cx.stop_propagation();
+        let confirm = self.ai_entity.read(cx).knowledge_delete_confirm()?;
+        Some(self.render_knowledge_dialog(
+            KnowledgeDialogContent::Delete(confirm),
+            |app, action, cx| {
+                if matches!(action, KnowledgeDialogAction::Confirm) {
+                    app.knowledge_confirm_delete(cx);
+                } else {
+                    app.ai_entity.update(cx, |ai, cx| {
+                        ai.clear_knowledge_delete_confirm();
                         cx.notify();
-                    }),
-                )
-                .child(
-                    dialog_content(&self.tokens)
-                        .w(px(KNOWLEDGE_DIALOG_WIDTH))
-                        .max_w(relative(0.92))
-                        .on_mouse_down(MouseButton::Left, |_event, _window, cx| {
-                            cx.stop_propagation();
-                        })
-                        .child(
-                            dialog_header(&self.tokens)
-                                .child(dialog_title(
-                                    &self.tokens,
-                                    self.i18n.t("settings_view.knowledge.delete_confirm_title"),
-                                ))
-                                .child(dialog_description(&self.tokens, message)),
-                        )
-                        .child(
-                            dialog_footer(&self.tokens)
-                                .child(self.standard_footer_action_button(
-                                    self.i18n.t("common.actions.cancel"),
-                                    ButtonVariant::Outline,
-                                    ConfirmDialogAction::Cancel,
-                                    false,
-                                    |this, _event, _window, cx| {
-                                        this.ai_entity.update(cx, |entity, cx| {
-                                            entity.clear_knowledge_delete_confirm();
-                                            cx.notify();
-                                        });
-                                        cx.notify();
-                                    },
-                                    cx,
-                                ))
-                                .child(self.standard_footer_action_button(
-                                    self.i18n.t("common.delete"),
-                                    ButtonVariant::Destructive,
-                                    ConfirmDialogAction::Confirm,
-                                    false,
-                                    |this, _event, _window, cx| {
-                                        this.knowledge_confirm_delete(cx);
-                                    },
-                                    cx,
-                                )),
-                        ),
-                )
-                .into_any_element(),
-        )
+                    });
+                    cx.notify();
+                }
+            },
+            cx,
+        ))
     }
 }

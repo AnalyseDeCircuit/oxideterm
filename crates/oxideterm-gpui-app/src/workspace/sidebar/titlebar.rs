@@ -567,7 +567,7 @@ impl WorkspaceApp {
                                 self.tokens.metrics.sidebar_action_icon_size,
                                 rgb(text_color),
                                 IconButtonOptions {
-                                    disabled: self.theme_transition_task.is_some(),
+                                    disabled: self.theme_transition.is_some(),
                                     ..IconButtonOptions::opaque_toolbar(
                                         action_button_size,
                                         ButtonRadius::Md,

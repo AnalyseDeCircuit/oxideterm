@@ -7647,6 +7647,7 @@ dependencies = [
  "oxideterm-connections",
  "oxideterm-editor-core",
  "oxideterm-gpui-background",
+ "oxideterm-gpui-markdown",
  "oxideterm-gpui-platform",
  "oxideterm-gpui-terminal",
  "oxideterm-gpui-ui",

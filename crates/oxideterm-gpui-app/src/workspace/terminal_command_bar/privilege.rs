@@ -537,7 +537,12 @@ impl WorkspaceApp {
                 .into_iter()
                 .find(|credential| credential.id == matched.credential_id);
             let kind = credential
-                .map(|credential| self.settings_privilege_prompt_type_label(credential.prompt_type))
+                .map(|credential| {
+                    oxideterm_gpui_settings_view::credentials_page::settings_privilege_prompt_type_label(
+                        &self.i18n,
+                        credential.prompt_type,
+                    )
+                })
                 .unwrap_or_default();
             rows = rows.child(
                 oxideterm_gpui_ui::select::select_option(

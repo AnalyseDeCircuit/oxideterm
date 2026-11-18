@@ -31,7 +31,7 @@ use super::{
     BACKGROUND_IMAGE_COMPLETION_POLL_INTERVAL, ImageRenderCache, ModemProgressState,
     SmoothScrollSnapshotCache, TerminalBleStatus, TerminalCommandNavigationDirection,
     TerminalContextAction, TerminalContextMenu, TerminalPane, TerminalPaneEvent, TmuxPromptKind,
-    TmuxPromptState, command_mark_ui_available,
+    TmuxPromptState, command_mark_ui_available, reconcile_snapshot_line_ids_from_sources,
 };
 use crate::background_cache::background_display_target;
 use crate::terminal_ui::*;
@@ -300,6 +300,7 @@ impl Render for TerminalPane {
         let now = Instant::now();
         let _ = self.advance_smooth_scroll_animation(now);
         let fold_animating = self.advance_command_fold_animations(now);
+        let theme_transition_colors = self.advance_theme_transition(now);
         let scrollbar_display_offset = self.smooth_scroll_display_offset();
         if self
             .context_menu
@@ -311,7 +312,11 @@ impl Render for TerminalPane {
         }
         let (mut snapshot, smooth_scroll_y_offset, viewport_rows) =
             self.render_snapshot_for_smooth_scroll();
-        if self.snapshot_dirty || self.smooth_scroll_animation.is_some() || fold_animating {
+        if self.snapshot_dirty
+            || self.smooth_scroll_animation.is_some()
+            || fold_animating
+            || theme_transition_colors.is_some()
+        {
             window.request_animation_frame();
         }
         snapshot.cursor_shape =
@@ -465,6 +470,7 @@ impl Render for TerminalPane {
             }),
         )
         .marked_text_caret(self.marked_text_caret_utf16)
+        .theme_transition_colors(theme_transition_colors)
         .detect_file_paths_as_links(self.settings.detect_file_paths_as_links)
         .precomputed_search_matches()
         .selection_highlight_query(selection_highlight_query)
@@ -2220,7 +2226,9 @@ impl TerminalPane {
         .detach();
     }
 
-    fn render_snapshot_for_smooth_scroll(&mut self) -> (TerminalSnapshot, gpui::Pixels, usize) {
+    pub(super) fn render_snapshot_for_smooth_scroll(
+        &mut self,
+    ) -> (TerminalSnapshot, gpui::Pixels, usize) {
         let snapshot = self.displayed_snapshot().clone();
         let viewport_rows = snapshot.rows;
         if !self.settings.smooth_scroll {
@@ -2244,8 +2252,21 @@ impl TerminalPane {
         // one overscan row per pending line. Only the fractional leading row needs clipping.
         let requested_rows = viewport_rows.saturating_add(usize::from(needs_overscan));
         if self.folding_active() {
+            if let Some(cached) = &self.smooth_scroll_snapshot_cache
+                && cached.source_generation == self.snapshot.generation
+                && cached.display_offset == base_display_offset
+                && cached.rows == requested_rows
+            {
+                return (cached.snapshot.clone(), y_offset, viewport_rows);
+            }
             return if let Some(snapshot) = self.folded_snapshot(base_display_offset, requested_rows)
             {
+                self.smooth_scroll_snapshot_cache = Some(SmoothScrollSnapshotCache {
+                    source_generation: self.snapshot.generation,
+                    display_offset: base_display_offset,
+                    rows: requested_rows,
+                    snapshot: snapshot.clone(),
+                });
                 (snapshot, y_offset, viewport_rows)
             } else {
                 self.snapshot_dirty = true;
@@ -2271,7 +2292,7 @@ impl TerminalPane {
             return cached.snapshot.clone();
         }
         let snapshot_started = self.preferences.show_performance_overlay.then(Instant::now);
-        let snapshot = self.terminal.lock().snapshot_with_display_offset(
+        let mut snapshot = self.terminal.lock().snapshot_with_display_offset(
             display_offset,
             rows,
             Some(
@@ -2280,6 +2301,22 @@ impl TerminalPane {
                     .map_or(&self.snapshot, |cached| &cached.snapshot),
             ),
         );
+        // Preserve `line_id` across smooth-scroll overscan frames and `self.snapshot` so
+        // `TerminalLayoutCache` and `TerminalTextRunCache` stay warm while scrolling.
+        if let Some(cached) = &self.smooth_scroll_snapshot_cache {
+            reconcile_snapshot_line_ids_from_sources(
+                &mut snapshot,
+                &[&self.snapshot, &cached.snapshot],
+                &mut self.next_snapshot_line_id,
+            );
+        } else {
+            reconcile_snapshot_line_ids_from_sources(
+                &mut snapshot,
+                &[&self.snapshot],
+                &mut self.next_snapshot_line_id,
+            );
+        }
+        snapshot.reuse_unchanged_rows_from(&self.snapshot);
         if let Some(snapshot_started) = snapshot_started {
             // Count only cache misses because cached overscan snapshots do not rebuild terminal
             // rows and therefore do not represent smooth-scroll snapshot work.
@@ -3278,6 +3315,60 @@ mod tests {
             assert_eq!(
                 after.logical_context_for_row(0).unwrap().text.trim_end(),
                 "'abcdefghijklmnopqrsZuvwx'"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn smooth_scroll_overscan_preserves_line_ids_across_scroll_boundaries(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (pane, cx) = cx.add_window_view(|window, cx| {
+            super::TerminalPane::new_recording_playback(12, 4, Default::default(), window, cx)
+                .unwrap()
+        });
+        pane.update(cx, |pane, _| {
+            let initial = {
+                let mut terminal = pane.terminal.lock();
+                terminal.feed_recording_output(b"line1\r\nline2\r\nline3\r\nline4\r\nline5\r\nline6");
+                terminal.snapshot()
+            };
+            pane.snapshot = pane.stamp_snapshot(initial);
+            let bottom_ids = pane
+                .snapshot
+                .lines
+                .iter()
+                .map(|row| row.line_id)
+                .collect::<Vec<_>>();
+            assert!(bottom_ids.iter().all(|id| *id != 0));
+
+            let overscan = pane.smooth_scroll_overscan_snapshot(1, 5);
+            assert!(overscan.lines.iter().all(|row| row.line_id != 0));
+            assert_eq!(
+                overscan
+                    .lines
+                    .iter()
+                    .skip(1)
+                    .map(|row| row.line_id)
+                    .collect::<Vec<_>>(),
+                bottom_ids
+            );
+            let revealed_id = overscan.lines[0].line_id;
+
+            let scrolled = pane
+                .terminal
+                .lock()
+                .scroll_lines_snapshot_incremental(1, &pane.snapshot);
+            let stamped = pane.stamp_snapshot(scrolled);
+            assert_eq!(stamped.lines[0].line_id, revealed_id);
+            assert_eq!(
+                stamped
+                    .lines
+                    .iter()
+                    .skip(1)
+                    .map(|row| row.line_id)
+                    .collect::<Vec<_>>(),
+                bottom_ids[..3]
             );
         });
     }

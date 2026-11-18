@@ -158,21 +158,7 @@ impl WorkspaceApp {
     ) -> R {
         let owner = cx.entity().downgrade();
         let dispatch = Rc::new(move |request, cx: &mut App| {
-            let _ = owner.update(cx, |app, cx| match request {
-                RemoteShellRequest::ToggleSuppression => {
-                    app.workspace_runtime.update(cx, |runtime, _cx| {
-                        runtime.toggle_remote_shell_integration_prompt_suppression();
-                    });
-                    cx.notify();
-                }
-                RemoteShellRequest::Defer => app.resolve_remote_shell_integration_prompt(false, cx),
-                RemoteShellRequest::Confirm => {
-                    app.resolve_remote_shell_integration_prompt(true, cx)
-                }
-                RemoteShellRequest::Run(action) => {
-                    app.run_remote_shell_integration_action(action, cx)
-                }
-            });
+            let _ = owner.update(cx, |app, cx| app.handle_remote_shell_request(request, cx));
         });
         render(
             RemoteShellPage {
@@ -181,6 +167,24 @@ impl WorkspaceApp {
             },
             cx,
         )
+    }
+
+    pub(super) fn handle_remote_shell_request(&mut self, request: RemoteShellRequest, cx: &mut Context<Self>) {
+        match request {
+                RemoteShellRequest::ToggleSuppression => {
+                    self.workspace_runtime.update(cx, |runtime, _cx| {
+                        runtime.toggle_remote_shell_integration_prompt_suppression();
+                    });
+                    cx.notify();
+                }
+                RemoteShellRequest::Defer => self.resolve_remote_shell_integration_prompt(false, cx),
+                RemoteShellRequest::Confirm => {
+                    self.resolve_remote_shell_integration_prompt(true, cx)
+                }
+                RemoteShellRequest::Run(action) => {
+                    self.run_remote_shell_integration_action(action, cx)
+                }
+        }
     }
 
     pub(in crate::workspace) fn render_remote_shell_integration_confirm(
@@ -197,21 +201,6 @@ impl WorkspaceApp {
             .map(|node| node.title.clone())
             .unwrap_or_else(|| confirm.node_id.0.clone());
         Some(self.with_remote_shell_page(cx, |page, _| page.confirmation(confirm, host)))
-    }
-
-    pub(in crate::workspace) fn remote_shell_integration_card(
-        &self,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let node_id = self.active_ssh_node_id.as_ref();
-        let node_title = node_id
-            .and_then(|node_id| self.ssh_nodes.get(node_id))
-            .map(|node| node.title.clone());
-        let state = self
-            .workspace_runtime
-            .read(cx)
-            .remote_shell_integration_card_snapshot(node_id);
-        self.with_remote_shell_page(cx, |page, cx| page.card(node_title, state, cx))
     }
 
     fn run_remote_shell_integration_action(

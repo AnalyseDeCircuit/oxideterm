@@ -4743,8 +4743,12 @@ impl AiWorkspaceEntity {
             }
         }
         if changed {
-            cx.emit(AiWorkspaceEvent::KnowledgeReindexDeliveryReady);
-            cx.notify();
+            if self.knowledge_reindex_progress.is_some() {
+                cx.emit(oxideterm_gpui_settings_view::surface::KnowledgeSettingsProgress);
+            } else {
+                cx.emit(AiWorkspaceEvent::KnowledgeReindexDeliveryReady);
+                cx.notify();
+            }
         }
         drain.outcome.backlog_remaining
     }
@@ -5063,6 +5067,7 @@ impl Drop for AiWorkspaceEntity {
 }
 
 impl gpui::EventEmitter<AiWorkspaceEvent> for AiWorkspaceEntity {}
+impl gpui::EventEmitter<oxideterm_gpui_settings_view::surface::KnowledgeSettingsProgress> for AiWorkspaceEntity {}
 
 /// Identifies the AI confirmation whose retained payload may finish exiting.
 #[derive(Clone, Copy)]

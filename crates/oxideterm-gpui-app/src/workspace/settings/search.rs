@@ -89,57 +89,17 @@ impl WorkspaceApp {
             }
         });
         let tab = result.tab;
-        if result.section == SettingsSectionId::AppearanceBackground {
-            // Reveal collapsible background sub-sections so jumped matches remain visible.
-            self.settings_workspace.update(cx, |entity, cx| {
-                entity.background_effects_expanded = Some(true);
-                entity.background_interactions_expanded = Some(true);
-                cx.notify();
-            });
-        }
-        self.settings_workspace.update(cx, |settings, cx| {
-            if result.section == SettingsSectionId::TerminalAwarenessTriggers {
-                settings.terminal_triggers.pane = None;
-                cx.notify();
-            }
-            settings.set_active_tab(tab, cx);
-            if let Some(page) = result.terminal_page {
-                settings.set_terminal_page(page, cx);
-            }
-            if let Some(page) = result.ai_page {
-                settings.set_ai_page(page, cx);
-            }
-            settings.close_settings_search(true, cx);
-        });
+        self.settings_workspace.update(cx, |settings, cx| settings.navigate_to_search_result(&result, cx));
         let dismissed_select = self.open_settings_select.is_some();
         self.close_settings_select();
         self.focused_settings_input = None;
-        self.settings_slider_drag = None;
         self.clear_ime_selection();
         self.ime_marked_text = None;
-        if tab == SettingsTab::General {
-            self.refresh_cli_companion_status(cx);
-            #[cfg(not(target_os = "macos"))]
-            self.refresh_launch_at_login_status(cx);
-        }
-        if tab == SettingsTab::Portable {
-            self.refresh_portable_settings_snapshot(true, cx);
-        }
+        self.refresh_settings_tab_services(tab, cx);
         self.sync_settings_section_list_state(cx);
-        if let Some(item_ix) = settings_section_list_item_index(
-            tab,
-            result.section,
-            self.settings_dynamic_section_counts(cx),
-        ) {
-            self.settings_workspace
-                .read(cx)
-                .section_list
-                .state()
-                .scroll_to(gpui::ListOffset {
-                    item_ix,
-                    offset_in_item: px(0.0),
-                });
-        }
+        self.settings_workspace.read(cx).section_list.scroll_to_section(
+            tab, result.section, self.settings_dynamic_section_counts(cx),
+        );
         if dismissed_select {
             cx.notify();
         }

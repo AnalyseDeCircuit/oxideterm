@@ -40,15 +40,6 @@ pub(in crate::workspace) fn current_window_size(window: &Window) -> (f32, f32) {
     (f32::from(bounds.size.width), f32::from(bounds.size.height))
 }
 
-pub(in crate::workspace) fn terminal_background_fit(fit: BackgroundFit) -> TerminalBackgroundFit {
-    match fit {
-        BackgroundFit::Cover => TerminalBackgroundFit::Cover,
-        BackgroundFit::Contain => TerminalBackgroundFit::Contain,
-        BackgroundFit::Fill => TerminalBackgroundFit::Fill,
-        BackgroundFit::Tile => TerminalBackgroundFit::Tile,
-    }
-}
-
 pub(in crate::workspace) fn background_scope_includes_content(
     scope: BackgroundScope,
     enabled_tabs: &[String],
@@ -933,7 +924,7 @@ impl WorkspaceApp {
         // active IME-owned value before the modal replaces the focus owner.
         self.apply_focused_cloud_sync_input_draft(cx);
         self.focused_settings_input = None;
-        self.settings_slider_drag = None;
+        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
         self.ime_marked_text = None;
         self.clear_all_workspace_tooltips(cx);
     }

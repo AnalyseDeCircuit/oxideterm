@@ -233,25 +233,26 @@ impl WorkspaceApp {
             settings.start_external_store_watch(settings_path, connections_path, cx);
             settings
         });
-        let settings_surface = Self::mount_settings_surface(&settings_workspace, cx);
-        let terminal_trigger_editor = Self::mount_terminal_trigger_editor(&settings_workspace, cx);
-        let highlight_editor = Self::mount_highlight_editor(&settings_workspace, cx);
-        let theme_editor_dialog = Self::mount_theme_editor(&settings_workspace, cx);
-        let ssh_import_dialog_view = Self::mount_connection_dialog(&settings_workspace, false, cx);
-        let managed_key_dialog_view = Self::mount_connection_dialog(&settings_workspace, true, cx);
-        let mcp_client_dialog = Self::mount_mcp_client_dialog(&settings_workspace, cx);
-        let command_specs_dialog = Self::mount_command_specs_dialog(&settings_workspace, cx);
-        let settings_navigation_editor =
-            Self::mount_settings_navigation_editor(&settings_workspace, cx);
-        let portable_password_dialog =
-            Self::mount_portable_password_dialog(&settings_workspace, cx);
-        let settings_theme_picker = Self::mount_settings_theme_picker(cx);
-        let settings_window_chrome = cx.new(|cx| {
-            oxideterm_gpui_settings_view::window_chrome::SettingsWindowChromeEntity::new(
-                &settings_workspace,
-                cx,
-            )
-        });
+        let (navigation_frame, finish_navigation) = Self::navigation_editor_bindings(cx);
+        let (portable_frame, finish_portable) = Self::portable_password_bindings(cx);
+        let (theme_picker_frame, apply_theme) = Self::theme_picker_bindings(cx);
+        let settings_views = oxideterm_gpui_settings_view::views::SettingsViews::new(
+            &settings_workspace,
+            oxideterm_gpui_settings_view::views::SettingsViewBindings {
+                surface: Self::settings_surface_bindings(cx),
+                native_update_notice: Self::native_update_notice_bindings(cx),
+                theme_editor: Self::theme_editor_bindings(cx),
+                command_specs: Self::command_specs_bindings(cx),
+                navigation_frame,
+                finish_navigation,
+                portable_frame,
+                portable_controls: oxideterm_gpui_settings_view::surface::settings_controls_source(cx.entity().downgrade()),
+                finish_portable,
+                theme_picker_frame,
+                apply_theme,
+            },
+            cx,
+        );
         let settings_workspace_subscription = cx.subscribe(
             &settings_workspace,
             |workspace, settings, event: &settings::SettingsWorkspaceEvent, cx| {
@@ -521,6 +522,9 @@ impl WorkspaceApp {
             );
             entity
         });
+        settings_views.surface.update(cx, |surface, cx| {
+            surface.follow_knowledge_progress(&ai_entity, cx);
+        });
         let assistant_owner = cx.weak_entity();
         let ai_sidebar_view = cx.new(|_| sidebar::AiAssistantSidebarView::new(assistant_owner));
         let ai_entity_subscription = cx.subscribe(
@@ -691,16 +695,7 @@ impl WorkspaceApp {
                 scroll_handle: UniformListScrollHandle::new(),
             },
             settings_workspace,
-            settings_window_chrome,
-            settings_surface,
-            terminal_trigger_editor,
-            highlight_editor,
-            theme_editor_dialog,
-            ssh_import_dialog_view,
-            managed_key_dialog_view,
-            mcp_client_dialog,
-            settings_navigation_editor,
-            portable_password_dialog,
+            settings_views,
             _settings_workspace_subscription: settings_workspace_subscription,
             segmented_control_user_motion:
                 selection_motion::UserSegmentedControlMotionState::default(),
@@ -812,7 +807,6 @@ impl WorkspaceApp {
             )
             .measure_all(),
             open_settings_select: None,
-            settings_theme_picker,
             open_settings_select_owner_window_id: None,
             settings_select_focus_origin: None,
             standard_confirm_focused_action: None,
@@ -840,15 +834,9 @@ impl WorkspaceApp {
             ime_drag_selection: None,
             focused_settings_input: None,
             settings_input_draft: String::new(),
-            command_specs_dialog,
-            settings_slider_drag: None,
             workspace_input,
             _workspace_input_observation: workspace_input_observation,
             input_caret,
-            native_update_notification_open: false,
-            native_update_notification_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            native_update_release_notes_scroll: MarkdownVirtualListScrollHandle::new(),
-            settings_legal_notice_scroll: MarkdownVirtualListScrollHandle::new(),
             _window_intents: window_intents,
             _window_intent_subscription: window_intent_subscription,
             _window_button_layout_subscription: window_button_layout_subscription,
@@ -925,7 +913,7 @@ impl WorkspaceApp {
             _cloud_sync_subscription: cloud_sync_subscription,
             i18n,
             tokens,
-            theme_transition_task: None,
+            theme_transition: None,
             system_dark,
             active_background: settings.resolved_background(system_dark),
             detected_graphics,
@@ -1691,7 +1679,9 @@ impl WorkspaceApp {
         if !self.render_policy.allow_background_images {
             return None;
         }
-        background_preferences_for_style(&self.active_background, &self.tokens)
+        oxideterm_gpui_settings_view::appearance_page::background_preferences_for_style(
+            &self.active_background, &self.tokens,
+        )
     }
 }
 

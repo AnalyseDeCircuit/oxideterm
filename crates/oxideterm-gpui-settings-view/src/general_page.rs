@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, Div, Entity, MouseButton, MouseDownEvent, Window, div, prelude::*, px, rgb,
+    AnyElement, App, Div, Entity, MouseButton, MouseDownEvent, Window, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonIconPosition,
@@ -22,6 +22,9 @@ use crate::{
     surface::nav::render_icon,
     *,
 };
+
+mod device;
+pub use device::render_data_directory_confirm;
 
 const TERMINAL_COMMAND_SPECS_ACTION_ICON_SIZE: f32 = 12.0;
 
@@ -53,6 +56,97 @@ impl<'a> std::ops::Deref for GeneralPage<'a> {
     fn deref(&self) -> &Self::Target {
         &self.controls
     }
+}
+
+pub fn render_focus_handoff_commands(
+    components: &crate::components::SettingsComponents<'_>,
+    mono_font: gpui::SharedString,
+    control: AnyElement,
+    toggle: Rc<dyn Fn(String, &mut App)>,
+) -> AnyElement {
+    let settings = components.settings;
+    let mut presets = div().w_full().flex().flex_row().flex_wrap().gap(px(8.0));
+    for command in oxideterm_settings::RECOMMENDED_FOCUS_HANDOFF_COMMANDS {
+        let enabled = settings
+            .terminal
+            .command_bar
+            .focus_handoff_commands
+            .iter()
+            .any(|candidate| candidate == command);
+        let command_name = (*command).to_string();
+        let theme = components.tokens.ui;
+        let chip = div()
+            .h(px(32.0))
+            .px(px(12.0))
+            .rounded(px(components.tokens.radii.md))
+            .border_1()
+            .border_color(if enabled {
+                rgba((theme.accent << 8) | 0x99)
+            } else {
+                rgba((theme.border << 8) | 0x99)
+            })
+            .bg(if enabled {
+                rgba((theme.accent << 8) | 0x20)
+            } else {
+                rgba(0x00000000)
+            })
+            .flex()
+            .items_center()
+            .gap(px(6.0))
+            .cursor_pointer()
+            .text_size(px(components.tokens.metrics.ui_text_sm))
+            .font_family(mono_font.clone())
+            .text_color(if enabled {
+                rgb(theme.accent)
+            } else {
+                rgb(theme.text_muted)
+            })
+            .hover(move |style| {
+                style
+                    .border_color(rgba((theme.accent << 8) | 0x88))
+                    .bg(rgb(theme.bg_hover))
+                    .text_color(rgb(theme.text))
+            })
+            .when(enabled, |chip| chip.child("✓"))
+            .child(command_name.clone())
+            .on_mouse_down(MouseButton::Left, {
+                let toggle = toggle.clone();
+                move |_, _, cx| {
+                    toggle(command_name.clone(), cx);
+                    cx.stop_propagation();
+                }
+            });
+        presets = presets.child(chip);
+    }
+
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(8.0))
+        .child(
+            components.card_subsection_header(
+                components.i18n
+                    .t("settings_view.terminal.command_bar_focus_handoff_presets"),
+                Some(
+                    components.i18n
+                        .t("settings_view.terminal.command_bar_focus_handoff_presets_hint"),
+                ),
+            ),
+        )
+        .child(presets)
+        .child(components.card_separator())
+        .child(
+            components.card_subsection_header(
+                components.i18n
+                    .t("settings_view.terminal.command_bar_focus_handoff_advanced"),
+                Some(
+                    components.i18n
+                        .t("settings_view.terminal.command_bar_focus_handoff_advanced_hint"),
+                ),
+            ),
+        )
+        .child(control)
+        .into_any_element()
 }
 
 impl GeneralPage<'_> {

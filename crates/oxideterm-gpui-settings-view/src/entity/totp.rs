@@ -1,3 +1,5 @@
+use oxideterm_connections::{ConnectionStore, SecretString, totp::{TotpError, TotpParameters}};
+
 use super::*;
 use oxideterm_connections::totp::{DEFAULT_TOTP_PROMPT, TotpAlgorithm, TotpCredential};
 
@@ -35,6 +37,87 @@ impl TotpDraft {
             enabled: credential.is_none_or(|entry| entry.enabled),
             connection_ids: HashSet::new(),
         }
+    }
+}
+
+impl SettingsWorkspaceEntity {
+    pub(crate) fn edit_totp_credential(
+        &mut self,
+        credential: Option<&TotpCredential>,
+        store: &ConnectionStore,
+        cx: &mut Context<Self>,
+    ) {
+        let mut draft = TotpDraft::new(credential);
+        if let Some(credential) = credential {
+            draft.connection_ids = store
+                .connections()
+                .iter()
+                .filter(|connection| {
+                    connection.options.totp_credential_id.as_deref() == Some(&credential.id)
+                })
+                .map(|connection| connection.id.clone())
+                .collect();
+        }
+        self.totp_draft = Some(draft);
+        self.totp_error = None;
+        self.settings_focused_input = None;
+        cx.notify();
+    }
+
+    pub(crate) fn save_totp_draft(&mut self, store: &mut ConnectionStore, cx: &mut Context<Self>) -> bool {
+        let Some(mut draft) = self.totp_draft.take()
+        else {
+            return false;
+        };
+        let secret = SecretString::from(std::mem::take(&mut *draft.secret));
+        let result = draft
+            .period
+            .parse()
+            .map_err(|_| TotpError::InvalidParameters)
+            .and_then(|period| {
+                store.save_totp_credential_with_connections(
+                    draft.id.as_deref(),
+                    &draft.name,
+                    (!secret.is_empty()).then_some(&secret),
+                    TotpParameters {
+                        algorithm: draft.algorithm,
+                        digits: draft.digits,
+                        period,
+                    },
+                    &draft.pattern,
+                    draft.enabled,
+                    Some(&draft.connection_ids),
+                )
+            });
+        let changed = result.is_ok();
+        self.settings_focused_input = None;
+        self.totp_error = result.err();
+        if self.totp_error.is_some() {
+            draft.secret = secret.into_zeroizing();
+            self.totp_draft = Some(draft);
+        }
+        cx.notify();
+        changed
+    }
+
+    pub(crate) fn delete_totp_credential_from_settings(
+        &mut self,
+        id: String,
+        store: &mut ConnectionStore,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let result = store.delete_totp_credential(&id);
+        let changed = result.is_ok();
+        self.totp_error = result.err();
+        cx.notify();
+        changed
+    }
+
+    pub(crate) fn cancel_totp_draft(&mut self, cx: &mut Context<Self>) {
+        self.totp_draft = None;
+        self.totp_error = None;
+        self.settings_focused_input = None;
+        cx.notify();
     }
 }
 

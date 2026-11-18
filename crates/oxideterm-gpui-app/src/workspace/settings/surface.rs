@@ -1,6 +1,4 @@
 use super::*;
-use crate::workspace::root::init::terminal_highlight_rules;
-use crate::workspace::root::init::terminal_preference_overrides;
 
 
 impl WorkspaceApp {
@@ -17,7 +15,7 @@ impl WorkspaceApp {
         });
         self.close_settings_select();
         self.focused_settings_input = None;
-        self.settings_slider_drag = None;
+        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
         self.clear_ime_selection();
         self.sync_settings_section_list_state(cx);
         self.settings_workspace.read(cx).section_list.state()
@@ -46,22 +44,14 @@ impl WorkspaceApp {
         });
         self.close_settings_select();
         self.focused_settings_input = None;
-        self.settings_slider_drag = None;
+        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
         self.clear_ime_selection();
         self.sync_settings_section_list_state(cx);
         // Target the importer row directly so callers do not merely land at
         // the top of a long Connections settings page.
-        if let Some(item_ix) = settings_section_list_item_index(
-            SettingsTab::Connections,
-            SettingsSectionId::ConnectionsImporters,
-            self.settings_dynamic_section_counts(cx),
-        ) {
-            self.settings_workspace.read(cx).section_list.state()
-                .scroll_to(gpui::ListOffset {
-                    item_ix,
-                    offset_in_item: px(0.0),
-                });
-        }
+        self.settings_workspace.read(cx).section_list.scroll_to_section(
+            SettingsTab::Connections, SettingsSectionId::ConnectionsImporters, self.settings_dynamic_section_counts(cx),
+        );
         self.open_settings(window, cx);
     }
 
@@ -75,7 +65,7 @@ impl WorkspaceApp {
         });
         self.close_settings_select();
         self.focused_settings_input = None;
-        self.settings_slider_drag = None;
+        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
         self.clear_ime_selection();
         self.sync_settings_section_list_state(cx);
         self.open_settings(window, cx);
@@ -103,7 +93,7 @@ impl WorkspaceApp {
             settings.close_settings_search(true, cx);
         });
         self.focused_settings_input = None;
-        self.settings_slider_drag = None;
+        self.settings_workspace.update(cx, |settings, _| settings.set_slider_drag(None));
         if close_active_settings_tab {
             if let Some(tab_id) = self.active_content_tab_id(cx) {
                 self.close_tab_by_id(tab_id, window, cx);
@@ -114,8 +104,20 @@ impl WorkspaceApp {
         cx.notify();
     }
 
+    pub(super) fn refresh_settings_tab_services(&mut self, tab: SettingsTab, cx: &mut Context<Self>) {
+        match tab {
+            SettingsTab::General => {
+                self.refresh_cli_companion_status(cx);
+                #[cfg(not(target_os = "macos"))]
+                self.refresh_launch_at_login_status(cx);
+            }
+            SettingsTab::Portable => self.refresh_portable_settings_snapshot(true, cx),
+            _ => {}
+        }
+    }
+
     pub(in crate::workspace) fn render_settings_surface(&self) -> AnyElement {
-        self.settings_surface.clone().into_any_element()
+        self.settings_views.surface.clone().into_any_element()
     }
 
     pub(in crate::workspace) fn render_settings_ai_page_section(
@@ -170,218 +172,101 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn settings_section_list_signatures(&self, cx: &App) -> Vec<u64> {
-        (0..self.settings_section_list_item_count(cx))
-            .map(|index| self.settings_section_signature(index, cx))
-            .collect()
+        let state = self.settings_workspace.read(cx);
+        let settings = self.settings_store.settings();
+        let tab = state.route_snapshot().active_tab;
+        let (clients, approvals) = if tab == SettingsTab::Network {
+            (self.public_mcp.clients(), self.public_mcp.approvals())
+        } else {
+            (Vec::new(), Vec::new())
+        };
+        oxideterm_gpui_settings_view::surface::SettingsSectionLayout {
+            state,
+            settings,
+            connections: &self.connection_store,
+            app_lock_configured: self.app_lock.configured,
+            shell_count: self.local_shells.len(),
+            mcp_clients: &clients,
+            mcp_approvals: &approvals,
+            mcp_credential_ready: self.public_mcp.revealed_credential().is_some(),
+            mcp_startup_error: self.public_mcp.startup_error().is_some(),
+        }
+        .signatures(self.settings_dynamic_section_counts(cx), |tab, section, hasher| {
+            self.hash_runtime_settings_layout(tab, section, hasher, cx);
+        })
     }
 
-    pub(in crate::workspace) fn settings_section_signature(&self, index: usize, cx: &App) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        // GPUI caches variable-row measurements. Hash only states that can
-        // change section height so ListState remeasures affected rows without
-        // serializing the entire settings file on every scroll render.
+    fn hash_runtime_settings_layout(&self, tab: SettingsTab, section: Option<SettingsSectionId>, hasher: &mut DefaultHasher, cx: &App) {
         let route = self.settings_workspace.read(cx).route_snapshot();
-        format!("{:?}", route.active_tab).hash(&mut hasher);
-        index.hash(&mut hasher);
         let settings = self.settings_store.settings();
-        let section = index
-            .checked_sub(SETTINGS_SECTION_HEADER_ITEM_COUNT)
-            .and_then(|section_index| {
-                settings_tab_section_at(
-                    route.active_tab,
-                    section_index,
-                    self.settings_dynamic_section_counts(cx),
-                )
-            });
-
-        oxideterm_gpui_settings_view::surface::hash_settings_section_layout(
-            self.settings_workspace.read(cx),
-            settings,
-            section,
-            self.app_lock.configured,
-            self.local_shells.len(),
-            &mut hasher,
-        );
-
-        match route.active_tab {
-            SettingsTab::Network => {
-                settings.network.upstream_proxy.is_some().hash(&mut hasher);
-                settings
-                    .network
-                    .upstream_proxy
-                    .as_ref()
-                    .map(|proxy| matches!(proxy.auth, SettingsUpstreamProxyAuth::Password { .. }))
-                    .hash(&mut hasher);
-                settings
-                    .network
-                    .upstream_proxy_disclaimer_accepted
-                    .hash(&mut hasher);
-                settings.network.application_proxy_mode.hash(&mut hasher);
-                settings.general.update_proxy.mode.hash(&mut hasher);
-                settings.general.update_proxy.protocol.hash(&mut hasher);
-                self.settings_workspace
-                    .read(cx)
-                    .network_proxy_layout_flags()
-                    .hash(&mut hasher);
-                for client in self.public_mcp.clients() {
-                    client.client_ref.as_str().hash(&mut hasher);
-                    client.label.hash(&mut hasher);
-                    client.enabled.hash(&mut hasher);
-                    client.approval_mode.hash(&mut hasher);
-                    client.tool_groups.hash(&mut hasher);
-                }
-                for approval in self.public_mcp.approvals().iter().filter(|approval| {
-                    approval.status == oxideterm_public_mcp::ApprovalStatus::Pending
-                }) {
-                    // A different frozen action can have a different wrapped command height.
-                    approval.approval_ref.as_str().hash(&mut hasher);
-                }
-                self.public_mcp
-                    .revealed_credential()
-                    .is_some()
-                    .hash(&mut hasher);
-                self.public_mcp.startup_error().is_some().hash(&mut hasher);
-            }
-            SettingsTab::Connections => {
-                if section == Some(SettingsSectionId::ConnectionsKnownHosts) {
-                    let state = &self.settings_workspace.read(cx).known_hosts;
-                    state.query.hash(&mut hasher);
-                    state.task.is_some().hash(&mut hasher);
-                    state.error.hash(&mut hasher);
-                    state
-                        .snapshot
-                        .as_ref()
-                        .map(|snapshot| snapshot.entries.len())
-                        .hash(&mut hasher);
-                    state
-                        .pending_delete
-                        .as_ref()
-                        .map(|entry| (&entry.host, entry.port, &entry.fingerprint))
-                        .hash(&mut hasher);
-                }
-                self.connection_store.connections().len().hash(&mut hasher);
-                self.connection_store
-                    .managed_ssh_keys()
-                    .len()
-                    .hash(&mut hasher);
-                self.settings_workspace
-                    .read(cx)
-                    .managed_key_status()
-                    .is_some()
-                    .hash(&mut hasher);
-                if section == Some(SettingsSectionId::ConnectionsImporters) {
-                    // Importer state only changes the importer card. Invalidating
-                    // earlier measured rows makes GPUI move the current scroll anchor.
-                    self.settings_workspace
-                        .read(cx)
-                        .connection_import_list_signature()
-                        .hash(&mut hasher);
-                }
-            }
-            SettingsTab::Privilege => {
-                self.connection_store
-                    .list_privilege_credentials(SSH_COMMON_PRIVILEGE_SCOPE_ID)
-                    .map(|credentials| credentials.len())
-                    .unwrap_or(0)
-                    .hash(&mut hasher);
-                self.connection_store
-                    .totp_credentials()
-                    .len()
-                    .hash(&mut hasher);
-                self.settings_workspace
-                    .read(cx)
-                    .totp_draft
-                    .is_some()
-                    .hash(&mut hasher);
-                self.settings_workspace
-                    .read(cx)
-                    .totp_error
-                    .is_some()
-                    .hash(&mut hasher);
-                self.connection_store.connections().len().hash(&mut hasher);
-                self.connection_store
-                    .connections()
-                    .iter()
-                    .map(|connection| connection.privilege_credentials.len())
-                    .sum::<usize>()
-                    .hash(&mut hasher);
-                self.connection_store
-                    .list_privilege_credentials(LOCAL_SHELL_PRIVILEGE_CONNECTION_ID)
-                    .map(|credentials| credentials.len())
-                    .unwrap_or(0)
-                    .hash(&mut hasher);
-                self.settings_workspace
-                    .read(cx)
-                    .privilege_layout_flags()
-                    .hash(&mut hasher);
-            }
+        match tab {
             SettingsTab::Ai => {
-                format!("{:?}", route.ai_page).hash(&mut hasher);
+                format!("{:?}", route.ai_page).hash(hasher);
                 // Hash expansion state only into the virtual row whose height
                 // can change. The compact prompt and memory cards stay stable.
                 match section {
                     Some(SettingsSectionId::AiProvidersSettings) => {
-                        settings.ai.providers.len().hash(&mut hasher);
-                        settings.ai.web_search.enabled.hash(&mut hasher);
-                        settings.ai.web_search.provider_id.hash(&mut hasher);
+                        settings.ai.providers.len().hash(hasher);
+                        settings.ai.web_search.enabled.hash(hasher);
+                        settings.ai.web_search.provider_id.hash(hasher);
                         self.ai_entity
                             .read(cx)
-                            .hash_settings_provider_layout(&mut hasher);
+                            .hash_settings_provider_layout(hasher);
                     }
                     Some(SettingsSectionId::AiContextModelWindows) => {
-                        settings.ai.providers.len().hash(&mut hasher);
+                        settings.ai.providers.len().hash(hasher);
                         self.ai_entity
                             .read(cx)
-                            .hash_settings_context_layout(&mut hasher);
+                            .hash_settings_context_layout(hasher);
                     }
                     Some(SettingsSectionId::AiToolsToolUse) => {
-                        settings.ai.tool_use.disabled_tools.hash(&mut hasher);
+                        settings.ai.tool_use.disabled_tools.hash(hasher);
                         self.ai_entity
                             .read(cx)
                             .settings_section_expanded(AiSettingsViewSection::ToolUse)
-                            .hash(&mut hasher);
+                            .hash(hasher);
                     }
                     Some(SettingsSectionId::AiToolsWebSearch) => {
-                        settings.ai.web_search.enabled.hash(&mut hasher);
-                        settings.ai.web_search.provider_id.hash(&mut hasher);
-                        settings.ai.providers.len().hash(&mut hasher);
+                        settings.ai.web_search.enabled.hash(hasher);
+                        settings.ai.web_search.provider_id.hash(hasher);
+                        settings.ai.providers.len().hash(hasher);
                     }
                     Some(SettingsSectionId::AiToolsAgents) => {
-                        settings.ai.tool_use.enabled.hash(&mut hasher);
+                        settings.ai.tool_use.enabled.hash(hasher);
                         let ai = self.ai_entity.read(cx);
-                        ai.agents.settings_model_picker_open.hash(&mut hasher);
+                        ai.agents.settings_model_picker_open.hash(hasher);
                         let options = self.global_agent_options();
-                        options.enabled.hash(&mut hasher);
+                        options.enabled.hash(hasher);
                         options
                             .default_model
                             .as_ref()
                             .map(|model| (&model.provider_id, &model.model))
-                            .hash(&mut hasher);
+                            .hash(hasher);
                         for provider in ai_provider_views(settings) {
-                            provider.id.hash(&mut hasher);
-                            provider.enabled.hash(&mut hasher);
-                            provider.models.hash(&mut hasher);
+                            provider.id.hash(hasher);
+                            provider.enabled.hash(hasher);
+                            provider.models.hash(hasher);
                         }
                     }
                     Some(SettingsSectionId::AiToolsSkills) => {
                         let state = self.settings_workspace.read(cx);
-                        state.skill_search_query.hash(&mut hasher);
-                        format!("{:?}", state.skill_scope_filter).hash(&mut hasher);
-                        state.skill_diagnostics_expanded.hash(&mut hasher);
+                        state.skill_search_query.hash(hasher);
+                        format!("{:?}", state.skill_scope_filter).hash(hasher);
+                        state.skill_diagnostics_expanded.hash(hasher);
                         let registry = self.skill_registry.read();
                         for skill in registry.records() {
-                            skill.id.hash(&mut hasher);
-                            skill.skill_path.hash(&mut hasher);
+                            skill.id.hash(hasher);
+                            skill.skill_path.hash(hasher);
                             state
                                 .expanded_skill_paths
                                 .contains(&skill.skill_path)
-                                .hash(&mut hasher);
-                            skill.enabled.hash(&mut hasher);
-                            skill.content_hash.hash(&mut hasher);
+                                .hash(hasher);
+                            skill.enabled.hash(hasher);
+                            skill.content_hash.hash(hasher);
                         }
                         for diagnostic in registry.diagnostics() {
-                            diagnostic.path.hash(&mut hasher);
-                            diagnostic.message.hash(&mut hasher);
+                            diagnostic.path.hash(hasher);
+                            diagnostic.message.hash(hasher);
                         }
                     }
                     _ => {}
@@ -389,26 +274,16 @@ impl WorkspaceApp {
             }
             SettingsTab::Knowledge => {
                 let ai = self.ai_entity.read(cx);
-                ai.knowledge_selected_collection_id().hash(&mut hasher);
-                ai.knowledge_document_page_index().hash(&mut hasher);
-                ai.knowledge_stats_cache_key().hash(&mut hasher);
-                ai.knowledge_embedding_config_expanded().hash(&mut hasher);
-                ai.knowledge_error().is_some().hash(&mut hasher);
-                ai.knowledge_import_progress().hash(&mut hasher);
-                ai.knowledge_embedding_progress().hash(&mut hasher);
-                ai.knowledge_reindex_progress().hash(&mut hasher);
+                ai.knowledge_selected_collection_id().hash(hasher);
+                ai.knowledge_document_page_index().hash(hasher);
+                ai.knowledge_stats_cache_key().hash(hasher);
+                ai.knowledge_embedding_config_expanded().hash(hasher);
+                ai.knowledge_error().is_some().hash(hasher);
+                ai.knowledge_import_progress().hash(hasher);
+                ai.knowledge_embedding_progress().hash(hasher);
+                ai.knowledge_reindex_progress().hash(hasher);
             }
             SettingsTab::Keybindings => {
-                // Keep the search control mounted while scope filtering replaces tables.
-                if index > 0 {
-                    let keybinding_state = self.settings_workspace.read(cx);
-                    format!("{:?}", keybinding_state.keybinding_scope_filter()).hash(&mut hasher);
-                    keybinding_state
-                        .keybinding_search_query()
-                        .trim()
-                        .hash(&mut hasher);
-                }
-                settings.keybindings.overrides.len().hash(&mut hasher);
                 for entry in &self
                     .plugin_entity
                     .read(cx)
@@ -416,20 +291,13 @@ impl WorkspaceApp {
                     .contributions()
                     .runtime_keybindings
                 {
-                    entry.plugin_id.hash(&mut hasher);
-                    entry.normalized_keybinding.hash(&mut hasher);
-                    entry.label.hash(&mut hasher);
+                    entry.plugin_id.hash(hasher);
+                    entry.normalized_keybinding.hash(hasher);
+                    entry.label.hash(hasher);
                 }
             }
             _ => {}
         }
-
-        hasher.finish()
-    }
-
-    pub(in crate::workspace) fn settings_section_list_item_count(&self, cx: &App) -> usize {
-        let active_tab = self.settings_workspace.read(cx).route_snapshot().active_tab;
-        settings_model_section_list_item_count(active_tab, self.settings_dynamic_section_counts(cx))
     }
 
     pub(in crate::workspace) fn settings_dynamic_section_counts(
@@ -452,43 +320,11 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn visible_keybinding_scope_count(&self, cx: &App) -> usize {
-        let catalog = self.keybinding_definitions(cx);
-        let keybinding_state = self.settings_workspace.read(cx);
-        let query = keybinding_state
-            .keybinding_search_query()
-            .trim()
-            .to_lowercase();
-        let scope_filter = keybinding_state.keybinding_scope_filter();
-        [
-            crate::keybindings::ActionScope::Global,
-            crate::keybindings::ActionScope::Terminal,
-            crate::keybindings::ActionScope::Split,
-            crate::keybindings::ActionScope::Palette,
-            crate::keybindings::ActionScope::Editor,
-            crate::keybindings::ActionScope::Sftp,
-            crate::keybindings::ActionScope::FileManager,
-            crate::keybindings::ActionScope::Preview,
-            crate::keybindings::ActionScope::RemoteDesktop,
-            crate::keybindings::ActionScope::Plugin,
-            crate::keybindings::ActionScope::AiPanel,
-        ]
-        .into_iter()
-        .filter(|scope| {
-            catalog
-                .iter()
-                .filter(|definition| definition.scope == *scope)
-                .filter(|definition| {
-                    settings_keybinding_scope_matches(scope_filter, definition.scope)
-                })
-                .any(|definition| {
-                    if query.is_empty() {
-                        return true;
-                    }
-                    let label = self.keybinding_label(definition).to_lowercase();
-                    label.contains(&query) || definition.id.to_lowercase().contains(&query)
-                })
-        })
-        .count()
+        oxideterm_gpui_settings_view::keybinding_page::visible_scope_count(
+            &self.keybinding_definitions(cx),
+            self.settings_workspace.read(cx),
+            |definition| self.keybinding_label(definition),
+        )
     }
 
     pub(in crate::workspace) fn knowledge_has_selected_collection(&self, cx: &App) -> bool {
@@ -500,39 +336,6 @@ impl WorkspaceApp {
             .filter(|id| collections.iter().any(|collection| collection.id == *id))
             .or_else(|| collections.first().map(|collection| collection.id.as_str()))
             .is_some()
-    }
-
-    pub(in crate::workspace) fn render_settings_tab_section(
-        &mut self,
-        tab: SettingsTab,
-        section: SettingsSectionId,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        // Section virtualization only pays off if item rendering is lazy.
-        // Dispatch by semantic section ID instead of constructing a full Vec
-        // or coupling renderers to hardcoded display indices.
-        match tab {
-            SettingsTab::General => self.settings_general_section(section, cx),
-            SettingsTab::Portable => self.settings_portable_section(section, cx),
-            SettingsTab::Terminal => self.settings_terminal_section(section, cx),
-            SettingsTab::Appearance => self.settings_appearance_section(section, cx),
-            SettingsTab::Connections => self.settings_connections_section(section, cx),
-            SettingsTab::Privilege => self.settings_privilege_credentials_section(section, cx),
-            SettingsTab::Network => self.settings_network_section(section, cx),
-            SettingsTab::Sftp => self.with_settings_controls(cx, |controls, cx| {
-                controls.settings_sftp_section(section, cx)
-            }),
-            SettingsTab::Ide => {
-                let custom_cjk = self.settings_workspace.read(cx).ide_cjk_font_custom;
-                self.with_settings_controls(cx, |controls, cx| {
-                    controls.settings_ide_section(section, custom_cjk, cx)
-                })
-            }
-            SettingsTab::Ai => div().into_any_element(),
-            SettingsTab::Knowledge => self.settings_knowledge_section(section, cx),
-            SettingsTab::Keybindings => self.settings_keybindings_section(section, cx),
-            SettingsTab::Help => self.settings_help_section(section, cx),
-        }
     }
 
     pub(in crate::workspace) fn clear_settings_select_anchors(&mut self) {
@@ -642,346 +445,4 @@ impl WorkspaceApp {
         Ok(())
     }
 
-    pub(in crate::workspace) fn apply_loaded_settings_to_runtime(
-        &mut self,
-        previous_settings: &PersistedSettings,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
-    ) {
-        if previous_settings.sidebar_ui.zen_mode != settings.sidebar_ui.zen_mode {
-            self.zen_exit.reset();
-            self.apply_workspace_overlay_intent(WorkspaceOverlayIntent::ClearZenHint, cx);
-        }
-        if previous_settings.keybindings != settings.keybindings {
-            crate::keybindings::install_context_keybindings(&settings.keybindings.overrides, cx);
-            #[cfg(target_os = "macos")]
-            {
-                let menus = crate::platform::app_menus(settings);
-                // Settings callbacks install the new bindings after this settings update.
-                cx.defer(move |cx| cx.set_menus(menus));
-            }
-        }
-        install_application_proxy_policy_from_settings(settings, &self.connection_store);
-        if previous_settings.appearance.app_icon != settings.appearance.app_icon {
-            // Replacing the macOS application icon decodes the bundled image on the main thread,
-            // so unrelated form edits must not repeat that work.
-            crate::app_icon::install_runtime_app_icon(settings.appearance.app_icon);
-        }
-        if let Err(error) =
-            bundled_fonts::load_terminal_font_open_critical(settings, &cx.text_system())
-        {
-            eprintln!(
-                "failed to load selected bundled terminal font; falling back to system fonts: {error}"
-            );
-        }
-        if let Err(error) =
-            bundled_fonts::load_terminal_font_explicit_secondary_faces(settings, &cx.text_system())
-        {
-            eprintln!(
-                "failed to load selected secondary bundled terminal fonts; falling back to system fonts: {error}"
-            );
-        }
-        self.i18n
-            .set_locale(locale_from_settings(settings.general.language));
-        if previous_settings.terminal.autosuggest != settings.terminal.autosuggest {
-            self.terminal_history_store.configure(
-                settings.terminal.autosuggest.save_history,
-                settings.terminal.autosuggest.history_retention_days,
-            );
-        }
-        if previous_settings.general.language != settings.general.language {
-            self.refresh_native_plugin_terminal_hooks(cx);
-            cx.set_menus(crate::platform::app_menus(settings));
-            oxideterm_gpui_editor::EditorLanguagePlugins::set_labels(
-                self.i18n.t("plugin.language_missing"),
-                self.i18n.t("plugin.load_failed_default"),
-                self.i18n.t("plugin.language_manage"),
-                self.i18n.t("plugin.language_dismiss"),
-                cx,
-            );
-        }
-        oxideterm_desktop_presence::set_keep_running_on_close(
-            settings.general.minimize_to_tray_on_close,
-        );
-        self.settings_workspace.update(cx, |state, _| {
-            state.appearance_edit_dark.get_or_insert_with(|| {
-                settings
-                    .appearance
-                    .active_scheme(self.system_dark)
-                    .is_some_and(oxideterm_settings::AppearanceScheme::is_dark)
-            });
-        });
-        // A new settings update supersedes an in-flight appearance transition.
-        self.theme_transition_task = None;
-        self.tokens = tokens_from_settings(&settings, self.system_dark);
-        self.active_background = settings.resolved_background(self.system_dark);
-        self.render_policy = compute_render_policy(
-            self.render_profile_override
-                .unwrap_or(settings.appearance.render_profile),
-            &self.detected_graphics,
-        );
-        // Settings changes can flip the render profile while a modal is open;
-        // update the shared backdrop gate before the next top-layer render.
-        set_tauri_backdrop_blur_allowed(self.render_policy.allow_background_blur);
-        self.sftp_transfer_manager
-            .apply_settings(sftp_runtime_settings_from_settings(&settings));
-        if !settings.terminal.command_bar.enabled || !settings.terminal.command_bar.project_tasks {
-            // Close stale project task UI when the owning awareness feature is disabled.
-            self.close_terminal_project_panel(cx);
-        }
-        if !settings.terminal.command_bar.enabled
-            || !settings.terminal.command_bar.current_directory_awareness
-            || !settings.terminal.command_bar.show_current_directory
-        {
-            // CWD picker state is transient command-bar chrome; disabling the
-            // feature should not leave an orphaned popover around.
-            self.close_terminal_cwd_picker(cx);
-        }
-        let saved_group_ids = settings
-            .terminal
-            .broadcast_groups
-            .iter()
-            .map(|group| group.id)
-            .collect();
-        self.terminal.update(cx, |terminal, _| {
-            // Settings refresh cannot recruit new windows into an already-running group.
-            terminal.sync_groups_mut().retain_groups(&saved_group_ids);
-            if terminal
-                .selected_broadcast_group_id()
-                .is_some_and(|id| !saved_group_ids.contains(&id))
-            {
-                terminal.clear_selected_broadcast_group();
-            }
-        });
-        self.ssh_registry.set_idle_timeout(Some(Duration::from_secs(
-            settings.connection_pool.idle_timeout_secs as u64,
-        )));
-        self.workspace_runtime.update(cx, |runtime, cx| {
-            runtime.configure_ssh_latency(
-                settings.terminal.command_bar.enabled && settings.terminal.command_bar.ssh_latency,
-                settings.terminal.command_bar.ssh_latency_interval_secs,
-            );
-            runtime.configure_reconnect(
-                settings.reconnect.enabled,
-                reconnect_timing_from_settings(&settings),
-                reconnect_max_attempts_from_settings(&settings),
-                cx,
-            );
-            runtime.configure_remote_shell_integration(
-                settings.terminal.remote_shell_integration_mode,
-                settings.terminal.command_bar.current_directory_awareness,
-                settings.terminal.remote_shell_integration_deferred.clone(),
-            );
-        });
-        self.tab_host.update(cx, |tab_host, _cx| {
-            tab_host
-                .configure_terminal_output_highlight(settings.terminal.highlight_tab_on_new_output);
-        });
-        self.ai_entity.update(cx, |ai, _cx| {
-            ai.set_agent_fs_mode(crate::workspace::ide::node_agent_mode_from_settings(
-                &settings,
-            ));
-        });
-        // Monitoring settings own recurring remote shells and page-scoped GPU work.
-        self.apply_host_tool_monitoring_settings(cx);
-        if !self.tokens.motion.enabled {
-            self.disclosure_motions.clear();
-        }
-        self.sidebar_collapsed = settings.sidebar_ui.collapsed;
-        self.sidebar_motion_generation = self.sidebar_motion_generation.wrapping_add(1);
-        self.context_sidebar_motion_generation =
-            self.context_sidebar_motion_generation.wrapping_add(1);
-        self.sidebar_rendered = !settings.sidebar_ui.collapsed;
-        self.context_sidebar_rendered = crate::workspace::sidebar::context_sidebar_panel_visible(
-            settings.sidebar_ui.ai_sidebar_collapsed,
-            settings.sidebar_ui.zen_mode,
-            settings.ai.enabled,
-            self.active_context_sidebar_panel,
-        );
-        let viewport_width = self
-            .ai_entity
-            .read(cx)
-            .chat_ui()
-            .overlay_window_size
-            .map(|size| size.0)
-            .unwrap_or(self.tokens.metrics.window_min_width);
-        // External settings reloads use the same responsive limits as pointer
-        // resizing, so persisted pixel widths cannot bypass the live viewport.
-        self.sidebar_width = crate::workspace::sidebar::clamp_responsive_sidebar_width(
-            settings.sidebar_ui.width as f32,
-            viewport_width,
-            self.tokens.metrics.sidebar_min_width,
-            self.tokens.metrics.sidebar_max_width,
-        );
-        let ai_sidebar_width = crate::workspace::sidebar::clamp_responsive_sidebar_width(
-            settings.sidebar_ui.ai_sidebar_width as f32,
-            viewport_width,
-            AI_SIDEBAR_ABSOLUTE_MIN_WIDTH,
-            AI_SIDEBAR_ABSOLUTE_MAX_WIDTH,
-        );
-        self.ai_entity.update(cx, |ai, _cx| {
-            ai.set_chat_sidebar_width(ai_sidebar_width);
-        });
-        self.sidebar_motion.settle(if self.sidebar_rendered {
-            self.sidebar_panel_width()
-        } else {
-            0.0
-        });
-        self.context_sidebar_motion
-            .settle(if self.context_sidebar_rendered {
-                ai_sidebar_width
-            } else {
-                0.0
-            });
-        self.apply_terminal_preferences_to_panes(cx);
-        // Toolbar chips are pane render state outside the preference snapshot;
-        // a locale switch changes their labels, so re-push them here.
-        self.sync_plugin_toolbar_state(cx);
-        // Tauri's IDE reads Settings.ide live from settingsStore. Native IDE
-        // surfaces keep their own GPUI owners, so push typography/wrap/autosave
-        // changes into each open surface after the settings store changes.
-        self.apply_ide_runtime_settings_to_surfaces(cx);
-        self.sync_terminal_command_sender_appearance(cx);
-        self.sync_search_editor_appearance(cx);
-        self.sync_active_terminal_metadata_context(cx);
-    }
-
-    pub(super) fn apply_terminal_preferences_to_panes(&mut self, cx: &mut Context<Self>) {
-        let panes = self
-            .tab_host
-            .read(cx)
-            .panes()
-            .iter()
-            .map(|(pane_id, pane)| (*pane_id, pane.clone()))
-            .collect::<Vec<_>>();
-        for (pane_id, pane) in panes {
-            let preferences = self.terminal_preferences_for_pane(pane_id, cx);
-            let retained_overrides = pane.read(cx).preference_overrides_snapshot();
-            let session_highlight_rule_set_id = pane
-                .read(cx)
-                .session_highlight_rule_set_id()
-                .map(str::to_string);
-            let refreshed_session_highlight_override =
-                session_highlight_rule_set_id.and_then(|id| {
-                    let terminal = &self.settings_store.settings().terminal;
-                    let rules = if id == GLOBAL_HIGHLIGHT_RULE_SET_ID {
-                        terminal.effective_highlight_rules()
-                    } else {
-                        &terminal.highlight_rule_set(&id)?.rules
-                    };
-                    Some(TerminalHighlightRuleSetOverride {
-                        id,
-                        rules: terminal_highlight_rules(rules),
-                    })
-                });
-            let local_shell_id = retained_overrides.local_shell_id.clone();
-            let session_id = self.tabs(cx).iter().find_map(|tab| {
-                tab.root_pane
-                    .as_ref()
-                    .and_then(|root| root.session_id_for_pane(pane_id))
-            });
-            let ssh_node_id = session_id.and_then(|session_id| {
-                self.workspace_runtime
-                    .read(cx)
-                    .ssh_terminal_node_id(session_id)
-            });
-            let refreshed_overrides = local_shell_id
-                .as_deref()
-                .map(|shell_id| {
-                    self.terminal_preference_overrides_for_local_shell(Some(&ShellInfo::new(
-                        shell_id, shell_id, shell_id,
-                    )))
-                })
-                .or_else(|| {
-                    ssh_node_id
-                        .as_ref()
-                        .map(|node_id| self.terminal_preference_overrides_for_ssh_node(node_id))
-                })
-                .or_else(|| {
-                    let semantic_scheme_id = retained_overrides.semantic_scheme_id.clone();
-                    let highlight_rule_set_id = retained_overrides.highlight_rule_set_id.clone();
-                    if semantic_scheme_id.is_none() && highlight_rule_set_id.is_none() {
-                        return None;
-                    }
-                    let mut overrides = retained_overrides.clone();
-                    let refreshed = terminal_preference_overrides(
-                        ConnectionTerminalOptions {
-                            semantic_scheme: semantic_scheme_id,
-                            highlight_rule_set: highlight_rule_set_id,
-                            ..ConnectionTerminalOptions::default()
-                        },
-                        &self.settings_store.settings().terminal,
-                    );
-                    overrides.semantic_scheme = refreshed.semantic_scheme;
-                    overrides.highlight_rules = refreshed.highlight_rules;
-                    Some(overrides)
-                });
-            let _ = pane.update(cx, |pane, cx| {
-                if let Some(overrides) = refreshed_overrides {
-                    pane.set_preference_overrides(overrides, preferences.clone(), cx);
-                } else {
-                    pane.set_preferences(preferences.clone(), cx);
-                }
-                if pane.session_highlight_rule_set_id().is_some() {
-                    pane.set_session_highlight_override(
-                        refreshed_session_highlight_override,
-                        preferences,
-                        cx,
-                    );
-                }
-            });
-        }
-    }
-
-    pub(in crate::workspace) fn emit_native_plugin_settings_events(
-        &mut self,
-        previous_settings: &PersistedSettings,
-        settings: &PersistedSettings,
-        cx: &mut Context<Self>,
-    ) {
-        let previous_theme =
-            ThemeTarget::Application.resolved_id(previous_settings, self.system_dark);
-        let theme = ThemeTarget::Application.resolved_id(settings, self.system_dark);
-        if previous_theme != theme {
-            self.emit_native_plugin_event_to_subscribers(
-                plugin_host::NATIVE_PLUGIN_APP_THEME_CHANGED_EVENT,
-                serde_json::json!({
-                    "theme": crate::workspace::plugin_lifecycle::native_plugin_theme_snapshot(
-                        theme
-                    ),
-                }),
-                cx,
-            );
-        }
-
-        if previous_settings.general.language != settings.general.language {
-            let language = settings.general.language.as_str();
-            self.emit_native_plugin_event_to_subscribers(
-                plugin_host::NATIVE_PLUGIN_I18N_LANGUAGE_CHANGED_EVENT,
-                serde_json::json!({ "language": language }),
-                cx,
-            );
-        }
-
-        let previous_value =
-            serde_json::to_value(previous_settings).unwrap_or_else(|_| serde_json::json!({}));
-        let current_value =
-            serde_json::to_value(settings).unwrap_or_else(|_| serde_json::json!({}));
-        if previous_value != current_value {
-            self.emit_native_plugin_app_settings_changed(current_value, cx);
-        }
-    }
-
-    pub(super) fn emit_native_plugin_app_settings_changed(
-        &mut self,
-        settings: serde_json::Value,
-        cx: &mut Context<Self>,
-    ) {
-        // Native plugins receive the same immutable settings snapshot as app.onSettingsChange.
-        self.emit_native_plugin_event_to_subscribers(
-            plugin_host::NATIVE_PLUGIN_APP_SETTINGS_CHANGED_EVENT,
-            serde_json::json!({ "settings": settings }),
-            cx,
-        );
-    }
 }

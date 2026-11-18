@@ -3,6 +3,266 @@
 
 use super::*;
 use gpui::{Task, WeakEntity};
+use oxideterm_gpui_settings_view::{SettingsSelectAnchorExt, settings_slider_anchor_id};
+use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId};
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn update_settings_select_anchor(
+        &mut self,
+        window_id: gpui::WindowId,
+        anchor: OverlayAnchor,
+        cx: &mut Context<Self>,
+    ) {
+        let is_open_select_in_other_window = self
+            .open_settings_select
+            .is_some_and(|select| select.anchor_id() == anchor.id)
+            && self.open_settings_select_owner_window_id != Some(window_id);
+        self.settings_select_anchors
+            .insert((window_id, anchor.id), anchor);
+        if is_open_select_in_other_window {
+            // The popup is mounted in the owning native window. Ignore a
+            // coincidental repaint from another window instead of replacing
+            // its coordinate space with foreign bounds.
+            return;
+        }
+        self.update_select_anchor(anchor, cx);
+    }
+
+    pub(in crate::workspace) fn update_select_anchor(
+        &mut self,
+        anchor: OverlayAnchor,
+        cx: &mut Context<Self>,
+    ) {
+        // Resolve new-connection anchors through their canonical mapping so a
+        // newly added select cannot silently lose its root-mounted overlay.
+        let should_notify = self
+            .open_settings_select
+            .is_some_and(|select| select.anchor_id() == anchor.id)
+            || self
+                .connection_form_state(cx)
+                .open_select
+                .is_some_and(|select| Self::new_connection_select_anchor_id(select) == anchor.id)
+            || matches!(
+                (self.cloud_sync.read(cx).view.open_select, anchor.id),
+                (
+                    Some(crate::workspace::cloud_sync::CloudSyncSelect::Backend),
+                    SelectAnchorId::CloudSyncBackend
+                ) | (
+                    Some(crate::workspace::cloud_sync::CloudSyncSelect::AuthMode),
+                    SelectAnchorId::CloudSyncAuthMode
+                ) | (
+                    Some(crate::workspace::cloud_sync::CloudSyncSelect::ConflictStrategy),
+                    SelectAnchorId::CloudSyncConflictStrategy
+                )
+            )
+            || (matches!(
+                anchor.id,
+                SelectAnchorId::AiPanelRoot
+                    | SelectAnchorId::AiConversationList
+                    | SelectAnchorId::AiChatMenu
+                    | SelectAnchorId::AiModelSelector
+                    | SelectAnchorId::AiInlineModelSelector
+                    | SelectAnchorId::AiReasoningMenu
+                    | SelectAnchorId::AiSafetyMenu
+                    | SelectAnchorId::AiContextPopover
+                    | SelectAnchorId::AiAutocomplete
+            ) && self.has_ai_sidebar_floating_overlay(cx))
+            || (anchor.id == SelectAnchorId::TerminalBroadcastMenu
+                && self.terminal.read(cx).broadcast_menu_open())
+            || (anchor.id == SelectAnchorId::TerminalCommandBar
+                && self.terminal.read(cx).quick_commands.is_open())
+            || (anchor.id == SelectAnchorId::TerminalCwdMenu
+                && self.terminal.read(cx).cwd_picker_open())
+            || (anchor.id == SelectAnchorId::TerminalGitBranchMenu
+                && self.terminal.read(cx).git_panel_open())
+            || (anchor.id == SelectAnchorId::TerminalProjectMenu
+                && self.terminal.read(cx).project_panel_open())
+            || (anchor.id == SelectAnchorId::SessionManagerViewMode
+                && self.session_manager.read(cx).view_mode_menu_open)
+            || (matches!(
+                anchor.id,
+                SelectAnchorId::AuditCategory
+                    | SelectAnchorId::AuditSeverity
+                    | SelectAnchorId::AuditSource
+                    | SelectAnchorId::AuditOutcome
+                    | SelectAnchorId::AuditTime
+                    | SelectAnchorId::AuditSearchField
+            ) && self.audit.open_filter.is_some())
+            || (anchor.id == SelectAnchorId::ActiveSessionSort && self.session_sort_menu_open)
+            || (anchor.id == SelectAnchorId::SessionManagerSort
+                && self.session_manager.read(cx).sort_menu_open)
+            || (anchor.id == SelectAnchorId::SessionManagerBatchMove
+                && self.session_manager.read(cx).show_batch_move)
+            || (anchor.id == SelectAnchorId::SessionManagerBatchTemplate
+                && self
+                    .session_manager
+                    .read(cx)
+                    .batch_add
+                    .as_ref()
+                    .is_some_and(|dialog| dialog.template_menu_open))
+            || (anchor.id == SelectAnchorId::SessionManagerBatchKeyAuth && {
+                // The key menu only owns a trigger while it is open; a
+                // closed menu must not claim the anchor.
+                let session_manager = self.session_manager.read(cx);
+                session_manager.batch_add_uses_key_auth()
+                    && session_manager
+                        .batch_add
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.key_menu_open)
+            })
+            || self.settings_workspace.read(cx).slider_drag()
+                .is_some_and(|slider| settings_slider_anchor_id(slider) == anchor.id);
+        if !should_notify && !select_anchor_tracks_while_closed(anchor.id) {
+            self.select_anchors.remove(&anchor.id);
+            return;
+        }
+        if self.select_anchors.get(&anchor.id) != Some(&anchor) {
+            self.select_anchors.insert(anchor.id, anchor);
+            if should_notify {
+                cx.notify();
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn deferred_ai_select_anchor_update(
+        workspace: gpui::Entity<Self>,
+    ) -> impl FnOnce(OverlayAnchor, &mut Window, &mut App) {
+        move |anchor, window, cx| {
+            // AI popovers are rendered from floating overlay probes. Updating the
+            // workspace synchronously from prepaint can re-enter WorkspaceApp
+            // when a click opened another modal in the same effect cycle.
+            window.defer(cx, move |_window, cx| {
+                let _ = workspace.update(cx, |this, cx| {
+                    this.update_select_anchor(anchor, cx);
+                });
+            });
+        }
+    }
+}
+
+pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectAnchorId) -> bool {
+    // Browser/Radix selects can synchronously read their trigger rect on the
+    // opening click. GPUI portals cannot, so modal select triggers keep a
+    // closed-state anchor cache without notifying; that makes first-click open
+    // immediate while scroll handlers still clear stale coordinates.
+    if anchor_id.is_settings_select_trigger()
+        || anchor_id.is_new_connection_select_trigger()
+        || anchor_id.is_cloud_sync_select_trigger()
+    {
+        return true;
+    }
+
+    // Sliders and non-settings overlays also need an anchor before pointer-down
+    // can open or drag them.
+    matches!(
+        anchor_id,
+        SelectAnchorId::ActiveSessionSort
+            | SelectAnchorId::AuditCategory
+            | SelectAnchorId::AuditSeverity
+            | SelectAnchorId::AuditSource
+            | SelectAnchorId::AuditOutcome
+            | SelectAnchorId::AuditTime
+                    | SelectAnchorId::AuditSearchField
+            | SelectAnchorId::SettingsAppearanceUiFontSizeSlider
+            | SelectAnchorId::SettingsAppearanceBorderRadiusSlider
+            | SelectAnchorId::OnboardingBorderRadiusSlider
+            | SelectAnchorId::SettingsAppearanceWindowOpacitySlider
+            | SelectAnchorId::VersionMigrationBorderRadiusSlider
+            | SelectAnchorId::SettingsAppearanceBackgroundOpacitySlider
+            | SelectAnchorId::SettingsAppearanceBackgroundBlurSlider
+            | SelectAnchorId::SettingsBackgroundReadability
+            | SelectAnchorId::SettingsBackgroundEffectStrength
+            | SelectAnchorId::SettingsBackgroundEffectSheen
+            | SelectAnchorId::SettingsBackgroundEffectSpeed
+            | SelectAnchorId::SettingsBackgroundEffectSize
+            | SelectAnchorId::SettingsBackgroundEffectBrightness
+            | SelectAnchorId::SettingsBackgroundEffectRoughness
+            | SelectAnchorId::SettingsBackgroundEffectDirection
+            | SelectAnchorId::SettingsBackgroundParticleCount
+            | SelectAnchorId::SettingsBackgroundCameraAmount
+            | SelectAnchorId::SettingsBackgroundCameraSpeed
+            | SelectAnchorId::SettingsTerminalFontSizeSlider
+            | SelectAnchorId::AiPanelRoot
+            | SelectAnchorId::AiConversationList
+            | SelectAnchorId::AiChatMenu
+            | SelectAnchorId::AiModelSelector
+            | SelectAnchorId::AiInlineModelSelector
+            | SelectAnchorId::AiReasoningMenu
+            | SelectAnchorId::AiSafetyMenu
+            | SelectAnchorId::AiContextPopover
+            | SelectAnchorId::AiAutocomplete
+            | SelectAnchorId::NewConnectionGroup
+            | SelectAnchorId::NewConnectionKeyAuthSource
+            | SelectAnchorId::NewConnectionManagedKey
+            | SelectAnchorId::NewConnectionTotp
+            | SelectAnchorId::NewConnectionJumpTotp
+            | SelectAnchorId::NewConnectionJumpSavedConnection
+            | SelectAnchorId::NewConnectionRemoteDesktopSshGateway
+            | SelectAnchorId::NewConnectionJumpKeyAuthSource
+            | SelectAnchorId::NewConnectionJumpManagedKey
+            | SelectAnchorId::NewConnectionSerialPort
+            | SelectAnchorId::NewConnectionSerialDataBits
+            | SelectAnchorId::NewConnectionSerialStopBits
+            | SelectAnchorId::NewConnectionSerialParity
+            | SelectAnchorId::NewConnectionSerialFlowControl
+            | SelectAnchorId::IdeAgentStatus
+            // Broadcast targets are rendered through the root backdrop, but
+            // Tauri/Radix positions them from the trigger button. Keep the
+            // closed trigger rect warm so the first pointer-down opens at the
+            // command-bar/tabbar button even when the AI sidebar changes root width.
+            | SelectAnchorId::TerminalBroadcastMenu
+            // Quick Commands uses Tauri's `min(860px, calc(100% - 1.5rem))`
+            // width against the command bar. Keep the bar rect warm so the
+            // first open and later resizes can compute the same adaptive width.
+            | SelectAnchorId::TerminalCommandBar
+            | SelectAnchorId::TerminalCwdMenu
+            | SelectAnchorId::TerminalGitBranchMenu
+            | SelectAnchorId::TerminalProjectMenu
+            | SelectAnchorId::TerminalCastSeekbar
+            | SelectAnchorId::RemoteDesktopResizeMenu(_)
+            // Session Manager toolbar menus use window-anchored overlays, so
+            // their trigger bounds must be cached before pointer-down.
+            | SelectAnchorId::SessionManagerViewMode
+            | SelectAnchorId::SessionManagerSort
+            | SelectAnchorId::SessionManagerSidebarSort
+            | SelectAnchorId::SessionManagerBatchMove
+    )
+}
+
+#[cfg(test)]
+mod slider_anchor_tests {
+    use super::*;
+
+    #[test]
+    fn settings_sliders_have_geometry_before_the_first_pointer_down() {
+        for slider in [
+            SettingsSlider::TerminalFontSize,
+            SettingsSlider::AppearanceUiFontSize,
+            SettingsSlider::AppearanceBorderRadius,
+            SettingsSlider::OnboardingBorderRadius,
+            SettingsSlider::VersionMigrationBorderRadius,
+            SettingsSlider::AppearanceWindowOpacity,
+            SettingsSlider::AppearanceBackgroundOpacity,
+            SettingsSlider::AppearanceBackgroundBlur,
+            SettingsSlider::BackgroundReadability,
+            SettingsSlider::BackgroundEffectStrength,
+            SettingsSlider::BackgroundEffectSheen,
+            SettingsSlider::BackgroundEffectSpeed,
+            SettingsSlider::BackgroundEffectSize,
+            SettingsSlider::BackgroundEffectBrightness,
+            SettingsSlider::BackgroundEffectRoughness,
+            SettingsSlider::BackgroundEffectDirection,
+            SettingsSlider::BackgroundParticleCount,
+            SettingsSlider::BackgroundCameraAmount,
+            SettingsSlider::BackgroundCameraSpeed,
+        ] {
+            assert!(
+                select_anchor_tracks_while_closed(settings_slider_anchor_id(slider)),
+                "{slider:?}: pointer-down must use the already measured slider geometry"
+            );
+        }
+    }
+}
 
 const WORKSPACE_NOTICE_TTL: Duration = Duration::from_secs(4);
 const PLUGIN_REQUIRED_NOTICE_TTL: Duration = Duration::from_secs(12);
@@ -1185,7 +1445,7 @@ impl WorkspaceOverlayEntity {
         tokens: &ThemeTokens,
         i18n: &I18n,
         mono_font_family: SharedString,
-        native_update: Option<ToastView>,
+        native_update: AnyElement,
         show_connection_cards: bool,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
@@ -1202,9 +1462,7 @@ impl WorkspaceOverlayEntity {
         {
             layers.push(render_zen_hint(tokens, &hint.label));
         }
-        if let Some(toasts) = self.render_toasts(tokens, native_update, cx) {
-            layers.push(toasts);
-        }
+        layers.push(self.render_toasts(tokens, native_update, cx));
         // Connection cards use a deferred layer and must yield while the MFA dialog owns input.
         if show_connection_cards {
             if let Some(connection_cards) = self.render_connection_cards(tokens, i18n, cx) {
@@ -1224,15 +1482,9 @@ impl WorkspaceOverlayEntity {
     fn render_toasts(
         &self,
         tokens: &ThemeTokens,
-        native_update: Option<ToastView>,
+        native_update: AnyElement,
         cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        if self.standard_toasts.is_empty()
-            && self.plugin_progress_toasts.is_empty()
-            && native_update.is_none()
-        {
-            return None;
-        }
+    ) -> AnyElement {
         let overlay = cx.entity();
         let standard = self.standard_toasts.iter().map(|toast| {
             let toast_id = toast.id;
@@ -1332,7 +1584,7 @@ impl WorkspaceOverlayEntity {
                 ),
             }
         });
-        Some(toaster(tokens, standard.chain(plugin).chain(native_update)).into_any_element())
+        toaster(tokens, standard.chain(plugin)).child(native_update).into_any_element()
     }
 
     fn render_connection_cards(

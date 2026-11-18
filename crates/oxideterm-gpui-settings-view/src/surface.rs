@@ -21,11 +21,20 @@ use crate::{
 };
 use oxideterm_gpui_ui::motion::UserSegmentedControlMotionState;
 
+mod host;
 pub(crate) mod nav;
+pub(crate) mod pages;
+pub use host::{
+    McpTargetLabel, SettingsDocumentText, SettingsSurfaceHost, settings_controls_source,
+};
 mod search_filter;
 mod section_cache;
 
-pub use section_cache::hash_settings_section_layout;
+pub use pages::{
+    KnowledgePageData, PreparedSettingsPage, SettingsPageAction, SettingsPageData,
+    SettingsPageFrame, SettingsPageWindowAction, TriggerPageRuntime,
+};
+pub use section_cache::SettingsSectionLayout;
 
 /// Shared by the surface and commands that scroll to a semantic settings section.
 pub struct SettingsSectionList {
@@ -48,6 +57,22 @@ impl Default for SettingsSectionList {
 }
 
 impl SettingsSectionList {
+    pub fn scroll_to_section(
+        &self,
+        tab: SettingsTab,
+        section: SettingsSectionId,
+        counts: SettingsDynamicSectionCounts,
+    ) {
+        if let Some(item_ix) =
+            oxideterm_settings_model::settings_section_list_item_index(tab, section, counts)
+        {
+            self.state.scroll_to(gpui::ListOffset {
+                item_ix,
+                offset_in_item: px(0.0),
+            });
+        }
+    }
+
     pub fn state(&self) -> &ListState {
         &self.state
     }
@@ -83,7 +108,17 @@ pub struct SettingsSurfaceFrame {
 /// sections it still owns. The surface owns GPUI view identity and layout.
 pub struct SettingsSurfaceBindings {
     pub frame: Rc<dyn Fn(&App) -> Option<SettingsSurfaceFrame>>,
-    pub section: Rc<dyn Fn(SettingsTab, SettingsSectionId, &mut App) -> Option<AnyElement>>,
+    pub page: Rc<
+        dyn for<'a> Fn(
+            SettingsSectionId,
+            Option<PreparedSettingsPage>,
+            &'a App,
+        ) -> Option<SettingsPageFrame<'a>>,
+    >,
+    pub prepare_page: Rc<dyn Fn(SettingsSectionId, &mut App) -> Option<PreparedSettingsPage>>,
+    // AI settings still have an application-owned surface during their extraction.
+    pub extension_section:
+        Rc<dyn Fn(SettingsTab, SettingsSectionId, &mut App) -> Option<AnyElement>>,
     pub scrolled: Rc<dyn Fn(&mut App)>,
     pub keybinding_note: Rc<dyn Fn(String, u32, &mut App) -> Option<AnyElement>>,
     pub dispatch: Rc<dyn Fn(SettingsSurfaceRequest, &mut Window, &mut App)>,
@@ -100,6 +135,9 @@ pub enum SettingsSurfaceRequest {
     Tooltip(String, Option<Point<Pixels>>),
 }
 
+/// Intermediate counts change the settings list; completion also updates the document workspace.
+pub struct KnowledgeSettingsProgress;
+
 pub struct SettingsSurfaceView {
     settings: Entity<SettingsWorkspaceEntity>,
     bindings: SettingsSurfaceBindings,
@@ -112,6 +150,19 @@ pub struct SettingsSurfaceView {
 }
 
 impl SettingsSurfaceView {
+    pub fn follow_knowledge_progress<T: gpui::EventEmitter<KnowledgeSettingsProgress> + 'static>(
+        &self,
+        source: &Entity<T>,
+        cx: &mut Context<Self>,
+    ) {
+        cx.subscribe(source, |surface, _, _: &KnowledgeSettingsProgress, cx| {
+            if surface.settings.read(cx).route_snapshot().active_tab == SettingsTab::Knowledge {
+                cx.notify();
+            }
+        })
+        .detach();
+    }
+
     pub fn new(
         settings: Entity<SettingsWorkspaceEntity>,
         bindings: SettingsSurfaceBindings,
@@ -243,7 +294,10 @@ impl Render for SettingsSurfaceView {
             .sync(tab, frame.counts, &frame.signatures);
         let state = settings.section_list.state().clone();
         let navigation = self.render_settings_nav(&frame, cx);
-        let section = self.bindings.section.clone();
+        let page = self.bindings.page.clone();
+        let prepare_page = self.bindings.prepare_page.clone();
+        let extension_section = self.bindings.extension_section.clone();
+        let settings_owner = self.settings.clone();
         let scrolled = self.bindings.scrolled.clone();
         let keybinding_note = self.bindings.keybinding_note.clone();
         let view = cx.entity().downgrade();
@@ -296,7 +350,13 @@ impl Render for SettingsSurfaceView {
                             }
                         }
                         Some(id) => {
-                            section(tab, id, cx).unwrap_or_else(|| div().into_any_element())
+                            let prepared = prepare_page(id, cx);
+                            if let Some(page) = page(id, prepared, cx) {
+                                page.render(&settings_owner, id, cx)
+                            } else {
+                                extension_section(tab, id, cx)
+                                    .unwrap_or_else(|| div().into_any_element())
+                            }
                         }
                         None => div().into_any_element(),
                     }
@@ -437,7 +497,9 @@ mod tests {
                 settings.clone(),
                 SettingsSurfaceBindings {
                     frame: Rc::new(|_| None),
-                    section: Rc::new(|_, _, _| None),
+                    page: Rc::new(|_, _, _| None),
+                    prepare_page: Rc::new(|_, _| None),
+                    extension_section: Rc::new(|_, _, _| None),
                     scrolled: Rc::new(|_| {}),
                     keybinding_note: Rc::new(|_, _, _| None),
                     dispatch: Rc::new(|_, _, _| {}),
@@ -523,7 +585,9 @@ mod tests {
                             groups: vec![vec![SettingsTab::Terminal]],
                         })
                     }),
-                    section: Rc::new(|_, section, _| {
+                    page: Rc::new(|_, _, _| None),
+                    prepare_page: Rc::new(|_, _| None),
+                    extension_section: Rc::new(|_, section, _| {
                         assert_ne!(section, SettingsSectionId::TerminalPageSwitcher);
                         Some(
                             div()

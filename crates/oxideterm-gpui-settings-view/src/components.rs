@@ -6,6 +6,8 @@ use oxideterm_theme::ThemeTokens;
 mod terminal_display;
 pub use terminal_display::TerminalPreviewFont;
 mod controls;
+mod multiline;
+pub use multiline::{multiline_input_viewport, settings_multiline_field, settings_multiline_patterns_field};
 
 pub use controls::*;
 
@@ -17,6 +19,7 @@ pub enum SettingsCalloutTone {
 }
 
 /// Shared page styling; does not own input focus or application state.
+#[derive(Clone, Copy)]
 pub struct SettingsComponents<'a> {
     pub tokens: &'a ThemeTokens,
     pub i18n: &'a I18n,

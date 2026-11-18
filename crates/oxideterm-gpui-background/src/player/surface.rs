@@ -24,7 +24,6 @@ struct Surface {
     observation: Option<Subscription>,
     displayed: Option<Presented>,
     outgoing: Option<(Presented, Instant)>,
-    repaint: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -49,7 +48,6 @@ pub(super) fn media_layer(
                 observation: None,
                 displayed: None,
                 outgoing: None,
-                repaint: None,
                 _subscriptions: vec![
                     cx.observe_window_activation(window, |_: &mut Surface, _, cx| cx.notify()),
                     cx.observe_window_visibility(window, |_: &mut Surface, _, _, cx| cx.notify()),
@@ -114,7 +112,6 @@ impl Surface {
             reduce_motion || now.saturating_duration_since(*start) >= CROSSFADE_DURATION
         }) {
             self.outgoing = None;
-            self.repaint = None;
         }
         let Some(ready) = ready else {
             return;
@@ -137,27 +134,12 @@ impl Surface {
         }
     }
 
-    fn schedule(&mut self, visible: bool, window: &Window, cx: &mut Context<Self>) {
-        if self.outgoing.is_none()
-            || !visible
-            || !window.is_visible()
-            || window.is_minimized()
-            || !window.is_window_active()
-            || cx.reduce_motion()
-        {
-            self.repaint = None;
-        } else if self.repaint.is_none() {
-            // The mounted surface owns this short-lived repaint; release cancels it.
-            self.repaint = Some(cx.spawn(async move |surface, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_millis(16))
-                    .await;
-                let _ = surface.update(cx, |surface, cx| {
-                    surface.repaint = None;
-                    cx.notify();
-                });
-            }));
-        }
+    fn should_animate(&self, window: &Window, cx: &App) -> bool {
+        self.outgoing.is_some()
+            && window.is_visible()
+            && !window.is_minimized()
+            && window.is_window_active()
+            && !cx.reduce_motion()
     }
 }
 
@@ -222,18 +204,22 @@ impl Render for Surface {
             .clamp(0.0, 1.0);
             t * t * (3.0 - 2.0 * t)
         });
-        let surface = cx.entity().downgrade();
-        let mut layer = div().absolute().inset_0().overflow_hidden().child(
-            canvas(
-                move |bounds, window, cx| {
-                    let visible = bounds.intersects(&window.content_mask().bounds);
-                    let _ = surface.update(cx, |surface, cx| surface.schedule(visible, window, cx));
-                },
-                |_, _, _, _| {},
-            )
-            .absolute()
-            .inset_0(),
-        );
+        let mut layer = div().absolute().inset_0().overflow_hidden();
+        if self.should_animate(window, cx) {
+            // Request the next VSync frame only while the crossfade layer is visible in the viewport.
+            layer = layer.child(
+                canvas(
+                    move |bounds, window, _cx| {
+                        if bounds.intersects(&window.content_mask().bounds) {
+                            window.request_animation_frame();
+                        }
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .inset_0(),
+            );
+        }
         if let Some(player) = &self.player {
             let player = player.clone();
             let prepare = player.clone();
@@ -410,7 +396,6 @@ mod tests {
             observation: None,
             displayed: None,
             outgoing: None,
-            repaint: None,
             _subscriptions: Vec::new(),
         });
         cx.simulate_resize(size(px(320.0), px(180.0)));
@@ -467,8 +452,14 @@ mod tests {
                 _ => panic!("selected still image must be displayed"),
             }
             assert!(
-                surface.repaint.is_none(),
+                surface.outgoing.is_none(),
                 "static backgrounds must stop ticking after the fade"
+            );
+        });
+        cx.update(|window, cx| {
+            assert!(
+                !surface.read(cx).should_animate(window, cx),
+                "completed transition must not schedule another animation frame"
             );
         });
         assert!(
@@ -490,7 +481,6 @@ mod tests {
             observation: None,
             displayed: None,
             outgoing: None,
-            repaint: None,
             _subscriptions: Vec::new(),
         });
         cx.simulate_resize(size(px(320.0), px(180.0)));
@@ -514,7 +504,6 @@ mod tests {
         cx.update(|window, cx| window.draw(cx).clear(cx));
         surface.read_with(cx, |surface, _| {
             assert_eq!(shown(surface), ("new.png", None));
-            assert!(surface.repaint.is_none());
         });
     }
 

@@ -821,7 +821,7 @@ impl AiWorkspaceEntity {
                 let current = index + 1;
                 let _ = entity.update(cx, |entity, cx| {
                     entity.knowledge_page.import_progress = Some((current, total));
-                    entity.emit_knowledge_page_changed(cx);
+                    cx.emit(oxideterm_gpui_settings_view::surface::KnowledgeSettingsProgress);
                 });
                 if failed {
                     break;
@@ -966,7 +966,7 @@ impl AiWorkspaceEntity {
                 processed += batch_len;
                 let _ = entity.update(cx, |entity, cx| {
                     entity.knowledge_page.embedding_progress = Some((processed, total));
-                    entity.emit_knowledge_page_changed(cx);
+                    cx.emit(oxideterm_gpui_settings_view::surface::KnowledgeSettingsProgress);
                 });
             }
             let _ = entity.update(cx, |entity, cx| {

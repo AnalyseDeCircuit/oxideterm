@@ -155,12 +155,14 @@ pub struct SettingsThemePicker {
     selected: Option<String>,
     preview: Option<String>,
     scroll: ScrollHandle,
+    settings: gpui::WeakEntity<crate::entity::SettingsWorkspaceEntity>,
     frame: Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>,
     apply: Rc<dyn Fn(SettingsSelect, String, &mut App)>,
 }
 
 impl SettingsThemePicker {
     pub fn new(
+        settings: gpui::WeakEntity<crate::entity::SettingsWorkspaceEntity>,
         frame: Rc<dyn Fn(&Window, &App) -> Option<SettingsThemePickerFrame>>,
         apply: Rc<dyn Fn(SettingsSelect, String, &mut App)>,
     ) -> Self {
@@ -169,6 +171,7 @@ impl SettingsThemePicker {
             selected: None,
             preview: None,
             scroll: ScrollHandle::new(),
+            settings,
             frame,
             apply,
         }
@@ -196,13 +199,18 @@ impl SettingsThemePicker {
         self.preview.as_deref()
     }
 
+    fn notify_preview(&self, cx: &mut Context<Self>) {
+        let _ = self.settings.update(cx, |_, cx| cx.notify());
+        cx.notify();
+    }
+
     pub fn navigate(&mut self, key: &str, cx: &mut Context<Self>) {
         if let Some((row, id)) = next_theme_option(&self.entries, self.preview(), key)
             && Some(id) != self.preview()
         {
             self.preview = Some(id.to_owned());
             self.scroll.scroll_to_item(row);
-            cx.notify();
+            self.notify_preview(cx);
         }
     }
 }
@@ -283,7 +291,7 @@ impl Render for SettingsThemePicker {
                         let _ = picker.update(cx, |picker, cx| {
                             if picker.preview.as_ref() != Some(&preview_id) {
                                 picker.preview = Some(preview_id.clone());
-                                cx.notify();
+                                picker.notify_preview(cx);
                             }
                         });
                     });

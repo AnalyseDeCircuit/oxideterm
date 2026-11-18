@@ -3824,19 +3824,7 @@ fn normalized_optional_string(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-pub(super) fn plugin_marketplace_sort_label(
-    sort: oxideterm_settings::PluginMarketplaceSort,
-) -> &'static str {
-    match sort {
-        oxideterm_settings::PluginMarketplaceSort::Name => "plugin.marketplace_sort_name",
-        oxideterm_settings::PluginMarketplaceSort::RecentUpdates => {
-            "plugin.marketplace_sort_updated"
-        }
-        oxideterm_settings::PluginMarketplaceSort::NewestListings => {
-            "plugin.marketplace_sort_newest"
-        }
-    }
-}
+use oxideterm_gpui_settings_view::select_menu::plugin_marketplace_sort_label;
 
 fn sort_plugin_marketplace_entries(
     entries: &mut [plugin_host::NativePluginRegistryEntry],

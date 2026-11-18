@@ -102,6 +102,11 @@ pub fn is_highlight_input(input: SettingsInput) -> bool {
     )
 }
 
+mod actions;
+pub use actions::{HighlightEdit, HighlightModal, HighlightOutcome};
+mod files;
+pub use files::{HighlightFileKind, HighlightFileOperation, HighlightFileResult};
+
 #[derive(Clone, Copy)]
 pub enum HighlightRequest {
     OpenSemantic,
@@ -186,6 +191,16 @@ pub fn semantic_context_label(context: SemanticRuleContext, i18n: &I18n) -> Stri
 }
 
 impl HighlightPage<'_> {
+    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+        use oxideterm_settings_model::SettingsSectionId::*;
+        match section {
+            TerminalHighlightSelection => self.highlight_selection_card(self.settings, cx),
+            TerminalHighlightSemantic => self.highlight_semantic_card(self.settings, cx),
+            TerminalHighlightRules => self.highlight_rules_card(self.settings, cx),
+            _ => div().into_any_element(),
+        }
+    }
+
     const HIGHLIGHT_PREVIEW_WRAP_CHARS: usize = 32;
 
     fn request(
@@ -243,7 +258,7 @@ impl HighlightPage<'_> {
         width: Option<f32>,
         cx: &App,
     ) -> AnyElement {
-        (self.field)(
+        self.field(
             input,
             &value,
             placeholder,

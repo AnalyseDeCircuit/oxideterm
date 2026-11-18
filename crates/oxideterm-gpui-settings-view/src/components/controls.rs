@@ -15,17 +15,16 @@ use oxideterm_gpui_ui::{
 use super::*;
 use crate::{SettingsInput, SettingsSelect, SettingsSelectAnchorExt, SettingsSlider};
 
-pub type SettingsFieldRenderer<'a> = &'a dyn Fn(
-    SettingsInput,
-    &str,
-    String,
-    Option<f32>,
-    TextInputContentAlign,
-    bool,
-    &App,
-) -> AnyElement;
+pub trait SettingsImeSource {
+    fn frame<'a>(
+        &'a self, input: SettingsInput, value: &'a str, cx: &'a App,
+    ) -> SettingsImeFrame<'a>;
+}
 
-pub type SettingsLabelRenderer<'a> = &'a dyn Fn(&str, &str, String, u32, &App) -> AnyElement;
+pub type SettingsControlsSource =
+    Rc<dyn for<'a> Fn(&'a App) -> Option<SettingsControls<'a>>>;
+
+pub type SettingsLabelRenderer = Rc<dyn Fn(&str, &str, String, u32, &App) -> AnyElement>;
 
 pub fn is_connection_key_input(input: SettingsInput) -> bool {
     matches!(
@@ -70,8 +69,8 @@ pub struct SettingsControls<'a> {
     pub open_select: Option<SettingsSelect>,
     pub select_origin: Option<BrowserFocusOrigin>,
     pub dispatch: SettingsWindowDispatch,
-    pub field: SettingsFieldRenderer<'a>,
-    pub label: SettingsLabelRenderer<'a>,
+    pub ime: &'a dyn SettingsImeSource,
+    pub label: SettingsLabelRenderer,
 }
 
 impl<'a> std::ops::Deref for SettingsControls<'a> {
@@ -82,6 +81,29 @@ impl<'a> std::ops::Deref for SettingsControls<'a> {
 }
 
 impl SettingsControls<'_> {
+    pub fn field(
+        &self,
+        input: SettingsInput,
+        value: &str,
+        placeholder: String,
+        width: Option<f32>,
+        align: TextInputContentAlign,
+        secret: bool,
+        cx: &App,
+    ) -> AnyElement {
+        self.text_field(
+            self.ime.frame(input, value, cx),
+            placeholder,
+            align,
+            secret,
+            |input| input
+                .when_some(width, |input, width| input.w(px(width)).max_w_full())
+                .when(width.is_none(), |input| input.w_full())
+                .min_w(px(0.0)),
+            self.dispatch.clone(),
+        )
+    }
+
     pub fn settings_select_control(
         &self,
         select: SettingsSelect,
@@ -153,7 +175,7 @@ impl SettingsControls<'_> {
         placeholder: String,
         cx: &App,
     ) -> AnyElement {
-        (self.field)(
+        self.field(
             input,
             value.as_ref(),
             placeholder,
@@ -172,7 +194,7 @@ impl SettingsControls<'_> {
         width: f32,
         cx: &App,
     ) -> AnyElement {
-        (self.field)(
+        self.field(
             input,
             value.as_ref(),
             placeholder,
@@ -190,7 +212,7 @@ impl SettingsControls<'_> {
         width: f32,
         cx: &App,
     ) -> AnyElement {
-        (self.field)(
+        self.field(
             input,
             &value,
             value.clone(),
@@ -265,6 +287,7 @@ pub enum SettingsWindowRequest {
     SelectAnchor(OverlayAnchor),
     BeginInputSelection(SettingsInput, MouseDownEvent),
     DragInputSelection(MouseMoveEvent),
+    DismissInput(SettingsInput),
     SliderAnchor(OverlayAnchor),
     BeginSlider(SettingsSlider, f32),
     MoveSlider(MouseMoveEvent),
@@ -285,6 +308,88 @@ pub struct SettingsImeFrame<'a> {
     pub anchor_id: TextInputAnchorId,
     pub viewport: TextInputViewport,
     pub update_anchor: Rc<dyn Fn(TextInputAnchor)>,
+}
+
+pub(crate) fn render_settings_select_control(
+    select: SettingsSelect,
+    disabled: bool,
+    width: Option<f32>,
+    trigger: Div,
+    dispatch: SettingsWindowDispatch,
+) -> AnyElement {
+    let open = dispatch.clone();
+    let trigger = trigger.when(!disabled, |trigger| {
+        trigger
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                open(SettingsWindowRequest::OpenSelect(select), window, cx);
+                cx.stop_propagation();
+            })
+    });
+    div()
+        .relative()
+        .min_w(px(0.0))
+        .when_some(width, |control, width| control.w(px(width)).max_w_full())
+        .when(width.is_none(), |control| control.w_full())
+        .child(select_anchor_probe(
+            select.anchor_id(),
+            trigger,
+            move |anchor, window, cx| {
+                dispatch(SettingsWindowRequest::SelectAnchor(anchor), window, cx)
+            },
+        ))
+        .into_any_element()
+}
+
+pub(crate) fn render_settings_text_field(
+    tokens: &ThemeTokens,
+    frame: SettingsImeFrame<'_>,
+    placeholder: String,
+    align: TextInputContentAlign,
+    secret: bool,
+    style: impl FnOnce(Div) -> Div,
+    dispatch: SettingsWindowDispatch,
+) -> AnyElement {
+    let target = frame.input;
+    let input = text_input_with_viewport_and_content_align(
+        tokens,
+        TextInputView {
+            value: frame.value,
+            placeholder,
+            focused: frame.focused,
+            caret_visible: frame.caret_visible,
+            secret,
+            selected_all: false,
+            selected_range: frame.selected_range,
+            marked_text: frame.marked_text,
+        },
+        align,
+        &frame.viewport,
+        frame.active_offset,
+    );
+    let down = dispatch.clone();
+    text_input_anchor_probe(
+        frame.anchor_id,
+        style(input)
+            .cursor(CursorStyle::IBeam)
+            .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+                down(
+                    SettingsWindowRequest::BeginInputSelection(target, event.clone()),
+                    window,
+                    cx,
+                );
+                cx.stop_propagation();
+            })
+            .on_mouse_move(move |event, window, cx| {
+                dispatch(
+                    SettingsWindowRequest::DragInputSelection(event.clone()),
+                    window,
+                    cx,
+                )
+            }),
+        move |anchor, _, _| (frame.update_anchor)(anchor),
+    )
+    .into_any_element()
 }
 
 impl SettingsComponents<'_> {
@@ -339,28 +444,7 @@ impl SettingsComponents<'_> {
         trigger: Div,
         dispatch: SettingsWindowDispatch,
     ) -> AnyElement {
-        let open = dispatch.clone();
-        let trigger = trigger.when(!disabled, |trigger| {
-            trigger
-                .cursor_pointer()
-                .on_mouse_down(MouseButton::Left, move |_, window, cx| {
-                    open(SettingsWindowRequest::OpenSelect(select), window, cx);
-                    cx.stop_propagation();
-                })
-        });
-        div()
-            .relative()
-            .min_w(px(0.0))
-            .when_some(width, |control, width| control.w(px(width)).max_w_full())
-            .when(width.is_none(), |control| control.w_full())
-            .child(select_anchor_probe(
-                select.anchor_id(),
-                trigger,
-                move |anchor, window, cx| {
-                    dispatch(SettingsWindowRequest::SelectAnchor(anchor), window, cx)
-                },
-            ))
-            .into_any_element()
+        render_settings_select_control(select, disabled, width, trigger, dispatch)
     }
 
     pub fn text_field(
@@ -372,46 +456,7 @@ impl SettingsComponents<'_> {
         style: impl FnOnce(Div) -> Div,
         dispatch: SettingsWindowDispatch,
     ) -> AnyElement {
-        let target = frame.input;
-        let input = text_input_with_viewport_and_content_align(
-            self.tokens,
-            TextInputView {
-                value: frame.value,
-                placeholder,
-                focused: frame.focused,
-                caret_visible: frame.caret_visible,
-                secret,
-                selected_all: false,
-                selected_range: frame.selected_range,
-                marked_text: frame.marked_text,
-            },
-            align,
-            &frame.viewport,
-            frame.active_offset,
-        );
-        let down = dispatch.clone();
-        text_input_anchor_probe(
-            frame.anchor_id,
-            style(input)
-                .cursor(CursorStyle::IBeam)
-                .on_mouse_down(MouseButton::Left, move |event, window, cx| {
-                    down(
-                        SettingsWindowRequest::BeginInputSelection(target, event.clone()),
-                        window,
-                        cx,
-                    );
-                    cx.stop_propagation();
-                })
-                .on_mouse_move(move |event, window, cx| {
-                    dispatch(
-                        SettingsWindowRequest::DragInputSelection(event.clone()),
-                        window,
-                        cx,
-                    )
-                }),
-            move |anchor, _, _| (frame.update_anchor)(anchor),
-        )
-        .into_any_element()
+        render_settings_text_field(self.tokens, frame, placeholder, align, secret, style, dispatch)
     }
 
     pub fn toggle_control(

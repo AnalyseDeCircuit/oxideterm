@@ -26,10 +26,13 @@ use oxideterm_settings_model::{ThemeTarget, custom_theme_display_name, is_custom
 use oxideterm_theme::ThemeTokens;
 use std::rc::Rc;
 
-const APPEARANCE_BORDER_RADIUS_MIN: f32 = 0.0;
-const APPEARANCE_BORDER_RADIUS_MAX: f32 = 16.0;
-const APPEARANCE_UI_FONT_SIZE_MIN: f32 = 11.0;
-const APPEARANCE_UI_FONT_SIZE_MAX: f32 = 20.0;
+mod preview;
+pub use preview::{AppearancePreview, background_preferences_for_style};
+
+pub const APPEARANCE_BORDER_RADIUS_MIN: f32 = 0.0;
+pub const APPEARANCE_BORDER_RADIUS_MAX: f32 = 16.0;
+pub const APPEARANCE_UI_FONT_SIZE_MIN: f32 = 11.0;
+pub const APPEARANCE_UI_FONT_SIZE_MAX: f32 = 20.0;
 const SETTINGS_PERCENT_SCALE: f64 = 100.0;
 
 #[derive(Clone, Copy)]
@@ -43,6 +46,35 @@ pub enum AppearanceAction {
     Corner(CornerStyle),
     Icon(AppIconVariant),
     Titlebar(bool),
+}
+
+pub struct AppearancePageData {
+    pub system_dark: bool,
+    pub edit_scheme: Option<bool>,
+    pub onboarding: bool,
+    pub render_policy: EffectiveRenderPolicy,
+    pub vibrancy_mode: NativeVibrancyMode,
+    pub vibrancy_support: VibrancySupport,
+    pub icon_variants: &'static [AppIconVariant],
+    pub icon_size: f32,
+    pub icon_source: fn(AppIconVariant) -> ImageSource,
+}
+
+impl AppearancePageData {
+    pub fn page<'a>(
+        self,
+        controls: SettingsControls<'a>,
+        dispatch: Rc<dyn Fn(AppearanceAction, &mut App)>,
+    ) -> AppearancePage<'a> {
+        let Self {
+            system_dark, edit_scheme, onboarding, render_policy, vibrancy_mode,
+            vibrancy_support, icon_variants, icon_size, icon_source,
+        } = self;
+        AppearancePage {
+            controls, system_dark, edit_scheme, onboarding, render_policy, vibrancy_mode,
+            vibrancy_support, icon_variants, icon_size, icon_source, dispatch,
+        }
+    }
 }
 
 pub struct AppearancePage<'a> {
@@ -65,6 +97,27 @@ impl<'a> std::ops::Deref for AppearancePage<'a> {
     }
 }
 impl AppearancePage<'_> {
+    pub fn section(
+        &self,
+        section: oxideterm_settings_model::SettingsSectionId,
+        settings: &PersistedSettings,
+        preview: Option<AnyElement>,
+        cx: &App,
+    ) -> AnyElement {
+        use oxideterm_settings_model::SettingsSectionId::*;
+        match section {
+            AppearanceTheme => {
+                let mut rows = self.appearance_theme_controls_with_hints(settings, true, cx);
+                rows.extend(preview);
+                self.appearance_card(self.i18n.t("settings_view.appearance.theme"), None, rows)
+            }
+            AppearanceLayout => self.appearance_layout_card(settings, cx),
+            AppearanceEffects => self.appearance_effects_card(settings, cx),
+            AppearanceAppIcon => self.appearance_app_icon_card(settings, cx),
+            _ => div().into_any_element(),
+        }
+    }
+
     fn press(
         &self,
         action: AppearanceAction,

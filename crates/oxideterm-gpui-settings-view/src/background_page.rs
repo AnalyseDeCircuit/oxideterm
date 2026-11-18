@@ -74,6 +74,12 @@ pub enum BackgroundRequest {
     Remove(String),
 }
 
+pub enum BackgroundGalleryEdit {
+    Pick,
+    Clear,
+    Remove(String),
+}
+
 pub struct BackgroundPage<'a> {
     pub appearance: AppearancePage<'a>,
     pub state: &'a Entity<SettingsWorkspaceEntity>,

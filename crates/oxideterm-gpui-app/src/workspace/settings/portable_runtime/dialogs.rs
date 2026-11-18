@@ -1,15 +1,9 @@
 use super::*;
 use crate::workspace::ime::WorkspaceImeTarget;
-use oxideterm_gpui_settings_view::{
-    components::SettingsWindowDispatch,
-    portable_runtime::dialog::{PortablePasswordDialog, PortablePasswordFrame},
-};
+use oxideterm_gpui_settings_view::portable_runtime::dialog::PortablePasswordFrame;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn mount_portable_password_dialog(
-        settings: &Entity<SettingsWorkspaceEntity>,
-        cx: &mut Context<Self>,
-    ) -> Entity<PortablePasswordDialog> {
+    pub(in crate::workspace) fn portable_password_bindings(cx: &Context<Self>) -> (Rc<dyn Fn(&App) -> Option<PortablePasswordFrame>>, Rc<dyn Fn(bool, &mut App)>) {
         let owner = cx.entity().downgrade();
         let frame = Rc::new({
             let owner = owner.clone();
@@ -23,17 +17,6 @@ impl WorkspaceApp {
                 })
             }
         });
-        let field = Rc::new({
-            let owner = owner.clone();
-            let dispatch = Self::settings_window_dispatch_for(owner.clone());
-            move |input, cx: &App| {
-                let Some(app) = owner.upgrade() else {
-                    return div().into_any_element();
-                };
-                app.read(cx)
-                    .portable_entity_password_input(input, dispatch.clone(), cx)
-            }
-        });
         let dispatch = Rc::new(move |submit, cx: &mut App| {
             let _ = owner.update(cx, |app, cx| {
                 app.clear_standard_confirm_focus();
@@ -44,29 +27,7 @@ impl WorkspaceApp {
                 }
             });
         });
-        cx.new(|cx| PortablePasswordDialog::new(settings.clone(), frame, field, dispatch, cx))
-    }
-
-    fn portable_entity_password_input(
-        &self,
-        input: SettingsInput,
-        dispatch: SettingsWindowDispatch,
-        cx: &App,
-    ) -> AnyElement {
-        let settings = self.settings_workspace.read(cx);
-        let display_value = settings
-            .settings_entity_input_value(input)
-            .expect("portable inputs are owned by the Settings Entity");
-        let focused = settings.settings_entity_focused_input() == Some(input);
-        let frame = self.settings_ime_frame(input, display_value, focused, cx);
-        self.settings_components().text_field(
-            frame,
-            String::new(),
-            TextInputContentAlign::Start,
-            true,
-            |input| input.w_full(),
-            dispatch,
-        )
+        (frame, dispatch)
     }
 
     pub(in crate::workspace) fn portable_password_field(

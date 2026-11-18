@@ -1,3 +1,12 @@
+use crate::components::{
+    SettingsImeFrame, SettingsWindowDispatch, SettingsWindowRequest,
+    render_settings_select_control, render_settings_text_field,
+};
+use oxideterm_gpui_ui::{
+    select::{BrowserFocusOrigin, browser_focus_visible, select_trigger_with_focus_visible},
+    text_input::TextInputContentAlign,
+};
+
 use std::{ops::Deref, rc::Rc};
 
 use gpui::{
@@ -33,6 +42,37 @@ const THEME_EDITOR_BODY_PADDING_X: f32 = 16.0; // Body px-4.
 const THEME_EDITOR_BODY_PADDING_Y: f32 = 12.0; // Body py-3.
 const THEME_EDITOR_BODY_GAP: f32 = 16.0; // Tauri space-y-4.
 
+pub fn prepare_theme_editor(
+    settings: &oxideterm_settings::PersistedSettings,
+    target: oxideterm_settings_model::ThemeTarget,
+    edit_theme_id: Option<String>,
+    scheme: Option<bool>,
+    system_dark: bool,
+    default_name: String,
+) -> ThemeEditorState {
+    let mut initial = settings.clone();
+    target.apply(
+        &mut initial,
+        target
+            .scheme_id(settings, scheme.unwrap_or(system_dark))
+            .to_string(),
+    );
+    let mut editor = oxideterm_settings_model::theme_editor_from_settings(
+        &initial,
+        target,
+        edit_theme_id.clone(),
+        default_name,
+    );
+    editor.system_dark = scheme;
+    editor.background = edit_theme_id
+        .as_deref()
+        .and_then(|id| settings.custom_themes.get(id))
+        .and_then(|theme| theme.get("background"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_else(|| settings.terminal.background_for_scheme(scheme));
+    editor
+}
+
 #[derive(Clone, Copy)]
 pub enum ThemeEditorRequest {
     Close,
@@ -56,21 +96,22 @@ pub struct ThemeEditorFrame {
     pub i18n: I18n,
     pub mono_font: SharedString,
     pub scroll: ScrollHandle,
+    pub open_select: Option<crate::SettingsSelect>,
+    pub select_origin: Option<BrowserFocusOrigin>,
 }
 
 pub struct ThemeEditorBindings {
     pub frame: Rc<dyn Fn(&App) -> Option<ThemeEditorFrame>>,
-    pub field:
-        Rc<dyn Fn(SettingsInput, &str, String, ThemeEditorTextInputKind, &mut App) -> AnyElement>,
-    pub duplicate: Rc<dyn Fn(String, &mut App) -> AnyElement>,
-    pub preview: Rc<dyn Fn(&ThemeEditorState, &mut App) -> AnyElement>,
-    pub background: Rc<dyn Fn(&mut App) -> AnyElement>,
+    pub ime:
+        Rc<dyn for<'a> Fn(SettingsInput, &'a str, bool, &'a App) -> Option<SettingsImeFrame<'a>>>,
+    pub window: SettingsWindowDispatch,
     pub dispatch: Rc<dyn Fn(ThemeEditorRequest, &mut Window, &mut App)>,
 }
 
 pub struct ThemeEditorDialog {
     settings: Entity<SettingsWorkspaceEntity>,
     bindings: ThemeEditorBindings,
+    background: Rc<dyn Fn(&mut App) -> AnyElement>,
     _changed: Subscription,
 }
 
@@ -78,6 +119,7 @@ impl ThemeEditorDialog {
     pub fn new(
         settings: &Entity<SettingsWorkspaceEntity>,
         bindings: ThemeEditorBindings,
+        background: Rc<dyn Fn(&mut App) -> AnyElement>,
         cx: &mut Context<Self>,
     ) -> Self {
         let changed = cx.observe(settings, |_, settings, cx| {
@@ -88,6 +130,7 @@ impl ThemeEditorDialog {
         Self {
             settings: settings.clone(),
             bindings,
+            background,
             _changed: changed,
         }
     }
@@ -106,6 +149,7 @@ impl Render for ThemeEditorDialog {
         let body = ThemeEditorBody {
             settings: &self.settings,
             bindings: &self.bindings,
+            background: &*self.background,
             frame,
         };
         body.render_modal(&editor, phase, cx)
@@ -116,6 +160,7 @@ impl Render for ThemeEditorDialog {
 struct ThemeEditorBody<'a> {
     settings: &'a Entity<SettingsWorkspaceEntity>,
     bindings: &'a ThemeEditorBindings,
+    background: &'a dyn Fn(&mut App) -> AnyElement,
     frame: ThemeEditorFrame,
 }
 
@@ -226,10 +271,27 @@ impl ThemeEditorBody<'_> {
                     .flex_col()
                     .gap(px(THEME_EDITOR_BODY_GAP))
                     .child(self.theme_editor_name_duplicate_row(editor, cx))
-                    .child((self.bindings.preview)(editor, cx))
+                    .child(
+                        crate::appearance_page::AppearancePreview {
+                            tokens: self.tokens,
+                            i18n: &self.i18n,
+                            state: self.settings,
+                            open_settings_select: None,
+                            hovered_theme: None,
+                        }
+                        .render_editor(
+                            editor,
+                            oxideterm_settings_model::editor_terminal_theme(
+                                &editor.terminal_colors,
+                            ),
+                            oxideterm_settings_model::editor_ui_colors(&editor.ui_colors),
+                            self.mono_font.clone(),
+                            cx,
+                        ),
+                    )
                     .child(self.theme_editor_section_tabs(editor, cx))
                     .child(if editor.active_section == ThemeEditorSection::Background {
-                        (self.bindings.background)(cx)
+                        (self.background)(cx)
                     } else {
                         self.theme_editor_color_grid(editor, cx)
                     }),
@@ -335,6 +397,56 @@ impl ThemeEditorBody<'_> {
         )
     }
 
+    fn render_input(
+        &self,
+        input: SettingsInput,
+        value: &str,
+        placeholder: String,
+        kind: ThemeEditorTextInputKind,
+        cx: &App,
+    ) -> AnyElement {
+        let settings = self.settings.read(cx);
+        let value = settings.settings_entity_input_value(input).unwrap_or(value);
+        let focused = settings.settings_entity_focused_input() == Some(input);
+        let Some(ime) = (self.bindings.ime)(input, value, focused, cx) else {
+            return div().into_any_element();
+        };
+        let dismiss = self.bindings.window.clone();
+        render_settings_text_field(
+            &self.tokens,
+            ime,
+            placeholder,
+            TextInputContentAlign::Start,
+            false,
+            |control| {
+                crate::settings_theme_editor_text_input(
+                    &self.tokens,
+                    control,
+                    kind,
+                    self.mono_font.clone(),
+                )
+                .on_mouse_down_out(move |_, window, cx| {
+                    dismiss(SettingsWindowRequest::DismissInput(input), window, cx);
+                })
+            },
+            self.bindings.window.clone(),
+        )
+    }
+
+    fn duplicate_select(&self, label: String) -> AnyElement {
+        let select = crate::SettingsSelect::CustomThemeDuplicate;
+        let focus_visible =
+            browser_focus_visible(self.open_select == Some(select), self.select_origin);
+        render_settings_select_control(
+            select,
+            false,
+            Some(180.0),
+            select_trigger_with_focus_visible(&self.tokens, label, false, false, focus_visible)
+                .h(px(32.0)),
+            self.bindings.window.clone(),
+        )
+    }
+
     fn theme_editor_name_duplicate_row(
         &self,
         editor: &ThemeEditorState,
@@ -342,7 +454,7 @@ impl ThemeEditorBody<'_> {
     ) -> AnyElement {
         settings_theme_editor_name_duplicate_row(
             self.theme_editor_label("settings_view.custom_theme.name"),
-            (self.bindings.field)(
+            self.render_input(
                 SettingsInput::CustomThemeName,
                 &editor.name,
                 self.i18n.t("settings_view.custom_theme.name_placeholder"),
@@ -356,7 +468,7 @@ impl ThemeEditorBody<'_> {
         )
     }
 
-    fn theme_editor_duplicate_row(&self, editor: &ThemeEditorState, cx: &mut App) -> AnyElement {
+    fn theme_editor_duplicate_row(&self, editor: &ThemeEditorState, _cx: &mut App) -> AnyElement {
         let value = if editor.duplicate_theme_touched {
             theme_display_name(&editor.duplicate_theme)
         } else {
@@ -364,7 +476,7 @@ impl ThemeEditorBody<'_> {
         };
         settings_theme_editor_duplicate_row(
             self.theme_editor_label("settings_view.custom_theme.duplicate_from"),
-            (self.bindings.duplicate)(value, cx),
+            self.duplicate_select(value),
         )
     }
     fn theme_editor_section_tabs(&self, editor: &ThemeEditorState, cx: &mut App) -> AnyElement {
@@ -615,7 +727,7 @@ impl ThemeEditorBody<'_> {
             )
             .into_any_element();
         let value_control = if focused {
-            (self.bindings.field)(
+            self.render_input(
                 input,
                 &color,
                 "#RRGGBB".to_string(),

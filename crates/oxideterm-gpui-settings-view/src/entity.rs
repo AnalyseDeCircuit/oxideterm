@@ -6,7 +6,7 @@ use std::{
 };
 
 pub use crate::SettingsNavigationDraftAction;
-use crate::{SettingsInput, SettingsKeybindingScopeFilter};
+use crate::{SettingsInput, SettingsKeybindingScopeFilter, SettingsSlider};
 use crate::{SettingsRouteSnapshot, SettingsRouteState};
 use gpui::{AppContext, Context, Entity, EventEmitter, KeyDownEvent, Task, Timer};
 use oxideterm_connections::{
@@ -28,6 +28,11 @@ use super::native_update::NativeUpdateRuntime;
 use oxideterm_settings_model::CliCompanionStatus;
 
 mod cli;
+mod completion;
+pub mod picker;
+#[cfg(test)]
+mod ownership_tests;
+pub use completion::SettingsCompletion;
 mod connections;
 mod known_hosts;
 mod network;
@@ -384,6 +389,7 @@ pub struct SettingsWorkspaceEntity {
     pub theme_preview_page: crate::ThemePreviewPage,
     pub(crate) command_specs: Option<crate::command_specs::CommandSpecsDraft>,
     pub appearance_edit_dark: Option<bool>,
+    pub(crate) slider_drag: Option<SettingsSlider>,
     external_store_watch: Option<ExternalStoreWatch>,
     external_store_watch_task: Option<Task<()>>,
     portable_status: Option<oxideterm_portable_runtime::PortableStatusSnapshot>,
@@ -583,6 +589,7 @@ impl SettingsWorkspaceEntity {
             theme_preview_page: Default::default(),
             command_specs: None,
             appearance_edit_dark: None,
+            slider_drag: None,
             external_store_watch: None,
             external_store_watch_task: None,
             portable_status: None,

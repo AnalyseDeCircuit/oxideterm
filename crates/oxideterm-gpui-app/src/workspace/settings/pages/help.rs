@@ -1,56 +1,39 @@
 use super::*;
+use oxideterm_gpui_settings_view::native_update::NativeUpdateAction;
 
-pub(in crate::workspace) const HELP_LEGAL_MARKDOWN: &str =
-    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../LEGAL.md"));
-const HELP_THIRD_PARTY_MARKDOWN: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../THIRD_PARTY_NOTICES.md"
-));
-
-pub(in crate::workspace) const HELP_LEGAL_NOTICE_WIDTH: f32 = 760.0;
-pub(in crate::workspace) const HELP_LEGAL_NOTICE_HEIGHT: f32 = 720.0;
+use oxideterm_gpui_settings_view::help_page::SettingsMarkdownDialog;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn settings_help_section(
+    pub(in crate::workspace::settings) fn handle_help_request(
         &mut self,
-        section: SettingsSectionId,
+        request: oxideterm_gpui_settings_view::help_page::HelpRequest,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
-        use oxideterm_gpui_settings_view::help_page::{HelpPage, HelpRequest};
-
-        let owner = cx.entity().downgrade();
-        let dispatch = Rc::new(move |request, cx: &mut App| {
-            let _ = owner.update(cx, |this, cx| match request {
-                HelpRequest::Check => this.check_native_update(cx),
-                HelpRequest::Download => this.download_native_update(cx),
-                HelpRequest::Install => this.install_native_update(cx),
-                HelpRequest::Cancel => this.cancel_native_update(cx),
-                HelpRequest::ReleaseNotes => this.open_native_update_release_notes(cx),
-                HelpRequest::Legal => this.open_help_legal_notice(cx),
-                HelpRequest::ThirdParty => {
-                    this.settings_legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
-                    this.overlay.update(cx, |overlay, cx| {
-                        overlay.open_confirm(WorkspaceOverlayConfirmKind::ThirdPartyNotices, cx);
-                    });
-                }
-                HelpRequest::Logs => this.open_help_log_directory(cx),
-                HelpRequest::Url(url) => this.open_help_url(url, cx),
-            });
-        });
-        let year = chrono::Local::now().format("%Y").to_string();
-        self.with_settings_controls(cx, |controls, cx| {
-            HelpPage {
-                controls,
-                state: &self.settings_workspace,
-                year: &year,
-                dispatch,
+    ) {
+        use oxideterm_gpui_settings_view::help_page::HelpRequest;
+        match request {
+            HelpRequest::Check => self.check_native_update(cx),
+            HelpRequest::Download => {
+                self.apply_native_update_action(NativeUpdateAction::Download, cx)
             }
-            .render(section, cx)
-        })
+            HelpRequest::Install => {
+                self.apply_native_update_action(NativeUpdateAction::Install, cx)
+            }
+            HelpRequest::Cancel => self.apply_native_update_action(NativeUpdateAction::Cancel, cx),
+            HelpRequest::ReleaseNotes => self.open_native_update_release_notes(cx),
+            HelpRequest::Legal => self.open_help_legal_notice(cx),
+            HelpRequest::ThirdParty => {
+                self.settings_views.legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
+                self.overlay.update(cx, |overlay, cx| {
+                    overlay.open_confirm(WorkspaceOverlayConfirmKind::ThirdPartyNotices, cx);
+                });
+            }
+            HelpRequest::Logs => self.open_help_log_directory(cx),
+            HelpRequest::Url(url) => self.open_help_url(url, cx),
+        }
     }
 
     pub(in crate::workspace) fn open_help_legal_notice(&mut self, cx: &mut Context<Self>) {
-        self.settings_legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
+        self.settings_views.legal_notice_scroll = MarkdownVirtualListScrollHandle::new();
         self.overlay.update(cx, |overlay, cx| {
             overlay.open_confirm(WorkspaceOverlayConfirmKind::LegalNotice, cx);
         });
@@ -123,84 +106,26 @@ impl WorkspaceApp {
             snapshot.kind,
             WorkspaceOverlayConfirmKind::ThirdPartyNotices
         );
-        let mut options = self.localized_markdown_options();
-        options.base_font_size = self.tokens.metrics.ui_text_sm;
-        options.block_gap = 8.0;
-        let code_actions = self.markdown_mermaid_actions(cx);
-
-        let backdrop = dismissible_dialog_backdrop().on_mouse_down(
-            MouseButton::Left,
-            cx.listener(|this, _event, _window, cx| {
-                this.close_help_legal_notice(cx);
-                cx.stop_propagation();
-            }),
-        );
-        let form = overlay_content_boundary(
-            dialog_content(&self.tokens)
-                .flex()
-                .flex_col()
-                .w(px(HELP_LEGAL_NOTICE_WIDTH))
-                .max_w(relative(0.92))
-                .h(px(HELP_LEGAL_NOTICE_HEIGHT))
-                .max_h(relative(0.90))
-                .child(
-                    dialog_header(&self.tokens)
-                        .child(dialog_title(
-                            &self.tokens,
-                            self.i18n.t(if third_party {
-                                "settings_view.help.third_party_notices"
-                            } else {
-                                "settings_view.help.disclaimer"
-                            }),
-                        ))
-                        .child(dialog_description(
-                            &self.tokens,
-                            self.i18n.t(if third_party {
-                                "settings_view.help.third_party_notices_description"
-                            } else {
-                                "settings_view.help.legal_notice_description"
-                            }),
-                        )),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h(px(0.0))
-                        .p(px(16.0))
-                        .bg(rgb(self.tokens.ui.bg))
-                        .text_color(rgb(self.tokens.ui.text))
-                        .child(markdown_virtual_with_code_actions(
-                            "settings-help-legal-notice-markdown",
-                            &self.tokens,
-                            if third_party {
-                                HELP_THIRD_PARTY_MARKDOWN
-                            } else {
-                                HELP_LEGAL_MARKDOWN
-                            },
-                            &options,
-                            &self.settings_legal_notice_scroll,
-                            &code_actions,
-                        )),
-                )
-                .child(
-                    dialog_footer(&self.tokens).child(self.standard_footer_action_button(
-                        self.i18n.t("settings_view.help.legal_notice_close"),
-                        ButtonVariant::Secondary,
-                        ConfirmDialogAction::Cancel,
-                        false,
-                        |this, _event, _window, cx| {
-                            this.close_help_legal_notice(cx);
-                        },
-                        cx,
-                    )),
-                ),
-        );
-        settings_dialog_transition(
-            &self.tokens,
-            "help-legal-notice-form",
-            backdrop,
-            form,
-            snapshot.phase,
+        let owner = cx.entity().downgrade();
+        SettingsMarkdownDialog {
+            tokens: &self.tokens,
+            i18n: &self.i18n,
+            phase: snapshot.phase,
+            focus: self.standard_confirm_focus(),
+            options: self.localized_markdown_options(),
+            actions: self.markdown_mermaid_actions(cx),
+        }
+        .legal_notice(
+            third_party,
+            &self.settings_views.legal_notice_scroll,
+            move |clear_focus, cx| {
+                let _ = owner.update(cx, |app, cx| {
+                    if clear_focus {
+                        app.clear_standard_confirm_focus();
+                    }
+                    app.close_help_legal_notice(cx);
+                });
+            },
         )
     }
 

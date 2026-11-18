@@ -1,6 +1,7 @@
 use super::new_connection::{NewConnectionSubmitAction, NewConnectionTransport};
 use super::*;
 use oxideterm_connections::SaveLocalTerminalProfileRequest;
+use oxideterm_gpui_settings_view::local_terminal::{effective_local_shells, expand_local_terminal_cwd};
 
 #[derive(Clone)]
 pub(super) struct LocalTerminalInstance {
@@ -30,6 +31,73 @@ pub(super) fn local_profile_node_id(id: &str) -> NodeId {
 }
 
 impl WorkspaceApp {
+    pub(in crate::workspace) fn local_terminal_config(&self) -> LocalPtyConfig {
+        let settings = &self.settings_store.settings().local_terminal;
+        let effective_shells = effective_local_shells(
+            &self.local_shells,
+            settings.git_bash_path.as_deref(),
+            &settings.shell_paths,
+        );
+        let shell = settings
+            .default_shell_id
+            .as_deref()
+            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
+            .cloned();
+        let cwd = settings
+            .default_cwd
+            .as_deref()
+            .map(str::trim)
+            .filter(|cwd| !cwd.is_empty())
+            .map(expand_local_terminal_cwd);
+        let env = settings
+            .custom_env_vars
+            .iter()
+            .map(|(key, value)| {
+                (
+                    key.clone(),
+                    value
+                        .as_str()
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_else(|| value.to_string()),
+                )
+            })
+            .collect();
+
+        LocalPtyConfig {
+            command: None,
+            shell,
+            cwd,
+            env,
+            remove_env: Vec::new(),
+            load_profile: settings.load_shell_profile,
+            current_directory_shell_integration: self
+                .settings_store
+                .settings()
+                .terminal
+                .command_bar
+                .current_directory_awareness,
+            oh_my_posh_enabled: settings.oh_my_posh_enabled,
+            oh_my_posh_theme: settings.oh_my_posh_theme.clone(),
+        }
+    }
+
+    pub(in crate::workspace) fn local_terminal_tab_title(&self) -> String {
+        let settings = &self.settings_store.settings().local_terminal;
+        let effective_shells = effective_local_shells(
+            &self.local_shells,
+            settings.git_bash_path.as_deref(),
+            &settings.shell_paths,
+        );
+        settings
+            .default_shell_id
+            .as_deref()
+            .and_then(|id| effective_shells.iter().find(|shell| shell.id == id))
+            .or_else(|| effective_shells.first())
+            .map(|shell| shell.label.clone())
+            .unwrap_or_else(|| "Local".to_string())
+    }
+
+
     fn local_profile_config(
         &self,
         shell_id: Option<&str>,

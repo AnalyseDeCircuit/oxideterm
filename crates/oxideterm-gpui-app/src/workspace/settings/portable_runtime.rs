@@ -7,5 +7,3 @@ use super::*;
 mod portable_runtime_actions;
 #[path = "portable_runtime/dialogs.rs"]
 mod portable_runtime_dialogs;
-#[path = "portable_runtime/render.rs"]
-mod portable_runtime_render;

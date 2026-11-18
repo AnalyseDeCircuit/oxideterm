@@ -1,27 +1,12 @@
 use super::*;
 
-impl WorkspaceApp {
-    pub(super) fn settings_known_hosts_section(&self, cx: &Context<Self>) -> AnyElement {
-        self.with_settings_controls(cx, |controls, cx| {
-            controls.settings_known_hosts_section(
-                &self.settings_workspace,
-                |path, cx| {
-                    if let Ok(url) = url::Url::from_file_path(path) {
-                        cx.open_url(url.as_str());
-                    }
-                },
-                cx,
-            )
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::workspace::window_shell::WorkspaceWindowShell;
     use gpui::TestAppContext;
     use oxideterm_ssh::list_known_hosts;
+    use oxideterm_settings_model::settings_section_list_item_index;
 
     #[gpui::test]
     fn known_hosts_search_and_confirmed_delete_use_the_selected_endpoint(cx: &mut TestAppContext) {

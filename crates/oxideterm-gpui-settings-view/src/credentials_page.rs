@@ -68,6 +68,9 @@ pub fn settings_privilege_response_mode_label(i18n: &I18n, mode: PrivilegeRespon
     })
 }
 
+mod actions;
+pub use actions::CredentialOutcome;
+
 #[derive(Clone)]
 pub enum CredentialRequest {
     SelectScope(String),
@@ -87,7 +90,6 @@ pub struct CredentialPage<'a> {
     pub state: &'a Entity<SettingsWorkspaceEntity>,
     pub store: &'a ConnectionStore,
     pub scroll: &'a dyn Fn(&str) -> ScrollHandle,
-    pub pattern_input: &'a dyn Fn(SettingsInput, &str, String, &App) -> AnyElement,
     pub dispatch: Rc<dyn Fn(CredentialRequest, &mut App)>,
 }
 
@@ -100,6 +102,15 @@ impl<'a> Deref for CredentialPage<'a> {
 }
 
 impl CredentialPage<'_> {
+    pub fn section(&self, section: oxideterm_settings_model::SettingsSectionId, cx: &App) -> AnyElement {
+        use oxideterm_settings_model::SettingsSectionId::*;
+        match section {
+            PrivilegeCredentials => self.credentials(cx),
+            PrivilegeTotp => self.totp(cx),
+            _ => div().into_any_element(),
+        }
+    }
+
     fn press(
         &self,
         request: CredentialRequest,
@@ -772,7 +783,7 @@ impl CredentialPage<'_> {
             if secret {
                 // Entity-owned secret controls borrow their live value in the shared
                 // input renderer so frame snapshots never duplicate credentials.
-                (self.field)(
+                self.field(
                     input,
                     value.as_ref(),
                     placeholder,
@@ -1039,7 +1050,14 @@ impl CredentialPage<'_> {
         form_field(
             self.tokens,
             self.i18n.t(label_key),
-            (self.pattern_input)(input, value, self.i18n.t(placeholder_key), cx),
+            {
+                let frame = self.ime.frame(input, value, cx);
+                let scroll = (self.scroll)(&format!("multiline-input-{}", frame.anchor_id.0));
+                crate::components::settings_multiline_patterns_field(
+                    self.tokens, frame, &self.i18n.t(placeholder_key),
+                    &scroll, self.controls.dispatch.clone(),
+                )
+            },
         )
     }
 }

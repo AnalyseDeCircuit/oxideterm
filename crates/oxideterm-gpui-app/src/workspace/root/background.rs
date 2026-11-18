@@ -88,7 +88,7 @@ mod tests {
             path: "animation.webp".into(),
             opacity: 1.0,
             blur: 0.0,
-            fit: TerminalBackgroundFit::Cover,
+            fit: oxideterm_gpui_terminal::TerminalBackgroundFit::Cover,
             alignment: (0.5, 0.5),
             effect: None,
             readability: None,
@@ -134,8 +134,52 @@ mod tests {
 }
 
 impl WorkspaceApp {
+    fn settle_expired_theme_transition(&mut self, cx: &App) -> bool {
+        let Some(transition) = self.theme_transition else {
+            return false;
+        };
+        let elapsed = cx
+            .background_executor()
+            .now()
+            .saturating_duration_since(transition.started);
+        if elapsed >= transition.duration {
+            self.interpolate_theme_colors(transition.from, transition.to, 1.0);
+            self.theme_transition = None;
+            false
+        } else {
+            true
+        }
+    }
+
+    pub(in crate::workspace) fn advance_theme_transition(
+        &mut self,
+        window: &mut Window,
+        cx: &App,
+    ) {
+        let Some(transition) = self.theme_transition else {
+            return;
+        };
+        let elapsed = cx
+            .background_executor()
+            .now()
+            .saturating_duration_since(transition.started);
+        let progress = if transition.duration.is_zero() {
+            1.0
+        } else {
+            (elapsed.as_secs_f32() / transition.duration.as_secs_f32()).min(1.0)
+        };
+        // Match the background crossfade's smooth start and finish.
+        let eased = progress * progress * (3.0 - 2.0 * progress);
+        self.interpolate_theme_colors(transition.from, transition.to, eased);
+        if progress >= 1.0 {
+            self.theme_transition = None;
+        } else {
+            window.request_animation_frame();
+        }
+    }
+
     pub(in crate::workspace) fn toggle_titlebar_theme(&mut self, cx: &mut Context<Self>) {
-        if self.theme_transition_task.is_some() {
+        if self.settle_expired_theme_transition(cx) {
             return;
         }
         match oxideterm_settings_model::next_appearance_scheme(
@@ -214,7 +258,7 @@ impl WorkspaceApp {
         scheme: Option<oxideterm_settings::AppearanceScheme>,
         cx: &mut Context<Self>,
     ) {
-        if self.theme_transition_task.is_some() {
+        if self.settle_expired_theme_transition(cx) {
             return;
         }
         if let Err(error) = self.validate_appearance_mode(scheme) {
@@ -240,38 +284,21 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
+        if duration.is_zero() {
+            return;
+        }
         let target = self.tokens;
         self.interpolate_theme_colors(previous, target, 0.0);
         let started = cx.background_executor().now();
-        // Only repaint UI colors. Persistence, terminal palettes and plugin events
-        // are applied once above; background media retains its existing crossfade.
-        self.theme_transition_task = Some(cx.spawn(async move |workspace, cx| {
-            loop {
-                cx.background_executor()
-                    .timer(Duration::from_millis(16))
-                    .await;
-                let elapsed = cx
-                    .background_executor()
-                    .now()
-                    .saturating_duration_since(started);
-                let progress = (elapsed.as_secs_f32() / duration.as_secs_f32()).min(1.0);
-                // Match the background crossfade's smooth start and finish.
-                let eased = progress * progress * (3.0 - 2.0 * progress);
-                if workspace
-                    .update(cx, |this, cx| {
-                        this.interpolate_theme_colors(previous, target, eased);
-                        if progress >= 1.0 {
-                            this.theme_transition_task = None;
-                        }
-                        cx.notify();
-                    })
-                    .is_err()
-                    || progress >= 1.0
-                {
-                    break;
-                }
-            }
-        }));
+        // Only repaint UI colors via VSync in `advance_theme_transition`. Persistence,
+        // plugin events and terminal target palettes are applied once above, while
+        // terminal panes interpolate their own view themes independently.
+        self.theme_transition = Some(ThemeTransitionState {
+            from: previous,
+            to: target,
+            started,
+            duration,
+        });
         cx.notify();
     }
 
@@ -326,7 +353,7 @@ impl WorkspaceApp {
             .resolved_id(self.settings_store.settings(), self.system_dark)
             .to_string();
         self.system_dark = dark;
-        self.theme_transition_task = None;
+        self.theme_transition = None;
         let settings = self.settings_store.settings();
         self.tokens = tokens_from_settings(settings, dark);
         self.active_background = settings.resolved_background(dark);
@@ -429,114 +456,6 @@ impl WorkspaceApp {
             window_background.render_layer(background, window, cx)
         })
     }
-}
-
-pub(in crate::workspace) fn background_preferences_for_style(
-    style: &oxideterm_settings::BackgroundStyle,
-    tokens: &ThemeTokens,
-) -> Option<TerminalBackgroundPreferences> {
-    if !style.enabled {
-        return None;
-    }
-    let effect =
-        style.effect.as_ref().map(
-            |effect| oxideterm_gpui_background::GeneratedEffectPreferences {
-                kind: match effect.kind {
-                    oxideterm_settings::GeneratedBackgroundKind::Mineral => {
-                        oxideterm_gpui_background::GeneratedEffectKind::Mineral
-                    }
-                    oxideterm_settings::GeneratedBackgroundKind::Fog => {
-                        oxideterm_gpui_background::GeneratedEffectKind::Fog
-                    }
-                    oxideterm_settings::GeneratedBackgroundKind::Tide => {
-                        oxideterm_gpui_background::GeneratedEffectKind::Tide
-                    }
-                    oxideterm_settings::GeneratedBackgroundKind::TideParticles => {
-                        oxideterm_gpui_background::GeneratedEffectKind::TideParticles
-                    }
-                    oxideterm_settings::GeneratedBackgroundKind::Meteor => {
-                        oxideterm_gpui_background::GeneratedEffectKind::Meteor
-                    }
-                    oxideterm_settings::GeneratedBackgroundKind::Particles => {
-                        oxideterm_gpui_background::GeneratedEffectKind::Particles
-                    }
-                    oxideterm_settings::GeneratedBackgroundKind::Caustics => {
-                        oxideterm_gpui_background::GeneratedEffectKind::Caustics
-                    }
-                },
-                strength: effect.strength,
-                sheen: effect.sheen,
-                max_fps: effect.max_fps,
-                colors: effect
-                    .colors
-                    .unwrap_or([tokens.ui.accent, tokens.terminal.cyan]),
-                speed: if tokens.motion.enabled && tokens.motion.spatial_enabled {
-                    effect.speed
-                } else {
-                    0.0
-                },
-                size: effect.size,
-                brightness: effect.brightness,
-                roughness: effect.roughness,
-                direction: effect.direction,
-                particle_count: effect.particle_count,
-                preview_viewport: None,
-            },
-        );
-    let path = match (&style.image, effect.is_some()) {
-        (Some(path), _) => PathBuf::from(path),
-        (None, true) => PathBuf::new(),
-        (None, false) => return None,
-    };
-    Some(TerminalBackgroundPreferences {
-        scene: oxideterm_gpui_background::ScenePreferences {
-            pause_on_input: style.pause_on_input,
-            parallax: style.parallax && tokens.motion.enabled && tokens.motion.spatial_enabled,
-            camera: style
-                .camera
-                .filter(|_| tokens.motion.enabled && tokens.motion.spatial_enabled)
-                .map(|camera| oxideterm_gpui_background::CameraPreferences {
-                    motion: match camera.motion {
-                        oxideterm_settings::BackgroundCameraMotion::Pan => {
-                            oxideterm_gpui_background::CameraMotion::Pan
-                        }
-                        oxideterm_settings::BackgroundCameraMotion::ZoomIn => {
-                            oxideterm_gpui_background::CameraMotion::ZoomIn
-                        }
-                        oxideterm_settings::BackgroundCameraMotion::ZoomOut => {
-                            oxideterm_gpui_background::CameraMotion::ZoomOut
-                        }
-                    },
-                    amount: camera.amount,
-                    speed: camera.speed,
-                }),
-            day_cycle: style.day_cycle,
-            dark: {
-                let color = tokens.terminal.background;
-                ((color >> 16 & 255) * 299 + (color >> 8 & 255) * 587 + (color & 255) * 114)
-                    < 128000
-            },
-            ..Default::default()
-        },
-        path,
-        effect,
-        readability: (style.readability > 0.0).then_some(
-            oxideterm_gpui_background::ReadingOverlay {
-                color: tokens.terminal.background,
-                opacity: style.readability.clamp(0.0, 1.0),
-            },
-        ),
-        alignment: style.alignment.position(),
-        opacity: style.opacity.clamp(0.0, 1.0) as f32,
-        blur: style.blur.clamp(0, 20) as f32,
-        fit: terminal_background_fit(style.fit),
-        limits: oxideterm_gpui_background::PlaybackLimits {
-            max_width: style.max_width,
-            max_height: style.max_height,
-            max_fps: style.max_fps,
-        },
-        on_failure: None,
-    })
 }
 
 impl window_shell::WorkspaceWindowBackgroundEntity {

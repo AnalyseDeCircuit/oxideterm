@@ -359,7 +359,7 @@ impl WorkspaceApp {
                 .panel
                 .is_resizing(),
             pane_splitter_dragging: self.split_drag.is_some(),
-            settings_slider_dragging: self.settings_slider_drag.is_some(),
+            settings_slider_dragging: self.settings_workspace.read(cx).slider_drag().is_some(),
             terminal_cast_seekbar_dragging: self.terminal.read(cx).cast_seek_dragging(),
             text_selection_dragging: self.ime_drag_selection.is_some(),
             sftp_file_dragging: sftp.has_drag_capture(),

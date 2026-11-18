@@ -3,6 +3,20 @@ use gpui::Context;
 use super::{PortableStatusRefresh, WorkspaceApp};
 
 impl WorkspaceApp {
+    pub(in crate::workspace::settings) fn handle_portable_settings_action(
+        &mut self,
+        request: oxideterm_gpui_settings_view::portable_runtime::PortableSettingsRequest,
+        cx: &mut Context<Self>,
+    ) {
+        use oxideterm_gpui_settings_view::portable_runtime::PortableSettingsRequest::*;
+        match request {
+            ToggleAutoUnlock(enabled) => self.set_portable_auto_unlock_enabled(enabled, cx),
+            ChangePassword => self.open_portable_password_change_dialog(cx),
+            Export => self.open_oxide_export_portable_migration_dialog(cx),
+            Import => self.open_oxide_import_portable_migration_dialog(cx),
+        }
+    }
+
     pub(in crate::workspace) fn ensure_portable_settings_snapshot(
         &mut self,
         cx: &mut Context<Self>,

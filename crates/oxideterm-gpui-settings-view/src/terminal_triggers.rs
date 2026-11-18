@@ -24,6 +24,8 @@ use crate::{
     SettingsInput, SettingsSelect, components::SettingsControls, entity::SettingsWorkspaceEntity,
 };
 
+mod actions;
+pub use actions::TerminalTriggerOutcome;
 mod render;
 mod state;
 pub use state::{

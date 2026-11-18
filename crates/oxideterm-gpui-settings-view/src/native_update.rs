@@ -1,8 +1,9 @@
 use crate::entity::{SettingsWorkspaceEntity, SettingsWorkspaceEvent, SettingsWorkspaceToast};
 use gpui::{Context, Task};
-use oxideterm_settings::UpdateChannel;
+use oxideterm_settings::{GeneralSettings, UpdateChannel};
 use oxideterm_workspace::delivery;
 use std::{
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -80,6 +81,21 @@ pub(super) struct NativeUpdateRuntime {
     error_fallback: String,
 }
 
+#[derive(Clone, Copy)]
+pub enum NativeUpdateAction {
+    Check(NativeUpdateCheckKind),
+    Download,
+    Install,
+    Cancel,
+}
+
+pub struct NativeUpdateEnvironment<'a> {
+    pub general: &'a GeneralSettings,
+    pub settings_path: &'a Path,
+    pub current_version: &'a str,
+    pub runtime: Arc<tokio::runtime::Runtime>,
+}
+
 pub struct NativeUpdateCheckRequest {
     pub kind: NativeUpdateCheckKind,
     pub channel: UpdateChannel,
@@ -136,6 +152,54 @@ impl NativeUpdateRuntime {
 }
 
 impl SettingsWorkspaceEntity {
+    pub fn native_update_is_portable(&self) -> bool {
+        self.portable_mode()
+            .unwrap_or_else(|| oxideterm_portable_runtime::is_portable_mode().unwrap_or(false))
+    }
+
+    pub fn apply_native_update_action(
+        &mut self,
+        action: NativeUpdateAction,
+        environment: NativeUpdateEnvironment<'_>,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut Context<Self>,
+    ) {
+        let install_context = || oxideterm_update::NativeInstallContext::current(self.native_update_is_portable())
+            .map_err(|error| error.to_string());
+        let download_directory = || environment.settings_path.parent()
+            .map(|parent| parent.join("updates"))
+            .unwrap_or_else(|| PathBuf::from("updates"));
+        match action {
+            NativeUpdateAction::Check(kind) => {
+                let install_flavor = install_context().map(|context| context.install_flavor);
+                self.start_native_update_check(NativeUpdateCheckRequest {
+                    kind,
+                    channel: environment.general.update_channel,
+                    current_version: environment.current_version.to_owned(),
+                    install_flavor,
+                    update_proxy: environment.general.update_proxy.clone(),
+                    runtime: environment.runtime,
+                }, cx);
+            }
+            NativeUpdateAction::Download => {
+                self.start_native_update_download(
+                    download_directory(),
+                    environment.general.update_proxy.clone(),
+                    environment.runtime,
+                    i18n.t("settings_view.help.update_error"),
+                    cx,
+                );
+            }
+            NativeUpdateAction::Install => {
+                let context = install_context();
+                self.start_native_update_install(context, download_directory(), environment.runtime, cx);
+            }
+            NativeUpdateAction::Cancel => {
+                self.cancel_native_update(cx);
+            }
+        }
+    }
+
     pub fn native_update_render_state(&self) -> NativeUpdateRenderState {
         match &self.native_update.state {
             NativeUpdateUiState::Idle => NativeUpdateRenderState::Idle,

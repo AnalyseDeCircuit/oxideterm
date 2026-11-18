@@ -317,7 +317,7 @@ impl SettingsControls<'_> {
             .flex()
             .items_center()
             .gap(px(4.0))
-            .child((self.field)(
+            .child(self.field(
                 input,
                 &value,
                 placeholder,

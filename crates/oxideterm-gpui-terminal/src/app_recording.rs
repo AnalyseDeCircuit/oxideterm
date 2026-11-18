@@ -28,9 +28,9 @@ impl TerminalPane {
             title,
             capture_input: false,
             theme: Some(TerminalRecordingTheme {
-                fg: hex_color(self.theme.foreground),
-                bg: hex_color(self.theme.background),
-                palette: asciicast_palette(self.theme.tokens.terminal),
+                fg: hex_color(self.preferences.theme.foreground),
+                bg: hex_color(self.preferences.theme.background),
+                palette: asciicast_palette(self.preferences.theme.tokens.terminal),
             }),
         };
         self.recorder = Some(TerminalRecorder::start(

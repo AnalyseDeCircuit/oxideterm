@@ -1,4 +1,8 @@
-use std::{sync::Arc, time::Duration};
+use std::{
+    hash::{Hash, Hasher},
+    sync::Arc,
+    time::Duration,
+};
 
 use gpui::{
     Font, FontFallbacks, FontFeatures, FontStyle, FontWeight, Hsla, Pixels, Rgba, SharedString,
@@ -1075,31 +1079,195 @@ impl TerminalUiTheme {
     /// Colors the terminal backend resolves for default, ANSI, and color-query slots, so
     /// emulator output and pane chrome share one theme.
     pub fn palette(&self) -> TerminalPalette {
-        let terminal = self.tokens.terminal;
         TerminalPalette::new(
             terminal_color_from_hex(self.foreground),
             terminal_color_from_hex(self.background),
             terminal_color_from_hex(self.header_foreground),
-            [
-                terminal.black,
-                terminal.red,
-                terminal.green,
-                terminal.yellow,
-                terminal.blue,
-                terminal.magenta,
-                terminal.cyan,
-                terminal.white,
-                terminal.bright_black,
-                terminal.bright_red,
-                terminal.bright_green,
-                terminal.bright_yellow,
-                terminal.bright_blue,
-                terminal.bright_magenta,
-                terminal.bright_cyan,
-                terminal.bright_white,
-            ]
-            .map(terminal_color_from_hex),
+            terminal_theme_ansi_colors(self.tokens.terminal),
         )
+    }
+
+    pub fn visual_colors_eq(&self, other: &Self) -> bool {
+        self.background == other.background
+            && self.bell_background == other.bell_background
+            && self.foreground == other.foreground
+            && self.header_foreground == other.header_foreground
+            && self.selection_background == other.selection_background
+            && self.tokens.ui == other.tokens.ui
+            && self.tokens.terminal == other.tokens.terminal
+    }
+
+    /// Interpolates visual theme colors without re-parsing selection strings or mutating backend state.
+    pub fn interpolate(from: &Self, to: &Self, progress: f32) -> Self {
+        let t = progress.clamp(0.0, 1.0);
+        let mut tokens = to.tokens;
+        tokens.ui = from.tokens.ui.interpolate(to.tokens.ui, t);
+        tokens.terminal = from.tokens.terminal.interpolate(to.tokens.terminal, t);
+        Self {
+            tokens,
+            background: lerp_hex_color(from.background, to.background, t),
+            bell_background: lerp_hex_color(from.bell_background, to.bell_background, t),
+            foreground: lerp_hex_color(from.foreground, to.foreground, t),
+            header_foreground: lerp_hex_color(from.header_foreground, to.header_foreground, t),
+            selection_background: lerp_hsla_rgba(
+                from.selection_background,
+                to.selection_background,
+                t,
+            ),
+        }
+    }
+}
+
+fn terminal_theme_ansi_colors(terminal: oxideterm_theme::TerminalTheme) -> [TerminalColor; 16] {
+    [
+        terminal.black,
+        terminal.red,
+        terminal.green,
+        terminal.yellow,
+        terminal.blue,
+        terminal.magenta,
+        terminal.cyan,
+        terminal.white,
+        terminal.bright_black,
+        terminal.bright_red,
+        terminal.bright_green,
+        terminal.bright_yellow,
+        terminal.bright_blue,
+        terminal.bright_magenta,
+        terminal.bright_cyan,
+        terminal.bright_white,
+    ]
+    .map(terminal_color_from_hex)
+}
+
+fn dim_terminal_color(color: TerminalColor) -> TerminalColor {
+    TerminalColor::rgb(
+        (color.r as f32 * 0.7) as u8,
+        (color.g as f32 * 0.7) as u8,
+        (color.b as f32 * 0.7) as u8,
+    )
+}
+
+fn lerp_u8_channel(from: u8, to: u8, progress: f32) -> u8 {
+    oxideterm_gpui_ui::motion::lerp(from as f32, to as f32, progress)
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+
+fn lerp_hex_color(from: u32, to: u32, progress: f32) -> u32 {
+    let r = lerp_u8_channel(((from >> 16) & 0xff) as u8, ((to >> 16) & 0xff) as u8, progress);
+    let g = lerp_u8_channel(((from >> 8) & 0xff) as u8, ((to >> 8) & 0xff) as u8, progress);
+    let b = lerp_u8_channel((from & 0xff) as u8, (to & 0xff) as u8, progress);
+    ((r as u32) << 16) | ((g as u32) << 8) | (b as u32)
+}
+
+fn lerp_terminal_color(
+    from: TerminalColor,
+    to: TerminalColor,
+    progress: f32,
+) -> TerminalColor {
+    TerminalColor::rgb(
+        lerp_u8_channel(from.r, to.r, progress),
+        lerp_u8_channel(from.g, to.g, progress),
+        lerp_u8_channel(from.b, to.b, progress),
+    )
+}
+
+fn lerp_hsla_rgba(from: Hsla, to: Hsla, progress: f32) -> Hsla {
+    let from: Rgba = from.into();
+    let to: Rgba = to.into();
+    Rgba {
+        r: oxideterm_gpui_ui::motion::lerp(from.r, to.r, progress),
+        g: oxideterm_gpui_ui::motion::lerp(from.g, to.g, progress),
+        b: oxideterm_gpui_ui::motion::lerp(from.b, to.b, progress),
+        a: oxideterm_gpui_ui::motion::lerp(from.a, to.a, progress),
+    }
+    .into()
+}
+
+pub(crate) fn terminal_color_to_hsla(color: TerminalColor) -> Hsla {
+    Rgba {
+        r: color.r as f32 / 255.0,
+        g: color.g as f32 / 255.0,
+        b: color.b as f32 / 255.0,
+        a: 1.0,
+    }
+    .into()
+}
+
+/// Maps already-resolved target snapshot colors to their mid-transition colors so
+/// the terminal view can animate cleanly after a single backend `set_palette`.
+#[derive(Clone, Copy)]
+pub(crate) struct TerminalTransitionColors {
+    pub(crate) target_background: TerminalColor,
+    pub(crate) target_foreground: TerminalColor,
+    pub(crate) target_dim_foreground: TerminalColor,
+    pub(crate) interpolated_background: Hsla,
+    pub(crate) interpolated_foreground: Hsla,
+    pub(crate) interpolated_dim_foreground: Hsla,
+    pub(crate) ansi_pairs: [(TerminalColor, Hsla); 16],
+    pub(crate) dim_ansi_pairs: [(TerminalColor, Hsla); 8],
+    pub(crate) signature: u64,
+}
+
+impl TerminalTransitionColors {
+    pub(crate) fn new(
+        from: &TerminalUiTheme,
+        to: &TerminalUiTheme,
+        interpolated: &TerminalUiTheme,
+        progress: f32,
+    ) -> Self {
+        let t = progress.clamp(0.0, 1.0);
+        let from_fg = terminal_color_from_hex(from.foreground);
+        let to_fg = terminal_color_from_hex(to.foreground);
+        let from_ansi = terminal_theme_ansi_colors(from.tokens.terminal);
+        let to_ansi = terminal_theme_ansi_colors(to.tokens.terminal);
+        let interp_ansi = terminal_theme_ansi_colors(interpolated.tokens.terminal);
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        t.to_bits().hash(&mut hasher);
+        from.background.hash(&mut hasher);
+        to.background.hash(&mut hasher);
+        from.foreground.hash(&mut hasher);
+        to.foreground.hash(&mut hasher);
+
+        Self {
+            target_background: terminal_color_from_hex(to.background),
+            target_foreground: to_fg,
+            target_dim_foreground: dim_terminal_color(to_fg),
+            interpolated_background: terminal_color_to_hsla(terminal_color_from_hex(
+                interpolated.background,
+            )),
+            interpolated_foreground: terminal_color_to_hsla(terminal_color_from_hex(
+                interpolated.foreground,
+            )),
+            interpolated_dim_foreground: terminal_color_to_hsla(lerp_terminal_color(
+                dim_terminal_color(from_fg),
+                dim_terminal_color(to_fg),
+                t,
+            )),
+            ansi_pairs: std::array::from_fn(|index| {
+                (to_ansi[index], terminal_color_to_hsla(interp_ansi[index]))
+            }),
+            dim_ansi_pairs: std::array::from_fn(|index| {
+                let interpolated_dim = lerp_terminal_color(
+                    dim_terminal_color(from_ansi[index]),
+                    dim_terminal_color(to_ansi[index]),
+                    t,
+                );
+                (
+                    dim_terminal_color(to_ansi[index]),
+                    terminal_color_to_hsla(interpolated_dim),
+                )
+            }),
+            signature: hasher.finish(),
+        }
+    }
+
+    pub(crate) fn map_ansi_color(&self, color: TerminalColor) -> Option<Hsla> {
+        self.ansi_pairs
+            .iter()
+            .chain(&self.dim_ansi_pairs)
+            .find_map(|&(target, interpolated)| (target == color).then_some(interpolated))
     }
 }
 

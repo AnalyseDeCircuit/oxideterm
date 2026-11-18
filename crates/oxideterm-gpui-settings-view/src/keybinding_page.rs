@@ -185,6 +185,48 @@ const KEYBINDING_HEADER_BG_ALPHA: u32 = 0x80; // Tauri bg-theme-bg-elevated/50.
 const KEYBINDING_ROW_DIVIDER_ALPHA: u32 = 0x4d; // Tauri divide-theme-border/30.
 const KEYBINDING_KBD_BORDER_ALPHA: u32 = 0x80; // Tauri border-theme-border/50.
 
+pub fn visible_scope_count(
+    catalog: &[ActionDefinition],
+    keybinding_state: &SettingsWorkspaceEntity,
+    label: impl Fn(&ActionDefinition) -> String,
+) -> usize {
+    let query = keybinding_state
+        .keybinding_search_query()
+        .trim()
+        .to_lowercase();
+    let scope_filter = keybinding_state.keybinding_scope_filter();
+    [
+        ActionScope::Global,
+        ActionScope::Terminal,
+        ActionScope::Split,
+        ActionScope::Palette,
+        ActionScope::Editor,
+        ActionScope::Sftp,
+        ActionScope::FileManager,
+        ActionScope::Preview,
+        ActionScope::RemoteDesktop,
+        ActionScope::Plugin,
+        ActionScope::AiPanel,
+    ]
+    .into_iter()
+    .filter(|scope| {
+        catalog
+            .iter()
+            .filter(|definition| definition.scope == *scope)
+            .filter(|definition| {
+                settings_keybinding_scope_matches(scope_filter, definition.scope)
+            })
+            .any(|definition| {
+                if query.is_empty() {
+                    return true;
+                }
+                let label = label(definition).to_lowercase();
+                label.contains(&query) || definition.id.to_lowercase().contains(&query)
+            })
+    })
+    .count()
+}
+
 pub fn settings_keybinding_scope_matches(
     filter: SettingsKeybindingScopeFilter,
     scope: ActionScope,
