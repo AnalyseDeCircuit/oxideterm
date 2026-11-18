@@ -304,17 +304,28 @@ struct ConnectionDirectorySnapshot {
 }
 
 impl PublicMcpHost {
-    pub fn read_connection_directory(&mut self, background: &PublicMcpBackground, store: &ConnectionStore, request: DomainRequest) {
+    pub fn read_connection_directory(
+        &mut self,
+        background: &PublicMcpBackground,
+        store: &ConnectionStore,
+        request: DomainRequest,
+    ) {
         let snapshot_or_key = match &request.call {
             PublicToolCall::BrowseConnections(_) => {
                 self.sync_connection_refs(&request.client_ref, store);
                 Ok(ConnectionDirectorySnapshot {
-                    refs: self.connection_refs.iter().filter(|((client, _), _)| client == &request.client_ref)
-                        .map(|((_, key), reference)| (key.clone(), reference.clone())).collect(),
+                    refs: self
+                        .connection_refs
+                        .iter()
+                        .filter(|((client, _), _)| client == &request.client_ref)
+                        .map(|((_, key), reference)| (key.clone(), reference.clone()))
+                        .collect(),
                 })
             }
             PublicToolCall::DescribeConnection(args) => {
-                let Some(key) = self.connection_key(&request.client_ref, &args.connection_ref, store) else {
+                let Some(key) =
+                    self.connection_key(&request.client_ref, &args.connection_ref, store)
+                else {
                     request.finish(ToolEnvelope::failed("The connection handle is unavailable"));
                     return;
                 };
@@ -325,14 +336,22 @@ impl PublicMcpHost {
         let store = store.clone();
         let admission = background.admission.clone();
         background.forwarding_runtime.spawn_blocking(move || {
-            if request.is_cancelled() { return; }
+            if request.is_cancelled() {
+                return;
+            }
             let result = match (&request.call, snapshot_or_key) {
-                (PublicToolCall::BrowseConnections(args), Ok(snapshot)) => Ok(snapshot.browse(&store, args)),
-                (PublicToolCall::DescribeConnection(args), Err(key)) => describe_connection(&store, &args.connection_ref, &key),
+                (PublicToolCall::BrowseConnections(args), Ok(snapshot)) => {
+                    Ok(snapshot.browse(&store, args))
+                }
+                (PublicToolCall::DescribeConnection(args), Err(key)) => {
+                    describe_connection(&store, &args.connection_ref, &key)
+                }
                 _ => unreachable!(),
             };
             let suspended = admission.lock();
-            if request.is_cancelled() { return; }
+            if request.is_cancelled() {
+                return;
+            }
             if *suspended {
                 request.finish(ToolEnvelope::failed("The OxideTerm workspace is locked"));
                 return;
@@ -346,10 +365,7 @@ impl PublicMcpHost {
 }
 
 impl ConnectionDirectorySnapshot {
-    fn connection_directory_entry(
-        &self,
-        info: ConnectionInfo,
-    ) -> PublicConnectionDirectoryEntry {
+    fn connection_directory_entry(&self, info: ConnectionInfo) -> PublicConnectionDirectoryEntry {
         let internal_key = format!("{CONNECTION_KEY_SSH_PREFIX}{}", info.id);
         let connection_ref = self.refs[&internal_key].clone();
         PublicConnectionDirectoryEntry {
@@ -381,7 +397,11 @@ impl ConnectionDirectorySnapshot {
         }
     }
 
-    fn browse(&self, store: &ConnectionStore, args: &oxideterm_public_mcp::calls::BrowseConnectionsArgs) -> serde_json::Value {
+    fn browse(
+        &self,
+        store: &ConnectionStore,
+        args: &oxideterm_public_mcp::calls::BrowseConnectionsArgs,
+    ) -> serde_json::Value {
         let query = args
             .query
             .as_deref()
@@ -485,137 +505,137 @@ impl ConnectionDirectorySnapshot {
         }
         json!({ "connections": connections })
     }
-
 }
 
-fn describe_connection(store: &ConnectionStore, connection_ref: &ConnectionRef, connection_key: &str)
-    -> Result<serde_json::Value, &'static str>
-{
-        if let Some(connection_id) = connection_key.strip_prefix(CONNECTION_KEY_SSH_PREFIX)
-            && let Some(connection) = store.get(connection_id)
-        {
-            let projection = connections::ssh_connection_projection(
-                connection_ref,
-                connections::connection_revision(store, connection_key)
-                    .unwrap_or_else(|| "unavailable".to_owned()),
-                connection,
-            );
-            return Ok(json!({ "connection": projection }));
-        }
-        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_SERIAL_PREFIX)
-            && let Some(profile) = store
-                .serial_profiles()
-                .iter()
-                .find(|profile| profile.id == profile_id)
-        {
-            return Ok(json!({
-                    "connection": {
-                        "connection_ref": connection_ref,
-                        "revision": connections::connection_revision(store, connection_key),
-                        "type": CONNECTION_TYPE_SERIAL,
-                        "name": profile.name,
-                        "group": profile.group,
-                        "notes": profile.notes,
-                        "port_path": profile.port_path,
-                        "baud_rate": profile.baud_rate,
-                        "data_bits": profile.data_bits,
-                        "stop_bits": profile.stop_bits,
-                        "parity": profile.parity,
-                        "flow_control": profile.flow_control,
-                        "connect_on_open": profile.connect_on_open,
-                        "color": profile.color,
-                        "icon_background_color": profile.icon_background_color,
-                        "icon": profile.icon,
-                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
-                    }
-                }));
-        }
-        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_TELNET_PREFIX)
-            && let Some(profile) = store
-                .telnet_profiles()
-                .iter()
-                .find(|profile| profile.id == profile_id)
-        {
-            return Ok(json!({
-                    "connection": {
-                        "connection_ref": connection_ref,
-                        "revision": connections::connection_revision(store, connection_key),
-                        "type": CONNECTION_TYPE_TELNET,
-                        "name": profile.name,
-                        "group": profile.group,
-                        "notes": profile.notes,
-                        "host": profile.host,
-                        "port": profile.port,
-                        "terminal": connections::terminal_options_projection(&profile.terminal),
-                        "connect_on_open": profile.connect_on_open,
-                        "color": profile.color,
-                        "icon_background_color": profile.icon_background_color,
-                        "icon": profile.icon,
-                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
-                    }
-                }));
-        }
-        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX)
-            && let Some(profile) = store
-                .mosh_profiles()
-                .iter()
-                .find(|profile| profile.id == profile_id)
-        {
-            return Ok(json!({
-                    "connection": {
-                        "connection_ref": connection_ref,
-                        "revision": connections::connection_revision(store, connection_key),
-                        "type": CONNECTION_TYPE_MOSH,
-                        "name": profile.name,
-                        "group": profile.group,
-                        "notes": profile.notes,
-                        "host": profile.host,
-                        "ssh_port": profile.ssh_port,
-                        "username": profile.username,
-                        "auth": connections::auth_projection(&profile.auth),
-                        "server_executable": profile.server_executable,
-                        "udp_host_override": profile.udp_host_override,
-                        "udp_port": profile.udp_port,
-                        "ip_family": profile.ip_family,
-                        "prediction": profile.prediction,
-                        "locale": profile.locale,
-                        "identity_agent": profile.identity_agent,
-                        "legacy_ssh_compatibility": profile.legacy_ssh_compatibility,
-                        "color": profile.color,
-                        "icon_background_color": profile.icon_background_color,
-                        "icon": profile.icon,
-                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
-                    }
-                }));
-        }
-        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX)
-            && let Some(profile) = store
-                .remote_desktop_profiles()
-                .iter()
-                .find(|profile| profile.id == profile_id)
-        {
-            return Ok(json!({
-                    "connection": {
-                        "connection_ref": connection_ref,
-                        "revision": connections::connection_revision(store, connection_key),
-                        "type": profile.protocol.provider_id(),
-                        "name": profile.name,
-                        "group": profile.group,
-                        "notes": profile.notes,
-                        "host": profile.host,
-                        "port": profile.port,
-                        "username": profile.username,
-                        "domain": profile.domain,
-                        "credential_configured": profile.credential_ref.is_some(),
-                        "read_only": profile.read_only,
-                        "options": connections::remote_desktop_options_projection(&profile.session_options),
-                        "color": profile.color,
-                        "icon_background_color": profile.icon_background_color,
-                        "icon": profile.icon,
-                        "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
-                    }
-                }));
-        }
-        Err("The saved connection no longer exists")
+fn describe_connection(
+    store: &ConnectionStore,
+    connection_ref: &ConnectionRef,
+    connection_key: &str,
+) -> Result<serde_json::Value, &'static str> {
+    if let Some(connection_id) = connection_key.strip_prefix(CONNECTION_KEY_SSH_PREFIX)
+        && let Some(connection) = store.get(connection_id)
+    {
+        let projection = connections::ssh_connection_projection(
+            connection_ref,
+            connections::connection_revision(store, connection_key)
+                .unwrap_or_else(|| "unavailable".to_owned()),
+            connection,
+        );
+        return Ok(json!({ "connection": projection }));
     }
+    if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_SERIAL_PREFIX)
+        && let Some(profile) = store
+            .serial_profiles()
+            .iter()
+            .find(|profile| profile.id == profile_id)
+    {
+        return Ok(json!({
+            "connection": {
+                "connection_ref": connection_ref,
+                "revision": connections::connection_revision(store, connection_key),
+                "type": CONNECTION_TYPE_SERIAL,
+                "name": profile.name,
+                "group": profile.group,
+                "notes": profile.notes,
+                "port_path": profile.port_path,
+                "baud_rate": profile.baud_rate,
+                "data_bits": profile.data_bits,
+                "stop_bits": profile.stop_bits,
+                "parity": profile.parity,
+                "flow_control": profile.flow_control,
+                "connect_on_open": profile.connect_on_open,
+                "color": profile.color,
+                "icon_background_color": profile.icon_background_color,
+                "icon": profile.icon,
+                "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
+            }
+        }));
+    }
+    if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_TELNET_PREFIX)
+        && let Some(profile) = store
+            .telnet_profiles()
+            .iter()
+            .find(|profile| profile.id == profile_id)
+    {
+        return Ok(json!({
+            "connection": {
+                "connection_ref": connection_ref,
+                "revision": connections::connection_revision(store, connection_key),
+                "type": CONNECTION_TYPE_TELNET,
+                "name": profile.name,
+                "group": profile.group,
+                "notes": profile.notes,
+                "host": profile.host,
+                "port": profile.port,
+                "terminal": connections::terminal_options_projection(&profile.terminal),
+                "connect_on_open": profile.connect_on_open,
+                "color": profile.color,
+                "icon_background_color": profile.icon_background_color,
+                "icon": profile.icon,
+                "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
+            }
+        }));
+    }
+    if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX)
+        && let Some(profile) = store
+            .mosh_profiles()
+            .iter()
+            .find(|profile| profile.id == profile_id)
+    {
+        return Ok(json!({
+            "connection": {
+                "connection_ref": connection_ref,
+                "revision": connections::connection_revision(store, connection_key),
+                "type": CONNECTION_TYPE_MOSH,
+                "name": profile.name,
+                "group": profile.group,
+                "notes": profile.notes,
+                "host": profile.host,
+                "ssh_port": profile.ssh_port,
+                "username": profile.username,
+                "auth": connections::auth_projection(&profile.auth),
+                "server_executable": profile.server_executable,
+                "udp_host_override": profile.udp_host_override,
+                "udp_port": profile.udp_port,
+                "ip_family": profile.ip_family,
+                "prediction": profile.prediction,
+                "locale": profile.locale,
+                "identity_agent": profile.identity_agent,
+                "legacy_ssh_compatibility": profile.legacy_ssh_compatibility,
+                "color": profile.color,
+                "icon_background_color": profile.icon_background_color,
+                "icon": profile.icon,
+                "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
+            }
+        }));
+    }
+    if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_DESKTOP_PREFIX)
+        && let Some(profile) = store
+            .remote_desktop_profiles()
+            .iter()
+            .find(|profile| profile.id == profile_id)
+    {
+        return Ok(json!({
+            "connection": {
+                "connection_ref": connection_ref,
+                "revision": connections::connection_revision(store, connection_key),
+                "type": profile.protocol.provider_id(),
+                "name": profile.name,
+                "group": profile.group,
+                "notes": profile.notes,
+                "host": profile.host,
+                "port": profile.port,
+                "username": profile.username,
+                "domain": profile.domain,
+                "credential_configured": profile.credential_ref.is_some(),
+                "read_only": profile.read_only,
+                "options": connections::remote_desktop_options_projection(&profile.session_options),
+                "color": profile.color,
+                "icon_background_color": profile.icon_background_color,
+                "icon": profile.icon,
+                "last_used_at": profile.last_used_at.map(|time| time.to_rfc3339()),
+            }
+        }));
+    }
+    Err("The saved connection no longer exists")
 }

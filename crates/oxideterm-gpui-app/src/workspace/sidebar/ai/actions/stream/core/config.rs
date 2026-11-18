@@ -1,4 +1,6 @@
-pub(in crate::workspace) use oxideterm_ai::chat_tools::{ai_active_tool_count, ai_stream_tool_definitions};
+pub(in crate::workspace) use oxideterm_ai::chat_tools::{
+    ai_active_tool_count, ai_stream_tool_definitions,
+};
 impl WorkspaceApp {
     fn ai_scoped_memory_context(
         &self,
@@ -108,7 +110,10 @@ impl WorkspaceApp {
         if entry_ids.is_empty() {
             return;
         }
-        let entry_ids = entry_ids.iter().cloned().collect::<std::collections::HashSet<_>>();
+        let entry_ids = entry_ids
+            .iter()
+            .cloned()
+            .collect::<std::collections::HashSet<_>>();
         let now_ms = ai_memory_now_ms();
         self.edit_settings(
             move |settings| {
@@ -136,7 +141,11 @@ impl WorkspaceApp {
         rag_system_prompt: Option<&str>,
         cx: &App,
     ) -> bool {
-        let Some(conversation) = self.ai.state.read(cx).conversation_state()
+        let Some(conversation) = self
+            .ai
+            .state
+            .read(cx)
+            .conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)
@@ -187,8 +196,8 @@ impl WorkspaceApp {
                     .map(|choice| choice.label.clone())
                 })
                 .unwrap_or_else(|| self.ai_acp_agent_model_fallback_label(&acp_agent_id, cx));
-            let (memory_context, memory_entry_ids) =
-                self.ai_scoped_memory_context(self.ai_memory_character_budget(None, &model_label), cx);
+            let (memory_context, memory_entry_ids) = self
+                .ai_scoped_memory_context(self.ai_memory_character_budget(None, &model_label), cx);
             let tools = ai_stream_tool_definitions(
                 tool_policy.enabled,
                 settings.ai.skills.enabled,
@@ -229,9 +238,8 @@ impl WorkspaceApp {
         let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
-        let model = active_model_selection(settings.ai.active_model.as_deref()).ok_or_else(|| {
-            self.i18n.t("ai.model_selector.no_model_selected")
-        })?;
+        let model = active_model_selection(settings.ai.active_model.as_deref())
+            .ok_or_else(|| self.i18n.t("ai.model_selector.no_model_selected"))?;
         let (memory_context, memory_entry_ids) = self.ai_scoped_memory_context(
             self.ai_memory_character_budget(Some(&provider.id), &model),
             cx,
@@ -244,7 +252,11 @@ impl WorkspaceApp {
             .and_then(|models| models.get(&model))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("auto");
-        let reasoning_effort = self.ai.state.read(cx).conversation_state()
+        let reasoning_effort = self
+            .ai
+            .state
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, &model)
@@ -265,8 +277,10 @@ impl WorkspaceApp {
             self.ai.state.read(cx).mcp_registry(),
         );
         let image_input = self.ai_image_model_setting(&provider.id, &provider.base_url, &model);
-        let omit_history_images = self.ai_image_text_only(&provider.id, &provider.base_url, &model, cx)
-            && oxideterm_ai::model_image_input(&provider.provider_type, &model, image_input) != Some(true);
+        let omit_history_images =
+            self.ai_image_text_only(&provider.id, &provider.base_url, &model, cx)
+                && oxideterm_ai::model_image_input(&provider.provider_type, &model, image_input)
+                    != Some(true);
         Ok(AiChatStreamConfig {
             api_protocol: provider.api_protocol,
             image_input,
@@ -306,14 +320,20 @@ impl WorkspaceApp {
         let provider = active_provider_view(&providers, settings.ai.active_provider_id.as_deref())
             .cloned()
             .ok_or_else(|| self.i18n.t("ai.model_selector.no_provider"))?;
-        let model = active_model_selection(settings.ai.active_model.as_deref()).ok_or_else(|| {
-            self.i18n.t("ai.model_selector.no_model_selected")
-        })?;
+        let model = active_model_selection(settings.ai.active_model.as_deref())
+            .ok_or_else(|| self.i18n.t("ai.model_selector.no_model_selected"))?;
         let max_response_tokens = if compact {
-            let window = oxideterm_ai::model_context_window(&model, &settings.ai.model_context_windows,
-                Some(&provider.id), &settings.ai.user_context_windows).max(1) as usize;
+            let window = oxideterm_ai::model_context_window(
+                &model,
+                &settings.ai.model_context_windows,
+                Some(&provider.id),
+                &settings.ai.user_context_windows,
+            )
+            .max(1) as usize;
             Some(oxideterm_ai::agent::checkpoint_output_budget(window) as i64)
-        } else { None };
+        } else {
+            None
+        };
         let configured_reasoning_effort = settings
             .ai
             .reasoning_model_overrides
@@ -321,7 +341,11 @@ impl WorkspaceApp {
             .and_then(|models| models.get(&model))
             .and_then(serde_json::Value::as_str)
             .unwrap_or("auto");
-        let reasoning_effort = self.ai.state.read(cx).conversation_state()
+        let reasoning_effort = self
+            .ai
+            .state
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .and_then(|conversation| {
                 ai_conversation_reasoning_effort(conversation, &provider.id, &model)
@@ -335,8 +359,10 @@ impl WorkspaceApp {
         .as_str()
         .to_string();
         let image_input = self.ai_image_model_setting(&provider.id, &provider.base_url, &model);
-        let omit_history_images = self.ai_image_text_only(&provider.id, &provider.base_url, &model, cx)
-            && oxideterm_ai::model_image_input(&provider.provider_type, &model, image_input) != Some(true);
+        let omit_history_images =
+            self.ai_image_text_only(&provider.id, &provider.base_url, &model, cx)
+                && oxideterm_ai::model_image_input(&provider.provider_type, &model, image_input)
+                    != Some(true);
         Ok(AiChatStreamConfig {
             api_protocol: provider.api_protocol,
             image_input,
@@ -371,7 +397,10 @@ impl WorkspaceApp {
         agent_id: &str,
         cx: &App,
     ) -> Option<AiAcpSessionState> {
-        self.ai.state.read(cx).conversation_state()
+        self.ai
+            .state
+            .read(cx)
+            .conversation_state()
             .active_conversation()
             .and_then(ai_acp_session_state)
             .filter(|state| state.agent_id == agent_id)
@@ -394,7 +423,13 @@ impl WorkspaceApp {
             rag_system_prompt.as_deref(),
             cx,
         );
-        let history = self.ai.state.read(cx).history.model_contexts.get(conversation_id)
+        let history = self
+            .ai
+            .state
+            .read(cx)
+            .history
+            .model_contexts
+            .get(conversation_id)
             .map(|conversation| conversation.messages.clone())?;
         let mut history = self.compose_ai_stream_history(
             history,
@@ -443,43 +478,15 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn compose_ai_stream_history(
         &self,
-        mut history: Vec<AiChatMessage>,
+        history: Vec<AiChatMessage>,
         config: &AiChatStreamConfig,
         request_content: Option<String>,
         task_system_prompt: Option<&str>,
         rag_system_prompt: Option<&str>,
     ) -> Vec<AiChatMessage> {
-        apply_chat_request_overrides(&mut history, request_content, None);
-        oxideterm_ai::prepare_image_history(&mut history, config);
-        oxideterm_ai::scope_responses_history(&mut history, config);
-        normalize_ai_stream_history_for_provider(&mut history);
-        let base_system_prompt = self.build_ai_base_system_prompt(
-            config,
-            rag_system_prompt,
-            task_system_prompt,
-        );
-        history.insert(
-            0,
-            AiChatMessage {
-                id: "base-system".to_string(),
-                role: AiChatRole::System,
-                content: base_system_prompt,
-                timestamp_ms: 0,
-                model: None,
-                context: None,
-                thinking_content: None,
-                is_streaming: false,
-                metadata: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-                turn: None,
-                transcript_ref: None,
-                summary_ref: None,
-                branches: None,
-                suggestions: Vec::new(),
-            },
-        );
-        history
+        let base_system_prompt =
+            self.build_ai_base_system_prompt(config, rag_system_prompt, task_system_prompt);
+        compose_ai_provider_history(history, config, request_content, base_system_prompt)
     }
 
     pub(in crate::workspace) fn ai_send_budget_decision(
@@ -491,11 +498,6 @@ impl WorkspaceApp {
         rag_system_prompt: Option<&str>,
     ) -> Option<AiPromptBudgetDecision> {
         let context_window = self.ai_active_model_context_window(config);
-        let response_reserve = config
-            .max_response_tokens
-            .and_then(|tokens| usize::try_from(tokens).ok())
-            .filter(|tokens| *tokens > 0)
-            .unwrap_or_else(|| ai_response_reserve(context_window));
         let history = self.compose_ai_stream_history(
             conversation.messages.clone(),
             config,
@@ -503,37 +505,12 @@ impl WorkspaceApp {
             task_system_prompt,
             rag_system_prompt,
         );
-        let breakdown = ai_prompt_token_breakdown(
+        Some(ai_send_budget_decision(
+            conversation,
+            config,
             &history,
-            &config.tools,
-            &config.provider_type,
-            response_reserve,
-        );
-        let regular_messages = history
-            .iter()
-            .filter(|message| message.role != AiChatRole::System)
-            .collect::<Vec<_>>();
-        let summary_eligible_tokens = ai_summary_eligible_tokens(&regular_messages);
-        Some(determine_ai_compression_level(AiPromptBudgetInput {
             context_window,
-            response_reserve,
-            system_budget: breakdown
-                .system_instructions
-                .saturating_add(breakdown.tool_definitions),
-            history_tokens: breakdown.history_tokens(),
-            trimmable_history_tokens: Some(breakdown.history_tokens()),
-            summary_eligible_tokens: Some(summary_eligible_tokens),
-            can_summarize: summary_eligible_tokens > 0,
-            can_lookup_transcript: ai_find_prompt_transcript_lookup_reference(
-                &conversation.messages,
-            )
-            .is_some(),
-            in_tool_loop: false,
-            auto_compact_threshold: None,
-            transcript_lookup_threshold: None,
-            tool_loop_stop_threshold: None,
-            safety_margin: None,
-        }))
+        ))
     }
 
     pub(in crate::workspace) fn ai_budget_diagnostic_payload(
@@ -547,11 +524,6 @@ impl WorkspaceApp {
         trimmed_count: usize,
     ) -> serde_json::Value {
         let context_window = self.ai_active_model_context_window(config);
-        let response_reserve = config
-            .max_response_tokens
-            .and_then(|tokens| usize::try_from(tokens).ok())
-            .filter(|tokens| *tokens > 0)
-            .unwrap_or_else(|| ai_response_reserve(context_window));
         let history = self.compose_ai_stream_history(
             conversation.messages.clone(),
             config,
@@ -559,36 +531,14 @@ impl WorkspaceApp {
             task_system_prompt,
             rag_system_prompt,
         );
-        let breakdown = ai_prompt_token_breakdown(
+        ai_budget_diagnostic_payload(
+            conversation,
+            config,
             &history,
-            &config.tools,
-            &config.provider_type,
-            response_reserve,
-        );
-        let transcript_lookup_tokens = decision
-            .filter(|decision| decision.level >= 3)
-            .and_then(|_| ai_find_prompt_transcript_lookup_reference(&conversation.messages))
-            .map(ai_build_transcript_lookup_prompt_reference)
-            .map(|prompt| ai_estimated_tokens(&prompt))
-            .unwrap_or(0);
-        let previous_level = conversation
-            .session_metadata
-            .as_ref()
-            .and_then(|metadata| metadata.get("lastBudgetLevel"))
-            .and_then(serde_json::Value::as_i64);
-        serde_json::json!({
-            "requestKind": "chat",
-            "budgetLevel": decision.map(|decision| decision.level).unwrap_or(0),
-            "previousLevel": previous_level,
-            "nextLevel": decision.map(|decision| decision.level).unwrap_or(0),
-            "contextWindow": context_window,
-            "responseReserve": response_reserve,
-            "systemBudget": breakdown.system_instructions
-                .saturating_add(breakdown.tool_definitions)
-                .saturating_add(transcript_lookup_tokens),
-            "historyTokens": breakdown.history_tokens(),
-            "trimmedCount": trimmed_count,
-        })
+            context_window,
+            decision,
+            trimmed_count,
+        )
     }
 
     pub(in crate::workspace) fn ai_transcript_lookup_prompt_for_conversation(
@@ -600,7 +550,11 @@ impl WorkspaceApp {
         rag_system_prompt: Option<&str>,
         cx: &App,
     ) -> Option<String> {
-        let conversation = self.ai.state.read(cx).conversation_state()
+        let conversation = self
+            .ai
+            .state
+            .read(cx)
+            .conversation_state()
             .conversations
             .iter()
             .find(|conversation| conversation.id == conversation_id)?;
@@ -622,14 +576,16 @@ impl WorkspaceApp {
         count: usize,
         cx: &mut Context<Self>,
     ) {
-        let sequence = self.ai.state.update(cx, |ai, _cx| {
-            ai.show_context_trim_notice(count)
-        });
+        let sequence = self
+            .ai
+            .state
+            .update(cx, |ai, _cx| ai.show_context_trim_notice(count));
         cx.spawn(async move |weak, cx| {
             Timer::after(Duration::from_secs(5)).await;
             let _ = weak.update(cx, |this, cx| {
                 let cleared = this
-                    .ai.state
+                    .ai
+                    .state
                     .update(cx, |ai, _cx| ai.clear_context_trim_notice(sequence));
                 if cleared {
                     cx.notify();
@@ -645,7 +601,8 @@ impl WorkspaceApp {
         entries: Vec<oxideterm_ai::PersistedTranscriptEntry>,
         cx: &App,
     ) {
-        self.ai.state
+        self.ai
+            .state
             .read(cx)
             .persist_transcript_entries(conversation_id, entries);
     }
@@ -656,7 +613,8 @@ impl WorkspaceApp {
         events: Vec<oxideterm_ai::PersistedDiagnosticEvent>,
         cx: &App,
     ) {
-        self.ai.state
+        self.ai
+            .state
             .read(cx)
             .persist_diagnostic_events(conversation_id, events);
     }
@@ -707,8 +665,7 @@ impl WorkspaceApp {
             .filter(|label| !label.trim().is_empty())
             .unwrap_or(config.provider_type.as_str());
         // This is the final provider boundary for custom, RAG, and runtime context.
-        let mut prompt =
-            oxideterm_ai::sanitize_for_ai(settings.ai.custom_system_prompt.trim());
+        let mut prompt = oxideterm_ai::sanitize_for_ai(settings.ai.custom_system_prompt.trim());
         if prompt.is_empty() {
             prompt = DEFAULT_AI_SYSTEM_PROMPT.to_string();
         }
@@ -748,9 +705,22 @@ impl WorkspaceApp {
             prompt.push_str(&oxideterm_ai::sanitize_for_ai(task_system_prompt));
         }
         if let Some(skill_catalog_prompt) = self.ai_skill_catalog_prompt() {
-            if let Some(mut context) = oxideterm_audit::AuditContext::current_request().or_else(oxideterm_audit::AuditContext::current) {
+            if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
+                .or_else(oxideterm_audit::AuditContext::current)
+            {
                 context.source = oxideterm_audit::AuditSource::Ai;
-                context.observe(oxideterm_audit::AuditCategory::Automation, "ai_context_provided", Some(&format!("provider=skills model={} bytes={}", config.model, skill_catalog_prompt.len())), oxideterm_audit::AuditOutcome::Sent, oxideterm_audit::AuditEvidence::Dispatch, oxideterm_audit::AuditAuthorization::NotRequired);
+                context.observe(
+                    oxideterm_audit::AuditCategory::Automation,
+                    "ai_context_provided",
+                    Some(&format!(
+                        "provider=skills model={} bytes={}",
+                        config.model,
+                        skill_catalog_prompt.len()
+                    )),
+                    oxideterm_audit::AuditOutcome::Sent,
+                    oxideterm_audit::AuditEvidence::Dispatch,
+                    oxideterm_audit::AuditAuthorization::NotRequired,
+                );
             }
             prompt.push_str("\n\n");
             prompt.push_str(&skill_catalog_prompt);
@@ -769,7 +739,7 @@ impl WorkspaceApp {
         if !self.settings_store.settings().ai.skills.enabled {
             return None;
         }
-        let catalog = self.skill_registry.read().catalog();
+        let catalog = self.ai.skills.registry.read().catalog();
         let mut selected = Vec::new();
         for skill in catalog {
             let candidate = serde_json::json!({

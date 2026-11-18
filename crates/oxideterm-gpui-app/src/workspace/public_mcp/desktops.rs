@@ -1,7 +1,7 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use gpui::{Context, Window};
+use gpui::{AppContext, Context, Window};
 use oxideterm_public_mcp::{
     DesktopClipboardPayload, DesktopRef, DomainRequest, PublicToolCall, ToolEnvelope, ToolGroup,
 };

@@ -8,6 +8,8 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
+base64.workspace = true
+chrono.workspace = true
 gpui.workspace = true
 oxideterm-ai = { path = "../oxideterm-ai" }
 oxideterm-audit = { path = "../oxideterm-audit" }

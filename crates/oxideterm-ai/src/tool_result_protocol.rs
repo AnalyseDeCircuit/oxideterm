@@ -1,6 +1,6 @@
 //! Model-facing tool-result envelopes, evidence facts, condensation, and output limits.
 
-use crate::compute_ai_prompt_budget;
+use crate::{AiChatMessage, AiChatRole, AiToolCall, compute_ai_prompt_budget};
 
 /// A runtime-neutral tool execution result ready for protocol formatting.
 #[derive(Clone, Debug)]
@@ -579,4 +579,82 @@ mod tests {
                 .is_some_and(|output| output.contains("[truncated:"))
         );
     }
+}
+
+pub fn ai_tool_choice_label(choice: &crate::AiToolChoice) -> serde_json::Value {
+    match choice {
+        crate::AiToolChoice::Auto => serde_json::json!("auto"),
+        crate::AiToolChoice::Required => serde_json::json!("required"),
+        crate::AiToolChoice::Named(name) => serde_json::json!(name),
+    }
+}
+
+#[derive(Debug)]
+pub struct AiRoundToolResultSummary {
+    pub tool_name: String,
+    pub success: bool,
+    pub summary: String,
+}
+
+pub fn ai_round_summary_text(results: &[AiRoundToolResultSummary]) -> String {
+    results
+        .iter()
+        .map(|result| {
+            format!(
+                "{}: {} - {}",
+                result.tool_name,
+                if result.success { "ok" } else { "error" },
+                result.summary.trim()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn parse_ai_tool_args(tool_name: &str, arguments: &str) -> Option<serde_json::Value> {
+    let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok()?;
+    if !parsed.is_object() {
+        return None;
+    }
+    if !crate::is_orchestrator_tool_name(tool_name) {
+        // External MCP servers own their argument contracts. Their payloads
+        // are forwarded only to that server and never resolved as application
+        // runtime authority.
+        return Some(parsed);
+    }
+    // Provider schemas are advisory. The same strict parser is the actual
+    // authority boundary for provider and ACP application tool calls.
+    crate::canonicalize_orchestrator_tool_arguments(tool_name, parsed).ok()
+}
+
+pub fn ai_tool_call_message_value(call: &AiToolCall) -> serde_json::Value {
+    serde_json::json!({
+        "id": call.id,
+        "name": call.name,
+        "arguments": call.arguments,
+    })
+}
+
+pub fn ai_tool_result_message(result: AiExecutedToolResult, timestamp_ms: i64) -> AiChatMessage {
+    let content = ai_tool_result_model_content(&result);
+    let mut message = AiChatMessage {
+        id: format!("tool-result-{}", result.tool_call_id),
+        role: AiChatRole::Tool,
+        content,
+        timestamp_ms,
+        model: None,
+        context: None,
+        is_streaming: false,
+        thinking_content: None,
+        metadata: None,
+        tool_call_id: Some(result.tool_call_id),
+        tool_calls: Vec::new(),
+        turn: None,
+        transcript_ref: None,
+        summary_ref: None,
+        branches: None,
+        suggestions: Vec::new(),
+    };
+    crate::set_message_images(&mut message, result.images);
+    message
 }

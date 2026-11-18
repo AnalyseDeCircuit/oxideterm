@@ -1,13 +1,13 @@
 use super::{
-    ConnectionStore, PublicMcpBackground, PublicMcpHost, PublicMcpLocalSyncCheckpoint,
-    PublicMcpSyncPlan, PublicMcpSyncPlanKind, PublicMcpSyncUndo, finish_serialized,
+    ConnectionStore, PublicMcpBackground, PublicMcpLocalSyncCheckpoint, PublicMcpSyncPlan,
+    PublicMcpSyncPlanKind, PublicMcpSyncUndo, finish_serialized,
 };
 use oxideterm_cloud_sync::{
     BackendType, CloudSyncSettings, OXIDE_APP_SETTINGS_SECTION_IDS, RawSyncScope, secret_keys,
     service::CloudSyncLocalSnapshot,
 };
 use oxideterm_cloud_sync::{
-    StructuredLocalState,
+    CloudSyncStatus, StructuredDirtyInfo, StructuredLocalState,
     operation::{
         AppliedSync, CloudSyncOperationService, PreparedSync, SyncOutcome, SyncPlanSummary,
     },
@@ -16,10 +16,15 @@ use oxideterm_cloud_sync::{
     state::CloudSyncPersistedState,
 };
 use oxideterm_forwarding::ForwardingRegistry;
-use oxideterm_public_mcp::{DomainRequest, PublicSyncSection, SyncSelection, UndoRef};
-use oxideterm_settings::SettingsStore;
+use oxideterm_public_mcp::{
+    DomainRequest, PublicSyncConflictStrategy, PublicSyncSection, PublicToolCall, SyncSelection,
+    ToolEnvelope, UndoRef,
+};
+use oxideterm_settings::{PersistedSettings, SettingsStore};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
+use std::time::Instant;
+use tokio::task::{JoinError, JoinHandle};
 
 const SYNC_CANCELLED_ERROR: &str = "cancelled";
 
@@ -270,7 +275,7 @@ impl PublicMcpSyncFailure {
     }
 }
 
-pub fn status_projection(
+fn status_projection(
     state: &CloudSyncPersistedState,
     local_snapshot: &CloudSyncLocalSnapshot,
     operation_in_flight: bool,
@@ -299,7 +304,7 @@ pub fn status_projection(
     })
 }
 
-pub struct PublicMcpSyncPreview {
+struct PublicMcpSyncPreview {
     prepared: PreparedSync,
     summary: SyncPlanSummary,
     pub secret_hints: BTreeMap<String, bool>,
@@ -335,7 +340,7 @@ async fn prepare_preview(
     })
 }
 
-pub fn local_snapshot(
+fn local_snapshot(
     connections: &ConnectionStore,
     forwards: &ForwardingRegistry,
     settings: &SettingsStore,
@@ -425,21 +430,24 @@ fn restore_checkpoint(
     Ok(())
 }
 
-impl PublicMcpHost {
-    pub fn finish_sync_preview(
+impl PublicMcpBackground {
+    fn finish_sync_preview(
         &self,
         request: DomainRequest,
         preview: PublicMcpSyncPreview,
         local_state: StructuredLocalState,
         sections: Vec<PublicSyncSection>,
     ) {
-        let plan_ref = self.insert_sync_plan(PublicMcpSyncPlan {
-            client_ref: request.client_ref.clone(),
-            created_at: std::time::Instant::now(),
-            local_state,
-            sections: sections.clone(),
-            kind: PublicMcpSyncPlanKind::Causal(preview.prepared),
-        });
+        let plan_ref = self
+            .sync_handles
+            .lock()
+            .insert_sync_plan(PublicMcpSyncPlan {
+                client_ref: request.client_ref.clone(),
+                created_at: std::time::Instant::now(),
+                local_state,
+                sections: sections.clone(),
+                kind: PublicMcpSyncPlanKind::Causal(preview.prepared),
+            });
         finish_serialized(
             request,
             json!({
@@ -496,7 +504,7 @@ impl PublicMcpSyncUndo {
     }
 }
 
-pub fn finish_sync_publication(
+fn finish_sync_publication(
     request: DomainRequest,
     outcome: &oxideterm_cloud_sync::operation::SyncOutcome,
     undo_ref: Option<UndoRef>,
@@ -519,7 +527,7 @@ impl PublicMcpBackground {
         clippy::too_many_arguments,
         reason = "preview uses the current owner stores and request cancellation"
     )]
-    pub fn spawn_sync_preview(
+    fn spawn_sync_preview(
         &self,
         service: CloudSyncOperationService,
         connections: ConnectionStore,
@@ -546,7 +554,7 @@ impl PublicMcpBackground {
         })
     }
 
-    pub fn spawn_sync_publication(
+    fn spawn_sync_publication(
         &self,
         applied: AppliedSync,
     ) -> tokio::task::JoinHandle<Result<SyncOutcome, PublicMcpSyncFailure>> {
@@ -558,4 +566,433 @@ impl PublicMcpBackground {
                 .map_err(|error| PublicMcpSyncFailure::from_error(error.to_string()))
         })
     }
+}
+
+pub struct PublicMcpSyncStores<'a> {
+    pub connections: &'a mut ConnectionStore,
+    pub forwards: &'a ForwardingRegistry,
+    pub settings: &'a mut SettingsStore,
+    pub cloud: &'a CloudSyncPersistedState,
+}
+
+pub trait PublicMcpSyncOwner {
+    fn stores(&mut self) -> PublicMcpSyncStores<'_>;
+    fn service(&self) -> CloudSyncOperationService;
+    fn busy(&self) -> bool;
+    fn effect(&mut self, effect: PublicMcpSyncEffect<'_>);
+}
+
+pub enum PublicMcpSyncEffect<'a> {
+    State(PublicMcpSyncStateChange<'a>),
+    Applied(&'a PersistedSettings),
+    Published(&'a SyncOutcome),
+    Restored(CloudSyncPersistedState),
+    Failed(&'static str),
+}
+
+pub enum PublicMcpSyncStateChange<'a> {
+    Begin(&'static str, CloudSyncStatus),
+    Clear,
+    Dirty(&'a StructuredDirtyInfo),
+    SecretHints(BTreeMap<String, bool>),
+}
+
+impl PublicMcpSyncStateChange<'_> {
+    pub fn apply(
+        self,
+        state: &mut CloudSyncPersistedState,
+        action: &mut Option<&'static str>,
+    ) -> (bool, bool) {
+        match self {
+            Self::Begin(name, status) => {
+                *action = Some(name);
+                state.status = status;
+                state.last_error = None;
+                (true, true)
+            }
+            Self::Clear => {
+                *action = None;
+                if matches!(
+                    state.status,
+                    CloudSyncStatus::Checking | CloudSyncStatus::Uploading
+                ) {
+                    state.status = CloudSyncStatus::Idle;
+                }
+                (true, true)
+            }
+            Self::Dirty(dirty) => {
+                state.local_dirty = dirty.has_dirty;
+                state.local_dirty_sections = Some(dirty.dirty_sections.clone());
+                (true, false)
+            }
+            Self::SecretHints(hints) => {
+                state.secret_hints = hints;
+                (false, false)
+            }
+        }
+    }
+}
+
+pub struct PublicMcpSyncPending {
+    request: DomainRequest,
+    work: SyncWork,
+}
+
+enum SyncWork {
+    Preview {
+        worker: JoinHandle<Result<PublicMcpSyncPreview, PublicMcpSyncFailure>>,
+        local_state: StructuredLocalState,
+        sections: Vec<PublicSyncSection>,
+    },
+    Publish {
+        worker: JoinHandle<Result<SyncOutcome, PublicMcpSyncFailure>>,
+        undo: Option<UndoRef>,
+    },
+}
+
+pub struct PublicMcpSyncCompletion {
+    request: DomainRequest,
+    result: SyncResult,
+}
+
+enum SyncResult {
+    Preview {
+        result: Result<Result<PublicMcpSyncPreview, PublicMcpSyncFailure>, JoinError>,
+        local_state: StructuredLocalState,
+        sections: Vec<PublicSyncSection>,
+    },
+    Publish {
+        result: Result<Result<SyncOutcome, PublicMcpSyncFailure>, JoinError>,
+        undo: Option<UndoRef>,
+    },
+}
+
+impl PublicMcpSyncPending {
+    pub async fn complete(self) -> PublicMcpSyncCompletion {
+        let result = match self.work {
+            SyncWork::Preview {
+                worker,
+                local_state,
+                sections,
+            } => SyncResult::Preview {
+                result: worker.await,
+                local_state,
+                sections,
+            },
+            SyncWork::Publish { worker, undo } => SyncResult::Publish {
+                result: worker.await,
+                undo,
+            },
+        };
+        PublicMcpSyncCompletion {
+            request: self.request,
+            result,
+        }
+    }
+}
+
+const BUSY: &str = "Another Cloud Sync operation is already running";
+
+impl PublicMcpBackground {
+    pub fn sync_request(
+        &self,
+        request: DomainRequest,
+        owner: &mut impl PublicMcpSyncOwner,
+    ) -> Option<PublicMcpSyncPending> {
+        match &request.call {
+            PublicToolCall::SyncStatus(_) => self.sync_status(request, owner),
+            PublicToolCall::SyncPullPreview(args) => {
+                if args.conflict_strategy != PublicSyncConflictStrategy::Merge {
+                    return sync_rejected(
+                        request,
+                        "Causal synchronization preserves concurrent values. Resolve individual conflicts in the desktop preview.",
+                    );
+                }
+                let selection = args.selection.clone();
+                return self.start_sync_preview(request, selection, false, owner);
+            }
+            PublicToolCall::SyncPublishPreview(args) => {
+                let (selection, force) = (args.selection.clone(), args.force);
+                return self.start_sync_preview(request, selection, force, owner);
+            }
+            PublicToolCall::SyncApplyPlan(args) => {
+                let plan = self
+                    .sync_handles
+                    .lock()
+                    .take_sync_plan(&request.client_ref, &args.sync_plan_ref);
+                let Some(plan) = plan else {
+                    return sync_rejected(
+                        request,
+                        "The Cloud Sync plan is unavailable, expired, or already used",
+                    );
+                };
+                return self.start_sync_apply(request, plan, owner);
+            }
+            PublicToolCall::SyncRestore(args) => {
+                let reference = args.undo_ref.clone();
+                self.sync_restore(request, reference, owner);
+            }
+            _ => unreachable!(),
+        }
+        None
+    }
+
+    fn sync_status(&self, request: DomainRequest, owner: &mut impl PublicMcpSyncOwner) {
+        let stores = owner.stores();
+        let snapshot = match local_snapshot(
+            stores.connections,
+            stores.forwards,
+            stores.settings,
+            stores.cloud,
+        ) {
+            Ok(snapshot) => snapshot,
+            Err(error) => {
+                request.finish(ToolEnvelope::failed(error));
+                return;
+            }
+        };
+        owner.effect(PublicMcpSyncEffect::State(PublicMcpSyncStateChange::Dirty(
+            &snapshot.dirty,
+        )));
+        let busy = owner.busy();
+        finish_serialized(
+            request,
+            status_projection(owner.stores().cloud, &snapshot, busy),
+        );
+    }
+
+    fn start_sync_preview(
+        &self,
+        request: DomainRequest,
+        selection: SyncSelection,
+        force: bool,
+        owner: &mut impl PublicMcpSyncOwner,
+    ) -> Option<PublicMcpSyncPending> {
+        if owner.busy() {
+            return sync_rejected(request, BUSY);
+        }
+        owner.effect(PublicMcpSyncEffect::State(PublicMcpSyncStateChange::Begin(
+            "mcp_sync_preview",
+            CloudSyncStatus::Checking,
+        )));
+        let service = owner.service();
+        let stores = owner.stores();
+        let (scope, sections) = match public_sync_scope(&stores.cloud.sync_scope, &selection) {
+            Ok(scope) => scope,
+            Err(error) => {
+                clear_sync(owner);
+                return sync_rejected(request, error);
+            }
+        };
+        let local_state =
+            match full_local_state(stores.connections, stores.forwards, stores.settings) {
+                Ok(state) => state,
+                Err(error) => {
+                    clear_sync(owner);
+                    return sync_rejected(request, error);
+                }
+            };
+        let worker = self.spawn_sync_preview(
+            service,
+            stores.connections.clone(),
+            stores.forwards.clone(),
+            stores.settings.clone(),
+            stores.cloud.clone(),
+            scope,
+            force,
+            request.cancellation_token(),
+        );
+        Some(PublicMcpSyncPending {
+            request,
+            work: SyncWork::Preview {
+                worker,
+                local_state,
+                sections,
+            },
+        })
+    }
+
+    fn start_sync_apply(
+        &self,
+        request: DomainRequest,
+        plan: PublicMcpSyncPlan,
+        owner: &mut impl PublicMcpSyncOwner,
+    ) -> Option<PublicMcpSyncPending> {
+        let stores = owner.stores();
+        if full_local_state(stores.connections, stores.forwards, stores.settings)
+            .ok()
+            .as_ref()
+            != Some(&plan.local_state)
+        {
+            return sync_rejected(
+                request,
+                "Local synchronized data changed after the plan was created",
+            );
+        }
+        if owner.busy() {
+            return sync_rejected(request, BUSY);
+        }
+        owner.effect(PublicMcpSyncEffect::State(PublicMcpSyncStateChange::Begin(
+            "mcp_sync_apply",
+            CloudSyncStatus::Uploading,
+        )));
+        let stores = owner.stores();
+        let PublicMcpSyncPlanKind::Causal(prepared) = plan.kind;
+        if !prepared.matches_settings(&stores.cloud.settings) {
+            clear_sync(owner);
+            return sync_rejected(
+                request,
+                "Cloud Sync configuration changed after the preview",
+            );
+        }
+        if request.is_cancelled() {
+            clear_sync(owner);
+            return None;
+        }
+        let checkpoint = match capture_undo_checkpoint(
+            &plan.sections,
+            stores.connections,
+            stores.forwards,
+            stores.settings,
+            stores.cloud,
+        ) {
+            Ok(checkpoint) => checkpoint,
+            Err(error) => {
+                clear_sync(owner);
+                return sync_rejected(request, error);
+            }
+        };
+        let previous = stores.settings.settings().clone();
+        let applied = match prepared.apply(stores.connections, stores.forwards, stores.settings) {
+            Ok(applied) => applied,
+            Err(error) => {
+                fail_sync(
+                    owner,
+                    request,
+                    PublicMcpSyncFailure::from_error(error.to_string()),
+                );
+                return None;
+            }
+        };
+        owner.effect(PublicMcpSyncEffect::Applied(&previous));
+        let undo = checkpoint.and_then(|checkpoint| {
+            let stores = owner.stores();
+            let post_apply_state =
+                full_local_state(stores.connections, stores.forwards, stores.settings).ok()?;
+            Some(
+                self.sync_handles
+                    .lock()
+                    .insert_sync_undo(PublicMcpSyncUndo {
+                        client_ref: request.client_ref.clone(),
+                        created_at: Instant::now(),
+                        post_apply_state,
+                        checkpoint,
+                    }),
+            )
+        });
+        let worker = self.spawn_sync_publication(applied);
+        Some(PublicMcpSyncPending {
+            request,
+            work: SyncWork::Publish { worker, undo },
+        })
+    }
+
+    fn sync_restore(
+        &self,
+        request: DomainRequest,
+        reference: UndoRef,
+        owner: &mut impl PublicMcpSyncOwner,
+    ) {
+        let undo = self
+            .sync_handles
+            .lock()
+            .take_sync_undo(&request.client_ref, &reference);
+        let Some(undo) = undo else {
+            request.finish(ToolEnvelope::failed(
+                "The Cloud Sync undo handle is unavailable, expired, or already used",
+            ));
+            return;
+        };
+        let result = if owner.busy() {
+            Err(BUSY.to_owned())
+        } else {
+            let stores = owner.stores();
+            undo.restore(
+                stores.connections,
+                stores.forwards,
+                stores.settings,
+                stores.cloud,
+            )
+        };
+        match result {
+            Ok(()) => {
+                owner.effect(PublicMcpSyncEffect::Restored(undo.checkpoint.cloud_state));
+                finish_serialized(request, json!({ "restored": true }));
+            }
+            Err(error) => {
+                self.sync_handles.lock().return_sync_undo(reference, undo);
+                request.finish(ToolEnvelope::failed(error));
+            }
+        }
+    }
+
+    pub fn complete_sync(
+        &self,
+        completion: PublicMcpSyncCompletion,
+        owner: &mut impl PublicMcpSyncOwner,
+    ) {
+        clear_sync(owner);
+        let PublicMcpSyncCompletion { request, result } = completion;
+        match result {
+            SyncResult::Preview {
+                result,
+                local_state,
+                sections,
+            } => {
+                if request.is_cancelled() {
+                    return;
+                }
+                match result {
+                    Ok(Ok(mut preview)) => {
+                        owner.effect(PublicMcpSyncEffect::State(
+                            PublicMcpSyncStateChange::SecretHints(std::mem::take(
+                                &mut preview.secret_hints,
+                            )),
+                        ));
+                        self.finish_sync_preview(request, preview, local_state, sections);
+                    }
+                    Ok(Err(error)) => fail_sync(owner, request, error),
+                    Err(_) => request.finish(ToolEnvelope::failed("Cloud Sync worker stopped")),
+                }
+            }
+            SyncResult::Publish { result, undo } => match result {
+                Ok(Ok(outcome)) => {
+                    owner.effect(PublicMcpSyncEffect::Published(&outcome));
+                    finish_sync_publication(request, &outcome, undo);
+                }
+                Ok(Err(error)) => fail_sync(owner, request, error),
+                Err(_) => request.finish(ToolEnvelope::failed(
+                    "Cloud Sync publication remains pending",
+                )),
+            },
+        }
+    }
+}
+
+fn sync_rejected(request: DomainRequest, error: impl Into<String>) -> Option<PublicMcpSyncPending> {
+    request.finish(ToolEnvelope::failed(error));
+    None
+}
+
+fn clear_sync(owner: &mut impl PublicMcpSyncOwner) {
+    owner.effect(PublicMcpSyncEffect::State(PublicMcpSyncStateChange::Clear));
+}
+
+fn fail_sync(
+    owner: &mut impl PublicMcpSyncOwner,
+    request: DomainRequest,
+    error: PublicMcpSyncFailure,
+) {
+    owner.effect(PublicMcpSyncEffect::Failed(error.display_error));
+    request.finish(ToolEnvelope::failed(error.message));
 }

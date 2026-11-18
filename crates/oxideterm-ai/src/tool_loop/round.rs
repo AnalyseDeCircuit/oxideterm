@@ -11,9 +11,9 @@ async fn execute_ai_round_call(
     assistant_id: &str,
     execution: &mut Option<AgentExecution>,
     allow_selection: bool,
-    dispatch: Option<&oxideterm_ai::agent::AgentDispatch>,
+    dispatch: Option<&crate::agent::AgentDispatch>,
 ) -> Result<AiExecutedToolResult, ()> {
-    let description = oxideterm_ai::agent::ToolExecutionDescription::for_call(&call);
+    let description = crate::agent::ToolExecutionDescription::for_call(&call);
     for attempt in 0.. {
         let mut result = execute_ai_round_call_once(
             call.clone(),
@@ -30,7 +30,7 @@ async fn execute_ai_round_call(
             dispatch,
         )
         .await?;
-        oxideterm_ai::agent::annotate_recovery(&mut result);
+        crate::agent::annotate_recovery(&mut result);
         if result
             .envelope
             .pointer("/error/code")
@@ -75,7 +75,7 @@ async fn execute_ai_round_call_once(
     assistant_id: &str,
     execution: &mut Option<AgentExecution>,
     allow_selection: bool,
-    dispatch: Option<&oxideterm_ai::agent::AgentDispatch>,
+    dispatch: Option<&crate::agent::AgentDispatch>,
 ) -> Result<AiExecutedToolResult, ()> {
     let audit_context = oxideterm_audit::AuditContext::current_request()
         .or_else(oxideterm_audit::AuditContext::current)
@@ -123,7 +123,7 @@ async fn execute_ai_round_call_once(
             .ok();
             return Ok(executed);
         }
-        if oxideterm_ai::agent::is_agent_tool(&call.name) {
+        if crate::agent::is_agent_tool(&call.name) {
             let executed = execute_ai_agent_coordination(
                 execution,
                 &ui_tx,
@@ -218,7 +218,7 @@ async fn execute_ai_round_call_once(
         let mut execution_summary_args = serde_json::json!({});
 
         let mut executed = match decision.decision {
-            oxideterm_ai::AiPolicyDecisionKind::Deny => {
+            crate::AiPolicyDecisionKind::Deny => {
                 if let Some(audit) = audit.as_mut() {
                     audit.authorization(
                         oxideterm_audit::AuditAuthorization::Denied,
@@ -244,7 +244,7 @@ async fn execute_ai_round_call_once(
                     decision.reason_code.clone(),
                 )
             }
-            oxideterm_ai::AiPolicyDecisionKind::RequireApproval => {
+            crate::AiPolicyDecisionKind::RequireApproval => {
                 if let Some(audit) = audit.as_mut() {
                     audit.authorization(
                         oxideterm_audit::AuditAuthorization::Pending,
@@ -263,7 +263,7 @@ async fn execute_ai_round_call_once(
                         name: call.name.clone(),
                         arguments: sanitize_ai_tool_arguments_for_approval(&call.arguments),
                         risk: risk.clone(),
-                        summary: oxideterm_ai::sanitize_for_ai(&summary),
+                        summary: crate::sanitize_for_ai(&summary),
                         sender: approval_tx,
                     },
                 )
@@ -366,7 +366,7 @@ async fn execute_ai_round_call_once(
                     let execution_args = parsed_args.clone();
                     // Keep the policy outcome out of the canonical model argument object.
                     let dangerous_command_approved = call.name == "run_command"
-                        && decision.risk == oxideterm_ai::AiActionRisk::Destructive;
+                        && decision.risk == crate::AiActionRisk::Destructive;
                     execution_summary_args = execution_args.clone();
                     executed_after_policy = true;
                     execute_ai_tool(
@@ -387,7 +387,7 @@ async fn execute_ai_round_call_once(
                     .await
                 }
             }
-            oxideterm_ai::AiPolicyDecisionKind::Allow => {
+            crate::AiPolicyDecisionKind::Allow => {
                 if let Some(audit) = audit.as_mut() {
                     audit.authorization(
                         oxideterm_audit::AuditAuthorization::Approved,
@@ -420,8 +420,8 @@ async fn execute_ai_round_call_once(
                 .ok();
                 let execution_args = parsed_args.clone();
                 // Bypass mode is prior user consent, represented as backend state only.
-                let dangerous_command_approved = call.name == "run_command"
-                    && decision.risk == oxideterm_ai::AiActionRisk::Destructive;
+                let dangerous_command_approved =
+                    call.name == "run_command" && decision.risk == crate::AiActionRisk::Destructive;
                 execution_summary_args = execution_args.clone();
                 executed_after_policy = true;
                 execute_ai_tool(
@@ -511,7 +511,7 @@ async fn execute_ai_round_call_once(
     audit_result
 }
 
-fn ai_direction_changed_result(call: &AiToolCall) -> AiExecutedToolResult {
+pub fn ai_direction_changed_result(call: &AiToolCall) -> AiExecutedToolResult {
     pre_execution_rejected_ai_tool_result(
         call.id.clone(),
         call.name.clone(),
@@ -520,8 +520,8 @@ fn ai_direction_changed_result(call: &AiToolCall) -> AiExecutedToolResult {
     )
 }
 
-async fn ai_pending_dispatch<F: std::future::Future>(
-    dispatch: Option<&oxideterm_ai::agent::AgentDispatch>,
+pub async fn ai_pending_dispatch<F: std::future::Future>(
+    dispatch: Option<&crate::agent::AgentDispatch>,
     future: F,
 ) -> Result<F::Output, ()> {
     if let Some(guard) = dispatch {

@@ -3,7 +3,8 @@ use oxideterm_public_mcp::history::{
     HISTORY_SNAPSHOT_BYTES, HistoryBuffer, HistoryCapture, HistoryError, HistoryRequest,
     HistoryRow, HistorySelection, HistoryStamp, HistoryTarget,
 };
-use oxideterm_terminal::{TerminalHistoryError, TerminalHistoryStamp};
+use oxideterm_terminal::{TerminalHistoryError, TerminalHistoryStamp, TerminalSession};
+use std::sync::Weak;
 
 impl PublicMcpBackground {
     pub fn terminal_history(
@@ -11,6 +12,8 @@ impl PublicMcpBackground {
         request: DomainRequest,
         session: Option<(TerminalSessionId, PublicMcpTerminalSession)>,
     ) {
+        // Waiting on another request must not keep a closed pane's transport alive.
+        let session = session.map(|(id, session)| (id, Arc::downgrade(&session)));
         let backend = self.clone();
         self.forwarding_runtime.spawn(async move {
             backend.run_terminal_history(request, session).await;
@@ -39,7 +42,7 @@ impl PublicMcpBackground {
     async fn run_terminal_history(
         self,
         request: DomainRequest,
-        session: Option<(TerminalSessionId, PublicMcpTerminalSession)>,
+        session: Option<(TerminalSessionId, Weak<Mutex<TerminalSession>>)>,
     ) {
         let PublicToolCall::TerminalHistory(args) = &request.call else {
             return;
@@ -118,7 +121,9 @@ impl PublicMcpBackground {
             }
             return;
         };
-        let Some((session_id, session)) = session else {
+        let Some((session_id, session)) =
+            session.and_then(|(id, session)| session.upgrade().map(|session| (id, session)))
+        else {
             request.finish(HistoryError::TerminalUnavailable.envelope());
             return;
         };

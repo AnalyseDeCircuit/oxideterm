@@ -1,60 +1,6 @@
 pub(in crate::workspace) const AI_CONNECT_TARGET_TIMEOUT_TICKS: usize = 900;
 pub(in crate::workspace) const AI_CONNECT_TARGET_POLL_INTERVAL_MS: u64 = 100;
 
-pub(in crate::workspace) fn ai_model_visible_settings_projection(
-    settings: &oxideterm_settings::PersistedSettings,
-) -> serde_json::Value {
-    // Only explicitly approved, non-secret settings may cross the model boundary.
-    serde_json::json!({
-        "ai": {
-            "enabled": settings.ai.enabled,
-            "toolUse": {
-                "enabled": settings.ai.tool_use.enabled,
-                "maxRounds": settings.ai.tool_use.max_rounds,
-                "maxCallsPerRound": settings.ai.tool_use.max_calls_per_round,
-                "autoApproveTools": settings.ai.tool_use.auto_approve_tools,
-                "disabledTools": settings.ai.tool_use.disabled_tools,
-            },
-        },
-        "terminal": {
-            "renderer": settings.terminal.renderer,
-            "encoding": settings.terminal.terminal_encoding,
-        },
-        "sftp": {
-            "directoryParallelism": settings.sftp.directory_parallelism,
-            "transferProtocol": settings.sftp.transfer_protocol,
-        }
-    })
-}
-
-fn ai_target_projection(target: &AiOrchestratorTarget) -> oxideterm_ai::AiTargetProjection {
-    // Runtime snapshots stay app-owned; only their content-free DTO shape crosses
-    // into the AI domain projection layer.
-    oxideterm_ai::AiTargetProjection {
-        id: target.id.clone(),
-        kind: target.kind.clone(),
-        label: target.label.clone(),
-        state: target.state.clone(),
-        capabilities: target.capabilities.clone(),
-        refs: target.refs.clone(),
-        metadata: target.metadata.clone(),
-    }
-}
-
-fn ai_target_from_projection(projection: oxideterm_ai::AiTargetProjection) -> AiOrchestratorTarget {
-    AiOrchestratorTarget {
-        id: projection.id,
-        kind: projection.kind,
-        label: projection.label,
-        state: projection.state,
-        capabilities: projection.capabilities,
-        refs: projection.refs,
-        metadata: projection.metadata,
-        terminal_buffer: None,
-        terminal_screen: None,
-    }
-}
-
 pub(in crate::workspace) fn ai_sftp_target_for_node(
     node_id: &NodeId,
     node: &WorkspaceSshNode,
@@ -330,8 +276,7 @@ impl WorkspaceApp {
                     session_kind == oxideterm_terminal::TerminalSessionKind::Serial;
                 let is_telnet_terminal =
                     session_kind == oxideterm_terminal::TerminalSessionKind::Telnet;
-                let is_ble_terminal =
-                    session_kind == oxideterm_terminal::TerminalSessionKind::Ble;
+                let is_ble_terminal = session_kind == oxideterm_terminal::TerminalSessionKind::Ble;
                 let terminal_type = if is_ble_terminal {
                     "ble"
                 } else if is_serial_terminal {
@@ -1218,7 +1163,7 @@ impl WorkspaceApp {
             );
         };
         let loaded = {
-            let registry = self.skill_registry.read();
+            let registry = self.ai.skills.registry.read();
             let Some(record) = registry.enabled_record(skill_id) else {
                 return snapshot.fail(
                     "Skill is unavailable.",
@@ -1331,7 +1276,7 @@ impl WorkspaceApp {
                 "read",
             );
         };
-        let registry = self.skill_registry.read();
+        let registry = self.ai.skills.registry.read();
         let Some(record) = registry.enabled_record(skill_id) else {
             return snapshot.fail(
                 "Skill is unavailable.",
@@ -1375,7 +1320,9 @@ impl WorkspaceApp {
         content_hash: &str,
         cx: &mut Context<Self>,
     ) {
-        self.loaded_conversation_skills
+        self.ai
+            .skills
+            .loaded_by_conversation
             .entry(conversation_id.to_string())
             .or_default()
             .insert(skill_id.to_string(), content_hash.to_string());
@@ -1413,12 +1360,15 @@ impl WorkspaceApp {
         skill_id: &str,
         cx: &App,
     ) -> Option<String> {
-        self.loaded_conversation_skills
+        self.ai
+            .skills
+            .loaded_by_conversation
             .get(conversation_id)
             .and_then(|skills| skills.get(skill_id))
             .cloned()
             .or_else(|| {
-                self.ai.state
+                self.ai
+                    .state
                     .read(cx)
                     .conversation_state()
                     .conversations
@@ -1848,34 +1798,39 @@ impl WorkspaceApp {
             let operation = async {
                 match tool_name.as_str() {
                     "read_resource" => {
-                        snapshot
-                            .read_live_resource(
-                                &services,
-                                node_id,
-                                sftp_owner,
-                                &args,
-                                ide_file_system,
-                                post_user_approval,
-                            )
-                            .await
+                        read_live_resource(
+                            &snapshot,
+                            &services,
+                            node_id,
+                            sftp_owner,
+                            &args,
+                            ide_file_system,
+                            post_user_approval,
+                        )
+                        .await
                     }
                     "write_resource" => {
-                        snapshot
-                            .write_live_resource(
-                                &services,
-                                node_id,
-                                sftp_owner,
-                                &args,
-                                ide_file_system,
-                                post_user_approval,
-                            )
-                            .await
+                        write_live_resource(
+                            &snapshot,
+                            &services,
+                            node_id,
+                            sftp_owner,
+                            &args,
+                            ide_file_system,
+                            post_user_approval,
+                        )
+                        .await
                     }
                     "transfer_resource" => match sftp_owner {
                         Some(owner) => {
-                            snapshot
-                                .transfer_live_resource(&services, owner, &args, post_user_approval)
-                                .await
+                            transfer_live_resource(
+                                &snapshot,
+                                &services,
+                                owner,
+                                &args,
+                                post_user_approval,
+                            )
+                            .await
                         }
                         None => snapshot.fail(
                             "SFTP capability is unavailable.",
@@ -2611,7 +2566,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         let execution_leases = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .agents
             .tool_leases
@@ -2985,7 +2941,7 @@ impl WorkspaceApp {
                         }
                         this.apply_ai_tool_status(owner.generation,
                         &owner.conversation_id, &owner.assistant_id, &tool_call_id, &tool_name, &owner.arguments, wait_state,
-                        Some(serde_json::json!({"commandId": command_id, "waiting": true, "waitDeadline": ai_now_ms() + wait.deadline.saturating_duration_since(std::time::Instant::now()).as_millis() as i64})), Some("interactive".into()),
+                        Some(serde_json::json!({"commandId": command_id, "waiting": true, "waitDeadline": ai_now_ms() + wait.deadline().saturating_duration_since(std::time::Instant::now()).as_millis() as i64})), Some("interactive".into()),
                         None, false, None, None, None, cx);
                     });
                     previous_wait_state = wait_state;
@@ -3893,24 +3849,5 @@ impl WorkspaceApp {
                 .with_next_actions(next_actions),
             duration_ms,
         )
-    }
-}
-
-fn ai_runtime_validation_public_code(
-    error: &oxideterm_ai::RuntimeValidationError,
-    post_user_approval: bool,
-) -> &'static str {
-    if post_user_approval {
-        "runtime_state_changed_after_approval"
-    } else {
-        error.public_code()
-    }
-}
-
-fn ai_runtime_validation_recovery_message(post_user_approval: bool) -> &'static str {
-    if post_user_approval {
-        "Nothing was executed because the live target changed while approval was open. Rediscover it before retrying."
-    } else {
-        "Rediscover the current runtime target before retrying."
     }
 }

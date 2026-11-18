@@ -293,3 +293,76 @@ pub fn ai_latest_summary_round_id(messages: &[AiChatMessage]) -> Option<String> 
             })
     })
 }
+
+pub fn ai_find_prompt_transcript_lookup_reference(
+    messages: &[AiChatMessage],
+) -> Option<serde_json::Value> {
+    messages.iter().rev().find_map(|message| {
+        message
+            .summary_ref
+            .as_ref()
+            .and_then(|summary_ref| summary_ref.get("transcriptRef"))
+            .filter(|transcript_ref| !transcript_ref.is_null())
+            .cloned()
+    })
+}
+
+pub fn ai_build_transcript_lookup_prompt_reference(transcript_ref: serde_json::Value) -> String {
+    let start_entry_id = transcript_ref
+        .get("startEntryId")
+        .and_then(serde_json::Value::as_str);
+    let end_entry_id = transcript_ref
+        .get("endEntryId")
+        .and_then(serde_json::Value::as_str);
+    let conversation_id = transcript_ref
+        .get("conversationId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("undefined");
+    let mut range_parts = Vec::new();
+    if let Some(start_entry_id) = start_entry_id {
+        range_parts.push(format!("start={start_entry_id}"));
+    }
+    if let Some(end_entry_id) = end_entry_id {
+        range_parts.push(format!("end={end_entry_id}"));
+    }
+    let range_text = if range_parts.is_empty() {
+        "range=unknown".to_string()
+    } else {
+        range_parts.join(", ")
+    };
+
+    [
+        "Earlier history is intentionally compacted out of this prompt.".to_string(),
+        format!("Transcript reference: conversation={conversation_id}, {range_text}."),
+        "Use the visible summary as the authoritative compressed context. Do not infer omitted details unless they are restated here or fetched through transcript lookup tooling.".to_string(),
+    ]
+    .join(" ")
+}
+
+pub async fn collect_ai_compaction_summary(
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<crate::AiStreamEvent>,
+) -> (String, bool) {
+    let mut summary = String::new();
+    let mut failed = false;
+    while let Some(event) = rx.recv().await {
+        match event {
+            crate::AiStreamEvent::Content(chunk) => {
+                summary.push_str(&chunk);
+            }
+            crate::AiStreamEvent::Thinking(_)
+            | crate::AiStreamEvent::Usage { .. }
+            | crate::AiStreamEvent::ProviderResponsePart { .. }
+            | crate::AiStreamEvent::ToolCall { .. }
+            | crate::AiStreamEvent::ToolCallComplete { .. } => {}
+            crate::AiStreamEvent::Done => break,
+            crate::AiStreamEvent::Error(_error) => {
+                // Provider details can include response bodies or
+                // request metadata; only a failure category crosses
+                // the compaction worker boundary.
+                failed = true;
+                break;
+            }
+        }
+    }
+    (summary, failed)
+}

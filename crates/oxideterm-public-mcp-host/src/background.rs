@@ -11,6 +11,14 @@ pub enum PublicMcpWindowRequest {
 }
 
 impl PublicMcpWindowRequest {
+    pub fn request(&self) -> &DomainRequest {
+        match self {
+            Self::Call(request)
+            | Self::ConnectionDirectory(request)
+            | Self::InstallAddon { request, .. } => request,
+        }
+    }
+
     pub fn into_request(self) -> DomainRequest {
         match self {
             Self::Call(request)
@@ -38,6 +46,7 @@ pub struct PublicMcpBackground {
     pub(crate) history: Arc<Mutex<oxideterm_public_mcp::history::HistoryStore>>,
     pub(crate) desktops: Arc<Mutex<HashMap<DesktopRef, PublicMcpDesktopRecord>>>,
     pub(crate) terminals: Arc<Mutex<HashMap<TerminalRef, PublicMcpTerminalRecord>>>,
+    pub(crate) sync_handles: Arc<Mutex<sync_handles::SyncHandles>>,
     pub(crate) admission: Arc<Mutex<bool>>,
     pub(crate) node_router: NodeRouter,
     pub(crate) sftp_transfer_manager: Arc<oxideterm_sftp::SftpTransferManager>,
@@ -62,6 +71,7 @@ impl PublicMcpBackground {
             settings_path: host.settings_path.clone(),
             runtime_handles: host.runtime_handles.clone(),
             admission: host.admission.clone(),
+            sync_handles: host.sync_handles.clone(),
             history: host.history.clone(),
             terminals: host.terminals.clone(),
             desktops: host.desktops.clone(),
@@ -73,9 +83,13 @@ impl PublicMcpBackground {
         }
     }
 
-    pub fn start_delivery(&self, mut receiver: DomainRequestReceiver)
-        -> (tokio::task::JoinHandle<()>, tokio::sync::mpsc::Receiver<PublicMcpWindowDelivery>)
-    {
+    pub fn start_delivery(
+        &self,
+        mut receiver: DomainRequestReceiver,
+    ) -> (
+        tokio::task::JoinHandle<()>,
+        tokio::sync::mpsc::Receiver<PublicMcpWindowDelivery>,
+    ) {
         let (window_tx, window_rx) = tokio::sync::mpsc::channel(PUBLIC_MCP_BROKER_CAPACITY);
         let backend = self.clone();
         let task = self.forwarding_runtime.spawn(async move {
@@ -83,22 +97,34 @@ impl PublicMcpBackground {
                 let (message, accepted) = match message {
                     DomainMessage::Request(request) => {
                         let backend = backend.clone();
-                        let request = match tokio::task::spawn_blocking(move || backend.dispatch(*request)).await {
-                            Ok(Err(request)) => request,
-                            Ok(Ok(())) | Err(_) => continue,
-                        };
+                        let request =
+                            match tokio::task::spawn_blocking(move || backend.dispatch(*request))
+                                .await
+                            {
+                                Ok(Err(request)) => request,
+                                Ok(Ok(())) | Err(_) => continue,
+                            };
                         // A prepared addon can be tens of MiB. Only buffer one until the
                         // window has accepted or discarded it.
-                        let (accepted, wait) = if matches!(request, PublicMcpWindowRequest::InstallAddon { .. }) {
-                            let (tx, rx) = tokio::sync::oneshot::channel();
-                            (Some(tx), Some(rx))
-                        } else { (None, None) };
+                        let (accepted, wait) =
+                            if matches!(request, PublicMcpWindowRequest::InstallAddon { .. }) {
+                                let (tx, rx) = tokio::sync::oneshot::channel();
+                                (Some(tx), Some(rx))
+                            } else {
+                                (None, None)
+                            };
                         (PublicMcpWindowDelivery::Request { request, accepted }, wait)
                     }
                     DomainMessage::StateChanged => (PublicMcpWindowDelivery::StateChanged, None),
                 };
-                if window_tx.send(message).await.is_err() { break; }
-                if let Some(accepted) = accepted && accepted.await.is_err() { break; }
+                if window_tx.send(message).await.is_err() {
+                    break;
+                }
+                if let Some(accepted) = accepted
+                    && accepted.await.is_err()
+                {
+                    break;
+                }
             }
         });
         (task, window_rx)

@@ -1,9 +1,11 @@
+use std::{collections::HashMap, path::PathBuf, sync::Arc};
+
 use gpui::{Entity, Subscription};
 use oxideterm_gpui_ai::{
-    background::{AiBackgroundTaskEntity, AiBackgroundTaskView},
+    background::AiBackgroundTaskEntity,
     inline::AiInlinePanelView,
     model_picker::AiModelPickerViews,
-    sidebar::{AiChatHeaderView, editor::AiEditorView},
+    sidebar::transcript::AiAssistantSidebarView,
     state::AiWorkspaceEntity,
 };
 
@@ -13,12 +15,16 @@ pub(super) struct AiWorkspaceViews {
     pub state: Entity<AiWorkspaceEntity>,
     pub acp: Entity<AcpWorkspaceEntity>,
     pub background: Entity<AiBackgroundTaskEntity>,
-    pub background_view: Entity<AiBackgroundTaskView>,
     pub inline_panel: Entity<AiInlinePanelView>,
-    pub chat_header: Entity<AiChatHeaderView>,
-    pub composer_editor: Entity<AiEditorView>,
-    pub message_editor: Entity<AiEditorView>,
+    pub transcript: Entity<AiAssistantSidebarView>,
     pub model_picker: AiModelPickerViews,
+    pub skills: AiWorkspaceSkills,
     pub _state_subscription: Subscription,
     pub _background_subscription: Subscription,
+}
+
+pub(super) struct AiWorkspaceSkills {
+    pub registry: Arc<parking_lot::RwLock<oxideterm_skills::SkillRegistry>>,
+    pub workspace_root: Option<PathBuf>,
+    pub loaded_by_conversation: HashMap<String, HashMap<String, String>>,
 }

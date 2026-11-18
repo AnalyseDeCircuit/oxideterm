@@ -278,7 +278,7 @@ impl WorkspaceApp {
         let explicit_skill =
             if slash_command.is_none() && self.settings_store.settings().ai.skills.enabled {
                 parsed_input.slash_command.as_deref().and_then(|skill_id| {
-                    let registry = self.skill_registry.read();
+                    let registry = self.ai.skills.registry.read();
                     let record = registry.enabled_record(skill_id)?;
                     let instructions = registry.load(skill_id).ok()?;
                     Some((

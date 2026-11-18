@@ -1,13 +1,16 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+use std::collections::HashMap;
+
 use gpui::{
     AnyElement, App, Context, CursorStyle, FontWeight, MouseButton, Render, ScrollHandle,
-    Subscription, Timer, Window, div, prelude::*, px, rgb, rgba,
+    Subscription, Task, Timer, Window, div, prelude::*, px, rgb, rgba,
 };
 use oxideterm_gpui_ui::button::ButtonVariant;
 use oxideterm_gpui_ui::motion::{self, MotionDuration, UserSegmentedControlMotionState};
 use oxideterm_gpui_ui::scroll::ScrollableElement;
+use oxideterm_theme::ThemeTokens;
 
 use crate::{
     ONBOARDING_TOTAL_STEPS, OnboardingFrame, OnboardingRequest, OnboardingStep,
@@ -29,6 +32,8 @@ pub struct OnboardingView {
     scroll_handle: ScrollHandle,
     last_step: usize,
     step_motion: UserSegmentedControlMotionState,
+    control_motion: UserSegmentedControlMotionState,
+    control_motion_tasks: HashMap<&'static str, Task<()>>,
     subscriptions: Vec<Subscription>,
 }
 
@@ -39,8 +44,43 @@ impl OnboardingView {
             scroll_handle: ScrollHandle::new(),
             last_step: 0,
             step_motion: UserSegmentedControlMotionState::default(),
+            control_motion: UserSegmentedControlMotionState::default(),
+            control_motion_tasks: HashMap::new(),
             subscriptions: Vec::new(),
         }
+    }
+
+    pub(crate) fn begin_control_motion(
+        &mut self,
+        control_id: &'static str,
+        tokens: &ThemeTokens,
+        previous_index: usize,
+        target_index: usize,
+        cx: &mut Context<Self>,
+    ) {
+        if previous_index == target_index {
+            return;
+        }
+        let Some(motion) = oxideterm_gpui_ui::segmented_control_motion(tokens) else {
+            self.control_motion.clear(control_id);
+            self.control_motion_tasks.remove(control_id);
+            return;
+        };
+        let generation = self.control_motion.begin_with_previous_index(
+            control_id,
+            Some(previous_index),
+            target_index,
+            None,
+        );
+        let task = cx.spawn(async move |view, cx| {
+            Timer::after(motion.duration).await;
+            let _ = view.update(cx, |this, cx| {
+                if this.control_motion.finish(control_id, generation) {
+                    cx.notify();
+                }
+            });
+        });
+        self.control_motion_tasks.insert(control_id, task);
     }
 
     pub fn retain_subscription(&mut self, subscription: Subscription) {
@@ -59,6 +99,8 @@ impl OnboardingView {
         let next = frame.step;
         self.last_step = next;
         self.scroll_handle = ScrollHandle::new();
+        self.control_motion = UserSegmentedControlMotionState::default();
+        self.control_motion_tasks.clear();
 
         let duration = motion::duration(&frame.tokens, MotionDuration::Control);
         if duration.is_zero() {
@@ -301,9 +343,14 @@ impl Render for OnboardingView {
         let body = match step {
             OnboardingStep::Overview => render_overview_step(&frame, wide),
             OnboardingStep::Disclaimer => render_disclaimer_step(&frame, &self.bindings),
-            OnboardingStep::Appearance => {
-                render_appearance_step(&frame, &self.bindings, wide, cx)
-            }
+            OnboardingStep::Appearance => render_appearance_step(
+                &frame,
+                &self.bindings,
+                &self.control_motion,
+                cx.entity().downgrade(),
+                wide,
+                cx,
+            ),
             OnboardingStep::Launch => render_launch_step(&frame, &self.bindings, wide),
         };
 

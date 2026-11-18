@@ -1,7 +1,8 @@
 impl WorkspaceApp {
     pub(in crate::workspace) fn start_ai_compact_conversation(&mut self, cx: &mut Context<Self>) {
         let Some(conversation_id) = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation()
@@ -18,7 +19,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .conversations
@@ -107,7 +109,9 @@ impl WorkspaceApp {
             let id = conversation_id.clone();
             let source_branch = branch.clone();
             let result = runtime
-                .spawn_blocking(move || store.model_context(&id, &source_branch, budget, &provider, &model))
+                .spawn_blocking(move || {
+                    store.model_context(&id, &source_branch, budget, &provider, &model)
+                })
                 .await;
             let _ = weak.update(cx, |this, cx| {
                 this.ai.state.update(cx, |ai, _| {
@@ -154,7 +158,10 @@ impl WorkspaceApp {
                     this.ai.state.update(cx, |ai, _| {
                         ai.history.compaction_sources.remove(&conversation_id);
                     });
-                    this.resume_ai_chat_after_pre_send_compaction(resume.map(|pending| *pending), cx);
+                    this.resume_ai_chat_after_pre_send_compaction(
+                        resume.map(|pending| *pending),
+                        cx,
+                    );
                 }
             });
         });
@@ -175,7 +182,8 @@ impl WorkspaceApp {
         // Return an unconsumed pre-send request when compaction is skipped so
         // its zeroizing provider configuration never needs to be cloned.
         let mut messages = match self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .history
             .compaction_sources
@@ -188,7 +196,8 @@ impl WorkspaceApp {
             _ => return Err(resume_after.map(Box::new)),
         };
         if !self
-            .ai.state
+            .ai
+            .state
             .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
         {
             return Err(resume_after.map(Box::new));
@@ -197,7 +206,8 @@ impl WorkspaceApp {
         let config = match self.resolve_ai_summary_stream_config(true, cx) {
             Ok(config) => config,
             Err(error) => {
-                self.ai.state
+                self.ai
+                    .state
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 if !silent {
                     self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
@@ -236,7 +246,8 @@ impl WorkspaceApp {
                 safety_margin: None,
             });
             if decision.level < 2 {
-                self.ai.state
+                self.ai
+                    .state
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 return Err(resume_after.map(Box::new));
             }
@@ -247,7 +258,8 @@ impl WorkspaceApp {
             silent,
             &config.provider_type,
         ) else {
-            self.ai.state
+            self.ai
+                .state
                 .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
             return Err(resume_after.map(Box::new));
         };
@@ -282,7 +294,8 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn start_ai_summarize_conversation(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -299,7 +312,8 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> bool {
         let (conversation_id, messages) = match self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .history
             .compaction_sources
@@ -314,7 +328,8 @@ impl WorkspaceApp {
             _ => return false,
         };
         if !self
-            .ai.state
+            .ai
+            .state
             .update(cx, |ai, _cx| ai.begin_compaction(&conversation_id))
         {
             return false;
@@ -323,7 +338,8 @@ impl WorkspaceApp {
         let config = match self.resolve_ai_summary_stream_config(false, cx) {
             Ok(config) => config,
             Err(error) => {
-                self.ai.state
+                self.ai
+                    .state
                     .update(cx, |ai, _cx| ai.finish_compaction(&conversation_id));
                 self.push_ai_settings_toast(error, TerminalNoticeVariant::Error, cx);
                 return false;
@@ -380,7 +396,8 @@ impl WorkspaceApp {
         let failed_to_get_key = self.i18n.t("ai.model_selector.failed_to_get_api_key");
         let api_key_not_found = self.i18n.t("ai.model_selector.api_key_not_found");
         let Some(generation) = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .history
             .compaction_runs
@@ -402,7 +419,8 @@ impl WorkspaceApp {
             };
             let _ = weak.update(cx, |this, cx| {
                 if this
-                    .ai.state
+                    .ai
+                    .state
                     .read(cx)
                     .history
                     .compaction_runs
@@ -526,12 +544,13 @@ impl WorkspaceApp {
         resume_after: Option<AiPendingChatStream>,
         silent: bool,
         tx: tokio::sync::mpsc::UnboundedSender<AiStreamEvent>,
-        mut rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
+        rx: tokio::sync::mpsc::UnboundedReceiver<AiStreamEvent>,
         ui_tx: AiCompactionDeliverySender,
         cx: &mut Context<Self>,
     ) {
         let Some(generation) = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .history
             .compaction_runs
@@ -547,28 +566,7 @@ impl WorkspaceApp {
         );
         let task = self.forwarding_runtime.spawn(async move {
             let _model = model;
-            let mut summary = String::new();
-            let mut failed = false;
-            while let Some(event) = rx.recv().await {
-                match event {
-                    AiStreamEvent::Content(chunk) => {
-                        summary.push_str(&chunk);
-                    }
-                    AiStreamEvent::Thinking(_)
-                    | AiStreamEvent::Usage { .. }
-                    | AiStreamEvent::ProviderResponsePart { .. }
-                    | AiStreamEvent::ToolCall { .. }
-                    | AiStreamEvent::ToolCallComplete { .. } => {}
-                    AiStreamEvent::Done => break,
-                    AiStreamEvent::Error(_error) => {
-                        // Provider details can include response bodies or
-                        // request metadata; only a failure category crosses
-                        // the compaction worker boundary.
-                        failed = true;
-                        break;
-                    }
-                }
-            }
+            let (summary, failed) = collect_ai_compaction_summary(rx).await;
             let _ = ui_tx.send(AiCompactionDelivery {
                 generation,
                 kind,

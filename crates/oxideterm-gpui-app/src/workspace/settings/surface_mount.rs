@@ -27,7 +27,7 @@ impl SettingsSurfaceHost for WorkspaceApp {
         self.settings_views.ai_providers.clone()
     }
     fn ai_skills(&self) -> oxideterm_gpui_settings_view::ai::AiSkillData {
-        let registry = self.skill_registry.read();
+        let registry = self.ai.skills.registry.read();
         oxideterm_gpui_settings_view::ai::AiSkillData {
             records: registry.records().cloned().collect(),
             diagnostics: registry.diagnostics().to_vec(),

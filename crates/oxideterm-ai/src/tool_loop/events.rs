@@ -1,7 +1,4 @@
-pub(in crate::workspace) fn record_completed_ai_tool_call(
-    completed_calls: &mut Vec<AiToolCall>,
-    call: AiToolCall,
-) {
+pub fn record_completed_ai_tool_call(completed_calls: &mut Vec<AiToolCall>, call: AiToolCall) {
     if let Some(existing) = completed_calls
         .iter_mut()
         .find(|existing| existing.id == call.id)
@@ -12,7 +9,7 @@ pub(in crate::workspace) fn record_completed_ai_tool_call(
     }
 }
 
-pub(in crate::workspace) fn reject_ai_tool_calls_for_protocol_guard(
+pub fn reject_ai_tool_calls_for_protocol_guard(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -43,7 +40,7 @@ pub(in crate::workspace) fn reject_ai_tool_calls_for_protocol_guard(
     }
 }
 
-pub(in crate::workspace) fn send_ai_guardrail(
+pub fn send_ai_guardrail(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -52,9 +49,7 @@ pub(in crate::workspace) fn send_ai_guardrail(
     message: impl Into<String>,
     raw_text: Option<String>,
 ) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
-    let raw_text = raw_text
-        .as_deref()
-        .map(oxideterm_ai::sanitize_for_ai);
+    let raw_text = raw_text.as_deref().map(crate::sanitize_for_ai);
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -68,7 +63,7 @@ pub(in crate::workspace) fn send_ai_guardrail(
     )
 }
 
-pub(in crate::workspace) fn send_ai_prompt_usage(
+pub fn send_ai_prompt_usage(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -76,7 +71,7 @@ pub(in crate::workspace) fn send_ai_prompt_usage(
     last_user_message_id: Option<String>,
     provider_id: String,
     model: String,
-    breakdown: oxideterm_ai::AiPromptTokenBreakdown,
+    breakdown: crate::AiPromptTokenBreakdown,
     max_tokens: usize,
 ) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     send_ai_stream_delivery(
@@ -95,7 +90,7 @@ pub(in crate::workspace) fn send_ai_prompt_usage(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::workspace) fn send_ai_assistant_round(
+pub fn send_ai_assistant_round(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -125,7 +120,7 @@ pub(in crate::workspace) fn send_ai_assistant_round(
     )
 }
 
-pub(in crate::workspace) fn send_ai_round_summary(
+pub fn send_ai_round_summary(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -134,8 +129,8 @@ pub(in crate::workspace) fn send_ai_round_summary(
     text: String,
     metadata: serde_json::Value,
 ) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
-    let text = oxideterm_ai::sanitize_for_ai(&text);
-    let metadata = oxideterm_ai::sanitize_json_for_ai(&metadata);
+    let text = crate::sanitize_for_ai(&text);
+    let metadata = crate::sanitize_json_for_ai(&metadata);
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -149,7 +144,7 @@ pub(in crate::workspace) fn send_ai_round_summary(
     )
 }
 
-pub(in crate::workspace) fn send_ai_round_stateful_marker(
+pub fn send_ai_round_stateful_marker(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -166,7 +161,7 @@ pub(in crate::workspace) fn send_ai_round_stateful_marker(
     )
 }
 
-pub(in crate::workspace) fn send_ai_diagnostic(
+pub fn send_ai_diagnostic(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -188,39 +183,7 @@ pub(in crate::workspace) fn send_ai_diagnostic(
     )
 }
 
-pub(in crate::workspace) fn ai_tool_choice_label(
-    choice: &oxideterm_ai::AiToolChoice,
-) -> serde_json::Value {
-    match choice {
-        oxideterm_ai::AiToolChoice::Auto => serde_json::json!("auto"),
-        oxideterm_ai::AiToolChoice::Required => serde_json::json!("required"),
-        oxideterm_ai::AiToolChoice::Named(name) => serde_json::json!(name),
-    }
-}
-
-#[derive(Debug)]
-pub(in crate::workspace) struct AiRoundToolResultSummary {
-    pub(in crate::workspace) tool_name: String,
-    pub(in crate::workspace) success: bool,
-    pub(in crate::workspace) summary: String,
-}
-
-pub(in crate::workspace) fn ai_round_summary_text(results: &[AiRoundToolResultSummary]) -> String {
-    results
-        .iter()
-        .map(|result| {
-            format!(
-                "{}: {} - {}",
-                result.tool_name,
-                if result.success { "ok" } else { "error" },
-                result.summary.trim()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
-pub(in crate::workspace) fn send_ai_stream_delivery(
+pub fn send_ai_stream_delivery(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -232,7 +195,7 @@ pub(in crate::workspace) fn send_ai_stream_delivery(
         // paths, or request metadata. The UI maps this stable category to a
         // localized message.
         AiStreamDeliveryEvent::Stream(AiStreamEvent::Error(ref error))
-            if oxideterm_ai::stream_error_label(error).is_some() =>
+            if crate::stream_error_label(error).is_some() =>
         {
             event
         }
@@ -241,15 +204,17 @@ pub(in crate::workspace) fn send_ai_stream_delivery(
         }
         other => other,
     };
-    ui_tx.send(AiStreamDelivery {
-        generation,
-        conversation_id: conversation_id.to_string(),
-        assistant_id: assistant_id.to_string(),
-        event,
-    }).map_err(Box::new)
+    ui_tx
+        .send(AiStreamDelivery {
+            generation,
+            conversation_id: conversation_id.to_string(),
+            assistant_id: assistant_id.to_string(),
+            event,
+        })
+        .map_err(Box::new)
 }
 
-pub(in crate::workspace) fn send_ai_tool_status(
+pub fn send_ai_tool_status(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -278,7 +243,7 @@ pub(in crate::workspace) fn send_ai_tool_status(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(in crate::workspace) fn send_ai_tool_status_with_payload(
+pub fn send_ai_tool_status_with_payload(
     ui_tx: &AiStreamDeliverySender,
     generation: u64,
     conversation_id: &str,
@@ -294,12 +259,10 @@ pub(in crate::workspace) fn send_ai_tool_status_with_payload(
     round_number: Option<i64>,
 ) -> Result<(), Box<std::sync::mpsc::SendError<AiStreamDelivery>>> {
     let arguments = sanitize_ai_tool_arguments_for_persistence(&call.arguments);
-    let result = result.as_ref().map(|result| {
-        oxideterm_ai::sanitize_tool_result_json_for_persistence(&call.name, result)
-    });
-    let summary = summary
-        .as_deref()
-        .map(oxideterm_ai::sanitize_for_persistence);
+    let result = result
+        .as_ref()
+        .map(|result| crate::sanitize_tool_result_json_for_persistence(&call.name, result));
+    let summary = summary.as_deref().map(crate::sanitize_for_persistence);
     send_ai_stream_delivery(
         ui_tx,
         generation,
@@ -319,55 +282,4 @@ pub(in crate::workspace) fn send_ai_tool_status_with_payload(
             round_number,
         },
     )
-}
-
-pub(in crate::workspace) fn parse_ai_tool_args(
-    tool_name: &str,
-    arguments: &str,
-) -> Option<serde_json::Value> {
-    let parsed = serde_json::from_str::<serde_json::Value>(arguments).ok()?;
-    if !parsed.is_object() {
-        return None;
-    }
-    if !oxideterm_ai::is_orchestrator_tool_name(tool_name) {
-        // External MCP servers own their argument contracts. Their payloads
-        // are forwarded only to that server and never resolved as application
-        // runtime authority.
-        return Some(parsed);
-    }
-    // Provider schemas are advisory. The same strict parser is the actual
-    // authority boundary for provider and ACP application tool calls.
-    oxideterm_ai::canonicalize_orchestrator_tool_arguments(tool_name, parsed).ok()
-}
-
-pub(in crate::workspace) fn ai_tool_call_message_value(call: &AiToolCall) -> serde_json::Value {
-    serde_json::json!({
-        "id": call.id,
-        "name": call.name,
-        "arguments": call.arguments,
-    })
-}
-
-pub(in crate::workspace) fn ai_tool_result_message(result: AiExecutedToolResult) -> AiChatMessage {
-    let content = ai_tool_result_model_content(&result);
-    let mut message = AiChatMessage {
-        id: format!("tool-result-{}", result.tool_call_id),
-        role: AiChatRole::Tool,
-        content,
-        timestamp_ms: ai_now_ms(),
-        model: None,
-        context: None,
-        is_streaming: false,
-        thinking_content: None,
-        metadata: None,
-        tool_call_id: Some(result.tool_call_id),
-        tool_calls: Vec::new(),
-        turn: None,
-        transcript_ref: None,
-        summary_ref: None,
-        branches: None,
-        suggestions: Vec::new(),
-    };
-    oxideterm_ai::set_message_images(&mut message, result.images);
-    message
 }

@@ -1247,17 +1247,17 @@ impl WorkspaceApp {
             .child(self.settings_views.ai_confirm.clone())
             .when(
                 self.ai.state.read(cx).chat_ui().safety_confirm_open,
-                |root| root.child(self.render_ai_safety_confirm_dialog(cx)),
+                |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::SafetyConfirm)),
             )
             .when(
                 self.ai.state.read(cx).chat_ui().summarize_confirm_open,
-                |root| root.child(self.render_ai_summarize_confirm_dialog(cx)),
+                |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::SummaryConfirm)),
             )
             .when(
                 ai_chat_confirm_snapshot.as_ref().is_some_and(|snapshot| {
                     matches!(&snapshot.kind, ai_state::AiChatConfirmKind::ClearAll)
                 }),
-                |root| root.child(self.render_ai_clear_all_confirm_dialog(cx)),
+                |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::ClearAllConfirm)),
             )
             .when(
                 ai_chat_confirm_snapshot.as_ref().is_some_and(|snapshot| {
@@ -1266,7 +1266,7 @@ impl WorkspaceApp {
                         ai_state::AiChatConfirmKind::DeleteMessage { .. }
                     )
                 }),
-                |root| root.child(self.render_ai_delete_message_confirm_dialog(cx)),
+                |root| root.child(self.ai_sidebar_layer(oxideterm_gpui_ai::sidebar::transcript::AiSidebarLayerKind::DeleteMessageConfirm)),
             )
             .when(
                 overlay_confirm_snapshot.as_ref().is_some_and(|snapshot| {

@@ -52,7 +52,7 @@ pub(crate) fn selectable_vertical_scrollbar_layer(
 
 #[derive(Clone)]
 pub(super) struct SelectableTextRenderState {
-    workspace: Entity<WorkspaceApp>,
+    workspace: gpui::WeakEntity<WorkspaceApp>,
     ui_font_family: SharedString,
     accent: u32,
     active_group_selection: Option<(u64, Range<usize>)>,
@@ -113,7 +113,7 @@ fn begin_selectable_text_frame_flush(flush_scheduled: &Cell<bool>) -> bool {
 }
 
 fn schedule_selectable_text_frame_flush(
-    workspace: Entity<WorkspaceApp>,
+    workspace: gpui::WeakEntity<WorkspaceApp>,
     pending_updates: Rc<RefCell<SelectableTextFrameUpdates>>,
     flush_scheduled: Rc<Cell<bool>>,
     window: &mut Window,
@@ -416,7 +416,7 @@ impl WorkspaceApp {
             })
             .unwrap_or_default();
         SelectableTextRenderState {
-            workspace,
+            workspace: workspace.downgrade(),
             ui_font_family: tauri_ui_font_family(
                 &self.settings_store.settings().appearance.ui_font_family,
             ),
@@ -610,7 +610,7 @@ impl WorkspaceApp {
                         anchor,
                     });
                 schedule_selectable_text_frame_flush(
-                    workspace,
+                    workspace.downgrade(),
                     pending_updates,
                     flush_scheduled,
                     window,
@@ -758,7 +758,7 @@ impl WorkspaceApp {
                         anchor,
                     });
                 schedule_selectable_text_frame_flush(
-                    workspace,
+                    workspace.downgrade(),
                     pending_updates,
                     flush_scheduled,
                     window,
@@ -1131,7 +1131,7 @@ impl SelectableTextRenderState {
                         .and_modify(|fragment| fragment.text = value.clone());
                     this.begin_selectable_text_group_from_mouse_down(group_id, event, window, cx)
                 });
-                if selection_started && selectable_text_should_stop_propagation(role) {
+                if selection_started.unwrap_or(false) && selectable_text_should_stop_propagation(role) {
                     // Standalone document text owns a successful selection;
                     // row-safe cells continue bubbling to their parent row.
                     cx.stop_propagation();
@@ -1152,9 +1152,8 @@ impl SelectableTextRenderState {
                     if event.click_count != 1 || links.is_empty() {
                         return;
                     }
-                    let selecting = link_workspace
-                        .read(cx)
-                        .ime_selected_range_for_target(target, cx)
+                    let selecting = link_workspace.upgrade()
+                        .and_then(|owner| owner.read(cx).ime_selected_range_for_target(target, cx))
                         .is_some_and(|range| range.start != range.end);
                     if selecting {
                         return;
@@ -1171,7 +1170,7 @@ impl SelectableTextRenderState {
                 .on_mouse_move(move |event: &gpui::MouseMoveEvent, window, cx| {
                     // Virtual-list rows observe an active drag without owning
                     // the cursor or mouse-down hitbox for their empty width.
-                    workspace_for_move.update(cx, |this, cx| {
+                    let _ = workspace_for_move.update(cx, |this, cx| {
                         this.update_ime_selection_drag_from_mouse_move(event, window, cx);
                     });
                 }),

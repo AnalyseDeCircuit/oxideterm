@@ -7,18 +7,14 @@ use std::{
 use gpui::{App, Context, Task};
 use oxideterm_gpui_terminal::{TerminalNotice, TerminalNoticeVariant};
 use oxideterm_public_mcp::{
-    ApprovalStatus, ClientApprovalMode, ClientRef, DomainRequest, PublicToolCall,
-    ToolEnvelope, ToolGroup,
+    ApprovalStatus, ClientApprovalMode, ClientRef, DomainRequest, PublicToolCall, ToolEnvelope,
+    ToolGroup,
 };
 use oxideterm_public_mcp_host::{
-    CONNECTION_KEY_DESKTOP_PREFIX, CONNECTION_KEY_MOSH_PREFIX, CONNECTION_KEY_SERIAL_PREFIX,
-    CONNECTION_KEY_SSH_PREFIX, CONNECTION_KEY_TELNET_PREFIX, PublicMcpBackground,
-    PublicMcpClientChange, PublicMcpClientEffect, PublicMcpDesktopRecord, PublicMcpHost,
-    PublicMcpHostEffect, PublicMcpPendingTerminalOpen, PublicMcpTerminalRecord,
-    PublicMcpWindowRequest, finish_serialized,
+    PublicMcpBackground, PublicMcpClientChange, PublicMcpClientEffect, PublicMcpDesktopRecord,
+    PublicMcpHost, PublicMcpHostEffect, PublicMcpPendingTerminalOpen, PublicMcpTerminalRecord,
+    PublicMcpWindowDelivery, PublicMcpWindowRequest, finish_serialized,
 };
-use oxideterm_session_adapter::ssh_config_from_saved_connection;
-use serde_json::json;
 
 use super::WorkspaceApp;
 
@@ -233,8 +229,8 @@ impl WorkspaceApp {
         use PublicMcpClientEffect::*;
         for effect in effects {
             match effect {
-                RevokeRecordings => self.revoke_public_mcp_client_recordings(client, cx),
-                StopRecordings => self.stop_public_mcp_client_recordings(client, cx),
+                RevokeRecordings => self.stop_public_mcp_recordings(client, None, true, cx),
+                StopRecordings => self.stop_public_mcp_recordings(client, None, false, cx),
                 CloseTerminals => self.revoke_public_mcp_client_terminals(client, cx),
                 CloseDesktops => self.revoke_public_mcp_client_desktops(client, cx),
                 SetDesktopObservation(enabled) => {
@@ -280,18 +276,16 @@ impl WorkspaceApp {
         delivery: PublicMcpWindowRequest,
         cx: &mut Context<Self>,
     ) {
-        let request = match &delivery {
-            PublicMcpWindowRequest::Call(request)
-            | PublicMcpWindowRequest::ConnectionDirectory(request)
-            | PublicMcpWindowRequest::InstallAddon { request, .. } => request,
-        };
         let admission = self.public_mcp.admission();
         let _dispatch = admission.lock();
-        let audit_context = request.audit_context.clone();
-        oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
+        let audit_context = {
+            let request = delivery.request();
             if request.is_cancelled() {
                 return;
             }
+            request.audit_context.clone()
+        };
+        oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
             if self.app_lock.locked {
                 delivery
                     .into_request()
@@ -339,17 +333,11 @@ impl WorkspaceApp {
                 PublicToolCall::ForgetCredential(_) => {
                     self.handle_public_mcp_forget_credential(request, cx)
                 }
-                PublicToolCall::SyncStatus(_) => self.handle_public_mcp_sync_status(request, cx),
-                PublicToolCall::SyncPullPreview(_) => {
-                    self.handle_public_mcp_sync_pull_preview(request, cx)
-                }
-                PublicToolCall::SyncPublishPreview(_) => {
-                    self.handle_public_mcp_sync_publish_preview(request, cx)
-                }
-                PublicToolCall::SyncApplyPlan(_) => {
-                    self.handle_public_mcp_sync_apply_plan(request, cx)
-                }
-                PublicToolCall::SyncRestore(_) => self.handle_public_mcp_sync_restore(request, cx),
+                PublicToolCall::SyncStatus(_)
+                | PublicToolCall::SyncPullPreview(_)
+                | PublicToolCall::SyncPublishPreview(_)
+                | PublicToolCall::SyncApplyPlan(_)
+                | PublicToolCall::SyncRestore(_) => self.handle_public_mcp_sync(request, cx),
                 PublicToolCall::ConnectNode(_) => self.handle_public_mcp_connect_node(request, cx),
                 PublicToolCall::DisconnectNode(_) => {
                     self.handle_public_mcp_disconnect_node(request, cx)
@@ -381,11 +369,8 @@ impl WorkspaceApp {
                 PublicToolCall::CloseTerminal(_) => {
                     self.handle_public_mcp_terminal_close(request, cx)
                 }
-                PublicToolCall::RecordingsControl(_) => {
-                    self.handle_public_mcp_recordings_control(request, cx)
-                }
-                PublicToolCall::RecordingsStatus(_) => {
-                    self.handle_public_mcp_recordings_status(request, cx)
+                PublicToolCall::RecordingsControl(_) | PublicToolCall::RecordingsStatus(_) => {
+                    self.handle_public_mcp_recording(request, cx)
                 }
                 PublicToolCall::OpenDesktop(_) => self.handle_public_mcp_desktop_open(request, cx),
                 PublicToolCall::DesktopState(_) => {
@@ -444,38 +429,16 @@ impl WorkspaceApp {
     }
 
     fn handle_public_mcp_connect_node(&mut self, request: DomainRequest, cx: &mut Context<Self>) {
-        let PublicToolCall::ConnectNode(args) = &request.call else {
-            return;
-        };
-        let Some(connection_id) = self.public_mcp.connection_id(
-            &request.client_ref,
-            &args.connection_ref,
-            &self.connection_store,
-        ) else {
-            request.finish(ToolEnvelope::failed("The connection handle is unavailable"));
-            return;
-        };
-        if !self.public_mcp.node_capacity_available(&request.client_ref) {
-            request.finish(ToolEnvelope::failed(
-                "The retained SSH node lease limit has been reached",
-            ));
-            return;
-        }
-        let Some(connection) = self.connection_store.get(&connection_id).cloned() else {
-            request.finish(ToolEnvelope::failed(
-                "The saved connection no longer exists",
-            ));
-            return;
-        };
-        let Some(config) = ssh_config_from_saved_connection(
+        let (connection_id, title, config) = match self.public_mcp.prepare_node_connection(
+            &request,
             &self.connection_store,
             self.settings_store.settings(),
-            &connection,
-        ) else {
-            request.finish(ToolEnvelope::failed(
-                "The saved connection requires credentials that are not available",
-            ));
-            return;
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                request.finish(ToolEnvelope::failed(error));
+                return;
+            }
         };
         // An approved MCP attempt participates in the normal recent-connection ordering.
         let _ = self.connection_store.mark_used(&connection_id);
@@ -484,7 +447,7 @@ impl WorkspaceApp {
             .as_ref()
             .is_some_and(|chain| !chain.is_empty())
         {
-            match self.expand_saved_connection_tree(&connection_id, config, connection.name) {
+            match self.expand_saved_connection_tree(&connection_id, config, title) {
                 Ok(expansion) => expansion.target_node_id,
                 Err(_) => {
                     request.finish(ToolEnvelope::failed(
@@ -494,7 +457,7 @@ impl WorkspaceApp {
                 }
             }
         } else {
-            self.materialize_ssh_root_node(config, connection.name, Some(connection_id.clone()))
+            self.materialize_ssh_root_node(config, title, Some(connection_id.clone()))
         };
         if !self.ensure_node_connection_started(&node_id, cx) {
             request.finish(ToolEnvelope::failed(

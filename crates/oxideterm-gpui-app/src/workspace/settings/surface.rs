@@ -166,7 +166,7 @@ impl WorkspaceApp {
                     self.settings_workspace.read(cx),
                     self.settings_store.settings(),
                     self.settings_views.ai_providers.read(cx),
-                    &self.skill_registry.read(),
+                    &self.ai.skills.registry.read(),
                     hasher,
                 );
             }

@@ -319,7 +319,7 @@ const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 40.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
 
-use oxideterm_gpui_ai::state::{AiChatFooterAction, AiChatInitializationError, AiCompactionNoticePhase};
+use oxideterm_gpui_ai::state::{AiChatFooterAction, AiCompactionNoticePhase};
 
 // AI composer footer uses the same explicit action list as dialog footers so
 // keyboard focus order stays centralized even though it is not a modal trap.
@@ -327,16 +327,6 @@ const AI_CHAT_FOOTER_ACTIONS: [AiChatFooterAction; 1] = [AiChatFooterAction::Sub
 
 const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
-
-struct AiMarkdownProjection {
-    source: String,
-    document: MarkdownDocument,
-}
-
-struct AiCachedMarkdownDocument {
-    projection: Arc<AiMarkdownProjection>,
-    layout: MarkdownBlockLayout,
-}
 
 // Preview payloads are immutable. A weak owner identifies replacement without copying source text.
 struct MarkdownPreviewCache<T> {
@@ -398,31 +388,7 @@ use oxideterm_gpui_ai::state::ai_chat_virtual_list_spec;
 // notification/event-log surfaces share the same browser virtualizer contract.
 const NOTIFICATION_SIDEBAR_ROW_HEIGHT_ESTIMATE: f32 = 72.0;
 const NOTIFICATION_SIDEBAR_VIRTUAL_OVERSCAN: usize = 10;
-const AI_MARKDOWN_WINDOW_OVERDRAW_PX: f32 = 720.0;
-const AI_MARKDOWN_CONTENT_OFFSET_PX: f32 = 56.0;
-
-#[derive(Clone, Debug)]
-enum AiChatListItem {
-    HistoryPage { older: bool },
-    TrimNotice { count: usize },
-    Message { index: usize, last_assistant: bool },
-    BottomSpacer,
-}
-
 use oxideterm_gpui_ai::state::AiChatMessageSignatureCache;
-
-#[derive(Clone, Copy, Debug)]
-struct AiMessageViewport {
-    top: f32,
-    height: f32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct AiChatListViewportSnapshot {
-    item_ix: usize,
-    offset_in_item: f32,
-    height: f32,
-}
 
 use oxideterm_gpui_ai::state::{AiContextTokenBreakdown, AiContextTokenBreakdownKey, AiPreparedPromptUsage};
 
@@ -675,7 +641,6 @@ pub(crate) struct WorkspaceApp {
     context_sidebar_motion_generation: u64,
     context_sidebar_motion: oxideterm_gpui_ui::motion::SidebarMotion,
     ai: AiWorkspaceViews,
-    ai_sidebar_view: Entity<sidebar::AiAssistantSidebarView>,
     mosh_plugin_sessions: Arc<oxideterm_mosh::MoshPluginSessions>,
     // Panes whose plugin toolbar state currently declares `overlay`; one
     // member per pane, in-memory only, never persisted. The single physical
@@ -692,9 +657,6 @@ pub(crate) struct WorkspaceApp {
     // action's declared default state; the pane's toolbar specs are only a
     // render mirror pushed from here. Entries exist for open panes only.
     plugin_toolbar_states: HashMap<(String, String, PaneId), String>,
-    skill_registry: std::sync::Arc<parking_lot::RwLock<oxideterm_skills::SkillRegistry>>,
-    skill_workspace_root: Option<std::path::PathBuf>,
-    loaded_conversation_skills: HashMap<String, HashMap<String, String>>,
     ai_runtime_context: Entity<ai_runtime_context::AiRuntimeContextEntity>,
     active_context_sidebar_panel: ContextSidebarPanel,
     needs_active_pane_focus: bool,

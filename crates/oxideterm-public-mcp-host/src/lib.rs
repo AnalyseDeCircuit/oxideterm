@@ -12,12 +12,12 @@ pub mod sync_protocol;
 mod terminals;
 mod transfers;
 pub use terminals::{
-    PublicMcpTerminalSerialState, PublicMcpTerminalSession, finish_terminal_read, telnet_control,
-    terminal_projection,
+    PublicMcpSavedTerminal, PublicMcpTerminalSerialState, PublicMcpTerminalSession,
+    finish_terminal_read, telnet_control, terminal_projection,
 };
 mod workspaces;
 pub use addons::{PublicAddonProjection, PublicMcpAddonPackage, public_addon_projection};
-pub use recordings::{PublicMcpRecordingStatus, live_recording_projection};
+pub use recordings::{RecordingPaneAction, RecordingPaneSnapshot};
 mod connections;
 mod quick_commands;
 pub use connections::{connection_revision, public_store_error};
@@ -38,7 +38,7 @@ pub use model::{
     PublicMcpNodeLease, PublicMcpPendingTerminalOpen, PublicMcpTerminalRecord,
 };
 pub use ports::{PublicMcpForwardMutation, PublicMcpForwardPort, PublicMcpHostEffect};
-pub use sync_handles::{
+use sync_handles::{
     PublicMcpLocalSyncCheckpoint, PublicMcpSyncPlan, PublicMcpSyncPlanKind, PublicMcpSyncUndo,
 };
 

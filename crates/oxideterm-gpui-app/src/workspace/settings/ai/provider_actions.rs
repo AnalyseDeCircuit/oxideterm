@@ -210,7 +210,7 @@ impl WorkspaceApp {
                     .ai_providers
                     .update(cx, |_, cx| cx.notify());
                 self.settings_views.surface.update(cx, |_, cx| cx.notify());
-                App::notify(cx, self.ai_sidebar_view.entity_id());
+                App::notify(cx, self.ai.transcript.entity_id());
             }
             ai_state::AiWorkspaceEvent::SelectorProviderStatusChanged => cx.notify(),
         }

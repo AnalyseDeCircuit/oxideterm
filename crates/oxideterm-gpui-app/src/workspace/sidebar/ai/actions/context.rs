@@ -434,7 +434,7 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn ai_active_ide_context(
         &self,
-        cx: &mut Context<Self>,
+        cx: &App,
     ) -> Option<oxideterm_gpui_ide::IdeAiContextSnapshot> {
         if !self.settings_store.settings().ai.context_sources.ide {
             return None;
@@ -490,7 +490,7 @@ impl WorkspaceApp {
             .is_some_and(|root| root.pane_count() > 1)
     }
 
-    pub(in crate::workspace) fn ai_has_ide_context(&self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::workspace) fn ai_has_ide_context(&self, cx: &App) -> bool {
         self.ai_active_ide_context(cx).is_some()
     }
 

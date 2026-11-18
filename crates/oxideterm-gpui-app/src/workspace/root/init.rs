@@ -548,8 +548,6 @@ impl WorkspaceApp {
         let chat_header = Self::mount_ai_chat_header(&ai_entity, cx);
         let (composer_editor, message_editor) = Self::mount_ai_editors(&ai_entity, cx);
         let model_picker = Self::mount_ai_model_picker(&ai_entity, cx);
-        let assistant_owner = cx.weak_entity();
-        let ai_sidebar_view = cx.new(|cx| sidebar::AiAssistantSidebarView::new(assistant_owner, &ai_entity, cx));
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
             |workspace, _ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
@@ -611,6 +609,16 @@ impl WorkspaceApp {
                 cx,
             )
         });
+        let transcript = Self::mount_ai_transcript(
+            &ai_entity, message_editor,
+            oxideterm_gpui_ai::sidebar::transcript::AiSidebarChildren {
+                header: chat_header,
+                background: background_view,
+                model_trigger: model_picker.sidebar.clone(),
+                composer: composer_editor,
+            },
+            tokens, i18n.clone(), forwarding_runtime.clone(), cx,
+        );
         let inline_owner = cx.weak_entity();
         let inline_request_owner = inline_owner.clone();
         let inline_anchor_owner = inline_owner.clone();
@@ -895,23 +903,21 @@ impl WorkspaceApp {
                 state: ai_entity,
                 acp: acp_entity,
                 background: ai_background_tasks,
-                background_view,
                 inline_panel,
-                chat_header,
-                composer_editor,
-                message_editor,
+                transcript,
                 model_picker,
+                skills: ai_views::AiWorkspaceSkills {
+                    registry: skill_registry,
+                    workspace_root: skill_workspace_root,
+                    loaded_by_conversation: HashMap::new(),
+                },
                 _state_subscription: ai_entity_subscription,
                 _background_subscription: ai_background_tasks_subscription,
             },
-            ai_sidebar_view,
             mosh_plugin_sessions: Arc::new(oxideterm_mosh::MoshPluginSessions::default()),
             plugin_overlay_members: HashMap::new(),
             plugin_overlay_generation: 0,
             plugin_toolbar_states: HashMap::new(),
-            skill_registry,
-            skill_workspace_root,
-            loaded_conversation_skills: HashMap::new(),
             ai_runtime_context,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
             needs_active_pane_focus: false,

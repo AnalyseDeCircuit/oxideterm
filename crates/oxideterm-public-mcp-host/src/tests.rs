@@ -248,15 +248,48 @@ fn canonical_path_boundary_distinguishes_children_from_shared_prefixes() {
 
 #[tokio::test]
 async fn recording_status_routes_only_live_recordings_to_the_window() {
-    use oxideterm_public_mcp::{RecordingStatusTarget, calls::RecordingsStatusArgs};
+    use oxideterm_public_mcp::{
+        RecordingStatusTarget, RecordingsControlArgs, calls::RecordingsStatusArgs,
+    };
     use oxideterm_terminal_recording::{TerminalRecordingState, TerminalRecordingStatus};
 
     let (_path, host, backend, client, mut receiver) =
         dispatch_fixture(&[ToolGroup::RecordingControl, ToolGroup::RecordingContent]);
     let terminal = TerminalRef::new();
-    host.check_recording_start(&client, &terminal, false)
+    let runtime = tokio::runtime::Handle::current();
+    let (request, response) = queued_request(
+        &host,
+        &mut receiver,
+        &client,
+        PublicToolCall::RecordingsControl(RecordingsControlArgs::Start {
+            terminal_ref: terminal.clone(),
+            title: Some("demo".into()),
+            capture_input: false,
+        }),
+    )
+    .await;
+    host.recording_request(request, &runtime, |target, action| {
+        assert_eq!(target, &terminal);
+        let RecordingPaneAction::Start(title) = action else {
+            panic!("expected recorder start");
+        };
+        assert_eq!(title.as_deref(), Some("demo"));
+        Ok(RecordingPaneSnapshot {
+            status: TerminalRecordingStatus {
+                state: TerminalRecordingState::Recording,
+                ..Default::default()
+            },
+            size: (80, 24),
+            stopped_content: None,
+        })
+    });
+    let started = response.await.unwrap().data.unwrap();
+    assert_eq!(started["recording"]["state"], "recording");
+    let recording = started["recording"]["recording_ref"]
+        .as_str()
+        .unwrap()
+        .parse::<RecordingRef>()
         .unwrap();
-    let recording = host.register_recording(&client, terminal.clone(), (80, 24));
     let call = || {
         PublicToolCall::RecordingsStatus(RecordingsStatusArgs {
             target: RecordingStatusTarget::Recording {
@@ -274,19 +307,40 @@ async fn recording_status_routes_only_live_recordings_to_the_window() {
         Some("fixture has no pane")
     );
 
-    host.finish_recording(
-        &client,
-        &recording,
-        TerminalRecordingStatus {
-            state: TerminalRecordingState::Recording,
-            elapsed: Duration::from_millis(2700),
-            event_count: 4,
-        },
-        (90, 30),
-        Zeroizing::new("sample terminal output".into()),
-        &tokio::runtime::Handle::current(),
-    )
-    .unwrap();
+    for expected_pane_call in [true, false] {
+        let (request, response) = queued_request(
+            &host,
+            &mut receiver,
+            &client,
+            PublicToolCall::RecordingsControl(RecordingsControlArgs::Stop {
+                recording_ref: recording.clone(),
+            }),
+        )
+        .await;
+        let mut stopped = false;
+        host.recording_request(request, &runtime, |target, action| {
+            assert_eq!(target, &terminal);
+            assert!(matches!(action, RecordingPaneAction::Stop));
+            stopped = true;
+            Ok(RecordingPaneSnapshot {
+                status: TerminalRecordingStatus {
+                    state: TerminalRecordingState::Recording,
+                    elapsed: Duration::from_millis(2700),
+                    event_count: 4,
+                },
+                size: (90, 30),
+                stopped_content: Some(Zeroizing::new("sample terminal output".into())),
+            })
+        });
+        assert_eq!(
+            stopped, expected_pane_call,
+            "repeated stop must not ask the pane for content again"
+        );
+        assert_eq!(
+            response.await.unwrap().data.unwrap()["recording"]["elapsed_ms"],
+            2700
+        );
+    }
     for content_available in [true, false] {
         if !content_available {
             host.revoke_public_mcp_client_recording_content(&client);
@@ -383,13 +437,43 @@ async fn addon_dispatch_prepares_only_the_callers_validated_artifact() {
     );
 }
 
-#[test]
-fn sync_undo_rejects_new_local_edits_and_restores_the_original_checkpoint() {
+#[tokio::test]
+async fn sync_undo_rejects_new_local_edits_then_retries_and_consumes_the_handle() {
     use oxideterm_cloud_sync::state::CloudSyncPersistedState;
     use oxideterm_quick_commands::{load_snapshot, save_snapshot};
     use oxideterm_settings::SettingsStore;
+    use sync_protocol::{PublicMcpSyncEffect, PublicMcpSyncOwner, PublicMcpSyncStores};
 
-    let dir = tempfile::tempdir().unwrap();
+    struct Owner<'a> {
+        connections: &'a mut ConnectionStore,
+        settings: &'a mut SettingsStore,
+        forwards: &'a oxideterm_forwarding::ForwardingRegistry,
+        state: CloudSyncPersistedState,
+    }
+    impl PublicMcpSyncOwner for Owner<'_> {
+        fn stores(&mut self) -> PublicMcpSyncStores<'_> {
+            PublicMcpSyncStores {
+                connections: self.connections,
+                settings: self.settings,
+                forwards: self.forwards,
+                cloud: &self.state,
+            }
+        }
+        fn service(&self) -> oxideterm_cloud_sync::operation::CloudSyncOperationService {
+            panic!("local undo must not start a Cloud Sync service")
+        }
+        fn busy(&self) -> bool {
+            false
+        }
+        fn effect(&mut self, effect: PublicMcpSyncEffect<'_>) {
+            let PublicMcpSyncEffect::Restored(state) = effect else {
+                panic!("local undo must only publish a restore effect");
+            };
+            self.state = state;
+        }
+    }
+
+    let (dir, host, backend, client, mut receiver) = dispatch_fixture(&[ToolGroup::CloudSync]);
     let mut connections = ConnectionStore::load(dir.path().join("connections.json")).unwrap();
     let mut settings = SettingsStore::load_from_path(dir.path().join("settings.json")).unwrap();
     let forwards = oxideterm_forwarding::ForwardingRegistry::new();
@@ -410,32 +494,54 @@ fn sync_undo_rejects_new_local_edits_and_restores_the_original_checkpoint() {
     commands.commands[0].name = "Received from sync".into();
     save_snapshot(settings.path(), &commands).unwrap();
     let undo = PublicMcpSyncUndo {
-        client_ref: ClientRef::new(),
+        client_ref: client.clone(),
         created_at: Instant::now(),
         post_apply_state: sync_protocol::full_local_state(&connections, &forwards, &settings)
             .unwrap(),
         checkpoint,
     };
-    commands.commands[0].name = "New local edit".into();
-    save_snapshot(settings.path(), &commands).unwrap();
-    assert_eq!(
-        undo.restore(&mut connections, &forwards, &mut settings, &state)
-            .unwrap_err(),
-        "Local synchronized data changed after the undo handle was created"
-    );
-    assert_eq!(
-        load_snapshot(settings.path()).unwrap().commands[0].name,
-        "New local edit"
-    );
-
-    commands.commands[0].name = "Received from sync".into();
-    save_snapshot(settings.path(), &commands).unwrap();
-    undo.restore(&mut connections, &forwards, &mut settings, &state)
-        .unwrap();
-    assert_eq!(
-        load_snapshot(settings.path()).unwrap().commands[0].name,
-        "Before applying sync"
-    );
+    let reference = backend.sync_handles.lock().insert_sync_undo(undo);
+    let mut owner = Owner {
+        connections: &mut connections,
+        settings: &mut settings,
+        forwards: &forwards,
+        state,
+    };
+    for (name, expected_name, expected_error) in [
+        (
+            "New local edit",
+            "New local edit",
+            Some("Local synchronized data changed after the undo handle was created"),
+        ),
+        ("Received from sync", "Before applying sync", None),
+        (
+            "Before applying sync",
+            "Before applying sync",
+            Some("The Cloud Sync undo handle is unavailable, expired, or already used"),
+        ),
+    ] {
+        commands.commands[0].name = name.into();
+        save_snapshot(owner.settings.path(), &commands).unwrap();
+        let (request, response) = queued_request(
+            &host,
+            &mut receiver,
+            &client,
+            PublicToolCall::SyncRestore(oxideterm_public_mcp::SyncRestoreArgs {
+                undo_ref: reference.clone(),
+            }),
+        )
+        .await;
+        assert!(backend.sync_request(request, &mut owner).is_none());
+        let response = response.await.unwrap();
+        assert_eq!(response.error.as_deref(), expected_error);
+        if expected_error.is_none() {
+            assert_eq!(response.data, Some(json!({ "restored": true })));
+        }
+        assert_eq!(
+            load_snapshot(owner.settings.path()).unwrap().commands[0].name,
+            expected_name
+        );
+    }
 }
 
 #[tokio::test]
@@ -612,7 +718,7 @@ async fn desktop_frame_generation_and_artifact_lifetime_follow_the_tab() {
 }
 
 #[tokio::test]
-async fn revoking_observation_cancels_only_the_affected_client_calls() {
+async fn revoking_observation_cancels_only_calls_requiring_that_group() {
     use oxideterm_public_mcp::history::{HistoryArgs, HistoryRequest};
     let (_path, mut host, backend, client, mut requests) =
         dispatch_fixture(&[ToolGroup::TerminalObserve, ToolGroup::NodeSession]);
@@ -659,4 +765,66 @@ async fn revoking_observation_cancels_only_the_affected_client_calls() {
     );
     drop(request);
     answer.abort();
+}
+
+#[tokio::test]
+async fn terminal_read_preserves_unchanged_cursor_and_bounds_whole_lines() {
+    use oxideterm_public_mcp::calls::ReadTerminalArgs;
+    let (_path, host, _, client, mut requests) = dispatch_fixture(&[ToolGroup::TerminalObserve]);
+    let terminal_ref = TerminalRef::new();
+    for cursor in [Some(4), Some(3)] {
+        let (request, response) = queued_request(
+            &host,
+            &mut requests,
+            &client,
+            PublicToolCall::ReadTerminal(ReadTerminalArgs {
+                terminal_ref: terminal_ref.clone(),
+                cursor,
+                line_limit: 2,
+                tail: true,
+            }),
+        )
+        .await;
+        finish_terminal_read(request, 4, (80, 24), 2, true, || {
+            assert_eq!(
+                cursor,
+                Some(3),
+                "an unchanged cursor must not read terminal text"
+            );
+            format!("outside tail\nselected\n{}", "界".repeat(100_000))
+        });
+        let data = response.await.unwrap().data.unwrap();
+        if cursor == Some(4) {
+            assert_eq!(
+                data,
+                json!({
+                    "terminal_ref": terminal_ref, "cursor": 4, "unchanged": true, "lines": [], "truncated": false,
+                })
+            );
+        } else {
+            assert_eq!(
+                data,
+                json!({
+                    "terminal_ref": terminal_ref, "cursor": 4, "unchanged": false, "cols": 80, "rows": 24,
+                    "display_offset": 2, "alternate_buffer": true, "lines": ["selected"], "truncated": true,
+                })
+            );
+        }
+    }
+}
+
+#[test]
+fn cloud_sync_errors_keep_the_safe_code_but_drop_backend_details() {
+    let error = sync_protocol::PublicMcpSyncFailure::from_error(
+        "remote_changed_after_preview: private backend path".into(),
+    );
+    assert_eq!(error.display_error, "remote_changed_after_preview");
+    assert_eq!(
+        error.message,
+        "The remote Cloud Sync revision changed after the plan was created"
+    );
+    let unknown =
+        sync_protocol::PublicMcpSyncFailure::from_error("unexpected server detail".into());
+    assert_eq!(unknown.display_error, "The Cloud Sync operation failed");
+    assert_eq!(unknown.message, "The Cloud Sync operation failed");
 }

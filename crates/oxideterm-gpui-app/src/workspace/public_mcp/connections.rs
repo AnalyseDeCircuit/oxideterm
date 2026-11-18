@@ -13,7 +13,8 @@ use oxideterm_public_mcp_host::{
 impl WorkspaceApp {
     pub(super) fn handle_public_mcp_connection_directory(&mut self, request: DomainRequest) {
         let background = self.public_mcp.background().clone();
-        self.public_mcp.read_connection_directory(&background, &self.connection_store, request);
+        self.public_mcp
+            .read_connection_directory(&background, &self.connection_store, request);
     }
 
     pub(super) fn handle_public_mcp_save_connection(

@@ -54,42 +54,14 @@ impl PublicMcpHost {
             .lock()
             .revoke_client_sync_handles(client_ref);
     }
-
-    pub fn insert_sync_plan(&self, plan: PublicMcpSyncPlan) -> SyncPlanRef {
-        self.sync_handles.lock().insert_sync_plan(plan)
-    }
-
-    pub fn take_sync_plan(
-        &self,
-        client_ref: &ClientRef,
-        plan_ref: &SyncPlanRef,
-    ) -> Option<PublicMcpSyncPlan> {
-        self.sync_handles
-            .lock()
-            .take_sync_plan(client_ref, plan_ref)
-    }
-
-    pub fn insert_sync_undo(&self, undo: PublicMcpSyncUndo) -> UndoRef {
-        self.sync_handles.lock().insert_sync_undo(undo)
-    }
-
-    pub fn take_sync_undo(
-        &self,
-        client_ref: &ClientRef,
-        undo_ref: &UndoRef,
-    ) -> Option<PublicMcpSyncUndo> {
-        self.sync_handles
-            .lock()
-            .take_sync_undo(client_ref, undo_ref)
-    }
-
-    // Failed restores keep the existing handle and its original expiry.
-    pub fn return_sync_undo(&self, undo_ref: UndoRef, undo: PublicMcpSyncUndo) {
-        self.sync_handles.lock().sync_undos.insert(undo_ref, undo);
-    }
 }
 
 impl SyncHandles {
+    // Failed restores retain the same handle and expiry.
+    pub(super) fn return_sync_undo(&mut self, reference: UndoRef, undo: PublicMcpSyncUndo) {
+        self.sync_undos.insert(reference, undo);
+    }
+
     fn revoke_client_sync_handles(&mut self, client_ref: &ClientRef) {
         self.sync_plans
             .retain(|_, plan| &plan.client_ref != client_ref);
@@ -97,7 +69,7 @@ impl SyncHandles {
             .retain(|_, undo| &undo.client_ref != client_ref);
     }
 
-    fn insert_sync_plan(&mut self, plan: PublicMcpSyncPlan) -> SyncPlanRef {
+    pub(super) fn insert_sync_plan(&mut self, plan: PublicMcpSyncPlan) -> SyncPlanRef {
         self.expire_sync_handles();
         while self.sync_plans.len() >= SYNC_PLAN_CAPACITY
             || self
@@ -128,7 +100,7 @@ impl SyncHandles {
         plan_ref
     }
 
-    fn take_sync_plan(
+    pub(super) fn take_sync_plan(
         &mut self,
         client_ref: &ClientRef,
         plan_ref: &SyncPlanRef,
@@ -141,7 +113,7 @@ impl SyncHandles {
             .flatten()
     }
 
-    fn insert_sync_undo(&mut self, undo: PublicMcpSyncUndo) -> UndoRef {
+    pub(super) fn insert_sync_undo(&mut self, undo: PublicMcpSyncUndo) -> UndoRef {
         self.expire_sync_handles();
         while self.sync_undos.len() >= SYNC_UNDO_CAPACITY
             || self
@@ -172,7 +144,7 @@ impl SyncHandles {
         undo_ref
     }
 
-    fn take_sync_undo(
+    pub(super) fn take_sync_undo(
         &mut self,
         client_ref: &ClientRef,
         undo_ref: &UndoRef,

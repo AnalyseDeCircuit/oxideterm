@@ -305,37 +305,6 @@ impl WorkspaceApp {
         })
     }
 
-    pub(in crate::workspace) fn refresh_knowledge_navigator(
-        &mut self,
-        force: bool,
-        cx: &mut Context<Self>,
-    ) {
-        self.knowledge_workspace
-            .view
-            .update(cx, |view, cx| view.refresh_knowledge_navigator(force, cx));
-    }
-    pub(in crate::workspace) fn select_knowledge_document(
-        &mut self,
-        id: String,
-        cx: &mut Context<Self>,
-    ) {
-        self.knowledge_workspace
-            .view
-            .update(cx, |view, cx| view.select_knowledge_document(id, cx));
-    }
-    pub(in crate::workspace) fn is_knowledge_document_selected(&self, id: &str, cx: &App) -> bool {
-        self.knowledge_workspace
-            .view
-            .read(cx)
-            .is_knowledge_document_selected(id, cx)
-    }
-    pub(in crate::workspace) fn knowledge_note_is_cut(&self, id: &str, cx: &App) -> bool {
-        self.knowledge_workspace
-            .view
-            .read(cx)
-            .knowledge_note_is_cut(id, cx)
-    }
-
     pub(super) fn notify_knowledge_preview_selection(&self, group: u64, cx: &mut App) -> bool {
         let Some(editor) = self.knowledge_workspace.state.read(cx).editor.clone() else {
             return false;
@@ -350,18 +319,6 @@ impl WorkspaceApp {
         cx.notify(editor.entity_id());
         true
     }
-    pub(in crate::workspace) fn open_knowledge_note_menu(
-        &mut self,
-        document: oxideterm_ai::RagDocumentResponse,
-        position: Point<Pixels>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.knowledge_workspace.view.update(cx, |view, cx| {
-            view.open_knowledge_note_menu(document, position, window, cx)
-        });
-    }
-
     pub(in crate::workspace) fn open_knowledge_workspace_tab(
         &mut self,
         window: &mut Window,
@@ -371,7 +328,9 @@ impl WorkspaceApp {
             && self.tabs(cx).iter().any(|tab| tab.id == tab_id)
         {
             self.set_active_tab(tab_id, window, cx);
-            self.refresh_knowledge_navigator(true, cx);
+            self.knowledge_workspace
+                .view
+                .update(cx, |view, cx| view.refresh_knowledge_navigator(true, cx));
             return;
         }
         let tab_id = self.alloc_tab_id(cx);
@@ -393,7 +352,9 @@ impl WorkspaceApp {
         self.needs_active_pane_focus = false;
         window.focus(&self.focus_handle, cx);
         self.reveal_active_tab(window, cx);
-        self.refresh_knowledge_navigator(true, cx);
+        self.knowledge_workspace
+            .view
+            .update(cx, |view, cx| view.refresh_knowledge_navigator(true, cx));
         cx.notify();
     }
 

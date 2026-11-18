@@ -2,7 +2,7 @@
 async fn compact_running_ai_task(
     history: &mut Vec<AiChatMessage>,
     config: &AiChatStreamConfig,
-    checkpoint: &mut oxideterm_ai::agent::AgentCheckpoint,
+    checkpoint: &mut crate::agent::AgentCheckpoint,
     task_user_id: &str,
     context_window: usize,
     execution: Option<&AgentExecution>,
@@ -19,15 +19,15 @@ async fn compact_running_ai_task(
             "id": message.id,
             "role": message.role,
             "toolCallId": message.tool_call_id,
-            "content": oxideterm_ai::sanitize_for_ai(&message.content),
-            "toolCalls": message.tool_calls.iter().map(oxideterm_ai::sanitize_tool_protocol_json_for_persistence).collect::<Vec<_>>(),
+            "content": crate::sanitize_for_ai(&message.content),
+            "toolCalls": message.tool_calls.iter().map(crate::sanitize_tool_protocol_json_for_persistence).collect::<Vec<_>>(),
         })).collect::<Vec<_>>();
     let mut summary_config = config.clone();
     summary_config.tools.clear();
-    summary_config.tool_choice = oxideterm_ai::AiToolChoice::Auto;
+    summary_config.tool_choice = crate::AiToolChoice::Auto;
     summary_config.reasoning_effort = Some("auto".into());
     summary_config.max_response_tokens =
-        Some(oxideterm_ai::agent::checkpoint_output_budget(context_window) as i64);
+        Some(crate::agent::checkpoint_output_budget(context_window) as i64);
     let evidence = zeroize::Zeroizing::new(serde_json::to_string(&evidence).unwrap());
     let mut remaining = evidence.as_str();
     let mut next = checkpoint.clone();
@@ -37,9 +37,7 @@ async fn compact_running_ai_task(
             next.resume_prompt()
         );
         let fixed_tokens = ai_estimated_tokens(&prefix)
-            .saturating_add(oxideterm_ai::agent::checkpoint_output_budget(
-                context_window,
-            ))
+            .saturating_add(crate::agent::checkpoint_output_budget(context_window))
             .saturating_add(128.max(context_window / 50));
         let end = summary_chunk_end(remaining, context_window.saturating_sub(fixed_tokens));
         if end == 0 {
@@ -50,8 +48,7 @@ async fn compact_running_ai_task(
             format!("{prefix}{}", &remaining[..end]),
         )];
         let request_id = execution.and_then(|agent| agent.runtime.begin_request(&agent.run).ok());
-        let mut request =
-            oxideterm_ai::agent::AgentModelRequest::start(summary_config.clone(), messages);
+        let mut request = crate::agent::AgentModelRequest::start(summary_config.clone(), messages);
         let mut summary = zeroize::Zeroizing::new(String::new());
         let mut completed = false;
         while let Some(event) = request.next_event().await {
@@ -85,7 +82,7 @@ async fn compact_running_ai_task(
         remaining = &remaining[end..];
     }
     let mut compacted = history.clone();
-    oxideterm_ai::agent::compact_agent_history(&mut compacted, &next, task_user_id);
+    crate::agent::compact_agent_history(&mut compacted, &next, task_user_id);
     let after = ai_prompt_token_breakdown(
         &compacted,
         &config.tools,

@@ -6,17 +6,14 @@ use oxideterm_public_mcp::{
     ToolEnvelope,
 };
 use oxideterm_public_mcp_host::{
-    PublicMcpTerminalSerialState, finish_terminal_read, telnet_control, terminal_projection,
+    PublicMcpSavedTerminal, PublicMcpTerminalSerialState, finish_terminal_read, telnet_control,
+    terminal_projection,
 };
-use oxideterm_session_adapter::auth_method_from_saved_auth;
-use oxideterm_ssh::SshConfig;
 use oxideterm_terminal::{SerialSessionConfig, TelnetSessionConfig, TerminalSessionKind};
 use serde_json::json;
 
 use super::{
-    CONNECTION_KEY_DESKTOP_PREFIX, CONNECTION_KEY_MOSH_PREFIX, CONNECTION_KEY_SERIAL_PREFIX,
-    CONNECTION_KEY_SSH_PREFIX, CONNECTION_KEY_TELNET_PREFIX, PublicMcpPendingTerminalOpen,
-    PublicMcpTerminalRecord, WorkspaceApp, finish_serialized,
+    PublicMcpPendingTerminalOpen, PublicMcpTerminalRecord, WorkspaceApp, finish_serialized,
 };
 use crate::workspace::{
     TerminalSessionId,
@@ -26,8 +23,6 @@ use crate::workspace::{
         terminal_serial_runtime_options_from_profile,
     },
 };
-
-const PENDING_MOSH_OPENS_PER_CLIENT: usize = 8;
 
 pub(in crate::workspace) enum PublicMcpTerminalWindowEffect {
     Open(DomainRequest),
@@ -401,196 +396,126 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(connection_key) = self.public_mcp.connection_key(
+        let profile = match self.public_mcp.saved_terminal_profile(
             &request.client_ref,
             &connection_ref,
             &self.connection_store,
-        ) else {
-            request.finish(ToolEnvelope::failed("The connection handle is unavailable"));
-            return;
+        ) {
+            Ok(profile) => profile,
+            Err(error) => {
+                request.finish(ToolEnvelope::failed(error));
+                return;
+            }
         };
-        if connection_key.starts_with(CONNECTION_KEY_SSH_PREFIX) {
-            request.finish(ToolEnvelope::failed(
-                "SSH terminals require an acquired node_ref source",
-            ));
-            return;
-        }
-        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_SERIAL_PREFIX) {
-            let Some(profile) = self
-                .connection_store
-                .serial_profiles()
-                .iter()
-                .find(|profile| profile.id == profile_id)
-                .cloned()
-            else {
-                request.finish(ToolEnvelope::failed(
-                    "The saved serial profile no longer exists",
-                ));
+        match profile {
+            PublicMcpSavedTerminal::Serial(profile) => {
+                let profile_id = profile.id.clone();
+                let title = requested_title.unwrap_or_else(|| profile.name.clone());
+                let runtime_options = terminal_serial_runtime_options_from_profile(&profile);
+                let config = SerialSessionConfig {
+                    port_path: profile.port_path,
+                    baud_rate: profile.baud_rate,
+                    data_bits: profile.data_bits,
+                    stop_bits: profile.stop_bits,
+                    parity: terminal_serial_parity_from_profile(&profile.parity),
+                    flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
+                    runtime_options,
+                };
+                match self.create_serial_terminal_tab_with_title(
+                    config,
+                    ConnectionTerminalOptions::default(),
+                    title.clone(),
+                    window,
+                    cx,
+                ) {
+                    Ok(session_id) => {
+                        self.register_terminal_saved_connection(
+                            session_id,
+                            oxideterm_terminal_triggers::SavedConnectionKind::Serial,
+                            profile_id.clone(),
+                            cx,
+                        );
+                        let _ = self.connection_store.mark_serial_profile_used(&profile_id);
+                        self.finish_public_mcp_terminal_open(
+                            request,
+                            TerminalRef::new(),
+                            session_id,
+                            "serial",
+                            title,
+                            None,
+                            cols,
+                            rows,
+                            cx,
+                        );
+                    }
+                    Err(error) => request.finish(ToolEnvelope::failed(error.to_string())),
+                }
                 return;
-            };
-            let title = requested_title.unwrap_or_else(|| profile.name.clone());
-            let runtime_options = terminal_serial_runtime_options_from_profile(&profile);
-            let config = SerialSessionConfig {
-                port_path: profile.port_path,
-                baud_rate: profile.baud_rate,
-                data_bits: profile.data_bits,
-                stop_bits: profile.stop_bits,
-                parity: terminal_serial_parity_from_profile(&profile.parity),
-                flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
-                runtime_options,
-            };
-            match self.create_serial_terminal_tab_with_title(
-                config,
-                ConnectionTerminalOptions::default(),
-                title.clone(),
-                window,
-                cx,
-            ) {
-                Ok(session_id) => {
-                    self.register_terminal_saved_connection(
-                        session_id,
-                        oxideterm_terminal_triggers::SavedConnectionKind::Serial,
-                        profile_id.to_string(),
-                        cx,
-                    );
-                    let _ = self.connection_store.mark_serial_profile_used(profile_id);
-                    self.finish_public_mcp_terminal_open(
+            }
+            PublicMcpSavedTerminal::Telnet(profile) => {
+                let profile_id = profile.id.clone();
+                let title = requested_title.unwrap_or_else(|| profile.name.clone());
+                let config = TelnetSessionConfig {
+                    line_endings:
+                        crate::workspace::new_connection::terminal_telnet_line_endings_from_profile(
+                            &profile,
+                        ),
+                    host: profile.host,
+                    port: profile.port,
+                };
+                match self.create_telnet_terminal_tab_with_title(
+                    config,
+                    profile.upstream_proxy,
+                    profile.terminal,
+                    title.clone(),
+                    window,
+                    cx,
+                ) {
+                    Ok(session_id) => {
+                        self.register_terminal_saved_connection(
+                            session_id,
+                            oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
+                            profile_id.clone(),
+                            cx,
+                        );
+                        let _ = self.connection_store.mark_telnet_profile_used(&profile_id);
+                        self.finish_public_mcp_terminal_open(
+                            request,
+                            TerminalRef::new(),
+                            session_id,
+                            "telnet",
+                            title,
+                            None,
+                            cols,
+                            rows,
+                            cx,
+                        );
+                    }
+                    Err(error) => request.finish(ToolEnvelope::failed(error.to_string())),
+                }
+                return;
+            }
+            PublicMcpSavedTerminal::Mosh { profile, config } => {
+                let title = requested_title.unwrap_or_else(|| profile.name.clone());
+                let terminal_ref = TerminalRef::new();
+                let pending_token = terminal_ref.to_string();
+                self.public_mcp.pending_terminal_opens.insert(
+                    pending_token.clone(),
+                    PublicMcpPendingTerminalOpen {
+                        client_ref: request.client_ref.clone(),
+                        terminal_ref,
                         request,
-                        TerminalRef::new(),
-                        session_id,
-                        "serial",
-                        title,
-                        None,
                         cols,
                         rows,
-                        cx,
-                    );
-                }
-                Err(error) => request.finish(ToolEnvelope::failed(error.to_string())),
-            }
-            return;
-        }
-        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_TELNET_PREFIX) {
-            let Some(profile) = self
-                .connection_store
-                .telnet_profiles()
-                .iter()
-                .find(|profile| profile.id == profile_id)
-                .cloned()
-            else {
-                request.finish(ToolEnvelope::failed(
-                    "The saved Telnet profile no longer exists",
-                ));
-                return;
-            };
-            let title = requested_title.unwrap_or_else(|| profile.name.clone());
-            let config = TelnetSessionConfig {
-                line_endings:
-                    crate::workspace::new_connection::terminal_telnet_line_endings_from_profile(
-                        &profile,
-                    ),
-                host: profile.host,
-                port: profile.port,
-            };
-            match self.create_telnet_terminal_tab_with_title(
-                config,
-                profile.upstream_proxy,
-                profile.terminal,
-                title.clone(),
-                window,
-                cx,
-            ) {
-                Ok(session_id) => {
-                    self.register_terminal_saved_connection(
-                        session_id,
-                        oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
-                        profile_id.to_string(),
-                        cx,
-                    );
-                    let _ = self.connection_store.mark_telnet_profile_used(profile_id);
-                    self.finish_public_mcp_terminal_open(
-                        request,
-                        TerminalRef::new(),
-                        session_id,
-                        "telnet",
-                        title,
-                        None,
-                        cols,
-                        rows,
-                        cx,
-                    );
-                }
-                Err(error) => request.finish(ToolEnvelope::failed(error.to_string())),
-            }
-            return;
-        }
-        if let Some(profile_id) = connection_key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX) {
-            self.public_mcp
-                .pending_terminal_opens
-                .retain(|_, pending| !pending.request.is_cancelled());
-            let pending_for_client = self
-                .public_mcp
-                .pending_terminal_opens
-                .values()
-                .filter(|pending| pending.client_ref == request.client_ref)
-                .count();
-            if pending_for_client >= PENDING_MOSH_OPENS_PER_CLIENT {
-                request.finish(ToolEnvelope::failed(
-                    "Too many Mosh terminal opens are waiting for authentication",
-                ));
+                        title: title.clone(),
+                    },
+                );
+                let mut options = mosh_options_from_profile(&profile);
+                options.public_mcp_open_token = Some(pending_token);
+                self.start_ssh_preflight(*config, title, SshConnectionIntent::Mosh(options), cx);
                 return;
             }
-            let Some(profile) = self.connection_store.get_mosh_profile(profile_id).cloned() else {
-                request.finish(ToolEnvelope::failed(
-                    "The saved Mosh profile no longer exists",
-                ));
-                return;
-            };
-            let Some(auth) = auth_method_from_saved_auth(&self.connection_store, &profile.auth)
-            else {
-                request.finish(ToolEnvelope::failed(
-                    "The saved Mosh profile requires credentials that are not available",
-                ));
-                return;
-            };
-            let title = requested_title.unwrap_or_else(|| profile.name.clone());
-            let terminal_ref = TerminalRef::new();
-            let pending_token = terminal_ref.to_string();
-            self.public_mcp.pending_terminal_opens.insert(
-                pending_token.clone(),
-                PublicMcpPendingTerminalOpen {
-                    client_ref: request.client_ref.clone(),
-                    terminal_ref,
-                    request,
-                    cols,
-                    rows,
-                    title: title.clone(),
-                },
-            );
-            let config = SshConfig {
-                host: profile.host.clone(),
-                port: profile.ssh_port,
-                username: profile.username.clone(),
-                auth,
-                identity_agent: profile.identity_agent.clone(),
-                legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
-                strict_host_key_checking: true,
-                ..SshConfig::default()
-            };
-            let mut options = mosh_options_from_profile(&profile);
-            options.public_mcp_open_token = Some(pending_token);
-            self.start_ssh_preflight(config, title, SshConnectionIntent::Mosh(options), cx);
-            return;
         }
-        if connection_key.starts_with(CONNECTION_KEY_DESKTOP_PREFIX) {
-            request.finish(ToolEnvelope::failed(
-                "Remote desktop profiles must be opened with desktops_open",
-            ));
-            return;
-        }
-        request.finish(ToolEnvelope::failed(
-            "The saved connection does not provide a terminal transport",
-        ));
     }
 
     fn apply_public_mcp_terminal_close(
@@ -607,7 +532,7 @@ impl WorkspaceApp {
             request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
             return;
         };
-        self.stop_public_mcp_recordings_for_terminal(&request.client_ref, &terminal_ref, cx);
+        self.stop_public_mcp_recordings(&request.client_ref, Some(&terminal_ref), false, cx);
         self.public_mcp.remove_terminal(&terminal_ref);
         self.close_terminal_session(record.session_id, window, cx);
         finish_serialized(
@@ -735,28 +660,14 @@ impl WorkspaceApp {
         self.public_mcp.history.lock().revoke_client(client_ref);
         let terminal_refs = self.public_mcp.client_terminals(client_ref);
         for terminal_ref in &terminal_refs {
-            self.stop_public_mcp_recordings_for_terminal(client_ref, terminal_ref, cx);
+            self.stop_public_mcp_recordings(client_ref, Some(terminal_ref), false, cx);
         }
         let session_ids = terminal_refs
             .into_iter()
             .filter_map(|terminal_ref| self.public_mcp.remove_terminal(&terminal_ref))
             .map(|record| record.session_id)
             .collect::<Vec<_>>();
-        let pending_tokens = self
-            .public_mcp
-            .pending_terminal_opens
-            .iter()
-            .filter_map(|(token, pending)| {
-                (&pending.client_ref == client_ref).then_some(token.clone())
-            })
-            .collect::<Vec<_>>();
-        for token in pending_tokens {
-            if let Some(pending) = self.public_mcp.pending_terminal_opens.remove(&token) {
-                pending
-                    .request
-                    .finish(ToolEnvelope::failed("The MCP client authorization changed"));
-            }
-        }
+        self.public_mcp.revoke_pending_terminal_opens(client_ref);
         if !session_ids.is_empty() {
             let _ = self.enqueue_public_mcp_terminal_window_effect(
                 PublicMcpTerminalWindowEffect::Revoke(session_ids),
@@ -774,7 +685,7 @@ impl WorkspaceApp {
         for (terminal_ref, client_ref) in terminal_refs {
             // A UI-owned pane close revokes only its public handle; an SSH node
             // remains owned by NodeRouter and any other registered consumers.
-            self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
+            self.stop_public_mcp_recordings(&client_ref, Some(&terminal_ref), false, cx);
             self.public_mcp.remove_terminal(&terminal_ref);
         }
     }
@@ -788,7 +699,7 @@ impl WorkspaceApp {
         for (terminal_ref, client_ref) in terminal_refs {
             self.public_mcp.revoke_terminal_history(&terminal_ref);
             // The public handle stays stable; recordings end at the old shell boundary.
-            self.stop_public_mcp_recordings_for_terminal(&client_ref, &terminal_ref, cx);
+            self.stop_public_mcp_recordings(&client_ref, Some(&terminal_ref), false, cx);
         }
     }
 

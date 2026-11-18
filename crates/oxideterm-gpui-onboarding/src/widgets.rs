@@ -3,9 +3,10 @@
 
 use gpui::{
     AnyElement, App, CursorStyle, Div, FontWeight, MouseButton, ParentElement, Rgba, SharedString,
-    Styled, Window, div, prelude::*, px, rgb, rgba, svg,
+    Styled, Window, div, prelude::*, px, relative, rgb, rgba, svg,
 };
 use oxideterm_gpui_ui::button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with};
+use oxideterm_gpui_ui::motion::UserSegmentedControlMotionState;
 use oxideterm_gpui_ui::theme_glass_card_background_alpha;
 use oxideterm_theme::ThemeTokens;
 
@@ -182,9 +183,43 @@ pub(crate) fn action_button(
 
 pub(crate) fn compact_pill_bar(
     tokens: &ThemeTokens,
+    id: &'static str,
     has_background: bool,
+    active_index: usize,
+    motion: &UserSegmentedControlMotionState,
     items: Vec<AnyElement>,
 ) -> AnyElement {
+    let item_count = items.len().max(1);
+    let active_index = active_index.min(item_count - 1);
+    let previous_index = motion
+        .previous_index_for(id, active_index)
+        .unwrap_or(active_index)
+        .min(item_count - 1);
+    let transitioning = motion.is_active_for(id, active_index);
+    let item_width = 1.0 / item_count as f32;
+    let active_left = active_index as f32 * item_width;
+    let previous_left = previous_index as f32 * item_width;
+
+    // Mirror OxideTerm's segmented indicator track so onboarding pills follow the
+    // exact Off / Reduced / Normal / Fast motion policy as settings switches.
+    let indicator = div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .w(relative(item_width))
+        .rounded(px(tokens.radii.sm))
+        .border_1()
+        .border_color(rgba((tokens.ui.border << 8) | ONBOARDING_HAIRLINE_ALPHA))
+        .bg(rgb(tokens.ui.bg_panel));
+    let indicator = oxideterm_gpui_ui::segmented_control::selection_indicator(
+        tokens,
+        id,
+        indicator,
+        previous_left,
+        active_left,
+        transitioning,
+    );
+
     div()
         .w_full()
         .min_w(px(0.0))
@@ -194,10 +229,15 @@ pub(crate) fn compact_pill_bar(
         .bg(sunken_bg(tokens, has_background))
         .p(px(2.0))
         .overflow_hidden()
-        .flex()
-        .flex_row()
-        .gap(px(2.0))
-        .children(items)
+        .child(
+            div()
+                .relative()
+                .w_full()
+                .grid()
+                .grid_cols(item_count as u16)
+                .child(indicator)
+                .children(items),
+        )
         .into_any_element()
 }
 
@@ -214,12 +254,12 @@ pub(crate) fn compact_pill_item(
     div()
         .id(id)
         .debug_selector(move || selector.clone())
-        .flex_1()
+        .relative()
+        .w_full()
         .min_w(px(0.0))
         .px(px(6.0))
         .py(px(4.5))
         .rounded(px(tokens.radii.sm))
-        .when(selected, |item| item.bg(rgb(theme.bg_panel)))
         .when(!selected, |item| {
             item.hover(move |style| style.bg(rgb(theme.bg_hover)))
         })

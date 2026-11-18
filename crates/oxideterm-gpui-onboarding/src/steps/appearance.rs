@@ -1,14 +1,18 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
-use gpui::{AnyElement, App, FontWeight, SharedString, Styled, div, prelude::*, px, rgb, rgba};
+use gpui::{
+    AnyElement, App, FontWeight, SharedString, Styled, WeakEntity, div, prelude::*, px, rgb,
+    rgba, svg,
+};
 use oxideterm_gpui_ui::button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, button_with};
-use oxideterm_gpui_ui::motion;
-use oxideterm_settings::{AppearanceScheme, CornerStyle, FontFamily};
+use oxideterm_gpui_ui::motion::{self, UserSegmentedControlMotionState};
+use oxideterm_settings::{AnimationSpeed, AppearanceScheme, CornerStyle, FontFamily};
+use oxideterm_theme::UiMotionProfile;
 
 use crate::{
     ONBOARDING_FONT_OPTIONS, OnboardingFrame, OnboardingRequest, OnboardingThemeTarget,
-    OnboardingViewBindings,
+    OnboardingView, OnboardingViewBindings,
     widgets::{
         ONBOARDING_ACCENT_BORDER_ALPHA, ONBOARDING_ACCENT_SUBTLE_ALPHA, ONBOARDING_CARD_BORDER_ALPHA,
         ONBOARDING_HAIRLINE_ALPHA, compact_pill_bar, compact_pill_item, grouped_surface,
@@ -16,58 +20,99 @@ use crate::{
     },
 };
 
+const ONBOARDING_MODE_CONTROL_ID: &str = "onboarding-mode-control";
+const ONBOARDING_SCHEME_CONTROL_ID: &str = "onboarding-scheme-control";
+const ONBOARDING_CORNER_CONTROL_ID: &str = "onboarding-corner-control";
+const ONBOARDING_ANIMATION_CONTROL_ID: &str = "onboarding-animation-control";
+
+fn motion_profile_for_speed(speed: AnimationSpeed) -> UiMotionProfile {
+    match speed {
+        AnimationSpeed::Off => UiMotionProfile::Off,
+        AnimationSpeed::Reduced => UiMotionProfile::Reduced,
+        AnimationSpeed::Normal => UiMotionProfile::Normal,
+        AnimationSpeed::Fast => UiMotionProfile::Fast,
+    }
+}
+
 pub(crate) fn render_appearance_step(
     frame: &OnboardingFrame,
     bindings: &OnboardingViewBindings,
+    control_motion: &UserSegmentedControlMotionState,
+    view: WeakEntity<OnboardingView>,
     wide: bool,
     cx: &mut App,
 ) -> AnyElement {
     let settings = &frame.settings;
     let theme = frame.tokens.ui;
 
+    let mode_options = [
+        (
+            Some(AppearanceScheme::Light),
+            "settings_view.appearance.mode_light",
+        ),
+        (
+            Some(AppearanceScheme::Dark),
+            "settings_view.appearance.mode_dark",
+        ),
+        (None, "settings_view.appearance.follow_system"),
+    ];
+    let mode_active_index = if settings.appearance.follow_system_appearance {
+        2
+    } else if settings.appearance.manual_scheme == Some(AppearanceScheme::Light) {
+        0
+    } else if settings.appearance.manual_scheme == Some(AppearanceScheme::Dark) {
+        1
+    } else {
+        2
+    };
     let mode_row = setting_stacked_row(
         frame,
         "settings_view.appearance.mode",
         compact_pill_bar(
             &frame.tokens,
+            ONBOARDING_MODE_CONTROL_ID,
             frame.has_background,
-            [
-                (
-                    Some(AppearanceScheme::Light),
-                    "settings_view.appearance.mode_light",
-                ),
-                (
-                    Some(AppearanceScheme::Dark),
-                    "settings_view.appearance.mode_dark",
-                ),
-                (None, "settings_view.appearance.follow_system"),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(index, (scheme, key))| {
-                let selected = match scheme {
-                    None => settings.appearance.follow_system_appearance,
-                    Some(scheme) => {
-                        !settings.appearance.follow_system_appearance
-                            && settings.appearance.manual_scheme == Some(scheme)
-                    }
-                };
-                let dispatch = bindings.dispatch.clone();
-                compact_pill_item(
-                    &frame.tokens,
-                    SharedString::from(format!("onboarding-mode-{index}")),
-                    frame.i18n.t(key),
-                    selected,
-                    move |window, cx| {
-                        dispatch(OnboardingRequest::SetAppearanceMode(scheme), window, cx);
-                    },
-                )
-            })
-            .collect(),
+            mode_active_index,
+            control_motion,
+            mode_options
+                .into_iter()
+                .enumerate()
+                .map(|(index, (scheme, key))| {
+                    let selected = match scheme {
+                        None => settings.appearance.follow_system_appearance,
+                        Some(scheme) => {
+                            !settings.appearance.follow_system_appearance
+                                && settings.appearance.manual_scheme == Some(scheme)
+                        }
+                    };
+                    let dispatch = bindings.dispatch.clone();
+                    let view = view.clone();
+                    let tokens = frame.tokens;
+                    compact_pill_item(
+                        &frame.tokens,
+                        SharedString::from(format!("onboarding-mode-{index}")),
+                        frame.i18n.t(key),
+                        selected,
+                        move |window, cx| {
+                            let _ = view.update(cx, |view, cx| {
+                                view.begin_control_motion(
+                                    ONBOARDING_MODE_CONTROL_ID,
+                                    &tokens,
+                                    mode_active_index,
+                                    index,
+                                    cx,
+                                );
+                            });
+                            dispatch(OnboardingRequest::SetAppearanceMode(scheme), window, cx);
+                        },
+                    )
+                })
+                .collect(),
         ),
     );
 
     let edit_dark = frame.edit_scheme.unwrap_or(frame.system_dark);
+    let scheme_active_index = usize::from(edit_dark);
     let mut theme_rows = vec![
         mode_row,
         setting_stacked_row(
@@ -75,20 +120,35 @@ pub(crate) fn render_appearance_step(
             "settings_view.appearance.edit_scheme",
             compact_pill_bar(
                 &frame.tokens,
+                ONBOARDING_SCHEME_CONTROL_ID,
                 frame.has_background,
+                scheme_active_index,
+                control_motion,
                 [
                     (false, "settings_view.appearance.system_light"),
                     (true, "settings_view.appearance.system_dark"),
                 ]
                 .into_iter()
-                .map(|(dark, key)| {
+                .enumerate()
+                .map(|(index, (dark, key))| {
                     let dispatch = bindings.dispatch.clone();
+                    let view = view.clone();
+                    let tokens = frame.tokens;
                     compact_pill_item(
                         &frame.tokens,
                         SharedString::from(format!("onboarding-scheme-{}", u8::from(dark))),
                         frame.i18n.t(key),
                         edit_dark == dark,
                         move |window, cx| {
+                            let _ = view.update(cx, |view, cx| {
+                                view.begin_control_motion(
+                                    ONBOARDING_SCHEME_CONTROL_ID,
+                                    &tokens,
+                                    scheme_active_index,
+                                    index,
+                                    cx,
+                                );
+                            });
                             dispatch(OnboardingRequest::SetEditScheme(dark), window, cx);
                         },
                     )
@@ -208,9 +268,16 @@ pub(crate) fn render_appearance_step(
                         }))
                         .child(label),
                 )
-                .when(selected, |item| {
-                    item.child(render_icon("lucide/check.svg", 12.0, rgb(theme.accent)))
-                }),
+                .child(motion::animated_checkmark(
+                    &frame.tokens,
+                    SharedString::from(format!("onboarding-font-check-{family:?}")),
+                    svg()
+                        .path("lucide/check.svg")
+                        .size(px(12.0))
+                        .flex_none()
+                        .text_color(rgb(theme.accent)),
+                    selected,
+                )),
         );
     }
 
@@ -273,6 +340,25 @@ pub(crate) fn render_appearance_step(
     let selected_corner = settings.appearance.corner_style;
     let selected_radius = settings.appearance.border_radius;
     let selected_anim = settings.appearance.animation_speed;
+    let corner_options = [
+        (
+            CornerStyle::Circular,
+            "settings_view.appearance.corner_circular",
+        ),
+        (
+            CornerStyle::Continuous,
+            "settings_view.appearance.corner_continuous",
+        ),
+    ];
+    let corner_active_index = corner_options
+        .iter()
+        .position(|(style, _)| *style == selected_corner)
+        .unwrap_or(0);
+    let anim_active_index = frame
+        .animation_options
+        .iter()
+        .position(|(speed, _)| *speed == selected_anim)
+        .unwrap_or(0);
 
     let detail_rows = vec![
         setting_stacked_row(
@@ -280,32 +366,37 @@ pub(crate) fn render_appearance_step(
             "settings_view.appearance.corner_style",
             compact_pill_bar(
                 &frame.tokens,
+                ONBOARDING_CORNER_CONTROL_ID,
                 frame.has_background,
-                [
-                    (
-                        CornerStyle::Circular,
-                        "settings_view.appearance.corner_circular",
-                    ),
-                    (
-                        CornerStyle::Continuous,
-                        "settings_view.appearance.corner_continuous",
-                    ),
-                ]
-                .into_iter()
-                .enumerate()
-                .map(|(index, (style, key))| {
-                    let dispatch = bindings.dispatch.clone();
-                    compact_pill_item(
-                        &frame.tokens,
-                        SharedString::from(format!("onboarding-corner-{index}")),
-                        frame.i18n.t(key),
-                        selected_corner == style,
-                        move |window, cx| {
-                            dispatch(OnboardingRequest::SetCornerStyle(style), window, cx);
-                        },
-                    )
-                })
-                .collect(),
+                corner_active_index,
+                control_motion,
+                corner_options
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, (style, key))| {
+                        let dispatch = bindings.dispatch.clone();
+                        let view = view.clone();
+                        let tokens = frame.tokens;
+                        compact_pill_item(
+                            &frame.tokens,
+                            SharedString::from(format!("onboarding-corner-{index}")),
+                            frame.i18n.t(key),
+                            selected_corner == style,
+                            move |window, cx| {
+                                let _ = view.update(cx, |view, cx| {
+                                    view.begin_control_motion(
+                                        ONBOARDING_CORNER_CONTROL_ID,
+                                        &tokens,
+                                        corner_active_index,
+                                        index,
+                                        cx,
+                                    );
+                                });
+                                dispatch(OnboardingRequest::SetCornerStyle(style), window, cx);
+                            },
+                        )
+                    })
+                    .collect(),
             ),
         ),
         div()
@@ -356,19 +447,35 @@ pub(crate) fn render_appearance_step(
             "settings_view.appearance.animation",
             compact_pill_bar(
                 &frame.tokens,
+                ONBOARDING_ANIMATION_CONTROL_ID,
                 frame.has_background,
+                anim_active_index,
+                control_motion,
                 frame.animation_options
                     .iter()
                     .enumerate()
                     .map(|(index, (speed, label))| {
                         let speed = *speed;
                         let dispatch = bindings.dispatch.clone();
+                        let view = view.clone();
+                        let mut target_tokens = frame.tokens;
+                        // Preview the newly selected speed immediately (e.g. Off -> Normal).
+                        target_tokens.apply_motion(motion_profile_for_speed(speed));
                         compact_pill_item(
                             &frame.tokens,
                             SharedString::from(format!("onboarding-anim-{index}")),
                             label.clone(),
                             speed == selected_anim,
                             move |window, cx| {
+                                let _ = view.update(cx, |view, cx| {
+                                    view.begin_control_motion(
+                                        ONBOARDING_ANIMATION_CONTROL_ID,
+                                        &target_tokens,
+                                        anim_active_index,
+                                        index,
+                                        cx,
+                                    );
+                                });
                                 dispatch(OnboardingRequest::SetAnimationSpeed(speed), window, cx);
                             },
                         )

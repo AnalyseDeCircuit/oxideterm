@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use oxideterm_public_mcp::{
-    ClientRef, DomainRequest, PublicToolCall, RecordingExportFormat, RecordingRef, TerminalRef,
-    ToolEnvelope, ToolGroup,
+    ClientRef, DomainRequest, PublicToolCall, RecordingExportFormat, RecordingRef,
+    RecordingStatusTarget, RecordingsControlArgs, TerminalRef, ToolEnvelope, ToolGroup,
 };
 use oxideterm_terminal_recording::{
     AsciicastRecording, TerminalRecordingPlayback, TerminalRecordingState, TerminalRecordingStatus,
@@ -20,9 +20,165 @@ const RECORDING_CONTENT_RETENTION: Duration = Duration::from_secs(15 * 60);
 const RECORDING_ARTIFACT_MEDIA_TYPE: &str = "application/x-asciicast";
 const DEFAULT_RECORDING_ARTIFACT_NAME: &str = "terminal-recording.cast";
 
-pub enum PublicMcpRecordingStatus {
+enum PublicMcpRecordingStatus {
     Live(TerminalRef),
     Stopped(Value),
+}
+
+pub enum RecordingPaneAction {
+    Status,
+    Start(Option<String>),
+    Pause,
+    Resume,
+    Stop,
+}
+
+impl RecordingPaneAction {
+    pub fn validate(&self, state: TerminalRecordingState) -> Result<(), String> {
+        let error = match self {
+            Self::Start(_) if state != TerminalRecordingState::Idle => {
+                "The terminal is already being recorded by OxideTerm"
+            }
+            Self::Pause if state != TerminalRecordingState::Recording => {
+                "The recording is not currently running"
+            }
+            Self::Resume if state != TerminalRecordingState::Paused => {
+                "The recording is not paused"
+            }
+            _ => return Ok(()),
+        };
+        Err(error.to_owned())
+    }
+}
+
+pub struct RecordingPaneSnapshot {
+    pub status: TerminalRecordingStatus,
+    pub size: (usize, usize),
+    pub stopped_content: Option<Zeroizing<String>>,
+}
+
+type RecordingPaneResult = Result<RecordingPaneSnapshot, String>;
+
+impl PublicMcpHost {
+    pub fn recording_request(
+        &self,
+        request: DomainRequest,
+        runtime: &tokio::runtime::Handle,
+        mut pane: impl FnMut(&TerminalRef, RecordingPaneAction) -> RecordingPaneResult,
+    ) {
+        let client = &request.client_ref;
+        let result = (|| match &request.call {
+            PublicToolCall::RecordingsControl(action) => match action {
+                RecordingsControlArgs::Start {
+                    terminal_ref,
+                    title,
+                    capture_input,
+                } => {
+                    self.check_recording_start(client, terminal_ref, *capture_input)?;
+                    let snapshot = pane(terminal_ref, RecordingPaneAction::Start(title.clone()))?;
+                    let id = self.register_recording(client, terminal_ref.clone(), snapshot.size);
+                    Ok(project_live_recording(Some(&id), terminal_ref, snapshot))
+                }
+                RecordingsControlArgs::Pause { recording_ref }
+                | RecordingsControlArgs::Resume { recording_ref } => {
+                    let terminal = self
+                        .recording_terminal(client, recording_ref)
+                        .ok()
+                        .flatten()
+                        .ok_or_else(|| "The active recording handle is unavailable".to_owned())?;
+                    let action = if matches!(action, RecordingsControlArgs::Pause { .. }) {
+                        RecordingPaneAction::Pause
+                    } else {
+                        RecordingPaneAction::Resume
+                    };
+                    let snapshot = pane(&terminal, action)?;
+                    Ok(project_live_recording(
+                        Some(recording_ref),
+                        &terminal,
+                        snapshot,
+                    ))
+                }
+                RecordingsControlArgs::Stop { recording_ref } => {
+                    self.stop_recording(client, recording_ref, runtime, &mut pane)?;
+                    self.project_recording(client, recording_ref, &mut pane)
+                }
+            },
+            PublicToolCall::RecordingsStatus(args) => match &args.target {
+                RecordingStatusTarget::Recording { recording_ref } => {
+                    self.project_recording(client, recording_ref, &mut pane)
+                }
+                RecordingStatusTarget::Terminal { terminal_ref } => {
+                    let id = self
+                        .live_recordings(client, Some(terminal_ref))
+                        .into_iter()
+                        .next();
+                    let snapshot = pane(terminal_ref, RecordingPaneAction::Status)?;
+                    Ok(project_live_recording(id.as_ref(), terminal_ref, snapshot))
+                }
+            },
+            _ => unreachable!(),
+        })();
+        match result {
+            Ok(recording) => finish_serialized(request, json!({ "recording": recording })),
+            Err(error) => request.finish(ToolEnvelope::failed(error)),
+        }
+    }
+
+    pub fn stop_recordings(
+        &self,
+        client: &ClientRef,
+        terminal: Option<&TerminalRef>,
+        forget: bool,
+        runtime: &tokio::runtime::Handle,
+        mut pane: impl FnMut(&TerminalRef, RecordingPaneAction) -> RecordingPaneResult,
+    ) {
+        for id in self.live_recordings(client, terminal) {
+            let _ = self.stop_recording(client, &id, runtime, &mut pane);
+        }
+        if forget {
+            self.forget_client_recordings(client);
+        }
+    }
+
+    fn stop_recording(
+        &self,
+        client: &ClientRef,
+        id: &RecordingRef,
+        runtime: &tokio::runtime::Handle,
+        pane: &mut impl FnMut(&TerminalRef, RecordingPaneAction) -> RecordingPaneResult,
+    ) -> Result<(), String> {
+        let Some(terminal) = self.recording_terminal(client, id)? else {
+            return Ok(());
+        };
+        let snapshot = pane(&terminal, RecordingPaneAction::Stop)?;
+        let content = snapshot
+            .stopped_content
+            .ok_or_else(|| "The terminal recorder is no longer active".to_owned())?;
+        self.finish_recording(client, id, snapshot.status, snapshot.size, content, runtime)
+    }
+
+    fn project_recording(
+        &self,
+        client: &ClientRef,
+        id: &RecordingRef,
+        pane: &mut impl FnMut(&TerminalRef, RecordingPaneAction) -> RecordingPaneResult,
+    ) -> Result<Value, String> {
+        match self.recording_status(client, id)? {
+            PublicMcpRecordingStatus::Live(terminal) => {
+                let snapshot = pane(&terminal, RecordingPaneAction::Status)?;
+                Ok(project_live_recording(Some(id), &terminal, snapshot))
+            }
+            PublicMcpRecordingStatus::Stopped(value) => Ok(value),
+        }
+    }
+}
+
+fn project_live_recording(
+    id: Option<&RecordingRef>,
+    terminal: &TerminalRef,
+    snapshot: RecordingPaneSnapshot,
+) -> Value {
+    live_recording_projection(id, terminal, snapshot.status, snapshot.size)
 }
 
 impl PublicMcpBackground {
@@ -148,7 +304,7 @@ impl PublicMcpBackground {
 }
 
 impl PublicMcpHost {
-    pub fn check_recording_start(
+    fn check_recording_start(
         &self,
         client_ref: &ClientRef,
         terminal_ref: &TerminalRef,
@@ -174,7 +330,7 @@ impl PublicMcpHost {
         self.make_public_mcp_recording_capacity(client_ref)
     }
 
-    pub fn register_recording(
+    fn register_recording(
         &self,
         client_ref: &ClientRef,
         terminal_ref: TerminalRef,
@@ -200,7 +356,7 @@ impl PublicMcpHost {
         recording_ref
     }
 
-    pub fn live_recordings(
+    fn live_recordings(
         &self,
         client_ref: &ClientRef,
         terminal_ref: Option<&TerminalRef>,
@@ -217,7 +373,7 @@ impl PublicMcpHost {
             .collect()
     }
 
-    pub fn recording_status(
+    fn recording_status(
         &self,
         client_ref: &ClientRef,
         recording_ref: &RecordingRef,
@@ -225,7 +381,7 @@ impl PublicMcpHost {
         recording_status(&self.recordings.lock(), client_ref, recording_ref)
     }
 
-    pub fn recording_terminal(
+    fn recording_terminal(
         &self,
         client_ref: &ClientRef,
         recording_ref: &RecordingRef,
@@ -238,7 +394,7 @@ impl PublicMcpHost {
             .ok_or_else(|| "The recording handle is unavailable".to_owned())
     }
 
-    pub fn finish_recording(
+    fn finish_recording(
         &self,
         client_ref: &ClientRef,
         recording_ref: &RecordingRef,
@@ -274,7 +430,7 @@ impl PublicMcpHost {
         Ok(())
     }
 
-    pub fn forget_client_recordings(&self, client_ref: &ClientRef) {
+    fn forget_client_recordings(&self, client_ref: &ClientRef) {
         self.revoke_public_mcp_client_recording_content(client_ref);
         self.recordings
             .lock()
@@ -390,7 +546,7 @@ fn recording_status(
     )))
 }
 
-pub fn live_recording_projection(
+fn live_recording_projection(
     recording_ref: Option<&RecordingRef>,
     terminal_ref: &TerminalRef,
     status: TerminalRecordingStatus,

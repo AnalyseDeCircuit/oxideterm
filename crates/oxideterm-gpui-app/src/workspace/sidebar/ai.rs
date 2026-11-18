@@ -59,54 +59,6 @@ pub(in crate::workspace) use oxideterm_gpui_ai::state::{
     AiAcpSessionState, ai_acp_session_state, ai_message_backend_for_stream,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::workspace) enum AiHeaderAction {
-    ArchivedConversations,
-    NewChat,
-    Settings,
-}
-
-impl WorkspaceApp {
-    fn render_ai_menu_action(
-        &self,
-        item: Div,
-        disabled: bool,
-        loading: bool,
-        hover_bg: Option<Rgba>,
-        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> Div {
-        // AI safety/chat menus are Radix dropdown-style command rows in Tauri.
-        // Keep this as a single WorkspaceApp listener. Passing a cx.listener
-        // through another cx.listener re-enters the same entity and trips GPUI's
-        // update guard on menu clicks.
-        let item = context_menu_actionable_row(
-            item,
-            disabled,
-            loading,
-            ContextMenuActionableStyle {
-                hover_background: hover_bg,
-                hover_text_color: None,
-            },
-        );
-        context_menu_action(
-            item,
-            disabled,
-            loading,
-            cx.listener(move |this, event, window, cx| {
-                this.ai.state.update(cx, |ai, _cx| {
-                    ai.set_chat_popover_open(AiChatPopover::Menu, false);
-                    ai.set_chat_popover_open(AiChatPopover::ConversationList, false);
-                    ai.set_chat_popover_open(AiChatPopover::Safety, false);
-                });
-                listener(this, event, window, cx);
-                cx.stop_propagation();
-                cx.notify();
-            }),
-        )
-    }
-}
-
 include!("ai/render.rs");
 include!("ai/input.rs");
 include!("ai/images.rs");

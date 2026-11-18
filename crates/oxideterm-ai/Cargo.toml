@@ -20,6 +20,9 @@ instant-distance = { version = "0.6.1", features = ["with-serde"] }
 eventsource-stream = "0.2.3"
 futures-util.workspace = true
 futures.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }

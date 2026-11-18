@@ -544,3 +544,25 @@ pub fn prepare_image_history(messages: &mut [AiChatMessage], config: &crate::AiC
         }
     }
 }
+
+#[cfg(test)]
+mod image_input_tests {
+    use super::*;
+    use base64::Engine as _;
+
+    #[test]
+    fn image_input_preparation_resizes_and_rejects_non_images() {
+        let pixels = image::RgbImage::from_pixel(2400, 1200, image::Rgb([210, 100, 40]));
+        let mut png = std::io::Cursor::new(Vec::new());
+        pixels.write_to(&mut png, image::ImageFormat::Png).unwrap();
+        let prepared = prepare_image_attachment(String::new(), png.into_inner()).unwrap();
+        assert_eq!((prepared.width, prepared.height), (2000, 1000));
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(prepared.data.as_deref().unwrap())
+            .unwrap();
+        let decoded = image::load_from_memory(&bytes).unwrap().to_rgb8();
+        assert_eq!(decoded.get_pixel(1000, 500).0, [210, 100, 40]);
+        assert!(prepare_image_attachment(String::new(), b"not an image".to_vec()).is_err());
+    }
+}
+

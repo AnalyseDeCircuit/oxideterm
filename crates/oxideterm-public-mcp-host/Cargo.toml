@@ -38,5 +38,6 @@ oxideterm-workspace = { path = "../oxideterm-workspace" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-terminal-recording = { path = "../oxideterm-terminal-recording" }
+oxideterm-session-adapter = { path = "../oxideterm-session-adapter" }
 oxideterm-terminal = { path = "../oxideterm-terminal" }
 image.workspace = true

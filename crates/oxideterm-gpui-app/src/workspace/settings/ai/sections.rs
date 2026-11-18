@@ -35,7 +35,7 @@ impl WorkspaceApp {
             .update(cx, |ai, _cx| ai.request_acp_agent_probe(agent))
         {
             self.settings_views.notify_acp(cx);
-            self.ai_sidebar_view.update(cx, |_, cx| cx.notify());
+            self.ai.transcript.update(cx, |_, cx| cx.notify());
         }
     }
 }

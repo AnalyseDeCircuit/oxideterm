@@ -61,19 +61,17 @@ impl WorkspaceApp {
                 }
             }),
             selected: Rc::new({
-                let owner = owner.clone();
+                let view = self.knowledge_workspace.view.downgrade();
                 move |id, cx| {
-                    owner
-                        .upgrade()
-                        .is_some_and(|app| app.read(cx).is_knowledge_document_selected(id, cx))
+                    view.upgrade()
+                        .is_some_and(|view| view.read(cx).is_knowledge_document_selected(id, cx))
                 }
             }),
             cut: Rc::new({
-                let owner = owner.clone();
+                let view = self.knowledge_workspace.view.downgrade();
                 move |id, cx| {
-                    owner
-                        .upgrade()
-                        .is_some_and(|app| app.read(cx).knowledge_note_is_cut(id, cx))
+                    view.upgrade()
+                        .is_some_and(|view| view.read(cx).knowledge_note_is_cut(id, cx))
                 }
             }),
             chevron: Rc::new(move |expanded, cx| {
@@ -91,7 +89,6 @@ impl WorkspaceApp {
             }),
         }
     }
-
 
     pub(in crate::workspace::settings) fn handle_knowledge_settings_request(
         &mut self,
@@ -140,7 +137,9 @@ impl WorkspaceApp {
                     entity.select_knowledge_collection(collection_id.clone());
                     cx.notify();
                 });
-                self.refresh_knowledge_navigator(true, cx);
+                self.knowledge_workspace.view.update(cx, |view, cx| {
+                    view.refresh_knowledge_navigator(true, cx);
+                });
                 self.settings_views.surface.update(cx, |_, cx| cx.notify());
             }
             KnowledgeSettingsRequest::DeleteCollection(delete_id, delete_name) => {
@@ -170,11 +169,15 @@ impl WorkspaceApp {
                 self.settings_views.surface.update(cx, |_, cx| cx.notify());
             }
             KnowledgeSettingsRequest::NoteMenu(menu_document) => {
-                self.open_knowledge_note_menu(menu_document.clone(), position, window, cx);
+                self.knowledge_workspace.view.update(cx, |view, cx| {
+                    view.open_knowledge_note_menu(menu_document, position, window, cx);
+                });
             }
             KnowledgeSettingsRequest::OpenInWorkspace(open_id) => {
                 self.open_knowledge_workspace_tab(window, cx);
-                self.select_knowledge_document(open_id.clone(), cx);
+                self.knowledge_workspace.view.update(cx, |view, cx| {
+                    view.select_knowledge_document(open_id, cx);
+                });
             }
             KnowledgeSettingsRequest::ToggleEmbedding => {
                 self.knowledge_page(cx).update(cx, |entity, cx| {
@@ -186,12 +189,15 @@ impl WorkspaceApp {
         }
     }
 
-
     pub(in crate::workspace) fn knowledge_document_format_label(
         &self,
         cx: &Context<Self>,
     ) -> String {
-        match self.knowledge_page(cx).read(cx).knowledge_new_document_format() {
+        match self
+            .knowledge_page(cx)
+            .read(cx)
+            .knowledge_new_document_format()
+        {
             "plaintext" => self.i18n.t("settings_view.knowledge.format_plain_text"),
             _ => self.i18n.t("settings_view.knowledge.format_markdown"),
         }

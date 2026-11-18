@@ -12,9 +12,14 @@ impl WorkspaceApp {
             cx.notify();
         });
         self.sync_settings_section_list_state(cx);
-        self.settings_workspace.read(cx).section_list.scroll_to_section(
-            SettingsTab::Knowledge, SettingsSectionId::KnowledgeDocuments, self.settings_dynamic_section_counts(cx),
-        );
+        self.settings_workspace
+            .read(cx)
+            .section_list
+            .scroll_to_section(
+                SettingsTab::Knowledge,
+                SettingsSectionId::KnowledgeDocuments,
+                self.settings_dynamic_section_counts(cx),
+            );
         cx.notify();
     }
 
@@ -27,7 +32,9 @@ impl WorkspaceApp {
             cx.notify();
         });
         self.settings_input_draft.clear();
-        self.refresh_knowledge_navigator(true, cx);
+        self.knowledge_workspace.view.update(cx, |view, cx| {
+            view.refresh_knowledge_navigator(true, cx);
+        });
         cx.notify();
     }
 
@@ -50,10 +57,14 @@ impl WorkspaceApp {
         self.knowledge_state().update(cx, |workspace, _cx| {
             workspace.insert_created_document(document);
         });
-        self.refresh_knowledge_navigator(true, cx);
+        self.knowledge_workspace.view.update(cx, |view, cx| {
+            view.refresh_knowledge_navigator(true, cx);
+        });
         {
             if open_in_workspace {
-                self.select_knowledge_document(document_id, cx);
+                self.knowledge_workspace.view.update(cx, |view, cx| {
+                    view.select_knowledge_document(document_id, cx);
+                });
             } else {
                 self.knowledge_open_external(document_id, cx);
             }
@@ -77,7 +88,9 @@ impl WorkspaceApp {
             self.knowledge_state().update(cx, |workspace, entity_cx| {
                 workspace.remove_collection(&collection_id, entity_cx);
             });
-            self.refresh_knowledge_navigator(true, cx);
+            self.knowledge_workspace.view.update(cx, |view, cx| {
+                view.refresh_knowledge_navigator(true, cx);
+            });
         }
         cx.notify();
     }
@@ -97,7 +110,9 @@ impl WorkspaceApp {
             self.knowledge_state().update(cx, |workspace, _cx| {
                 workspace.remove_document(&document_id);
             });
-            self.refresh_knowledge_navigator(true, cx);
+            self.knowledge_workspace.view.update(cx, |view, cx| {
+                view.refresh_knowledge_navigator(true, cx);
+            });
         }
         cx.notify();
     }
@@ -151,19 +166,23 @@ impl WorkspaceApp {
     ) {
         use oxideterm_gpui_settings_view::knowledge_page::EmbeddingJob;
         let job = EmbeddingJob::prepare(self.settings_store.settings(), &self.i18n);
-        self.knowledge_page(cx).update(cx, |entity, cx| {
-            match job {
-                Ok(job) => {
-                    entity.start_knowledge_embeddings(
-                        collection_id, job.provider, job.model, job.requires_api_key,
-                        job.missing_key_error, job.retrieval_error, job.partial_failure, cx,
-                    );
-                }
-                Err(message) => {
-                    entity.expand_knowledge_embedding_config();
-                    entity.set_knowledge_error(message);
-                    cx.notify();
-                }
+        self.knowledge_page(cx).update(cx, |entity, cx| match job {
+            Ok(job) => {
+                entity.start_knowledge_embeddings(
+                    collection_id,
+                    job.provider,
+                    job.model,
+                    job.requires_api_key,
+                    job.missing_key_error,
+                    job.retrieval_error,
+                    job.partial_failure,
+                    cx,
+                );
+            }
+            Err(message) => {
+                entity.expand_knowledge_embedding_config();
+                entity.set_knowledge_error(message);
+                cx.notify();
             }
         });
     }
@@ -210,7 +229,9 @@ impl WorkspaceApp {
             outcome
         });
         match outcome {
-            oxideterm_gpui_ai::knowledge::page::KnowledgeExternalSyncOutcome::NoChanges if notify_no_changes => {
+            oxideterm_gpui_ai::knowledge::page::KnowledgeExternalSyncOutcome::NoChanges
+                if notify_no_changes =>
+            {
                 self.push_ai_settings_toast(
                     self.i18n.t("settings_view.knowledge.doc_no_changes"),
                     TerminalNoticeVariant::Success,

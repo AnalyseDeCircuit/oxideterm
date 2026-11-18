@@ -2,10 +2,12 @@
 
 mod compaction;
 mod history;
+mod records;
 mod turn;
 
 pub use compaction::*;
 pub use history::*;
+pub use records::*;
 pub use turn::*;
 
 #[cfg(test)]

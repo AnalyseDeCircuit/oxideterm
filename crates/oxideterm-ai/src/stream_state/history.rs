@@ -1,10 +1,13 @@
 //! Pure history normalization, token budgeting, and cancellation transitions.
 
 use crate::{
-    AiChatMessage, AiChatRole, AiConversation, AiToolDefinition, model_context_window,
-    sanitize_for_persistence,
+    AiChatMessage, AiChatRole, AiChatStreamConfig, AiConversation, AiToolDefinition,
+    model_context_window, sanitize_for_persistence,
 };
 
+use super::compaction::{
+    ai_build_transcript_lookup_prompt_reference, ai_find_prompt_transcript_lookup_reference,
+};
 use super::turn::{set_ai_turn_status, update_ai_tool_call_status};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -827,3 +830,124 @@ Rules:
 - Keep each suggestion under 60 characters
 - Use Lucide icon names: Zap, Search, Bug, FileCode, Terminal, Settings, RefreshCw, Shield, BarChart, GitBranch, Download, Upload, Eye, Wrench, Play
 - Suggestions must be contextually relevant to the conversation"#;
+
+pub fn compose_ai_provider_history(
+    mut history: Vec<AiChatMessage>,
+    config: &AiChatStreamConfig,
+    request_content: Option<String>,
+    base_system_prompt: String,
+) -> Vec<AiChatMessage> {
+    crate::apply_chat_request_overrides(&mut history, request_content, None);
+    crate::prepare_image_history(&mut history, config);
+    crate::scope_responses_history(&mut history, config);
+    normalize_ai_stream_history_for_provider(&mut history);
+    history.insert(
+        0,
+        AiChatMessage {
+            id: "base-system".to_string(),
+            role: AiChatRole::System,
+            content: base_system_prompt,
+            timestamp_ms: 0,
+            model: None,
+            context: None,
+            thinking_content: None,
+            is_streaming: false,
+            metadata: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+            turn: None,
+            transcript_ref: None,
+            summary_ref: None,
+            branches: None,
+            suggestions: Vec::new(),
+        },
+    );
+    history
+}
+
+pub fn ai_send_budget_decision(
+    conversation: &AiConversation,
+    config: &AiChatStreamConfig,
+    history: &[AiChatMessage],
+    context_window: usize,
+) -> AiPromptBudgetDecision {
+    let response_reserve = ai_chat_response_reserve(config, context_window);
+    let breakdown = ai_prompt_token_breakdown(
+        history,
+        &config.tools,
+        &config.provider_type,
+        response_reserve,
+    );
+    let regular_messages = history
+        .iter()
+        .filter(|message| message.role != AiChatRole::System)
+        .collect::<Vec<_>>();
+    let summary_eligible_tokens = ai_summary_eligible_tokens(&regular_messages);
+    determine_ai_compression_level(AiPromptBudgetInput {
+        context_window,
+        response_reserve,
+        system_budget: breakdown
+            .system_instructions
+            .saturating_add(breakdown.tool_definitions),
+        history_tokens: breakdown.history_tokens(),
+        trimmable_history_tokens: Some(breakdown.history_tokens()),
+        summary_eligible_tokens: Some(summary_eligible_tokens),
+        can_summarize: summary_eligible_tokens > 0,
+        can_lookup_transcript: ai_find_prompt_transcript_lookup_reference(&conversation.messages)
+            .is_some(),
+        in_tool_loop: false,
+        auto_compact_threshold: None,
+        transcript_lookup_threshold: None,
+        tool_loop_stop_threshold: None,
+        safety_margin: None,
+    })
+}
+
+pub fn ai_budget_diagnostic_payload(
+    conversation: &AiConversation,
+    config: &AiChatStreamConfig,
+    history: &[AiChatMessage],
+    context_window: usize,
+    decision: Option<AiPromptBudgetDecision>,
+    trimmed_count: usize,
+) -> serde_json::Value {
+    let response_reserve = ai_chat_response_reserve(config, context_window);
+    let breakdown = ai_prompt_token_breakdown(
+        history,
+        &config.tools,
+        &config.provider_type,
+        response_reserve,
+    );
+    let transcript_lookup_tokens = decision
+        .filter(|decision| decision.level >= 3)
+        .and_then(|_| ai_find_prompt_transcript_lookup_reference(&conversation.messages))
+        .map(ai_build_transcript_lookup_prompt_reference)
+        .map(|prompt| ai_estimated_tokens(&prompt))
+        .unwrap_or(0);
+    let previous_level = conversation
+        .session_metadata
+        .as_ref()
+        .and_then(|metadata| metadata.get("lastBudgetLevel"))
+        .and_then(serde_json::Value::as_i64);
+    serde_json::json!({
+        "requestKind": "chat",
+        "budgetLevel": decision.map(|decision| decision.level).unwrap_or(0),
+        "previousLevel": previous_level,
+        "nextLevel": decision.map(|decision| decision.level).unwrap_or(0),
+        "contextWindow": context_window,
+        "responseReserve": response_reserve,
+        "systemBudget": breakdown.system_instructions
+            .saturating_add(breakdown.tool_definitions)
+            .saturating_add(transcript_lookup_tokens),
+        "historyTokens": breakdown.history_tokens(),
+        "trimmedCount": trimmed_count,
+    })
+}
+
+fn ai_chat_response_reserve(config: &crate::AiChatStreamConfig, context_window: usize) -> usize {
+    config
+        .max_response_tokens
+        .and_then(|tokens| usize::try_from(tokens).ok())
+        .filter(|tokens| *tokens > 0)
+        .unwrap_or_else(|| ai_response_reserve(context_window))
+}

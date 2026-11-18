@@ -8,6 +8,16 @@ pub type PublicMcpTerminalSession = Arc<Mutex<TerminalSession>>;
 const TERMINAL_READ_OUTPUT_LIMIT_BYTES: usize = 256 * 1024;
 const PUBLIC_MCP_TERMINAL_CAPACITY: usize = 128;
 const PUBLIC_MCP_TERMINAL_CAPACITY_PER_CLIENT: usize = 32;
+const PENDING_MOSH_OPENS_PER_CLIENT: usize = 8;
+
+pub enum PublicMcpSavedTerminal {
+    Serial(oxideterm_connections::SerialProfile),
+    Telnet(oxideterm_connections::TelnetProfile),
+    Mosh {
+        profile: oxideterm_connections::MoshProfile,
+        config: Box<oxideterm_ssh::SshConfig>,
+    },
+}
 
 impl PublicMcpHost {
     pub fn terminal(
@@ -120,6 +130,7 @@ impl PublicMcpBackground {
         session: PublicMcpTerminalSession,
     ) {
         let backend = self.clone();
+        let session = Arc::downgrade(&session);
         self.forwarding_runtime.spawn_blocking(move || {
             let PublicToolCall::FindTerminal(args) = &request.call else {
                 return;
@@ -129,9 +140,17 @@ impl PublicMcpBackground {
             }
             let terminal_ref = args.terminal_ref.clone();
             let limit = args.limit as usize;
+            let Some(session) = session.upgrade() else {
+                request.finish(ToolEnvelope::failed("The terminal handle is unavailable"));
+                return;
+            };
             let matches = session.lock().search_matches(&args.query);
             let suspended = backend.admission.lock();
-            if request.is_cancelled() || *suspended {
+            if request.is_cancelled() {
+                return;
+            }
+            if *suspended {
+                request.finish(ToolEnvelope::failed("The OxideTerm workspace is locked"));
                 return;
             }
             if !backend
@@ -175,7 +194,7 @@ impl PublicMcpBackground {
 }
 
 pub struct PublicMcpTerminalSerialState {
-    pub port_available: bool,
+    pub port_available: Option<bool>,
     pub can_reconnect: bool,
     pub data_terminal_ready: bool,
     pub request_to_send: bool,
@@ -276,4 +295,108 @@ fn bounded_terminal_lines(
     }
     let truncated = selected.len() < all_lines.len() || lines.len() < selected.len();
     (lines, truncated)
+}
+
+impl PublicMcpHost {
+    pub fn saved_terminal_profile(
+        &mut self,
+        client: &ClientRef,
+        reference: &ConnectionRef,
+        store: &ConnectionStore,
+    ) -> Result<PublicMcpSavedTerminal, &'static str> {
+        let key = self
+            .connection_key(client, reference, store)
+            .ok_or("The connection handle is unavailable")?;
+        if key.starts_with(CONNECTION_KEY_SSH_PREFIX) {
+            return Err("SSH terminals require an acquired node_ref source");
+        }
+        if let Some(id) = key.strip_prefix(CONNECTION_KEY_SERIAL_PREFIX) {
+            return store
+                .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == id)
+                .cloned()
+                .map(PublicMcpSavedTerminal::Serial)
+                .ok_or("The saved serial profile no longer exists");
+        }
+        if let Some(id) = key.strip_prefix(CONNECTION_KEY_TELNET_PREFIX) {
+            return store
+                .telnet_profiles()
+                .iter()
+                .find(|profile| profile.id == id)
+                .cloned()
+                .map(PublicMcpSavedTerminal::Telnet)
+                .ok_or("The saved Telnet profile no longer exists");
+        }
+        if let Some(id) = key.strip_prefix(CONNECTION_KEY_MOSH_PREFIX) {
+            self.pending_terminal_opens
+                .retain(|_, pending| !pending.request.is_cancelled());
+            if self
+                .pending_terminal_opens
+                .values()
+                .filter(|pending| &pending.client_ref == client)
+                .count()
+                >= PENDING_MOSH_OPENS_PER_CLIENT
+            {
+                return Err("Too many Mosh terminal opens are waiting for authentication");
+            }
+            let profile = store
+                .get_mosh_profile(id)
+                .cloned()
+                .ok_or("The saved Mosh profile no longer exists")?;
+            let auth = oxideterm_session_adapter::auth_method_from_saved_auth(store, &profile.auth)
+                .ok_or("The saved Mosh profile requires credentials that are not available")?;
+            let config = Box::new(oxideterm_ssh::SshConfig {
+                host: profile.host.clone(),
+                port: profile.ssh_port,
+                username: profile.username.clone(),
+                auth,
+                identity_agent: profile.identity_agent.clone(),
+                legacy_ssh_compatibility: profile.legacy_ssh_compatibility,
+                strict_host_key_checking: true,
+                ..Default::default()
+            });
+            return Ok(PublicMcpSavedTerminal::Mosh { profile, config });
+        }
+        if key.starts_with(CONNECTION_KEY_DESKTOP_PREFIX) {
+            return Err("Remote desktop profiles must be opened with desktops_open");
+        }
+        Err("The saved connection does not provide a terminal transport")
+    }
+
+    pub fn revoke_pending_terminal_opens(&mut self, client: &ClientRef) {
+        for (_, pending) in self
+            .pending_terminal_opens
+            .extract_if(|_, pending| &pending.client_ref == client)
+        {
+            pending
+                .request
+                .finish(ToolEnvelope::failed("The MCP client authorization changed"));
+        }
+    }
+
+    pub fn prepare_node_connection(
+        &mut self,
+        request: &DomainRequest,
+        store: &ConnectionStore,
+        settings: &oxideterm_settings::PersistedSettings,
+    ) -> Result<(String, String, oxideterm_ssh::SshConfig), &'static str> {
+        let PublicToolCall::ConnectNode(args) = &request.call else {
+            unreachable!()
+        };
+        let id = self
+            .connection_id(&request.client_ref, &args.connection_ref, store)
+            .ok_or("The connection handle is unavailable")?;
+        if !self.node_capacity_available(&request.client_ref) {
+            return Err("The retained SSH node lease limit has been reached");
+        }
+        let connection = store
+            .get(&id)
+            .ok_or("The saved connection no longer exists")?;
+        let config = oxideterm_session_adapter::ssh_config_from_saved_connection(
+            store, settings, connection,
+        )
+        .ok_or("The saved connection requires credentials that are not available")?;
+        Ok((id, connection.name.clone(), config))
+    }
 }

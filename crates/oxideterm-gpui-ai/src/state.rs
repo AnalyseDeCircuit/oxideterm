@@ -47,6 +47,7 @@ mod model;
 pub use model::*;
 pub use stream_apply::*;
 mod stream_apply;
+mod stream_records;
 
 pub mod agents;
 pub mod history;
@@ -553,6 +554,70 @@ impl AiWorkspaceEntity {
             text,
         );
         true
+    }
+
+    pub fn chat_autocomplete_items(
+        &self,
+        backend: oxideterm_settings::AiActiveBackend,
+        skill_catalog: impl FnOnce() -> Vec<(String, String)>,
+    ) -> Vec<oxideterm_ai::AiAutocompleteCandidate> {
+        use oxideterm_ai::{AiAutocompleteCandidate, AiAutocompleteKind, ai_autocomplete_candidates, ai_input_token_at_cursor};
+
+        if !self.chat_ui().input_focused || self.chat_ui().autocomplete_suppressed {
+            return Vec::new();
+        }
+        let draft = &self.chat_ui().draft;
+        let mut candidates = ai_autocomplete_candidates(draft, draft.len());
+        let input_token = ai_input_token_at_cursor(draft, draft.len());
+        if input_token.token_type != Some(oxideterm_ai::AiInputTokenType::Slash) {
+            return candidates;
+        }
+        let partial = input_token.partial.to_lowercase();
+        for (id, description) in skill_catalog() {
+            if id.to_lowercase().starts_with(&partial)
+                && !candidates.iter().any(|candidate| candidate.name == id)
+            {
+                candidates.push(AiAutocompleteCandidate {
+                    kind: AiAutocompleteKind::Slash,
+                    name: id,
+                    description,
+                    description_is_i18n_key: false,
+                    accepts_value: true,
+                });
+            }
+        }
+        if backend != oxideterm_settings::AiActiveBackend::Acp {
+            return candidates;
+        }
+        let Some(session) = self
+            .conversation_state()
+            .active_conversation()
+            .and_then(ai_acp_session_state)
+        else {
+            return candidates;
+        };
+        for command in session.available_commands {
+            let Some(name) = command.get("name").and_then(serde_json::Value::as_str) else {
+                continue;
+            };
+            if !name.to_lowercase().starts_with(&partial)
+                || candidates.iter().any(|candidate| candidate.name == name)
+            {
+                continue;
+            }
+            candidates.push(AiAutocompleteCandidate {
+                kind: AiAutocompleteKind::Slash,
+                name: name.to_string(),
+                description: command
+                    .get("description")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                description_is_i18n_key: false,
+                accepts_value: command.get("input").is_some_and(|input| !input.is_null()),
+            });
+        }
+        candidates
     }
 
     pub fn apply_chat_autocomplete(&mut self, candidate: &oxideterm_ai::AiAutocompleteCandidate) {
@@ -1322,6 +1387,10 @@ impl AiWorkspaceEntity {
             .and_then(|id| self.safety_modes_by_conversation.get(id))
             .copied()
             .unwrap_or(oxideterm_gpui_ui::ai::AiSafetyMode::Default)
+    }
+
+    pub(crate) fn chat_initialized(&self) -> bool {
+        self.chat_initialized
     }
 
     pub fn ensure_chat_initialized(&mut self, path: PathBuf, cx: &mut Context<Self>) {
@@ -3838,7 +3907,6 @@ impl AiWorkspaceEntity {
         if !drain.items.is_empty() {
             self.chat_stream_deliveries.extend(drain.items);
             cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
-            cx.notify();
         }
         drain.outcome.backlog_remaining
     }
