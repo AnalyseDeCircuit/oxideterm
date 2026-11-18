@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use super::{
+use crate::state::{
     QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandAvailability,
     QuickCommandCategoryDraft, QuickCommandEditorDraft, QuickCommandImportResult,
     QuickCommandImportStrategy, QuickCommandsSnapshot, QuickCommandsState,
@@ -13,7 +13,7 @@ use oxideterm_quick_commands::{
 };
 
 impl QuickCommandsState {
-    pub(in crate::workspace) fn load(settings_path: &Path) -> Self {
+    pub fn load(settings_path: &Path) -> Self {
         let mut state = Self {
             settings_path: settings_path.to_path_buf(),
             categories: default_quick_command_categories(),
@@ -51,7 +51,7 @@ impl QuickCommandsState {
         visible_quick_commands_for_management(&self.commands, &self.active_category, &self.query)
     }
 
-    pub(in crate::workspace) fn upsert_command(&mut self, draft: QuickCommandDraft) {
+    pub fn upsert_command(&mut self, draft: QuickCommandDraft) {
         let updated_at = now_ms();
         let mut commands = self.commands.clone();
         if !upsert_quick_command(&mut commands, &self.categories, draft, updated_at) {
@@ -73,10 +73,7 @@ impl QuickCommandsState {
         }
     }
 
-    pub(in crate::workspace) fn upsert_editor_command(
-        &mut self,
-        draft: QuickCommandEditorDraft,
-    ) -> bool {
+    pub(crate) fn upsert_editor_command(&mut self, draft: QuickCommandEditorDraft) -> bool {
         let updated_at = now_ms();
         let command = QuickCommand {
             id: draft.id.unwrap_or_else(new_quick_command_id),
@@ -95,14 +92,15 @@ impl QuickCommandsState {
             parameters: draft
                 .parameters
                 .into_iter()
-                .map(|parameter| super::QuickCommandParameter {
+                .map(|parameter| crate::state::QuickCommandParameter {
                     name: parameter.name.trim().to_string(),
                     label: parameter.label.trim().to_string(),
                     kind: parameter.kind,
-                    default_value: (parameter.kind != super::QuickCommandParameterKind::Secret)
+                    default_value: (parameter.kind
+                        != crate::state::QuickCommandParameterKind::Secret)
                         .then(|| trimmed_optional(parameter.default_value))
                         .flatten(),
-                    choices: if parameter.kind == super::QuickCommandParameterKind::Secret {
+                    choices: if parameter.kind == crate::state::QuickCommandParameterKind::Secret {
                         Vec::new()
                     } else {
                         split_choices(&parameter.choices)
@@ -153,13 +151,13 @@ impl QuickCommandsState {
         }
     }
 
-    pub(in crate::workspace) fn delete_command(&mut self, id: &str) {
+    pub fn delete_command(&mut self, id: &str) {
         if delete_quick_command(&mut self.commands, id) {
             self.persist();
         }
     }
 
-    pub(in crate::workspace) fn move_command(&mut self, id: &str, offset: isize) -> bool {
+    pub fn move_command(&mut self, id: &str, offset: isize) -> bool {
         if offset == 0 {
             return false;
         }
@@ -316,11 +314,11 @@ impl QuickCommandsState {
         }
     }
 
-    pub(in crate::workspace) fn export_snapshot_json(&self) -> Result<String, String> {
+    pub fn export_snapshot_json(&self) -> Result<String, String> {
         oxideterm_quick_commands::export_snapshot_json(&self.settings_path)
     }
 
-    pub(in crate::workspace) fn apply_snapshot_json(
+    pub fn apply_snapshot_json(
         &mut self,
         snapshot_json: &str,
         strategy: QuickCommandImportStrategy,
@@ -336,7 +334,7 @@ impl QuickCommandsState {
         result
     }
 
-    pub(in crate::workspace) fn reload_from_store(&mut self) {
+    pub fn reload_from_store(&mut self) {
         match oxideterm_quick_commands::load_snapshot(&self.settings_path) {
             Ok(snapshot) => {
                 self.categories = snapshot.categories;
@@ -401,7 +399,7 @@ mod quick_command_tests {
         QUICK_COMMANDS_SCHEMA_VERSION, QuickCommand, QuickCommandCategoryDraft, QuickCommandDraft,
         QuickCommandImportStrategy, QuickCommandsSnapshot, QuickCommandsState, now_ms,
     };
-    use crate::workspace::quick_commands::{QuickCommandCategory, QuickCommandIcon};
+    use crate::state::{QuickCommandCategory, QuickCommandIcon};
     use std::fs;
     use std::path::PathBuf;
 

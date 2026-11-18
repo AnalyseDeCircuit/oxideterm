@@ -1,63 +1,6 @@
 use crate::workspace::ai_state::{AiQueuedChatTurn, AiStandardConfirmKind};
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn copy_ai_message(
-        &mut self,
-        message_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        let ai = self.ai.state.read(cx);
-        let Some(conversation) = ai.conversation_state().active_conversation() else {
-            return;
-        };
-        let stored = ai.history.store.clone().zip(
-            ai.history
-                .pages
-                .get(&conversation.id)
-                .and_then(|page| page.descriptions.get(&message_id))
-                .cloned(),
-        );
-        let Some((store, description)) = stored else {
-            if let Some(message) = conversation
-                .messages
-                .iter()
-                .find(|message| message.id == message_id)
-            {
-                cx.write_to_clipboard(ClipboardItem::new_string(message.content.clone()));
-            }
-            return;
-        };
-        let conversation = conversation.id.clone();
-        let runtime = self.forwarding_runtime.clone();
-        let task = cx.spawn(async move |weak, cx| {
-            let result = runtime
-                .spawn_blocking(move || {
-                    store.message_content(
-                        &conversation,
-                        &description.storage_id,
-                        description.revision,
-                    )
-                })
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.copy_load.take();
-                });
-                match result {
-                    Ok(Ok(content)) => cx.write_to_clipboard(ClipboardItem::new_string(content)),
-                    _ => this.push_ai_settings_toast(
-                        this.i18n.t("ai.chat.load_failed_generic"),
-                        TerminalNoticeVariant::Error,
-                        cx,
-                    ),
-                }
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.copy_load = Some(task);
-        });
-    }
-
     pub(in crate::workspace) fn open_ai_safety_confirm(&mut self, cx: &mut Context<Self>) {
         self.ai.state.update(cx, |ai, _cx| {
             ai.open_standard_chat_confirm(AiStandardConfirmKind::Safety);
@@ -77,7 +20,8 @@ impl WorkspaceApp {
             return false;
         };
         self.clear_standard_confirm_focus();
-        self.schedule_ai_standard_confirm_exit(AiStandardConfirmKind::Safety, generation, cx);
+        let delay = oxideterm_gpui_ui::motion::duration(&self.tokens, oxideterm_gpui_ui::motion::MotionDuration::Control);
+        self.ai.state.update(cx, |ai, cx| ai.schedule_standard_confirm_exit(AiStandardConfirmKind::Safety, generation, delay, cx));
         true
     }
 
@@ -99,45 +43,9 @@ impl WorkspaceApp {
             return false;
         };
         self.clear_standard_confirm_focus();
-        self.schedule_ai_standard_confirm_exit(AiStandardConfirmKind::Summarize, generation, cx);
+        let delay = oxideterm_gpui_ui::motion::duration(&self.tokens, oxideterm_gpui_ui::motion::MotionDuration::Control);
+        self.ai.state.update(cx, |ai, cx| ai.schedule_standard_confirm_exit(AiStandardConfirmKind::Summarize, generation, delay, cx));
         true
-    }
-
-    fn schedule_ai_standard_confirm_exit(
-        &mut self,
-        kind: AiStandardConfirmKind,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) {
-        let delay = oxideterm_gpui_ui::motion::duration(
-            &self.tokens,
-            oxideterm_gpui_ui::motion::MotionDuration::Control,
-        );
-        if delay.is_zero() {
-            self.finish_ai_standard_confirm_exit(kind, generation, cx);
-            return;
-        }
-        // The open flag remains set until this generation's exit frame completes.
-        cx.spawn(async move |weak, cx| {
-            Timer::after(delay).await;
-            let _ = weak.update(cx, |this, cx| {
-                if this.finish_ai_standard_confirm_exit(kind, generation, cx) {
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
-    }
-
-    fn finish_ai_standard_confirm_exit(
-        &mut self,
-        kind: AiStandardConfirmKind,
-        generation: u64,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.finish_standard_chat_confirm_exit(kind, generation)
-        })
     }
 
     pub(in crate::workspace) fn create_ai_sidebar_conversation(
@@ -146,20 +54,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> Option<String> {
         self.ensure_ai_chat_initialized(cx);
-        if !self.ai.state.read(cx).history_ready() {
-            return None;
-        }
-        let now = ai_now_ms();
-        let id = self.next_ai_chat_id(now, cx);
-        let id = self
-            .ai
-            .state
-            .update(cx, |ai, _cx| ai.create_chat_conversation(id, title, now));
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.reset_chat_for_new_conversation();
-        });
-        cx.notify();
-        Some(id)
+        self.ai.state.update(cx, |ai, cx| ai.create_sidebar_conversation(title, cx))
     }
 
     pub(in crate::workspace) fn steer_ai_chat_draft(&mut self, cx: &mut Context<Self>) {
@@ -655,143 +550,20 @@ impl WorkspaceApp {
             }
         };
         self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
-        let ai = self.ai.state.read(cx);
-        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else {
-            return;
-        };
-        let Some(store) = ai.history.store.clone() else {
-            return;
-        };
-        let branch = ai
-            .history
-            .branches
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_else(|| "main".into());
-        let launch_id = self.next_ai_chat_id(ai_now_ms(), cx);
-        let runtime = self.forwarding_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.ai.state.update(cx, |ai, _| {
-            ai.chat_launches
-                .insert(conversation_id.clone(), launch_id.clone());
-            ai.set_conversation_loading(&conversation_id, true);
-            ai.persist_chat_state();
-            ai.history_barrier(sender);
-        });
-        let target = conversation_id.clone();
-        let task = cx.spawn(async move |weak, cx| {
-            if receiver.await != Ok(true) {
-                return;
-            }
-            let id = conversation_id.clone();
-            let source_branch = branch.clone();
-            let result = runtime
-                .spawn_blocking(move || store.retry_messages(&id, &source_branch))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                let ai = this.ai.state.read(cx);
-                if ai.history.quitting
-                    || !ai.chat_launch_matches(&conversation_id, Some(&launch_id))
-                    || ai
-                        .history
-                        .branches
-                        .get(&conversation_id)
-                        .is_some_and(|current| current != &branch)
-                {
-                    return;
-                }
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.launches.remove(&conversation_id);
-                    ai.set_conversation_loading(&conversation_id, false);
-                });
-                let Ok(Ok(messages)) = result else {
-                    this.ai.state.update(cx, |ai, _| ai.history_load_failed());
-                    cx.notify();
-                    return;
-                };
-                let recovery = messages
-                    .last()
-                    .and_then(oxideterm_ai::agent::recoverable_checkpoint)
-                    .map(|checkpoint| checkpoint.resume_prompt());
-                if recovery.is_none() {
-                    let Some(user) = messages
-                        .into_iter()
-                        .find(|message| message.role == AiChatRole::User)
-                    else {
-                        return;
-                    };
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.capture_history_before_edit(&conversation_id);
-                        if let Some(conversation) = ai
-                            .conversation_state_mut()
-                            .conversations
-                            .iter_mut()
-                            .find(|conversation| conversation.id == conversation_id)
-                        {
-                            if let Some(index) = conversation
-                                .messages
-                                .iter()
-                                .position(|message| message.id == user.id)
-                            {
-                                conversation.messages.truncate(index);
-                            } else {
-                                conversation.messages.clear();
-                            }
-                            conversation.messages.push(user);
-                        }
-                        ai.truncate_conversation_after_last_user(&conversation_id, ai_now_ms());
-                    });
-                }
-                this.start_ai_chat_stream_after_api_key_lookup(
-                    conversation_id,
-                    stream_config,
-                    None,
-                    recovery,
-                    cx,
-                );
-                cx.notify();
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.launches.insert(target, task);
-        });
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn request_delete_ai_message(
-        &mut self,
-        message_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
+        let workspace = cx.weak_entity();
         self.ai.state.update(cx, |ai, cx| {
-            ai.open_chat_confirm(
-                ai_state::AiChatConfirmKind::DeleteMessage {
-                    message_id: Arc::from(message_id),
-                },
-                cx,
-            );
+            ai.regenerate_message(stream_config, move |pending, cx| {
+                let _ = workspace.update(cx, |app, cx| {
+                    app.start_ai_chat_stream_after_api_key_lookup(
+                        pending.conversation_id, pending.config, pending.request_content, pending.task_system_prompt, cx,
+                    );
+                });
+            }, cx)
         });
     }
 
-    pub(in crate::workspace) fn delete_ai_message(
-        &mut self,
-        message_id: &str,
-        cx: &mut Context<Self>,
-    ) {
-        let deleted = self.ai.state.update(cx, |ai, _cx| {
-            ai.delete_active_message(message_id, ai_now_ms())
-        });
-        if !deleted {
-            return;
-        }
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.remove_thinking_expansion(message_id);
-        });
-        cx.notify();
+    pub(in crate::workspace) fn delete_ai_message(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        self.ai.state.update(cx, |ai, cx| ai.delete_ai_message(message_id, cx));
     }
 
     pub(in crate::workspace) fn set_ai_safety_mode_default(&mut self, cx: &mut Context<Self>) {
@@ -838,140 +610,20 @@ impl WorkspaceApp {
         self.ime_marked_text = None;
     }
 
-    pub(in crate::workspace) fn start_edit_ai_message(
-        &mut self,
-        message_id: String,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        let ai = self.ai.state.read(cx);
-        let Some(conversation_id) = ai.conversation_state().active_conversation_id.clone() else {
-            return;
-        };
-        let Some(store) = ai.history.store.clone() else {
-            return;
-        };
-        let branch = ai
-            .history
-            .branches
-            .get(&conversation_id)
-            .cloned()
-            .unwrap_or_else(|| "main".into());
-        let runtime = self.forwarding_runtime.clone();
-        let (sender, receiver) = tokio::sync::oneshot::channel();
-        self.ai.state.update(cx, |ai, _| {
-            ai.set_conversation_loading(&conversation_id, true);
-            ai.persist_chat_state();
-            ai.history_barrier(sender);
-        });
-        let task = cx.spawn(async move |weak, cx| {
-            if receiver.await != Ok(true) {
-                return;
-            }
-            let id = conversation_id.clone();
-            let source_branch = branch.clone();
-            let message = message_id.clone();
-            let result = runtime
-                .spawn_blocking(move || store.message_by_id(&id, &source_branch, &message))
-                .await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.state.update(cx, |ai, _| {
-                    ai.history.edit_load.take();
-                    ai.set_conversation_loading(&conversation_id, false);
-                    if ai.history.quitting
-                        || ai.conversation_state().active_conversation_id.as_deref()
-                            != Some(&conversation_id)
-                        || ai
-                            .history
-                            .branches
-                            .get(&conversation_id)
-                            .is_some_and(|current| current != &branch)
-                    {
-                        return;
-                    }
-                    match result {
-                        Ok(Ok(message)) if message.role == AiChatRole::User => {
-                            let content = message.content.clone();
-                            if let Some(slot) = ai
-                                .conversation_state_mut()
-                                .active_conversation_mut()
-                                .and_then(|conversation| {
-                                    conversation
-                                        .messages
-                                        .iter_mut()
-                                        .find(|item| item.id == message_id)
-                                })
-                            {
-                                *slot = message;
-                            }
-                            ai.begin_message_edit(message_id, content);
-                            ai.set_model_selector_search_focused(false);
-                        }
-                        _ => ai.history_load_failed(),
-                    }
-                });
-                this.ime_marked_text = None;
-                cx.notify();
-            });
-        });
-        self.ai.state.update(cx, |ai, _| {
-            ai.history.edit_load = Some(task);
-        });
-        cx.notify();
+    pub(in crate::workspace) fn start_edit_ai_message(&mut self, message_id: String, cx: &mut Context<Self>) {
+        let workspace = cx.weak_entity();
+        self.ai.state.update(cx, |ai, cx| ai.load_message_edit(message_id, move |cx| {
+            let _ = workspace.update(cx, |app, _| app.ime_marked_text = None);
+        }, cx));
     }
 
     pub(in crate::workspace) fn cancel_edit_ai_message(&mut self, cx: &mut Context<Self>) {
-        self.ai.state.update(cx, |ai, _cx| {
-            if ai.history.edit_load.take().is_some() {
-                if let Some(id) = ai.conversation_state().active_conversation_id.clone() {
-                    ai.set_conversation_loading(&id, false);
-                }
-            }
-            ai.clear_message_edit();
-        });
+        self.ai.state.update(cx, |ai, cx| ai.cancel_message_edit(cx));
         self.ime_marked_text = None;
-        cx.notify();
     }
 
     pub(in crate::workspace) fn save_ai_message_edit(&mut self, cx: &mut Context<Self>) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        let edited_content = self
-            .ai
-            .state
-            .read(cx)
-            .chat_ui()
-            .editing_message_draft
-            .trim()
-            .to_string();
-        if edited_content.is_empty() {
-            cx.notify();
-            return;
-        }
-        let Some(message_id) = self.ai.state.read(cx).chat_ui().editing_message_id.clone() else {
-            return;
-        };
-        let editable = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation()
-            .and_then(|conversation| {
-                conversation
-                    .messages
-                    .iter()
-                    .find(|message| message.id == message_id)
-            })
-            .is_some_and(|message| message.role == AiChatRole::User);
-        if !editable {
-            return;
-        }
+        let Some((message_id, edited_content)) = self.ai.state.read(cx).editable_message_draft() else { return };
         let stream_config = match self.resolve_ai_stream_config(cx) {
             Ok(config) => config,
             Err(error) => {
@@ -982,26 +634,8 @@ impl WorkspaceApp {
         };
         self.record_ai_memory_usage(&stream_config.memory_entry_ids, cx);
 
-        let now = ai_now_ms();
-        let new_user_id = self.next_ai_chat_id(now, cx);
         let request_content = Some(edited_content.clone());
-        let backend = ai_message_backend_for_stream(&stream_config);
-        let conversation_id = self.ai.state.update(cx, |ai, _cx| {
-            ai.replace_active_user_message(
-                &message_id,
-                new_user_id,
-                edited_content,
-                stream_config.model.clone(),
-                backend,
-                now,
-            )
-        });
-        let Some(conversation_id) = conversation_id else {
-            return;
-        };
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.clear_message_edit();
-        });
+        let Some(conversation_id) = self.ai.state.update(cx, |ai, cx| ai.commit_message_edit(&message_id, edited_content, &stream_config, cx)) else { return };
         self.ime_marked_text = None;
         self.start_ai_chat_stream_after_api_key_lookup(
             conversation_id,
@@ -1010,118 +644,6 @@ impl WorkspaceApp {
             None,
             cx,
         );
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn switch_ai_message_branch(
-        &mut self,
-        message_id: String,
-        branch_index: usize,
-        cx: &mut Context<Self>,
-    ) {
-        if self.ai.state.read(cx).chat_is_loading() {
-            cx.notify();
-            return;
-        }
-        let reference = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation()
-            .and_then(|conversation| {
-                let message = conversation
-                    .messages
-                    .iter()
-                    .find(|message| message.id == message_id)?;
-                let range = message.branches.as_ref()?.refs.get(&branch_index)?.clone();
-                Some((conversation.id.clone(), range))
-            });
-        if let Some((conversation, range)) = reference {
-            let Some(store) = self.ai.state.read(cx).history.store.clone() else {
-                return;
-            };
-            let launch = self.next_ai_chat_id(ai_now_ms(), cx);
-            let (sender, receiver) = tokio::sync::oneshot::channel();
-            self.ai.state.update(cx, |ai, _| {
-                ai.chat_launches
-                    .insert(conversation.clone(), launch.clone());
-                ai.set_conversation_loading(&conversation, true);
-                ai.history_barrier(sender);
-            });
-            let runtime = self.forwarding_runtime.clone();
-            let owner = conversation.clone();
-            let task = cx.spawn(async move |weak, cx| {
-                if receiver.await != Ok(true) {
-                    return;
-                }
-                let id = conversation.clone();
-                let result = runtime
-                    .spawn_blocking(move || {
-                        let mut cursor = None;
-                        let mut pages = Vec::new();
-                        loop {
-                            let page = store.range_messages(&id, &range, cursor.as_ref(), 50)?;
-                            pages.push(page.messages);
-                            cursor = page.before;
-                            if cursor.is_none() {
-                                break;
-                            }
-                        }
-                        Ok::<_, anyhow::Error>(
-                            pages.into_iter().rev().flatten().collect::<Vec<_>>(),
-                        )
-                    })
-                    .await;
-                let _ = weak.update(cx, |this, cx| {
-                    this.ai.state.update(cx, |ai, _| {
-                        ai.history.launches.remove(&conversation);
-                        if !ai.chat_launch_matches(&conversation, Some(&launch)) {
-                            return;
-                        }
-                        ai.set_conversation_loading(&conversation, false);
-                        if ai.conversation_state().active_conversation_id.as_deref()
-                            != Some(&conversation)
-                        {
-                            return;
-                        }
-                        if let Ok(Ok(tail)) = result {
-                            if let Some(branches) = ai
-                                .conversation_state_mut()
-                                .active_conversation_mut()
-                                .and_then(|conversation| {
-                                    conversation
-                                        .messages
-                                        .iter_mut()
-                                        .find(|message| message.id == message_id)
-                                })
-                                .and_then(|message| message.branches.as_mut())
-                            {
-                                branches.tails.insert(branch_index, tail);
-                            }
-                            ai.switch_active_message_branch(&message_id, branch_index, ai_now_ms());
-                            ai.clear_message_edit();
-                        } else {
-                            ai.history_load_failed();
-                        }
-                    });
-                    cx.notify();
-                });
-            });
-            self.ai.state.update(cx, |ai, _| {
-                ai.history.launches.insert(owner, task);
-            });
-            return;
-        }
-        let switched = self.ai.state.update(cx, |ai, _cx| {
-            ai.switch_active_message_branch(&message_id, branch_index, ai_now_ms())
-        });
-        if !switched {
-            return;
-        }
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.clear_message_edit();
-        });
         cx.notify();
     }
 

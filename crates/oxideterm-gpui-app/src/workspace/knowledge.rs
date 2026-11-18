@@ -166,12 +166,7 @@ impl WorkspaceApp {
                 if let Some(window) = window {
                     window.defer(cx, move |window, cx| {
                         let _ = owner.update(cx, |app, cx| match request {
-                            KnowledgeRequest::CreateDocument(id) => {
-                                app.open_knowledge_document_dialog(id, true, window, cx)
-                            }
-                            KnowledgeRequest::CreateNotebook => {
-                                app.open_knowledge_create_dialog(cx)
-                            }
+                            KnowledgeRequest::PresentCreationDialog => cx.notify(),
                             KnowledgeRequest::Settings => app.open_knowledge_settings(window, cx),
                             KnowledgeRequest::Import(id) => {
                                 app.knowledge_import_files(id, window, cx)
@@ -299,18 +294,11 @@ impl WorkspaceApp {
     }
 
     pub(super) fn notify_knowledge_preview_selection(&self, group: u64, cx: &mut App) -> bool {
-        let Some(editor) = self.knowledge_workspace.state.read(cx).editor.clone() else {
-            return false;
-        };
-        if super::selectable_text::selectable_text_id(
-            "notes-preview",
-            editor.read(cx).document_id.as_str(),
-        ) != group
-        {
-            return false;
-        }
-        cx.notify(editor.entity_id());
-        true
+        self.knowledge_workspace.state.read(cx).preview_editor_for_group(group, cx)
+            .is_some_and(|editor| {
+                cx.notify(editor.entity_id());
+                true
+            })
     }
     pub(in crate::workspace) fn open_knowledge_workspace_tab(
         &mut self,
@@ -434,7 +422,7 @@ impl WorkspaceApp {
             Some(KnowledgePreviewFrame {
                 options,
                 text: Some(Rc::new(move |document, key, order, text, runs, links| {
-                    let group = selectable_text_id("notes-preview", document);
+                    let group = oxideterm_gpui_ai::knowledge::workspace::knowledge_preview_group(document);
                     let join_previous = key.join_previous;
                     state.render_styled_text_in_group(
                         SelectableTextRole::PlainDocument,

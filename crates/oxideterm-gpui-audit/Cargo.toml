@@ -1,0 +1,20 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-audit"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+gpui.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+parking_lot.workspace = true
+zeroize.workspace = true

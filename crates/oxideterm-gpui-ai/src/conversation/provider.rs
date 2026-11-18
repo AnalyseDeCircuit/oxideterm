@@ -348,3 +348,39 @@ fn record_prompt_usage(
         breakdown,
     });
 }
+
+impl AiWorkspaceEntity {
+    pub fn model_backend_services(&self, settings: &oxideterm_settings::AiSettings) -> AiModelBackendServices {
+        AiModelBackendServices {
+            rag_store: self.rag_store(),
+            ai_mcp_registry: self.mcp_registry().clone(),
+            ai_key_store: self.key_store().clone(),
+            ai_providers: settings.providers.clone(),
+            ai_embedding_config: settings.embedding_config.clone(),
+            agent_model_limits: oxideterm_ai::provider_views(&settings.providers)
+                .into_iter()
+                .flat_map(|provider| {
+                    provider.models.into_iter().map(move |model| {
+                        let context = super::ai_model_context_window(settings, Some(&provider.id), &model);
+                        let response: Option<i64> = None;
+                        let reasoning = settings
+                            .reasoning_model_overrides
+                            .get(&provider.id)
+                            .and_then(|models| models.get(&model))
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or("auto");
+                        let reasoning = oxideterm_ai::normalize_reasoning_level_for_model(
+                            &provider.provider_type,
+                            &model,
+                            reasoning,
+                        )
+                        .as_str()
+                        .to_owned();
+                        ((provider.id.clone(), model), (context, response, reasoning))
+                    })
+                })
+                .collect(),
+        }
+    }
+
+}

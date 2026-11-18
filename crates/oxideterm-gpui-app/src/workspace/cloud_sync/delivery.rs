@@ -264,11 +264,44 @@ impl WorkspaceApp {
         });
     }
 
-    pub(super) fn cancel_cloud_sync_confirm(&mut self, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn handle_cloud_sync_confirm_key(
+        &mut self,
+        event: &KeyDownEvent,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        use oxideterm_gpui_ui::confirm::ModalFooterKeyAction;
+        match self
+            .cloud_sync_confirm
+            .update(cx, |portal, cx| portal.handle_key(event, cx))
+        {
+            Some(ModalFooterKeyAction::Cancel) => {
+                self.apply_cloud_sync_confirm_action(ConfirmDialogAction::Cancel, cx);
+            }
+            Some(ModalFooterKeyAction::Activate(action)) => {
+                self.apply_cloud_sync_confirm_action(action, cx);
+            }
+            Some(ModalFooterKeyAction::Focus(_)) => {}
+            None => return false,
+        }
+        true
+    }
+
+    pub(super) fn apply_cloud_sync_confirm_action(
+        &mut self,
+        action: ConfirmDialogAction,
+        cx: &mut Context<Self>,
+    ) {
+        match action {
+            ConfirmDialogAction::Cancel => self.cancel_cloud_sync_confirm(cx),
+            ConfirmDialogAction::Confirm => self.confirm_cloud_sync_confirm(cx),
+        }
+    }
+
+    fn cancel_cloud_sync_confirm(&mut self, cx: &mut Context<Self>) {
         self.with_cloud_sync_runtime(cx, |sync, cx| sync.cancel_cloud_sync_confirm(cx));
     }
 
-    pub(super) fn confirm_cloud_sync_confirm(&mut self, cx: &mut Context<Self>) {
+    fn confirm_cloud_sync_confirm(&mut self, cx: &mut Context<Self>) {
         let sync = self.cloud_sync.read(cx);
         let persists = matches!(
             sync.view.confirm,

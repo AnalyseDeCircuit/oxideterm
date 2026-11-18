@@ -36,7 +36,7 @@ mod navigation;
 mod operations;
 mod state;
 use state::KnowledgeNavigatorSnapshot;
-pub use state::KnowledgeWorkspaceEntity;
+pub use state::{KnowledgeWorkspaceEntity, knowledge_preview_group};
 
 const KNOWLEDGE_WORKSPACE_SECTION_ESTIMATED_HEIGHT: f32 = 28.0;
 const KNOWLEDGE_WORKSPACE_SECTION_OVERSCAN: usize = 8;
@@ -76,8 +76,7 @@ pub enum KnowledgeRequest {
     Close(TabId, AnyWindowHandle),
     Quit,
     SaveEditorPreferences(KnowledgeEditorUiState),
-    CreateNotebook,
-    CreateDocument(String),
+    PresentCreationDialog,
     FocusDeleteConfirmation,
     Import(String),
     Settings,

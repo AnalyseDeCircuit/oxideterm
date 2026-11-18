@@ -20,6 +20,10 @@ notices:
 stats *args:
     {{ python }} scripts/project-stats.py {{ args }}
 
+# Audit Rust test quality across the current diff or optional script flags.
+audit-tests *args:
+    {{ python }} scripts/quality/audit_tests.py {{ args }}
+
 # Build and stage the CLI companion for an optional target triple.
 build-cli target="":
     bash scripts/build/build-cli.sh {{ target }}

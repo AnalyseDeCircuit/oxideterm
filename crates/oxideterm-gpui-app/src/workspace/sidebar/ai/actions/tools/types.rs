@@ -1,7 +1,4 @@
-use oxideterm_ai::tool_resources::AiOrchestratorTarget;
-
-pub(in crate::workspace) const AI_RUNTIME_STABLE_RESOURCE_LIMIT: usize = 128;
-use oxideterm_ai::tool_loop::{AiModelBackendServices, AiModelRuntimeState};
+use oxideterm_ai::tool_loop::AiModelBackendServices;
 use oxideterm_ai::tool_resources::AiOrchestratorRuntimeSnapshot;
 
 /// Concrete application adapters used only after the GPUI broker validates a
@@ -14,32 +11,6 @@ pub(in crate::workspace) struct AiLiveToolServices {
 }
 
 use oxideterm_gpui_ai::conversation::AiAcpChatLaunch;
-
-pub(in crate::workspace) enum AiRemoteFileWriteError {
-    OwnerReplaced,
-    ExpectedHashMismatch,
-    ExpectedFileMissing { path: String },
-    ExistingFileNotText { path: String },
-    Sftp(oxideterm_ssh::SftpError),
-}
-
-impl std::fmt::Debug for AiRemoteFileWriteError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // Paths, content hashes, and transport details are deliberately absent
-        // because this error can cross task and diagnostic boundaries.
-        let variant = match self {
-            Self::OwnerReplaced => "OwnerReplaced",
-            Self::ExpectedHashMismatch => "ExpectedHashMismatch",
-            Self::ExpectedFileMissing { .. } => "ExpectedFileMissing",
-            Self::ExistingFileNotText { .. } => "ExistingFileNotText",
-            Self::Sftp(_) => "Sftp",
-        };
-        formatter
-            .debug_struct("AiRemoteFileWriteError")
-            .field("variant", &variant)
-            .finish()
-    }
-}
 
 /// Separates a stale SFTP authority from an operation failure without retaining
 /// raw transfer arguments in an error's debug representation.

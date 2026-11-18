@@ -2,7 +2,13 @@
 
 use std::collections::BTreeMap;
 
+mod application;
+pub use application::*;
 mod discovery;
+mod terminal;
+pub use terminal::*;
+mod live_files;
+pub use live_files::*;
 pub use discovery::*;
 mod memory;
 pub use memory::*;

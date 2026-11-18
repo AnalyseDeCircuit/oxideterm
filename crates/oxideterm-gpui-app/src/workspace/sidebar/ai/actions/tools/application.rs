@@ -1,3 +1,8 @@
+use oxideterm_ai::tool_resources::{
+    AiForwardOperation, AiPluginAction, AiTransportLifecycle, AiSerialSessionCapture, ai_action_accepted, ai_forwarding_operation, ai_credential_scopes, ai_list_credential_metadata, ai_list_transport_profiles,
+    ai_plugin_action, ai_plugin_action_accepted,
+};
+
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -148,30 +153,22 @@ impl WorkspaceApp {
         if !self.node_is_ready_for_forwarding(&node_id) {
             return Err("The selected SSH node is not ready for forwarding.".to_string());
         }
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A forwarding action is required.".to_string())?;
-        if action == "scan_ports" {
-            self.start_port_scan(node_id, true, cx);
-            return Ok(serde_json::json!({ "accepted": true, "action": action }));
-        }
-
         let operation = ai_forwarding_operation(arguments)?;
-        let tab_id = self
-            .forwarding
-            .read(cx)
-            .tab_for_node(&node_id)
+        let action = operation.action();
+        let (operation, message_key, sync_saved_forwards) = match operation {
+            AiForwardOperation::Scan => {
+                self.start_port_scan(node_id, true, cx);
+                return Ok(ai_action_accepted(action));
+            }
+            AiForwardOperation::Create { rule } => (forwards::ForwardingRuntimeOperation::Create { rule, check_health: true }, "forwards.messages.created", true),
+            AiForwardOperation::Update { forward_id, update } => (forwards::ForwardingRuntimeOperation::Update { forward_id, update }, "forwards.messages.updated", true),
+            AiForwardOperation::Stop { forward_id } => (forwards::ForwardingRuntimeOperation::Stop { forward_id }, "forwards.messages.stopped", false),
+            AiForwardOperation::Restart { forward_id } => (forwards::ForwardingRuntimeOperation::Restart { forward_id }, "forwards.messages.restarted", false),
+            AiForwardOperation::Delete { forward_id } => (forwards::ForwardingRuntimeOperation::Delete { forward_id }, "forwards.messages.deleted", true),
+        };
+        let tab_id = self.forwarding.read(cx).tab_for_node(&node_id)
             .or_else(|| self.active_tab_id(cx))
             .ok_or_else(|| "No workspace tab is available for forwarding delivery.".to_string())?;
-        let (message_key, sync_saved_forwards) = match action {
-            "create" => ("forwards.messages.created", true),
-            "update" => ("forwards.messages.updated", true),
-            "stop" => ("forwards.messages.stopped", false),
-            "restart" => ("forwards.messages.restarted", false),
-            "delete" => ("forwards.messages.deleted", true),
-            _ => return Err("Unsupported forwarding action.".to_string()),
-        };
         self.start_forward_operation(
             tab_id,
             node_id,
@@ -180,7 +177,7 @@ impl WorkspaceApp {
             operation,
             cx,
         );
-        Ok(serde_json::json!({ "accepted": true, "action": action }))
+        Ok(ai_action_accepted(action))
     }
 
     pub(in crate::workspace) fn execute_ai_list_plugins(
@@ -225,40 +222,13 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A plugin action is required.".to_string())?;
-        if action == "open_manager" {
+        let (action, operation) = ai_plugin_action(arguments)?;
+        let plugin_id = operation.plugin_id();
+        match operation {
+        AiPluginAction::OpenManager => {
             self.open_plugin_manager_tab(window, cx);
-            return Ok(serde_json::json!({ "accepted": true, "action": action }));
         }
-        if action == "install" {
-            let package_url = arguments
-                .get("package_url")
-                .and_then(serde_json::Value::as_str)
-                .ok_or_else(|| "A plugin package URL is required.".to_string())?;
-            let parsed_url =
-                url::Url::parse(package_url).map_err(|_| "The plugin package URL is invalid.")?;
-            if !matches!(parsed_url.scheme(), "http" | "https")
-                || !parsed_url.username().is_empty()
-                || parsed_url.password().is_some()
-                || parsed_url.query().is_some()
-                || parsed_url.fragment().is_some()
-            {
-                return Err(
-                    "Plugin package URLs must use HTTP(S) without credentials, query strings, or fragments."
-                        .to_string(),
-                );
-            }
-            let checksum = arguments
-                .get("checksum")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            let overwrite = arguments
-                .get("overwrite")
-                .and_then(serde_json::Value::as_bool)
-                .unwrap_or(false);
+        AiPluginAction::Install { package_url, checksum, overwrite } => {
             let settings_path = self.settings_store.path().to_path_buf();
             if self.plugin_entity.read(cx).manager_operation_in_flight() {
                 return Err("Another plugin operation is already running.".to_string());
@@ -274,7 +244,7 @@ impl WorkspaceApp {
                 plugins.start_package_install(
                     settings_path,
                     None,
-                    zeroize::Zeroizing::new(package_url.to_string()),
+                    package_url,
                     checksum,
                     overwrite,
                     retired_desktops,
@@ -284,31 +254,20 @@ impl WorkspaceApp {
                 return Err("Another plugin operation is already running.".to_string());
             }
             cx.notify();
-            return Ok(serde_json::json!({ "accepted": true, "action": action }));
         }
-        let plugin_id = arguments
-            .get("plugin_id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A plugin identifier is required.".to_string())?;
-        let result = match action {
-            "enable" | "disable" => {
-                let enabled = action == "enable";
+        AiPluginAction::Enable { plugin_id, enabled } => {
                 self.plugin_entity
                     .update(cx, |plugins, _cx| {
                         plugins.set_plugin_enabled(plugin_id, enabled, _cx)
                     })
                     .map(|_| {
                         self.bootstrap_native_plugin_runtime(cx);
-                    })
+                    })?;
             }
-            "uninstall" => {
+            AiPluginAction::Uninstall { plugin_id, remove_storage } => {
                 if self.plugin_entity.read(cx).manager_operation_in_flight() {
                     return Err("Another plugin operation is already running.".to_string());
                 }
-                let remove_storage = arguments
-                    .get("remove_storage")
-                    .and_then(serde_json::Value::as_bool)
-                    .unwrap_or(false);
                 self.plugin_entity.update(cx, |plugins, cx| {
                     plugins.set_plugin_enabled(plugin_id, false, cx)?;
                     plugins.begin_remote_desktop_removal(plugin_id);
@@ -340,17 +299,8 @@ impl WorkspaceApp {
                     });
                 })
                 .detach();
-                Ok(())
             }
-            "invoke" => {
-                let command_id = arguments
-                    .get("command_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| "A plugin command identifier is required.".to_string())?;
-                let command_arguments = arguments
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!({}));
+            AiPluginAction::Invoke { plugin_id, command_id, arguments: command_arguments } => {
                 let host_api_resolver = self.native_plugin_host_api_resolver(cx);
                 self.plugin_entity.update(cx, |plugins, _cx| {
                     plugins.start_runtime_command_with_arguments(
@@ -360,90 +310,20 @@ impl WorkspaceApp {
                         host_api_resolver,
                     )
                 });
-                Ok(())
             }
-            "configure" => {
-                let setting_id = arguments
-                    .get("setting_id")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| "A plugin setting identifier is required.".to_string())?;
-                let value = arguments
-                    .get("value")
-                    .cloned()
-                    .ok_or_else(|| "A plugin setting value is required.".to_string())?;
+            AiPluginAction::Configure { plugin_id, setting_id, value } => {
                 self.plugin_entity.update(cx, |plugins, _cx| {
                     plugins.set_plugin_setting_value(plugin_id, setting_id, value)
-                })
+                })?;
             }
-            _ => Err("Unsupported plugin action.".to_string()),
-        };
-        result?;
-        cx.notify();
-        Ok(serde_json::json!({
-            "accepted": true,
-            "action": action,
-            "pluginId": plugin_id,
-        }))
+        }
+        if !matches!(action, "open_manager" | "install") { cx.notify(); }
+        Ok(ai_plugin_action_accepted(action, plugin_id))
     }
 
-    pub(in crate::workspace) fn execute_ai_list_transport_profiles(
-        &self,
-    ) -> serde_json::Value {
-        let serial = self
-            .connection_store
-            .serial_profiles()
-            .iter()
-            .map(|profile| {
-                serde_json::json!({
-                    "id": profile.id,
-                    "name": profile.name,
-                    "group": profile.group,
-                    "portPath": profile.port_path,
-                    "baudRate": profile.baud_rate,
-                    "dataBits": profile.data_bits,
-                    "stopBits": profile.stop_bits,
-                    "parity": format!("{:?}", profile.parity).to_lowercase(),
-                    "flowControl": format!("{:?}", profile.flow_control).to_lowercase(),
-                })
-            })
-            .collect::<Vec<_>>();
-        let telnet = self
-            .connection_store
-            .telnet_profiles()
-            .iter()
-            .map(|profile| {
-                serde_json::json!({
-                    "id": profile.id,
-                    "name": profile.name,
-                    "group": profile.group,
-                    "host": profile.host,
-                    "port": profile.port,
-                })
-            })
-            .collect::<Vec<_>>();
-        let remote_desktop = self
-            .connection_store
-            .remote_desktop_profiles()
-            .iter()
-            .map(|profile| {
-                serde_json::json!({
-                    "id": profile.id,
-                    "name": profile.name,
-                    "group": profile.group,
-                    "protocol": format!("{:?}", profile.protocol).to_lowercase(),
-                    "host": profile.host,
-                    "port": profile.port,
-                    "username": profile.username,
-                    "readOnly": profile.read_only,
-                    "hasCredential": profile.credential_ref.is_some(),
-                })
-            })
-            .collect::<Vec<_>>();
-        serde_json::json!({
-            "serial": serial,
-            "telnet": telnet,
-            "remoteDesktop": remote_desktop,
-        })
+    pub(in crate::workspace) fn execute_ai_list_transport_profiles(&self) -> serde_json::Value {
+        ai_list_transport_profiles(self.connection_store.serial_profiles(),
+            self.connection_store.telnet_profiles(), self.connection_store.remote_desktop_profiles())
     }
 
     pub(in crate::workspace) fn execute_ai_open_transport_profile(
@@ -526,51 +406,29 @@ impl WorkspaceApp {
             .ai_terminal_pane_for_session(session_id, cx)
             .ok_or_else(|| "The terminal session owner is no longer available.".to_string())?;
         let pane = pane.read(cx);
+        use oxideterm_terminal::{TerminalLifecycle, TerminalSessionKind};
         let lifecycle = match pane.lifecycle() {
-            oxideterm_terminal::TerminalLifecycle::Running => {
-                serde_json::json!({ "state": "running" })
-            }
-            oxideterm_terminal::TerminalLifecycle::Exited(exit_code) => {
-                serde_json::json!({ "state": "exited", "exitCode": exit_code })
-            }
-            oxideterm_terminal::TerminalLifecycle::Closed => {
-                serde_json::json!({ "state": "closed" })
-            }
+            TerminalLifecycle::Running => AiTransportLifecycle::Running,
+            TerminalLifecycle::Exited(code) => AiTransportLifecycle::Exited(code),
+            TerminalLifecycle::Closed => AiTransportLifecycle::Closed,
         };
         match pane.session_kind() {
-            oxideterm_terminal::TerminalSessionKind::Telnet => Ok(serde_json::json!({
-                "transport": "telnet",
-                "lifecycle": lifecycle,
-            })),
-            oxideterm_terminal::TerminalSessionKind::Serial => {
-                let status = pane
-                    .serial_status()
-                    .ok_or_else(|| "Serial session state is unavailable.".to_string())?;
-                Ok(serde_json::json!({
-                    "transport": "serial",
-                    "lifecycle": lifecycle,
-                    "port": {
-                        "path": status.config.port_path,
-                        "available": status.port_available,
-                        "baudRate": status.config.baud_rate,
-                        "dataBits": status.config.data_bits,
-                        "stopBits": status.config.stop_bits,
-                        "parity": format!("{:?}", status.config.parity).to_lowercase(),
-                        "flowControl": format!("{:?}", status.config.flow_control).to_lowercase(),
-                    },
-                    "controlLines": {
-                        "dtr": status.control_state.data_terminal_ready,
-                        "rts": status.control_state.request_to_send,
-                    },
-                    "runtime": {
-                        "localEcho": status.runtime_options.local_echo,
-                        "lineEnding": format!("{:?}", status.runtime_options.line_ending).to_lowercase(),
-                        "outputLineEnding": format!("{:?}", status.runtime_options.output_line_ending).to_lowercase(),
-                        "displayMode": format!("{:?}", status.runtime_options.display_mode).to_lowercase(),
-                        "sendMode": format!("{:?}", status.runtime_options.send_mode).to_lowercase(),
-                    },
-                    "canReconnect": status.can_reconnect,
-                }))
+            TerminalSessionKind::Telnet => Ok(lifecycle.telnet()),
+            TerminalSessionKind::Serial => {
+                let status = pane.serial_status().ok_or_else(|| "Serial session state is unavailable.".to_string())?;
+                Ok(AiSerialSessionCapture {
+                    port: status.config.port_path, available: status.port_available, baud_rate: status.config.baud_rate,
+                    data_bits: status.config.data_bits, stop_bits: status.config.stop_bits,
+                    parity: format!("{:?}", status.config.parity).to_lowercase(),
+                    flow_control: format!("{:?}", status.config.flow_control).to_lowercase(),
+                    dtr: status.control_state.data_terminal_ready, rts: status.control_state.request_to_send,
+                    local_echo: status.runtime_options.local_echo,
+                    line_ending: format!("{:?}", status.runtime_options.line_ending).to_lowercase(),
+                    output_line_ending: format!("{:?}", status.runtime_options.output_line_ending).to_lowercase(),
+                    display_mode: format!("{:?}", status.runtime_options.display_mode).to_lowercase(),
+                    send_mode: format!("{:?}", status.runtime_options.send_mode).to_lowercase(),
+                    can_reconnect: status.can_reconnect,
+                }.json(lifecycle))
             }
             _ => Err("The selected terminal is not a serial or Telnet session.".to_string()),
         }
@@ -813,7 +671,7 @@ impl WorkspaceApp {
             "pull_preview" => self.start_cloud_sync_pull_preview(cx),
             _ => return Err("Unsupported Cloud Sync action.".to_string()),
         }
-        Ok(serde_json::json!({ "accepted": true, "action": action }))
+        Ok(ai_action_accepted(action))
     }
 
     pub(in crate::workspace) fn execute_ai_configure_cloud_sync(
@@ -872,93 +730,14 @@ impl WorkspaceApp {
         }))
     }
 
-    pub(in crate::workspace) fn execute_ai_list_credentials(
-        &self,
-        arguments: &serde_json::Value,
-    ) -> Result<serde_json::Value, String> {
-        let managed_ssh_keys = self
-            .connection_store
-            .managed_ssh_keys()
-            .into_iter()
-            .map(|key| {
-                serde_json::json!({
-                    "id": key.id,
-                    "name": key.name,
-                    "fingerprint": key.fingerprint,
-                    "requiresPassphrase": key.requires_passphrase,
-                    "origin": format!("{:?}", key.origin).to_lowercase(),
-                    "createdAt": key.created_at,
-                    "updatedAt": key.updated_at,
-                })
-            })
-            .collect::<Vec<_>>();
-        let requested_scope = arguments
-            .get("connection_id")
-            .and_then(serde_json::Value::as_str);
-        let scopes = requested_scope.map_or_else(
-            || {
-                std::iter::once(
-                    oxideterm_connections::LOCAL_SHELL_PRIVILEGE_CONNECTION_ID.to_string(),
-                )
-                .chain(
-                    self.connection_store
-                        .connections()
-                        .iter()
-                        .map(|connection| connection.id.clone()),
-                )
-                .collect::<Vec<_>>()
-            },
-            |scope| vec![scope.to_string()],
-        );
+    pub(in crate::workspace) fn execute_ai_list_credentials(&self, arguments: &serde_json::Value) -> Result<serde_json::Value, String> {
+        let scopes = ai_credential_scopes(arguments, self.connection_store.connections().iter().map(|connection| connection.id.as_str()));
         let mut privilege_credentials = Vec::new();
         for scope in &scopes {
-            privilege_credentials.extend(
-                self.connection_store
-                    .list_privilege_credentials(scope)
-                    .map_err(|error| error.to_string())?,
-            );
+            privilege_credentials.extend(self.connection_store.list_privilege_credentials(scope).map_err(|error| error.to_string())?);
         }
-        let privilege = privilege_credentials
-            .into_iter()
-            .map(|credential| {
-                serde_json::json!({
-                    "id": credential.id,
-                    "connectionId": credential.connection_id,
-                    "label": credential.label,
-                    "promptType": credential.prompt_type,
-                    "responseMode": credential.response_mode,
-                    "usernameHint": credential.username_hint,
-                    "hostPatterns": credential.host_patterns,
-                    "secondFactorPatterns": credential.second_factor_patterns,
-                    "secondFactorUserHint": credential.second_factor_user_hint,
-                    "totpCredentialId": credential.totp_credential_id,
-                    "enabled": credential.enabled,
-                    "requireClickToSend": credential.require_click_to_send,
-                    "hasSecret": credential.keychain_id.is_some(),
-                    "createdAt": credential.created_at.to_rfc3339(),
-                    "updatedAt": credential.updated_at.to_rfc3339(),
-                })
-            })
-            .collect::<Vec<_>>();
-        let remote_desktop = self
-            .connection_store
-            .remote_desktop_profiles()
-            .iter()
-            .filter(|profile| profile.credential_ref.is_some())
-            .map(|profile| {
-                serde_json::json!({
-                    "profileId": profile.id,
-                    "profileName": profile.name,
-                    "protocol": format!("{:?}", profile.protocol).to_lowercase(),
-                    "hasCredential": true,
-                })
-            })
-            .collect::<Vec<_>>();
-        Ok(serde_json::json!({
-            "managedSshKeys": managed_ssh_keys,
-            "privilegeCredentials": privilege,
-            "remoteDesktopCredentials": remote_desktop,
-        }))
+        Ok(ai_list_credential_metadata(self.connection_store.managed_ssh_keys(), privilege_credentials,
+            self.connection_store.remote_desktop_profiles()))
     }
 
     pub(in crate::workspace) fn execute_ai_manage_credential(
@@ -977,7 +756,7 @@ impl WorkspaceApp {
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string);
             self.open_privilege_credentials_settings(scope_id, window, cx);
-            return Ok(serde_json::json!({ "accepted": true, "action": action }));
+            return Ok(ai_action_accepted(action));
         }
         let kind = arguments
             .get("kind")
@@ -1025,44 +804,8 @@ impl WorkspaceApp {
         }))
     }
 
-    pub(in crate::workspace) fn execute_ai_list_memory_entries(
-        &self,
-        arguments: &serde_json::Value,
-    ) -> serde_json::Value {
-        let now_ms = ai_memory_now_ms();
-        let scope_kind = arguments
-            .get("scope_kind")
-            .and_then(serde_json::Value::as_str);
-        let scope_id = arguments
-            .get("scope_id")
-            .and_then(serde_json::Value::as_str);
-        let memory_kind = arguments
-            .get("memory_kind")
-            .and_then(serde_json::Value::as_str);
-        let include_expired = arguments
-            .get("include_expired")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
-        let entries = self
-            .settings_store
-            .settings()
-            .ai
-            .memory
-            .entries
-            .iter()
-            .filter(|entry| include_expired || !entry.is_expired(now_ms))
-            .filter(|entry| {
-                scope_kind.is_none_or(|kind| ai_memory_scope_label(entry.scope_kind) == kind)
-            })
-            .filter(|entry| {
-                scope_id.is_none_or(|scope_id| entry.scope_id.as_deref() == Some(scope_id))
-            })
-            .filter(|entry| {
-                memory_kind.is_none_or(|kind| ai_memory_kind_label(entry.memory_kind) == kind)
-            })
-            .map(ai_memory_entry_json)
-            .collect::<Vec<_>>();
-        serde_json::json!({ "entries": entries })
+    pub(in crate::workspace) fn execute_ai_list_memory_entries(&self, arguments: &serde_json::Value) -> serde_json::Value {
+        oxideterm_ai::tool_resources::ai_list_memory_entries(&self.settings_store.settings().ai.memory.entries, arguments)
     }
 
     pub(in crate::workspace) fn execute_ai_manage_memory_entry(
@@ -1070,156 +813,26 @@ impl WorkspaceApp {
         arguments: &serde_json::Value,
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A memory action is required.".to_string())?;
-        let now_ms = ai_memory_now_ms();
         let mut entries = self.settings_store.settings().ai.memory.entries.clone();
-        let result = match action {
-            "create" => {
-                let content = ai_memory_entry_content(arguments)?;
-                let scope_kind = ai_memory_scope_from_arguments(arguments)?;
-                let scope_id = self.ai_resolve_memory_scope_id(arguments, scope_kind, cx)?;
-                let memory_kind = ai_memory_kind_from_arguments(arguments)?;
-                let expires_at_ms = ai_memory_expiry(arguments, memory_kind, now_ms)?;
-                let normalized = ai_normalized_memory_content(&content);
-                if let Some(existing) = entries.iter_mut().find(|entry| {
-                    entry.scope_kind == scope_kind
-                        && entry.scope_id == scope_id
-                        && ai_normalized_memory_content(&entry.content) == normalized
-                }) {
-                    existing.last_used_at_ms = Some(now_ms);
-                    existing.use_count = existing.use_count.saturating_add(1);
-                    existing.updated_at_ms = now_ms;
-                    existing.revision = existing.revision.saturating_add(1);
-                    ai_memory_entry_json(existing)
-                } else {
-                    let entry = oxideterm_settings::AiMemoryEntry {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        content,
-                        scope_kind,
-                        scope_id,
-                        memory_kind,
-                        source: oxideterm_settings::AiMemorySource::Assistant,
-                        created_at_ms: now_ms,
-                        updated_at_ms: now_ms,
-                        last_used_at_ms: None,
-                        use_count: 0,
-                        expires_at_ms,
-                        revision: 1,
-                    };
-                    let result = ai_memory_entry_json(&entry);
-                    entries.push(entry);
-                    result
-                }
+        let result = oxideterm_ai::tool_resources::ai_manage_memory_entry(
+            &mut entries, arguments, |kind| self.ai_resolve_memory_scope_id(kind, cx),
+        )?;
+        let clears_legacy_content = arguments.get("action").and_then(serde_json::Value::as_str) == Some("delete")
+            && arguments.get("id").and_then(serde_json::Value::as_str) == Some("legacy-user-memory");
+        self.edit_settings(move |settings| {
+            settings.ai.memory.entries = entries;
+            if clears_legacy_content {
+                settings.ai.memory.content.clear();
             }
-            "update" => {
-                let (entry_id, normalized_content, scope_kind, scope_id) = {
-                    let entry = ai_memory_entry_mut(arguments, &mut entries)?;
-                    if let Some(content) = arguments
-                        .get("content")
-                        .and_then(serde_json::Value::as_str)
-                    {
-                        let content = content.trim();
-                        if !oxideterm_ai::preference_is_safe_to_persist(content) {
-                            return Err(
-                                "Memory cannot store credentials or one-time task instructions."
-                                    .to_string(),
-                            );
-                        }
-                        entry.content = content.to_string();
-                    }
-                    if arguments.get("scope_kind").is_some() {
-                        entry.scope_kind = ai_memory_scope_from_arguments(arguments)?;
-                        entry.scope_id =
-                            self.ai_resolve_memory_scope_id(arguments, entry.scope_kind, cx)?;
-                    }
-                    if arguments.get("memory_kind").is_some() {
-                        entry.memory_kind = ai_memory_kind_from_arguments(arguments)?;
-                    }
-                    if arguments.get("memory_kind").is_some()
-                        || arguments.get("expires_at_ms").is_some()
-                        || entry.memory_kind == oxideterm_settings::AiMemoryKind::Temporary
-                    {
-                        entry.expires_at_ms =
-                            ai_memory_expiry(arguments, entry.memory_kind, now_ms)?;
-                    }
-                    entry.updated_at_ms = now_ms;
-                    entry.revision = entry.revision.saturating_add(1);
-                    (
-                        entry.id.clone(),
-                        ai_normalized_memory_content(&entry.content),
-                        entry.scope_kind,
-                        entry.scope_id.clone(),
-                    )
-                };
-                if entries.iter().any(|entry| {
-                    entry.id != entry_id
-                        && entry.scope_kind == scope_kind
-                        && entry.scope_id == scope_id
-                        && ai_normalized_memory_content(&entry.content) == normalized_content
-                }) {
-                    return Err(
-                        "An equivalent memory entry already exists in this scope.".to_string()
-                    );
-                }
-                let entry = entries
-                    .iter()
-                    .find(|entry| entry.id == entry_id)
-                    .ok_or_else(|| "The memory entry no longer exists.".to_string())?;
-                ai_memory_entry_json(entry)
-            }
-            "touch" => {
-                let entry = ai_memory_entry_mut(arguments, &mut entries)?;
-                entry.last_used_at_ms = Some(now_ms);
-                entry.use_count = entry.use_count.saturating_add(1);
-                entry.updated_at_ms = now_ms;
-                entry.revision = entry.revision.saturating_add(1);
-                ai_memory_entry_json(entry)
-            }
-            "delete" => {
-                let id = ai_memory_id(arguments)?;
-                let expected_revision = ai_memory_expected_revision(arguments)?;
-                let index = entries
-                    .iter()
-                    .position(|entry| entry.id == id)
-                    .ok_or_else(|| "The memory entry no longer exists.".to_string())?;
-                if entries[index].revision != expected_revision {
-                    return Err("The memory entry changed; refresh it before deleting.".to_string());
-                }
-                entries.remove(index);
-                serde_json::json!({ "id": id, "deleted": true })
-            }
-            _ => return Err("Unsupported memory action.".to_string()),
-        };
-        let clears_legacy_content = action == "delete"
-            && arguments.get("id").and_then(serde_json::Value::as_str)
-                == Some("legacy-user-memory");
-        self.edit_settings(
-            move |settings| {
-                settings.ai.memory.entries = entries;
-                if clears_legacy_content {
-                    settings.ai.memory.content.clear();
-                }
-            },
-            cx,
-        );
-        Ok(serde_json::json!({ "accepted": true, "action": action, "entry": result }))
+        }, cx);
+        Ok(result)
     }
 
     fn ai_resolve_memory_scope_id(
         &self,
-        arguments: &serde_json::Value,
         scope_kind: oxideterm_settings::AiMemoryScopeKind,
         cx: &App,
     ) -> Result<Option<String>, String> {
-        if let Some(scope_id) = arguments
-            .get("scope_id")
-            .and_then(serde_json::Value::as_str)
-        {
-            return Ok(Some(scope_id.to_string()));
-        }
         match scope_kind {
             oxideterm_settings::AiMemoryScopeKind::User => Ok(Some(whoami::username())),
             oxideterm_settings::AiMemoryScopeKind::Workspace => Ok(Some(
@@ -1240,83 +853,6 @@ impl WorkspaceApp {
                     "No active SSH host is available for host-scoped memory.".to_string()
                 }),
         }
-    }
-}
-
-fn ai_forwarding_operation(
-    arguments: &serde_json::Value,
-) -> Result<forwards::ForwardingRuntimeOperation, String> {
-    let action = arguments
-        .get("action")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let forward_id = || {
-        arguments
-            .get("forward_id")
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_string)
-            .ok_or_else(|| "A forwarding rule identifier is required.".to_string())
-    };
-    match action {
-        "create" => {
-            let rule = arguments
-                .get("rule")
-                .cloned()
-                .and_then(|value| {
-                    serde_json::from_value::<oxideterm_forwarding::ForwardRule>(value).ok()
-                })
-                .ok_or_else(|| "The forwarding rule is invalid.".to_string())?;
-            Ok(forwards::ForwardingRuntimeOperation::Create {
-                rule,
-                check_health: true,
-            })
-        }
-        "update" => {
-            let rule = arguments
-                .get("rule")
-                .and_then(serde_json::Value::as_object)
-                .ok_or_else(|| "The forwarding update is invalid.".to_string())?;
-            let update = oxideterm_forwarding::ForwardUpdate {
-                forward_type: rule
-                    .get("forwardType")
-                    .cloned()
-                    .and_then(|value| serde_json::from_value(value).ok()),
-                bind_address: rule
-                    .get("bindAddress")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-                bind_port: rule
-                    .get("bindPort")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|port| u16::try_from(port).ok()),
-                target_host: rule
-                    .get("targetHost")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-                target_port: rule
-                    .get("targetPort")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|port| u16::try_from(port).ok()),
-                description: rule
-                    .get("description")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-            };
-            Ok(forwards::ForwardingRuntimeOperation::Update {
-                forward_id: forward_id()?,
-                update,
-            })
-        }
-        "stop" => Ok(forwards::ForwardingRuntimeOperation::Stop {
-            forward_id: forward_id()?,
-        }),
-        "restart" => Ok(forwards::ForwardingRuntimeOperation::Restart {
-            forward_id: forward_id()?,
-        }),
-        "delete" => Ok(forwards::ForwardingRuntimeOperation::Delete {
-            forward_id: forward_id()?,
-        }),
-        _ => Err("Unsupported forwarding action.".to_string()),
     }
 }
 

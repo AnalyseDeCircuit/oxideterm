@@ -136,12 +136,10 @@ pub struct AiTranscriptFrame {
 }
 
 pub enum AiTranscriptRequest {
-    Copy(String),
+    ClipboardReadFailed,
     Regenerate,
-    DeleteMessage(String),
     CancelEdit,
     SaveEdit,
-    SwitchBranch(String, usize),
     FollowUp(String),
     ApproveTool(u64, String, bool),
     AcpPermission(u64, String, Option<String>),
@@ -217,10 +215,6 @@ impl AiAssistantSidebarView {
         i18n: I18n,
         cx: &mut Context<Self>,
     ) -> Self {
-        cx.subscribe(&state, |_, _, _: &crate::stream::AiChatBatchApplied, cx| {
-            cx.notify()
-        })
-        .detach();
         cx.observe(&state, |_, _, cx| cx.notify()).detach();
         Self {
             state,
@@ -518,7 +512,10 @@ impl AiAssistantSidebarView {
     }
 
     fn copy_ai_message(&self, a0: String, cx: &mut App) {
-        (self.bindings.request)(AiTranscriptRequest::Copy(a0), None, cx);
+        let request = self.bindings.request.clone();
+        self.state.update(cx, |ai, cx| {
+            ai.copy_ai_message(a0, move |cx| request(AiTranscriptRequest::ClipboardReadFailed, None, cx), cx);
+        });
     }
 
     fn regenerate_ai_last_response(&self, cx: &mut App) {
@@ -526,7 +523,7 @@ impl AiAssistantSidebarView {
     }
 
     fn request_delete_ai_message(&self, a0: String, cx: &mut App) {
-        (self.bindings.request)(AiTranscriptRequest::DeleteMessage(a0), None, cx);
+        self.state.update(cx, |ai, cx| ai.request_delete_ai_message(a0, cx));
     }
 
     fn cancel_edit_ai_message(&self, cx: &mut App) {
@@ -538,7 +535,7 @@ impl AiAssistantSidebarView {
     }
 
     fn switch_ai_message_branch(&self, a0: String, a1: usize, cx: &mut App) {
-        (self.bindings.request)(AiTranscriptRequest::SwitchBranch(a0, a1), None, cx);
+        self.state.update(cx, |ai, cx| ai.switch_ai_message_branch(a0, a1, cx));
     }
 
     fn send_ai_follow_up_suggestion(&self, a0: String, cx: &mut App) {

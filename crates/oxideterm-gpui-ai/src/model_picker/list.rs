@@ -28,7 +28,7 @@ impl AiModelPickerView {
             let active_provider = self.ai_active_model_selector_provider_id().as_deref()
                 == Some(provider.id.as_str());
             let active_provider_model = (active_provider
-                && Self::ai_acp_agent_id_from_provider_id(&provider.id).is_none())
+                && ai_acp_agent_id_from_provider_id(&provider.id).is_none())
             .then(|| {
                 self.display()
                     .active_model
@@ -40,7 +40,7 @@ impl AiModelPickerView {
             let status = self.render_ai_model_selector_provider_status(&provider, has_key, online);
             let refresh = (has_key
                 && online
-                && Self::ai_acp_agent_id_from_provider_id(&provider.id).is_none())
+                && ai_acp_agent_id_from_provider_id(&provider.id).is_none())
             .then(|| {
                 let provider_for_refresh = provider.clone();
                 ai_model_selector_refresh_button(
@@ -96,7 +96,7 @@ impl AiModelPickerView {
                         ai.toggle_model_selector_provider(provider_id.clone())
                     });
                     if expanded
-                        && let Some(agent_id) = Self::ai_acp_agent_id_from_provider_id(&provider_id)
+                        && let Some(agent_id) = ai_acp_agent_id_from_provider_id(&provider_id)
                     {
                         (this.bindings.request)(
                             AiModelPickerRequest::Discover(agent_id.to_string()),

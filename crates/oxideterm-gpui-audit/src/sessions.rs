@@ -1,5 +1,14 @@
-use super::*;
-use oxideterm_audit::{AuditSessionQuery, AuditSessionSummary};
+use std::sync::Arc;
+
+use gpui::{AnyElement, Context, MouseButton, UniformListScrollHandle, div, prelude::*, px, rgb};
+use oxideterm_audit::{AuditQuery, AuditSessionQuery, AuditSessionSummary};
+use oxideterm_gpui_ui::{
+    icons::LucideIcon,
+    virtual_list::{TauriVirtualListSpec, tauri_virtual_uniform_list},
+};
+use zeroize::Zeroize;
+
+use super::{AuditFilter, AuditPage, AuditView, audit_time};
 
 #[derive(Default)]
 pub(super) struct AuditSessions {
@@ -8,7 +17,7 @@ pub(super) struct AuditSessions {
     next_cursor: Option<(i64, String)>,
 }
 
-impl WorkspaceApp {
+impl AuditView {
     pub(super) fn refresh_audit_sessions(&mut self, reset: bool, cx: &mut Context<Self>) {
         if reset || self.audit.sessions.cursors.is_empty() {
             self.audit.sessions.cursors = vec![None];
@@ -55,16 +64,16 @@ impl WorkspaceApp {
     }
 
     pub(super) fn show_audit_session(&mut self, session_id: String, cx: &mut Context<Self>) {
-        self.audit.view = AuditView::Events;
+        self.audit.view = AuditPage::Events;
         self.audit.policy_draft = None;
-        self.clear_ime_selection();
+        self.blur_input(cx);
         self.audit.query = AuditQuery {
             session_id: Some(session_id),
             latest_only: true,
             limit: 100,
             ..Default::default()
         };
-        self.audit.search.clear();
+        self.audit.search.zeroize();
         self.audit.time_filter = 0;
         self.refresh_audit(true, cx);
     }
@@ -127,9 +136,9 @@ impl WorkspaceApp {
                     .gap_2()
                     .border_b_1()
                     .border_color(rgb(theme.border))
-                    .child(self.audit_view_button(AuditView::Events, cx))
-                    .child(self.audit_view_button(AuditView::Sessions, cx))
-                    .child(self.audit_view_button(AuditView::Recordings, cx))
+                    .child(self.audit_view_button(AuditPage::Events, cx))
+                    .child(self.audit_view_button(AuditPage::Sessions, cx))
+                    .child(self.audit_view_button(AuditPage::Recordings, cx))
                     .child(self.render_audit_filter(AuditFilter::Time, cx))
                     .child(div().flex_1())
                     .child(self.render_audit_toggle(cx))

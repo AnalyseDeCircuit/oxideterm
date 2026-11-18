@@ -31,6 +31,7 @@ oxideterm-terminal-model = { path = "../oxideterm-terminal-model" }
 oxideterm-terminal-triggers = { path = "../oxideterm-terminal-triggers" }
 oxideterm-tmux = { path = "../oxideterm-tmux" }
 oxideterm-trzsz = { path = "../oxideterm-trzsz" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
 parking_lot.workspace = true
 polling.workspace = true
 serialport.workspace = true

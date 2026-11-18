@@ -1,4 +1,12 @@
 use super::*;
+use std::hash::{Hash, Hasher};
+
+pub fn knowledge_preview_group(document: &str) -> u64 {
+    let mut hasher = std::hash::DefaultHasher::new();
+    "notes-preview".hash(&mut hasher);
+    document.hash(&mut hasher);
+    hasher.finish()
+}
 
 #[derive(Clone, Default)]
 pub(super) struct KnowledgeNavigatorSnapshot {
@@ -52,6 +60,15 @@ pub struct KnowledgeWorkspaceEntity {
 }
 
 impl KnowledgeWorkspaceEntity {
+    pub fn preview_editor_for_group(
+        &self,
+        group: u64,
+        cx: &App,
+    ) -> Option<Entity<KnowledgeDocumentEditor>> {
+        let editor = self.editor.as_ref()?;
+        (knowledge_preview_group(&editor.read(cx).document_id) == group).then(|| editor.clone())
+    }
+
     pub fn app_quit_pending(&self) -> bool {
         self.pending_app_quit
     }

@@ -4,7 +4,7 @@ use gpui::{App, AppContext, Context, Entity};
 use oxideterm_gpui_ai::{
     model_picker::{
         AiModelPickerBindings, AiModelPickerFrame, AiModelPickerPart, AiModelPickerRequest,
-        AiModelPickerStatus, AiModelPickerView, AiModelPickerViews,
+        AiModelPickerView, AiModelPickerViews, active_model_picker_provider,
     },
     state::{AiModelSelectorScope, AiWorkspaceEntity},
 };
@@ -22,38 +22,24 @@ impl WorkspaceApp {
         let select_workspace = workspace.clone();
         let input_workspace = workspace.clone();
         let search = WorkspaceImeTarget::AiModelSelectorSearch;
+        let state_for_frame = state.clone();
         let bindings = AiModelPickerBindings {
             frame: Rc::new(move |cx: &App| {
                 let workspace = workspace.upgrade()?;
                 let app = workspace.read(cx);
                 let settings = app.settings_store.settings();
-                let providers = app.ai_model_selector_providers(cx);
-                let status = providers
-                    .iter()
-                    .map(|provider| {
-                        let agent = WorkspaceApp::ai_acp_agent_id_from_provider_id(&provider.id);
-                        (
-                            provider.id.clone(),
-                            AiModelPickerStatus {
-                                has_key: app.ai_model_selector_has_key(provider, cx),
-                                online: app.ai_model_selector_provider_is_online(provider, cx),
-                                acp_fallback_label: agent
-                                    .map(|id| app.ai_acp_agent_model_fallback_label(id, cx)),
-                                acp_discovery_pending: agent.is_some_and(|id| {
-                                    app.ai_acp_model_discovery_is_pending(id, cx)
-                                }),
-                                acp_options: agent
-                                    .and_then(|id| app.ai_acp_model_options_for_agent(id, cx)),
-                            },
-                        )
-                    })
-                    .collect();
+                let ai = state_for_frame.read(cx);
+                let providers = ai.picker_providers(&settings.ai, &app.i18n);
+                let status = providers.iter().map(|provider| {
+                    (provider.id.clone(), ai.picker_status(provider, &settings.ai, &app.i18n,
+                        |id| app.ai_picker_plugin_available(id, cx)))
+                }).collect();
                 Some(AiModelPickerFrame {
                     tokens: app.tokens,
                     i18n: app.i18n.clone(),
                     providers,
                     status,
-                    active_provider: app.ai_active_model_selector_provider_id(),
+                    active_provider: active_model_picker_provider(&settings.ai),
                     active_model: settings.ai.active_model.clone(),
                     acp_active: settings.ai.active_backend
                         == oxideterm_settings::AiActiveBackend::Acp,

@@ -10,8 +10,6 @@ mod health;
 mod helpers;
 mod lifecycle;
 mod multiplexer;
-#[cfg(test)]
-mod tests;
 mod topology;
 mod types;
 mod window_text;

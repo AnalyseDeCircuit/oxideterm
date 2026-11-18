@@ -729,16 +729,3 @@ pub fn background_fit_label(fit: BackgroundFit, i18n: &I18n) -> String {
         BackgroundFit::Tile => i18n.t("settings_view.terminal.bg_fit_tile"),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::compact_decimal;
-
-    #[test]
-    fn compact_decimal_preserves_two_decimals_without_trailing_zeros() {
-        assert_eq!(compact_decimal(0.9), "0.9");
-        assert_eq!(compact_decimal(0.91), "0.91");
-        assert_eq!(compact_decimal(1.15), "1.15");
-        assert_eq!(compact_decimal(1.0), "1");
-    }
-}

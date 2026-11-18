@@ -1,20 +1,22 @@
 use std::{cell::Cell, rc::Rc};
 
 use gpui::{
-    AnyElement, Context, CursorStyle, MouseButton, MouseMoveEvent, Pixels, Window, div, prelude::*,
-    px, rgb, rgba,
+    AnyElement, Context, CursorStyle, MouseButton, MouseMoveEvent, Pixels, div, prelude::*, px,
+    rgb, rgba,
 };
 
-use super::super::{WorkspaceApp, settings_ui_font_family};
+use oxideterm_quick_commands::QuickCommandTargetContext;
+
+use crate::{bridge::QuickCommandsRequest, view::QuickCommandsView};
 
 const DEFAULT_HEIGHT: f32 = 260.0;
 const MIN_HEIGHT: f32 = 160.0;
 const MIN_TERMINAL_HEIGHT: f32 = 180.0;
 const RESIZE_HOTZONE: f32 = 6.0;
 
-pub(in crate::workspace) struct QuickCommandsPanelState {
+pub struct QuickCommandsPanelState {
     // Layout measurements exclude the toolbar, quick bar, and sender input.
-    pub(in crate::workspace) available_height: Rc<Cell<f32>>,
+    pub available_height: Rc<Cell<f32>>,
     height: f32,
     drag: Option<(Pixels, f32)>,
 }
@@ -42,11 +44,24 @@ impl QuickCommandsPanelState {
         self.clamp_height(self.height)
     }
 
-    pub(in crate::workspace) fn is_resizing(&self) -> bool {
+    pub fn is_resizing(&self) -> bool {
         self.drag.is_some()
     }
 
-    pub(in crate::workspace) fn finish_resize(&mut self) -> bool {
+    pub fn update_drag(&mut self, event: &MouseMoveEvent) -> (bool, bool) {
+        let Some((start_y, start_height)) = self.drag else {
+            return (false, false);
+        };
+        if !event.dragging() {
+            return (self.finish_resize(), true);
+        }
+        let height = self.clamp_height(start_height - f32::from(event.position.y - start_y));
+        let changed = (height - self.height).abs() > 0.1;
+        self.height = height;
+        (changed, false)
+    }
+
+    pub fn finish_resize(&mut self) -> bool {
         self.drag.take().is_some()
     }
 }
@@ -78,74 +93,33 @@ fn panel_frame(
         .child(body)
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn toggle_terminal_quick_commands_panel(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let open = self
-            .terminal
-            .update(cx, |terminal, _| terminal.quick_commands.toggle_open());
-        if open {
-            self.prepare_terminal_quick_commands_panel(window, cx);
-        } else {
-            self.ime_marked_text = None;
-            self.clear_ime_selection();
-            self.focus_active_pane(window, cx);
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn prepare_terminal_quick_commands_panel(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        // The sender retains its drafts and running jobs while its expanded surface closes.
-        self.terminal_command_sender.update(cx, |sender, cx| {
-            sender.set_expanded(false, cx);
-            sender.set_compact_focused(false, cx);
-            sender.dismiss_compact_suggestions();
-        });
-        self.close_terminal_command_overlays(cx);
-        self.ime_marked_text = None;
-        self.clear_ime_selection();
-        window.focus(&self.focus_handle, cx);
-    }
-
-    pub(in crate::workspace) fn render_terminal_quick_commands_panel(
+impl QuickCommandsView {
+    pub(crate) fn render_terminal_quick_commands_panel(
         &self,
+        target: Option<&QuickCommandTargetContext>,
+        execution_targets: &[QuickCommandTargetContext],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let commands = &self.terminal.read(cx).quick_commands;
-        let open = commands.is_open()
-            && self
-                .settings_store
-                .settings()
-                .terminal
-                .command_bar
-                .quick_commands_enabled;
+        let commands = self.state.read(cx);
+        let open = commands.is_open() && self.enabled;
         let height = commands.panel.height();
         let resizing = commands.panel.is_resizing();
         let mut tokens = self.tokens;
         if resizing {
             tokens.motion.spatial_enabled = false;
         }
-        let snapshot = open.then(|| self.quick_commands_render_snapshot(cx));
-        let has_background = self.window_background_preferences().is_some();
+        let snapshot = open.then(|| self.quick_commands_render_snapshot(target, cx));
+        let has_background = self.has_background;
         let content = snapshot.map(|snapshot| {
             let panel = panel_frame(
                 &tokens,
                 has_background,
                 height,
                 self.render_quick_command_category_sidebar(&snapshot, cx),
-                self.render_quick_command_body(&snapshot, cx),
+                self.render_quick_command_body(&snapshot, execution_targets, cx),
             )
             .text_size(px(tokens.metrics.ui_text_sm))
-            .font_family(settings_ui_font_family(
-                &self.settings_store.settings().appearance.ui_font_family,
-            ))
+            .font_family(self.ui_font.clone())
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
             .on_scroll(|_, _, cx| cx.stop_propagation())
@@ -162,8 +136,8 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
-                            this.terminal.update(cx, |terminal, _| {
-                                let panel = &mut terminal.quick_commands.panel;
+                            this.state.update(cx, |terminal, _| {
+                                let panel = &mut terminal.panel;
                                 if event.click_count >= 2 {
                                     panel.height = DEFAULT_HEIGHT;
                                     panel.finish_resize();
@@ -171,6 +145,7 @@ impl WorkspaceApp {
                                     panel.drag = Some((event.position.y, panel.height()));
                                 }
                             });
+                            this.dispatch(QuickCommandsRequest::WindowLayoutChanged, None, cx);
                             window.prevent_default();
                             cx.stop_propagation();
                             cx.notify();
@@ -188,46 +163,12 @@ impl WorkspaceApp {
             .target_height(if open { height } else { 0.0 })
             .into_any_element()
     }
-
-    pub(in crate::workspace) fn update_terminal_quick_commands_resize(
-        &mut self,
-        event: &MouseMoveEvent,
-        cx: &mut Context<Self>,
-    ) {
-        let changed = self.terminal.update(cx, |terminal, _| {
-            let panel = &mut terminal.quick_commands.panel;
-            let Some((start_y, start_height)) = panel.drag else {
-                return false;
-            };
-            if !event.dragging() {
-                return panel.finish_resize();
-            }
-            let height = panel.clamp_height(start_height - f32::from(event.position.y - start_y));
-            let changed = (height - panel.height).abs() > 0.1;
-            panel.height = height;
-            changed
-        });
-        if changed {
-            cx.notify();
-        }
-    }
-
-    pub(in crate::workspace) fn finish_terminal_quick_commands_resize(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        if self.terminal.update(cx, |terminal, _| {
-            terminal.quick_commands.panel.finish_resize()
-        }) {
-            cx.notify();
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Render, ScrollHandle, TestAppContext};
+    use gpui::{Render, ScrollHandle, TestAppContext, Window};
 
     struct DockFixture {
         panel: QuickCommandsPanelState,

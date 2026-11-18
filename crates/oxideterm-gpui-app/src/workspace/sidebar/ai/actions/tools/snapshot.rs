@@ -1,61 +1,22 @@
-use oxideterm_ai::tool_resources::{AiSerialTargetInput, AiTerminalTargetInput, AiTerminalTransport, ai_app_surface_target, ai_saved_connection_target, ai_terminal_target, finish_ai_target_discovery};
+use oxideterm_ai::tool_resources::{
+    AiActiveNodeCapture, AiAppSurface, AiApplicationTool, AiLiveResourceOperation, AiRuntimeHealthCapture, AiSerialTargetInput, AiSshNodeTargetInput,
+    AiTerminalOutputWait, AiTerminalRunEnd, AiTerminalWaitFailure, AiTerminalWaitProgress, AiTerminalWaitSample,
+    AiTargetCapture, AiTerminalTargetInput, AiTerminalTransport, finish_ai_target_discovery,
+    finish_ai_workspace_snapshot, ai_read_stable_resource, dispatch_ai_application_tool,
+    ai_preference_saved, ai_remember_preference_payload, save_ai_user_preference, plan_ai_settings_write,
+};
+use oxideterm_workspace::ActiveSessionReadiness;
 
 pub(in crate::workspace) const AI_CONNECT_TARGET_TIMEOUT_TICKS: usize = 900;
 pub(in crate::workspace) const AI_CONNECT_TARGET_POLL_INTERVAL_MS: u64 = 100;
 
-pub(in crate::workspace) fn ai_sftp_target_for_node(
-    node_id: &NodeId,
-    node: &WorkspaceSshNode,
-    sftp_session_id: String,
-) -> AiOrchestratorTarget {
-    // Tauri exposes SFTP targets from node runtime state, not from the SFTP tab
-    // itself, so keep the target shape node-scoped even when a tab is open.
-    ai_target_from_projection(oxideterm_ai::sftp_target_projection(
-        oxideterm_ai::AiSftpTargetInput {
-            node_id: node_id.0.clone(),
-            session_id: sftp_session_id,
-            connection_id: node.saved_connection_id.clone(),
-            host: node.endpoint.host.clone(),
-        },
-    ))
-}
-
-pub(in crate::workspace) fn ai_opened_local_terminal_target(
-    target: &AiOrchestratorTarget,
-) -> AiOrchestratorTarget {
-    // Tauri returns a synthetic local-terminal target from open_app_surface,
-    // not the richer target-discovery snapshot that carries tab metadata.
-    ai_target_from_projection(oxideterm_ai::opened_local_terminal_projection(
-        &ai_target_projection(target),
-    ))
-}
-
-pub(in crate::workspace) fn ai_ide_workspace_target_for_node(
-    tab_id: TabId,
-    node_id: &NodeId,
-    node: &WorkspaceSshNode,
-    active_editor_tab_id: Option<String>,
-    project_root_path: Option<String>,
-    project_name: Option<String>,
-) -> AiOrchestratorTarget {
-    // Tauri's IDE target is keyed by node id and carries the active editor tab
-    // separately; it never uses the outer app tab id as the workspace tab ref.
-    let mut target = ai_target_from_projection(oxideterm_ai::ide_workspace_target_projection(
-        oxideterm_ai::AiIdeTargetInput {
-            node_id: node_id.0.clone(),
-            connection_id: node.saved_connection_id.clone(),
-            active_editor_tab_id,
-            project_root_path,
-            project_name,
-        },
-    ));
-    // The internal target map must preserve surface identity when one node has
-    // multiple IDE projects. The tab id is never emitted in the v2 projection.
-    target.id = format!("ide-surface:{}", tab_id.0);
-    target
-        .refs
-        .insert("surfaceTabId".to_string(), tab_id.0.to_string());
-    target
+fn ai_node_readiness(node: &WorkspaceSshNode) -> ActiveSessionReadiness {
+    match node.readiness {
+        NodeReadiness::Ready => ActiveSessionReadiness::Ready,
+        NodeReadiness::Connecting => ActiveSessionReadiness::Connecting,
+        NodeReadiness::Error => ActiveSessionReadiness::Error,
+        NodeReadiness::Disconnected => ActiveSessionReadiness::Disconnected,
+    }
 }
 
 impl WorkspaceApp {
@@ -78,11 +39,24 @@ impl WorkspaceApp {
         });
         let mut targets = Vec::new();
         for connection in self.connection_store.connections() {
-            targets.push(ai_saved_connection_target(&connection.id, &connection.name, &connection.host, &connection.username, connection.port, &connection.group));
+            targets.push(AiTargetCapture::SavedConnection {
+                id: &connection.id,
+                name: &connection.name,
+                host: &connection.host,
+                username: &connection.username,
+                port: connection.port,
+                group: &connection.group,
+            });
         }
         for tab in self.tabs(cx) {
             let session_id = tab.root_pane.as_ref().and_then(|root| root.session_id_for_pane(tab.active_pane_id?));
-            targets.push(ai_app_surface_target(tab.id, &tab.kind, &tab.title, session_id, self.tab_host.read(cx).surface_is_visible(tab.id)));
+            targets.push(AiTargetCapture::Surface {
+                tab_id: tab.id,
+                kind: tab.kind.clone(),
+                title: tab.title.clone(),
+                session_id,
+                visible: self.tab_host.read(cx).surface_is_visible(tab.id),
+            });
         }
 
         for (node_id, node) in &self.ssh_nodes {
@@ -90,22 +64,20 @@ impl WorkspaceApp {
             let sftp_session_id = resolved_connection
                 .as_ref()
                 .and_then(|resolved| resolved.sftp_session_id.clone());
-            let readiness = match node.readiness {
-                NodeReadiness::Ready => oxideterm_workspace::ActiveSessionReadiness::Ready,
-                NodeReadiness::Connecting => oxideterm_workspace::ActiveSessionReadiness::Connecting,
-                NodeReadiness::Error => oxideterm_workspace::ActiveSessionReadiness::Error,
-                NodeReadiness::Disconnected => oxideterm_workspace::ActiveSessionReadiness::Disconnected,
-            };
-            targets.extend(oxideterm_ai::tool_resources::ai_ssh_node_target(
-                oxideterm_ai::tool_resources::AiSshNodeTargetInput {
-                    node_id: &node_id.0, connection_id: node.saved_connection_id.as_deref(), readiness,
-                    host: &node.endpoint.host, port: node.endpoint.port, username: &node.endpoint.username,
-                    title: &node.title, terminal_ids: &node.terminal_ids, sftp_session_id: sftp_session_id.as_deref(),
-                }
-            ));
-            if let Some(sftp_session_id) = sftp_session_id {
-                targets.push(ai_sftp_target_for_node(node_id, node, sftp_session_id));
-            }
+            targets.push(AiTargetCapture::SshNode {
+                target: AiSshNodeTargetInput {
+                    node_id: &node_id.0,
+                    connection_id: node.saved_connection_id.as_deref(),
+                    readiness: ai_node_readiness(node),
+                    host: &node.endpoint.host,
+                    port: node.endpoint.port,
+                    username: &node.endpoint.username,
+                    title: &node.title,
+                    terminal_ids: &node.terminal_ids,
+                    sftp_session_id: None,
+                },
+                sftp_session_id,
+            });
         }
 
         for node_id in self.sftp_tab_nodes.values() {
@@ -120,21 +92,28 @@ impl WorkspaceApp {
             else {
                 continue;
             };
-            targets.push(ai_sftp_target_for_node(node_id, node, sftp_session_id));
+            targets.push(AiTargetCapture::Sftp(oxideterm_ai::AiSftpTargetInput {
+                node_id: node_id.0.clone(),
+                session_id: sftp_session_id,
+                connection_id: node.saved_connection_id.clone(),
+                host: node.endpoint.host.clone(),
+            }));
         }
 
         for ide_target in self.ide_workspace.read(cx).target_snapshots(cx) {
             let Some(node) = self.ssh_nodes.get(&ide_target.node_id) else {
                 continue;
             };
-            targets.push(ai_ide_workspace_target_for_node(
-                ide_target.tab_id,
-                &ide_target.node_id,
-                node,
-                ide_target.active_editor_tab_id,
-                ide_target.project_root_path,
-                ide_target.project_name,
-            ));
+            targets.push(AiTargetCapture::Ide {
+                tab_id: ide_target.tab_id,
+                target: oxideterm_ai::AiIdeTargetInput {
+                    node_id: ide_target.node_id.0,
+                    connection_id: node.saved_connection_id.clone(),
+                    active_editor_tab_id: ide_target.active_editor_tab_id,
+                    project_root_path: ide_target.project_root_path,
+                    project_name: ide_target.project_name,
+                },
+            });
         }
 
         let tab_host = self.tab_host.read(cx);
@@ -178,7 +157,7 @@ impl WorkspaceApp {
                         pane.lifecycle().is_running(),
                     )
                 };
-                targets.push(ai_terminal_target(AiTerminalTargetInput {
+                targets.push(AiTargetCapture::Terminal(AiTerminalTargetInput {
                     session_id, tab_id: tab.id, pane_id, pane_label: self.terminal_pane_label(pane_id, cx),
                     transport: match session_kind {
                         oxideterm_terminal::TerminalSessionKind::LocalPty => AiTerminalTransport::Local,
@@ -205,152 +184,52 @@ impl WorkspaceApp {
                 targets, runtime_handles, ..AiOrchestratorRuntimeSnapshot::background_result_projection()
             };
         }
-        let settings = self.settings_store.settings();
-        let active_node_id = self
-            .active_ssh_node_id
-            .as_ref()
-            .map(|node_id| node_id.0.clone());
-        let active_session_id = self
-            .ai_active_terminal_session_id(cx)
-            .map(|session_id| session_id.0.to_string());
-        let active_tab = self.active_content_tab(cx).map(|tab| {
-            serde_json::json!({
-                "type": ai_tab_kind_label(&tab.kind),
-                "title": tab.title,
+        let active_tab = self.active_content_tab(cx).map(|tab| (tab.kind.clone(), tab.title.clone()));
+        let active_node = self.active_ssh_node_id.as_ref().and_then(|id| {
+            self.ssh_nodes.get(id).map(|node| AiActiveNodeCapture {
+                host: &node.endpoint.host,
+                username: &node.endpoint.username,
+                readiness: ai_node_readiness(node),
             })
         });
-        let active_node = self.active_ssh_node_id.as_ref().and_then(|node_id| {
-            self.ssh_nodes.get(node_id).map(|node| {
-                serde_json::json!({
-                    "host": node.endpoint.host,
-                    "username": node.endpoint.username,
-                    "status": match node.readiness {
-                        NodeReadiness::Ready => "connected",
-                        NodeReadiness::Connecting => "connecting",
-                        NodeReadiness::Error => "error",
-                        NodeReadiness::Disconnected => "disconnected",
-                    },
-                })
-            })
-        });
-        let model_visible_settings = ai_model_visible_settings_projection(settings);
-        let transfers = ai_transfers_state(&self.sftp_transfer_manager);
-        let mut ssh_node_states = std::collections::BTreeMap::<String, usize>::new();
-        for node in self.ssh_nodes.values() {
-            let state = match node.readiness {
-                NodeReadiness::Ready => "connected",
-                NodeReadiness::Connecting => "connecting",
-                NodeReadiness::Error => "error",
-                NodeReadiness::Disconnected => "disconnected",
-            };
-            *ssh_node_states.entry(state.to_string()).or_default() += 1;
+        let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
+        let (mut total, mut warnings, mut errors) = (0, 0, 0);
+        for entry in &self.notification_center.event_log.entries {
+            if entry.timestamp >= cutoff {
+                total += 1;
+                match entry.severity {
+                    WorkspaceEventSeverity::Warn => warnings += 1,
+                    WorkspaceEventSeverity::Error => errors += 1,
+                    _ => {}
+                }
+            }
         }
-        let recent_event_cutoff =
-            std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
-        let recent_events = self
-            .notification_center
-            .event_log
-            .entries
-            .iter()
-            .filter(|entry| entry.timestamp >= recent_event_cutoff)
-            .collect::<Vec<_>>();
-        let recent_event_warnings = recent_events
-            .iter()
-            .filter(|entry| entry.severity == WorkspaceEventSeverity::Warn)
-            .count();
-        let recent_event_errors = recent_events
-            .iter()
-            .filter(|entry| entry.severity == WorkspaceEventSeverity::Error)
-            .count();
-        // Keep get_state(health) on the same public shape as Tauri even though
-        // native derives the values from GPUI-owned stores instead of Zustand.
-        let health_state = serde_json::json!({
-            "tabs": {
-                "open": self.tabs(cx).len(),
-                "hasActiveTab": self.active_tab_id(cx).is_some(),
-            },
-            "terminalRegistry": { "entries": self.tab_host.read(cx).panes().len() },
-            "localTerminals": {
-                "count": self.visible_local_terminal_session_count(cx) + self.detached_local_terminals.len(),
-            },
-            "sshNodes": {
-                "total": self.ssh_nodes.len(),
-                "states": ssh_node_states,
-            },
-            "transfers": {
-                "total": transfers.get("total").and_then(serde_json::Value::as_u64).unwrap_or(0),
-                "counts": transfers.get("counts").cloned().unwrap_or_else(|| serde_json::json!({})),
-            },
-            "recentEvents": {
-                "total": recent_events.len(),
-                "warnings": recent_event_warnings,
-                "errors": recent_event_errors,
-            },
-        });
-        AiOrchestratorRuntimeSnapshot {
-            targets,
-            runtime_handles,
-            active_tab,
+        let mut snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
+        snapshot.targets = targets;
+        snapshot.runtime_handles = runtime_handles;
+        finish_ai_workspace_snapshot(
+            snapshot,
+            active_tab.as_ref().map(|(kind, title)| (kind, title.as_str())),
             active_node,
-            active_session_id,
-            active_tab_id: self
-                .active_content_tab_id(cx)
-                .map(|tab_id| tab_id.0.to_string()),
-            active_node_id,
-            memory: ai_memory_settings_json(
-                settings.ai.memory.enabled,
-                &settings.ai.memory.content,
-                &settings.ai.memory.entries,
-            ),
-            health_state,
-            transfers_state: transfers,
-            model_visible_settings,
-        }
+            self.ai_active_terminal_session_id(cx),
+            self.active_content_tab_id(cx),
+            self.active_ssh_node_id.as_ref().map(|node_id| node_id.0.as_str()),
+            self.settings_store.settings(),
+            ai_transfers_state(&self.sftp_transfer_manager),
+            AiRuntimeHealthCapture {
+                open_tabs: self.tabs(cx).len(),
+                has_active_tab: self.active_tab_id(cx).is_some(),
+                pane_count: self.tab_host.read(cx).panes().len(),
+                local_session_count: self.visible_local_terminal_session_count(cx)
+                    + self.detached_local_terminals.len(),
+                node_states: self.ssh_nodes.values().map(ai_node_readiness),
+                recent_events: (total, warnings, errors),
+            },
+        )
     }
 
-    pub(in crate::workspace) fn ai_model_backend_services(
-        &self,
-        cx: &App,
-    ) -> AiModelBackendServices {
-        let ai = self.ai.state.read(cx);
-        let settings = self.settings_store.settings();
-        AiModelBackendServices {
-            rag_store: ai.rag_store(),
-            ai_mcp_registry: ai.mcp_registry().clone(),
-            ai_key_store: ai.key_store().clone(),
-            ai_providers: settings.ai.providers.clone(),
-            ai_embedding_config: settings.ai.embedding_config.clone(),
-            agent_model_limits: ai_provider_views(&settings.ai.providers)
-                .into_iter()
-                .flat_map(|provider| {
-                    provider.models.into_iter().map(move |model| {
-                        let context = ai_context_window_from_maps(
-                            &settings.ai.user_context_windows,
-                            &settings.ai.model_context_windows,
-                            &provider.id,
-                            &model,
-                        )
-                        .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
-                        let response: Option<i64> = None;
-                        let reasoning = settings
-                            .ai
-                            .reasoning_model_overrides
-                            .get(&provider.id)
-                            .and_then(|models| models.get(&model))
-                            .and_then(serde_json::Value::as_str)
-                            .unwrap_or("auto");
-                        let reasoning = oxideterm_ai::normalize_reasoning_level_for_model(
-                            &provider.provider_type,
-                            &model,
-                            reasoning,
-                        )
-                        .as_str()
-                        .to_owned();
-                        ((provider.id.clone(), model), (context, response, reasoning))
-                    })
-                })
-                .collect(),
-        }
+    pub(in crate::workspace) fn ai_model_backend_services(&self, cx: &App) -> AiModelBackendServices {
+        self.ai.state.read(cx).model_backend_services(&self.settings_store.settings().ai)
     }
 
     pub(in crate::workspace) fn ai_live_tool_services(&self) -> AiLiveToolServices {
@@ -373,46 +252,12 @@ impl WorkspaceApp {
         // Issuing from authoritative owners here makes the first provider
         // round useful without trusting the internal target scan as authority.
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(tool_session_id), cx);
-        let mut stable_resources = if self
-            .ai.authority
-            .read(cx)
-            .is_agent_scoped_session(tool_session_id)
-        {
-            Vec::new()
-        } else {
-            ai_app_surface_stable_resources()
-        };
-        for resource_ref in snapshot
-            .targets
-            .iter()
-            .filter_map(ai_stable_resource_ref_for_target)
-        {
-            if !stable_resources.contains(&resource_ref) {
-                stable_resources.push(resource_ref);
-            }
-            if stable_resources.len() >= AI_RUNTIME_STABLE_RESOURCE_LIMIT {
-                break;
-            }
-        }
-        let live_handles = self
-            .ai.authority
-            .read(cx)
-            .current_handle_projections(tool_session_id);
-        let registry_epoch = self.ai.authority.read(cx).registry_epoch();
-        let projection = oxideterm_ai::RuntimeContextSnapshot {
-            protocol_version: 2,
-            snapshot_id: format!("snap_{}", uuid::Uuid::new_v4().simple()),
-            observed_at_ms: ai_now_ms(),
-            registry_epoch,
-            stable_resources,
-            live_handles,
-        };
-        let value = serde_json::json!({
-            "runtimeContext": projection,
-        });
-        serde_json::to_string_pretty(&value)
-            .map(|text| ai_model_safe_runtime_text(&text))
-            .unwrap_or_else(|_| "{\"runtimeContext\":{\"protocolVersion\":2}}".to_string())
+        oxideterm_ai::tool_resources::ai_runtime_context_prompt(
+            &snapshot,
+            self.ai.authority.read(cx),
+            tool_session_id,
+            ai_now_ms(),
+        )
     }
 
     pub(in crate::workspace) fn ai_acp_chat_launch(
@@ -532,289 +377,9 @@ impl WorkspaceApp {
         let started = std::time::Instant::now();
         let current_snapshot =
             self.ai_orchestrator_snapshot_for_tool_session(Some(tool_session_id), cx);
-        let result = match tool_name.as_str() {
-            "list_targets" => current_snapshot.list_targets(&args),
-            "select_target" => current_snapshot.select_target(&args),
-            "connect_target" => self.execute_ai_connect_target(&args, window, cx),
-            "run_command" => current_snapshot.fail(
-                "Command execution requires the asynchronous runtime broker.",
-                "runtime_capability_unavailable",
-                "Retry the command through the current tool session.",
-                "interactive",
-            ),
-            "observe_terminal" => self.execute_ai_observe_terminal(tool_session_id, &args, cx),
-            "send_terminal_input" => {
-                self.execute_ai_send_terminal_input(tool_session_id, &args, window, cx)
-            }
-            "wait_terminal_output" => current_snapshot.fail(
-                "Terminal waiting requires the asynchronous runtime broker.",
-                "runtime_capability_unavailable",
-                "Retry the wait through the current tool session.",
-                "read",
-            ),
-            "get_terminal_command_status" => {
-                self.execute_ai_get_terminal_command_status(tool_session_id, &args, cx)
-            }
-            "read_resource" => self.execute_ai_read_stable_resource(&args, cx),
-            "write_resource" => self.execute_ai_write_settings_resource(&args, window, cx),
-            "transfer_resource" => current_snapshot.fail(
-                "SFTP capability is unavailable.",
-                "runtime_capability_unavailable",
-                "Rediscover current resources after the SFTP capability owner is available.",
-                "write",
-            ),
-            "open_app_surface" => {
-                self.execute_ai_open_app_surface(tool_session_id, &args, window, cx)
-            }
-            "get_state" => self.execute_ai_get_state(tool_session_id, &args, cx),
-            "inspect_host_tools" => {
-                let result = self.execute_ai_inspect_host_tools(tool_session_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Host Tools inspection completed.",
-                    "read",
-                )
-            }
-            "control_host_tool" => {
-                let result = self.execute_ai_control_host_tool(tool_session_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Host Tools action accepted.",
-                    "execute",
-                )
-            }
-            "list_forwards" => {
-                let result = self.execute_ai_list_forwards(tool_session_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Forwarding rules listed.",
-                    "read",
-                )
-            }
-            "manage_forward" => {
-                let result = self.execute_ai_manage_forward(tool_session_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Forwarding action accepted.",
-                    "write",
-                )
-            }
-            "list_plugins" => {
-                let data = self.execute_ai_list_plugins(cx);
-                current_snapshot.ok(
-                    "Installed plugins listed.",
-                    serde_json::to_string_pretty(&data).unwrap_or_default(),
-                    data,
-                    "read",
-                )
-            }
-            "manage_plugin" => {
-                let result = self.execute_ai_manage_plugin(&args, window, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Plugin action accepted.",
-                    "write",
-                )
-            }
-            "list_transport_profiles" => {
-                let data = self.execute_ai_list_transport_profiles();
-                current_snapshot.ok(
-                    "Saved transport profiles listed.",
-                    serde_json::to_string_pretty(&data).unwrap_or_default(),
-                    data,
-                    "read",
-                )
-            }
-            "open_transport_profile" => {
-                let result = self.execute_ai_open_transport_profile(&args, window, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Transport profile open request accepted.",
-                    "interactive",
-                )
-            }
-            "get_transport_session_state" => {
-                let result =
-                    self.execute_ai_get_transport_session_state(tool_session_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Transport session state read.",
-                    "read",
-                )
-            }
-            "manage_serial_session" => {
-                let result = self.execute_ai_manage_serial_session(tool_session_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Serial session action completed.",
-                    "interactive",
-                )
-            }
-            "manage_telnet_session" => {
-                let result = self.execute_ai_manage_telnet_session(tool_session_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Telnet session action completed.",
-                    "interactive",
-                )
-            }
-            "list_remote_desktop_sessions" => {
-                let data = self.execute_ai_list_remote_desktop_sessions(cx);
-                current_snapshot.ok(
-                    "Remote desktop sessions listed.",
-                    serde_json::to_string_pretty(&data).unwrap_or_default(),
-                    data,
-                    "read",
-                )
-            }
-            "manage_remote_desktop_session" => {
-                let result = self.execute_ai_manage_remote_desktop_session(&args, window, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Remote desktop session action accepted.",
-                    "interactive",
-                )
-            }
-            "get_cloud_sync_state" => {
-                let data = self.execute_ai_get_cloud_sync_state(cx);
-                current_snapshot.ok(
-                    "Cloud Sync state inspected.",
-                    serde_json::to_string_pretty(&data).unwrap_or_default(),
-                    data,
-                    "read",
-                )
-            }
-            "configure_cloud_sync" => {
-                let result = self.execute_ai_configure_cloud_sync(&args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Cloud Sync configuration updated.",
-                    "write",
-                )
-            }
-            "manage_cloud_sync" => {
-                let result = self.execute_ai_manage_cloud_sync(&args, window, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Cloud Sync action accepted.",
-                    "write",
-                )
-            }
-            "list_credentials" => {
-                let result = self.execute_ai_list_credentials(&args);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Credential metadata listed.",
-                    "read",
-                )
-            }
-            "manage_credential" => {
-                let result = self.execute_ai_manage_credential(&args, window, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Credential management action accepted.",
-                    "write",
-                )
-            }
-            "list_memory_entries" => {
-                let data = self.execute_ai_list_memory_entries(&args);
-                current_snapshot.ok(
-                    "Memory entries listed.",
-                    serde_json::to_string_pretty(&data).unwrap_or_default(),
-                    data,
-                    "read",
-                )
-            }
-            "manage_memory_entry" => {
-                let result = self.execute_ai_manage_memory_entry(&args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Memory entry action completed.",
-                    "write",
-                )
-            }
-            "create_background_task" => {
-                let result = self.execute_ai_create_background_task(conversation_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Background task created.",
-                    "write",
-                )
-            }
-            "list_background_tasks" => {
-                let data = self.execute_ai_list_background_tasks(conversation_id, cx);
-                current_snapshot.ok(
-                    "Background tasks listed.",
-                    serde_json::to_string_pretty(&data).unwrap_or_default(),
-                    data,
-                    "read",
-                )
-            }
-            "get_background_task" => {
-                let result = self.execute_ai_get_background_task(conversation_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Background task inspected.",
-                    "read",
-                )
-            }
-            "cancel_background_task" => {
-                let result = self.execute_ai_cancel_background_task(conversation_id, &args, cx);
-                ai_application_action_result(
-                    &current_snapshot,
-                    result,
-                    "Background task cancelled.",
-                    "write",
-                )
-            }
-            "remember_preference" => self.execute_ai_remember_preference(&args, cx),
-            "recall_preferences" => {
-                let memory_content = ai_memory_trimmed_content(&current_snapshot.memory);
-                current_snapshot.ok(
-                    if memory_content.is_empty() {
-                        "No saved preferences."
-                    } else {
-                        "Preferences recalled."
-                    },
-                    if memory_content.is_empty() {
-                        "No saved preferences.".to_string()
-                    } else {
-                        memory_content.to_string()
-                    },
-                    current_snapshot.memory.clone(),
-                    "read",
-                )
-            }
-            "load_skill" => {
-                self.ai.state.update(cx, |state, _| state.execute_ai_load_skill(conversation_id, &args, &current_snapshot, &self.ai.skills, self.settings_store.settings().ai.skills.enabled))
-            }
-            "read_skill_resource" => {
-                self.ai.state.read(cx).execute_ai_read_skill_resource(conversation_id, &args, &current_snapshot, &self.ai.skills, self.settings_store.settings().ai.skills.enabled)
-            }
-            _ => current_snapshot.fail(
-                "Unknown orchestrator tool.",
-                "unknown_tool",
-                format!("{tool_name} is not an OxideSens task tool."),
-                "read",
-            ),
-        };
+        let result = dispatch_ai_application_tool(&current_snapshot, &tool_name, &args, |request| {
+            self.invoke_ai_application_tool(request, conversation_id, tool_session_id, &args, &current_snapshot, window, cx)
+        });
         self.ai_orchestrator_snapshot_for_tool_session(Some(tool_session_id), cx)
             .to_executed_tool_result(
                 tool_call_id,
@@ -827,99 +392,70 @@ impl WorkspaceApp {
     /// Executes only stable, non-live reads on the UI-owned broker. Live file
     /// and SFTP operations remain unavailable until their real owners expose
     /// capability adapters.
-    fn execute_ai_read_stable_resource(
-        &self,
+    fn invoke_ai_application_tool(
+        &mut self,
+        request: AiApplicationTool,
+        conversation_id: &str,
+        tool_session_id: &ToolSessionId,
         args: &serde_json::Value,
+        snapshot: &AiOrchestratorRuntimeSnapshot,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
+        use AiApplicationTool::*;
+        let result = match request {
+            ConnectTarget => return self.execute_ai_connect_target(args, window, cx),
+            ObserveTerminal => return self.execute_ai_observe_terminal(tool_session_id, args, cx),
+            SendTerminalInput => return {
+                self.execute_ai_send_terminal_input(tool_session_id, args, window, cx)
+            },
+            GetTerminalCommandStatus => return {
+                self.execute_ai_get_terminal_command_status(tool_session_id, args, cx)
+            },
+            ReadResource => return self.execute_ai_read_stable_resource(args, cx),
+            WriteResource => return self.execute_ai_write_settings_resource(args, window, cx),
+            OpenAppSurface => return {
+                self.execute_ai_open_app_surface(tool_session_id, args, window, cx)
+            },
+            GetState => return self.execute_ai_get_state(tool_session_id, args, cx),
+            InspectHostTools => self.execute_ai_inspect_host_tools(tool_session_id, args, cx),
+            ControlHostTool => self.execute_ai_control_host_tool(tool_session_id, args, cx),
+            ListForwards => self.execute_ai_list_forwards(tool_session_id, args, cx),
+            ManageForward => self.execute_ai_manage_forward(tool_session_id, args, cx),
+            ListPlugins => Ok(self.execute_ai_list_plugins(cx)),
+            ManagePlugin => self.execute_ai_manage_plugin(args, window, cx),
+            ListTransportProfiles => Ok(self.execute_ai_list_transport_profiles()),
+            OpenTransportProfile => self.execute_ai_open_transport_profile(args, window, cx),
+            GetTransportSessionState => self.execute_ai_get_transport_session_state(tool_session_id, args, cx),
+            ManageSerialSession => self.execute_ai_manage_serial_session(tool_session_id, args, cx),
+            ManageTelnetSession => self.execute_ai_manage_telnet_session(tool_session_id, args, cx),
+            ListRemoteDesktopSessions => Ok(self.execute_ai_list_remote_desktop_sessions(cx)),
+            ManageRemoteDesktopSession => self.execute_ai_manage_remote_desktop_session(args, window, cx),
+            GetCloudSyncState => Ok(self.execute_ai_get_cloud_sync_state(cx)),
+            ConfigureCloudSync => self.execute_ai_configure_cloud_sync(args, cx),
+            ManageCloudSync => self.execute_ai_manage_cloud_sync(args, window, cx),
+            ListCredentials => self.execute_ai_list_credentials(args),
+            ManageCredential => self.execute_ai_manage_credential(args, window, cx),
+            ListMemoryEntries => Ok(self.execute_ai_list_memory_entries(args)),
+            ManageMemoryEntry => self.execute_ai_manage_memory_entry(args, cx),
+            CreateBackgroundTask => self.execute_ai_create_background_task(conversation_id, args, cx),
+            ListBackgroundTasks => Ok(self.execute_ai_list_background_tasks(conversation_id, cx)),
+            GetBackgroundTask => self.execute_ai_get_background_task(conversation_id, args, cx),
+            CancelBackgroundTask => self.execute_ai_cancel_background_task(conversation_id, args, cx),
+            RememberPreference => return self.execute_ai_remember_preference(args, cx),
+            LoadSkill => return {
+                self.ai.state.update(cx, |state, _| state.execute_ai_load_skill(conversation_id, args, &snapshot, &self.ai.skills, self.settings_store.settings().ai.skills.enabled))
+            },
+            ReadSkillResource => return {
+                self.ai.state.read(cx).execute_ai_read_skill_resource(conversation_id, args, &snapshot, &self.ai.skills, self.settings_store.settings().ai.skills.enabled)
+            },
+        };
+        request.result(snapshot, result)
+    }
+
+    fn execute_ai_read_stable_resource(&self, args: &serde_json::Value, cx: &mut Context<Self>) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        match ai_stable_resource_operation("read_resource", args) {
-            Ok(AiStableResourceOperation::Settings) => {
-                let Some(target) = snapshot
-                    .targets
-                    .iter()
-                    .find(|target| target.kind == "settings")
-                    .cloned()
-                else {
-                    return snapshot.fail(
-                        "Settings resource is unavailable.",
-                        "resource_not_found",
-                        "Rediscover the application settings resource before reading it.",
-                        "read",
-                    );
-                };
-                let section = args.get("section").and_then(serde_json::Value::as_str);
-                let data = section
-                    .and_then(|section| snapshot.model_visible_settings.get(section).cloned())
-                    .unwrap_or_else(|| snapshot.model_visible_settings.clone());
-                snapshot
-                    .ok(
-                        section
-                            .map(|section| format!("Read settings section {section}."))
-                            .unwrap_or_else(|| "Read settings.".to_string()),
-                        serde_json::to_string_pretty(&data).unwrap_or_default(),
-                        data,
-                        "read",
-                    )
-                    .with_target(target)
-            }
-            Ok(AiStableResourceOperation::Rag) => {
-                let Some(target) = snapshot
-                    .targets
-                    .iter()
-                    .find(|target| target.kind == "rag-index")
-                    .cloned()
-                else {
-                    return snapshot.fail(
-                        "Knowledge resource is unavailable.",
-                        "resource_not_found",
-                        "Rediscover the knowledge resource before searching it.",
-                        "read",
-                    );
-                };
-                let rag_store = self.ai.state.read(cx).rag_store();
-                let results = oxideterm_ai::rag_search(
-                    &rag_store,
-                    oxideterm_ai::RagSearchRequest {
-                        query: ai_rag_query_arg(args).to_string(),
-                        collection_ids: Vec::new(),
-                        query_vector: None,
-                        top_k: Some(8),
-                    },
-                );
-                match results {
-                    Ok(results) => {
-                        let data =
-                            serde_json::to_value(results).unwrap_or_else(|_| serde_json::json!([]));
-                        snapshot
-                            .ok(
-                                format!(
-                                    "Found {} knowledge results.",
-                                    data.as_array().map(Vec::len).unwrap_or(0)
-                                ),
-                                serde_json::to_string_pretty(&data).unwrap_or_default(),
-                                data,
-                                "read",
-                            )
-                            .with_target(target)
-                    }
-                    Err(error) => snapshot
-                        .fail(
-                            "Knowledge search failed.",
-                            "rag_search_error",
-                            error,
-                            "read",
-                        )
-                        .with_target(target),
-                }
-            }
-            _ => snapshot.fail(
-                "Resource is unavailable.",
-                "resource_not_found",
-                "Rediscover the resource through the current v2 runtime context.",
-                "read",
-            ),
-        }
+        ai_read_stable_resource(&snapshot, args, || self.ai.state.read(cx).rag_store())
     }
 
     fn execute_ai_get_state(
@@ -1136,8 +672,8 @@ impl WorkspaceApp {
         let execution = async move {
             let mut sender = sender;
             let operation = async {
-                match tool_name.as_str() {
-                    "read_resource" => {
+                match operation {
+                    AiLiveResourceOperation::SftpRead | AiLiveResourceOperation::IdeRead => {
                         read_live_resource(
                             &snapshot,
                             &services,
@@ -1149,7 +685,7 @@ impl WorkspaceApp {
                         )
                         .await
                     }
-                    "write_resource" => {
+                    AiLiveResourceOperation::SftpWrite | AiLiveResourceOperation::IdeWrite => {
                         write_live_resource(
                             &snapshot,
                             &services,
@@ -1161,7 +697,7 @@ impl WorkspaceApp {
                         )
                         .await
                     }
-                    "transfer_resource" => match sftp_owner {
+                    AiLiveResourceOperation::SftpStartTransfer => match sftp_owner {
                         Some(owner) => {
                             transfer_live_resource(
                                 &snapshot,
@@ -1179,12 +715,6 @@ impl WorkspaceApp {
                             "write",
                         ),
                     },
-                    _ => snapshot.fail(
-                        "Resource operation is unavailable.",
-                        "runtime_capability_unavailable",
-                        "Rediscover the current runtime resource before retrying.",
-                        "write",
-                    ),
                 }
             };
             let action = tokio::select! {
@@ -1383,35 +913,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        let resource_ref = match ai_stable_resource_operation("connect_target", args) {
-            Ok(AiStableResourceOperation::SavedConnection(resource_ref)) => resource_ref,
-            _ => {
-                return snapshot.fail(
-                    "Saved connection is unavailable.",
-                    "resource_not_found",
-                    "Rediscover the saved connection before connecting.",
-                    "write",
-                );
-            }
+        let resource_ref = match snapshot.plan_saved_connection(args) {
+            Ok(resource) => resource,
+            Err(result) => return result,
         };
-        let target = snapshot
-            .targets
-            .iter()
-            .find(|target| {
-                target.kind == "saved-connection"
-                    && target
-                        .refs
-                        .get("connectionId")
-                        .is_some_and(|id| id == resource_ref.id())
-            })
-            .cloned();
         let Some(connection) = self.connection_store.get(resource_ref.id()).cloned() else {
-            return snapshot.fail(
-                "Saved connection was removed.",
-                "resource_removed",
-                "The saved connection no longer exists. Rediscover available connections.",
-                "write",
-            );
+            return snapshot.saved_connection_removed();
         };
         let Some(config) = oxideterm_session_adapter::ssh_config_from_saved_connection(
             &self.connection_store,
@@ -1424,29 +931,11 @@ impl WorkspaceApp {
                 window,
                 cx,
             ) {
-                return snapshot
-                    .ok(
-                        "Target is already live.",
-                        "Focused the existing SSH terminal.",
-                        serde_json::json!({ "resourceRef": resource_ref }),
-                        "write",
-                    )
-                    .with_optional_target(target);
+                return snapshot.saved_connection_opened(resource_ref, true);
             }
-            return snapshot
-                .fail(
-                    "Saved connection cannot be opened.",
-                    "credential_interaction_required",
-                    "The saved connection needs valid SSH configuration or credentials.",
-                    "write",
-                )
-                .with_optional_target(target);
+            return snapshot.saved_connection_credentials_required(&resource_ref);
         };
-        let title = if connection.name.trim().is_empty() {
-            format!("{}@{}", connection.username, connection.host)
-        } else {
-            connection.name.clone()
-        };
+        let title = oxideterm_ai::tool_resources::ai_connection_title(&connection.name, &connection.username, &connection.host);
         self.start_saved_connection_flow(
             resource_ref.id().to_string(),
             config,
@@ -1456,14 +945,7 @@ impl WorkspaceApp {
             window,
             cx,
         );
-        snapshot
-            .ok(
-                "Connection requested.",
-                "The saved connection flow has started.",
-                serde_json::json!({ "resourceRef": resource_ref }),
-                "write",
-            )
-            .with_optional_target(target)
+        snapshot.saved_connection_opened(resource_ref, false)
     }
 
     pub(in crate::workspace) fn execute_ai_observe_terminal(
@@ -1489,94 +971,15 @@ impl WorkspaceApp {
                 );
             }
         };
-        let target = snapshot
-            .targets
-            .iter()
-            .find(|target| {
-                target.kind == "terminal-session"
-                    && target
-                        .refs
-                        .get("sessionId")
-                        .is_some_and(|value| value == &session_id.0.to_string())
-            })
-            .cloned();
-        let Some(target_snapshot) = target.as_ref() else {
-            return snapshot.fail(
-                "Runtime terminal is unavailable.",
-                "runtime_owner_closed",
-                "The terminal pane is no longer registered.",
-                "read",
-            );
+        let Some(target) = snapshot.terminal_target(session_id) else {
+            return snapshot.fail("Runtime terminal is unavailable.", "runtime_owner_closed", "The terminal pane is no longer registered.", "read");
         };
-        let max_chars = args
-            .get("max_chars")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(4000) as usize;
-        let output = trim_tail_chars(
-            target_snapshot
-                .terminal_buffer
-                .as_deref()
-                .unwrap_or_default(),
-            max_chars,
-        );
-        let command_records = self
-            .ai_terminal_pane_for_session(session_id, cx)
-            .map(|pane| {
-                pane.read(cx)
-                    .ai_command_records()
-                    .into_iter()
-                    .rev()
-                    .take(5)
-                    .map(|record| {
-                        ai_terminal_command_record_json(
-                            &record,
-                            pane.read(cx).ai_command_prompt_returned(&record.command_id),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let screen = target_snapshot
-            .terminal_screen
-            .clone()
-            .unwrap_or_else(|| serde_json::json!({ "lines": [] }));
-        let input_wait_reason = ai_terminal_input_wait_reason(
-            target_snapshot
-                .terminal_buffer
-                .as_deref()
-                .unwrap_or_default(),
-            self.ai_terminal_pane_for_session(session_id, cx)
-                .is_some_and(|pane| pane.read(cx).ai_waiting_for_secret()),
-        );
-        let terminal_observation = command_records.first().map(|record| {
-            let state = record.get("status").and_then(serde_json::Value::as_str).unwrap_or("running");
-            serde_json::json!({
-                "commandId": record["commandId"],
-                "state": state,
-                "completionConfirmed": record["completionConfirmed"],
-                "exitCode": record["exitCode"],
-                "canRunCommand": matches!(state, "completed" | "shell_ready") && input_wait_reason.is_none(),
-            })
-        });
-        snapshot
-            .ok(
-                "Terminal observed.",
-                output.clone(),
-                serde_json::json!({
-                    "buffer": output,
-                    "screen": screen,
-                    "waitingForInput": input_wait_reason.is_some(),
-                    "inputWaitReason": input_wait_reason,
-                    "tuiState": ai_terminal_tui_state(
-                        target_snapshot.terminal_screen.as_ref(),
-                        target_snapshot.terminal_buffer.as_deref().unwrap_or_default(),
-                    ),
-                    "recentCommands": command_records,
-                    "terminalObservation": terminal_observation,
-                }),
-                "read",
-            )
-            .with_optional_target(target)
+        let pane = self.ai_terminal_pane_for_session(session_id, cx);
+        let pane = pane.as_ref().map(|pane| pane.read(cx));
+        let records = pane.map(|pane| pane.ai_command_records()).unwrap_or_default();
+        snapshot.terminal_observed(target, args, records.iter().rev().map(|record| {
+            ai_terminal_command_capture(record, pane.is_some_and(|pane| pane.ai_command_prompt_returned(&record.command_id)))
+        }), pane.is_some_and(|pane| pane.ai_waiting_for_secret()))
     }
 
     pub(in crate::workspace) fn execute_ai_send_terminal_input(
@@ -1603,17 +1006,7 @@ impl WorkspaceApp {
                 );
             }
         };
-        let target = snapshot
-            .targets
-            .iter()
-            .find(|target| {
-                target.kind == "terminal-session"
-                    && target
-                        .refs
-                        .get("sessionId")
-                        .is_some_and(|value| value == &session_id.0.to_string())
-            })
-            .cloned();
+        let target = snapshot.terminal_target(session_id);
         let Some((_pane_id, pane)) = self.ai_terminal_session(session_id, cx) else {
             return snapshot
                 .fail(
@@ -1683,17 +1076,7 @@ impl WorkspaceApp {
                 );
             }
         };
-        let target = snapshot
-            .targets
-            .iter()
-            .find(|target| {
-                target.kind == "terminal-session"
-                    && target
-                        .refs
-                        .get("sessionId")
-                        .is_some_and(|value| value == &session_id.0.to_string())
-            })
-            .cloned();
+        let target = snapshot.terminal_target(session_id);
         let Some(pane) = self.ai_terminal_pane_for_session(session_id, cx) else {
             return snapshot
                 .fail(
@@ -1704,43 +1087,11 @@ impl WorkspaceApp {
                 )
                 .with_optional_target(target);
         };
-        let command_id = args.get("command_id").and_then(serde_json::Value::as_str);
-        let limit = args
-            .get("limit")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(5) as usize;
-        let records = pane
-            .read(cx)
-            .ai_command_records()
-            .into_iter()
-            .rev()
-            .filter(|record| command_id.is_none_or(|id| record.command_id == id))
-            .take(if command_id.is_some() { 1 } else { limit })
-            .map(|record| {
-                ai_terminal_command_record_json(
-                    &record,
-                    pane.read(cx).ai_command_prompt_returned(&record.command_id),
-                )
-            })
-            .collect::<Vec<_>>();
-        if command_id.is_some() && records.is_empty() {
-            return snapshot
-                .fail(
-                    "Terminal command is not tracked.",
-                    "terminal_command_not_found",
-                    "The command mark is unavailable or has expired from the terminal ledger.",
-                    "read",
-                )
-                .with_optional_target(target);
-        }
-        snapshot
-            .ok(
-                "Terminal command status read.",
-                serde_json::to_string_pretty(&records).unwrap_or_default(),
-                serde_json::json!({ "commands": records }),
-                "read",
-            )
-            .with_optional_target(target)
+        let pane = pane.read(cx);
+        let records = pane.ai_command_records();
+        snapshot.terminal_command_status(target, args, records.iter().rev().map(|record| {
+            ai_terminal_command_capture(record, pane.ai_command_prompt_returned(&record.command_id))
+        }))
     }
 
     pub(in crate::workspace) fn start_ai_terminal_run_command_execution(
@@ -1856,17 +1207,7 @@ impl WorkspaceApp {
             .ssh_terminal_nodes()
             .into_iter()
             .find_map(|(id, node)| (id == session_id).then_some(node));
-        let target = snapshot
-            .targets
-            .iter()
-            .find(|target| {
-                target.kind == "terminal-session"
-                    && target
-                        .refs
-                        .get("sessionId")
-                        .is_some_and(|value| value == &session_id.0.to_string())
-            })
-            .cloned();
+        let target = snapshot.terminal_target(session_id);
         let command = zeroize::Zeroizing::new(ai_command_with_cwd(
             &command,
             args.get("cwd").and_then(serde_json::Value::as_str),
@@ -2104,16 +1445,10 @@ impl WorkspaceApp {
                         current_snapshot.to_executed_tool_result(
                             tool_call_id.clone(),
                             tool_name.clone(),
-                            current_snapshot
-                                .ok(
-                                    "Terminal command output captured.",
-                                    terminal_delta_output(&before, &current),
-                                    ai_terminal_observation_data(command_id.as_deref(), command_completed, prompt_returned,
-                                        ai_terminal_input_wait_reason(&current, waiting_for_secret),
-                                        command_record.as_ref().and_then(|record| record.exit_code), expired),
-                                    "interactive",
-                                )
-                                .with_optional_target(target.clone()),
+                            current_snapshot.terminal_run_observed(
+                                command_id.as_deref(), &before, &current, command_completed, prompt_returned,
+                                waiting_for_secret, command_record.as_ref().and_then(|record| record.exit_code), expired, target.clone(),
+                            ),
                             started.elapsed().as_millis(),
                         )
                     });
@@ -2146,74 +1481,14 @@ impl WorkspaceApp {
             let result = weak.update(cx, |this, cx| {
                 let current_snapshot =
                     this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                let output = terminal_delta_output(&before, &last);
-                let output_empty = output.trim().is_empty();
-                if outcome_unknown {
-                    return current_snapshot.to_executed_tool_result(tool_call_id, tool_name,
-                        current_snapshot.fail("Command outcome is unknown after a connection change.", "command_outcome_unknown",
-                            "Inspect the current system state before repeating this command.", "interactive"), started.elapsed().as_millis());
-                }
-                if direction_changed {
-                    return current_snapshot.to_executed_tool_result(tool_call_id, tool_name,
-                        current_snapshot.ok("Command observation yielded to new instructions.", output,
-                            serde_json::json!({"executionState":"running", "commandId":command_id, "outcomeUnknown":true}), "interactive"),
-                        started.elapsed().as_millis());
-                }
-                if user_taken_over {
-                    return rejected_ai_tool_result(tool_call_id, tool_name, "terminal_taken_over", "The terminal was taken over or disconnected. Output attribution is no longer reliable; the remote command's termination is not confirmed.");
-                }
-                if owner_closed {
-                    return current_snapshot.to_executed_tool_result(
-                        tool_call_id,
-                        tool_name,
-                        current_snapshot
-                            .fail(
-                                "Runtime terminal changed while waiting for output.",
-                                if post_user_approval {
-                                    "runtime_state_changed_after_approval"
-                                } else {
-                                    "runtime_owner_closed"
-                                },
-                                ai_runtime_validation_recovery_message(post_user_approval),
-                                "interactive",
-                            )
-                            .with_optional_target(target),
-                        started.elapsed().as_millis(),
-                    );
-                }
-                current_snapshot.to_executed_tool_result(
-                    tool_call_id,
-                    tool_name,
-                    AiActionResultLite {
-                        images: Vec::new(),
-                        ok: !output_empty,
-                        summary: "Terminal command did not produce completed output.".to_string(),
-                        output: if output_empty {
-                            "No new output captured.".to_string()
-                        } else {
-                            output
-                        },
-                        data: serde_json::json!({
-                            "executionState": if output_empty { "timeout" } else { "output_captured" },
-                            "visibleInTerminal": true,
-                            "waitingForInput": last_waiting_for_secret,
-                            "inputWaitReason": last_waiting_for_secret.then_some("credential_prompt"),
-                            "commandId": command_id,
-                        }),
-                        error_code: output_empty
-                            .then(|| "terminal_command_wait_timeout".to_string()),
-                        error_message: output_empty.then(|| {
-                            "No new output was captured before the command wait timed out.".to_string()
-                        }),
-                        risk: "interactive",
-                        target,
-                        targets: Vec::new(),
-                        next_actions: Vec::new(),
-                        observations: Vec::new(),
-                        verified: None,
-                        state_version: None,
-                    },
-                    started.elapsed().as_millis(),
+                let end = if outcome_unknown { AiTerminalRunEnd::OutcomeUnknown }
+                    else if direction_changed { AiTerminalRunEnd::DirectionChanged }
+                    else if user_taken_over { AiTerminalRunEnd::TakenOver }
+                    else if owner_closed { AiTerminalRunEnd::OwnerClosed }
+                    else { AiTerminalRunEnd::Unconfirmed };
+                current_snapshot.terminal_run_finished(
+                    tool_call_id, tool_name, started.elapsed().as_millis(), end, &before, &last,
+                    command_id, last_waiting_for_secret, target, post_user_approval,
                 )
             });
             if let (Some(sender), Ok(result)) = (sender.take(), result) {
@@ -2301,17 +1576,6 @@ impl WorkspaceApp {
         });
         let initial_buffer = pane.read(cx).ai_buffer_snapshot();
         let initial_alternate_screen = pane.read(cx).ai_screen_is_alternate_buffer();
-        let command_wait =
-            args.get("condition").and_then(serde_json::Value::as_str) == Some("command_completed");
-        let timeout_secs = args
-            .get("timeout_secs")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(30)
-            .clamp(1, 30);
-        let max_chars = args
-            .get("max_chars")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(4_000) as usize;
         let observation = owner.resource(
             self,
             cx,
@@ -2322,16 +1586,12 @@ impl WorkspaceApp {
             let _observation = observation;
             let _subscriptions = (subscription, runtime_subscription);
             let mut previous_wait_state = "";
-            let mut connection_lost = false;
-            let mut outcome_unknown = false;
-            let mut direction_changed = false;
-            let mut owner_closed = false;
             let mut sender = Some(sender);
-            let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs);
-            let mut last = zeroize::Zeroizing::new(initial_buffer.clone());
-            let mut changed_at = std::time::Instant::now();
-            loop {
-                if owner.dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) { direction_changed = true; break; }
+            let mut wait = AiTerminalOutputWait::new(&args, initial_buffer, initial_alternate_screen, std::time::Instant::now());
+            let failure = loop {
+                if owner.dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
+                    break AiTerminalWaitFailure::DirectionChanged;
+                }
                 if sender.as_ref().is_none_or(tokio::sync::oneshot::Sender::is_closed) {
                     return;
                 }
@@ -2341,13 +1601,13 @@ impl WorkspaceApp {
                     let recovering = node_id.as_ref().and_then(|node| this.node_router.connection_id_for_node(node))
                         .and_then(|id| this.ssh_registry.get(&id)).is_some_and(|connection|
                             matches!(connection.state(), ConnectionState::Connecting | ConnectionState::LinkDown | ConnectionState::Reconnecting | ConnectionState::Error(_)));
-                    if recovering { return Some((initial_buffer.clone(), initial_alternate_screen, Vec::new(), true, false, false)); }
+                    if recovering { return Some((String::new(), false, Vec::new(), true, false, false)); }
                     if let Some(node) = &node_id {
                         let alive = this.node_router.connection_id_for_node(node).and_then(|id| this.ssh_registry.get(&id))
                             .is_some_and(|connection| !matches!(connection.state(), ConnectionState::Disconnected | ConnectionState::Disconnecting));
                         if !alive { return None; }
                     }
-                    if connection_lost {
+                    if wait.connection_lost() {
                         handle_id = this.ai.authority.update(cx, |runtime, _|
                             runtime.issue_terminal_handle(&tool_session_id, session_id).ok()).map(|projection| projection.handle_id);
                     }
@@ -2373,110 +1633,54 @@ impl WorkspaceApp {
                         pane.ai_command_records(),
                         false,
                         pane.ai_waiting_for_secret(),
-                        args.get("command_id").and_then(serde_json::Value::as_str)
+                        wait.requested_command()
                             .map(|id| pane.ai_command_prompt_returned(id))
                             .unwrap_or_else(|| pane.ai_command_records().last().is_some_and(|record| pane.ai_command_prompt_returned(&record.command_id))),
                     ))
                 });
                 let Ok(Some((buffer, alternate_screen, records, recovering, waiting_for_secret, prompt_returned))) = observation else {
-                    owner_closed = true;
-                    break;
+                    break AiTerminalWaitFailure::OwnerClosed;
                 };
                 let state = if recovering { "waiting_connection" } else { "waiting_condition" };
                 if state != previous_wait_state {
                     let _ = weak.update(cx, |this, cx| this.apply_ai_tool_status(owner.generation, &owner.conversation_id,
                         &owner.assistant_id, &tool_call_id, &tool_name, &owner.arguments, state,
-                        Some(serde_json::json!({"waiting":true,"waitDeadline":ai_now_ms() + deadline.saturating_duration_since(std::time::Instant::now()).as_millis() as i64})),
+                        Some(serde_json::json!({"waiting":true,"waitDeadline":ai_now_ms() + wait.deadline().saturating_duration_since(std::time::Instant::now()).as_millis() as i64})),
                         Some("read".into()), None, false, None, None, None, cx));
                     previous_wait_state = state;
                 }
                 if recovering {
-                    if std::time::Instant::now() >= deadline { break; }
-                    connection_lost = true;
+                    if !wait.recovering(std::time::Instant::now()) {
+                        break AiTerminalWaitFailure::TimedOut;
+                    }
                     Timer::after(Duration::from_millis(250)).await;
                     continue;
                 }
-                if command_wait && connection_lost && !records.iter().any(|record|
-                    Some(record.command_id.as_str()) == args.get("command_id").and_then(serde_json::Value::as_str)) {
-                    outcome_unknown = true;
-                    break;
-                }
-                if command_wait && records.iter().any(|record|
-                    Some(record.command_id.as_str()) == args.get("command_id").and_then(serde_json::Value::as_str)
-                        && record.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale) {
-                    outcome_unknown = true;
-                    break;
-                }
-                connection_lost = false;
-                if buffer != *last {
-                    last = zeroize::Zeroizing::new(buffer.clone());
-                    changed_at = std::time::Instant::now();
-                }
-                let matched = ai_terminal_wait_match(&args, &initial_buffer, &buffer,
-                    initial_alternate_screen, alternate_screen, &records).or_else(|| {
-                        (args.get("condition").and_then(serde_json::Value::as_str) == Some("prompt") && prompt_returned)
-                            .then(|| serde_json::json!({"condition":"prompt", "reason":"shell_prompt"}))
-                    });
-                let expired = std::time::Instant::now() >= deadline;
-                let yield_observation = command_wait && ai_terminal_command_output_ready(
-                    false, prompt_returned, &initial_buffer, &buffer, changed_at.elapsed(), waiting_for_secret, false);
-                if expired && !command_wait && matched.is_none() { break; }
-                if matched.is_some() || yield_observation || expired {
-                    let result = weak.update(cx, |this, cx| {
-                        let current_snapshot = this
-                            .ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                        let output = trim_tail_chars(&buffer, max_chars);
-                        let input_wait_reason = ai_terminal_input_wait_reason(&buffer, waiting_for_secret);
-                        let command_id = args.get("command_id").and_then(serde_json::Value::as_str)
-                            .or_else(|| records.last().map(|record| record.command_id.as_str()));
-                        let record = records.iter().find(|record| Some(record.command_id.as_str()) == command_id);
-                        let completed = record.is_some_and(|record| record.status == oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed);
-                        let mut data = ai_terminal_observation_data(command_id, completed, prompt_returned,
-                            input_wait_reason, record.and_then(|record| record.exit_code), expired);
-                        data["conditionSatisfied"] = serde_json::json!(matched.is_some());
-                        data["matched"] = serde_json::json!(matched);
-                        data["terminalObservation"]["conditionSatisfied"] = data["conditionSatisfied"].clone();
-                        data["buffer"] = serde_json::json!(output);
-                        data["tuiState"] = serde_json::json!(if alternate_screen { "alternate_screen" } else if input_wait_reason.is_some() { "prompt" } else { "shell" });
-                        current_snapshot.to_executed_tool_result(
-                            tool_call_id.clone(),
-                            tool_name.clone(),
-                            current_snapshot.ok(
-                                if matched.is_some() { "Terminal wait condition satisfied." } else { "Terminal observation returned; command completion is not confirmed." },
-                                output,
-                                data,
-                                "read",
-                            ),
-                            started.elapsed().as_millis(),
-                        )
-                    });
-                    if let (Some(sender), Ok(result)) = (sender.take(), result) {
-                        let _ = sender.send(result);
+                let records = records.iter().map(|record| ai_terminal_command_capture(record, false)).collect::<Vec<_>>();
+                match wait.observe(&snapshot, AiTerminalWaitSample {
+                    buffer: &buffer, alternate_screen, waiting_for_secret, prompt_returned,
+                }, &records, std::time::Instant::now()) {
+                    AiTerminalWaitProgress::Pending => {},
+                    AiTerminalWaitProgress::Failed(failure) => break failure,
+                    AiTerminalWaitProgress::Observed(action) => {
+                        let result = weak.update(cx, |this, cx| {
+                            this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx)
+                                .to_executed_tool_result(tool_call_id, tool_name, action, started.elapsed().as_millis())
+                        });
+                        if let (Some(sender), Ok(result)) = (sender.take(), result) { let _ = sender.send(result); }
+                        return;
                     }
-                    return;
                 }
                 tokio::select! {
                     _ = activity_rx.changed() => {},
                     _ = Timer::after(Duration::from_millis(250)) => {},
                     _ = sender.as_mut().unwrap().closed() => return,
                 }
-            }
+            };
             let result = weak.update(cx, |this, cx| {
-                let current_snapshot =
-                    this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-                current_snapshot.to_executed_tool_result(
-                    tool_call_id,
-                    tool_name,
-                    current_snapshot.fail(
-                        "Terminal wait timed out.",
-                        if direction_changed { "agent_direction_changed" } else if owner_closed { "runtime_owner_closed" } else if outcome_unknown { "command_outcome_unknown" } else { "terminal_wait_timeout" },
-                        format!(
-                            "The requested terminal condition was not observed within {timeout_secs} seconds."
-                        ),
-                        "read",
-                    ),
-                    started.elapsed().as_millis(),
-                )
+                let snapshot = this.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+                let action = wait.failure(&snapshot, failure);
+                snapshot.to_executed_tool_result(tool_call_id, tool_name, action, started.elapsed().as_millis())
             });
             if let (Some(sender), Ok(result)) = (sender.take(), result) {
                 let _ = sender.send(result);
@@ -2486,183 +1690,28 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn execute_ai_write_settings_resource(
-        &mut self,
-        args: &serde_json::Value,
-        window: &mut Window,
-        cx: &mut Context<Self>,
+        &mut self, args: &serde_json::Value, window: &mut Window, cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        if !matches!(
-            ai_stable_resource_operation("write_resource", args),
-            Ok(AiStableResourceOperation::Settings)
-        ) {
-            return snapshot.fail(
-                "Settings resource is unavailable.",
-                "resource_not_found",
-                "Rediscover the application settings resource before updating it.",
-                "write",
-            );
-        }
-        let Some(target) = snapshot
-            .targets
-            .iter()
-            .find(|target| target.kind == "settings")
-            .cloned()
-        else {
-            return snapshot.fail(
-                "Settings resource is unavailable.",
-                "resource_not_found",
-                "Rediscover the application settings resource before updating it.",
-                "write",
-            );
+        let write = match plan_ai_settings_write(&snapshot, self.settings_store.settings(), args) {
+            Ok(write) => write,
+            Err(result) => return result,
         };
-        let Some(section) = args.get("section").and_then(serde_json::Value::as_str) else {
-            return snapshot.fail(
-                "Settings section and key are required.",
-                "missing_settings_key",
-                "write_resource(settings) requires section and key.",
-                "write",
-            );
-        };
-        let Some(key) = args.get("key").and_then(serde_json::Value::as_str) else {
-            return snapshot.fail(
-                "Settings section and key are required.",
-                "missing_settings_key",
-                "write_resource(settings) requires section and key.",
-                "write",
-            );
-        };
-        let value = args
-            .get("value")
-            .cloned()
-            .unwrap_or(serde_json::Value::Null);
-        if args
-            .get("dry_run")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false)
-        {
-            return snapshot
-                .ok(
-                    format!("Dry-run settings write {section}.{key}."),
-                    "Dry-run only; settings were not changed.",
-                    serde_json::json!({ "section": section, "key": key, "value": value }),
-                    "write",
-                )
-                .with_target(target)
-                .with_verified(false);
-        }
-        match settings_with_json_patch(self.settings_store.settings(), section, key, value.clone())
-        {
-            Ok(next_settings) => {
-                self.edit_settings(|settings| *settings = next_settings, cx);
-                let target_tab =
-                    oxideterm_gpui_settings_view::settings_tab_from_ai_section(section);
-                let target_terminal_page =
-                    oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(section);
-                self.settings_workspace.update(cx, |settings, cx| {
-                    if let Some(tab) = target_tab {
-                        settings.set_active_tab(tab, cx);
-                    }
-                    if let Some(page) = target_terminal_page {
-                        settings.set_terminal_page(page, cx);
-                    }
-                });
-                self.open_settings_tab(window, cx);
-                snapshot
-                    .ok(
-                        format!("Updated settings {section}.{key}."),
-                        format!("{section}.{key} updated."),
-                        serde_json::json!({
-                            "section": section,
-                            "key": key,
-                            "value": value,
-                            "visibleSurface": "settings",
-                        }),
-                        "write",
-                    )
-                    .with_target(target)
-            }
-            Err(error) => snapshot
-                .fail(
-                    "Settings section cannot be updated.",
-                    "unsupported_settings_section",
-                    error,
-                    "write",
-                )
-                .with_target(target),
-        }
+        self.edit_settings(|settings| *settings = write.settings, cx);
+        self.open_ai_settings_section(Some(write.section), window, cx);
+        write.result
     }
 
     pub(in crate::workspace) fn execute_ai_remember_preference(
-        &mut self,
-        args: &serde_json::Value,
-        cx: &mut Context<Self>,
+        &mut self, args: &serde_json::Value, cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        let Some(preference) = args
-            .get("preference")
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-        else {
-            return snapshot.fail(
-                "Preference is required.",
-                "missing_preference",
-                "remember_preference requires preference text.",
-                "write",
-            );
+        let preference = match ai_remember_preference_payload(&snapshot, args) {
+            Ok(preference) => preference.to_owned(),
+            Err(result) => return result,
         };
-        if !oxideterm_ai::preference_is_safe_to_persist(preference) {
-            return snapshot.fail(
-                "Preference was not saved.",
-                "memory_content_rejected",
-                "Long-term memory cannot store credentials or one-time task instructions.",
-                "write",
-            );
-        }
-        let preference = preference.to_string();
-        let now_ms = ai_memory_now_ms();
-        let normalized = ai_normalized_memory_content(&preference);
-        self.edit_settings(
-            move |settings| {
-                if let Some(existing) = settings.ai.memory.entries.iter_mut().find(|entry| {
-                    entry.scope_kind == oxideterm_settings::AiMemoryScopeKind::User
-                        && entry.scope_id.is_none()
-                        && ai_normalized_memory_content(&entry.content) == normalized
-                }) {
-                    existing.last_used_at_ms = Some(now_ms);
-                    existing.use_count = existing.use_count.saturating_add(1);
-                    existing.updated_at_ms = now_ms;
-                    existing.revision = existing.revision.saturating_add(1);
-                    return;
-                }
-                settings
-                    .ai
-                    .memory
-                    .entries
-                    .push(oxideterm_settings::AiMemoryEntry {
-                        id: uuid::Uuid::new_v4().to_string(),
-                        content: preference,
-                        scope_kind: oxideterm_settings::AiMemoryScopeKind::User,
-                        scope_id: None,
-                        memory_kind: oxideterm_settings::AiMemoryKind::LongTerm,
-                        source: oxideterm_settings::AiMemorySource::Assistant,
-                        created_at_ms: now_ms,
-                        updated_at_ms: now_ms,
-                        last_used_at_ms: None,
-                        use_count: 0,
-                        expires_at_ms: None,
-                        revision: 1,
-                    });
-            },
-            cx,
-        );
-        snapshot.ok(
-            "Preference remembered.",
-            "The preference was saved as a user-scoped memory entry.",
-            serde_json::json!({ "scopeKind": "user", "memoryKind": "long_term" }),
-            "write",
-        )
+        self.edit_settings(move |settings| save_ai_user_preference(&mut settings.ai.memory, preference), cx);
+        ai_preference_saved(&snapshot)
     }
 
     pub(in crate::workspace) fn execute_ai_open_app_surface(
@@ -2713,58 +1762,31 @@ impl WorkspaceApp {
                 "write",
             );
         }
-        let surface = match ai_stable_resource_operation("open_app_surface", args) {
-            Ok(AiStableResourceOperation::AppSurface(surface)) => surface,
-            _ => {
-                return snapshot.fail(
-                    "Application surface is unavailable.",
-                    "resource_not_found",
-                    "Rediscover the application surface before opening it.",
-                    "write",
-                );
-            }
+        let planned = match snapshot.plan_open_surface(args, self.active_ssh_node_id.clone()) {
+            Ok(surface) => surface,
+            Err(result) => return result,
         };
-        // Opening a durable surface is not the same as focusing an existing live tab.
-        let target: Option<AiOrchestratorTarget> = None;
-
-        match surface.as_str() {
-            "local_terminal" | "terminal" => match self.create_local_terminal_tab(window, cx) {
-                Ok(()) => {
-                    let active_tab_id = self.active_tab_id(cx).map(|tab_id| tab_id.0.to_string());
-                    let refreshed = self.ai_orchestrator_snapshot(cx);
-                    let target = refreshed
-                        .targets
-                        .iter()
-                        .find(|target| {
-                            target.kind == "terminal-session"
-                                && active_tab_id
-                                    .as_ref()
-                                    .is_some_and(|tab_id| target.refs.get("tabId") == Some(tab_id))
-                                && target
-                                    .metadata
-                                    .get("terminalType")
-                                    .and_then(serde_json::Value::as_str)
-                                    == Some("local_terminal")
-                        })
-                        .map(ai_opened_local_terminal_target);
-                    refreshed
-                        .ok(
-                            "Opened local terminal.",
-                            "Opened local terminal.",
-                            serde_json::json!({ "surface": surface }),
-                            "write",
-                        )
-                        .with_optional_target(target)
+        match &planned {
+            AiAppSurface::LocalTerminal(_) => {
+                if let Err(error) = self.create_local_terminal_tab(window, cx) {
+                    return snapshot.fail("Failed to open local terminal.", "open_local_terminal_failed", error.to_string(), "write");
                 }
-                Err(error) => snapshot.fail(
-                    "Failed to open local terminal.",
-                    "open_local_terminal_failed",
-                    error.to_string(),
-                    "write",
-                ),
-            },
-            "settings" => {
-                if let Some(section) = args.get("section").and_then(serde_json::Value::as_str) {
+                let active_tab = self.active_tab_id(cx);
+                return self.ai_orchestrator_snapshot(cx).opened_surface(planned, active_tab);
+            }
+            AiAppSurface::Settings => self.open_ai_settings_section(args.get("section").and_then(serde_json::Value::as_str), window, cx),
+            AiAppSurface::ConnectionManager => { self.open_session_manager_tab(window, cx); }
+            AiAppSurface::Runtime => { self.open_connection_pool_tab(window, cx); }
+            AiAppSurface::HostTools => { self.open_context_sidebar_panel(ContextSidebarPanel::HostTools, cx); }
+            AiAppSurface::FileManager => { self.open_file_manager_tab(window, cx); }
+            AiAppSurface::Sftp(node) => { self.open_sftp_tab(node.clone(), window, cx); }
+            AiAppSurface::Ide(node) => { self.open_ide_folder_picker_tab(node.clone(), window, cx); }
+        }
+        snapshot.opened_surface(planned, None)
+    }
+
+    fn open_ai_settings_section(&mut self, section: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
+                if let Some(section) = section {
                     let target_tab =
                         oxideterm_gpui_settings_view::settings_tab_from_ai_section(section);
                     let target_terminal_page =
@@ -2780,131 +1802,8 @@ impl WorkspaceApp {
                         }
                     });
                 }
-                self.open_settings_tab(window, cx);
-                snapshot
-                    .ok(
-                        "Opened settings.",
-                        "Opened settings.",
-                        serde_json::Value::Null,
-                        "write",
-                    )
-                    .with_optional_target(target)
-            }
-            "connection_manager" => {
-                self.open_session_manager_tab(window, cx);
-                snapshot
-                    .ok(
-                        "Opened connection_manager.",
-                        "Opened connection_manager.",
-                        serde_json::Value::Null,
-                        "write",
-                    )
-                    .with_optional_target(target)
-            }
-            "connection_pool" => {
-                self.open_connection_pool_tab(window, cx);
-                snapshot
-                    .ok(
-                        "Opened runtime overview.",
-                        "Opened runtime overview.",
-                        serde_json::Value::Null,
-                        "write",
-                    )
-                    .with_optional_target(target)
-            }
-            "connection_monitor" => {
-                self.open_context_sidebar_panel(ContextSidebarPanel::HostTools, cx);
-                snapshot
-                    .ok(
-                        "Opened Host Tools.",
-                        "Opened Host Tools.",
-                        serde_json::Value::Null,
-                        "write",
-                    )
-                    .with_optional_target(target)
-            }
-            "file_manager" => {
-                self.open_file_manager_tab(window, cx);
-                snapshot
-                    .ok(
-                        "Opened file_manager.",
-                        "Opened file_manager.",
-                        serde_json::Value::Null,
-                        "write",
-                    )
-                    .with_optional_target(target)
-            }
-            "sftp" => {
-                let node_id = target
-                    .as_ref()
-                    .and_then(|target| target.refs.get("nodeId"))
-                    .map(|value| NodeId::new(value.clone()))
-                    .or_else(|| self.active_ssh_node_id.clone());
-                let Some(node_id) = node_id else {
-                    return snapshot
-                        .fail(
-                            "SFTP requires a connected SSH target.",
-                            "missing_node_context",
-                            "Connect an SSH target first, then rediscover the current SFTP surface.",
-                            "write",
-                        )
-                        .with_optional_target(target)
-                        .with_next_actions(vec![serde_json::json!({
-                            "action": "list_targets",
-                            "args": { "view": "files" },
-                            "reason": "Find a connected SFTP or SSH target before opening SFTP."
-                        })]);
-                };
-                self.open_sftp_tab(node_id, window, cx);
-                snapshot
-                    .ok(
-                        "Opened sftp.",
-                        "Opened sftp.",
-                        serde_json::Value::Null,
-                        "write",
-                    )
-                    .with_optional_target(target)
-            }
-            "ide" => {
-                let node_id = target
-                    .as_ref()
-                    .and_then(|target| target.refs.get("nodeId"))
-                    .map(|value| NodeId::new(value.clone()))
-                    .or_else(|| self.active_ssh_node_id.clone());
-                let Some(node_id) = node_id else {
-                    return snapshot
-                        .fail(
-                            "IDE requires a connected SSH target.",
-                            "missing_node_context",
-                            "Connect an SSH target first, then rediscover the current IDE surface.",
-                            "write",
-                        )
-                        .with_optional_target(target)
-                        .with_next_actions(vec![serde_json::json!({
-                            "action": "list_targets",
-                            "args": { "view": "files" },
-                            "reason": "Find a connected IDE or SSH target before opening IDE."
-                        })]);
-                };
-                self.open_ide_folder_picker_tab(node_id, window, cx);
-                snapshot
-                    .ok(
-                        "Opened ide.",
-                        "Opened ide.",
-                        serde_json::Value::Null,
-                        "write",
-                    )
-                    .with_optional_target(target)
-            }
-            _ => snapshot
-                .fail(
-                    "Unknown app surface.",
-                    "unknown_app_surface",
-                    format!("Unknown app surface: {surface}"),
-                    "write",
-                )
-                .with_optional_target(target),
-        }
+
+        self.open_settings_tab(window, cx);
     }
 
     fn ai_terminal_pane_for_session(
@@ -2949,45 +1848,10 @@ impl WorkspaceApp {
             return None;
         };
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(tool_session_id), cx);
-        let ready_targets = snapshot
-            .targets
-            .iter()
-            .filter(|target| {
-                matches!(target.kind.as_str(), "ssh-node" | "terminal-session")
-                    && target.state == "connected"
-                    && target
-                        .refs
-                        .get("connectionId")
-                        .is_some_and(|id| id == resource_ref.id())
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        let primary = ready_targets
-            .iter()
-            .find(|target| target.kind == "terminal-session")
-            .or_else(|| ready_targets.first())?
-            .clone();
-        let label = self
-            .connection_store
-            .get(resource_ref.id())
-            .map(|connection| connection.name.trim())
-            .filter(|label| !label.is_empty())
-            .unwrap_or("saved connection");
-        Some(
-            snapshot.to_executed_tool_result(
-                tool_call_id.to_string(),
-                tool_name.to_string(),
-                snapshot
-                    .ok(
-                        format!("Connected {label}."),
-                        "A live terminal is ready.",
-                        serde_json::json!({ "resourceRef": resource_ref }),
-                        "write",
-                    )
-                    .with_target(primary)
-                    .with_targets(ready_targets),
-                duration_ms,
-            ),
+        snapshot.connect_target_ready_result(
+            &resource_ref,
+            self.connection_store.get(resource_ref.id()).map(|connection| connection.name.as_str()),
+            tool_call_id, tool_name, duration_ms,
         )
     }
 
@@ -3002,43 +1866,6 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AiExecutedToolResult {
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(tool_session_id), cx);
-        let target = match ai_stable_resource_operation("connect_target", args) {
-            Ok(AiStableResourceOperation::SavedConnection(resource_ref)) => snapshot
-                .targets
-                .iter()
-                .find(|target| {
-                    target.kind == "saved-connection"
-                        && target
-                            .refs
-                            .get("connectionId")
-                            .is_some_and(|id| id == resource_ref.id())
-                })
-                .cloned(),
-            _ => None,
-        };
-        let next_actions = target
-            .as_ref()
-            .map(|target| {
-                vec![serde_json::json!({
-                    "action": "select_target",
-                    "args": { "query": target.label },
-                    "reason": "Re-select the saved connection after credentials are updated."
-                })]
-            })
-            .unwrap_or_default();
-        snapshot.to_executed_tool_result(
-            tool_call_id.to_string(),
-            tool_name.to_string(),
-            snapshot
-                .fail(
-                    "Connection did not complete.",
-                    "connect_failed",
-                    "The saved connection flow did not return a live terminal.",
-                    "write",
-                )
-                .with_optional_target(target)
-                .with_next_actions(next_actions),
-            duration_ms,
-        )
+        snapshot.connect_target_timeout_result(tool_call_id, tool_name, args, duration_ms)
     }
 }

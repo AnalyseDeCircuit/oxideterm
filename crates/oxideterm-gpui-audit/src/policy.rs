@@ -1,10 +1,18 @@
-use super::*;
+use std::borrow::Cow;
+
+use gpui::{AnyElement, Context, IntoElement, ParentElement, Styled, div, px, rgb};
 use oxideterm_audit::AuditPolicy;
+use oxideterm_gpui_ui::button::{
+    ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions,
+};
+use zeroize::Zeroize;
+
+use super::{AuditPage, AuditView, input::AuditInput};
 
 const MIB: u64 = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(in crate::workspace) enum AuditPolicyInput {
+pub(super) enum AuditPolicyInput {
     Retention,
     Capacity,
 }
@@ -31,11 +39,21 @@ impl AuditPolicyDraft {
         }
     }
 
-    fn value(&self, input: AuditPolicyInput) -> &str {
+    pub(super) fn value(&self, input: AuditPolicyInput) -> &str {
         match input {
             AuditPolicyInput::Retention => &self.retention,
             AuditPolicyInput::Capacity => &self.capacity,
         }
+    }
+
+    pub(super) fn set_value(&mut self, input: AuditPolicyInput, replacement: &str) {
+        let value = match input {
+            AuditPolicyInput::Retention => &mut self.retention,
+            AuditPolicyInput::Capacity => &mut self.capacity,
+        };
+        value.zeroize();
+        value.push_str(replacement);
+        self.invalid = false;
     }
 
     pub(super) fn apply(&self, mut policy: AuditPolicy) -> Option<AuditPolicy> {
@@ -71,41 +89,32 @@ impl AuditPolicyDraft {
     }
 }
 
-impl WorkspaceApp {
+impl Drop for AuditPolicyDraft {
+    fn drop(&mut self) {
+        self.retention.zeroize();
+        self.capacity.zeroize();
+    }
+}
+
+impl AuditView {
     fn audit_policy_draft(&self) -> AuditPolicyDraft {
-        AuditPolicyDraft::new(self.audit.policy, self.audit.view == AuditView::Recordings)
+        AuditPolicyDraft::new(self.audit.policy, self.audit.view == AuditPage::Recordings)
     }
 
-    pub(in crate::workspace) fn audit_policy_input_value(&self, input: AuditPolicyInput) -> String {
-        self.audit
-            .policy_draft
-            .as_ref()
-            .map(|draft| draft.value(input).to_owned())
-            .unwrap_or_else(|| self.audit_policy_draft().value(input).to_owned())
-    }
-
-    pub(in crate::workspace) fn replace_audit_policy_input(
-        &mut self,
-        input: AuditPolicyInput,
-        range: Option<std::ops::Range<usize>>,
-        text: &str,
-        cx: &mut Context<Self>,
-    ) {
+    pub(super) fn ensure_audit_policy_draft(&mut self) {
         if self.audit.policy_draft.is_none() {
             self.audit.policy_draft = Some(self.audit_policy_draft());
         }
-        let draft = self.audit.policy_draft.as_mut().unwrap();
-        let value = match input {
-            AuditPolicyInput::Retention => &mut draft.retention,
-            AuditPolicyInput::Capacity => &mut draft.capacity,
-        };
-        oxideterm_editor_core::utf16::replace_utf16(value, range, text);
-        draft.invalid = false;
-        self.show_active_input_caret(cx);
-        cx.notify();
     }
 
-    pub(in crate::workspace) fn apply_audit_policy_inputs(&mut self, cx: &mut Context<Self>) {
+    pub(super) fn audit_policy_input_text(&self, input: AuditPolicyInput) -> Cow<'_, str> {
+        match &self.audit.policy_draft {
+            Some(draft) => Cow::Borrowed(draft.value(input)),
+            None => Cow::Owned(self.audit_policy_draft().value(input).to_owned()),
+        }
+    }
+
+    pub(super) fn apply_audit_policy_inputs(&mut self, cx: &mut Context<Self>) {
         if self.audit.settings_task.is_some() || self.audit.loading {
             return;
         }
@@ -121,41 +130,17 @@ impl WorkspaceApp {
     }
 
     fn render_audit_policy_input(&self, input: AuditPolicyInput, cx: &Context<Self>) -> AnyElement {
-        let target = WorkspaceImeTarget::AuditPolicy(input);
-        let output = self.audit.view == AuditView::Recordings;
+        let output = self.audit.view == AuditPage::Recordings;
         let key = match (input, output) {
             (AuditPolicyInput::Retention, false) => "event_log.audit.retention",
             (AuditPolicyInput::Capacity, false) => "event_log.audit.capacity",
             (AuditPolicyInput::Retention, true) => "event_log.recordings.retention",
             (AuditPolicyInput::Capacity, true) => "event_log.recordings.capacity",
         };
-        let value = self.audit_policy_input_value(input);
-        let field = self
-            .workspace_text_input(
-                target,
-                oxideterm_gpui_ui::text_input::TextInputView {
-                    value: &value,
-                    placeholder: String::new(),
-                    focused: self.active_ime_target(cx) == Some(target),
-                    caret_visible: self.input_caret.visible(),
-                    secret: false,
-                    selected_all: false,
-                    selected_range: self.ime_selected_range_for_target(target, cx),
-                    marked_text: self.marked_text_for_target(target, cx),
-                },
-            )
-            .w(px(88.0))
-            .h(px(28.0));
-        let field = self.text_input_with_workspace_ime(
-            target,
-            field,
-            move |this, cx| {
-                if this.audit.policy_draft.is_none() {
-                    this.audit.policy_draft = Some(this.audit_policy_draft());
-                }
-                this.selected_ime_target = Some(target);
-                this.show_active_input_caret(cx);
-            },
+        let field = self.render_input(
+            AuditInput::Policy(input),
+            &self.audit_policy_input_text(input),
+            String::new(),
             cx,
         );
         div()

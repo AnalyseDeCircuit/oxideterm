@@ -44,11 +44,10 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn select_ai_conversation(&mut self, id: String, cx: &mut App) {
-        self.ai.state.update(cx, |ai, _cx| {
+        self.ai.state.update(cx, |ai, cx| {
             ai.select_conversation(id);
-        });
-        self.ai.state.update(cx, |ai, _cx| {
             ai.reset_chat_for_conversation_selection();
+            cx.notify();
         });
     }
 
@@ -70,24 +69,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn save_ai_conversation_rename(&mut self, cx: &mut Context<Self>) {
-        let (conversation_id, draft) = {
-            let ai = self.ai.state.read(cx);
-            (
-                ai.chat_ui().renaming_conversation_id.clone(),
-                ai.chat_ui().renaming_conversation_draft.trim().to_string(),
-            )
-        };
-        let Some(conversation_id) = conversation_id else {
-            return;
-        };
-        self.ai.state.update(cx, |ai, _cx| {
-            if draft.is_empty() {
-                ai.clear_conversation_rename();
-            } else {
-                ai.rename_conversation(&conversation_id, draft, ai_now_ms());
-                ai.persist_chat_state();
-            }
-        });
+        if !self.ai.state.update(cx, |ai, cx| ai.save_conversation_rename(cx)) { return; }
         self.clear_ime_selection();
         self.ime_marked_text = None;
         cx.notify();

@@ -162,25 +162,7 @@ impl WorkspaceApp {
         if self.onboarding_disclaimer_locked() {
             return;
         }
-        self.audit.open_filter = None;
-        for input in [
-            super::super::audit::AuditPolicyInput::Retention,
-            super::super::audit::AuditPolicyInput::Capacity,
-        ] {
-            if self
-                .ime_selected_range_for_target(WorkspaceImeTarget::AuditPolicy(input), cx)
-                .is_some()
-            {
-                self.clear_ime_selection();
-                break;
-            }
-        }
-        if self
-            .ime_selected_range_for_target(WorkspaceImeTarget::AuditSearch, cx)
-            .is_some()
-        {
-            self.clear_ime_selection();
-        }
+        self.audit.update(cx, |audit, cx| audit.dismiss_transients(cx));
         if self.focus_detached_tab_window(tab_id, cx) {
             return;
         }
@@ -216,7 +198,7 @@ impl WorkspaceApp {
             tab.kind == TabKind::NotificationCenter
                 && self.tab_host.read(cx).surface_is_visible(tab.id)
         }) {
-            self.hide_audit_page();
+            self.audit.update(cx, |audit, cx| audit.hide_audit_page(cx));
         }
         // Tauri keeps the SSH session tree independent from terminal tab focus,
         // but app-level utility tabs still light up their owning activity icon.
@@ -1065,7 +1047,7 @@ impl WorkspaceApp {
         } = transition;
         self.close_plugin_connection_tab(tab.id, cx);
         if tab.kind == TabKind::NotificationCenter {
-            self.hide_audit_page();
+            self.audit.update(cx, |audit, cx| audit.hide_audit_page(cx));
         }
         if tab.kind == TabKind::SessionManager
             && self.active_sidebar_section == SidebarSection::Connections

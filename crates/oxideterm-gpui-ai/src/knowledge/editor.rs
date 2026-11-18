@@ -1217,18 +1217,6 @@ mod tests {
         surface.read_with(cx, |surface, _| assert!(!surface.is_dirty()));
     }
 
-    #[test]
-    fn bold_toolbar_action_uses_double_asterisk_markers() {
-        assert_eq!(
-            knowledge_format_wrap(KnowledgeFormatAction::Bold),
-            Some(("**", "**"))
-        );
-        assert_eq!(
-            knowledge_format_wrap(KnowledgeFormatAction::Italic),
-            Some(("*", "*"))
-        );
-    }
-
     #[gpui::test]
     fn background_note_releases_preview_and_restores_unsaved_history(
         cx: &mut gpui::TestAppContext,

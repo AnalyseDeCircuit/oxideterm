@@ -75,20 +75,9 @@ impl WorkspaceApp {
         let entries = if let Some(entries) = get_cached_terminal_path_entries(&cache_key) {
             entries
         } else {
-            let Ok(entries) = std::fs::read_dir(&parts.directory) else {
+            let Ok(entries) = read_local_terminal_path_entries(&parts.directory) else {
                 return Vec::new();
             };
-            let entries = entries
-                .filter_map(Result::ok)
-                .filter_map(|entry| {
-                    let metadata = std::fs::symlink_metadata(entry.path()).ok()?;
-                    Some(TerminalPathEntry {
-                        name: entry.file_name().to_string_lossy().to_string(),
-                        path: entry.path().to_string_lossy().to_string(),
-                        is_directory: metadata.is_dir(),
-                    })
-                })
-                .collect::<Vec<_>>();
             put_cached_terminal_path_entries(cache_key, entries.clone());
             entries
         };

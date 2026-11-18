@@ -3,10 +3,48 @@ use std::collections::VecDeque;
 use oxideterm_ai::AiStreamEvent;
 
 use super::{AiStreamDelivery, AiStreamDeliveryEvent};
-use crate::state::{AiContextTokenBreakdown, AiPreparedPromptUsage, AiWorkspaceEntity};
+use crate::state::{
+    AiContextTokenBreakdown, AiPendingCursorRequest, AiPendingUserQuestion, AiPreparedPromptUsage,
+    AiWorkspaceEntity,
+};
+
+pub enum AiChatWindowDelivery {
+    Host(AiStreamDelivery),
+    Attention {
+        generation: u64,
+        conversation_id: String,
+        assistant_id: String,
+        label: &'static str,
+    },
+    FocusCandidate {
+        generation: u64,
+    },
+}
+
+impl AiChatWindowDelivery {
+    pub(crate) fn is_current(&self, ai: &AiWorkspaceEntity) -> bool {
+        match self {
+            Self::Host(delivery) => ai.chat_stream_matches(
+                delivery.generation,
+                &delivery.conversation_id,
+                &delivery.assistant_id,
+            ),
+            Self::Attention {
+                generation,
+                conversation_id,
+                assistant_id,
+                ..
+            } => ai.chat_stream_matches(*generation, conversation_id, assistant_id),
+            Self::FocusCandidate { generation } => {
+                ai.chat_stream_generation() == *generation
+                    && ai.is_chat_stream_generation(*generation)
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum AiStreamTextKind {
+enum AiStreamTextKind {
     Content,
     Thinking,
 }
@@ -19,59 +57,36 @@ struct PendingText {
     text: String,
 }
 
-pub struct AiChatDeliveryBatch {
+#[derive(Default)]
+pub(crate) struct AiChatDeliveryBatch {
     pending_text: Option<PendingText>,
     deliveries: VecDeque<AiStreamDelivery>,
 }
 
 impl AiChatDeliveryBatch {
-    pub fn new(deliveries: VecDeque<AiStreamDelivery>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(deliveries: VecDeque<AiStreamDelivery>) -> Self {
         Self {
             pending_text: None,
             deliveries,
         }
     }
 
-    /// Consume a prefix that needs neither the window nor a live owner.
-    /// Leave the first host request and everything behind it in order.
-    pub(crate) fn apply_local_prefix(
-        deliveries: &mut VecDeque<AiStreamDelivery>,
-        ai: &mut AiWorkspaceEntity,
-    ) -> bool {
-        let local_count = deliveries
-            .iter()
-            .take_while(|delivery| {
-                matches!(
-                    delivery.event,
-                    AiStreamDeliveryEvent::ToolImages(_)
-                        | AiStreamDeliveryEvent::HistoryBarrier(_)
-                        | AiStreamDeliveryEvent::Checkpoint(_)
-                        | AiStreamDeliveryEvent::PromptUsage { .. }
-                        | AiStreamDeliveryEvent::Stream(
-                            AiStreamEvent::Content(_)
-                                | AiStreamEvent::Thinking(_)
-                                | AiStreamEvent::Usage { .. }
-                                | AiStreamEvent::ProviderResponsePart { .. }
-                                | AiStreamEvent::ToolCall { .. }
-                                | AiStreamEvent::ToolCallComplete { .. }
-                        )
-                )
-            })
-            .count();
-        if local_count == 0 {
-            return false;
-        }
-        let local = deliveries.drain(..local_count).collect();
-        let mut batch = Self::new(local);
-        let host = batch.next_host_delivery(ai);
-        debug_assert!(host.is_none());
-        true
+    pub(crate) fn extend(&mut self, deliveries: impl IntoIterator<Item = AiStreamDelivery>) {
+        self.deliveries.extend(deliveries);
+    }
+
+    pub(crate) fn has_deliveries(&self) -> bool {
+        !self.deliveries.is_empty()
     }
 
     /// Apply conversation-owned deliveries up to the next operation that needs
     /// the window or the live runtime. Do not advance further until that
     /// operation has had a chance to cancel or replace its generation.
-    pub fn next_host_delivery(&mut self, ai: &mut AiWorkspaceEntity) -> Option<AiStreamDelivery> {
+    pub(crate) fn next_host_delivery(
+        &mut self,
+        ai: &mut AiWorkspaceEntity,
+    ) -> Option<AiStreamDelivery> {
         while let Some(delivery) = self.deliveries.pop_front() {
             if !ai.chat_stream_matches(
                 delivery.generation,
@@ -182,12 +197,13 @@ impl AiChatDeliveryBatch {
         None
     }
 
-    pub fn next_window_delivery(
+    pub(crate) fn next_window_delivery(
         &mut self,
         ai: &mut AiWorkspaceEntity,
+        i18n: &oxideterm_i18n::I18n,
         diagnostic: impl Fn(serde_json::Value) -> serde_json::Value,
         cx: &mut gpui::Context<AiWorkspaceEntity>,
-    ) -> Option<AiStreamDelivery> {
+    ) -> Option<AiChatWindowDelivery> {
         while let Some(delivery) = self.next_host_delivery(ai) {
             match delivery.event {
                 AiStreamDeliveryEvent::Guardrail {
@@ -306,13 +322,210 @@ impl AiChatDeliveryBatch {
                         cx,
                     );
                 }
-                event => return Some(AiStreamDelivery { event, ..delivery }),
+
+                AiStreamDeliveryEvent::AcpClientEvent {
+                    event:
+                        event @ (oxideterm_ai::AcpClientEvent::SessionUpdate(_)
+                        | oxideterm_ai::AcpClientEvent::CreateElicitation { .. }
+                        | oxideterm_ai::AcpClientEvent::CompleteElicitation(_)),
+                    ..
+                } => {
+                    // Expand in place so ACP text and provider text share the same batch ordering.
+                    for event in oxideterm_ai::acp_client_event_to_ai_stream_events(event)
+                        .into_iter()
+                        .rev()
+                    {
+                        self.deliveries.push_front(AiStreamDelivery {
+                            generation: delivery.generation,
+                            conversation_id: delivery.conversation_id.clone(),
+                            assistant_id: delivery.assistant_id.clone(),
+                            event: AiStreamDeliveryEvent::Stream(event),
+                        });
+                    }
+                }
+                AiStreamDeliveryEvent::AcpClientEvent {
+                    event:
+                        oxideterm_ai::AcpClientEvent::CursorRequest {
+                            request,
+                            response_tx,
+                        },
+                    ..
+                } => {
+                    self.flush_text(ai);
+                    if !request.valid() || !ai.is_chat_stream_generation(delivery.generation) {
+                        let _ =
+                            response_tx.send(Ok(oxideterm_ai::CursorRequest::cancelled_response()));
+                        continue;
+                    }
+                    let id = request.tool_call_id().to_owned();
+                    ai.apply_ai_tool_status(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &id,
+                        request.method(),
+                        "{}",
+                        "waiting_user",
+                        None,
+                        Some("read".to_owned()),
+                        Some(i18n.t("ai.questions.waiting")),
+                        false,
+                        None,
+                        None,
+                        None,
+                        &diagnostic,
+                        cx,
+                    );
+                    let selections = match &request {
+                        oxideterm_ai::CursorRequest::Questions(request) => {
+                            vec![Vec::new(); request.questions.len()]
+                        }
+                        oxideterm_ai::CursorRequest::Plan(_) => Vec::new(),
+                    };
+                    ai.pending_cursor_requests.insert(
+                        (delivery.generation, id),
+                        AiPendingCursorRequest {
+                            conversation_id: delivery.conversation_id.clone(),
+                            assistant_id: delivery.assistant_id.clone(),
+                            request,
+                            selections,
+                            response_tx: Some(response_tx),
+                        },
+                    );
+                    return Some(AiChatWindowDelivery::Attention {
+                        generation: delivery.generation,
+                        conversation_id: delivery.conversation_id,
+                        assistant_id: delivery.assistant_id,
+                        label: "ai.questions.waiting",
+                    });
+                }
+                AiStreamDeliveryEvent::AcpSessionStarted {
+                    session_id,
+                    session_metadata,
+                    session_config_options,
+                    session_modes,
+                    agent_id,
+                } => {
+                    self.flush_text(ai);
+                    if ai.apply_acp_session_started_state(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &session_id,
+                        session_metadata,
+                        session_config_options,
+                        session_modes,
+                        &agent_id,
+                    ) {
+                        cx.notify();
+                    }
+                }
+                AiStreamDeliveryEvent::UserQuestionRequested {
+                    call,
+                    dispatch,
+                    sender,
+                } => {
+                    if sender.is_closed()
+                        || dispatch
+                            .as_ref()
+                            .is_some_and(|guard| guard.check().is_err())
+                    {
+                        continue;
+                    }
+                    self.flush_text(ai);
+                    let question = serde_json::from_str(&call.arguments).unwrap_or_default();
+                    ai.apply_ai_tool_status(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &call.id,
+                        &call.name,
+                        &call.arguments,
+                        "waiting_user",
+                        Some(question),
+                        Some("read".to_owned()),
+                        Some(i18n.t("ai.questions.waiting")),
+                        false,
+                        None,
+                        None,
+                        None,
+                        &diagnostic,
+                        cx,
+                    );
+                    ai.pending_user_questions.insert(
+                        (delivery.generation, call.id),
+                        AiPendingUserQuestion {
+                            conversation_id: delivery.conversation_id.clone(),
+                            dispatch,
+                            sender,
+                        },
+                    );
+                    return Some(AiChatWindowDelivery::Attention {
+                        generation: delivery.generation,
+                        conversation_id: delivery.conversation_id,
+                        assistant_id: delivery.assistant_id,
+                        label: "ai.questions.waiting",
+                    });
+                }
+                AiStreamDeliveryEvent::ToolCandidateSelectionRequested {
+                    tool_call_id,
+                    name,
+                    arguments,
+                    candidates,
+                    sender,
+                } => {
+                    self.flush_text(ai);
+                    let candidate_count = candidates.len();
+                    let label = i18n.t("ai.tool_use.choose_target");
+                    let result = serde_json::json!({
+                        "ok": false,
+                        "summary": label,
+                        "disambiguation": { "candidates": candidates },
+                        "recoverable": true,
+                    });
+                    ai.apply_ai_tool_status(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &tool_call_id,
+                        &name,
+                        &arguments,
+                        "pending_user_selection",
+                        Some(result),
+                        Some("read".to_owned()),
+                        Some(label),
+                        false,
+                        None,
+                        None,
+                        None,
+                        &diagnostic,
+                        cx,
+                    );
+                    ai.register_tool_candidate_selection(
+                        delivery.generation,
+                        tool_call_id,
+                        candidate_count,
+                        sender,
+                    );
+                    cx.notify();
+                    if ai.chat_stream_generation() == delivery.generation {
+                        return Some(AiChatWindowDelivery::FocusCandidate {
+                            generation: delivery.generation,
+                        });
+                    }
+                }
+                event => {
+                    self.flush_text(ai);
+                    return Some(AiChatWindowDelivery::Host(AiStreamDelivery {
+                        event,
+                        ..delivery
+                    }));
+                }
             }
         }
         None
     }
 
-    pub fn push_text(
+    fn push_text(
         &mut self,
         ai: &mut AiWorkspaceEntity,
         generation: u64,
@@ -343,7 +556,7 @@ impl AiChatDeliveryBatch {
         });
     }
 
-    pub fn flush_text(&mut self, ai: &mut AiWorkspaceEntity) {
+    fn flush_text(&mut self, ai: &mut AiWorkspaceEntity) {
         let Some(pending) = self.pending_text.take() else {
             return;
         };

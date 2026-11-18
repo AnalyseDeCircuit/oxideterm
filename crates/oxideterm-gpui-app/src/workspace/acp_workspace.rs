@@ -3,8 +3,6 @@ use oxideterm_gpui_ai::acp;
 use oxideterm_gpui_terminal::SharedTerminalSession;
 use oxideterm_sftp::TextDiffLineKind;
 
-use super::sidebar::handle_acp_application_tool_call;
-
 pub(in crate::workspace) type AcpWorkspaceEntity = acp::AcpWorkspaceEntity<SharedTerminalSession>;
 
 pub(in crate::workspace) fn new_acp_workspace(
@@ -14,7 +12,6 @@ pub(in crate::workspace) fn new_acp_workspace(
     AcpWorkspaceEntity::new(
         task_runtime,
         |session| session.lock().shutdown(),
-        |call, turn| Box::pin(handle_acp_application_tool_call(call, turn)),
         cx,
     )
 }

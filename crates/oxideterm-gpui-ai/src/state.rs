@@ -43,6 +43,9 @@ mod presentation;
 use lazy::LazyAiRagStore;
 pub use presentation::*;
 mod chat;
+pub mod images;
+pub mod sidebar_keys;
+mod message_actions;
 mod model;
 pub use model::*;
 pub use stream_apply::*;
@@ -356,7 +359,11 @@ pub struct AiWorkspaceEntity {
     pub agents: agents::AiAgentWorkspace,
     chat_stream_tx: AiStreamDeliverySender,
     chat_stream_rx: std::sync::mpsc::Receiver<AiStreamDelivery>,
-    chat_stream_deliveries: VecDeque<AiStreamDelivery>,
+    chat_stream_batch: crate::stream::AiChatDeliveryBatch,
+    chat_stream_frame: Option<Rc<crate::stream::AiChatStreamFrameSource>>,
+    chat_window_delivery: Option<crate::stream::AiChatWindowDelivery>,
+    chat_window_ticket: Option<u64>,
+    next_chat_window_ticket: u64,
     conversation_state: oxideterm_ai::AiChatState,
     pub history: history::AiHistoryState,
     chat_initialized: bool,
@@ -1186,7 +1193,11 @@ impl AiWorkspaceEntity {
             ),
             chat_stream_tx,
             chat_stream_rx,
-            chat_stream_deliveries: VecDeque::new(),
+            chat_stream_batch: crate::stream::AiChatDeliveryBatch::default(),
+            chat_stream_frame: None,
+            chat_window_delivery: None,
+            chat_window_ticket: None,
+            next_chat_window_ticket: 0,
             conversation_state: oxideterm_ai::AiChatState::default(),
             history: history::AiHistoryState::default(),
             chat_initialized: false,
@@ -3389,8 +3400,35 @@ impl AiWorkspaceEntity {
         &self.mcp_registry
     }
 
-    pub fn take_chat_stream_deliveries(&mut self) -> VecDeque<AiStreamDelivery> {
-        std::mem::take(&mut self.chat_stream_deliveries)
+    pub fn set_chat_stream_frame(&mut self, source: Rc<crate::stream::AiChatStreamFrameSource>) {
+        self.chat_stream_frame = Some(source);
+    }
+
+    // Called only once the window registry has acquired a live window.
+    pub fn take_chat_window_request(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<(u64, crate::stream::AiChatWindowDelivery)> {
+        let ticket = self.chat_window_ticket?;
+        let delivery = self.chat_window_delivery.take()?;
+        if !delivery.is_current(self) {
+            self.acknowledge_chat_window_request(ticket, cx);
+            return None;
+        }
+        Some((ticket, delivery))
+    }
+
+    pub fn acknowledge_chat_window_request(&mut self, ticket: u64, cx: &mut Context<Self>) {
+        if self.chat_window_ticket != Some(ticket) || self.chat_window_delivery.is_some() {
+            return;
+        }
+        // A receipt confirms the broker handoff, not any async operation. The
+        // next delivery revalidates its own run after cancellation or replacement.
+        self.chat_window_ticket = None;
+        let owner = cx.weak_entity();
+        cx.defer(move |cx| {
+            let _ = owner.update(cx, |ai, cx| ai.advance_chat_stream_batch(cx));
+        });
     }
 
     pub fn compaction_sender(&self) -> AiCompactionDeliverySender {
@@ -3914,18 +3952,31 @@ impl AiWorkspaceEntity {
             &self.chat_stream_rx,
             AI_CHAT_STREAM_DELIVERY_BUDGET,
         );
-        if !drain.items.is_empty() {
-            let mut deliveries = std::mem::take(&mut self.chat_stream_deliveries);
-            deliveries.extend(drain.items);
-            if crate::stream::AiChatDeliveryBatch::apply_local_prefix(&mut deliveries, self) {
-                cx.notify();
-            }
-            self.chat_stream_deliveries = deliveries;
-            if !self.chat_stream_deliveries.is_empty() {
-                cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
-            }
-        }
+        self.chat_stream_batch.extend(drain.items);
+        self.advance_chat_stream_batch(cx);
         drain.outcome.backlog_remaining
+    }
+
+    fn advance_chat_stream_batch(&mut self, cx: &mut Context<Self>) {
+        if self.chat_window_ticket.is_some() || !self.chat_stream_batch.has_deliveries() {
+            return;
+        }
+        let frame = self.chat_stream_frame.as_ref()
+            .and_then(|source| source(cx))
+            .unwrap_or_default();
+        // Keep the unprocessed tail in the AI entity, not the window broker.
+        let mut batch = std::mem::take(&mut self.chat_stream_batch);
+        let delivery = batch.next_window_delivery(
+            self, &frame.i18n, |data| frame.diagnostic(data), cx,
+        );
+        self.chat_stream_batch = batch;
+        cx.notify();
+        if let Some(delivery) = delivery {
+            self.next_chat_window_ticket += 1;
+            self.chat_window_ticket = Some(self.next_chat_window_ticket);
+            self.chat_window_delivery = Some(delivery);
+            cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+        }
     }
 
     fn schedule_compaction_delivery(&self, cx: &mut Context<Self>) {
@@ -5307,47 +5358,72 @@ mod entity_tests {
             entity.set_workspace_visibility(AiWorkspaceVisibility::default());
             stream
         });
-        worker_tx
-            .send(AiStreamDelivery {
-                generation,
-                conversation_id: "conversation-a".to_string(),
-                assistant_id: "assistant-a".to_string(),
-                event: AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content(
-                    "chunk".to_string(),
-                )),
-            })
-            .unwrap();
+        use crate::stream::AiChatWindowDelivery;
 
-        worker_tx
-            .send(AiStreamDelivery {
-                generation,
-                conversation_id: "conversation-a".into(),
-                assistant_id: "assistant-a".into(),
-                event: AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Done),
-            })
-            .unwrap();
-        worker_tx
-            .send(AiStreamDelivery {
-                generation,
-                conversation_id: "conversation-a".into(),
-                assistant_id: "assistant-a".into(),
-                event: AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content("late".into())),
-            })
-            .unwrap();
+        let delivery = |event| AiStreamDelivery {
+            generation,
+            conversation_id: "conversation-a".into(),
+            assistant_id: "assistant-a".into(),
+            event,
+        };
+        let content = |text: &str| AiStreamDeliveryEvent::Stream(
+            oxideterm_ai::AiStreamEvent::Content(text.to_owned()),
+        );
+        let (sender, mut response) = tokio::sync::oneshot::channel();
+        for event in [
+            content("before"),
+            AiStreamDeliveryEvent::RuntimeContextRequested { tool_session_id: oxideterm_ai::ToolSessionId::new(), sender },
+            content(" after"),
+            AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Done),
+            content(" stale"),
+        ] {
+            worker_tx.send(delivery(event)).unwrap();
+        }
         cx.run_until_parked();
 
-        entity.update(cx, |entity, _cx| {
-            let mut queued = entity.take_chat_stream_deliveries();
-            assert!(matches!(queued.pop_front().unwrap().event,
-                AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Done)));
-            assert!(matches!(queued.pop_front().unwrap().event,
-                AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Content(chunk)) if chunk == "late"));
-            let message = entity.conversation_state().active_conversation().unwrap()
-                .messages.iter().find(|message| message.id == "assistant-a").unwrap();
-            assert_eq!(message.content, "chunk");
-            assert!(entity.complete_chat_stream(generation));
-            assert!(!entity.is_chat_stream_generation(generation));
-            assert!(!entity.complete_chat_stream(generation));
+        let displayed = |ai: &AiWorkspaceEntity| {
+            ai.conversation_state().active_conversation().unwrap()
+                .messages.iter().find(|message| message.id == "assistant-a").unwrap()
+                .content.clone()
+        };
+        let (first_ticket, request) = entity.update(cx, |ai, cx| {
+            assert_eq!(displayed(ai), "before");
+            let request = ai.take_chat_window_request(cx).unwrap();
+            assert!(ai.take_chat_window_request(cx).is_none());
+            request
+        });
+        let AiChatWindowDelivery::Host(AiStreamDelivery {
+            event: AiStreamDeliveryEvent::RuntimeContextRequested { sender, .. }, ..
+        }) = request else {
+            panic!("expected the runtime context request before the trailing chunk");
+        };
+        sender.send(Some("runtime context".into())).unwrap();
+        assert_eq!(response.try_recv().unwrap().as_deref(), Some("runtime context"));
+        entity.update(cx, |ai, cx| ai.acknowledge_chat_window_request(first_ticket + 1, cx));
+        cx.run_until_parked();
+        entity.update(cx, |ai, cx| {
+            assert_eq!(displayed(ai), "before");
+            assert!(ai.take_chat_window_request(cx).is_none());
+            ai.acknowledge_chat_window_request(first_ticket, cx);
+        });
+        cx.run_until_parked();
+
+        entity.update(cx, |ai, cx| {
+            assert_eq!(displayed(ai), "before after");
+            let (second_ticket, request) = ai.take_chat_window_request(cx).unwrap();
+            assert!(matches!(request, AiChatWindowDelivery::Host(AiStreamDelivery {
+                event: AiStreamDeliveryEvent::Stream(oxideterm_ai::AiStreamEvent::Done), ..
+            })));
+            assert!(ai.complete_chat_stream(generation));
+            ai.acknowledge_chat_window_request(first_ticket, cx);
+            assert!(ai.take_chat_window_request(cx).is_none());
+            ai.acknowledge_chat_window_request(second_ticket, cx);
+        });
+        cx.run_until_parked();
+        entity.update(cx, |ai, cx| {
+            assert_eq!(displayed(ai), "before after");
+            assert!(!ai.is_chat_stream_generation(generation));
+            assert!(ai.take_chat_window_request(cx).is_none());
         });
     }
 

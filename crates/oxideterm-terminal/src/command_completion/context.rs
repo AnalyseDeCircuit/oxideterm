@@ -1,33 +1,36 @@
-use super::*;
+use oxideterm_ssh::NodeId;
+use oxideterm_workspace::{PaneId, TabId, TerminalSessionId};
+
+use super::common::completion_provider_scope;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum TerminalCommandContextType {
+pub enum TerminalCommandContextType {
     Terminal,
     LocalTerminal,
 }
 
-#[derive(Clone, Debug)]
-pub(in crate::workspace) struct TerminalCommandContext {
-    pub(super) pane_id: Option<PaneId>,
-    pub(super) session_id: Option<TerminalSessionId>,
-    pub(super) tab_id: Option<TabId>,
-    pub(super) terminal_type: TerminalCommandContextType,
-    pub(super) node_id: Option<NodeId>,
-    pub(super) cwd: Option<String>,
-    pub(super) cwd_host: Option<String>,
-    pub(super) target_label: String,
+#[derive(Clone)]
+pub struct TerminalCommandContext {
+    pub pane_id: Option<PaneId>,
+    pub session_id: Option<TerminalSessionId>,
+    pub tab_id: Option<TabId>,
+    pub terminal_type: TerminalCommandContextType,
+    pub node_id: Option<NodeId>,
+    pub cwd: Option<String>,
+    pub cwd_host: Option<String>,
+    pub target_label: String,
 }
 
 impl TerminalCommandContext {
-    pub(super) fn is_local_terminal(&self) -> bool {
+    pub fn is_local_terminal(&self) -> bool {
         self.terminal_type == TerminalCommandContextType::LocalTerminal
     }
 
-    pub(super) fn is_remote_terminal(&self) -> bool {
+    pub fn is_remote_terminal(&self) -> bool {
         self.terminal_type == TerminalCommandContextType::Terminal
     }
 
-    pub(super) fn provider_scope_id(&self) -> String {
+    pub fn provider_scope_id(&self) -> String {
         completion_provider_scope(
             self.node_id.as_ref().map(|node| node.0.as_str()),
             self.session_id.map(|id| id.0),
@@ -40,7 +43,8 @@ impl TerminalCommandContext {
 #[cfg(test)]
 mod terminal_command_context_tests {
     use super::{TerminalCommandContext, TerminalCommandContextType};
-    use crate::workspace::{NodeId, PaneId, TabId, TerminalSessionId};
+    use oxideterm_ssh::NodeId;
+    use oxideterm_workspace::{PaneId, TabId, TerminalSessionId};
 
     fn context() -> TerminalCommandContext {
         TerminalCommandContext {

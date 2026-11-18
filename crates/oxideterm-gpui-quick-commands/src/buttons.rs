@@ -6,10 +6,11 @@ use oxideterm_gpui_ui::button::{
     ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, IconButtonOptions, ToolbarButtonOptions,
 };
 
-use super::super::WorkspaceApp;
-use crate::assets::LucideIcon;
+use crate::bridge::QuickCommandsRequest;
+use crate::view::QuickCommandsView;
+use oxideterm_gpui_ui::icons::LucideIcon;
 
-impl WorkspaceApp {
+impl QuickCommandsView {
     pub(super) fn quick_command_icon_button(
         &self,
         icon: LucideIcon,
@@ -44,18 +45,21 @@ impl WorkspaceApp {
             .id(tooltip_id)
             .on_mouse_move(
                 cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        tooltip_id,
-                        tooltip_title.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
+                    this.dispatch(
+                        QuickCommandsRequest::Tooltip {
+                            id: tooltip_id,
+                            label: tooltip_title.clone(),
+                            x: f32::from(event.position.x) + 12.0,
+                            y: f32::from(event.position.y) + 16.0,
+                        },
+                        None,
                         cx,
                     );
                 }),
             )
             .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
                 if !*hovered {
-                    this.clear_workspace_tooltip(tooltip_id, cx);
+                    this.dispatch(QuickCommandsRequest::ClearTooltip(tooltip_id), None, cx);
                 }
             }))
     }
@@ -133,7 +137,8 @@ impl WorkspaceApp {
         // Quick command editor actions are visually outline buttons in Tauri
         // even when disabled. Use the shared action wrapper so disabled rows no
         // longer keep local mouse handlers attached.
-        self.workspace_toolbar_action_button(
+        oxideterm_gpui_ui::button::toolbar_action_button(
+            &self.tokens,
             label,
             None,
             ToolbarButtonOptions {

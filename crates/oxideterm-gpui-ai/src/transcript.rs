@@ -37,3 +37,6 @@ pub fn ai_summary_source_transcript_ref(
         "endEntryId": end_entry_id,
     })
 }
+
+#[cfg(test)]
+mod tests;

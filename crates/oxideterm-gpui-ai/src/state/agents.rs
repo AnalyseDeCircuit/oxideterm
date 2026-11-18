@@ -4,6 +4,7 @@ pub use oxideterm_ai::tool_loop::AiModelBackendServices;
 
 use oxideterm_ai::agent::{
     AgentGroupId, AgentRecord, AgentResourceCoordinator, AgentRunId, AgentRunRef, AgentRuntime,
+    AgentText,
 };
 
 #[derive(Clone)]
@@ -193,8 +194,7 @@ impl AiWorkspaceEntity {
                     .update(cx, |ai, cx| {
                         ai.refresh_agent_records();
                         ai.persist_agent_records();
-                        // Use the existing window-routed delivery wake; no hidden detail is rendered here.
-                        cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+                        cx.notify();
                     })
                     .is_err()
                 {
@@ -432,7 +432,7 @@ impl AiWorkspaceEntity {
                     Ok(Ok(page)) => view.page = page.map(Arc::new),
                     _ => view.failed = true,
                 }
-                cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+                cx.notify();
             });
         });
         self.agents.communication_pages.get_mut(&key).unwrap().task = Some(task);
@@ -544,9 +544,48 @@ impl AiWorkspaceEntity {
                         ai.agents.detail_errors.insert(id);
                     }
                 }
-                cx.emit(AiWorkspaceEvent::ChatStreamDeliveryReady);
+                cx.notify();
             });
         });
         self.agents.detail_tasks.insert(key, task);
+    }
+}
+
+impl AiWorkspaceEntity {
+    pub fn agent_attention_description(&self, conversation_id: &str, message_id: &str) -> Option<String> {
+        let record = self
+            .agents
+            .message_runs
+            .get(message_id)
+            .and_then(|id| self.agents.records.get(id));
+        if self.conversation_state().active_conversation_id.as_deref() == Some(conversation_id)
+            && record
+                .is_none_or(|record| self.agents.detail.as_ref() == Some(&record.snapshot.run.run_id))
+        {
+            return None;
+        }
+        let conversation = self
+            .conversation_state()
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == conversation_id)
+            .map(|conversation| conversation.title.clone())
+            .unwrap_or_default();
+        let task = record
+            .map(|record| {
+                format!(
+                    "{} · {}",
+                    record.snapshot.title.as_str(),
+                    record
+                        .target_labels
+                        .iter()
+                        .map(AgentText::as_str)
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            })
+            .unwrap_or_default();
+
+        Some(oxideterm_ai::sanitize_for_persistence(&format!("{conversation} · {task}")))
     }
 }

@@ -6996,8 +6996,11 @@ dependencies = [
  "image",
  "instant-distance",
  "libc",
+ "oxideterm-acp-host-tools",
  "oxideterm-atomic-file",
  "oxideterm-audit",
+ "oxideterm-connections",
+ "oxideterm-forwarding",
  "oxideterm-network-proxy",
  "oxideterm-portable-runtime",
  "oxideterm-secret-store",
@@ -7433,6 +7436,7 @@ dependencies = [
  "oxideterm-forwarding",
  "oxideterm-ftp",
  "oxideterm-gpui-ai",
+ "oxideterm-gpui-audit",
  "oxideterm-gpui-background",
  "oxideterm-gpui-cloud-sync",
  "oxideterm-gpui-connections",
@@ -7444,6 +7448,7 @@ dependencies = [
  "oxideterm-gpui-markdown",
  "oxideterm-gpui-onboarding",
  "oxideterm-gpui-platform",
+ "oxideterm-gpui-quick-commands",
  "oxideterm-gpui-remote-desktop",
  "oxideterm-gpui-settings-view",
  "oxideterm-gpui-terminal",
@@ -7505,6 +7510,22 @@ dependencies = [
  "x11-dl",
  "zeroize",
  "zstd",
+]
+
+[[package]]
+name = "oxideterm-gpui-audit"
+version = "2.3.4-beta.1"
+dependencies = [
+ "chrono",
+ "gpui-pre",
+ "oxideterm-audit",
+ "oxideterm-editor-core",
+ "oxideterm-gpui-terminal",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-theme",
+ "parking_lot",
+ "zeroize",
 ]
 
 [[package]]
@@ -7740,6 +7761,24 @@ dependencies = [
  "tokio-util",
  "windows 0.61.3",
  "x11-dl",
+ "zeroize",
+]
+
+[[package]]
+name = "oxideterm-gpui-quick-commands"
+version = "2.3.4-beta.1"
+dependencies = [
+ "gpui-pre",
+ "oxideterm-atomic-file",
+ "oxideterm-editor-core",
+ "oxideterm-gpui-editor",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-quick-commands",
+ "oxideterm-settings",
+ "oxideterm-theme",
+ "serde_json",
+ "tempfile",
  "zeroize",
 ]
 
@@ -8404,12 +8443,14 @@ dependencies = [
  "oxideterm-terminal-triggers",
  "oxideterm-tmux",
  "oxideterm-trzsz",
+ "oxideterm-workspace",
  "parking_lot",
  "polling",
  "rand 0.10.2",
  "regex",
  "russh",
  "serde",
+ "serde_json",
  "serialport",
  "tempfile",
  "tokio",

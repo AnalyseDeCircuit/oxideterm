@@ -3,7 +3,8 @@ use std::hash::Hash;
 
 use oxideterm_workspace::{ActiveSessionReadiness, PaneId, TabId, TabKind, TerminalSessionId};
 
-use super::AiOrchestratorTarget;
+use super::{AiOrchestratorTarget, ai_target_from_projection};
+use crate::{AiIdeTargetInput, AiSftpTargetInput};
 use crate::{AiRuntimeAuthority, RuntimeHandleProjection, ToolSessionId};
 
 pub fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
@@ -232,15 +233,112 @@ pub fn ai_terminal_target(input: AiTerminalTargetInput<'_>) -> AiOrchestratorTar
     }
 }
 
+/// Snapshots are collected by the runtime owners before resource policy runs.
+pub enum AiTargetCapture<'a> {
+    SavedConnection {
+        id: &'a str,
+        name: &'a str,
+        host: &'a str,
+        username: &'a str,
+        port: u16,
+        group: &'a Option<String>,
+    },
+    Surface {
+        tab_id: TabId,
+        kind: TabKind,
+        title: String,
+        session_id: Option<TerminalSessionId>,
+        visible: bool,
+    },
+    SshNode {
+        target: AiSshNodeTargetInput<'a>,
+        sftp_session_id: Option<String>,
+    },
+    Sftp(AiSftpTargetInput),
+    Ide {
+        tab_id: TabId,
+        target: AiIdeTargetInput,
+    },
+    Terminal(AiTerminalTargetInput<'a>),
+}
+
+impl AiTargetCapture<'_> {
+    fn append_targets(self, targets: &mut Vec<AiOrchestratorTarget>) {
+        match self {
+            Self::SavedConnection {
+                id,
+                name,
+                host,
+                username,
+                port,
+                group,
+            } => {
+                targets.push(ai_saved_connection_target(
+                    id, name, host, username, port, group,
+                ));
+            }
+            Self::Surface {
+                tab_id,
+                kind,
+                title,
+                session_id,
+                visible,
+            } => {
+                targets.push(ai_app_surface_target(
+                    tab_id, &kind, &title, session_id, visible,
+                ));
+            }
+            Self::SshNode {
+                target,
+                sftp_session_id,
+            } => {
+                let sftp = sftp_session_id.as_ref().map(|session| AiSftpTargetInput {
+                    node_id: target.node_id.to_owned(),
+                    session_id: session.clone(),
+                    connection_id: target.connection_id.map(str::to_owned),
+                    host: target.host.to_owned(),
+                });
+                targets.extend(ai_ssh_node_target(AiSshNodeTargetInput {
+                    sftp_session_id: sftp_session_id.as_deref(),
+                    ..target
+                }));
+                if let Some(sftp) = sftp {
+                    Self::Sftp(sftp).append_targets(targets);
+                }
+            }
+            Self::Sftp(target) => {
+                targets.push(ai_target_from_projection(crate::sftp_target_projection(
+                    target,
+                )));
+            }
+            Self::Ide { tab_id, target } => {
+                let mut target =
+                    ai_target_from_projection(crate::ide_workspace_target_projection(target));
+                // Distinguish IDE surfaces for the same node without exposing the outer tab ID.
+                target.id = format!("ide-surface:{}", tab_id.0);
+                target
+                    .refs
+                    .insert("surfaceTabId".to_owned(), tab_id.0.to_string());
+                targets.push(target);
+            }
+            Self::Terminal(terminal) => targets.push(ai_terminal_target(terminal)),
+        }
+    }
+}
+
 pub fn finish_ai_target_discovery<N: Clone + Eq + Hash>(
     authority: &mut AiRuntimeAuthority<N>,
     tool_session_id: Option<&ToolSessionId>,
-    mut targets: Vec<AiOrchestratorTarget>,
+    captures: Vec<AiTargetCapture<'_>>,
     node_id: impl Fn(&str) -> N,
 ) -> (
     Vec<AiOrchestratorTarget>,
     HashMap<String, RuntimeHandleProjection>,
 ) {
+    let mut targets = Vec::with_capacity(captures.len());
+    for capture in captures {
+        capture.append_targets(&mut targets);
+    }
     targets.push(AiOrchestratorTarget {
         id: "local-shell:default".to_string(),
         kind: "local-shell".to_string(),
@@ -422,4 +520,89 @@ pub fn ai_ssh_node_target(input: AiSshNodeTargetInput<'_>) -> Option<AiOrchestra
         });
     }
     None
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum AiTransferState { Pending, Active, Paused, Completed, Cancelled, Error }
+
+pub struct AiTransferCapture<'a> {
+    pub id: &'a str,
+    pub direction: &'a str,
+    pub state: AiTransferState,
+    pub size: u64,
+    pub transferred: u64,
+    pub has_error: bool,
+    pub start_time: u64,
+    pub end_time: Option<u64>,
+}
+
+fn ai_background_transfer_state_label(
+    state: AiTransferState,
+) -> &'static str {
+    match state {
+        AiTransferState::Pending => "pending",
+        AiTransferState::Active => "active",
+        AiTransferState::Paused => "paused",
+        AiTransferState::Completed => "completed",
+        AiTransferState::Cancelled => "cancelled",
+        AiTransferState::Error => "error",
+    }
+}
+
+pub fn ai_transfers_state(transfers: &[AiTransferCapture<'_>]) -> serde_json::Value {
+    let count = |state| {
+        transfers
+            .iter()
+            .filter(|transfer| transfer.state == state)
+            .count()
+    };
+    let active_or_recent = transfers
+        .iter()
+        .filter(|transfer| {
+            matches!(
+                transfer.state,
+                AiTransferState::Pending
+                    | AiTransferState::Active
+                    | AiTransferState::Paused
+                    | AiTransferState::Error
+            )
+        })
+        .chain(
+            transfers
+                .iter()
+                .filter(|transfer| {
+                    matches!(
+                        transfer.state,
+                        AiTransferState::Completed | AiTransferState::Cancelled
+                    )
+                })
+                .rev()
+                .take(5),
+        )
+        .take(20)
+        .map(|transfer| {
+            serde_json::json!({
+                "id": transfer.id,
+                "direction": transfer.direction,
+                "state": ai_background_transfer_state_label(transfer.state),
+                "size": transfer.size,
+                "transferred": transfer.transferred,
+                "hasError": transfer.has_error,
+                "startTime": transfer.start_time,
+                "endTime": transfer.end_time,
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "total": transfers.len(),
+        "counts": {
+            "pending": count(AiTransferState::Pending),
+            "active": count(AiTransferState::Active),
+            "paused": count(AiTransferState::Paused),
+            "completed": count(AiTransferState::Completed),
+            "cancelled": count(AiTransferState::Cancelled),
+            "error": count(AiTransferState::Error),
+        },
+        "transfers": active_or_recent,
+    })
 }

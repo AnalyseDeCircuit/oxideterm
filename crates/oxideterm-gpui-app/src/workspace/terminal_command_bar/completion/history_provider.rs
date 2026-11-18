@@ -67,7 +67,10 @@ impl WorkspaceApp {
         }
 
         terminal_history_suggestions(
-            input, entries, self.terminal_history_all_connections.then_some(&origins), classify_command_risk,
+            input,
+            entries,
+            self.terminal_history_all_connections.then_some(&origins),
+            classify_command_risk,
         )
     }
 }

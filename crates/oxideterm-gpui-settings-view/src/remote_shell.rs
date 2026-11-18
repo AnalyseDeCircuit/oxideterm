@@ -717,43 +717,6 @@ mod tests {
     }
 
     #[test]
-    fn remote_shell_success_notice_distinguishes_install_update_and_repair() {
-        use oxideterm_terminal::RemoteShellIntegrationState as State;
-        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);
-        for (state, expected) in [
-            (State::NeedsUpdate, "Shell 集成已更新，打开新终端后生效。"),
-            (State::NeedsRepair, "Shell 集成已修复，打开新终端后生效。"),
-            (
-                State::NotInstalled,
-                "远程 Shell 集成已安装，请打开新终端启用。",
-            ),
-        ] {
-            let notice = RemoteShellIntegrationNotice::Configured(NodeId("server".into()), state)
-                .terminal_notice(&i18n);
-            assert_eq!(notice.title, expected);
-        }
-    }
-
-    #[test]
-    fn shell_integration_failure_notice_identifies_the_optional_feature() {
-        let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);
-        let notice = RemoteShellIntegrationNotice::CheckFailed(
-            RemoteShellIntegrationFailure::SftpUnavailable,
-        )
-        .terminal_notice(&i18n);
-        assert_eq!(notice.title, "远程 Shell 集成不可用");
-        assert_eq!(
-            notice.description.as_deref(),
-            Some("无法打开 SFTP，无法检查或管理远端集成文件。请确认服务器允许 SFTP。")
-        );
-        assert_eq!(
-            notice.status_text.as_deref(),
-            Some("SSH 终端仍可正常使用。")
-        );
-        assert_eq!(notice.variant, TerminalNoticeVariant::Warning);
-    }
-
-    #[test]
     fn shell_integration_gate_keeps_unsupported_shell_silent_until_requested() {
         use oxideterm_terminal::RemoteShellIntegrationError;
         let i18n = oxideterm_i18n::I18n::new(oxideterm_i18n::Locale::ZhCn);

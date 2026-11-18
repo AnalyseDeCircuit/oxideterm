@@ -1,9 +1,8 @@
 use oxideterm_ai::tool_resources::{
     AiActionResultLite, AiStableResourceOperation, ai_live_resource_operation,
     ai_run_command_preflight_risk,
-    ai_stable_resource_operation, ai_target_from_projection, ai_target_projection,
+    ai_stable_resource_operation,
 };
-use sha2::Digest as _;
 
 #[cfg(windows)]
 pub(in crate::workspace) const AI_LOCAL_COMMAND_CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -211,109 +210,25 @@ pub(in crate::workspace) fn ai_command_with_cwd(command: &str, cwd: Option<&str>
     }
 }
 
-use oxideterm_ai::chat_tools::ai_rag_query_arg;
-pub(in crate::workspace) fn ai_background_transfer_state_label(
-    state: BackgroundTransferState,
-) -> &'static str {
-    match state {
-        BackgroundTransferState::Pending => "pending",
-        BackgroundTransferState::Active => "active",
-        BackgroundTransferState::Paused => "paused",
-        BackgroundTransferState::Completed => "completed",
-        BackgroundTransferState::Cancelled => "cancelled",
-        BackgroundTransferState::Error => "error",
-    }
-}
-
-pub(in crate::workspace) fn ai_transfers_state(manager: &SftpTransferManager) -> serde_json::Value {
+fn ai_transfers_state(manager: &SftpTransferManager) -> serde_json::Value {
+    use oxideterm_ai::tool_resources::{AiTransferCapture, AiTransferState};
     let transfers = manager.list_background_transfers(None);
-    let count = |state| {
-        transfers
-            .iter()
-            .filter(|transfer| transfer.state == state)
-            .count()
-    };
-    let active_or_recent = transfers
-        .iter()
-        .filter(|transfer| {
-            matches!(
-                transfer.state,
-                BackgroundTransferState::Pending
-                    | BackgroundTransferState::Active
-                    | BackgroundTransferState::Paused
-                    | BackgroundTransferState::Error
-            )
-        })
-        .chain(
-            transfers
-                .iter()
-                .filter(|transfer| {
-                    matches!(
-                        transfer.state,
-                        BackgroundTransferState::Completed | BackgroundTransferState::Cancelled
-                    )
-                })
-                .rev()
-                .take(5),
-        )
-        .take(20)
-        .map(|transfer| {
-            serde_json::json!({
-                "id": transfer.id,
-                "direction": transfer.direction,
-                "state": ai_background_transfer_state_label(transfer.state),
-                "size": transfer.size,
-                "transferred": transfer.transferred,
-                "hasError": transfer.error.is_some(),
-                "startTime": transfer.start_time,
-                "endTime": transfer.end_time,
-            })
-        })
-        .collect::<Vec<_>>();
-    serde_json::json!({
-        "total": transfers.len(),
-        "counts": {
-            "pending": count(BackgroundTransferState::Pending),
-            "active": count(BackgroundTransferState::Active),
-            "paused": count(BackgroundTransferState::Paused),
-            "completed": count(BackgroundTransferState::Completed),
-            "cancelled": count(BackgroundTransferState::Cancelled),
-            "error": count(BackgroundTransferState::Error),
+    let facts = transfers.iter().map(|transfer| AiTransferCapture {
+        id: &transfer.id,
+        direction: match transfer.direction {
+            BackgroundTransferDirection::Upload => "upload",
+            BackgroundTransferDirection::Download => "download",
         },
-        "transfers": active_or_recent,
-    })
-}
-
-use oxideterm_ai::tool_result_protocol::{trim_tail_chars, truncate_for_model};
-pub(in crate::workspace) fn ai_hash_text_content(content: &str, encoding: &str) -> String {
-    let mut hasher = sha2::Sha256::new();
-    hasher.update(encoding.as_bytes());
-    hasher.update([0]);
-    hasher.update(content.as_bytes());
-    format!("sha256:{:x}", hasher.finalize())
-}
-
-pub(in crate::workspace) fn ai_remote_directory_prefixes(path: &str) -> Vec<String> {
-    let absolute = path.starts_with('/');
-    path.split('/')
-        .filter(|part| !part.is_empty())
-        .scan(Vec::<&str>::new(), |parts, part| {
-            parts.push(part);
-            let joined = parts.join("/");
-            Some(if absolute {
-                format!("/{joined}")
-            } else {
-                joined
-            })
-        })
-        .collect()
-}
-
-pub(in crate::workspace) fn ai_transfer_name(local_path: &str, remote_path: &str) -> String {
-    std::path::Path::new(local_path)
-        .file_name()
-        .or_else(|| std::path::Path::new(remote_path).file_name())
-        .map(|name| name.to_string_lossy().to_string())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| "Directory transfer".to_string())
+        state: match transfer.state {
+            BackgroundTransferState::Pending => AiTransferState::Pending,
+            BackgroundTransferState::Active => AiTransferState::Active,
+            BackgroundTransferState::Paused => AiTransferState::Paused,
+            BackgroundTransferState::Completed => AiTransferState::Completed,
+            BackgroundTransferState::Cancelled => AiTransferState::Cancelled,
+            BackgroundTransferState::Error => AiTransferState::Error,
+        },
+        size: transfer.size, transferred: transfer.transferred, has_error: transfer.error.is_some(),
+        start_time: transfer.start_time, end_time: transfer.end_time,
+    }).collect::<Vec<_>>();
+    oxideterm_ai::tool_resources::ai_transfers_state(&facts)
 }

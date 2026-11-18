@@ -1,8 +1,33 @@
-pub(in crate::workspace) use oxideterm_gpui_ai::acp::AcpApplicationToolTurn;
+use super::*;
+
+#[derive(Clone)]
+pub struct AcpApplicationToolTurn {
+    pub services: AiModelBackendServices,
+    pub tool_policy: crate::AiToolUsePolicy,
+    pub safety_mode: crate::AiPolicySafetyMode,
+    pub profile_id: Option<String>,
+    pub ui_tx: AiStreamDeliverySender,
+    pub generation: u64,
+    pub tool_session_id: ToolSessionId,
+    pub conversation_id: String,
+    pub assistant_id: String,
+    pub cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AcpApplicationToolTurn {
+    pub fn cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
 
 /// Executes one ACP-originated MCP call through the same application policy and
 /// runtime-capability boundaries used by provider-originated tool calls.
-pub(in crate::workspace) async fn handle_acp_application_tool_call(
+pub async fn handle_acp_application_tool_call(
     call: oxideterm_acp_host_tools::AcpHostToolCall,
     turn: Option<AcpApplicationToolTurn>,
 ) {
@@ -16,25 +41,21 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
         respond_to_cancelled_acp_tool(call);
         return;
     }
-    let canonical_arguments =
-        match canonicalize_acp_tool_arguments(&call.name, &call.arguments) {
-            Ok(arguments) => arguments,
-            Err(_) => {
-                let rejected = pre_execution_rejected_ai_tool_result(
-                    call.id.clone(),
-                    call.name.clone(),
-                    "invalid_tool_arguments",
-                    "The application tool arguments do not match the exposed contract.",
-                );
-                respond_to_acp_tool(
-                    call,
-                    rejected,
-                );
-                return;
-            }
-        };
-    let arguments = serde_json::to_string(&canonical_arguments)
-        .unwrap_or_else(|_| "{}".to_string());
+    let canonical_arguments = match canonicalize_acp_tool_arguments(&call.name, &call.arguments) {
+        Ok(arguments) => arguments,
+        Err(_) => {
+            let rejected = pre_execution_rejected_ai_tool_result(
+                call.id.clone(),
+                call.name.clone(),
+                "invalid_tool_arguments",
+                "The application tool arguments do not match the exposed contract.",
+            );
+            respond_to_acp_tool(call, rejected);
+            return;
+        }
+    };
+    let arguments =
+        serde_json::to_string(&canonical_arguments).unwrap_or_else(|_| "{}".to_string());
     let status_call = AiToolCall {
         id: call.id.clone(),
         name: call.name.clone(),
@@ -78,7 +99,7 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
     let risk = ai_policy_risk_label(decision.risk).to_string();
     let mut executed_after_policy = false;
     let mut executed = match decision.decision {
-        oxideterm_ai::AiPolicyDecisionKind::Deny => {
+        crate::AiPolicyDecisionKind::Deny => {
             let _ = send_ai_tool_status(
                 &turn.ui_tx,
                 turn.generation,
@@ -97,7 +118,7 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
                 decision.reason_code.clone(),
             )
         }
-        oxideterm_ai::AiPolicyDecisionKind::RequireApproval => {
+        crate::AiPolicyDecisionKind::RequireApproval => {
             let (approval_tx, approval_rx) = tokio::sync::oneshot::channel();
             if send_ai_stream_delivery(
                 &turn.ui_tx,
@@ -109,7 +130,7 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
                     name: call.name.clone(),
                     arguments: sanitize_ai_tool_arguments_for_approval(&status_call.arguments),
                     risk: risk.clone(),
-                    summary: oxideterm_ai::sanitize_for_ai(&decision.reason_code),
+                    summary: crate::sanitize_for_ai(&decision.reason_code),
                     sender: approval_tx,
                 },
             )
@@ -172,15 +193,14 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
                     call.name.clone(),
                     canonical_arguments.clone(),
                     true,
-                    call.name == "run_command"
-                        && decision.risk == oxideterm_ai::AiActionRisk::Destructive,
+                    call.name == "run_command" && decision.risk == crate::AiActionRisk::Destructive,
                     None,
                     None,
                 )
                 .await
             }
         }
-        oxideterm_ai::AiPolicyDecisionKind::Allow => {
+        crate::AiPolicyDecisionKind::Allow => {
             if turn.is_cancelled() {
                 respond_to_cancelled_acp_tool(call);
                 return;
@@ -219,8 +239,7 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
                 call.name.clone(),
                 canonical_arguments.clone(),
                 false,
-                call.name == "run_command"
-                    && decision.risk == oxideterm_ai::AiActionRisk::Destructive,
+                call.name == "run_command" && decision.risk == crate::AiActionRisk::Destructive,
                 None,
                 None,
             )
@@ -264,16 +283,16 @@ pub(in crate::workspace) async fn handle_acp_application_tool_call(
 fn canonicalize_acp_tool_arguments(
     tool_name: &str,
     arguments: &serde_json::Value,
-) -> Result<serde_json::Value, oxideterm_ai::OrchestratorArgumentError> {
-    if oxideterm_ai::is_mcp_tool_name(tool_name)
+) -> Result<serde_json::Value, crate::OrchestratorArgumentError> {
+    if crate::is_mcp_tool_name(tool_name)
         || matches!(tool_name, "list_mcp_resources" | "read_mcp_resource")
     {
         return arguments
             .is_object()
             .then(|| arguments.clone())
-            .ok_or(oxideterm_ai::OrchestratorArgumentError::InvalidArguments);
+            .ok_or(crate::OrchestratorArgumentError::InvalidArguments);
     }
-    oxideterm_ai::canonicalize_orchestrator_tool_arguments(tool_name, arguments.clone())
+    crate::canonicalize_orchestrator_tool_arguments(tool_name, arguments.clone())
 }
 
 fn respond_to_cancelled_acp_tool(call: oxideterm_acp_host_tools::AcpHostToolCall) {
@@ -287,8 +306,7 @@ fn respond_to_acp_tool(
     executed: AiExecutedToolResult,
 ) {
     // MCP tool results bypass provider-message sanitation, so redact here.
-    let model_content =
-        oxideterm_ai::sanitize_for_ai(&oxideterm_ai::ai_tool_result_model_content(&executed));
+    let model_content = crate::sanitize_for_ai(&crate::ai_tool_result_model_content(&executed));
     let mut response = if executed.success {
         oxideterm_acp_host_tools::AcpHostToolResponse::success(model_content)
     } else {
@@ -307,7 +325,7 @@ fn respond_to_acp_tool(
 }
 
 /// Resolves the same local ACP session directory for prompts and pre-prompt discovery.
-pub(in crate::workspace) fn acp_session_cwd_from_agent(
+pub fn acp_session_cwd_from_agent(
     agent: &oxideterm_settings::AcpAgentConfig,
 ) -> std::path::PathBuf {
     std::env::current_dir().unwrap_or_else(|_| {

@@ -1,0 +1,25 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-quick-commands"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+gpui.workspace = true
+oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+zeroize.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+oxideterm-settings = { path = "../oxideterm-settings" }
+serde_json.workspace = true
+tempfile = "3.23"

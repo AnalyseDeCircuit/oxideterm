@@ -202,7 +202,7 @@ pub(in crate::workspace) use titlebar::{
 
 pub(in crate::workspace) use ai::{
     AiChatPromptKeyAction, AiInputVisualLine, ai_chat_prompt_key_action,
-    ai_input_line_index_for_offset, ai_input_visual_lines, handle_acp_application_tool_call,
+    ai_input_line_index_for_offset, ai_input_visual_lines,
 };
 use helpers::*;
 pub(in crate::workspace) use state::{

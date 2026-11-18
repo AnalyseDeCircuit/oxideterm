@@ -43,7 +43,9 @@ impl WorkspaceApp {
             settings_store.path(),
             settings_store.settings().onboarding_completed,
         )?;
-        let audit = audit::AuditState::new(settings_store.path().with_file_name("audit.sqlite3"));
+        let audit_state = oxideterm_gpui_audit::AuditState::new(
+            oxideterm_audit::AuditService::start(settings_store.path().with_file_name("audit.sqlite3")),
+        );
         let settings = settings_store.settings().clone();
         let i18n = I18n::new(locale_from_settings(settings.general.language));
         // Shell history is already the user's persistence boundary; OxideTerm keeps only a
@@ -123,6 +125,7 @@ impl WorkspaceApp {
             gpui::WindowAppearance::Dark | gpui::WindowAppearance::VibrantDark
         );
         let tokens = tokens_from_settings(&settings, system_dark);
+        let audit = Self::mount_audit(audit_state, tokens, &i18n, cx);
         let initial_viewport_width = current_window_size(window).0;
         let initial_sidebar_width = sidebar::clamp_responsive_sidebar_width(
             settings.sidebar_ui.width as f32,
@@ -454,9 +457,7 @@ impl WorkspaceApp {
         let cloud_sync =
             cx.new(|cx| cloud_sync::CloudSyncWorkspaceEntity::new(cloud_sync_store, cx));
         let cloud_sync_panel = Self::mount_cloud_sync_panel(&cloud_sync, cx);
-        let sync_owner = cx.weak_entity();
-        let cloud_sync_confirm =
-            cx.new(|cx| cloud_sync::CloudSyncConfirmPortal::new(&cloud_sync, sync_owner, cx));
+        let cloud_sync_confirm = Self::mount_cloud_sync_confirm(&cloud_sync, cx);
         let cloud_sync_subscription = cx.subscribe(
             &cloud_sync,
             |workspace, _cloud_sync, event: &cloud_sync::CloudSyncWorkspaceEvent, cx| {
@@ -517,6 +518,19 @@ impl WorkspaceApp {
         let chat_header = Self::mount_ai_chat_header(&ai_entity, cx);
         let (composer_editor, message_editor) = Self::mount_ai_editors(&ai_entity, cx);
         let model_picker = Self::mount_ai_model_picker(&ai_entity, cx);
+        let stream_owner = cx.weak_entity();
+        ai_entity.update(cx, |ai, _| {
+            ai.set_chat_stream_frame(Rc::new(move |cx| {
+                let workspace = stream_owner.upgrade()?.read(cx);
+                let settings = &workspace.settings_store.settings().ai;
+                Some(oxideterm_gpui_ai::stream::AiChatStreamFrame {
+                    i18n: workspace.i18n.clone(),
+                    tool_use_enabled: settings.tool_use.enabled,
+                    provider_id: settings.active_provider_id.clone(),
+                    model: settings.active_model.clone(),
+                })
+            }));
+        });
         let ai_entity_subscription = cx.subscribe(
             &ai_entity,
             |workspace, ai_entity, event: &ai_state::AiWorkspaceEvent, cx| {
@@ -715,6 +729,15 @@ impl WorkspaceApp {
         );
         plugin_entity.update(cx, |plugins, _cx| plugins.start_compatibility_refresh());
         let text_input_anchors = TextInputAnchorStore::default();
+        quick_commands::mount(
+            &terminal,
+            tokens,
+            &i18n,
+            settings_store.settings(),
+            &focus_handle,
+            &text_input_anchors,
+            cx,
+        );
         let file_manager = file_manager::mount(
             &settings_store, tokens, &i18n, &text_input_anchors, &plugin_entity, &forwarding_runtime, cx,
         );
@@ -1093,7 +1116,6 @@ impl WorkspaceApp {
         {
             workspace.refresh_session_manager_ssh_config_hosts(cx);
         }
-        workspace.start_audit_delivery(cx);
         workspace.restore_session_tree_snapshot();
         workspace.start_startup_ssh_tunnels(window, cx);
         if workspace.onboarding.open {

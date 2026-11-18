@@ -132,13 +132,12 @@ impl WorkspaceApp {
             );
         }
 
-        let Some((history, trimmed_count)) = self.build_ai_stream_history(
+        let Some((history, trimmed_count)) = self.ai_conversation_prompt(cx).build_ai_stream_history(
             &conversation_id,
             &config,
             request_content.clone(),
             task_system_prompt.clone(),
             rag_system_prompt.clone(),
-            cx,
         ) else {
             return;
         };
@@ -152,14 +151,14 @@ impl WorkspaceApp {
             .iter()
             .find(|conversation| conversation.id == conversation_id)
             .map(|conversation| {
-                let decision = self.ai_send_budget_decision(
+                let decision = self.ai_conversation_prompt(cx).ai_send_budget_decision(
                     conversation,
                     &config,
                     request_content.as_deref(),
                     task_system_prompt.as_deref(),
                     rag_system_prompt.as_deref(),
                 );
-                let payload = self.ai_budget_diagnostic_payload(
+                let payload = self.ai_conversation_prompt(cx).ai_budget_diagnostic_payload(
                     conversation,
                     &config,
                     request_content.as_deref(),

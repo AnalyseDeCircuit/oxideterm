@@ -1705,30 +1705,7 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.active_window_modal_owner(cx).is_some() {
-            return;
-        }
-        if matches!(
-            self.active_ime_target_for_window(window.window_handle().window_id(), cx),
-            Some(WorkspaceImeTarget::AuditPolicy(_))
-        ) && self.ime_marked_text.is_none()
-            && event.keystroke.key == "enter"
-        {
-            self.apply_audit_policy_inputs(cx);
-            cx.stop_propagation();
-            return;
-        }
-        if self.active_ime_target_for_window(window.window_handle().window_id(), cx)
-            == Some(WorkspaceImeTarget::AuditSearch)
-            && self.ime_marked_text.is_none()
-            && event.keystroke.key == "enter"
-        {
-            self.apply_audit_search(cx);
-            cx.stop_propagation();
-            return;
-        }
-        if self.handle_audit_filter_key(&event.keystroke.key, cx) {
-            cx.stop_propagation();
+        if self.active_window_modal_owner(cx).is_some() || self.audit.read(cx).owns_keyboard(window) {
             return;
         }
         if self.session_sort_menu_open {

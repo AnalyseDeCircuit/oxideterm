@@ -1,4 +1,6 @@
-use super::{TerminalFigArgType, TerminalFigOptionSpec, TerminalFigSpec, TerminalFigSubcommandSpec};
+use super::{
+    TerminalFigArgType, TerminalFigOptionSpec, TerminalFigSpec, TerminalFigSubcommandSpec,
+};
 
 const TERMINAL_COMMAND_SPECS_FILENAME: &str = "terminal-command-specs.json";
 
@@ -171,9 +173,7 @@ pub fn terminal_fig_specs(settings_path: &std::path::Path) -> Vec<TerminalFigSpe
     specs
 }
 
-pub fn terminal_command_specs_path(
-    settings_path: &std::path::Path,
-) -> std::path::PathBuf {
+pub fn terminal_command_specs_path(settings_path: &std::path::Path) -> std::path::PathBuf {
     settings_path
         .parent()
         .unwrap_or(settings_path)
@@ -217,9 +217,7 @@ pub fn terminal_command_specs_editor_initial_json(value: &str) -> String {
     }
 }
 
-pub fn normalize_terminal_command_specs_json(
-    value: &str,
-) -> Result<String, String> {
+pub fn normalize_terminal_command_specs_json(value: &str) -> Result<String, String> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
         return Ok("{\n  \"specs\": []\n}".to_string());
@@ -241,9 +239,7 @@ pub fn normalize_terminal_command_specs_json(
         .map_err(|error| error.to_string())
 }
 
-pub fn user_terminal_fig_specs_count(
-    settings_path: &std::path::Path,
-) -> usize {
+pub fn user_terminal_fig_specs_count(settings_path: &std::path::Path) -> usize {
     load_user_terminal_fig_specs(settings_path).len()
 }
 
@@ -1080,8 +1076,7 @@ pub fn built_in_terminal_fig_specs() -> Vec<TerminalFigSpec> {
 #[cfg(test)]
 mod terminal_fig_registry_tests {
     use super::{
-        TerminalFigArgType, TerminalFigSpec, TerminalFigSpecConfigRoot,
-        built_in_terminal_fig_specs, terminal_command_specs_editor_initial_json,
+        TerminalFigArgType, TerminalFigSpec, TerminalFigSpecConfigRoot, built_in_terminal_fig_specs,
     };
 
     #[test]

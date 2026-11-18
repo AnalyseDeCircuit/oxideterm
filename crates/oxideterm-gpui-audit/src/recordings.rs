@@ -1,11 +1,26 @@
-use super::*;
+use std::{
+    collections::VecDeque,
+    sync::Arc,
+    time::{Duration, Instant},
+};
+
+use gpui::{
+    AnyElement, Bounds, Context, Entity, MouseButton, MouseDownEvent, Pixels, Timer,
+    UniformListScrollHandle, Window, canvas, div, prelude::*, px, relative, rgb,
+};
 use oxideterm_audit::{
-    AuditOperation, RecordingPage, RecordingState, RecordingSummary, StoredRecordingFrame,
-    StoredRecordingFrameKind,
+    AuditCategory, AuditOperation, AuditOutcome, AuditSource, RecordingPage, RecordingState,
+    RecordingSummary, StoredRecordingFrame, StoredRecordingFrameKind,
+};
+use oxideterm_gpui_terminal::TerminalPane;
+use oxideterm_gpui_ui::{
+    button::{ButtonOptions, ButtonRadius, ButtonSize, ButtonVariant, ToolbarButtonOptions},
+    icons::LucideIcon,
+    virtual_list::{TauriVirtualListSpec, tauri_virtual_uniform_list},
 };
 use parking_lot::Mutex;
-use std::collections::VecDeque;
-use std::time::Instant;
+
+use super::{AUDIT_ROW_HEIGHT, AuditPage, AuditView, audit_time};
 
 #[derive(Default)]
 pub(super) struct AuditRecordings {
@@ -84,12 +99,12 @@ fn recording_eof(page: &RecordingPage) -> bool {
     page.next_cursor.is_none() && page.state != RecordingState::InProgress
 }
 
-impl WorkspaceApp {
-    pub(super) fn audit_view_button(&self, view: AuditView, cx: &Context<Self>) -> AnyElement {
+impl AuditView {
+    pub(super) fn audit_view_button(&self, view: AuditPage, cx: &Context<Self>) -> AnyElement {
         let (label, icon) = match view {
-            AuditView::Events => ("event_log.audit.title", LucideIcon::History),
-            AuditView::Sessions => ("event_log.sessions.title", LucideIcon::Terminal),
-            AuditView::Recordings => ("event_log.recordings.title", LucideIcon::Play),
+            AuditPage::Events => ("event_log.audit.title", LucideIcon::History),
+            AuditPage::Sessions => ("event_log.sessions.title", LucideIcon::Terminal),
+            AuditPage::Recordings => ("event_log.recordings.title", LucideIcon::Play),
         };
         self.workspace_toolbar_action_button(
             self.i18n.t(label),
@@ -115,12 +130,12 @@ impl WorkspaceApp {
             cx.listener(move |this, _, _, cx| {
                 if this.audit.view != view {
                     this.audit.policy_draft = None;
-                    this.clear_ime_selection();
+                    this.blur_input(cx);
                 }
                 this.audit.view = view;
                 this.audit.open_filter = None;
                 this.stop_audit_recording_playback();
-                if view == AuditView::Recordings {
+                if view == AuditPage::Recordings {
                     this.audit.recordings.session_id = None;
                 }
                 this.refresh_audit(true, cx);
@@ -135,22 +150,28 @@ impl WorkspaceApp {
         self.audit.recordings.player = None;
     }
 
-    pub(in crate::workspace) fn hide_audit_page(&mut self) {
+    pub fn hide_audit_page(&mut self, cx: &mut Context<Self>) {
+        self.blur_input(cx);
+        let filter_closed = self.audit.open_filter.take().is_some();
         if self.audit.recordings.playback_task.is_none() && self.audit.task.is_none() {
+            if filter_closed {
+                cx.notify();
+            }
             return;
         }
         self.stop_audit_recording_playback();
         self.audit.task = None;
         self.audit.generation += 1;
         self.audit.loading = false;
+        cx.notify();
     }
 
     pub(super) fn open_session_recordings(&mut self, session_id: String, cx: &mut Context<Self>) {
         self.stop_audit_recording_playback();
         self.audit.recordings.session_id = Some(session_id);
-        self.audit.view = AuditView::Recordings;
+        self.audit.view = AuditPage::Recordings;
         self.audit.policy_draft = None;
-        self.clear_ime_selection();
+        self.blur_input(cx);
         self.refresh_audit_recordings(true, cx);
     }
 
@@ -245,14 +266,9 @@ impl WorkspaceApp {
         let Some(client) = self.audit.client.clone() else {
             return;
         };
-        let mut preferences =
-            self.prepare_terminal_preferences_for_tab_kind(&TabKind::LocalTerminal, cx);
-        // Audit playback retains a bounded terminal screen and scrollback, never the entire recording.
-        preferences.scrollback_lines = preferences.scrollback_lines.min(2000);
-        let pane = cx.new(|cx| {
-            TerminalPane::new_recording_playback(80, 24, preferences, window, cx)
-                .expect("audit playback does not create a PTY")
-        });
+        let Some(pane) = (self.bindings.playback)(window, cx) else {
+            return;
+        };
         let mut context = oxideterm_audit::AuditContext::new(client.clone(), AuditSource::User);
         context.session_id = Some(recording.details.session_id.clone());
         let view_operation = context.operation(
@@ -643,9 +659,9 @@ impl WorkspaceApp {
                     .gap_2()
                     .border_b_1()
                     .border_color(rgb(theme.border))
-                    .child(self.audit_view_button(AuditView::Events, cx))
-                    .child(self.audit_view_button(AuditView::Sessions, cx))
-                    .child(self.audit_view_button(AuditView::Recordings, cx))
+                    .child(self.audit_view_button(AuditPage::Events, cx))
+                    .child(self.audit_view_button(AuditPage::Sessions, cx))
+                    .child(self.audit_view_button(AuditPage::Recordings, cx))
                     .child(div().flex_1())
                     .child(self.render_audit_toggle(cx))
                     .child(self.audit_icon_button(
@@ -653,8 +669,7 @@ impl WorkspaceApp {
                         "event_log.audit.settings",
                         false,
                         |this, _, _, cx| {
-                            this.audit.settings_open = !this.audit.settings_open;
-                            cx.notify();
+                            this.toggle_settings(cx);
                         },
                         cx,
                     ))
@@ -792,6 +807,7 @@ fn recording_state_key(state: RecordingState) -> &'static str {
 mod tests {
     use super::*;
     use oxideterm_audit::{RecordingChunk, RecordingPage};
+    use zeroize::Zeroizing;
 
     fn output(time: i64, value: &str) -> StoredRecordingFrame {
         StoredRecordingFrame {

@@ -23,6 +23,8 @@ fn ai_now_ms() -> i64 {
         .unwrap_or_default()
 }
 
+mod acp;
+pub use acp::{AcpApplicationToolTurn, acp_session_cwd_from_agent, handle_acp_application_tool_call};
 mod delivery;
 pub use delivery::{AiStreamDelivery, AiStreamDeliveryEvent, AiStreamDeliverySender};
 
@@ -36,3 +38,6 @@ include!("round.rs");
 
 #[cfg(test)]
 include!("tests.rs");
+
+#[cfg(test)]
+include!("stream_contract_tests.rs");

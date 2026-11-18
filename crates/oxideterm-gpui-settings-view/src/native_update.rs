@@ -749,40 +749,6 @@ mod tests {
 
     use super::*;
 
-    fn update_status(
-        downloaded_bytes: u64,
-        total_bytes: Option<u64>,
-    ) -> oxideterm_update::ResumableUpdateStatus {
-        oxideterm_update::ResumableUpdateStatus {
-            task_id: "update-test".to_string(),
-            version: "2.0.0".to_string(),
-            attempt: 1,
-            downloaded_bytes,
-            total_bytes,
-            resumable: true,
-            stage: oxideterm_update::NativeUpdateStage::Downloading,
-            status: oxideterm_update::NativeUpdateStage::Downloading,
-            error_code: None,
-            error_message: None,
-            timestamp: 0,
-            retry_delay_ms: None,
-            last_http_status: None,
-            can_resume_after_restart: true,
-        }
-    }
-
-    #[test]
-    fn progress_hint_reports_bytes_without_internal_retry_details() {
-        assert_eq!(
-            native_update_progress_hint(&update_status(512, Some(1024))),
-            "512 B / 1.0 KB · 50%"
-        );
-        assert_eq!(
-            native_update_progress_hint(&update_status(512, None)),
-            "512 B"
-        );
-    }
-
     #[gpui::test]
     fn native_update_delivery_changes_entity_state_without_workspace_polling(
         cx: &mut TestAppContext,

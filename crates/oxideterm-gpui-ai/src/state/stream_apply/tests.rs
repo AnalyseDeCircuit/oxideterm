@@ -145,7 +145,7 @@ fn responses_history_delivery_ignores_cancelled_generations(cx: &mut gpui::TestA
 
 #[gpui::test]
 fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui::TestAppContext) {
-    use crate::stream::{AiChatDeliveryBatch, AiStreamDelivery, AiStreamDeliveryEvent};
+    use crate::stream::{AiChatDeliveryBatch, AiChatWindowDelivery, AiStreamDelivery, AiStreamDeliveryEvent};
 
     let runtime = Arc::new(
         tokio::runtime::Builder::new_current_thread()
@@ -155,7 +155,7 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
     );
     let entity =
         cx.new(|cx| AiWorkspaceEntity::new(runtime, oxideterm_ai::AiProviderKeyStore::new(), cx));
-    entity.update(cx, |ai, _| {
+    entity.update(cx, |ai, cx| {
         let id = ai.create_conversation("batch".into(), None, 1, None);
         ai.add_message(
             &id,
@@ -178,10 +178,11 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
             .into(),
         );
         assert!(matches!(
-            batch.next_host_delivery(ai).unwrap().event,
-            AiStreamDeliveryEvent::Stream(AiStreamEvent::Done)
+            batch.next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx),
+            Some(AiChatWindowDelivery::Host(AiStreamDelivery {
+                event: AiStreamDeliveryEvent::Stream(AiStreamEvent::Done), ..
+            }))
         ));
-        batch.flush_text(ai);
         assert_eq!(
             ai.conversation_state()
                 .active_conversation()
@@ -192,7 +193,7 @@ fn chat_batch_leaves_deliveries_after_the_host_boundary_unapplied(cx: &mut gpui:
         );
 
         ai.apply_stream_event_state(generation, &id, "assistant", AiStreamEvent::Done, None);
-        assert!(batch.next_host_delivery(ai).is_none());
+        assert!(batch.next_window_delivery(ai, &oxideterm_i18n::I18n::default(), |data| data, cx).is_none());
         let message = &ai
             .conversation_state()
             .active_conversation()

@@ -128,14 +128,6 @@ impl AiModelPickerView {
         self.display().active_provider.clone()
     }
 
-    fn ai_acp_provider_id(agent_id: &str) -> String {
-        format!("acp:{agent_id}")
-    }
-
-    fn ai_acp_agent_id_from_provider_id(provider_id: &str) -> Option<&str> {
-        provider_id.strip_prefix("acp:")
-    }
-
     fn active_ai_acp_session_state(&self, agent_id: &str, cx: &App) -> Option<AiAcpSessionState> {
         ai_acp_session_state(
             self.state
@@ -149,7 +141,7 @@ impl AiModelPickerView {
     fn ai_acp_agent_model_fallback_label(&self, agent_id: &str, _: &App) -> String {
         self.display()
             .status
-            .get(&Self::ai_acp_provider_id(agent_id))
+            .get(&ai_acp_provider_id(agent_id))
             .and_then(|status| status.acp_fallback_label.clone())
             .unwrap_or_else(|| {
                 self.display()
@@ -165,14 +157,14 @@ impl AiModelPickerView {
     ) -> Option<Vec<AcpSessionConfigOption>> {
         self.display()
             .status
-            .get(&Self::ai_acp_provider_id(agent_id))
+            .get(&ai_acp_provider_id(agent_id))
             .and_then(|status| status.acp_options.clone())
     }
 
     fn ai_acp_model_discovery_is_pending(&self, agent_id: &str, _: &App) -> bool {
         self.display()
             .status
-            .get(&Self::ai_acp_provider_id(agent_id))
+            .get(&ai_acp_provider_id(agent_id))
             .is_some_and(|status| status.acp_discovery_pending)
     }
 
@@ -224,3 +216,6 @@ fn render_lucide_icon(icon: LucideIcon, size: f32, color: Rgba) -> AnyElement {
 include!("model_picker/trigger.rs");
 include!("model_picker/list.rs");
 include!("model_picker/models.rs");
+
+mod controller;
+pub use controller::{active_model_picker_provider, ai_acp_agent_id_from_provider_id, ai_acp_provider_id};

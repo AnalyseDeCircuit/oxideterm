@@ -79,15 +79,6 @@ impl WorkspaceApp {
                 && self.terminal.read(cx).project_panel_open())
             || (anchor.id == SelectAnchorId::SessionManagerViewMode
                 && self.connections.session_manager.read(cx).view_mode_menu_open)
-            || (matches!(
-                anchor.id,
-                SelectAnchorId::AuditCategory
-                    | SelectAnchorId::AuditSeverity
-                    | SelectAnchorId::AuditSource
-                    | SelectAnchorId::AuditOutcome
-                    | SelectAnchorId::AuditTime
-                    | SelectAnchorId::AuditSearchField
-            ) && self.audit.open_filter.is_some())
             || (anchor.id == SelectAnchorId::ActiveSessionSort && self.session_sort_menu_open)
             || (anchor.id == SelectAnchorId::SessionManagerSort
                 && self.connections.session_manager.read(cx).sort_menu_open)
@@ -157,12 +148,6 @@ pub(in crate::workspace) fn select_anchor_tracks_while_closed(anchor_id: SelectA
     matches!(
         anchor_id,
         SelectAnchorId::ActiveSessionSort
-            | SelectAnchorId::AuditCategory
-            | SelectAnchorId::AuditSeverity
-            | SelectAnchorId::AuditSource
-            | SelectAnchorId::AuditOutcome
-            | SelectAnchorId::AuditTime
-                    | SelectAnchorId::AuditSearchField
             | SelectAnchorId::SettingsAppearanceUiFontSizeSlider
             | SelectAnchorId::SettingsAppearanceBorderRadiusSlider
             | SelectAnchorId::OnboardingBorderRadiusSlider

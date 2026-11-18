@@ -1,6 +1,7 @@
 use std::hash::Hash;
 
 mod acp_turn;
+mod agents;
 pub use acp_turn::AiAcpChatLaunch;
 mod provider;
 pub use provider::AiProviderTurn;
@@ -301,6 +302,14 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
         }
     }
 }
+
+mod prompt;
+pub use prompt::AiConversationPrompt;
+
+pub mod context;
+
+mod config;
+pub use config::{AiMemoryScope, ai_model_context_window, ai_tool_use_policy_from_settings, build_ai_base_system_prompt};
 
 impl AiWorkspaceEntity {
     pub fn dismiss_model_selector(&mut self) {

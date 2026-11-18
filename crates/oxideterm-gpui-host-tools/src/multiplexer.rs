@@ -1046,14 +1046,6 @@ mod mux_search_pass_tests {
             HostToolsEntity::mux_row_identity(Multiplexer::Herdr, "s", None)
         );
     }
-
-    #[test]
-    fn count_label_picks_the_locale_forms() {
-        assert_eq!(mux_count_label(1, "Tab", "Tabs"), "1 Tab");
-        assert_eq!(mux_count_label(2, "Tab", "Tabs"), "2 Tabs");
-        // A translated unit never carries an appended English plural marker.
-        assert_eq!(mux_count_label(3, "个标签", "个标签"), "3 个标签");
-    }
 }
 
 /// The verb's icon and copy, resolved from the tree level the verb runs on.

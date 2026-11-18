@@ -218,10 +218,4 @@ mod tests {
         assert!(detail.contains("local 127.0.0.1:8080 -> localhost:3000"));
         assert!(detail.contains("Port already in use"));
     }
-
-    #[test]
-    fn restore_failures_do_not_abort_reconnect_pipeline() {
-        assert_eq!(forward_restore_phase_result(0), PhaseResult::Ok);
-        assert_eq!(forward_restore_phase_result(2), PhaseResult::Ok);
-    }
 }

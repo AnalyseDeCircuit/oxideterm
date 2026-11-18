@@ -182,14 +182,14 @@ impl WorkspaceApp {
             }),
             request: Rc::new(move |request, window, cx| {
                 let _ = action_owner.update(cx, |app, cx| match request {
-                    AiTranscriptRequest::Copy(a0) => app.copy_ai_message(a0, cx),
+                    AiTranscriptRequest::ClipboardReadFailed => app.push_ai_settings_toast(
+                        app.i18n.t("ai.chat.load_failed_generic"),
+                        TerminalNoticeVariant::Error,
+                        cx,
+                    ),
                     AiTranscriptRequest::Regenerate => app.regenerate_ai_last_response(cx),
-                    AiTranscriptRequest::DeleteMessage(a0) => app.request_delete_ai_message(a0, cx),
                     AiTranscriptRequest::CancelEdit => app.cancel_edit_ai_message(cx),
                     AiTranscriptRequest::SaveEdit => app.save_ai_message_edit(cx),
-                    AiTranscriptRequest::SwitchBranch(a0, a1) => {
-                        app.switch_ai_message_branch(a0, a1, cx)
-                    }
                     AiTranscriptRequest::FollowUp(a0) => app.send_ai_follow_up_suggestion(a0, cx),
                     AiTranscriptRequest::ApproveTool(a0, a1, a2) => {
                         app.resolve_ai_tool_approval(a0, a1, a2, cx)

@@ -1,34 +1,6 @@
-use oxideterm_gpui_ai::state::{detect_ai_cli_agent_kind, sanitize_ai_tool_arguments_for_approval};
+use oxideterm_gpui_ai::state::sanitize_ai_tool_arguments_for_approval;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn apply_ai_acp_session_started(
-        &mut self,
-        generation: u64,
-        conversation_id: &str,
-        session_id: &str,
-        session_metadata: Option<serde_json::Value>,
-        session_config_options: Vec<oxideterm_ai::AcpSessionConfigOption>,
-        session_modes: Option<oxideterm_ai::AcpSessionModeState>,
-        agent_id: &str,
-        cx: &mut App,
-    ) -> bool {
-        let applied = self.ai.state.update(cx, |ai, _cx| {
-            ai.apply_acp_session_started_state(
-                generation,
-                conversation_id,
-                session_id,
-                session_metadata,
-                session_config_options,
-                session_modes,
-                agent_id,
-            )
-        });
-        if !applied {
-            return false;
-        }
-        true
-    }
-
     pub(in crate::workspace) fn ai_stream_error_text(&self, error: &str) -> Option<String> {
         let text = self.i18n.t(oxideterm_ai::stream_error_label(error)?);
         Some(match oxideterm_ai::stream_error_http_status(error) {

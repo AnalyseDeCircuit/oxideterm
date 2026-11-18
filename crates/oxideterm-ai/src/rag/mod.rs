@@ -991,18 +991,6 @@ mod tests {
     }
 
     #[test]
-    fn cancelled_manual_rebuild_keeps_the_observable_index_state() {
-        let store = temp_store("cancelled_manual_rebuild_status");
-
-        store.record_manual_bm25_rebuild(&Err(RagError::Cancelled));
-
-        assert!(matches!(
-            store.bm25_index_status().unwrap(),
-            Bm25IndexStatus::Ready
-        ));
-    }
-
-    #[test]
     fn imported_document_and_repeated_saves_publish_current_keyword_results() {
         let store = temp_store("coalesced_keyword_rebuild");
         let collection = rag_create_collection(

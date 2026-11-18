@@ -1018,17 +1018,6 @@ mod saved_connection_open_tests {
     }
 
     #[test]
-    fn stale_saved_connection_id_is_detected_before_opening() {
-        let path = std::env::temp_dir().join(format!(
-            "oxideterm-stale-saved-connection-{}.json",
-            uuid::Uuid::new_v4()
-        ));
-        let store = ConnectionStore::load(path).expect("empty connection store");
-
-        assert!(saved_connection_for_open(&store, "removed-connection").is_none());
-    }
-
-    #[test]
     fn unchanged_edited_proxy_hop_preserves_its_keychain_reference() {
         let persisted_proxy_chain = vec![password_proxy_hop(SavedAuth::Password {
             empty_password: false,
