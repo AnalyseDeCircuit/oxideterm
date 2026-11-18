@@ -227,7 +227,8 @@ impl DisclosureMotions {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::TestAppContext;
+    use gpui::{TestAppContext, div};
+    use std::time::Duration;
 
     #[test]
     fn retained_disclosures_ignore_stale_completion_and_invalidate_only_their_owner() {

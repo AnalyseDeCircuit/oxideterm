@@ -13,7 +13,7 @@ impl WorkspaceApp {
             .and_then(serde_json::Value::as_str)
         {
             return self
-                .ai_runtime_context
+                .ai.authority
                 .read(cx)
                 .validate_node_handle(tool_session_id, Some(handle_id));
         }
@@ -514,7 +514,7 @@ impl WorkspaceApp {
             .get("handle_id")
             .and_then(serde_json::Value::as_str);
         let session_id = self
-            .ai_runtime_context
+            .ai.authority
             .read(cx)
             .validate_terminal_handle(
                 tool_session_id,
@@ -586,7 +586,7 @@ impl WorkspaceApp {
             .get("handle_id")
             .and_then(serde_json::Value::as_str);
         let session_id = self
-            .ai_runtime_context
+            .ai.authority
             .read(cx)
             .validate_terminal_handle(
                 tool_session_id,
@@ -681,7 +681,7 @@ impl WorkspaceApp {
             .get("handle_id")
             .and_then(serde_json::Value::as_str);
         let session_id = self
-            .ai_runtime_context
+            .ai.authority
             .read(cx)
             .validate_terminal_handle(
                 tool_session_id,

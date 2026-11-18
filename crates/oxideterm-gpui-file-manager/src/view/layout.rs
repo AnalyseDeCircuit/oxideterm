@@ -1,5 +1,4 @@
 use super::*;
-use crate::workspace::detached_tab_window::DetachedTabWindow;
 
 const BOOKMARKS_MAX_WIDTH_RATIO: f32 = 0.45;
 const FILE_LIST_MIN_WIDTH: f32 = 280.0;
@@ -21,7 +20,7 @@ pub(super) fn bookmarks_width(preferred: f32, surface_width: f32) -> f32 {
 }
 
 impl FileManagerState {
-    pub(in crate::workspace::file_manager) fn cancel_bookmarks_resize(&mut self) -> bool {
+    pub(in crate::view) fn cancel_bookmarks_resize(&mut self) -> bool {
         let Some(drag) = self.bookmarks_resize.take() else {
             return false;
         };
@@ -32,12 +31,8 @@ impl FileManagerState {
     }
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace::file_manager) fn file_manager_layout_width(
-        &self,
-        window: &Window,
-        cx: &App,
-    ) -> f32 {
+impl FileManagerView {
+    pub(in crate::view) fn file_manager_layout_width(&self, window: &Window, cx: &App) -> f32 {
         self.file_manager
             .read(cx)
             .bookmarks_surface_size
@@ -46,27 +41,18 @@ impl WorkspaceApp {
             .unwrap_or_else(|| f32::from(window.viewport_size().width))
     }
 
-    pub(in crate::workspace::file_manager) fn file_manager_bookmarks_width(
-        &self,
-        window: &Window,
-        cx: &App,
-    ) -> f32 {
+    pub(in crate::view) fn file_manager_bookmarks_width(&self, window: &Window, cx: &App) -> f32 {
         let preferred = self
             .file_manager
             .read(cx)
             .bookmarks_resize
             .filter(|drag| drag.window_id == window.window_handle().window_id())
             .map(|drag| drag.width)
-            .unwrap_or(
-                self.settings_store
-                    .settings()
-                    .sidebar_ui
-                    .file_manager_sidebar_width as f32,
-            );
+            .unwrap_or(self.bookmarks_width as f32);
         bookmarks_width(preferred, self.file_manager_layout_width(window, cx))
     }
 
-    pub(in crate::workspace) fn file_manager_bookmarks_resize_active(
+    pub fn file_manager_bookmarks_resize_active(
         &self,
         window_id: gpui::WindowId,
         cx: &App,
@@ -77,7 +63,7 @@ impl WorkspaceApp {
             .is_some_and(|drag| drag.window_id == window_id)
     }
 
-    pub(in crate::workspace::file_manager) fn start_file_manager_bookmarks_resize(
+    pub(in crate::view) fn start_file_manager_bookmarks_resize(
         &mut self,
         event: &MouseDownEvent,
         window: &mut Window,
@@ -92,7 +78,7 @@ impl WorkspaceApp {
             }
         });
         let weak = cx.weak_entity();
-        let closed = window_shell::observe_window_close(window, cx, move |id, cx| {
+        let closed = observe_window_close(window, cx, move |id, cx| {
             let _ = weak.update(cx, |this, cx| {
                 this.cancel_file_manager_bookmarks_resize(id, cx)
             });
@@ -109,16 +95,11 @@ impl WorkspaceApp {
             file_manager.bookmarks_resize_close = Some(closed);
             cx.notify();
         });
-        let focus = window
-            .root::<DetachedTabWindow>()
-            .flatten()
-            .map(|root| root.read(cx).focus_handle(cx))
-            .unwrap_or_else(|| self.focus_handle.clone());
-        window.focus(&focus, cx);
+        self.pointer(FileManagerPointer::Focus, window, cx);
         cx.notify();
     }
 
-    pub(in crate::workspace) fn update_file_manager_bookmarks_resize(
+    pub fn update_file_manager_bookmarks_resize(
         &mut self,
         event: &MouseMoveEvent,
         window: &Window,
@@ -151,7 +132,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn cancel_file_manager_bookmarks_resize(
+    pub fn cancel_file_manager_bookmarks_resize(
         &mut self,
         window_id: gpui::WindowId,
         cx: &mut Context<Self>,
@@ -167,7 +148,7 @@ impl WorkspaceApp {
         true
     }
 
-    pub(in crate::workspace) fn finish_file_manager_bookmarks_resize(
+    pub fn finish_file_manager_bookmarks_resize(
         &mut self,
         window_id: gpui::WindowId,
         cx: &mut Context<Self>,
@@ -189,7 +170,7 @@ impl WorkspaceApp {
         true
     }
 
-    pub(in crate::workspace::file_manager) fn reset_file_manager_bookmarks_width(
+    pub(in crate::view) fn reset_file_manager_bookmarks_width(
         &mut self,
         window: &Window,
         cx: &mut Context<Self>,
@@ -199,38 +180,12 @@ impl WorkspaceApp {
     }
 
     fn save_file_manager_bookmarks_width(&mut self, width: f32, cx: &mut Context<Self>) {
-        let previous = self
-            .settings_store
-            .settings()
-            .sidebar_ui
-            .file_manager_sidebar_width;
         let width = (width.round() as i64).clamp(
             FILE_MANAGER_SIDEBAR_MIN_WIDTH,
             FILE_MANAGER_SIDEBAR_MAX_WIDTH,
         );
-        if previous == width {
-            return;
-        }
-        self.settings_store
-            .settings_mut()
-            .sidebar_ui
-            .file_manager_sidebar_width = width;
-        match self.settings_store.save() {
-            Ok(_) => self.settings_workspace.update(cx, |settings, _cx| {
-                settings.acknowledge_external_store_state();
-            }),
-            Err(error) => {
-                self.settings_store
-                    .settings_mut()
-                    .sidebar_ui
-                    .file_manager_sidebar_width = previous;
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.error"),
-                    Some(error.to_string()),
-                    TerminalNoticeVariant::Error,
-                    cx,
-                );
-            }
+        if width != self.bookmarks_width {
+            self.request(FileManagerRequest::SaveBookmarksWidth(width), cx);
         }
         cx.notify();
     }

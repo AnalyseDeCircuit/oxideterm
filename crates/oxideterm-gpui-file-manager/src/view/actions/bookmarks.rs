@@ -132,12 +132,8 @@ mod tests {
     }
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace::file_manager) fn is_file_manager_path_bookmarked(
-        &self,
-        path: &str,
-        cx: &App,
-    ) -> bool {
+impl FileManagerView {
+    pub(in crate::view) fn is_file_manager_path_bookmarked(&self, path: &str, cx: &App) -> bool {
         self.file_manager
             .read(cx)
             .bookmarks
@@ -145,10 +141,7 @@ impl WorkspaceApp {
             .any(|bookmark| bookmark.path == path)
     }
 
-    pub(in crate::workspace::file_manager) fn toggle_file_manager_current_bookmark(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub(in crate::view) fn toggle_file_manager_current_bookmark(&mut self, cx: &mut Context<Self>) {
         let added = self.file_manager.update(cx, |file_manager, cx| {
             let path = file_manager.path.clone();
             let added = if let Some(index) = file_manager
@@ -174,21 +167,21 @@ impl WorkspaceApp {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.bookmarked"),
                 None,
-                TerminalNoticeVariant::Success,
+                FileManagerNoticeKind::Success,
                 cx,
             );
         } else {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.removeBookmark"),
                 None,
-                TerminalNoticeVariant::Default,
+                FileManagerNoticeKind::Default,
                 cx,
             );
         }
         self.persist_file_manager_bookmarks(cx);
     }
 
-    pub(in crate::workspace::file_manager) fn remove_file_manager_bookmark(
+    pub(in crate::view) fn remove_file_manager_bookmark(
         &mut self,
         id: &str,
         cx: &mut Context<Self>,
@@ -200,7 +193,7 @@ impl WorkspaceApp {
         self.persist_file_manager_bookmarks(cx);
     }
 
-    pub(in crate::workspace::file_manager) fn open_file_manager_edit_bookmark_dialog(
+    pub(in crate::view) fn open_file_manager_edit_bookmark_dialog(
         &mut self,
         bookmark: LocalBookmark,
         cx: &mut Context<Self>,
@@ -214,7 +207,7 @@ impl WorkspaceApp {
             file_manager.focused_input = Some(FileManagerInput::DialogValue);
             cx.notify();
         });
-        self.ime_marked_text = None;
+        self.request(FileManagerRequest::ClearIme, cx);
     }
 
     pub(super) fn update_file_manager_bookmark_name(&mut self, id: String, cx: &mut Context<Self>) {
@@ -242,7 +235,7 @@ impl WorkspaceApp {
         self.close_file_manager_dialog(cx);
     }
 
-    pub(in crate::workspace::file_manager) fn reorder_file_manager_bookmark(
+    pub(in crate::view) fn reorder_file_manager_bookmark(
         &mut self,
         source: &str,
         target: &str,
@@ -266,7 +259,7 @@ impl WorkspaceApp {
             Err(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
-                TerminalNoticeVariant::Error,
+                FileManagerNoticeKind::Error,
                 cx,
             ),
         }
@@ -278,7 +271,7 @@ impl WorkspaceApp {
             Err(error) => self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
-                TerminalNoticeVariant::Error,
+                FileManagerNoticeKind::Error,
                 cx,
             ),
         }

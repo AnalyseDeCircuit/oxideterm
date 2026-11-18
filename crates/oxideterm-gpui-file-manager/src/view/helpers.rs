@@ -22,50 +22,6 @@ pub(super) fn file_icon_for_entry(
     icon.with_symlink(entry.file_type == LocalFileType::Symlink || entry.symlink_target.is_some())
 }
 
-pub(super) fn local_file_properties(entry: &LocalFileEntry) -> FileManagerProperties {
-    let metadata = local_preview_metadata(&entry.path);
-    let accessed = metadata.as_ref().and_then(|metadata| metadata.accessed);
-    let created = metadata.as_ref().and_then(|metadata| metadata.created);
-    let mode = metadata.as_ref().and_then(|metadata| metadata.mode);
-    let mime_type = metadata
-        .as_ref()
-        .and_then(|metadata| metadata.mime_type.clone());
-    let is_symlink = metadata
-        .as_ref()
-        .is_some_and(|metadata| metadata.is_symlink);
-    let (dir_files, dir_dirs, total_size) = if entry.file_type == LocalFileType::Directory {
-        let stats = directory_stats(std::path::Path::new(&entry.path));
-        (Some(stats.0), Some(stats.1), Some(stats.2))
-    } else {
-        (None, None, None)
-    };
-    let location = std::path::Path::new(&entry.path)
-        .parent()
-        .map(|parent| parent.to_string_lossy().to_string())
-        .unwrap_or_default();
-    let kind_label = match entry.file_type {
-        LocalFileType::Directory => "fileManager.propTypeFolder",
-        LocalFileType::Symlink => "fileManager.propTypeSymlink",
-        LocalFileType::File => "fileManager.propTypeFile",
-    }
-    .to_string();
-    FileManagerProperties {
-        kind_label,
-        location,
-        size: entry.size,
-        modified: entry.modified,
-        accessed,
-        readonly: entry.readonly,
-        dir_files,
-        dir_dirs,
-        total_size,
-        created,
-        mode,
-        mime_type,
-        is_symlink,
-    }
-}
-
 pub(super) fn format_file_size(bytes: u64) -> String {
     if bytes == 0 {
         return "0 B".to_string();

@@ -1,3 +1,4 @@
+mod sidebar;
 use super::*;
 
 #[derive(Clone)]
@@ -37,14 +38,14 @@ fn file_manager_sidebar_location_presentation(
     }
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn render_file_manager_surface(
+impl FileManagerView {
+    pub fn render_file_manager_surface(
         &self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let theme = self.tokens.ui;
-        let has_background = self.background_surface_active("file_manager");
+        let has_background = self.background;
         let (filtered, filtered_rows) = self.file_manager.update(cx, |file_manager, _cx| {
             (file_manager.sorted_files(), file_manager.sorted_file_rows())
         });
@@ -60,7 +61,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle, cx);
+                    this.pointer(FileManagerPointer::Focus, window, cx);
                     this.dismiss_file_manager_context_menu(cx);
                     if this.file_manager.read(cx).dialog.is_none() {
                         this.blur_file_manager_inline_inputs(cx);
@@ -111,8 +112,7 @@ impl WorkspaceApp {
         }
         if self.file_manager.read(cx).dialog.is_none()
             && self.file_manager.read(cx).focused_input == Some(FileManagerInput::Path)
-            && let Some(completion) =
-                self.render_path_completion_overlay(PathCompletionOwner::FileManager, cx)
+            && let Some(completion) = self.render_path_completion_overlay(cx)
         {
             root = root.child(completion);
         }
@@ -319,572 +319,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_file_manager_bookmarks(
-        &self,
-        has_background: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let expanded = self.file_manager.read(cx).bookmarks_visible;
-        let (sidebar_locations, bookmarks, drives) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.sidebar_locations.clone(),
-                file_manager.bookmarks.clone(),
-                file_manager.drives.clone(),
-            )
-        };
-        let mut panel = div()
-            .relative()
-            .h_full()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .bg(file_manager_panel_bg(
-                theme.bg_card,
-                has_background,
-                FILE_MANAGER_PANEL_80_ALPHA,
-            ))
-            .overflow_hidden();
-
-        if !expanded {
-            return self.animate_file_manager_bookmarks_width(panel, expanded, window, cx);
-        }
-
-        let mut navigation = div()
-            .flex_1()
-            .min_h(px(0.0))
-            .overflow_y_scrollbar()
-            .py(px(8.0))
-            .child(self.render_file_manager_sidebar_section_header(
-                self.i18n.t("fileManager.favorites"),
-                true,
-                true,
-                cx,
-            ));
-        let mut item_geometry = FileManagerSidebarItemGeometry::FIRST;
-        for location in sidebar_locations {
-            let (label_key, icon) = file_manager_sidebar_location_presentation(location.kind);
-            navigation = navigation.child(self.render_file_manager_sidebar_path_row(
-                location.path,
-                self.i18n.t(label_key),
-                icon,
-                theme.accent,
-                has_background,
-                item_geometry,
-                cx,
-            ));
-            item_geometry = item_geometry.next();
-        }
-        for bookmark in bookmarks {
-            navigation = navigation.child(self.render_file_manager_sidebar_bookmark_row(
-                bookmark,
-                has_background,
-                item_geometry,
-                cx,
-            ));
-            item_geometry = item_geometry.next();
-        }
-        navigation = navigation.child(div().mt(px(10.0)).child(
-            self.render_file_manager_sidebar_section_header(
-                self.i18n.t("fileManager.sidebarLocations"),
-                false,
-                false,
-                cx,
-            ),
-        ));
-        item_geometry = item_geometry.after_section_header();
-        for drive in &drives {
-            navigation = navigation.child(self.render_file_manager_sidebar_path_row(
-                drive.path.clone(),
-                drive.name.clone(),
-                LucideIcon::HardDrive,
-                theme.text_secondary,
-                has_background,
-                item_geometry,
-                cx,
-            ));
-            item_geometry = item_geometry.next();
-        }
-        panel = panel.child(navigation);
-        panel = panel.child(
-            div()
-                .border_t_1()
-                .border_color(file_manager_border(theme.border, has_background))
-                .p(px(8.0))
-                .child(
-                    div()
-                        .h(px(28.0))
-                        .w_full()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.0))
-                        .px(px(8.0))
-                        .rounded(px(self.tokens.radii.sm))
-                        .cursor_pointer()
-                        .hover(move |button| {
-                            button.bg(file_manager_hover_bg(theme.bg_hover, has_background))
-                        })
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::Terminal,
-                            FILE_MANAGER_ICON_MD,
-                            rgb(theme.text),
-                        ))
-                        .child(
-                            div()
-                                .text_size(px(FILE_MANAGER_TEXT_XS))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .text_color(rgb(theme.text))
-                                .child(self.render_display_text_with_role(
-                                    SelectableTextRole::NonSelectable,
-                                    "file-manager-action",
-                                    "open-terminal-here",
-                                    self.i18n.t("fileManager.openTerminalHere"),
-                                    theme.text,
-                                    cx,
-                                )),
-                        )
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _event, window, cx| {
-                                this.blur_file_manager_inline_inputs(cx);
-                                this.open_terminal_at_file_manager_path(window, cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                ),
-        );
-        let label = self.i18n.t("fileManager.resizeFavorites");
-        panel = panel.child(
-            sidebar::sidebar_resize_hotzone_chrome(
-                "file-manager-bookmarks-resize",
-                file_manager_border(theme.border, has_background),
-                true,
-            )
-            .debug_selector(|| "file-manager-bookmarks-resize".into())
-            .right_0()
-            .top_0()
-            .bottom_0()
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    this.blur_file_manager_inline_inputs(cx);
-                    if event.click_count >= 2 {
-                        this.reset_file_manager_bookmarks_width(window, cx);
-                    } else {
-                        this.start_file_manager_bookmarks_resize(event, window, cx);
-                    }
-                    window.prevent_default();
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(
-                cx.listener(move |this, event: &MouseMoveEvent, _window, cx| {
-                    this.queue_workspace_tooltip(
-                        "file-manager-bookmarks-resize",
-                        label.clone(),
-                        f32::from(event.position.x) + 12.0,
-                        f32::from(event.position.y) + 16.0,
-                        cx,
-                    );
-                }),
-            )
-            .on_hover(cx.listener(|this, hovered, _, cx| {
-                if !hovered {
-                    this.clear_workspace_tooltip("file-manager-bookmarks-resize", cx);
-                }
-            })),
-        );
-        self.animate_file_manager_bookmarks_width(panel, expanded, window, cx)
-    }
-
-    fn render_file_manager_sidebar_section_header(
-        &self,
-        label: String,
-        show_sidebar_collapse: bool,
-        show_add_bookmark: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let title = div()
-            .flex()
-            .items_center()
-            .gap(px(4.0))
-            .when(show_sidebar_collapse, |title| {
-                title.child(self.render_file_manager_icon_button(
-                    LucideIcon::PanelLeftClose,
-                    self.i18n.t("fileManager.collapseSidebar"),
-                    cx.listener(|this, _event, _window, cx| {
-                        this.file_manager.update(cx, |file_manager, cx| {
-                            file_manager.bookmarks_visible = false;
-                            cx.notify();
-                        });
-                        cx.stop_propagation();
-                    }),
-                    cx.entity(),
-                ))
-            })
-            .child(label);
-        div()
-            .h(px(FILE_MANAGER_SIDEBAR_SECTION_HEADER_HEIGHT))
-            .flex()
-            .items_center()
-            .justify_between()
-            .px(px(12.0))
-            .text_size(px(FILE_MANAGER_TEXT_XS))
-            .font_weight(gpui::FontWeight::SEMIBOLD)
-            .text_color(rgb(theme.text_muted))
-            .child(title)
-            .when(show_add_bookmark, |header| {
-                header.child(self.render_file_manager_icon_button(
-                    LucideIcon::Plus,
-                    self.i18n.t("fileManager.addBookmark"),
-                    cx.listener(|this, _event, _window, cx| {
-                        let current_path = this.file_manager.read(cx).path.clone();
-                        if !this.is_file_manager_path_bookmarked(&current_path, cx) {
-                            this.toggle_file_manager_current_bookmark(cx);
-                        }
-                        cx.stop_propagation();
-                    }),
-                    cx.entity(),
-                ))
-            })
-            .into_any_element()
-    }
-
-    fn render_file_manager_sidebar_path_row(
-        &self,
-        path: String,
-        label: String,
-        icon: LucideIcon,
-        icon_color: u32,
-        has_background: bool,
-        item_geometry: FileManagerSidebarItemGeometry,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let active = path == self.file_manager.read(cx).path;
-        let selection_surface = self.render_file_manager_sidebar_selection(active, item_geometry);
-        div()
-            .h(px(FILE_MANAGER_SIDEBAR_ROW_HEIGHT))
-            .mx(px(8.0))
-            .px(px(8.0))
-            .relative()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .rounded(px(self.tokens.radii.sm))
-            .bg(rgba(theme.bg << 8))
-            .hover(move |row| row.bg(file_manager_hover_bg(theme.bg_hover, has_background)))
-            .cursor_pointer()
-            .when_some(selection_surface, |row, surface| row.child(surface))
-            .child(Self::render_lucide_icon(
-                icon,
-                FILE_MANAGER_ICON_MD,
-                rgb(icon_color),
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .text_size(px(FILE_MANAGER_TEXT_SM))
-                    .text_color(if active {
-                        rgb(theme.accent)
-                    } else {
-                        rgb(theme.text)
-                    })
-                    .child(label),
-            )
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(move |this, _event, _window, cx| {
-                    this.blur_file_manager_inline_inputs(cx);
-                    this.begin_file_manager_sidebar_transition(&path, item_geometry, cx);
-                    this.set_file_manager_path(path.clone(), cx);
-                    cx.stop_propagation();
-                    cx.notify();
-                }),
-            )
-            .into_any_element()
-    }
-
-    fn render_file_manager_sidebar_bookmark_row(
-        &self,
-        bookmark: LocalBookmark,
-        has_background: bool,
-        item_geometry: FileManagerSidebarItemGeometry,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let active = bookmark.path == self.file_manager.read(cx).path;
-        let selection_surface = self.render_file_manager_sidebar_selection(active, item_geometry);
-        let drag = FileManagerBookmarkDrag {
-            id: bookmark.id.clone(),
-            name: bookmark.name.clone(),
-            after: Rc::new(Cell::new(false)),
-            tokens: self.tokens,
-        };
-        let source_id = bookmark.id.clone();
-        let target_id = bookmark.id.clone();
-        let hover_id = bookmark.id.clone();
-        let tooltip = format!(
-            "{}\n{}\n{}",
-            bookmark.name,
-            bookmark.path,
-            self.i18n.t("fileManager.dragToReorder")
-        );
-        let bookmark_selector = format!("file-manager-bookmark-{}", bookmark.id);
-        div()
-            .id(SharedString::from(format!(
-                "file-manager-bookmark-{}",
-                bookmark.id
-            )))
-            .debug_selector(move || bookmark_selector)
-            .h(px(FILE_MANAGER_SIDEBAR_ROW_HEIGHT))
-            .mx(px(8.0))
-            .px(px(8.0))
-            .relative()
-            .flex()
-            .items_center()
-            .gap(px(8.0))
-            .rounded(px(self.tokens.radii.sm))
-            .bg(rgba(theme.bg << 8))
-            .hover(move |row| row.bg(file_manager_hover_bg(theme.bg_hover, has_background)))
-            .cursor_pointer()
-            .on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))
-            .can_drop(move |value, _, _| {
-                value
-                    .downcast_ref::<FileManagerBookmarkDrag>()
-                    .is_some_and(|drag| drag.id != source_id)
-            })
-            .on_drag_move::<FileManagerBookmarkDrag>(|event, window, cx| {
-                if event.bounds.contains(&event.event.position) {
-                    let after = event.event.position.y >= event.bounds.center().y;
-                    if event.drag(cx).after.replace(after) != after {
-                        window.refresh();
-                    }
-                }
-            })
-            .drag_over::<FileManagerBookmarkDrag>(move |style, drag, _, _| {
-                if drag.id == hover_id {
-                    return style;
-                }
-                let style = style.border_color(rgb(theme.accent));
-                if drag.after.get() {
-                    style.border_b_2().border_t_0()
-                } else {
-                    style.border_t_2().border_b_0()
-                }
-            })
-            .on_drop(
-                cx.listener(move |this, drag: &FileManagerBookmarkDrag, _, cx| {
-                    this.reorder_file_manager_bookmark(&drag.id, &target_id, drag.after.get(), cx);
-                    cx.stop_propagation();
-                }),
-            )
-            .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, _, cx| {
-                this.queue_workspace_tooltip(
-                    "file-manager-bookmark",
-                    tooltip.clone(),
-                    f32::from(event.position.x) + 12.0,
-                    f32::from(event.position.y) + 16.0,
-                    cx,
-                );
-            }))
-            .on_hover(cx.listener(|this, hovered, _, cx| {
-                if !hovered {
-                    this.clear_workspace_tooltip("file-manager-bookmark", cx);
-                }
-            }))
-            .when_some(selection_surface, |row, surface| row.child(surface))
-            .child(Self::render_lucide_icon(
-                LucideIcon::Folder,
-                FILE_MANAGER_ICON_MD,
-                rgb(theme.accent),
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.0))
-                    .truncate()
-                    .text_size(px(FILE_MANAGER_TEXT_SM))
-                    .text_color(if active {
-                        rgb(theme.accent)
-                    } else {
-                        rgb(theme.text)
-                    })
-                    .child(bookmark.name.clone()),
-            )
-            .child(
-                div()
-                    .size(px(20.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.sm))
-                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Pencil,
-                        FILE_MANAGER_ICON_SM,
-                        rgb(theme.text_muted),
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener({
-                            let bookmark = bookmark.clone();
-                            move |this, _event, _window, cx| {
-                                this.blur_file_manager_inline_inputs(cx);
-                                this.open_file_manager_edit_bookmark_dialog(bookmark.clone(), cx);
-                                cx.stop_propagation();
-                                cx.notify();
-                            }
-                        }),
-                    ),
-            )
-            .child(
-                div()
-                    .size(px(20.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .rounded(px(self.tokens.radii.sm))
-                    .hover(move |button| button.bg(rgb(theme.bg_hover)))
-                    .child(Self::render_lucide_icon(
-                        LucideIcon::Trash2,
-                        FILE_MANAGER_ICON_SM,
-                        rgb(theme.text_muted),
-                    ))
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener({
-                            let id = bookmark.id.clone();
-                            move |this, _event, _window, cx| {
-                                this.blur_file_manager_inline_inputs(cx);
-                                this.remove_file_manager_bookmark(&id, cx);
-                                cx.stop_propagation();
-                            }
-                        }),
-                    ),
-            )
-            .on_click(cx.listener({
-                let path = bookmark.path;
-                move |this, _event, _window, cx| {
-                    this.blur_file_manager_inline_inputs(cx);
-                    this.begin_file_manager_sidebar_transition(&path, item_geometry, cx);
-                    this.set_file_manager_path(path.clone(), cx);
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-            }))
-            .into_any_element()
-    }
-
-    fn render_file_manager_sidebar_selection(
-        &self,
-        active: bool,
-        item_geometry: FileManagerSidebarItemGeometry,
-    ) -> Option<AnyElement> {
-        active.then(|| {
-            let theme = self.tokens.ui;
-            let surface = div()
-                .absolute()
-                .inset_0()
-                .rounded(px(self.tokens.radii.sm))
-                .bg(rgba((theme.accent << 8) | FILE_MANAGER_SELECTED_BG_ALPHA));
-            self.render_vertical_selection_surface(
-                selection_motion::FILE_MANAGER_NAVIGATION_ID,
-                item_geometry.transition_index,
-                surface,
-            )
-        })
-    }
-
-    fn begin_file_manager_sidebar_transition(
-        &mut self,
-        target_path: &str,
-        target_geometry: FileManagerSidebarItemGeometry,
-        cx: &mut Context<Self>,
-    ) {
-        let current_path = self.file_manager.read(cx).path.clone();
-        if current_path == target_path {
-            return;
-        }
-        let vertical_offset_y = self
-            .file_manager_sidebar_geometry_for_path(&current_path, cx)
-            .map(|source_geometry| source_geometry.top - target_geometry.top);
-        self.begin_user_segmented_control_transition_with_vertical_offset(
-            selection_motion::FILE_MANAGER_NAVIGATION_ID,
-            target_geometry.transition_index,
-            vertical_offset_y,
-            cx,
-        );
-    }
-
-    fn file_manager_sidebar_geometry_for_path(
-        &self,
-        path: &str,
-        cx: &App,
-    ) -> Option<FileManagerSidebarItemGeometry> {
-        let (sidebar_locations, bookmarks, drives) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.sidebar_locations.clone(),
-                file_manager.bookmarks.clone(),
-                file_manager.drives.clone(),
-            )
-        };
-        let mut item_geometry = FileManagerSidebarItemGeometry::FIRST;
-        for location in &sidebar_locations {
-            if location.path == path {
-                return Some(item_geometry);
-            }
-            item_geometry = item_geometry.next();
-        }
-        for bookmark in &bookmarks {
-            if bookmark.path == path {
-                return Some(item_geometry);
-            }
-            item_geometry = item_geometry.next();
-        }
-        item_geometry = item_geometry.after_section_header();
-        for drive in &drives {
-            if drive.path == path {
-                return Some(item_geometry);
-            }
-            item_geometry = item_geometry.next();
-        }
-        None
-    }
-
-    fn animate_file_manager_bookmarks_width(
-        &self,
-        panel: gpui::Div,
-        expanded: bool,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let target = if expanded {
-            self.file_manager_bookmarks_width(window, cx)
-        } else {
-            0.0
-        };
-        let available = layout::bookmarks_width(
-            FILE_MANAGER_SIDEBAR_MAX_WIDTH as f32,
-            self.file_manager_layout_width(window, cx),
-        );
-        self.file_manager.update(cx, |file_manager, _cx| {
-            file_manager.bookmarks_motion.retarget(target);
-            file_manager.bookmarks_motion.animate(
-                &self.tokens,
-                "file-manager-bookmarks-width",
-                panel,
-                move |panel, width| panel.w(px(width.min(available))),
-            )
-        })
-    }
-
     fn render_file_manager_list_panel(
         &self,
         files: Arc<Vec<LocalFileEntry>>,
@@ -978,7 +412,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle, cx);
+                    this.pointer(FileManagerPointer::Focus, window, cx);
                 }),
             )
             .into_any_element()
@@ -1054,7 +488,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle, cx);
+                    this.pointer(FileManagerPointer::Focus, window, cx);
                     if editing || event.click_count >= 2 {
                         this.start_file_manager_path_edit(cx);
                     } else {
@@ -1062,7 +496,7 @@ impl WorkspaceApp {
                             file_manager.focused_input = None;
                             cx.notify();
                         });
-                        this.ime_marked_text = None;
+                        this.request(FileManagerRequest::ClearIme, cx);
                     }
                     cx.stop_propagation();
                     cx.notify();
@@ -1090,10 +524,8 @@ impl WorkspaceApp {
             }
             let is_last = index + 1 == segments.len();
             let full_path = segment.full_path.clone();
-            let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
-                "file-manager-breadcrumb-segment",
-                &segment.full_path,
-            );
+            let selection_group_id =
+                selectable_text_id("file-manager-breadcrumb-segment", &segment.full_path);
             let segment_text_color = if is_last {
                 theme.text_heading
             } else {
@@ -1183,7 +615,7 @@ impl WorkspaceApp {
         focused: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let target = WorkspaceImeTarget::FileManager(input);
+        let target = (input);
         let control = self
             .workspace_text_input(
                 target,
@@ -1191,7 +623,7 @@ impl WorkspaceApp {
                     value,
                     placeholder: self.i18n.t("fileManager.pathPlaceholder"),
                     focused,
-                    caret_visible: self.input_caret.visible(),
+                    caret_visible: self.caret_visible,
                     secret: false,
                     selected_all: false,
                     selected_range: self.ime_selected_range_for_target(target, cx),
@@ -1279,10 +711,7 @@ impl WorkspaceApp {
             LocalSortField::Size => "size",
             LocalSortField::Modified => "modified",
         };
-        let selection_group_id = crate::workspace::selectable_text::selectable_text_id(
-            "file-manager-sort-header",
-            field_key,
-        );
+        let selection_group_id = selectable_text_id("file-manager-sort-header", field_key);
         let text_color = if active {
             self.tokens.ui.accent
         } else {
@@ -1359,7 +788,7 @@ impl WorkspaceApp {
                 file_manager.filter.clone(),
             )
         };
-        let target = WorkspaceImeTarget::FileManager(input);
+        let target = (input);
         self.sidebar_search_row(file_manager_panel_bg(theme.bg_panel, has_background, 0xff))
             .child(
                 self.text_input_with_workspace_ime(
@@ -1370,7 +799,7 @@ impl WorkspaceApp {
                             value: &filter,
                             placeholder: self.i18n.t("fileManager.filterPlaceholder"),
                             focused,
-                            caret_visible: self.input_caret.visible(),
+                            caret_visible: self.caret_visible,
                             secret: false,
                             selected_all: false,
                             selected_range: self.ime_selected_range_for_target(target, cx),
@@ -1641,7 +1070,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _event, window, cx| {
-                    window.focus(&this.focus_handle, cx);
+                    this.pointer(FileManagerPointer::Focus, window, cx);
                     this.dismiss_file_manager_context_menu(cx);
                     this.blur_file_manager_inline_inputs(cx);
                     this.clear_file_manager_selection(cx);
@@ -1651,7 +1080,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Right,
                 cx.listener(|this, event: &MouseDownEvent, window, cx| {
-                    window.focus(&this.focus_handle, cx);
+                    this.pointer(FileManagerPointer::Focus, window, cx);
                     this.open_file_manager_context_menu(
                         None,
                         f32::from(event.position.x),
@@ -1771,71 +1200,34 @@ mod tests {
     use gpui::TestAppContext;
 
     #[gpui::test]
-    fn favorites_drag_and_resize_preserve_navigation_and_save_on_release(cx: &mut TestAppContext) {
-        let executable = std::env::current_exe().unwrap();
-        let fixture_key = "OXIDETERM_FAVORITES_TEST_DIR";
-        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
-            // Workspace storage is process-wide; keep real settings and credentials isolated.
-            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
-            let child = directory.path().join(executable.file_name().unwrap());
-            std::fs::hard_link(&executable, &child).unwrap();
-            std::fs::write(directory.path().join("portable"), []).unwrap();
-            let output = std::process::Command::new(child)
-                .arg(cx.test_function_name().unwrap())
-                .arg("--nocapture")
-                .env(fixture_key, directory.path())
-                .env_remove("APPIMAGE")
-                .current_dir(directory.path())
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return;
-        };
-        let settings_path = default_settings_path();
-        assert!(settings_path.starts_with(PathBuf::from(&fixture_dir)));
-        let mut settings = SettingsStore::load_from_path(settings_path.clone()).unwrap();
-        settings.settings_mut().ssh_config.auto_load_hosts = false;
-        settings.settings_mut().onboarding_completed = true;
-        settings.settings_mut().appearance.animation_speed =
-            oxideterm_settings::AnimationSpeed::Off;
-        settings.save().unwrap();
+    fn dragging_favorites_reorders_without_navigating_and_click_still_opens(
+        cx: &mut TestAppContext,
+    ) {
+        let dir = tempfile::tempdir().unwrap();
         for id in ["a", "b", "c"] {
-            std::fs::create_dir(PathBuf::from(&fixture_dir).join(id)).unwrap();
+            fs::create_dir(dir.path().join(id)).unwrap();
         }
-        cx.executor().allow_parking();
-        let (shell, cx) = cx.add_window_view(|window, cx| {
-            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
-            workspace.update(cx, |workspace, cx| {
-                workspace.open_file_manager_tab(window, cx);
-                workspace.file_manager.update(cx, |state, cx| {
-                    state.bookmarks = ["a", "b", "c"]
-                        .into_iter()
-                        .map(|id| LocalBookmark {
-                            id: id.into(),
-                            name: id.into(),
-                            path: PathBuf::from(&fixture_dir)
-                                .join(id)
-                                .to_string_lossy()
-                                .into_owned(),
-                            created_at: 1,
-                        })
-                        .collect();
-                    cx.notify();
-                });
+        let (body, cx) = cx.add_window_view(|_, cx| {
+            let views = test_views(&dir.path().join("settings.json"), |_, _| {}, cx);
+            views.body.update(cx, |view, cx| {
+                view.set_file_manager_path(dir.path().to_string_lossy().into_owned(), cx)
             });
-            WorkspaceWindowShell::new(workspace, window, cx)
+            views.update(cx, |state, cx| {
+                state.bookmarks = ["a", "b", "c"]
+                    .into_iter()
+                    .map(|id| LocalBookmark {
+                        id: id.into(),
+                        name: id.into(),
+                        path: dir.path().join(id).to_string_lossy().into_owned(),
+                        created_at: 1,
+                    })
+                    .collect();
+                cx.notify();
+            });
+            views.body
         });
-        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
-        cx.run_until_parked();
         cx.update(|window, cx| window.draw(cx).clear(cx));
-        let initial_path = workspace.read_with(cx, |workspace, cx| {
-            workspace.file_manager.read(cx).path.clone()
-        });
+        let initial = body.read_with(cx, |view, cx| view.file_manager.read(cx).path.clone());
         let row_a = cx.debug_bounds("file-manager-bookmark-a").unwrap();
         let row_b = cx.debug_bounds("file-manager-bookmark-b").unwrap();
         let start = gpui::point(row_a.left() + px(40.0), row_a.center().y);
@@ -1845,12 +1237,9 @@ mod tests {
         cx.simulate_mouse_move(end, MouseButton::Left, modifiers);
         cx.simulate_mouse_move(end, MouseButton::Left, modifiers);
         cx.simulate_mouse_up(end, MouseButton::Left, modifiers);
-        workspace.read_with(cx, |workspace, cx| {
-            let state = workspace.file_manager.read(cx);
-            assert_eq!(
-                state.path, initial_path,
-                "dragging must not navigate to a favorite"
-            );
+        body.read_with(cx, |view, cx| {
+            let state = view.file_manager.read(cx);
+            assert_eq!(state.path, initial);
             assert_eq!(
                 state
                     .bookmarks
@@ -1860,144 +1249,16 @@ mod tests {
                 ["b", "a", "c"]
             );
         });
-
         let row_a = cx.debug_bounds("file-manager-bookmark-a").unwrap();
-        let start = gpui::point(row_a.left() + px(40.0), row_a.center().y);
-        let outside = gpui::point(px(-10.0), px(-10.0));
-        cx.simulate_mouse_down(start, MouseButton::Left, modifiers);
-        cx.simulate_mouse_move(outside, MouseButton::Left, modifiers);
-        cx.simulate_mouse_up(outside, MouseButton::Left, modifiers);
-        workspace.read_with(cx, |workspace, cx| {
-            assert_eq!(workspace.file_manager.read(cx).bookmarks[0].id, "b");
-        });
-        cx.simulate_click(start, modifiers);
-        workspace.read_with(cx, |workspace, cx| {
+        cx.simulate_click(
+            gpui::point(row_a.left() + px(40.0), row_a.center().y),
+            modifiers,
+        );
+        body.read_with(cx, |view, cx| {
             assert_eq!(
-                workspace.file_manager.read(cx).path,
-                PathBuf::from(&fixture_dir).join("a").to_string_lossy()
+                view.file_manager.read(cx).path,
+                dir.path().join("a").to_string_lossy()
             );
         });
-
-        let edge = cx
-            .debug_bounds("file-manager-bookmarks-resize")
-            .unwrap()
-            .center();
-        let wider = gpui::point(edge.x + px(80.0), edge.y);
-        cx.simulate_mouse_down(edge, MouseButton::Left, modifiers);
-        cx.simulate_mouse_move(wider, MouseButton::Left, modifiers);
-        assert_eq!(
-            SettingsStore::load_from_path(settings_path.clone())
-                .unwrap()
-                .settings()
-                .sidebar_ui
-                .file_manager_sidebar_width,
-            184
-        );
-        cx.simulate_mouse_up(wider, MouseButton::Left, modifiers);
-        assert_eq!(
-            SettingsStore::load_from_path(settings_path.clone())
-                .unwrap()
-                .settings()
-                .sidebar_ui
-                .file_manager_sidebar_width,
-            264
-        );
-        let resized_edge = cx
-            .debug_bounds("file-manager-bookmarks-resize")
-            .unwrap()
-            .center();
-        assert_eq!(resized_edge.x - edge.x, px(80.0));
-
-        cx.simulate_mouse_down(resized_edge, MouseButton::Left, modifiers);
-        cx.simulate_mouse_move(
-            gpui::point(resized_edge.x + px(20.0), resized_edge.y),
-            MouseButton::Left,
-            modifiers,
-        );
-        cx.simulate_keystrokes("escape");
-        cx.simulate_mouse_up(resized_edge, MouseButton::Left, modifiers);
-        assert_eq!(
-            cx.debug_bounds("file-manager-bookmarks-resize")
-                .unwrap()
-                .center()
-                .x,
-            resized_edge.x
-        );
-        assert_eq!(
-            SettingsStore::load_from_path(settings_path.clone())
-                .unwrap()
-                .settings()
-                .sidebar_ui
-                .file_manager_sidebar_width,
-            264
-        );
-        cx.simulate_event(MouseDownEvent {
-            position: resized_edge,
-            button: MouseButton::Left,
-            modifiers,
-            click_count: 2,
-            first_mouse: false,
-        });
-        cx.simulate_mouse_up(resized_edge, MouseButton::Left, modifiers);
-        assert_eq!(
-            SettingsStore::load_from_path(settings_path.clone())
-                .unwrap()
-                .settings()
-                .sidebar_ui
-                .file_manager_sidebar_width,
-            184
-        );
-
-        let detached = cx.update(|window, cx| {
-            workspace.update(cx, |workspace, cx| {
-                let tab = workspace.active_content_tab_id(cx).unwrap();
-                workspace.detach_tab_to_window(tab, None, window, cx);
-                workspace
-                    .tab_host
-                    .read(cx)
-                    .detached_window_handle(tab)
-                    .unwrap()
-            })
-        });
-        cx.run_until_parked();
-        let cx = &mut gpui::VisualTestContext::from_window(detached, cx);
-        cx.update(|window, cx| {
-            window.simulate_next_frame(cx);
-            window.draw(cx).clear(cx);
-        });
-        let edge = cx
-            .debug_bounds("file-manager-bookmarks-resize")
-            .unwrap()
-            .center();
-        cx.simulate_mouse_down(edge, MouseButton::Left, modifiers);
-        cx.simulate_mouse_move(
-            gpui::point(edge.x + px(40.0), edge.y),
-            MouseButton::Left,
-            modifiers,
-        );
-        assert_eq!(
-            cx.debug_bounds("file-manager-bookmarks-resize")
-                .unwrap()
-                .center()
-                .x,
-            edge.x + px(40.0)
-        );
-        cx.simulate_keystrokes("escape");
-        cx.simulate_mouse_up(edge, MouseButton::Left, modifiers);
-        assert_eq!(
-            cx.debug_bounds("file-manager-bookmarks-resize")
-                .unwrap()
-                .center()
-                .x,
-            edge.x
-        );
-        assert_eq!(
-            SettingsStore::load_from_path(settings_path)
-                .unwrap()
-                .settings()
-                .sidebar_ui
-                .file_manager_sidebar_width,
-            184
-        );
     }
 }

@@ -1,11 +1,28 @@
-use super::*;
+pub fn local_file_audit_context(
+    source: oxideterm_audit::AuditSource,
+) -> Option<oxideterm_audit::AuditContext> {
+    let request = oxideterm_audit::AuditContext::current_request();
+    let is_scoped = request.is_some();
+    let mut context = request.or_else(oxideterm_audit::AuditContext::current)?;
+    if !is_scoped {
+        context.source = source;
+    }
+    context.target = Some(oxideterm_audit::redact("local"));
+    context.protocol = Some("local".into());
+    context.session_id = None;
+    context.consumer_id = None;
+    context.transport_id = None;
+    context.node_id = None;
+    context.connection_id = None;
+    Some(context)
+}
 
 #[cfg(windows)]
 const FILE_MANAGER_EXTERNAL_BRIDGE_CREATE_NO_WINDOW: u32 = 0x08000000;
 
-pub(in crate::workspace::file_manager) fn open_path_external(path: &str) -> Result<(), String> {
+pub fn open_path_external(path: &str) -> Result<(), String> {
     let audit = oxideterm_audit::AuditOperation::in_context(
-        super::super::local_file_audit_context(oxideterm_audit::AuditSource::User).as_ref(),
+        local_file_audit_context(oxideterm_audit::AuditSource::User).as_ref(),
         oxideterm_audit::AuditCategory::File,
         "file_external_open",
         Some(path),
@@ -19,9 +36,9 @@ pub(in crate::workspace::file_manager) fn open_path_external(path: &str) -> Resu
 
     #[cfg(target_os = "windows")]
     let mut command = {
-        let mut command = std::process::Command::new("cmd");
+        let mut command = std::process::Command::new("explorer.exe");
         configure_file_manager_external_bridge(&mut command);
-        command.args(["/C", "start", "", path]);
+        command.arg(std::path::Path::new(path));
         command
     };
 
@@ -50,7 +67,7 @@ pub(in crate::workspace::file_manager) fn open_path_external(path: &str) -> Resu
     result
 }
 
-pub(in crate::workspace::file_manager) fn reveal_path_external(path: &str) -> Result<(), String> {
+pub fn reveal_path_external(path: &str) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut command = std::process::Command::new("open");

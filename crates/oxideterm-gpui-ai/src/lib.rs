@@ -1,6 +1,7 @@
 //! AI workspace state, views, and task delivery.
 pub mod acp;
 pub mod background;
+pub mod conversation;
 pub mod inline;
 pub mod knowledge;
 pub mod model_picker;

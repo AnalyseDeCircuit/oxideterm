@@ -739,7 +739,7 @@ impl WorkspaceApp {
         if !self.settings_store.settings().ai.skills.enabled {
             return None;
         }
-        let catalog = self.ai.skills.registry.read().catalog();
+        let catalog = self.ai.skills.read().catalog();
         let mut selected = Vec::new();
         for skill in catalog {
             let candidate = serde_json::json!({

@@ -37,3 +37,21 @@ pub use preview::{
     MAX_PREVIEW_SIZE, STREAM_PREVIEW_THRESHOLD, local_file_extension, local_preview_metadata,
     mime_type_for_extension, read_local_preview, read_local_preview_range,
 };
+mod external;
+mod path_completion;
+mod preview_stream;
+pub use external::{local_file_audit_context, open_path_external, reveal_path_external};
+pub use path_completion::{
+    PathCompletionCandidate, PathCompletionRequest, local_path_completion_request,
+    split_path_completion_request,
+};
+pub use preview::local_inspection_preview;
+pub use preview_stream::{append_local_preview_chunk, append_local_preview_text};
+
+mod batch;
+mod properties;
+pub use batch::{
+    LocalBatchProgress, compress_local_files_audited, copy_dropped_local_files,
+    duplicate_local_files, extract_local_archive_audited, paste_local_files,
+};
+pub use properties::{LocalFileProperties, local_file_properties};

@@ -111,13 +111,12 @@ impl WorkspaceApp {
             .map(std::path::PathBuf::from)
             .collect();
         let skill_registry =
-            oxideterm_skills::SkillRegistry::discover(&oxideterm_skills::SkillDiscoveryOptions {
+            oxideterm_gpui_ai::state::skills::AiSkillCatalog::discover(oxideterm_skills::SkillDiscoveryOptions {
                 workspace_root: skill_workspace_root.clone(),
                 settings_path: Some(settings_store.path().to_path_buf()),
                 plugin_roots,
                 disabled_paths,
             });
-        let skill_registry = std::sync::Arc::new(parking_lot::RwLock::new(skill_registry));
         let local_shells = scan_shells();
         let system_dark = matches!(
             window.appearance(),
@@ -277,36 +276,6 @@ impl WorkspaceApp {
             &settings_workspace,
             |workspace, settings, event: &settings::SettingsWorkspaceEvent, cx| {
                 workspace.handle_settings_workspace_event(settings, event, cx);
-            },
-        );
-        let file_manager = cx.new(|cx| FileManagerState::load(settings_store.path(), cx));
-        let file_manager_observation =
-            cx.observe(&file_manager, |_workspace, _file_manager, cx| {
-                // Entity-owned local file operations repaint every mounted file-manager surface.
-                cx.notify();
-            });
-        let file_manager_subscription = cx.subscribe(
-            &file_manager,
-            |workspace, _file_manager, event: &FileManagerWorkspaceEvent, cx| {
-                match event {
-                    FileManagerWorkspaceEvent::Error(error) => workspace.push_file_manager_toast(
-                        workspace.i18n.t("fileManager.error"),
-                        Some(error.clone()),
-                        TerminalNoticeVariant::Error,
-                        cx,
-                    ),
-                    FileManagerWorkspaceEvent::OperationSucceeded => workspace
-                        .push_file_manager_toast(
-                            workspace.i18n.t("fileManager.operationSuccess"),
-                            None,
-                            TerminalNoticeVariant::Success,
-                            cx,
-                        ),
-                    FileManagerWorkspaceEvent::OpenEntry(entry) => {
-                        workspace.open_file_manager_entry(entry.clone(), cx);
-                    }
-                }
-                cx.notify();
             },
         );
         let ssh_worker_tx = connection_flow.read(cx).ssh_worker_sender();
@@ -690,7 +659,7 @@ impl WorkspaceApp {
             )
         });
         let ai_runtime_context = cx.new(|cx| {
-            ai_runtime_context::AiRuntimeContextEntity::attach_release_shutdown(cx);
+            cx.on_release(|authority: &mut ai_runtime_context::AiRuntimeContextEntity, _| authority.shutdown()).detach();
             ai_runtime_context::AiRuntimeContextEntity::new()
         });
         let plugin_task_runtime = forwarding_runtime.clone();
@@ -738,6 +707,10 @@ impl WorkspaceApp {
             },
         );
         plugin_entity.update(cx, |plugins, _cx| plugins.start_compatibility_refresh());
+        let text_input_anchors = TextInputAnchorStore::default();
+        let file_manager = file_manager::mount(
+            &settings_store, tokens, &i18n, &text_input_anchors, &plugin_entity, &forwarding_runtime, cx,
+        );
         let tab_host = cx.new(|_| tabs::WorkspaceTabHostEntity::new());
         let tab_host_subscription = cx.subscribe(
             &tab_host,
@@ -900,17 +873,17 @@ impl WorkspaceApp {
                 },
             ),
             ai: AiWorkspaceViews {
+                conversations: oxideterm_gpui_ai::conversation::AiConversationController::new(
+                    ai_entity.clone(), ai_runtime_context.clone(), acp_entity.clone(), ai_background_tasks.clone(),
+                ),
                 state: ai_entity,
                 acp: acp_entity,
                 background: ai_background_tasks,
                 inline_panel,
                 transcript,
                 model_picker,
-                skills: ai_views::AiWorkspaceSkills {
-                    registry: skill_registry,
-                    workspace_root: skill_workspace_root,
-                    loaded_by_conversation: HashMap::new(),
-                },
+                authority: ai_runtime_context,
+                skills: skill_registry,
                 _state_subscription: ai_entity_subscription,
                 _background_subscription: ai_background_tasks_subscription,
             },
@@ -918,7 +891,6 @@ impl WorkspaceApp {
             plugin_overlay_members: HashMap::new(),
             plugin_overlay_generation: 0,
             plugin_toolbar_states: HashMap::new(),
-            ai_runtime_context,
             active_context_sidebar_panel: ContextSidebarPanel::Assistant,
             needs_active_pane_focus: false,
             active_sidebar_section: SidebarSection::from_settings_key(
@@ -954,7 +926,7 @@ impl WorkspaceApp {
             skip_future_ssh_close_confirmations: false,
             select_anchors: HashMap::new(),
             settings_select_anchors: HashMap::new(),
-            text_input_anchors: TextInputAnchorStore::default(),
+            text_input_anchors,
             selectable_text_values: HashMap::new(),
             selectable_text_layouts: HashMap::new(),
             selectable_text_fragments: HashMap::new(),
@@ -1018,8 +990,6 @@ impl WorkspaceApp {
             forwarding,
             _forwarding_subscription: forwarding_subscription,
             file_manager,
-            _file_manager_observation: file_manager_observation,
-            _file_manager_subscription: file_manager_subscription,
             sftp_tab_nodes: HashMap::new(),
             standalone_sftp_tabs: HashMap::new(),
             standalone_sftp_sessions: HashMap::new(),
@@ -1139,13 +1109,13 @@ impl WorkspaceApp {
             workspace.shutdown_terminal_trigger_runtime();
             // Shutdown ordering is security-sensitive: late broker callbacks
             // fail before user-decision waiters and owner projections disappear.
-            workspace.ai_runtime_context.update(cx, |runtime, _cx| {
+            workspace.ai.authority.update(cx, |runtime, _cx| {
                 runtime.stop_accepting_and_finish_tool_sessions();
             });
             workspace.ai.state.update(cx, |ai, _cx| {
                 ai.cancel_chat_stream();
             });
-            workspace.ai_runtime_context.update(cx, |runtime, _cx| {
+            workspace.ai.authority.update(cx, |runtime, _cx| {
                 runtime.revoke_registered_owner_projections();
             });
         })

@@ -831,12 +831,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !matches!(state, NodeReadiness::Ready) {
-            self.ai_runtime_context
+            self.ai.authority
                 .update(cx, |runtime, _cx| runtime.revoke_node_connection(node_id));
             return;
         }
         let Some(connection_id) = self.node_router.connection_id_for_node(node_id) else {
-            self.ai_runtime_context
+            self.ai.authority
                 .update(cx, |runtime, _cx| runtime.revoke_node_connection(node_id));
             return;
         };
@@ -852,7 +852,7 @@ impl WorkspaceApp {
             )
             .ok()
         });
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
+        self.ai.authority.update(cx, |runtime, _cx| {
             runtime.register_node_connection(node_id.clone(), connection_id, label, resource_ref);
         });
     }
@@ -868,12 +868,12 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if !ready {
-            self.ai_runtime_context
+            self.ai.authority
                 .update(cx, |runtime, _cx| runtime.revoke_sftp_session(node_id));
             return;
         }
         let Some(session_generation) = session_generation else {
-            self.ai_runtime_context
+            self.ai.authority
                 .update(cx, |runtime, _cx| runtime.revoke_sftp_session(node_id));
             return;
         };
@@ -889,7 +889,7 @@ impl WorkspaceApp {
             )
             .ok()
         });
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
+        self.ai.authority.update(cx, |runtime, _cx| {
             runtime.register_sftp_session(
                 node_id.clone(),
                 connection_id,
@@ -919,7 +919,7 @@ impl WorkspaceApp {
             );
         for affected_node_id in &affected {
             self.ensure_workspace_ssh_node_from_runtime(affected_node_id);
-            self.ai_runtime_context.update(cx, |runtime, _cx| {
+            self.ai.authority.update(cx, |runtime, _cx| {
                 runtime.revoke_node_connection(affected_node_id)
             });
             self.mark_ide_interrupted_for_node(affected_node_id, cx);

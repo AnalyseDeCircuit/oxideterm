@@ -102,3 +102,4 @@ pub use typography::{
     gpui_font_family_name, middle_truncate_text, monospace_datum, monospace_datum_color,
     tauri_cjk_ui_font_family, tauri_ui_font_family,
 };
+pub mod breadcrumb_scroll;

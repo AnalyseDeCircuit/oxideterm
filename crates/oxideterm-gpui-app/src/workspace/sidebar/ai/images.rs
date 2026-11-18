@@ -43,7 +43,8 @@ impl WorkspaceApp {
     }
 
     fn ai_image_text_only(&self, provider: &str, endpoint: &str, model: &str, cx: &App) -> bool {
-        self.ai.state
+        self.ai
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation()
@@ -56,7 +57,8 @@ impl WorkspaceApp {
 
     fn resume_ai_image_request_for_model(&mut self, cx: &mut Context<Self>) {
         let Some(id) = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -68,7 +70,8 @@ impl WorkspaceApp {
             return;
         };
         let pending = self
-            .ai.state
+            .ai
+            .state
             .update(cx, |ai, _| ai.pending_image_requests.remove(&id));
         if let Some(pending) = pending {
             self.start_ai_chat_stream_after_api_key_lookup(
@@ -95,7 +98,8 @@ impl WorkspaceApp {
             prompt: Some(self.i18n.t("ai.images.add").into()),
         });
         let conversation = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -107,7 +111,8 @@ impl WorkspaceApp {
                     ai.set_chat_image_import(None);
                 });
                 if this
-                    .ai.state
+                    .ai
+                    .state
                     .read(cx)
                     .conversation_state()
                     .active_conversation_id
@@ -121,7 +126,8 @@ impl WorkspaceApp {
                 cx.notify();
             });
         });
-        self.ai.state
+        self.ai
+            .state
             .update(cx, |ai, _| ai.set_chat_image_import(Some(task)));
     }
 
@@ -192,7 +198,8 @@ impl WorkspaceApp {
             return;
         }
         let conversation = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation_id
@@ -206,10 +213,12 @@ impl WorkspaceApp {
         let task = cx.spawn(async move |weak, cx| {
             let result = work.await;
             let _ = weak.update(cx, |this, cx| {
-                this.ai.state
+                this.ai
+                    .state
                     .update(cx, |ai, _| ai.set_chat_image_import(None));
                 if this
-                    .ai.state
+                    .ai
+                    .state
                     .read(cx)
                     .conversation_state()
                     .active_conversation_id
@@ -223,7 +232,8 @@ impl WorkspaceApp {
                 }
                 match result {
                     Ok(Ok(images)) => this
-                        .ai.state
+                        .ai
+                        .state
                         .update(cx, |ai, _| ai.chat_images_mut().extend(images)),
                     _ => this.push_ai_settings_toast(
                         this.i18n.t("ai.images.invalid"),
@@ -234,52 +244,58 @@ impl WorkspaceApp {
                 cx.notify();
             });
         });
-        self.ai.state
+        self.ai
+            .state
             .update(cx, |ai, _| ai.set_chat_image_import(Some(task)));
         cx.notify();
     }
 
-    pub(in crate::workspace) fn continue_ai_image_text_only(&mut self, id: &str, cx: &mut Context<Self>) {
-    let pending = self
-        .ai.state
-        .update(cx, |ai, _| ai.pending_image_requests.remove(id));
-    if let Some(mut pending) = pending {
-        pending.config.omit_history_images = true;
-        let key = ai_image_model_key(
-            pending.config.provider_id.as_deref().unwrap_or_default(),
-            &pending.config.base_url,
-            &pending.config.model,
-        );
-        self.ai.state.update(cx, |ai, _| {
-            if let Some(conversation) = ai
-                .conversation_state_mut()
-                .conversations
-                .iter_mut()
-                .find(|conversation| conversation.id == id)
-            {
-                let metadata = conversation
-                    .session_metadata
-                    .get_or_insert_with(|| serde_json::json!({}));
-                if let Some(fields) = metadata.as_object_mut() {
-                    let models = fields
-                        .entry("textOnlyImageModels")
-                        .or_insert_with(|| serde_json::json!({}));
-                    if let Some(models) = models.as_object_mut() {
-                        models.insert(key, serde_json::json!(true));
+    pub(in crate::workspace) fn continue_ai_image_text_only(
+        &mut self,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let pending = self
+            .ai
+            .state
+            .update(cx, |ai, _| ai.pending_image_requests.remove(id));
+        if let Some(mut pending) = pending {
+            pending.config.omit_history_images = true;
+            let key = ai_image_model_key(
+                pending.config.provider_id.as_deref().unwrap_or_default(),
+                &pending.config.base_url,
+                &pending.config.model,
+            );
+            self.ai.state.update(cx, |ai, _| {
+                if let Some(conversation) = ai
+                    .conversation_state_mut()
+                    .conversations
+                    .iter_mut()
+                    .find(|conversation| conversation.id == id)
+                {
+                    let metadata = conversation
+                        .session_metadata
+                        .get_or_insert_with(|| serde_json::json!({}));
+                    if let Some(fields) = metadata.as_object_mut() {
+                        let models = fields
+                            .entry("textOnlyImageModels")
+                            .or_insert_with(|| serde_json::json!({}));
+                        if let Some(models) = models.as_object_mut() {
+                            models.insert(key, serde_json::json!(true));
+                        }
                     }
                 }
-            }
-            ai.persist_chat_state();
-        });
-        self.start_ai_chat_stream_after_budget_preflight(
-            pending.conversation_id,
-            pending.config,
-            pending.request_content,
-            pending.task_system_prompt,
-            pending.rag_system_prompt,
-            true,
-            cx,
-        );
-    }
+                ai.persist_chat_state();
+            });
+            self.start_ai_chat_stream_after_budget_preflight(
+                pending.conversation_id,
+                pending.config,
+                pending.request_content,
+                pending.task_system_prompt,
+                pending.rag_system_prompt,
+                true,
+                cx,
+            );
+        }
     }
 }

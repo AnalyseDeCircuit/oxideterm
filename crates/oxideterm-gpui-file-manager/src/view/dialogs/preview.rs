@@ -1,3 +1,5 @@
+mod code;
+mod media;
 use super::*;
 use gpui::StyledText;
 
@@ -94,7 +96,7 @@ fn render_file_manager_archive_row(
         .into_any_element()
 }
 
-impl WorkspaceApp {
+impl FileManagerView {
     pub(super) fn render_file_manager_preview_dialog(
         &self,
         entry: LocalFileEntry,
@@ -308,7 +310,7 @@ impl WorkspaceApp {
                                     this.push_file_manager_toast(
                                         this.i18n.t("fileManager.error"),
                                         Some(error),
-                                        TerminalNoticeVariant::Error,
+                                        FileManagerNoticeKind::Error,
                                         cx,
                                     );
                                 }
@@ -513,463 +515,6 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn render_file_manager_preview_audio(
-        &self,
-        name: String,
-        _path: &str,
-        mime_type: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let snapshot = self.file_manager.read(cx).preview_audio.snapshot();
-        let duration = snapshot.duration.unwrap_or_default();
-        let position = snapshot.position.min(duration);
-        let progress = if duration.is_zero() {
-            0.0
-        } else {
-            (position.as_secs_f32() / duration.as_secs_f32()).clamp(0.0, 1.0)
-        };
-        let play_icon = if snapshot.state == AudioPreviewState::Playing {
-            LucideIcon::Pause
-        } else {
-            LucideIcon::Play
-        };
-        let playback_disabled = snapshot.state == AudioPreviewState::Error;
-        let can_seek = snapshot.duration.is_some() && snapshot.state != AudioPreviewState::Error;
-        div()
-            .w_full()
-            .min_h(px(520.0))
-            .flex()
-            .flex_col()
-            .items_center()
-            .justify_center()
-            .p_4()
-            .gap(px(16.0))
-            .child(Self::render_lucide_icon(
-                LucideIcon::FileAudio,
-                56.0,
-                rgb(FILE_MANAGER_PURPLE),
-            ))
-            .child(
-                div()
-                    .max_w(px(448.0))
-                    .truncate()
-                    .text_size(px(FILE_MANAGER_TEXT_SM))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
-                        "file-preview-audio-name",
-                        name.clone(),
-                        name,
-                        theme.text_muted,
-                        cx,
-                    )),
-            )
-            .child(
-                div()
-                    .w_full()
-                    .max_w(px(520.0))
-                    .flex()
-                    .items_center()
-                    .gap(px(10.0))
-                    .rounded(px(self.tokens.radii.md))
-                    .border_1()
-                    .border_color(rgb(theme.border))
-                    .bg(rgb(theme.bg_panel))
-                    .px_3()
-                    .py_2()
-                    .child(self.workspace_icon_action_button(
-                        play_icon,
-                        14.0,
-                        rgb(theme.text),
-                        IconButtonOptions {
-                            disabled: playback_disabled,
-                            background: Some(rgb(theme.bg)),
-                            border: Some(rgb(theme.border)),
-                            hover_background: Some(rgb(theme.bg_hover)),
-                            // Local preview audio shares the browser button boundary with
-                            // SFTP preview audio; decode errors must not leave a live click target.
-                            ..IconButtonOptions::opaque_toolbar(32.0, ButtonRadius::Md)
-                        },
-                        |this, _event, _window, cx| {
-                            this.toggle_file_manager_preview_audio(cx);
-                            cx.stop_propagation();
-                        },
-                        cx,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .h(px(6.0))
-                            .rounded(px(self.tokens.radii.sm))
-                            .overflow_hidden()
-                            .bg(rgb(theme.bg_sunken))
-                            .child(
-                                div()
-                                    .h_full()
-                                    .w(relative(progress))
-                                    .rounded(px(self.tokens.radii.sm))
-                                    .bg(rgb(theme.accent)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .min_w(px(92.0))
-                            .text_size(px(FILE_MANAGER_TEXT_XS))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "file-preview-audio-time",
-                                "position",
-                                format!(
-                                    "{} / {}",
-                                    format_file_manager_media_time(position),
-                                    format_file_manager_media_time(duration)
-                                ),
-                                theme.text_muted,
-                                cx,
-                            )),
-                    )
-                    .when(can_seek, |row| {
-                        row.child(self.render_file_manager_media_seek_button(
-                            "-15s",
-                            cx.listener(|this, _event, _window, cx| {
-                                let now =
-                                    this.file_manager.read(cx).preview_audio.snapshot().position;
-                                this.seek_file_manager_preview_audio(
-                                    now.saturating_sub(std::time::Duration::from_secs(15)),
-                                    cx,
-                                );
-                                cx.stop_propagation();
-                            }),
-                            cx,
-                        ))
-                        .child(
-                            self.render_file_manager_media_seek_button(
-                                "+15s",
-                                cx.listener(|this, _event, _window, cx| {
-                                    let snapshot =
-                                        this.file_manager.read(cx).preview_audio.snapshot();
-                                    let Some(duration) = snapshot.duration else {
-                                        return;
-                                    };
-                                    this.seek_file_manager_preview_audio(
-                                        (snapshot.position + std::time::Duration::from_secs(15))
-                                            .min(duration),
-                                        cx,
-                                    );
-                                    cx.stop_propagation();
-                                }),
-                                cx,
-                            ),
-                        )
-                    })
-                    .when_some(snapshot.error, |row, error| {
-                        row.child(
-                            div()
-                                .text_size(px(FILE_MANAGER_TEXT_XS))
-                                .text_color(rgb(FILE_MANAGER_RED))
-                                .child(self.render_display_text_with_role(
-                                    SelectableTextRole::PlainDocument,
-                                    "file-preview-audio-error",
-                                    error.clone(),
-                                    error,
-                                    FILE_MANAGER_RED,
-                                    cx,
-                                )),
-                        )
-                    }),
-            )
-            .child(
-                div()
-                    .text_size(px(FILE_MANAGER_TEXT_XS))
-                    .text_color(rgb(theme.text_muted))
-                    .child(self.render_display_text_with_role(
-                        SelectableTextRole::PlainDocument,
-                        "file-preview-audio-mime",
-                        mime_type,
-                        mime_type.to_string(),
-                        theme.text_muted,
-                        cx,
-                    )),
-            )
-            .into_any_element()
-    }
-
-    fn render_file_manager_preview_video(
-        &self,
-        name: String,
-        path: &str,
-        mime_type: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let video_surface = self.file_manager.read(cx).preview_video_surface.clone();
-        let snapshot = video_surface.snapshot();
-        let detail = snapshot
-            .error
-            .unwrap_or_else(|| "Native video playback is initializing.".to_string());
-        let fallback = self
-            .render_file_manager_native_asset_status_with_external(
-                name, path, mime_type, &detail, cx,
-            )
-            .into_any_element();
-        sftp_native_video_element(path.to_string(), video_surface, fallback).into_any_element()
-    }
-
-    fn render_file_manager_preview_font(
-        &self,
-        name: String,
-        path: &str,
-        mime_type: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let (font_error, font_family, font_size) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.preview_font_error.clone(),
-                file_manager.preview_font_family.clone(),
-                file_manager.preview_font_size,
-            )
-        };
-        if let Some(error) = font_error {
-            return self.render_file_manager_preview_status(
-                LucideIcon::FileText,
-                self.i18n.t("fileManager.fontLoadError"),
-                Some(error),
-                false,
-                cx,
-            );
-        }
-        let Some(font_family) = font_family else {
-            return self.render_file_manager_preview_status(
-                LucideIcon::LoaderCircle,
-                self.i18n.t("fileManager.loadingFont"),
-                Some(path.to_string()),
-                false,
-                cx,
-            );
-        };
-        let sample_font = SharedString::from(font_family.clone());
-        div()
-            .size_full()
-            .min_h(px(520.0))
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.0))
-                    .px(px(16.0))
-                    .py(px(12.0))
-                    .border_b_1()
-                    .border_color(rgb(theme.border))
-                    .bg(rgba((theme.bg_panel << 8) | FILE_MANAGER_PANEL_80_ALPHA))
-                    .child(self.render_file_manager_font_size_button(
-                        "-",
-                        false,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.file_manager.update(cx, |file_manager, cx| {
-                                file_manager.preview_font_size =
-                                    (file_manager.preview_font_size - 4.0).max(8.0);
-                                cx.notify();
-                            });
-                            cx.stop_propagation();
-                        }),
-                        cx,
-                    ))
-                    .child(
-                        div()
-                            .w(px(52.0))
-                            .text_center()
-                            .text_size(px(FILE_MANAGER_TEXT_XS))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_selectable_display_text(
-                                "file-manager-font-size",
-                                &name,
-                                format!("{font_size:.0}px"),
-                                theme.text_muted,
-                                cx,
-                            )),
-                    )
-                    .child(self.render_file_manager_font_size_button(
-                        "+",
-                        false,
-                        cx.listener(|this, _event, _window, cx| {
-                            this.file_manager.update(cx, |file_manager, cx| {
-                                file_manager.preview_font_size =
-                                    (file_manager.preview_font_size + 4.0).min(120.0);
-                                cx.notify();
-                            });
-                            cx.stop_propagation();
-                        }),
-                        cx,
-                    ))
-                    .children([16.0, 24.0, 32.0, 48.0, 72.0].into_iter().map(|size| {
-                        self.render_file_manager_font_size_button(
-                            format!("{size:.0}"),
-                            (font_size - size).abs() < f32::EPSILON,
-                            cx.listener(move |this, _event, _window, cx| {
-                                this.file_manager.update(cx, |file_manager, cx| {
-                                    file_manager.preview_font_size = size;
-                                    cx.notify();
-                                });
-                                cx.stop_propagation();
-                            }),
-                            cx,
-                        )
-                    }))
-                    .child(
-                        div()
-                            .ml_auto()
-                            .text_size(px(FILE_MANAGER_TEXT_XS))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_selectable_display_text(
-                                "file-manager-font-mime",
-                                &name,
-                                format!("{name} · {mime_type}"),
-                                theme.text_muted,
-                                cx,
-                            )),
-                    ),
-            )
-            .child(
-                div()
-                    .id("file-manager-metadata-scroll")
-                    .flex_1()
-                    .selectable_overflow_y_scrollbar(
-                        &self.file_manager.read(cx).preview_metadata_scroll,
-                    )
-                    .p(px(24.0))
-                    .flex()
-                    .flex_col()
-                    .gap(px(20.0))
-                    .child(
-                        div()
-                            .text_size(px(FILE_MANAGER_TEXT_XS))
-                            .text_color(rgb(theme.text_muted))
-                            .child(self.render_selectable_display_text(
-                                "file-manager-font-family",
-                                &name,
-                                font_family,
-                                theme.text_muted,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .font_family(sample_font.clone())
-                            .text_size(px(font_size))
-                            .line_height(px(font_size * 1.3))
-                            .text_color(rgb(theme.text))
-                            .child(self.render_selectable_display_text(
-                                "file-manager-font-sample-alpha",
-                                &name,
-                                "The quick brown fox jumps over the lazy dog.",
-                                theme.text,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .font_family(sample_font.clone())
-                            .text_size(px(font_size))
-                            .line_height(px(font_size * 1.3))
-                            .text_color(rgb(theme.text))
-                            .child(self.render_selectable_display_text(
-                                "file-manager-font-sample-symbols",
-                                &name,
-                                "0123456789 !@#$%^&*() []{} <>",
-                                theme.text,
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .font_family(sample_font)
-                            .text_size(px(font_size))
-                            .line_height(px(font_size * 1.3))
-                            .text_color(rgb(theme.text))
-                            .child(self.render_display_text_with_role(
-                                SelectableTextRole::PlainDocument,
-                                "file-preview-font-sample",
-                                "zh",
-                                "中文字体预览：家里的主机 OxideTerm 终端文件管理器",
-                                theme.text,
-                                cx,
-                            )),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    fn render_file_manager_media_seek_button(
-        &self,
-        label: &'static str,
-        on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        self.workspace_toolbar_action_button(
-            label.to_string(),
-            None,
-            ToolbarButtonOptions {
-                text_color: Some(rgb(theme.text_muted)),
-                hover_background: Some(rgb(theme.bg_hover)),
-                hover_text_color: Some(rgb(theme.text)),
-                // Tauri audio controls are real buttons, so their text never
-                // enters document selection; shared toolbar_button preserves
-                // that browser button boundary for native preview controls.
-                ..ToolbarButtonOptions::compact_text(
-                    ButtonVariant::Ghost,
-                    ButtonRadius::Sm,
-                    24.0,
-                    8.0,
-                    FILE_MANAGER_TEXT_XS,
-                )
-            },
-            on_click,
-        )
-        .into_any_element()
-    }
-
-    fn render_file_manager_font_size_button(
-        &self,
-        label: impl Into<String>,
-        active: bool,
-        on_click: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-        _cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let theme = self.tokens.ui;
-        let label = label.into();
-        let text_color = if active { theme.text } else { theme.text_muted };
-        self.workspace_toolbar_action_button(
-            label,
-            None,
-            ToolbarButtonOptions {
-                background: Some(if active {
-                    rgb(theme.bg_hover)
-                } else {
-                    rgb(theme.bg_panel)
-                }),
-                text_color: Some(rgb(text_color)),
-                hover_background: Some(rgb(theme.bg_hover)),
-                hover_text_color: Some(rgb(theme.text)),
-                ..ToolbarButtonOptions::compact_text_min_width(
-                    ButtonVariant::Secondary,
-                    ButtonRadius::Sm,
-                    28.0,
-                    28.0,
-                    8.0,
-                    FILE_MANAGER_TEXT_XS,
-                )
-            },
-            on_click,
-        )
-        .into_any_element()
-    }
-
     fn render_file_manager_native_asset_status_with_external(
         &self,
         title: String,
@@ -1031,7 +576,7 @@ impl WorkspaceApp {
                 div()
                     .max_w(px(680.0))
                     .truncate()
-                    .font_family(settings_mono_font_family(self.settings_store.settings()))
+                    .font_family(self.mono_font_family.clone())
                     .child(self.render_display_text_with_role(
                         SelectableTextRole::PlainDocument,
                         "file-preview-native-status",
@@ -1070,7 +615,7 @@ impl WorkspaceApp {
                             this.push_file_manager_toast(
                                 this.i18n.t("fileManager.error"),
                                 Some(error),
-                                TerminalNoticeVariant::Error,
+                                FileManagerNoticeKind::Error,
                                 cx,
                             );
                         }
@@ -1080,327 +625,6 @@ impl WorkspaceApp {
                 )
                 .mt_2(),
             )
-    }
-
-    fn render_file_manager_preview_markdown(
-        &self,
-        content: &str,
-        source_path: &str,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let opts = self
-            .localized_markdown_options()
-            .with_source_path(source_path);
-        let code_actions = self.markdown_mermaid_actions(cx);
-        let (document, markdown_scroll) = self.file_manager.update(cx, |state, _| {
-            let owner = state
-                .preview
-                .as_ref()
-                .expect("Markdown preview payload")
-                .clone();
-            let document = state.preview_markdown_cache.document(
-                &owner,
-                content,
-                opts.enable_smart_punctuation,
-                &mut state.preview_markdown_scroll,
-            );
-            (document, state.preview_markdown_scroll.clone())
-        });
-        div()
-            .size_full()
-            .p(px(16.0))
-            .child(
-                oxideterm_gpui_markdown::render::render_document_virtual_with_code_actions(
-                    "file-manager-preview-markdown-virtual",
-                    &document,
-                    &self.tokens,
-                    &opts,
-                    &markdown_scroll,
-                    Some(&code_actions),
-                ),
-            )
-            .into_any_element()
-    }
-
-    fn render_file_manager_preview_code(
-        &self,
-        content: &str,
-        language: Option<&str>,
-        filename: &str,
-        has_background: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        if oxideterm_gpui_editor::detect_language(Some(std::path::Path::new(filename)), content, cx)
-            .is_some()
-        {
-            let existing = self.file_manager.read(cx).preview_editor.clone();
-            let editor = existing.unwrap_or_else(|| {
-                let tokens = self.tokens;
-                let settings = self.ide_runtime_settings();
-                let labels = EditorContextMenuLabels {
-                    copy: self.i18n.t("menu.copy"),
-                    cut: self.i18n.t("fileManager.cut"),
-                    paste: self.i18n.t("menu.paste"),
-                    select_all: self.i18n.t("fileManager.selectAll"),
-                };
-                let editor = cx.new(|cx| {
-                    let mut editor = TextEditorView::new(content, &tokens, cx);
-                    editor.set_read_only(true);
-                    editor.set_context_menu_labels(labels);
-                    editor.apply_ide_runtime_settings(
-                        &tokens,
-                        settings.editor_font_family.clone(),
-                        settings.editor_font_weight,
-                        settings.editor_font_fallback.clone(),
-                        settings.editor_font_size,
-                        settings.editor_line_height,
-                        settings.word_wrap,
-                        settings.background_active,
-                        cx,
-                    );
-                    editor.set_language_from_path(filename, None, cx);
-                    editor
-                });
-                self.file_manager.update(cx, |state, _| {
-                    // Retain the editor so grammar updates preserve selection and scroll position.
-                    state.preview_editor = Some(editor.clone());
-                });
-                editor
-            });
-            return div().size_full().child(editor).into_any_element();
-        }
-        if content.is_empty() {
-            return self.render_file_manager_preview_text_status(
-                &self.i18n.t("fileManager.emptyFile"),
-                cx,
-            );
-        }
-        let theme = self.tokens.ui;
-        let opts = MarkdownOptions::from_theme(&self.tokens);
-        let language = language
-            .filter(|language| !language.trim().is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| file_manager_preview_language_for_name(filename))
-            .to_ascii_lowercase();
-        let lines = Arc::new(file_manager_preview_visual_lines(content));
-        let row_count = lines.len();
-        let list_lines = lines;
-        let font_family = settings_mono_font_family(self.settings_store.settings());
-        let font_size = self.settings_store.settings().terminal.font_size as f32;
-        let row_height = font_size * 1.5;
-        let scroll = self.file_manager.read(cx).preview_code_scroll.clone();
-        div()
-            .size_full()
-            .bg(file_manager_bg(theme.bg_sunken, has_background))
-            .child(
-                div().size_full().p(px(16.0)).child(
-                    tauri_virtual_uniform_list(
-                        "file-manager-preview-code-virtual",
-                        row_count,
-                        scroll,
-                        TauriVirtualListSpec::new(
-                            px(row_height),
-                            FILE_MANAGER_PREVIEW_CODE_OVERSCAN,
-                        ),
-                        move |range, _window, _cx| {
-                            let opts = opts.clone();
-                            let language = language.clone();
-                            let font_family = font_family.clone();
-                            range
-                                .map(|index| {
-                                    let line = &list_lines[index];
-                                    let content: AnyElement = if language != "text"
-                                        && language != "plain"
-                                        && let Some(runs) = highlight::highlight_code(
-                                            &language,
-                                            &line.content,
-                                            &opts,
-                                        ) {
-                                        let (text, text_runs) =
-                                            highlight::highlighted_runs_to_text_runs(&runs);
-                                        StyledText::new(text)
-                                            .with_runs(text_runs)
-                                            .into_any_element()
-                                    } else {
-                                        SharedString::from(line.content.clone()).into_any_element()
-                                    };
-                                    div()
-                                        .h(px(row_height))
-                                        .w_full()
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .font_family(font_family.clone())
-                                        .text_size(px(font_size))
-                                        .line_height(px(row_height))
-                                        .text_color(rgb(theme.text))
-                                        .child(
-                                            div()
-                                                .w(px(48.0))
-                                                .flex_none()
-                                                .pr(px(12.0))
-                                                .text_align(gpui::TextAlign::Right)
-                                                .text_color(rgba(
-                                                    (theme.text_muted << 8)
-                                                        | FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA,
-                                                ))
-                                                .child(
-                                                    line.line_number
-                                                        .map(|line_number| line_number.to_string())
-                                                        .unwrap_or_default(),
-                                                ),
-                                        )
-                                        .child(div().flex_1().min_w(px(0.0)).child(content))
-                                        .into_any_element()
-                                })
-                                .collect::<Vec<_>>()
-                        },
-                    )
-                    .on_scroll(|_, _, cx| cx.stop_propagation()),
-                ),
-            )
-            .into_any_element()
-    }
-
-    fn render_file_manager_preview_stream_code(
-        &self,
-        language: Option<&str>,
-        filename: &str,
-        has_background: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let (stream_language, lines, error, eof, scroll) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.preview_stream.language.clone(),
-                Arc::new(file_manager.preview_stream.lines.clone()),
-                file_manager.preview_stream.error.clone(),
-                file_manager.preview_stream.eof,
-                file_manager.preview_code_scroll.clone(),
-            )
-        };
-        if lines.is_empty() && eof && error.is_none() {
-            return self.render_file_manager_preview_text_status(
-                &self.i18n.t("fileManager.emptyFile"),
-                cx,
-            );
-        }
-
-        let theme = self.tokens.ui;
-        let opts = MarkdownOptions::from_theme(&self.tokens);
-        let language = stream_language
-            .as_deref()
-            .or(language)
-            .filter(|language| !language.trim().is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| file_manager_preview_language_for_name(filename))
-            .to_ascii_lowercase();
-        let row_count = lines.len() + usize::from(!eof || error.is_some());
-        let notice = oxideterm_gpui_editor::detect_language(
-            Some(std::path::Path::new(filename)),
-            lines.first().map(String::as_str).unwrap_or_default(),
-            cx,
-        )
-        .and_then(|language| {
-            oxideterm_gpui_editor::render_language_plugin_notice(language, &self.tokens, cx)
-        });
-        let font_family = settings_mono_font_family(self.settings_store.settings());
-        let font_size = self.settings_store.settings().terminal.font_size as f32;
-        let row_height = font_size * 1.5;
-        let body = div()
-            .size_full()
-            .bg(file_manager_bg(theme.bg_sunken, has_background))
-            .child(
-                div().size_full().p(px(16.0)).overflow_x_scrollbar().child(
-                    tauri_virtual_uniform_list(
-                        "file-manager-preview-stream-code-virtual",
-                        row_count.max(1),
-                        scroll,
-                        TauriVirtualListSpec::new(
-                            px(row_height),
-                            FILE_MANAGER_PREVIEW_CODE_OVERSCAN,
-                        ),
-                        move |range, _window, _cx| {
-                            let opts = opts.clone();
-                            let language = language.clone();
-                            let font_family = font_family.clone();
-                            let lines = lines.clone();
-                            let error = error.clone();
-                            range
-                                .map(|index| {
-                                    if index >= lines.len() {
-                                        let message = error
-                                            .clone()
-                                            .unwrap_or_else(|| "Loading...".to_string());
-                                        return div()
-                                            .h(px(row_height))
-                                            .w_full()
-                                            .flex()
-                                            .items_center()
-                                            .font_family(font_family.clone())
-                                            .text_size(px(font_size))
-                                            .line_height(px(row_height))
-                                            .text_color(rgb(theme.text_muted))
-                                            .child(message)
-                                            .into_any_element();
-                                    }
-
-                                    let line = &lines[index];
-                                    let content: AnyElement = if language != "text"
-                                        && language != "plain"
-                                        && let Some(runs) =
-                                            highlight::highlight_code(&language, line, &opts)
-                                    {
-                                        let (text, text_runs) =
-                                            highlight::highlighted_runs_to_text_runs(&runs);
-                                        StyledText::new(text)
-                                            .with_runs(text_runs)
-                                            .into_any_element()
-                                    } else {
-                                        SharedString::from(line.clone()).into_any_element()
-                                    };
-                                    div()
-                                        .h(px(row_height))
-                                        .w_full()
-                                        .flex()
-                                        .flex_row()
-                                        .items_center()
-                                        .font_family(font_family.clone())
-                                        .text_size(px(font_size))
-                                        .line_height(px(row_height))
-                                        .text_color(rgb(theme.text))
-                                        .child(
-                                            div()
-                                                .w(px(48.0))
-                                                .flex_none()
-                                                .pr(px(12.0))
-                                                .text_align(gpui::TextAlign::Right)
-                                                .text_color(rgba(
-                                                    (theme.text_muted << 8)
-                                                        | FILE_MANAGER_PREVIEW_CODE_GUTTER_ALPHA,
-                                                ))
-                                                .child((index + 1).to_string()),
-                                        )
-                                        .child(div().min_w(px(0.0)).child(content))
-                                        .into_any_element()
-                                })
-                                .collect::<Vec<_>>()
-                        },
-                    )
-                    .on_scroll(cx.listener(|this, _event, _window, cx| {
-                        this.load_more_file_manager_stream_preview(cx);
-                        cx.stop_propagation();
-                    })),
-                ),
-            )
-            .into_any_element();
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .children(notice)
-            .child(div().flex_1().min_h_0().child(body))
-            .into_any_element()
     }
 
     fn render_file_manager_archive_tree(
@@ -1696,8 +920,7 @@ impl WorkspaceApp {
                 cx,
             ));
         if mono_value {
-            value_el =
-                value_el.font_family(settings_mono_font_family(self.settings_store.settings()));
+            value_el = value_el.font_family(self.mono_font_family.clone());
         }
         div()
             .flex()
@@ -2008,41 +1231,11 @@ mod tests {
 
     #[gpui::test]
     fn local_code_preview_shows_language_notice_and_keeps_files_read_only(cx: &mut TestAppContext) {
-        let executable = std::env::current_exe().unwrap();
-        let fixture_key = "OXIDETERM_LOCAL_PREVIEW_TEST_DIR";
-        let Some(fixture_dir) = std::env::var_os(fixture_key) else {
-            // Isolate real workspace storage discovery from the user's settings and credentials.
-            let directory = tempfile::tempdir_in(executable.parent().unwrap()).unwrap();
-            let child = directory.path().join(executable.file_name().unwrap());
-            std::fs::hard_link(&executable, &child).unwrap();
-            std::fs::write(directory.path().join("portable"), []).unwrap();
-            let output = std::process::Command::new(child)
-                .arg(cx.test_function_name().unwrap())
-                .arg("--nocapture")
-                .env(fixture_key, directory.path())
-                .env_remove("APPIMAGE")
-                .current_dir(directory.path())
-                .output()
-                .unwrap();
-            assert!(
-                output.status.success(),
-                "local preview regression failed:\n{}\n{}",
-                String::from_utf8_lossy(&output.stdout),
-                String::from_utf8_lossy(&output.stderr)
-            );
-            return;
-        };
-        let fixture_dir = std::path::PathBuf::from(fixture_dir);
-        let settings_path = default_settings_path();
-        assert!(settings_path.starts_with(&fixture_dir));
-        let mut settings = SettingsStore::load_from_path(settings_path).unwrap();
-        settings.settings_mut().ssh_config.auto_load_hosts = false;
-        settings.save().unwrap();
-        let (shell, cx) = cx.add_window_view(|window, cx| {
-            let workspace = cx.new(|cx| WorkspaceApp::new(window, cx, None, None).unwrap());
-            WorkspaceWindowShell::new(workspace, window, cx)
+        let directory = tempfile::tempdir().unwrap();
+        let fixture_dir = directory.path();
+        let (view, cx) = cx.add_window_view(|_window, cx| {
+            super::super::test_views(&fixture_dir.join("settings.json"), |_, _| {}, cx).dialog
         });
-        let workspace = shell.read_with(cx, |shell, _| shell.session_entity());
         let source = "fn main() {}\n";
         let path = fixture_dir.join("missing.rs");
         std::fs::write(&path, source).unwrap();
@@ -2055,15 +1248,15 @@ mod tests {
             readonly: false,
             symlink_target: None,
         };
-        workspace.update(cx, |workspace, cx| {
-            workspace.open_file_manager_preview(entry.clone(), cx)
+        view.update(cx, |view, cx| {
+            view.open_file_manager_preview(entry.clone(), cx)
         });
         cx.draw(
             gpui::Point::default(),
             gpui::size(px(800.0), px(600.0)),
             |window, cx| {
-                workspace.update(cx, |workspace, cx| {
-                    workspace.render_file_manager_preview_content(entry.clone(), false, window, cx)
+                view.update(cx, |view, cx| {
+                    view.render_file_manager_preview_content(entry.clone(), false, window, cx)
                 })
             },
         );
@@ -2071,13 +1264,8 @@ mod tests {
             .debug_bounds("editor-language-notice")
             .expect("missing Rust support must be visible in local preview");
         assert!(bounds.size.width > px(0.0) && bounds.size.height > px(0.0));
-        let editor = workspace.read_with(cx, |workspace, cx| {
-            workspace
-                .file_manager
-                .read(cx)
-                .preview_editor
-                .clone()
-                .unwrap()
+        let editor = view.read_with(cx, |view, cx| {
+            view.file_manager.read(cx).preview_editor.clone().unwrap()
         });
         editor.update(cx, |editor, cx| editor.insert_text("unexpected edit", cx));
         assert_eq!(
@@ -2086,7 +1274,7 @@ mod tests {
         );
         let weak = editor.downgrade();
         drop(editor);
-        workspace.update(cx, |workspace, cx| workspace.close_file_manager_dialog(cx));
+        view.update(cx, |view, cx| view.close_file_manager_dialog(cx));
         cx.update(|_, _| {});
         assert!(
             weak.upgrade().is_none(),

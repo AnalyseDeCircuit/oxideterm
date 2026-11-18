@@ -163,3 +163,58 @@ pub fn markdown_virtual_with_code_actions(
         Some(code_actions),
     )
 }
+
+// Preview payloads are immutable. A weak owner identifies replacement without copying source text.
+pub struct MarkdownPreviewCache<T> {
+    owner: Option<std::sync::Weak<T>>,
+    smart_punctuation: bool,
+    document: Option<MarkdownDocument>,
+}
+
+impl<T> Default for MarkdownPreviewCache<T> {
+    fn default() -> Self {
+        Self {
+            owner: None,
+            smart_punctuation: false,
+            document: None,
+        }
+    }
+}
+
+impl<T> MarkdownPreviewCache<T> {
+    pub fn document(
+        &mut self,
+        owner: &std::sync::Arc<T>,
+        source: &str,
+        smart_punctuation: bool,
+        scroll: &mut MarkdownVirtualListScrollHandle,
+    ) -> MarkdownDocument {
+        let owner = std::sync::Arc::downgrade(owner);
+        if !self
+            .owner
+            .as_ref()
+            .is_some_and(|previous| previous.ptr_eq(&owner))
+            || self.smart_punctuation != smart_punctuation
+        {
+            self.owner = Some(owner);
+            self.smart_punctuation = smart_punctuation;
+            self.document = None;
+            scroll.invalidate_document_cache();
+        }
+        self.document
+            .get_or_insert_with(|| {
+                parser::parse_with_smart_punctuation(
+                    source,
+                    smart_punctuation,
+                )
+            })
+            .clone()
+    }
+
+    pub fn release(&mut self, scroll: &mut MarkdownVirtualListScrollHandle) {
+        self.document = None;
+        scroll.release_document_cache();
+    }
+}
+
+

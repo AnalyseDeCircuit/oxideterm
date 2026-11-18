@@ -237,7 +237,7 @@ use self::connection_monitor::{
     ConnectionRuntimeSection, HostToolsEntity, HostToolsEvent, HostToolsMessages,
     HostToolsWindowIntent, HostToolsWindowRequest,
 };
-use self::file_manager::{FileManagerState, FileManagerWorkspaceEvent};
+use oxideterm_gpui_file_manager::FileManagerViews;
 use self::graphics::GraphicsWorkspaceEntity;
 use self::ime::{
     TextInputAnchorStore, WorkspaceImeDragSelection, WorkspaceImeElement, WorkspaceImeSelection,
@@ -280,7 +280,7 @@ use crate::{
 };
 use crate::{assets::LucideIcon, bundled_fonts};
 use oxideterm_gpui_markdown::{
-    MarkdownBlockLayout, MarkdownCodeBlockActions, MarkdownDocument, MarkdownMermaidZoomHandler,
+    MarkdownCodeBlockActions, MarkdownDocument, MarkdownMermaidZoomHandler,
     MarkdownOptions, MarkdownVirtualListScrollHandle,
 };
 
@@ -297,7 +297,7 @@ use oxideterm_gpui_ui::select::{OverlayAnchor, SelectAnchorId, select_anchor_pro
 use oxideterm_gpui_ui::text_input::TextInputAnchor;
 use oxideterm_gpui_ui::typography::tauri_ui_font_family as settings_ui_font_family;
 pub(super) use selectable_text::{
-    SelectableTextRole, SelectableTextScrollExt, selectable_vertical_scrollbar_layer,
+    SelectableTextRole, SelectableTextScrollExt,
 };
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
@@ -319,7 +319,7 @@ const ACTIVE_SESSION_SIDEBAR_LIST_INITIAL_ITEM_COUNT: usize = 0;
 const ACTIVE_SESSION_SIDEBAR_LIST_ESTIMATED_HEIGHT: f32 = 40.0;
 const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
 
-use oxideterm_gpui_ai::state::{AiChatFooterAction, AiCompactionNoticePhase};
+use oxideterm_gpui_ai::state::AiChatFooterAction;
 
 // AI composer footer uses the same explicit action list as dialog footers so
 // keyboard focus order stays centralized even though it is not a modal trap.
@@ -328,60 +328,7 @@ const AI_CHAT_FOOTER_ACTIONS: [AiChatFooterAction; 1] = [AiChatFooterAction::Sub
 const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
 
-// Preview payloads are immutable. A weak owner identifies replacement without copying source text.
-struct MarkdownPreviewCache<T> {
-    owner: Option<std::sync::Weak<T>>,
-    smart_punctuation: bool,
-    document: Option<MarkdownDocument>,
-}
-
-impl<T> Default for MarkdownPreviewCache<T> {
-    fn default() -> Self {
-        Self {
-            owner: None,
-            smart_punctuation: false,
-            document: None,
-        }
-    }
-}
-
-impl<T> MarkdownPreviewCache<T> {
-    fn document(
-        &mut self,
-        owner: &Arc<T>,
-        source: &str,
-        smart_punctuation: bool,
-        scroll: &mut MarkdownVirtualListScrollHandle,
-    ) -> MarkdownDocument {
-        let owner = Arc::downgrade(owner);
-        if !self
-            .owner
-            .as_ref()
-            .is_some_and(|previous| previous.ptr_eq(&owner))
-            || self.smart_punctuation != smart_punctuation
-        {
-            self.owner = Some(owner);
-            self.smart_punctuation = smart_punctuation;
-            self.document = None;
-            scroll.invalidate_document_cache();
-        }
-        self.document
-            .get_or_insert_with(|| {
-                oxideterm_gpui_markdown::parser::parse_with_smart_punctuation(
-                    source,
-                    smart_punctuation,
-                )
-            })
-            .clone()
-    }
-
-    fn release(&mut self, scroll: &mut MarkdownVirtualListScrollHandle) {
-        self.document = None;
-        scroll.release_document_cache();
-    }
-}
-
-use oxideterm_gpui_ai::state::ai_chat_virtual_list_spec;
+use oxideterm_gpui_markdown::MarkdownPreviewCache;
 
 // Tauri NotificationsPanel uses variable-height grouped rows. Keep the native
 // estimate/overscan as a virtual-list spec instead of a raw overdraw number so
@@ -657,7 +604,6 @@ pub(crate) struct WorkspaceApp {
     // action's declared default state; the pane's toolbar specs are only a
     // render mirror pushed from here. Entries exist for open panes only.
     plugin_toolbar_states: HashMap<(String, String, PaneId), String>,
-    ai_runtime_context: Entity<ai_runtime_context::AiRuntimeContextEntity>,
     active_context_sidebar_panel: ContextSidebarPanel,
     needs_active_pane_focus: bool,
     active_sidebar_section: SidebarSection,
@@ -746,9 +692,7 @@ pub(crate) struct WorkspaceApp {
     next_ssh_node_id: u64,
     forwarding: Entity<forwards::ForwardingWorkspaceEntity>,
     _forwarding_subscription: Subscription,
-    file_manager: Entity<FileManagerState>,
-    _file_manager_observation: Subscription,
-    _file_manager_subscription: Subscription,
+    file_manager: FileManagerViews,
     sftp_tab_nodes: HashMap<TabId, NodeId>,
     standalone_sftp_tabs: HashMap<TabId, sftp::StandaloneSftpTabBinding>,
     standalone_sftp_sessions: HashMap<String, sftp::StandaloneSftpRuntime>,

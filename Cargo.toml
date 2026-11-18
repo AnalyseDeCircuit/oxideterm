@@ -22,6 +22,7 @@ members = [
   "crates/oxideterm-gpui-forwards",
   "crates/oxideterm-gpui-host-tools",
   "crates/oxideterm-gpui-onboarding",
+  "crates/oxideterm-gpui-file-manager",
   "crates/oxideterm-gpui-remote-desktop",
   "crates/oxideterm-gpui-platform",
   "crates/oxideterm-gpui-settings-view",

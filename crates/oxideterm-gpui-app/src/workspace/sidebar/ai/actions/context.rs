@@ -596,31 +596,7 @@ fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, local_
     }
 }
 
-pub(in crate::workspace) fn ai_tab_kind_label(kind: &TabKind) -> &'static str {
-    match kind {
-        TabKind::Workspace => "workspace",
-        TabKind::LocalTerminal => "local_terminal",
-        TabKind::SshTerminal => "terminal",
-        TabKind::MoshTerminal => "mosh_terminal",
-        TabKind::Sftp => "sftp",
-        TabKind::Ide => "ide",
-        TabKind::Forwards => "forwards",
-        TabKind::Settings => "settings",
-        TabKind::FileManager => "file_manager",
-        TabKind::SessionManager => "session_manager",
-        TabKind::Runtime => "runtime",
-        TabKind::ConnectionPool => "runtime",
-        TabKind::Topology => "topology",
-        TabKind::Graphics => "graphics",
-        TabKind::NotificationCenter => "notifications",
-        TabKind::PluginManager => "plugin_manager",
-        TabKind::Plugin { .. } => "plugin",
-        TabKind::CloudSync => "cloud_sync",
-        TabKind::Knowledge => "knowledge",
-        TabKind::RemoteDesktop => "remote_desktop",
-        TabKind::Onboarding => "onboarding",
-    }
-}
+pub(in crate::workspace) use oxideterm_ai::tool_resources::ai_tab_kind_label;
 
 pub(in crate::workspace) fn ai_ledger_source_from_terminal_source(
     source: TerminalCommandMarkDetectionSource,

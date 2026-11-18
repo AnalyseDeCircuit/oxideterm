@@ -225,7 +225,7 @@ impl WorkspaceApp {
         let broadcaster = TerminalInputBroadcastRoute {
             source_pane_id: pane_id,
             session_id,
-            ai_runtime: self.ai_runtime_context.downgrade(),
+            ai_runtime: self.ai.authority.downgrade(),
             agent_resources: self.ai.state.read(cx).agents.services.resources.clone(),
             tab_host: self.tab_host.downgrade(),
             terminal: self.terminal.downgrade(),
@@ -243,7 +243,7 @@ impl WorkspaceApp {
         });
         // The live terminal session is the capability owner. A later tab move
         // reuses this registration instead of minting another owner identity.
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
+        self.ai.authority.update(cx, |runtime, _cx| {
             runtime.register_terminal_session(session_id, terminal_label);
         });
         // Publish the GATT command surface for plugin host calls. This shared

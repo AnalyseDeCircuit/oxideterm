@@ -861,7 +861,7 @@ impl WorkspaceApp {
                     sender,
                 } => {
                     self.ai.state.update(cx, |ai, _| batch.flush_text(ai));
-                    let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
+                    let session_is_active = self.ai.authority.read(cx).is_active_tool_session(
                         delivery.generation,
                         &tool_session_id,
                     );
@@ -904,7 +904,7 @@ impl WorkspaceApp {
                     tool_session_id,
                     sender,
                 } => {
-                    let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
+                    let session_is_active = self.ai.authority.read(cx).is_active_tool_session(
                         delivery.generation,
                         &tool_session_id,
                     );
@@ -930,7 +930,7 @@ impl WorkspaceApp {
                         let _ = sender.send(rejected_ai_tool_result(tool_call_id, name, "agent_direction_changed", "Task direction changed before dispatch."));
                         continue;
                     }
-                    let session_is_active = self.ai_runtime_context.read(cx).is_active_tool_session(
+                    let session_is_active = self.ai.authority.read(cx).is_active_tool_session(
                         delivery.generation,
                         &tool_session_id,
                     );

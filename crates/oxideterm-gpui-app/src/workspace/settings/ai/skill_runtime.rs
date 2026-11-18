@@ -1,7 +1,7 @@
 use super::*;
 
 impl WorkspaceApp {
-    pub(in crate::workspace) fn refresh_ai_skill_registry(&mut self) {
+    pub(in crate::workspace) fn refresh_ai_skill_registry(&mut self, cx: &mut App) {
         let plugin_registry =
             plugin_host::NativePluginRegistry::discover(self.settings_store.path());
         let plugin_roots = plugin_registry
@@ -27,16 +27,7 @@ impl WorkspaceApp {
             .iter()
             .map(std::path::PathBuf::from)
             .collect();
-        let registry =
-            oxideterm_skills::SkillRegistry::discover(&oxideterm_skills::SkillDiscoveryOptions {
-                workspace_root: self.ai.skills.workspace_root.clone(),
-                settings_path: Some(self.settings_store.path().to_path_buf()),
-                plugin_roots,
-                disabled_paths,
-            });
-        *self.ai.skills.registry.write() = registry;
-        // A disabled or replaced skill must be loaded again before resources
-        // can be read in any existing conversation.
-        self.ai.skills.loaded_by_conversation.clear();
+        self.ai.skills.refresh(self.settings_store.path().to_path_buf(), plugin_roots, disabled_paths);
+        self.ai.state.update(cx, |state, _| state.clear_loaded_skill_versions());
     }
 }

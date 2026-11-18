@@ -530,3 +530,28 @@ mod tests {
         );
     }
 }
+
+pub fn local_inspection_preview(
+    path: &str,
+    detect: impl FnOnce(&str, &[u8]) -> Option<&'static str>,
+) -> Option<LocalPreview> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut header = zeroize::Zeroizing::new([0; 64]);
+    let count = file.read(&mut header[..]).ok()?;
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let mime = detect(&extension, &header[..count])?;
+    let size = file.metadata().ok()?.len();
+    Some(if size > MAX_PREVIEW_SIZE {
+        LocalPreview::TooLarge { size }
+    } else {
+        LocalPreview::Document {
+            path: path.into(),
+            mime_type: mime.into(),
+        }
+    })
+}

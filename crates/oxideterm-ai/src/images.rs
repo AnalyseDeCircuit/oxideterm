@@ -565,4 +565,3 @@ mod image_input_tests {
         assert!(prepare_image_attachment(String::new(), b"not an image".to_vec()).is_err());
     }
 }
-

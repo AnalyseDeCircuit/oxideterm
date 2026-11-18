@@ -48,6 +48,7 @@ pub use model::*;
 pub use stream_apply::*;
 mod stream_apply;
 mod stream_records;
+pub mod skills;
 
 pub mod agents;
 pub mod history;
@@ -289,6 +290,7 @@ const AI_CHAT_STREAM_DELIVERY_BUDGET: oxideterm_workspace::delivery::DeliveryBud
 /// Owns AI worker delivery slices as they move out of the workspace root.
 pub struct AiWorkspaceEntity {
     task_runtime: Arc<tokio::runtime::Runtime>,
+    loaded_skill_versions: HashMap<String, HashMap<String, String>>,
     _rag_cache_cleanup: Task<()>,
     key_store: oxideterm_ai::AiProviderKeyStore,
     model_ui: AiModelWorkspaceState,
@@ -1103,6 +1105,7 @@ impl AiWorkspaceEntity {
         });
         let mut entity = Self {
             task_runtime,
+            loaded_skill_versions: HashMap::new(),
             // Entity ownership cancels cleanup; the weak handle cannot keep a closed workspace alive.
             _rag_cache_cleanup: cx.spawn(async move |weak, cx| {
                 loop {

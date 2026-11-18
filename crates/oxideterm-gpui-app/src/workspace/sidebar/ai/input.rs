@@ -1,4 +1,6 @@
-use oxideterm_gpui_ai::sidebar::transcript::{ai_chat_hash_json_value, ai_chat_message_base_signature};
+use oxideterm_gpui_ai::sidebar::transcript::{
+    ai_chat_hash_json_value, ai_chat_message_base_signature,
+};
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ai_tool_indicator_info(&self, cx: &App) -> (bool, usize) {
@@ -105,12 +107,14 @@ impl WorkspaceApp {
             )
         };
         let conversation = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .conversation_state()
             .active_conversation();
         if let Some(prepared) = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .chat_ui()
             .prepared_prompt_usage
@@ -153,7 +157,8 @@ impl WorkspaceApp {
         };
         {
             let cache = self
-                .ai.state
+                .ai
+                .state
                 .read(cx)
                 .chat_ui()
                 .context_token_cache
@@ -242,7 +247,8 @@ impl WorkspaceApp {
             }
         };
         let mut cache = self
-            .ai.state
+            .ai
+            .state
             .read(cx)
             .chat_ui()
             .context_token_cache
@@ -279,8 +285,8 @@ impl WorkspaceApp {
             // Skill content hashes make catalog edits invalidate the prompt
             // without rebuilding the full catalog string on every repaint.
             for skill in self
-                .ai.skills.registry
-                .read()
+                .ai
+                .skills.read()
                 .records()
                 .filter(|skill| skill.enabled)
             {
@@ -328,7 +334,8 @@ impl WorkspaceApp {
             model: config.model.clone(),
             breakdown,
         };
-        self.ai.state
+        self.ai
+            .state
             .update(cx, |ai, _cx| ai.set_prepared_prompt_usage(usage));
     }
 
@@ -337,14 +344,21 @@ impl WorkspaceApp {
         cx: &App,
     ) -> Vec<AiAutocompleteCandidate> {
         let settings = &self.settings_store.settings().ai;
-        self.ai.state.read(cx).chat_autocomplete_items(settings.active_backend, || {
-            if settings.skills.enabled {
-                self.ai.skills.registry.read().catalog()
-                    .into_iter().map(|skill| (skill.id, skill.description)).collect()
-            } else {
-                Vec::new()
-            }
-        })
+        self.ai
+            .state
+            .read(cx)
+            .chat_autocomplete_items(settings.active_backend, || {
+                if settings.skills.enabled {
+                    self.ai
+                        .skills.read()
+                        .catalog()
+                        .into_iter()
+                        .map(|skill| (skill.id, skill.description))
+                        .collect()
+                } else {
+                    Vec::new()
+                }
+            })
     }
 
     pub(in crate::workspace) fn apply_ai_chat_autocomplete_candidate(
@@ -411,11 +425,11 @@ mod context_usage_tests {
     }
 }
 
-pub(in crate::workspace) use oxideterm_gpui_ai::sidebar::editor::{
-    AiInputVisualLine, ai_input_line_index_for_offset, ai_input_visual_lines,
-};
 use oxideterm_gpui_ai::sidebar::editor::{
     AI_INPUT_SOFT_WRAP_CHROME_PX, ai_input_measured_visual_lines, ai_input_soft_wrap_columns,
+};
+pub(in crate::workspace) use oxideterm_gpui_ai::sidebar::editor::{
+    AiInputVisualLine, ai_input_line_index_for_offset, ai_input_visual_lines,
 };
 
 pub(in crate::workspace) fn ai_format_tokens(tokens: usize) -> String {
@@ -469,4 +483,20 @@ pub(in crate::workspace) fn ai_hash_text_shape(
     // Context usage cache correctness matters more than sampling a few bytes;
     // equal-length edits in the middle of a prompt must invalidate the entry.
     std::hash::Hash::hash(text.as_bytes(), hasher);
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn ai_context_message_usage_counts(
+        &self,
+        cx: &App,
+    ) -> Option<(usize, usize)> {
+        ai_context_counts_for_backend(
+            self.settings_store.settings().ai.active_backend,
+            self.active_ai_acp_usage(cx),
+            || {
+                let breakdown = self.ai_context_token_breakdown(cx);
+                (breakdown.total, breakdown.max_tokens)
+            },
+        )
+    }
 }

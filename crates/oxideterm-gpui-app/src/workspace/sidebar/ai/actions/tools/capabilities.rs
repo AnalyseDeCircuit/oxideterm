@@ -1,12 +1,7 @@
-use super::*;
 use oxideterm_ai::tool_resources::{
-    AiActionResultLite, AiLiveResourceOperation, AiStableResourceOperation, ai_connection_counts,
-    ai_live_resource_operation, ai_next_action_json, ai_rejects_legacy_live_target_argument,
-    ai_run_command_preflight_risk, ai_stable_resource_operation, ai_target_from_projection,
-    ai_target_projection, ai_tool_verified_default, is_ai_command_like_query, normalized_ai_intent,
-    normalized_ai_query, normalized_ai_select_target_kind, normalized_ai_target_view,
-    risk_to_capability, target_in_ai_view, target_matches_active_context, target_matches_ai_query,
-    view_for_ai_intent,
+    AiActionResultLite, AiStableResourceOperation, ai_live_resource_operation,
+    ai_rejects_legacy_live_target_argument, ai_run_command_preflight_risk,
+    ai_stable_resource_operation, ai_target_from_projection, ai_target_projection,
 };
 use sha2::Digest as _;
 
@@ -313,9 +308,7 @@ pub(in crate::workspace) fn ai_transfers_state(manager: &SftpTransferManager) ->
     })
 }
 
-use oxideterm_ai::tool_result_protocol::{
-    prepare_ai_tool_output, trim_tail_chars, truncate_for_model,
-};
+use oxideterm_ai::tool_result_protocol::{trim_tail_chars, truncate_for_model};
 pub(in crate::workspace) fn ai_hash_text_content(content: &str, encoding: &str) -> String {
     let mut hasher = sha2::Sha256::new();
     hasher.update(encoding.as_bytes());

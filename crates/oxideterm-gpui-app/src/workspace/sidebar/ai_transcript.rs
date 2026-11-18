@@ -207,7 +207,9 @@ impl WorkspaceApp {
                         app.insert_ai_code_block_command(a0, cx)
                     }
                     AiTranscriptRequest::ImagePreviewFailed => app.push_ai_settings_toast(
-                        app.i18n.t("ai.images.missing"), TerminalNoticeVariant::Error, cx,
+                        app.i18n.t("ai.images.missing"),
+                        TerminalNoticeVariant::Error,
+                        cx,
                     ),
                     AiTranscriptRequest::RetryHistory => app.retry_ai_chat_initialization(cx),
                     AiTranscriptRequest::BeginRename(id, title) => {

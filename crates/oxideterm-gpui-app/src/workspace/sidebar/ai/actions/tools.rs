@@ -6,7 +6,7 @@ use oxideterm_ai::tool_loop::{
 #[cfg(test)]
 use oxideterm_ai::tool_loop::{record_completed_ai_tool_call, send_ai_tool_status_with_payload};
 use oxideterm_ai::tool_resources::{
-    ai_model_visible_settings_projection, ai_model_safe_runtime_text,
+    ai_model_safe_runtime_text, ai_model_visible_settings_projection,
     ai_runtime_validation_public_code, ai_runtime_validation_recovery_message,
     ai_stable_resource_ref_for_target,
 };
@@ -18,7 +18,6 @@ include!("tools/acp_bridge.rs");
 include!("tools/application.rs");
 include!("tools/background.rs");
 include!("tools/snapshot.rs");
-include!("tools/loop.rs");
 include!("tools/local_command.rs");
 include!("tools/agents.rs");
 include!("tools/agent_resources.rs");
@@ -26,6 +25,3 @@ include!("tools/executor.rs");
 include!("tools/web.rs");
 include!("tools/capabilities.rs");
 include!("tools/protocol.rs");
-
-#[cfg(test)]
-include!("tools/loop_tests.rs");

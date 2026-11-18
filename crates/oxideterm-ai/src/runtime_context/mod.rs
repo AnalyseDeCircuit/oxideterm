@@ -1,3 +1,4 @@
+mod authority;
 mod capability;
 mod error;
 mod identity;
@@ -10,6 +11,7 @@ pub(crate) fn is_runtime_context_message(message: &crate::AiChatMessage) -> bool
     message.role == crate::AiChatRole::System && message.id == RUNTIME_CONTEXT_MESSAGE_ID
 }
 
+pub use authority::{AiRunCommandOwner, AiRuntimeAuthority, AiSftpRuntimeOwner};
 pub use capability::RuntimeCapability;
 pub use error::{
     RuntimeContextError, RuntimeRevocationReason, RuntimeValidationError, RuntimeValidationFailure,

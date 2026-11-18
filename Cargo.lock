@@ -7436,6 +7436,7 @@ dependencies = [
  "oxideterm-gpui-cloud-sync",
  "oxideterm-gpui-connections",
  "oxideterm-gpui-editor",
+ "oxideterm-gpui-file-manager",
  "oxideterm-gpui-forwards",
  "oxideterm-gpui-host-tools",
  "oxideterm-gpui-ide",
@@ -7609,6 +7610,27 @@ dependencies = [
  "unicode-segmentation",
  "unicode-width",
  "zip",
+]
+
+[[package]]
+name = "oxideterm-gpui-file-manager"
+version = "2.3.4-beta.1"
+dependencies = [
+ "chrono",
+ "gpui-pre",
+ "oxideterm-audit",
+ "oxideterm-editor-core",
+ "oxideterm-gpui-editor",
+ "oxideterm-gpui-markdown",
+ "oxideterm-gpui-ui",
+ "oxideterm-i18n",
+ "oxideterm-local-files",
+ "oxideterm-preview",
+ "oxideterm-settings",
+ "oxideterm-theme",
+ "oxideterm-workspace",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -7905,11 +7927,13 @@ dependencies = [
  "chrono",
  "dirs",
  "md5 0.7.0",
+ "oxideterm-audit",
  "serde",
  "sha2 0.10.9",
  "sysinfo 0.33.1",
  "tempfile",
  "walkdir",
+ "zeroize",
  "zip",
 ]
 

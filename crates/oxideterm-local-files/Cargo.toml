@@ -17,5 +17,8 @@ sysinfo.workspace = true
 walkdir = "2"
 zip.workspace = true
 
+oxideterm-audit = { path = "../oxideterm-audit" }
+zeroize.workspace = true
+
 [dev-dependencies]
 tempfile = "3.23"

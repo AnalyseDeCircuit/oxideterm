@@ -2,6 +2,8 @@
 
 use std::collections::BTreeMap;
 
+mod discovery;
+pub use discovery::*;
 mod snapshot;
 pub use snapshot::*;
 

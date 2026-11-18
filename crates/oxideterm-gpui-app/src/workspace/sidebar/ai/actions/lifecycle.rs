@@ -33,25 +33,8 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn close_ai_model_selector(&mut self, cx: &mut App) {
-        // The compact model selector behaves like a browser/Radix Select with a
-        // searchable input owner. Closing it must clear popup state, keyboard
-        // focus origin, highlighted option, and any marked text together so Esc,
-        // outside click, Tab, footer navigation, and row activation do not drift.
-        let restore_terminal_inline_prompt = self.ai.state.read(cx).model_selector_scope()
-            == Some(AiModelSelectorScope::TerminalInline)
-            && self.ai.state.read(cx).terminal_inline_panel().open;
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.close_model_selector();
-        });
+        self.ai.state.update(cx, |state, _| state.dismiss_model_selector());
         self.ime_marked_text = None;
-        if restore_terminal_inline_prompt {
-            // Tauri's inline command bar returns focus to its prompt after a
-            // nested model picker closes; otherwise the next typed key appears
-            // to vanish into the terminal surface.
-            self.ai.state.update(cx, |ai, _cx| {
-                ai.terminal_inline_panel_mut().prompt_focused = true;
-            });
-        }
     }
 
     pub(in crate::workspace) fn cancel_ai_chat_stream(&mut self, cx: &mut Context<Self>) {
@@ -130,180 +113,16 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
-        let generations = self.ai.state.read(cx).conversation_stream_generations(id);
-        self.ai.state
-            .update(cx, |ai, _cx| ai.cancel_chat_stream_for(id));
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
-            for generation in generations {
-                runtime.finish_tool_session(
-                    generation,
-                    oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
-                );
-            }
-        });
-        self.ai.background.update(cx, |tasks, _cx| {
-            tasks.cancel_owner(id);
-        });
-        self.ai.acp.update(cx, |entity, _cx| {
-            entity.close_thread(id, false);
-        });
-        let has_conversations = self.ai.state.update(cx, |ai, _cx| {
-            let has_conversations = ai.delete_conversation(id);
-            ai.persist_chat_state();
-            has_conversations
-        });
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.reset_chat_after_conversation_delete(has_conversations);
-        });
-        if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
-            .or_else(oxideterm_audit::AuditContext::current)
-        {
-            if context.source == oxideterm_audit::AuditSource::Application {
-                context.source = oxideterm_audit::AuditSource::User;
-            }
-            context.target = Some(oxideterm_audit::redact(id));
-            context.observe(
-                oxideterm_audit::AuditCategory::Automation,
-                "ai_conversation_delete",
-                None,
-                oxideterm_audit::AuditOutcome::Sent,
-                oxideterm_audit::AuditEvidence::Dispatch,
-                oxideterm_audit::AuditAuthorization::NotRequired,
-            );
-        }
+        self.ai.conversations.delete_ai_conversation(id, cx);
     }
 
     pub(in crate::workspace) fn clear_ai_conversations(&mut self, cx: &mut App) {
-        let mut ids: std::collections::HashSet<String> = match self
-            .ai.state
-            .read(cx)
-            .history
-            .store
-            .as_ref()
-            .map(|store| store.conversation_ids())
-            .transpose()
-        {
-            Ok(ids) => ids.unwrap_or_default().into_iter().collect(),
-            Err(_) => {
-                self.ai.state.update(cx, |ai, _| ai.history_load_failed());
-                return;
-            }
-        };
-        ids.extend(
-            self.ai.state
-                .read(cx)
-                .conversation_state()
-                .conversations
-                .iter()
-                .map(|conversation| conversation.id.clone()),
-        );
-        // Cancel the live generation before clearing its routing identifier.
-        self.cancel_ai_chat_stream_without_notify(cx);
-        self.ai.state
-            .update(cx, |ai, _| ai.reset_conversation_lists_after_clear());
-        for id in ids {
-            self.delete_ai_conversation(&id, cx);
-        }
-        self.ai.acp.update(cx, |entity, _cx| {
-            entity.close_all_threads(false);
-        });
-        self.ai.background.update(cx, |tasks, _cx| {
-            tasks.cancel_all();
-        });
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.clear_conversations();
-            ai.persist_chat_state();
-        });
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.clear_chat_expansions();
-        });
-        self.close_ai_sidebar_popovers(cx);
+        self.ai.conversations.clear_ai_conversations(cx);
+        self.ime_marked_text = None;
     }
 
     pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {
-        let cancelled_generations = self
-            .ai.state
-            .read(cx)
-            .conversation_state()
-            .active_conversation_id
-            .as_deref()
-            .map(|id| self.ai.state.read(cx).conversation_stream_generations(id))
-            .unwrap_or_default();
-        let had_active_generation = !cancelled_generations.is_empty();
-        let active_conversation_id = self
-            .ai.state
-            .read(cx)
-            .conversation_state()
-            .active_conversation_id
-            .clone();
-        if let Some(conversation_id) = active_conversation_id.as_deref() {
-            // The ACP entity is the sole process/session owner. Route Stop to
-            // it before invalidating the UI generation so the protocol cancel
-            // reaches the still-live session.
-            let _ = self.ai.acp.read(cx).cancel_active_turn(conversation_id);
-        }
-        let (conversation_id, stopped_turns) = self.ai.state.update(cx, |ai, _cx| {
-            ai.cancel_chat_stream();
-            ai.cancel_chat_conversation_state()
-        });
-        // An abort can leave a UI delivery queued behind the model task. Revoke
-        // its lease before that delivery can reach a terminal or other owner.
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
-            for generation in cancelled_generations {
-                runtime.finish_tool_session(
-                    generation,
-                    oxideterm_ai::RuntimeRevocationReason::ToolSessionCancelled,
-                );
-            }
-        });
-        if let Some(conversation_id) = conversation_id.as_deref() {
-            self.persist_ai_stopped_assistant_turns(conversation_id, &stopped_turns, cx);
-        }
-        if (had_active_generation || !stopped_turns.is_empty())
-            && let Some(conversation_id) = active_conversation_id
-        {
-            if let Some(mut context) = oxideterm_audit::AuditContext::current_request()
-                .or_else(oxideterm_audit::AuditContext::current)
-            {
-                if context.source == oxideterm_audit::AuditSource::Application {
-                    context.source = oxideterm_audit::AuditSource::User;
-                }
-                context.target = Some(oxideterm_audit::redact(&conversation_id));
-                context.observe(
-                    oxideterm_audit::AuditCategory::Automation,
-                    "ai_task_cancel",
-                    None,
-                    oxideterm_audit::AuditOutcome::CancelRequested,
-                    oxideterm_audit::AuditEvidence::Dispatch,
-                    oxideterm_audit::AuditAuthorization::NotRequired,
-                );
-            }
-        }
-    }
-
-    pub(in crate::workspace) fn persist_ai_stopped_assistant_turns(
-        &self,
-        conversation_id: &str,
-        stopped_turns: &[AiStoppedAssistantTurn],
-        cx: &App,
-    ) {
-        for stopped in stopped_turns {
-            if stopped.retained {
-                self.persist_ai_assistant_turn_end(
-                    conversation_id,
-                    &stopped.message_id,
-                    stopped.status,
-                    cx,
-                );
-            } else {
-                self.persist_ai_removed_assistant_turn_end(
-                    conversation_id,
-                    &stopped.message_id,
-                    stopped.status,
-                    cx,
-                );
-            }
-        }
+        self.ai.conversations.cancel_ai_chat_stream_without_notify(cx);
     }
 
     pub(in crate::workspace) fn retry_ai_chat_initialization(&mut self, cx: &mut Context<Self>) {

@@ -83,7 +83,7 @@ impl WorkspaceApp {
             .collect::<Vec<_>>();
         for session_id in &stale_sessions {
             self.detached_local_terminals.remove(session_id);
-            self.ai_runtime_context.update(cx, |runtime, _cx| {
+            self.ai.authority.update(cx, |runtime, _cx| {
                 runtime.revoke_terminal_session(*session_id);
             });
         }
@@ -227,7 +227,7 @@ impl WorkspaceApp {
         if let Some(detached) = self.detached_local_terminals.remove(&session_id) {
             detached.session.lock().shutdown();
         }
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
+        self.ai.authority.update(cx, |runtime, _cx| {
             runtime.revoke_terminal_session(session_id);
         });
         if self.detached_local_terminals.is_empty() {

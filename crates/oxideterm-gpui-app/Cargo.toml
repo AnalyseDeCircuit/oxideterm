@@ -49,6 +49,7 @@ oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
 oxideterm-gpui-host-tools = { path = "../oxideterm-gpui-host-tools" }
 oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
+oxideterm-gpui-file-manager = { path = "../oxideterm-gpui-file-manager" }
 oxideterm-gpui-onboarding = { path = "../oxideterm-gpui-onboarding" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
 oxideterm-gpui-remote-desktop = { path = "../oxideterm-gpui-remote-desktop" }

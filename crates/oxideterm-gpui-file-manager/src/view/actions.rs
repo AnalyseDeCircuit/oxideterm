@@ -1,9 +1,7 @@
+mod operations;
 use super::*;
 
 mod bookmarks;
-mod external;
-
-pub(in crate::workspace::file_manager) use external::{open_path_external, reveal_path_external};
 
 const FILE_MANAGER_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
@@ -17,105 +15,25 @@ fn local_file_operation(action: &str, detail: &str) -> oxideterm_audit::AuditOpe
     )
 }
 
-impl WorkspaceApp {
-    pub(in crate::workspace) fn open_file_manager_tab(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.refresh_file_manager_drives(cx);
-        let initial_path = self.active_local_terminal_cwd_path(cx);
-        let tab_id = if let Some(tab) = self
-            .tabs(cx)
-            .iter()
-            .find(|tab| tab.kind == TabKind::FileManager)
-        {
-            tab.id
-        } else {
-            let tab_id = self.alloc_tab_id(cx);
-            self.insert_tab(
-                Tab {
-                    id: tab_id,
-                    kind: TabKind::FileManager,
-                    title: self.i18n.t("fileManager.title"),
-                    title_source: TabTitleSource::I18nKey("fileManager.title"),
-                    root_pane: None,
-                    active_pane_id: None,
-                },
-                cx,
-            );
-            tab_id
-        };
-        if self.focus_detached_tab_window(tab_id, cx) {
-            return;
-        }
-        self.set_main_window_active_tab(Some(tab_id), cx);
-        self.active_surface = ActiveSurface::Terminal;
-        self.needs_active_pane_focus = false;
-        // Opening a workspace tab is independent from sidebar visibility, so
-        // preserve the user's collapsed or expanded state across navigation.
+impl FileManagerView {
+    pub fn open_location(&mut self, initial_path: Option<String>, cx: &mut Context<Self>) {
         if let Some(path) = initial_path {
-            // Opening File Manager from a local terminal should start where the
-            // user is already working, without turning cwd into global state.
             self.set_file_manager_path(path, cx);
         } else {
-            let path = self.file_manager.read(cx).path.clone();
-            let audit = local_file_operation("file_browse", &path);
-            self.file_manager.update(cx, |file_manager, cx| {
-                file_manager.refresh();
-                audit.finish(
-                    if file_manager.error.is_none() {
-                        oxideterm_audit::AuditOutcome::Succeeded
-                    } else {
-                        oxideterm_audit::AuditOutcome::Failed
-                    },
-                    oxideterm_audit::AuditEvidence::Protocol,
-                    None,
-                    None,
-                );
-                cx.notify();
-            });
+            self.refresh_file_manager(cx);
         }
-        self.persist_sidebar_settings(cx);
-        self.reveal_active_tab(window, cx);
-        cx.notify();
     }
-
-    pub(in crate::workspace) fn open_file_manager_tab_at_path(
-        &mut self,
-        path: String,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.open_file_manager_tab(window, cx);
-        if !path.trim().is_empty() {
-            // The cwd picker can browse away from the active terminal's
-            // confirmed cwd before opening the surface, so apply that explicit
-            // selection after the tab is active.
-            self.set_file_manager_path(path, cx);
-        }
-        cx.notify();
-    }
-
-    pub(in crate::workspace) fn handle_file_manager_key(
+    pub fn handle_file_manager_key(
         &mut self,
         event: &KeyDownEvent,
+        file_action: Option<&'static str>,
+        preview_action: Option<&'static str>,
         cx: &mut Context<Self>,
     ) -> bool {
         let key = event.keystroke.key.as_str();
-        if key == "escape" && self.dismiss_workspace_context_menus(cx) {
-            cx.notify();
-            return true;
-        }
-        if self.handle_file_manager_dialog_input_footer_key(event, cx) {
-            return true;
-        }
         if let Some(input) = self.file_manager.read(cx).focused_input {
             // Inline inputs share the workspace IME/text-editing model so
             // selection, caret movement, and platform shortcuts stay browser-like.
-            if self.handle_active_text_input_edit_shortcut(&event.keystroke, cx) {
-                return true;
-            }
             if input == FileManagerInput::Path
                 && self.handle_file_manager_path_completion_key(event, cx)
             {
@@ -139,7 +57,7 @@ impl WorkspaceApp {
                                 file_manager.focused_input = None;
                                 cx.notify();
                             });
-                            self.ime_marked_text = None;
+                            self.request(FileManagerRequest::ClearIme, cx);
                         }
                         FileManagerInput::DialogValue => {}
                     }
@@ -157,15 +75,6 @@ impl WorkspaceApp {
                 }
                 _ => {}
             }
-            if self.handle_active_text_input_navigation(&event.keystroke, cx) {
-                return true;
-            }
-            if self.handle_active_text_input_delete_selection(&event.keystroke, cx) {
-                return true;
-            }
-            if self.handle_active_text_input_transpose(&event.keystroke, cx) {
-                return true;
-            }
             return false;
         }
         if self.handle_file_manager_dialog_footer_key(event, cx) {
@@ -181,18 +90,7 @@ impl WorkspaceApp {
                 ),
             )
         };
-        let overrides = &self.settings_store.settings().keybindings.overrides;
-        let file_action = crate::keybindings::matched_scoped_action(
-            &event.keystroke,
-            crate::keybindings::ActionScope::FileManager,
-            overrides,
-        );
         if preview_dialog_open {
-            let preview_action = crate::keybindings::matched_scoped_action(
-                &event.keystroke,
-                crate::keybindings::ActionScope::Preview,
-                overrides,
-            );
             let command = match preview_action {
                 Some("preview.previous") => "left",
                 Some("preview.next") => "right",
@@ -436,14 +334,14 @@ impl WorkspaceApp {
         });
     }
 
-    fn refresh_file_manager_drives(&mut self, cx: &mut Context<Self>) {
+    pub fn refresh_file_manager_drives(&mut self, cx: &mut Context<Self>) {
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.refresh_drives();
             cx.notify();
         });
     }
 
-    pub(super) fn set_file_manager_path(&mut self, path: String, cx: &mut Context<Self>) {
+    pub fn set_file_manager_path(&mut self, path: String, cx: &mut Context<Self>) {
         let audit = local_file_operation("file_browse", &path);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.set_path(path);
@@ -461,7 +359,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace::file_manager) fn handle_file_manager_breadcrumb_scroll(
+    pub(in crate::view) fn handle_file_manager_breadcrumb_scroll(
         &mut self,
         event: &ScrollEvent,
         cx: &mut Context<Self>,
@@ -495,11 +393,7 @@ impl WorkspaceApp {
         }
     }
 
-    pub(in crate::workspace) fn open_file_manager_entry(
-        &mut self,
-        entry: LocalFileEntry,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn open_file_manager_entry(&mut self, entry: LocalFileEntry, cx: &mut Context<Self>) {
         match entry.file_type {
             LocalFileType::Directory => self.set_file_manager_path(entry.path, cx),
             LocalFileType::File | LocalFileType::Symlink => {
@@ -519,7 +413,7 @@ impl WorkspaceApp {
             file_manager.focused_dialog_footer_action = None;
             cx.notify();
         });
-        self.ime_marked_text = None;
+        self.request(FileManagerRequest::ClearIme, cx);
     }
 
     pub(super) fn cancel_file_manager_path_edit(&mut self, cx: &mut Context<Self>) {
@@ -532,7 +426,7 @@ impl WorkspaceApp {
             file_manager.editing_path = false;
             cx.notify();
         });
-        self.ime_marked_text = None;
+        self.request(FileManagerRequest::ClearIme, cx);
     }
 
     fn handle_file_manager_input_tab(
@@ -559,13 +453,13 @@ impl WorkspaceApp {
                     }
                     cx.notify();
                 });
-                self.ime_marked_text = None;
+                self.request(FileManagerRequest::ClearIme, cx);
             }
         }
-        self.clear_ime_selection();
+        self.request(FileManagerRequest::ClearImeSelection, cx);
     }
 
-    fn handle_file_manager_dialog_input_footer_key(
+    pub fn handle_file_manager_dialog_input_footer_key(
         &mut self,
         event: &KeyDownEvent,
         cx: &mut Context<Self>,
@@ -593,7 +487,7 @@ impl WorkspaceApp {
             return false;
         }
 
-        match crate::workspace::browser_behavior::modal_footer_input_key_action(
+        match browser_behavior::modal_footer_input_key_action(
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
             &FILE_MANAGER_DIALOG_FOOTER_ACTIONS,
@@ -603,38 +497,34 @@ impl WorkspaceApp {
             ConfirmDialogAction::Cancel,
             Some(ConfirmDialogAction::Confirm),
         ) {
-            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::Cancel) => {
+            Some(browser_behavior::ModalFooterInputKeyAction::Cancel) => {
                 self.close_file_manager_dialog(cx);
                 cx.notify();
                 true
             }
-            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusInput) => {
                 self.file_manager.update(cx, |file_manager, cx| {
                     file_manager.focused_input = Some(FileManagerInput::DialogValue);
                     file_manager.focused_dialog_footer_action = None;
                     cx.notify();
                 });
-                self.ime_marked_text = None;
-                self.clear_ime_selection();
+                self.request(FileManagerRequest::ClearIme, cx);
+                self.request(FileManagerRequest::ClearImeSelection, cx);
                 cx.notify();
                 true
             }
-            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::FocusFooter(
-                action,
-            )) => {
+            Some(browser_behavior::ModalFooterInputKeyAction::FocusFooter(action)) => {
                 self.file_manager.update(cx, |file_manager, cx| {
                     file_manager.focused_input = None;
                     file_manager.focused_dialog_footer_action = Some(action);
                     cx.notify();
                 });
-                self.ime_marked_text = None;
-                self.clear_ime_selection();
+                self.request(FileManagerRequest::ClearIme, cx);
+                self.request(FileManagerRequest::ClearImeSelection, cx);
                 cx.notify();
                 true
             }
-            Some(crate::workspace::browser_behavior::ModalFooterInputKeyAction::Activate(
-                action,
-            )) => {
+            Some(browser_behavior::ModalFooterInputKeyAction::Activate(action)) => {
                 match action {
                     ConfirmDialogAction::Cancel => self.close_file_manager_dialog(cx),
                     ConfirmDialogAction::Confirm => self.accept_file_manager_dialog(cx),
@@ -658,15 +548,12 @@ impl WorkspaceApp {
                 file_manager.focused_input = None;
                 cx.notify();
             });
-            self.ime_marked_text = None;
+            self.request(FileManagerRequest::ClearIme, cx);
         }
     }
 
     /// Refreshes path suggestions from one cached parent-directory listing.
-    pub(in crate::workspace) fn refresh_file_manager_path_completion(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn refresh_file_manager_path_completion(&mut self, cx: &mut Context<Self>) {
         let request = {
             let file_manager = self.file_manager.read(cx);
             local_path_completion_request(&file_manager.path_input)
@@ -704,11 +591,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn accept_file_manager_path_completion(
-        &mut self,
-        index: usize,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn accept_file_manager_path_completion(&mut self, index: usize, cx: &mut Context<Self>) {
         self.accept_file_manager_path_completion_without_context(index, cx);
     }
 
@@ -810,7 +693,7 @@ impl WorkspaceApp {
         self.blur_file_manager_inline_inputs(cx);
         self.file_manager.update(cx, |file_manager, cx| {
             if let Some(file) = file.as_ref()
-                && crate::workspace::browser_behavior::preserve_or_move_context_selection(
+                && browser_behavior::preserve_or_move_context_selection(
                     &mut file_manager.selected,
                     file.name.clone(),
                 )
@@ -824,10 +707,7 @@ impl WorkspaceApp {
         });
     }
 
-    pub(in crate::workspace) fn dismiss_file_manager_context_menu(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn dismiss_file_manager_context_menu(&mut self, cx: &mut Context<Self>) -> bool {
         // Radix ContextMenu has one dismissal owner regardless of whether the
         // close came from outside click, Esc, or an item activation. Keep the
         // FileManager menu payload behind this helper so global browser
@@ -838,10 +718,7 @@ impl WorkspaceApp {
         self.clear_file_manager_context_menu_immediately(cx)
     }
 
-    pub(in crate::workspace) fn clear_file_manager_context_menu_immediately(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) -> bool {
+    pub fn clear_file_manager_context_menu_immediately(&mut self, cx: &mut Context<Self>) -> bool {
         self.file_manager.update(cx, |file_manager, cx| {
             let changed = file_manager.clear_context_menu_immediately();
             if changed {
@@ -995,24 +872,24 @@ impl WorkspaceApp {
             file_manager.preview_font_family = None;
             file_manager.preview_font_error = None;
             file_manager.focused_input = None;
-            file_manager.preview_video_surface.detach();
+            (file_manager.preview_video_surface.detach)();
             cx.notify();
             file_manager
                 .preview_audio
                 .command(AudioPreviewCommand::Stop)
                 .err()
         });
-        self.ime_marked_text = None;
+        self.request(FileManagerRequest::ClearIme, cx);
         if let Some(error) = audio_stop_error {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
-                TerminalNoticeVariant::Error,
+                FileManagerNoticeKind::Error,
                 cx,
             );
         }
         let audit = local_file_operation("file_preview", &entry.path);
-        let preview = super::super::plugin_preview::local_inspection_preview(&entry.path)
+        let preview = oxideterm_local_files::local_inspection_preview(&entry.path, oxideterm_preview::inspection_mime_type)
             .unwrap_or_else(|| read_local_preview(&entry.path));
         audit.finish(
             match &preview {
@@ -1031,28 +908,10 @@ impl WorkspaceApp {
         );
         match &preview {
             LocalPreview::Document { path, mime_type } => {
-                let plugins = self.plugin_entity.clone();
-                let runtime = self.forwarding_runtime.clone();
-                let tokens = self.tokens;
-                let i18n = self.i18n.clone();
-                let view = cx.new(|cx| {
-                    super::super::plugin_preview::PluginFilePreview::new(
-                        plugins, runtime, tokens, i18n, cx,
-                    )
-                });
-                view.update(cx, |view, cx| {
-                    view.set_source(
-                        oxideterm_preview::PreviewAssetOwner::local(
-                            path,
-                            mime_type,
-                            oxideterm_preview::PreviewAssetKind::Document,
-                        ),
-                        cx,
-                    )
-                });
-                self.file_manager.update(cx, |file_manager, _| {
-                    file_manager.preview_plugin = Some(view)
-                });
+                let view =
+                    (self.bindings.document)(path, mime_type, self.tokens, self.i18n.clone(), cx);
+                self.file_manager
+                    .update(cx, |file_manager, _| file_manager.preview_plugin = view);
             }
             LocalPreview::Audio { path, .. } => {
                 if let Err(error) = self.file_manager.update(cx, |file_manager, _cx| {
@@ -1061,7 +920,7 @@ impl WorkspaceApp {
                     self.push_file_manager_toast(
                         self.i18n.t("fileManager.error"),
                         Some(error),
-                        TerminalNoticeVariant::Error,
+                        FileManagerNoticeKind::Error,
                         cx,
                     );
                 }
@@ -1165,8 +1024,11 @@ impl WorkspaceApp {
             match result {
                 Ok(chunk) => {
                     file_manager.preview_stream.loaded_bytes += chunk.data.len() as u64;
-                    append_file_manager_stream_preview_chunk(
-                        &mut file_manager.preview_stream,
+                    let stream = &mut file_manager.preview_stream;
+                    append_local_preview_chunk(
+                        &mut stream.lines,
+                        &mut stream.carry_text,
+                        &mut stream.carry_bytes,
                         chunk.data,
                         chunk.eof,
                     );
@@ -1229,7 +1091,7 @@ impl WorkspaceApp {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
-                TerminalNoticeVariant::Error,
+                FileManagerNoticeKind::Error,
                 cx,
             );
         }
@@ -1249,7 +1111,7 @@ impl WorkspaceApp {
             self.push_file_manager_toast(
                 self.i18n.t("fileManager.error"),
                 Some(error),
-                TerminalNoticeVariant::Error,
+                FileManagerNoticeKind::Error,
                 cx,
             );
         }
@@ -1275,7 +1137,7 @@ impl WorkspaceApp {
         self.push_file_manager_toast(
             self.i18n.t("fileManager.copyContent"),
             None,
-            TerminalNoticeVariant::Success,
+            FileManagerNoticeKind::Success,
             cx,
         );
         cx.notify();
@@ -1333,26 +1195,26 @@ impl WorkspaceApp {
         let Some(focused) = self.file_manager.read(cx).focused_dialog_footer_action else {
             return false;
         };
-        match crate::workspace::browser_behavior::modal_footer_key_action(
+        match browser_behavior::modal_footer_key_action(
             event.keystroke.key.as_str(),
             event.keystroke.modifiers.shift,
             &FILE_MANAGER_DIALOG_FOOTER_ACTIONS,
             Some(focused),
             ConfirmDialogAction::Cancel,
         ) {
-            Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Cancel) => {
+            Some(browser_behavior::ModalFooterKeyAction::Cancel) => {
                 self.close_file_manager_dialog(cx);
                 cx.notify();
                 true
             }
-            Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Focus(action)) => {
+            Some(browser_behavior::ModalFooterKeyAction::Focus(action)) => {
                 self.file_manager.update(cx, |file_manager, cx| {
                     file_manager.focused_dialog_footer_action = Some(action);
                     cx.notify();
                 });
                 true
             }
-            Some(crate::workspace::browser_behavior::ModalFooterKeyAction::Activate(action)) => {
+            Some(browser_behavior::ModalFooterKeyAction::Activate(action)) => {
                 match action {
                     ConfirmDialogAction::Cancel => self.close_file_manager_dialog(cx),
                     ConfirmDialogAction::Confirm => self.accept_file_manager_dialog(cx),
@@ -1362,759 +1224,6 @@ impl WorkspaceApp {
             }
             None => false,
         }
-    }
-
-    pub(super) fn create_file_manager_folder(&mut self, cx: &mut Context<Self>) {
-        let (name, current_path) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.dialog_value.trim().to_string(),
-                file_manager.path.clone(),
-            )
-        };
-        let audit = local_file_operation("file_mkdir", &join_local_path(&current_path, &name));
-        let result = validate_local_name(&name)
-            .map(|_| join_local_path(&current_path, &name))
-            .and_then(|path| std::fs::create_dir(&path).map_err(|error| error.to_string()));
-        audit.result(&result);
-        match result {
-            Ok(()) => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.folderCreated"),
-                    None,
-                    TerminalNoticeVariant::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                TerminalNoticeVariant::Error,
-                cx,
-            ),
-        }
-        cx.notify();
-    }
-
-    pub(super) fn create_file_manager_file(&mut self, cx: &mut Context<Self>) {
-        let (name, current_path) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.dialog_value.trim().to_string(),
-                file_manager.path.clone(),
-            )
-        };
-        let audit = local_file_operation(
-            "file_save",
-            &format!(
-                "path={}; mode=create_new",
-                join_local_path(&current_path, &name)
-            ),
-        );
-        let result = validate_local_name(&name)
-            .map(|_| join_local_path(&current_path, &name))
-            .and_then(|path| {
-                std::fs::OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&path)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            });
-        audit.finish(
-            if result.is_ok() {
-                oxideterm_audit::AuditOutcome::Succeeded
-            } else {
-                oxideterm_audit::AuditOutcome::Failed
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            result.is_ok().then_some(0),
-        );
-        match result {
-            Ok(()) => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.fileCreated"),
-                    None,
-                    TerminalNoticeVariant::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                TerminalNoticeVariant::Error,
-                cx,
-            ),
-        }
-        cx.notify();
-    }
-
-    pub(super) fn rename_file_manager_entry(&mut self, old_name: String, cx: &mut Context<Self>) {
-        let (new_name, current_path) = {
-            let file_manager = self.file_manager.read(cx);
-            (
-                file_manager.dialog_value.trim().to_string(),
-                file_manager.path.clone(),
-            )
-        };
-        let old_path = join_local_path(&current_path, &old_name);
-        let new_path = join_local_path(&current_path, &new_name);
-        let audit = local_file_operation("file_rename", &format!("{old_path} → {new_path}"));
-        let result = validate_local_name(&new_name)
-            .and_then(|_| std::fs::rename(&old_path, &new_path).map_err(|error| error.to_string()));
-        audit.result(&result);
-        match result {
-            Ok(()) => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.renamed"),
-                    None,
-                    TerminalNoticeVariant::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                TerminalNoticeVariant::Error,
-                cx,
-            ),
-        }
-        cx.notify();
-    }
-
-    pub(super) fn delete_file_manager_entries(
-        &mut self,
-        names: Vec<String>,
-        cx: &mut Context<Self>,
-    ) {
-        let current_path = self.file_manager.read(cx).path.clone();
-        let context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        let mut audit = oxideterm_audit::AuditOperation::in_context(
-            context.as_ref(),
-            oxideterm_audit::AuditCategory::File,
-            "file_delete_recursive",
-            Some(&format!("path={current_path}; requested={}", names.len())),
-        );
-        let child_context = context.map(|mut context| {
-            context.parent_id = audit.id().map(str::to_owned);
-            context
-        });
-        let mut error = None;
-        let mut removed = 0usize;
-        let mut failed_path = None;
-        for name in &names {
-            let path = join_local_path(&current_path, name);
-            let path_ref = std::path::Path::new(&path);
-            let is_directory = path_ref.is_dir();
-            let child = oxideterm_audit::AuditOperation::in_context(
-                child_context.as_ref(),
-                oxideterm_audit::AuditCategory::File,
-                if is_directory {
-                    "file_delete_recursive"
-                } else {
-                    "file_delete"
-                },
-                Some(&path),
-            );
-            let result = if is_directory {
-                std::fs::remove_dir_all(path_ref)
-            } else {
-                std::fs::remove_file(path_ref)
-            };
-            child.result(&result);
-            if let Err(err) = result {
-                error = Some(err.to_string());
-                failed_path = Some(path);
-                break;
-            }
-            removed += 1;
-        }
-        audit.summary(&format!("path={current_path}; requested={}; removed={removed}; unprocessed={}; failed_path={}; nested_items=unavailable:remove_dir_all", names.len(), names.len().saturating_sub(removed + usize::from(error.is_some())), failed_path.as_deref().unwrap_or("none")));
-        audit.finish(
-            if error.is_none() {
-                oxideterm_audit::AuditOutcome::Succeeded
-            } else if removed > 0 {
-                oxideterm_audit::AuditOutcome::Partial
-            } else {
-                oxideterm_audit::AuditOutcome::Failed
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            None,
-        );
-        match error {
-            Some(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                TerminalNoticeVariant::Error,
-                cx,
-            ),
-            None => {
-                self.close_file_manager_dialog(cx);
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n
-                        .t("fileManager.deletedCount")
-                        .replace("{{count}}", &names.len().to_string()),
-                    None,
-                    TerminalNoticeVariant::Success,
-                    cx,
-                );
-            }
-        }
-        cx.notify();
-    }
-
-    pub(super) fn copy_file_manager_selection(&mut self, cut: bool, cx: &mut Context<Self>) {
-        let entries = self.selected_file_manager_entries(cx);
-        if entries.is_empty() {
-            return;
-        }
-        self.file_manager.update(cx, |file_manager, cx| {
-            file_manager.clipboard = Some(LocalClipboard {
-                mode: if cut {
-                    LocalClipboardMode::Cut
-                } else {
-                    LocalClipboardMode::Copy
-                },
-                paths: entries.iter().map(|entry| entry.path.clone()).collect(),
-                source_dir: file_manager.path.clone(),
-            });
-            file_manager.clear_context_menu_immediately();
-            cx.notify();
-        });
-        let key = if cut {
-            "fileManager.cutCount"
-        } else {
-            "fileManager.copiedCount"
-        };
-        self.push_file_manager_toast(
-            self.i18n
-                .t(key)
-                .replace("{{count}}", &entries.len().to_string()),
-            None,
-            TerminalNoticeVariant::Default,
-            cx,
-        );
-    }
-
-    fn start_file_manager_operation(
-        &mut self,
-        total: usize,
-        work: impl FnOnce(
-            delivery::ActiveDeliverySender<FileManagerOperationEvent>,
-        ) -> Result<(), String>
-        + Send
-        + 'static,
-        cx: &mut Context<Self>,
-    ) {
-        self.file_manager.update(cx, |file_manager, cx| {
-            file_manager.start_operation(total, work, cx);
-        });
-    }
-
-    pub(super) fn paste_file_manager_clipboard(&mut self, cx: &mut Context<Self>) {
-        let (clipboard, current_path) = {
-            let file_manager = self.file_manager.read(cx);
-            (file_manager.clipboard.clone(), file_manager.path.clone())
-        };
-        let Some(clipboard) = clipboard else {
-            return;
-        };
-        if clipboard.mode == LocalClipboardMode::Cut && clipboard.source_dir == current_path {
-            self.dismiss_file_manager_context_menu(cx);
-            return;
-        }
-        let destination = current_path;
-        let sources = clipboard.paths.clone();
-        let mode = clipboard.mode;
-        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        let total = sources
-            .iter()
-            .map(|source| local_operation_unit_count(std::path::Path::new(source)))
-            .sum::<usize>();
-        self.start_file_manager_operation(
-            total,
-            move |tx| {
-                let mut audit = oxideterm_audit::AuditOperation::in_context(
-                    audit_context.as_ref(), oxideterm_audit::AuditCategory::File,
-                    if mode == LocalClipboardMode::Cut { "file_move" } else { "file_copy" },
-                    Some(&format!("destination={destination}; sources={}", sources.len())),
-                );
-                let child_context = audit_context.map(|mut context| {
-                    context.parent_id = audit.id().map(str::to_owned);
-                    context
-                });
-                let done = std::cell::Cell::new(0usize);
-                let bytes = std::cell::Cell::new(0u64);
-                let copied = std::cell::Cell::new(false);
-                let mut attempted_source = None;
-                let mut failed_object = None;
-                let result: Result<(), String> = (|| {
-                for source in &sources {
-                    attempted_source = Some(source.as_str());
-                    let source_path = std::path::Path::new(source);
-                    let Some(name) = source_path.file_name() else {
-                        return Err("Source has no file name".to_string());
-                    };
-                    let target = unique_copy_path(&std::path::Path::new(&destination).join(name));
-                    if mode == LocalClipboardMode::Cut
-                        && would_move_directory_into_itself(source_path, &target)
-                    {
-                        return Err("cannot move a folder into itself".to_string());
-                    }
-                    let mut progress = |path: &std::path::Path, copied_bytes: Option<u64>| {
-                        if let Some(copied_bytes) = copied_bytes {
-                            done.set(done.get() + 1);
-                            bytes.set(bytes.get().saturating_add(copied_bytes));
-                            copied.set(true);
-                        } else {
-                            failed_object = Some(path.to_string_lossy().into_owned());
-                        }
-                        if let Some(context) = child_context.as_ref() {
-                            let relative = path.strip_prefix(source_path).unwrap_or_else(|_| std::path::Path::new(""));
-                            let copied_to = if relative.as_os_str().is_empty() { target.clone() } else { target.join(relative) };
-                            context.operation(oxideterm_audit::AuditCategory::File, "file_copy", Some(&format!("{} → {}", path.display(), copied_to.display())))
-                                .finish(if copied_bytes.is_some() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, copied_bytes);
-                        }
-                        if copied_bytes.is_none() { return; }
-                        let file_name = path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        let _ = tx.send(FileManagerOperationEvent::Progress(
-                            FileManagerOperationProgress {
-                                current: done.get(),
-                                total: total.max(1),
-                                file_name,
-                                active: true,
-                            },
-                        ));
-                    };
-                    if mode == LocalClipboardMode::Cut {
-                        match std::fs::rename(source_path, &target) {
-                            Ok(()) => {
-                                done.set(done.get() + 1);
-                                if let Some(context) = child_context.as_ref() {
-                                    context.operation(oxideterm_audit::AuditCategory::File, "file_move", Some(&format!("{} → {}", source_path.display(), target.display())))
-                                        .finish(oxideterm_audit::AuditOutcome::Succeeded, oxideterm_audit::AuditEvidence::Protocol, None, None);
-                                }
-                                let _ = tx.send(FileManagerOperationEvent::Progress(FileManagerOperationProgress {
-                                    current: done.get(), total: total.max(1), file_name: name.to_string_lossy().into_owned(), active: true,
-                                }));
-                                Ok(())
-                            }
-                            Err(_) => {
-                                copy_recursively_with_progress(source_path, &target, &mut progress)
-                                    .map_err(|error| error.to_string())?;
-                                let removal = if source_path.is_dir() {
-                                    std::fs::remove_dir_all(source_path)
-                                } else {
-                                    std::fs::remove_file(source_path)
-                                };
-                                if removal.is_ok() {
-                                    if let Some(context) = child_context.as_ref() {
-                                        context.operation(oxideterm_audit::AuditCategory::File, "file_move", Some(&format!("{} → {}", source_path.display(), target.display())))
-                                            .finish(oxideterm_audit::AuditOutcome::Succeeded, oxideterm_audit::AuditEvidence::Protocol, None, None);
-                                    }
-                                } else if let Some(context) = child_context.as_ref() {
-                                    context.operation(oxideterm_audit::AuditCategory::File, "file_move", Some(&format!("{} → {}", source_path.display(), target.display())))
-                                        .finish(oxideterm_audit::AuditOutcome::Partial, oxideterm_audit::AuditEvidence::Protocol, None, None);
-                                }
-                                removal.map_err(|error| error.to_string())
-                            }
-                        }
-                    } else {
-                        copy_recursively_with_progress(source_path, &target, &mut progress)
-                            .map_err(|error| error.to_string())
-                    }?;
-                }
-                Ok(())
-                })();
-                audit.summary(&format!("destination={destination}; sources={}; completed_objects={}; estimated_objects={total}; failed_object={}; copied_bytes={}", sources.len(), done.get(), if result.is_err() { failed_object.as_deref().or(attempted_source).unwrap_or("unknown") } else { "none" }, if copied.get() { bytes.get().to_string() } else { "unknown".into() }));
-                audit.finish(
-                    if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else if done.get() > 0 { oxideterm_audit::AuditOutcome::Partial } else { oxideterm_audit::AuditOutcome::Failed },
-                    oxideterm_audit::AuditEvidence::Protocol,
-                    None,
-                    copied.get().then_some(bytes.get()),
-                );
-                result
-            },
-            cx,
-        );
-        if clipboard.mode == LocalClipboardMode::Cut {
-            self.file_manager.update(cx, |file_manager, cx| {
-                file_manager.clipboard = None;
-                file_manager.clear_context_menu_immediately();
-                cx.notify();
-            });
-        } else {
-            self.dismiss_file_manager_context_menu(cx);
-        }
-    }
-
-    pub(super) fn duplicate_file_manager_selection(&mut self, cx: &mut Context<Self>) {
-        let entries = self.selected_file_manager_entries(cx);
-        if entries.is_empty() {
-            return;
-        }
-        let paths = entries
-            .iter()
-            .map(|entry| entry.path.clone())
-            .collect::<Vec<_>>();
-        let total = paths
-            .iter()
-            .map(|path| local_operation_unit_count(std::path::Path::new(path)))
-            .sum::<usize>();
-        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        self.start_file_manager_operation(
-            total,
-            move |tx| {
-                let mut done = 0usize;
-                let mut bytes = 0u64;
-                let mut audit = oxideterm_audit::AuditOperation::in_context(
-                    audit_context.as_ref(), oxideterm_audit::AuditCategory::File,
-                    "file_copy", Some(&format!("sources={}; mode=duplicate", paths.len())),
-                );
-                let child_context = audit_context.map(|mut context| {
-                    context.parent_id = audit.id().map(str::to_owned);
-                    context
-                });
-                let mut attempted_source = None;
-                let mut failed_object = None;
-                let result: Result<(), String> = (|| {
-                for path in &paths {
-                    attempted_source = Some(path.as_str());
-                    let source = std::path::Path::new(&path);
-                    let target = unique_copy_path(source);
-                    let mut progress = |path: &std::path::Path, copied_bytes: Option<u64>| {
-                        if let Some(copied_bytes) = copied_bytes {
-                            done += 1;
-                            bytes = bytes.saturating_add(copied_bytes);
-                        } else {
-                            failed_object = Some(path.to_string_lossy().into_owned());
-                        }
-                        if let Some(context) = child_context.as_ref() {
-                            let relative = path.strip_prefix(source).unwrap_or_else(|_| std::path::Path::new(""));
-                            let copied_to = if relative.as_os_str().is_empty() { target.clone() } else { target.join(relative) };
-                            context.operation(oxideterm_audit::AuditCategory::File, "file_copy", Some(&format!("{} → {}", path.display(), copied_to.display())))
-                                .finish(if copied_bytes.is_some() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, copied_bytes);
-                        }
-                        if copied_bytes.is_none() { return; }
-                        let file_name = path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        let _ = tx.send(FileManagerOperationEvent::Progress(
-                            FileManagerOperationProgress {
-                                current: done,
-                                total: total.max(1),
-                                file_name,
-                                active: true,
-                            },
-                        ));
-                    };
-                    copy_recursively_with_progress(source, &target, &mut progress)
-                        .map_err(|error| error.to_string())?;
-                }
-                Ok(())
-                })();
-                audit.summary(&format!("sources={}; completed_objects={done}; estimated_objects={total}; failed_object={}; copied_bytes={bytes}", paths.len(), if result.is_err() { failed_object.as_deref().or(attempted_source).unwrap_or("unknown") } else { "none" }));
-                audit.finish(if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else if done > 0 { oxideterm_audit::AuditOutcome::Partial } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, (done > 0).then_some(bytes));
-                result
-            },
-            cx,
-        );
-        self.dismiss_file_manager_context_menu(cx);
-    }
-
-    pub(super) fn queue_file_manager_external_drop_paths(
-        &mut self,
-        paths: &[std::path::PathBuf],
-        cx: &mut Context<Self>,
-    ) {
-        let sources = paths
-            .iter()
-            .filter(|path| path.exists())
-            .map(|path| path.to_string_lossy().to_string())
-            .collect::<Vec<_>>();
-        if sources.is_empty() {
-            return;
-        }
-        let destination = self.file_manager.read(cx).path.clone();
-        let total = sources
-            .iter()
-            .map(|source| local_operation_unit_count(std::path::Path::new(source)))
-            .sum::<usize>();
-        let audit_context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        self.start_file_manager_operation(
-            total,
-            move |tx| {
-                let mut done = 0usize;
-                let mut bytes = 0u64;
-                let mut audit = oxideterm_audit::AuditOperation::in_context(
-                    audit_context.as_ref(), oxideterm_audit::AuditCategory::File,
-                    "file_copy", Some(&format!("destination={destination}; sources={}; mode=drop", sources.len())),
-                );
-                let child_context = audit_context.map(|mut context| {
-                    context.parent_id = audit.id().map(str::to_owned);
-                    context
-                });
-                let mut attempted_source = None;
-                let mut failed_object = None;
-                let result: Result<(), String> = (|| {
-                for source in &sources {
-                    attempted_source = Some(source.as_str());
-                    let source_path = std::path::Path::new(source);
-                    let Some(name) = source_path.file_name() else {
-                        return Err("Source has no file name".to_string());
-                    };
-                    let target = unique_copy_path(&std::path::Path::new(&destination).join(name));
-                    let mut progress = |path: &std::path::Path, copied_bytes: Option<u64>| {
-                        if let Some(copied_bytes) = copied_bytes {
-                            done += 1;
-                            bytes = bytes.saturating_add(copied_bytes);
-                        } else {
-                            failed_object = Some(path.to_string_lossy().into_owned());
-                        }
-                        if let Some(context) = child_context.as_ref() {
-                            let relative = path.strip_prefix(source_path).unwrap_or_else(|_| std::path::Path::new(""));
-                            let copied_to = if relative.as_os_str().is_empty() { target.clone() } else { target.join(relative) };
-                            context.operation(oxideterm_audit::AuditCategory::File, "file_copy", Some(&format!("{} → {}", path.display(), copied_to.display())))
-                                .finish(if copied_bytes.is_some() { oxideterm_audit::AuditOutcome::Succeeded } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, copied_bytes);
-                        }
-                        if copied_bytes.is_none() { return; }
-                        let file_name = path
-                            .file_name()
-                            .map(|name| name.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        let _ = tx.send(FileManagerOperationEvent::Progress(
-                            FileManagerOperationProgress {
-                                current: done,
-                                total: total.max(1),
-                                file_name,
-                                active: true,
-                            },
-                        ));
-                    };
-                    copy_recursively_with_progress(source_path, &target, &mut progress)
-                        .map_err(|error| error.to_string())?;
-                }
-                Ok(())
-                })();
-                audit.summary(&format!("destination={destination}; sources={}; completed_objects={done}; estimated_objects={total}; failed_object={}; copied_bytes={bytes}", sources.len(), if result.is_err() { failed_object.as_deref().or(attempted_source).unwrap_or("unknown") } else { "none" }));
-                audit.finish(if result.is_ok() { oxideterm_audit::AuditOutcome::Succeeded } else if done > 0 { oxideterm_audit::AuditOutcome::Partial } else { oxideterm_audit::AuditOutcome::Failed }, oxideterm_audit::AuditEvidence::Protocol, None, (done > 0).then_some(bytes));
-                result
-            },
-            cx,
-        );
-        self.dismiss_file_manager_context_menu(cx);
-    }
-
-    pub(super) fn compress_file_manager_selection(&mut self, cx: &mut Context<Self>) {
-        let entries = self.selected_file_manager_entries(cx);
-        if entries.is_empty() {
-            return;
-        }
-        let archive_name = if entries.len() == 1 {
-            format!("{}.zip", entries[0].name)
-        } else {
-            format!("Archive_{}.zip", chrono::Local::now().format("%Y-%m-%d"))
-        };
-        let current_path = self.file_manager.read(cx).path.clone();
-        let archive_path =
-            unique_copy_path(&std::path::Path::new(&current_path).join(archive_name));
-        let paths = entries
-            .iter()
-            .map(|entry| entry.path.clone())
-            .collect::<Vec<_>>();
-        let context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        let mut audit = oxideterm_audit::AuditOperation::in_context(
-            context.as_ref(),
-            oxideterm_audit::AuditCategory::File,
-            "file_archive_create",
-            Some(&format!(
-                "archive={}; sources={}",
-                archive_path.display(),
-                paths.len()
-            )),
-        );
-        let child_context = context.map(|mut context| {
-            context.parent_id = audit.id().map(str::to_owned);
-            context
-        });
-        let mut completed = 0usize;
-        let mut skipped = 0usize;
-        let mut input_bytes = 0u64;
-        let mut failed_object = None;
-        let result = compress_local_files(
-            &paths,
-            &archive_path.to_string_lossy(),
-            &mut |path, outcome| {
-                let (audit_outcome, bytes) = match outcome {
-                    ArchiveEntryOutcome::Completed(bytes) => {
-                        completed += 1;
-                        input_bytes = input_bytes.saturating_add(bytes);
-                        (oxideterm_audit::AuditOutcome::Succeeded, Some(bytes))
-                    }
-                    ArchiveEntryOutcome::Skipped => {
-                        skipped += 1;
-                        (oxideterm_audit::AuditOutcome::Unchanged, None)
-                    }
-                    ArchiveEntryOutcome::Failed => {
-                        failed_object = Some(path.to_string_lossy().into_owned());
-                        (oxideterm_audit::AuditOutcome::Failed, None)
-                    }
-                };
-                if let Some(context) = child_context.as_ref() {
-                    context
-                        .operation(
-                            oxideterm_audit::AuditCategory::File,
-                            "file_archive_create",
-                            Some(&format!("{} → {}", path.display(), archive_path.display())),
-                        )
-                        .finish(
-                            audit_outcome,
-                            oxideterm_audit::AuditEvidence::Protocol,
-                            None,
-                            bytes,
-                        );
-                }
-            },
-        );
-        let archive_bytes = result
-            .as_ref()
-            .ok()
-            .and_then(|_| std::fs::metadata(&archive_path).ok())
-            .map(|metadata| metadata.len());
-        audit.summary(&format!("archive={}; requested_sources={}; completed_entries={completed}; skipped_entries={skipped}; failed_object={}; input_bytes={input_bytes}", archive_path.display(), paths.len(), failed_object.as_deref().unwrap_or("none")));
-        audit.finish(
-            if result.is_ok() && skipped == 0 {
-                oxideterm_audit::AuditOutcome::Succeeded
-            } else if completed > 0 || result.is_ok() {
-                oxideterm_audit::AuditOutcome::Partial
-            } else {
-                oxideterm_audit::AuditOutcome::Failed
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            archive_bytes,
-        );
-        match result {
-            Ok(()) => {
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.operationSuccess"),
-                    Some(format!("{}", archive_path.display())),
-                    TerminalNoticeVariant::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                TerminalNoticeVariant::Error,
-                cx,
-            ),
-        }
-        self.dismiss_file_manager_context_menu(cx);
-    }
-
-    pub(super) fn extract_selected_file_manager_archive(&mut self, cx: &mut Context<Self>) {
-        let Some(entry) = self.single_selected_file_manager_file(cx) else {
-            return;
-        };
-        if !can_extract_archive(&entry.name) {
-            return;
-        }
-        let current_path = self.file_manager.read(cx).path.clone();
-        let context = super::local_file_audit_context(oxideterm_audit::AuditSource::User);
-        let mut audit = oxideterm_audit::AuditOperation::in_context(
-            context.as_ref(),
-            oxideterm_audit::AuditCategory::File,
-            "file_archive_extract",
-            Some(&format!(
-                "archive={}; destination={current_path}",
-                entry.path
-            )),
-        );
-        let child_context = context.map(|mut context| {
-            context.parent_id = audit.id().map(str::to_owned);
-            context
-        });
-        let mut completed = 0usize;
-        let mut skipped = 0usize;
-        let mut written_bytes = 0u64;
-        let mut failed_object = None;
-        let result = extract_local_archive(&entry.path, &current_path, &mut |path, outcome| {
-            let (audit_outcome, bytes) = match outcome {
-                ArchiveEntryOutcome::Completed(bytes) => {
-                    completed += 1;
-                    written_bytes = written_bytes.saturating_add(bytes);
-                    (oxideterm_audit::AuditOutcome::Succeeded, Some(bytes))
-                }
-                ArchiveEntryOutcome::Skipped => {
-                    skipped += 1;
-                    (oxideterm_audit::AuditOutcome::Unchanged, None)
-                }
-                ArchiveEntryOutcome::Failed => {
-                    failed_object = Some(path.to_string_lossy().into_owned());
-                    (oxideterm_audit::AuditOutcome::Failed, None)
-                }
-            };
-            if let Some(context) = child_context.as_ref() {
-                context
-                    .operation(
-                        oxideterm_audit::AuditCategory::File,
-                        "file_archive_extract",
-                        Some(&format!("{} → {}", entry.path, path.display())),
-                    )
-                    .finish(
-                        audit_outcome,
-                        oxideterm_audit::AuditEvidence::Protocol,
-                        None,
-                        bytes,
-                    );
-            }
-        });
-        audit.summary(&format!("archive={}; destination={current_path}; completed_entries={completed}; skipped_entries={skipped}; failed_object={}", entry.path, failed_object.as_deref().unwrap_or("none")));
-        audit.finish(
-            if result.is_ok() && skipped == 0 {
-                oxideterm_audit::AuditOutcome::Succeeded
-            } else if completed > 0 || result.is_ok() {
-                oxideterm_audit::AuditOutcome::Partial
-            } else {
-                oxideterm_audit::AuditOutcome::Failed
-            },
-            oxideterm_audit::AuditEvidence::Protocol,
-            None,
-            (completed > 0).then_some(written_bytes),
-        );
-        match result {
-            Ok(()) => {
-                self.refresh_file_manager(cx);
-                self.push_file_manager_toast(
-                    self.i18n.t("fileManager.operationSuccess"),
-                    Some(entry.name),
-                    TerminalNoticeVariant::Success,
-                    cx,
-                );
-            }
-            Err(error) => self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error),
-                TerminalNoticeVariant::Error,
-                cx,
-            ),
-        }
-        self.dismiss_file_manager_context_menu(cx);
     }
 
     pub(super) fn copy_file_manager_path_to_clipboard(
@@ -2153,36 +1262,18 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let mut terminal_config = self.local_terminal_config();
-        terminal_config.cwd = Some(PathBuf::from(self.file_manager.read(cx).path.clone()));
-        if let Err(error) = self.create_local_terminal_tab_with_config(
-            terminal_config,
-            self.local_terminal_tab_title(),
+        self.pointer(
+            FileManagerPointer::OpenTerminal(self.file_manager.read(cx).path.clone()),
             window,
             cx,
-        ) {
-            self.push_file_manager_toast(
-                self.i18n.t("fileManager.error"),
-                Some(error.to_string()),
-                TerminalNoticeVariant::Error,
-                cx,
-            );
-            return;
-        }
-        self.push_file_manager_toast(
-            self.i18n.t("fileManager.terminalOpened"),
-            None,
-            TerminalNoticeVariant::Success,
-            cx,
         );
-        cx.notify();
     }
 
-    pub(in crate::workspace) fn close_file_manager_dialog(&mut self, cx: &mut Context<Self>) {
+    pub fn close_file_manager_dialog(&mut self, cx: &mut Context<Self>) {
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.close_dialog(cx);
         });
-        self.ime_marked_text = None;
+        self.request(FileManagerRequest::ClearIme, cx);
     }
 
     pub(super) fn begin_file_manager_rich_dialog_exit(&mut self, cx: &mut Context<Self>) -> bool {
@@ -2190,87 +1281,26 @@ impl WorkspaceApp {
             &self.tokens,
             oxideterm_gpui_ui::motion::MotionDuration::Overlay,
         );
-        self.ime_marked_text = None;
+        self.request(FileManagerRequest::ClearIme, cx);
         self.file_manager.update(cx, |file_manager, cx| {
             file_manager.begin_rich_dialog_exit(delay, cx)
         })
     }
 
-    pub(in crate::workspace) fn push_file_manager_toast(
+    pub fn push_file_manager_toast(
         &self,
         title: String,
         description: Option<String>,
-        variant: TerminalNoticeVariant,
+        variant: FileManagerNoticeKind,
         cx: &App,
     ) {
-        self.push_workspace_notice(
-            TerminalNotice {
+        self.request(
+            FileManagerRequest::Notice {
                 title,
                 description,
-                status_text: None,
-                progress: None,
-                variant,
+                kind: variant,
             },
             cx,
         );
-    }
-}
-
-fn append_file_manager_stream_preview_chunk(
-    state: &mut FileManagerPreviewStreamState,
-    data: Vec<u8>,
-    eof: bool,
-) {
-    if data.is_empty() && !eof {
-        return;
-    }
-
-    let mut bytes = std::mem::take(&mut state.carry_bytes);
-    bytes.extend_from_slice(&data);
-    let mut text = String::new();
-
-    match std::str::from_utf8(&bytes) {
-        Ok(valid) => text.push_str(valid),
-        Err(error) => {
-            let valid_up_to = error.valid_up_to();
-            if valid_up_to > 0 {
-                if let Ok(valid) = std::str::from_utf8(&bytes[..valid_up_to]) {
-                    text.push_str(valid);
-                }
-            }
-            let tail = &bytes[valid_up_to..];
-            if eof {
-                text.push_str(&String::from_utf8_lossy(tail));
-            } else {
-                state.carry_bytes.extend_from_slice(tail);
-            }
-        }
-    }
-
-    if eof && !state.carry_bytes.is_empty() {
-        text.push_str(&String::from_utf8_lossy(&state.carry_bytes));
-        state.carry_bytes.clear();
-    }
-
-    append_file_manager_stream_preview_text(state, &text, eof);
-}
-
-fn append_file_manager_stream_preview_text(
-    state: &mut FileManagerPreviewStreamState,
-    text: &str,
-    eof: bool,
-) {
-    if text.is_empty() && !eof {
-        return;
-    }
-    let combined = format!("{}{}", state.carry_text, text);
-    let mut parts = combined.split('\n').map(str::to_string).collect::<Vec<_>>();
-
-    if eof {
-        state.carry_text.clear();
-        state.lines.extend(parts);
-    } else {
-        state.carry_text = parts.pop().unwrap_or_default();
-        state.lines.extend(parts);
     }
 }

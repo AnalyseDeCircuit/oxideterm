@@ -30,7 +30,7 @@ impl WorkspaceApp {
         .ok();
         // Tab insertion is the mount boundary for exact focus authority. The
         // stable reference is optional because not every internal tab is openable.
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
+        self.ai.authority.update(cx, |runtime, _cx| {
             runtime.register_app_surface(tab_id, surface_label, stable_surface_ref);
         });
     }

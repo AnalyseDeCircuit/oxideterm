@@ -63,7 +63,7 @@ impl WorkspaceApp {
             // applying its deltas. Only lifecycle effects below reach the shell.
             AiStreamApplyOutcome::Applied => return,
             AiStreamApplyOutcome::Completed => {
-                self.ai_runtime_context.update(cx, |runtime, _cx| {
+                self.ai.authority.update(cx, |runtime, _cx| {
                     runtime.finish_tool_session(
                         generation,
                         oxideterm_ai::RuntimeRevocationReason::ToolSessionFinished,
@@ -79,7 +79,7 @@ impl WorkspaceApp {
                 }
             }
             AiStreamApplyOutcome::Failed(safe_error) => {
-                self.ai_runtime_context.update(cx, |runtime, _cx| {
+                self.ai.authority.update(cx, |runtime, _cx| {
                     runtime.finish_tool_session(
                         generation,
                         oxideterm_ai::RuntimeRevocationReason::ToolSessionFinished,

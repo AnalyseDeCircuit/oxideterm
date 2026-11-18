@@ -2,12 +2,12 @@ use oxideterm_ai::terminal_observation::{
     AiTerminalCommandWait, ai_terminal_command_output_ready, ai_terminal_input_payload,
     ai_terminal_input_wait_reason, ai_terminal_observation_data, ai_terminal_tui_state,
     ai_terminal_wait_match as match_terminal_wait, annotate_ai_run_command_execution_result,
-    looks_waiting_for_input, terminal_delta_output,
+    terminal_delta_output,
 };
 
 pub(in crate::workspace) use oxideterm_ai::tool_result_protocol::{
     ai_policy_risk_label, annotate_executed_ai_tool_result_policy, executed_summary,
-    pre_execution_rejected_ai_tool_result, rejected_ai_tool_result, unavailable_ai_tool_result,
+    pre_execution_rejected_ai_tool_result, rejected_ai_tool_result,
 };
 pub(in crate::workspace) fn ai_terminal_command_record_json(
     record: &oxideterm_gpui_terminal::TerminalAiCommandRecord,

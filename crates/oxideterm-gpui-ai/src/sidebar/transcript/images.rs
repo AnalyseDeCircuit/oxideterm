@@ -121,7 +121,12 @@ impl AiAssistantSidebarView {
         let runtime = &self.bindings.runtime;
         let request = self.bindings.request.clone();
         self.state.update(cx, |state, cx| {
-            if state.chat_ui().image_preview.as_ref().is_some_and(|(id, _)| id == &image.id) {
+            if state
+                .chat_ui()
+                .image_preview
+                .as_ref()
+                .is_some_and(|(id, _)| id == &image.id)
+            {
                 state.set_chat_image_preview(None);
                 cx.notify();
                 return;
@@ -131,8 +136,13 @@ impl AiAssistantSidebarView {
             let target = conversation.clone();
             let work = runtime.spawn_blocking(move || {
                 let bytes = match image.data {
-                    Some(data) => base64::engine::general_purpose::STANDARD.decode(data.as_bytes()).ok()?,
-                    None => store?.image_bytes(target.as_deref()?, &image.id).ok()?.to_vec(),
+                    Some(data) => base64::engine::general_purpose::STANDARD
+                        .decode(data.as_bytes())
+                        .ok()?,
+                    None => store?
+                        .image_bytes(target.as_deref()?, &image.id)
+                        .ok()?
+                        .to_vec(),
                 };
                 let format = match image.mime_type.as_str() {
                     "image/jpeg" => gpui::ImageFormat::Jpeg,
@@ -151,7 +161,9 @@ impl AiAssistantSidebarView {
                         state.set_chat_image_preview(Some(preview));
                         cx.notify();
                     } else {
-                        cx.defer(move |cx| request(AiTranscriptRequest::ImagePreviewFailed, None, cx));
+                        cx.defer(move |cx| {
+                            request(AiTranscriptRequest::ImagePreviewFailed, None, cx)
+                        });
                     }
                 });
             });

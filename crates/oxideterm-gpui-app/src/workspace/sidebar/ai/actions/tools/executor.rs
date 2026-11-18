@@ -1,4 +1,3 @@
-
 /// Executes a v2 live read after the UI broker resolved an opaque owner
 /// handle to this exact node. No target identifier crosses this boundary.
 async fn read_live_resource(
@@ -266,14 +265,7 @@ async fn write_live_resource(
             "write",
         );
     };
-    let write_result = write_remote_file(
-        services,
-        &sftp_owner,
-        path,
-        content,
-        expected_hash,
-    )
-    .await;
+    let write_result = write_remote_file(services, &sftp_owner, path, content, expected_hash).await;
     if matches!(
         &write_result,
         Err(AiRemoteFileWriteError::Sftp(error)) if error.is_channel_recoverable()

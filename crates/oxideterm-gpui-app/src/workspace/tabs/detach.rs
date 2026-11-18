@@ -232,7 +232,7 @@ impl WorkspaceApp {
             return false;
         };
         for id in removed {
-            self.ai_runtime_context
+            self.ai.authority
                 .update(cx, |runtime, _| runtime.revoke_app_surface(id));
         }
         self.register_tab_surface(&tab, cx);
@@ -261,7 +261,7 @@ impl WorkspaceApp {
             return;
         };
         for id in removed {
-            self.ai_runtime_context
+            self.ai.authority
                 .update(cx, |runtime, _| runtime.revoke_app_surface(id));
         }
         self.register_tab_surface(&tab, cx);

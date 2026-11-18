@@ -166,7 +166,7 @@ impl WorkspaceApp {
                     self.settings_workspace.read(cx),
                     self.settings_store.settings(),
                     self.settings_views.ai_providers.read(cx),
-                    &self.ai.skills.registry.read(),
+                    &self.ai.skills.read(),
                     hasher,
                 );
             }
@@ -331,7 +331,7 @@ impl WorkspaceApp {
         // of relying on stale in-memory settings or browser-style stores.
         self.apply_loaded_settings_to_runtime(&previous_settings, &settings, cx);
         self.refresh_ai_settings_views(&previous_settings, &settings, cx);
-        self.refresh_ai_skill_registry();
+        self.refresh_ai_skill_registry(cx);
         self.emit_native_plugin_settings_events(&previous_settings, &settings, cx);
         self.queue_cloud_sync_dirty_refresh(cx);
         self.sync_tab_titles(cx);

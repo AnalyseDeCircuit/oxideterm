@@ -9,7 +9,7 @@ impl WorkspaceApp {
     ) -> Result<Vec<oxideterm_ai::RuntimeOwnerKey>, String> {
         if !self.ai.state.read(cx).run_accepts_tools(generation)
             || !self
-                .ai_runtime_context
+                .ai.authority
                 .read(cx)
                 .is_active_tool_session(generation, session)
         {
@@ -44,7 +44,7 @@ impl WorkspaceApp {
         let mut keys = handles
             .iter()
             .map(|handle| {
-                self.ai_runtime_context
+                self.ai.authority
                     .read(cx)
                     .delegated_agent_target(session, handle)
                     .map(|(key, _)| key)

@@ -12,7 +12,7 @@ impl WorkspaceApp {
             ai.set_conversation_loading(conversation_id, true);
             (replaced_generation, generation, sender)
         });
-        let tool_session = self.ai_runtime_context.update(cx, |runtime, _cx| {
+        let tool_session = self.ai.authority.update(cx, |runtime, _cx| {
             // The UI run owner chooses which stream was replaced. The broker
             // must not infer that starting a stream cancels every other run.
             for generation in replaced_generation {

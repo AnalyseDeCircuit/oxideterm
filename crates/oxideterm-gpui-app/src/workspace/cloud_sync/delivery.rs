@@ -296,7 +296,7 @@ impl WorkspaceApp {
             settings.acknowledge_external_store_state()
         });
         self.sync_ssh_config_sync_service();
-        self.refresh_ai_skill_registry();
+        self.refresh_ai_skill_registry(cx);
         self.emit_native_plugin_settings_events(previous, &settings, cx);
         self.sync_tab_titles(cx);
         self.invalidate_cloud_sync_snapshot_caches(cx);

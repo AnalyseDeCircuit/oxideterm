@@ -70,7 +70,7 @@ impl WorkspaceApp {
     ) -> AgentExecution {
         let runtime = self.ai.state.read(cx).agents.services.runtime.clone();
         runtime.set_concurrency(self.agent_concurrency());
-        let scope = self.ai_runtime_context.read(cx).agent_scope(
+        let scope = self.ai.authority.read(cx).agent_scope(
             session,
             config
                 .tools
@@ -187,7 +187,7 @@ impl WorkspaceApp {
             let mut labels = Vec::new();
             for handle in handles {
                 let (owner, label) = self
-                    .ai_runtime_context
+                    .ai.authority
                     .read(cx)
                     .delegated_agent_target(
                         session,
@@ -240,7 +240,7 @@ impl WorkspaceApp {
             });
             let model = self.global_agent_options().default_model;
             let parent_targets = self
-                .ai_runtime_context
+                .ai.authority
                 .read(cx)
                 .agent_scope(session, snapshot.scope.tools)
                 .targets;
@@ -362,7 +362,7 @@ impl WorkspaceApp {
                 ai.refresh_agent_records();
                 generations
             });
-            self.ai_runtime_context.update(cx, |host, _cx| {
+            self.ai.authority.update(cx, |host, _cx| {
                 for generation in generations {
                     host.finish_tool_session(
                         generation,
@@ -445,7 +445,7 @@ impl WorkspaceApp {
             stream
         });
         let session = self
-            .ai_runtime_context
+            .ai.authority
             .update(cx, |host, _cx| {
                 let session = host.begin_tool_session(generation);
                 host.restrict_agent_session(&session, &snapshot.scope)
@@ -475,4 +475,15 @@ impl WorkspaceApp {
             .update(cx, |ai, _cx| ai.set_chat_stream_task(generation, task));
         Ok(())
     }
+}
+
+impl WorkspaceApp {
+    pub(in crate::workspace) fn global_agent_options(&self) -> oxideterm_ai::agent::AgentOptions {
+        oxideterm_gpui_settings_view::ai::subagents::global_agent_options(self.settings_store.settings())
+    }
+
+    fn agent_concurrency(&self) -> usize {
+        oxideterm_gpui_settings_view::ai::subagents::agent_concurrency(self.settings_store.settings())
+    }
+
 }

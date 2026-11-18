@@ -149,6 +149,7 @@ pub use responses_state::{
     append_responses_round, has_responses_history, responses_round_state, scope_responses_history,
 };
 pub use runtime_context::{
+    AiRunCommandOwner, AiRuntimeAuthority, AiSftpRuntimeOwner,
     RUNTIME_CONTEXT_MESSAGE_ID, RuntimeCapability, RuntimeCapabilityRegistry, RuntimeContextError,
     RuntimeContextSnapshot, RuntimeHandleId, RuntimeHandleProjection, RuntimeOwnerGeneration,
     RuntimeOwnerKey, RuntimeOwnerKind, RuntimeOwnerRegistration, RuntimeRegistryEpoch,

@@ -11,27 +11,8 @@ mod inspection;
 use inspection::InspectionPage;
 
 pub(super) fn local_inspection_preview(path: &str) -> Option<oxideterm_local_files::LocalPreview> {
-    use std::io::Read;
-    let mut file = std::fs::File::open(path).ok()?;
-    let mut header = zeroize::Zeroizing::new([0; 64]);
-    let count = file.read(&mut header[..]).ok()?;
-    let extension = std::path::Path::new(path)
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let mime = oxideterm_preview::inspection_mime_type(&extension, &header[..count])?;
-    let size = file.metadata().ok()?.len();
-    Some(if size > oxideterm_local_files::MAX_PREVIEW_SIZE {
-        oxideterm_local_files::LocalPreview::TooLarge { size }
-    } else {
-        oxideterm_local_files::LocalPreview::Document {
-            path: path.into(),
-            mime_type: mime.into(),
-        }
-    })
+    oxideterm_local_files::local_inspection_preview(path, oxideterm_preview::inspection_mime_type)
 }
-
 enum RenderedPage {
     Image(Arc<RenderImage>, u32, f32),
     Table(TablePage),

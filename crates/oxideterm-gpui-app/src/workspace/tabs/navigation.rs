@@ -426,7 +426,7 @@ impl WorkspaceApp {
     ) {
         // This method is also the shared terminal-session close path for local
         // panes. Revoke only this session; NodeRouter remains the SSH owner.
-        self.ai_runtime_context.update(cx, |runtime, _cx| {
+        self.ai.authority.update(cx, |runtime, _cx| {
             runtime.revoke_terminal_session(session_id);
         });
         let forwarding_registry = self.forwarding_service.registry().clone();
@@ -1096,7 +1096,7 @@ impl WorkspaceApp {
         }
         // Final tab removal revokes focus authority before any deferred UI work
         // can observe a replacement tab with the same presentation kind.
-        self.ai_runtime_context
+        self.ai.authority
             .update(cx, |runtime, _cx| runtime.revoke_app_surface(tab.id));
         self.apply_tab_mount_cleanup(mount_cleanup, window.as_deref_mut(), cx);
         self.sync_host_tools_lifecycle(false, cx);

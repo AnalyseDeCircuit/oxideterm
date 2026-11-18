@@ -1,0 +1,28 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-file-manager"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+gpui.workspace = true
+chrono.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-editor-core = { path = "../oxideterm-editor-core" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-preview = { path = "../oxideterm-preview" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+tempfile = "3.23"
+serde_json.workspace = true

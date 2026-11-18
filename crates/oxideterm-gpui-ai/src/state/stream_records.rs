@@ -356,6 +356,103 @@ impl AiWorkspaceEntity {
         cx.notify();
     }
 }
+
+impl AiWorkspaceEntity {
+    pub fn persist_ai_assistant_turn_end(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        status: &str,
+    ) {
+        let Some(message) = self.conversation_state()
+            .conversations
+            .iter()
+            .find(|conversation| conversation.id == conversation_id)
+            .and_then(|conversation| {
+                conversation
+                    .messages
+                    .iter()
+                    .find(|message| message.id == message_id)
+            })
+        else {
+            return;
+        };
+        let parts = message
+            .turn
+            .as_ref()
+            .and_then(|turn| turn.get("parts"))
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([]));
+        let has_parts = parts.as_array().is_some_and(|parts| !parts.is_empty());
+        let tool_round_count = message
+            .turn
+            .as_ref()
+            .and_then(|turn| turn.get("toolRounds"))
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0);
+        let plain_text_summary =
+            ai_turn_plain_text_summary(message).unwrap_or_else(|| message.content.clone());
+        let now = ai_now_ms();
+        let mut entries = Vec::new();
+        if has_parts {
+            entries.push(ai_transcript_entry(
+                format!("transcript-assistant-parts-{message_id}"),
+                conversation_id,
+                "assistant_part",
+                serde_json::json!({
+                    "parts": parts,
+                    "completeTurnParts": true,
+                }),
+                Some(message_id.to_string()),
+                Some(message_id.to_string()),
+                now,
+            ));
+        }
+        entries.push(ai_transcript_entry(
+            format!("transcript-assistant-end-{message_id}"),
+            conversation_id,
+            "assistant_turn_end",
+            serde_json::json!({
+                "status": status,
+                "messageId": message_id,
+                "plainTextSummary": plain_text_summary,
+                "toolRoundCount": tool_round_count,
+            }),
+            Some(message_id.to_string()),
+            Some(message_id.to_string()),
+            now,
+        ));
+        self.persist_transcript_entries(conversation_id.to_string(), entries);
+    }
+
+    pub fn persist_ai_removed_assistant_turn_end(
+        &self,
+        conversation_id: &str,
+        message_id: &str,
+        status: &str,
+    ) {
+        let now = ai_now_ms();
+        self.persist_transcript_entries(
+            conversation_id.to_string(),
+            vec![ai_transcript_entry(
+                format!("transcript-assistant-end-{message_id}"),
+                conversation_id,
+                "assistant_turn_end",
+                serde_json::json!({
+                    "status": status,
+                    "messageId": message_id,
+                    "plainTextSummary": "",
+                    "toolRoundCount": 0,
+                }),
+                Some(message_id.to_string()),
+                Some(message_id.to_string()),
+                now,
+            )],
+        );
+    }
+
+}
 impl AiWorkspaceEntity {
     pub fn apply_ai_guardrail(
         &mut self,

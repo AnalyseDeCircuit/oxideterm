@@ -55,4 +55,3 @@ impl WorkspaceApp {
         self.begin_disclosure_motion(format!("ai:{key}:tool"), expanded, cx);
     }
 }
-
