@@ -1,7 +1,7 @@
 use oxideterm_gpui_ai::conversation::context::{
     AiEnvironmentSnapshot, AiIdeContext, AiRuntimeCommandRecord, AiTerminalPaneContext, AiTerminalReferenceSource,
     build_environment_prompt, build_ide_code_context, build_reference_context, build_single_terminal_context,
-    build_split_terminal_context,
+    build_split_terminal_context, capture_command_records, ai_local_os_label, ai_terminal_environment,
 };
 
 impl WorkspaceApp {
@@ -84,36 +84,10 @@ impl WorkspaceApp {
         &self,
         cx: &mut Context<Self>,
     ) -> Vec<AiRuntimeCommandRecord> {
-        // Command history remains owned by terminal panes and is never copied
-        // from secret-capable AI tool arguments.
-        let mut records = Vec::new();
-        let mut seen = HashSet::new();
-        let tab_host = self.tab_host.read(cx);
-        for (pane_id, pane) in tab_host.panes() {
-            if self.session_id_for_pane(*pane_id, cx).is_none() {
-                continue;
-            }
-            for record in pane.read(cx).ai_command_records() {
-                if !seen.insert(record.command_id.clone()) {
-                    continue;
-                }
-                let source = ai_ledger_source_from_terminal_source(record.source);
-                let status = ai_ledger_status_from_terminal_status(record.status);
-                records.push(AiRuntimeCommandRecord {
-                    command_id: record.command_id,
-                    command: record.command,
-                    cwd: None,
-                    source,
-                    status,
-                    exit_code: record.exit_code.map(i64::from),
-                    started_at: record.started_at as i64,
-                    finished_at: record.finished_at.map(|value| value as i64),
-                    approval_mode: None,
-                    risk: "execute".to_string(),
-                });
-            }
-        }
-        records
+        let tabs = self.tab_host.read(cx);
+        capture_command_records(tabs.panes().iter().filter_map(|(id, pane)| {
+            self.session_id_for_pane(*id, cx).map(|_| pane.read(cx).ai_command_records())
+        }).flatten())
     }
 
     pub(in crate::workspace) fn session_id_for_pane(
@@ -287,60 +261,7 @@ impl WorkspaceApp {
     }
 }
 
-pub(in crate::workspace) fn ai_local_os_label() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "macOS"
-    } else if cfg!(target_os = "windows") {
-        "Windows"
-    } else {
-        "Linux"
-    }
-}
-
-fn ai_terminal_environment(kind: oxideterm_terminal::TerminalSessionKind, local_os: &str) -> String {
-    use oxideterm_terminal::TerminalSessionKind;
-    // Telnet and serial panes share the local tab kind but run on another target.
-    match kind {
-        TerminalSessionKind::LocalPty => format!("Local ({local_os}; shell unverified)"),
-        TerminalSessionKind::SshPty => "SSH (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Mosh => "Mosh (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Telnet => "Telnet (remote OS and shell unverified)".to_string(),
-        TerminalSessionKind::Serial => {
-            "Serial device (OS and command interface unverified)".to_string()
-        }
-        TerminalSessionKind::Ble => {
-            "BLE device (OS and command interface unverified)".to_string()
-        }
-    }
-}
-
 pub(in crate::workspace) use oxideterm_ai::tool_resources::ai_tab_kind_label;
-
-pub(in crate::workspace) fn ai_ledger_source_from_terminal_source(
-    source: TerminalCommandMarkDetectionSource,
-) -> String {
-    match source {
-        TerminalCommandMarkDetectionSource::Ai => "ai.terminal_input",
-        TerminalCommandMarkDetectionSource::Broadcast => "broadcast",
-        TerminalCommandMarkDetectionSource::ShellIntegration => "shell_integration",
-        TerminalCommandMarkDetectionSource::CommandBar => "command_bar",
-        TerminalCommandMarkDetectionSource::QuickCommand => "quick_command",
-        TerminalCommandMarkDetectionSource::UserInputObserved => "user.terminal_input",
-        TerminalCommandMarkDetectionSource::Heuristic => "user_promoted",
-    }
-    .to_string()
-}
-
-pub(in crate::workspace) fn ai_ledger_status_from_terminal_status(
-    status: oxideterm_gpui_terminal::TerminalCommandFactStatus,
-) -> String {
-    match status {
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Open => "running",
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Closed => "completed",
-        oxideterm_gpui_terminal::TerminalCommandFactStatus::Stale => "stale",
-    }
-    .to_string()
-}
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn ai_ambient_context_budget(&self) -> usize {
@@ -348,25 +269,5 @@ impl WorkspaceApp {
         let window = oxideterm_ai::model_context_window(settings.active_model.as_deref().unwrap_or_default(),
             &settings.model_context_windows, settings.active_provider_id.as_deref(), &settings.user_context_windows);
         oxideterm_ai::agent::ambient_context_budget(window.max(1) as usize)
-    }
-}
-
-#[cfg(test)]
-mod terminal_environment_tests {
-    use super::ai_terminal_environment;
-    use oxideterm_terminal::TerminalSessionKind;
-
-    #[test]
-    fn only_local_pty_inherits_the_application_host_os() {
-        for (kind, expected) in [
-            (TerminalSessionKind::LocalPty, "Local (macOS; shell unverified)"),
-            (TerminalSessionKind::SshPty, "SSH (remote OS and shell unverified)"),
-            (TerminalSessionKind::Mosh, "Mosh (remote OS and shell unverified)"),
-            (TerminalSessionKind::Telnet, "Telnet (remote OS and shell unverified)"),
-            (TerminalSessionKind::Serial, "Serial device (OS and command interface unverified)"),
-            (TerminalSessionKind::Ble, "BLE device (OS and command interface unverified)"),
-        ] {
-            assert_eq!(ai_terminal_environment(kind, "macOS"), expected);
-        }
     }
 }

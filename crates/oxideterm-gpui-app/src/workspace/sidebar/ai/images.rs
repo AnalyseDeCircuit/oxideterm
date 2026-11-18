@@ -37,44 +37,13 @@ impl WorkspaceApp {
         if !self.check_ai_image_input(cx) {
             return;
         }
-        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
-            files: true,
-            directories: false,
-            multiple: true,
-            prompt: Some(self.i18n.t("ai.images.add").into()),
+        let owner = cx.weak_entity();
+        let prompt = self.i18n.t("ai.images.add");
+        self.ai.state.update(cx, |ai, cx| {
+            ai.select_chat_images(prompt, move |paths, cx| {
+                let _ = owner.update(cx, |app, cx| app.import_ai_image_paths(paths, cx));
+            }, cx);
         });
-        let conversation = self
-            .ai
-            .state
-            .read(cx)
-            .conversation_state()
-            .active_conversation_id
-            .clone();
-        let task = cx.spawn(async move |weak, cx| {
-            let paths = receiver.await;
-            let _ = weak.update(cx, |this, cx| {
-                this.ai.state.update(cx, |ai, _| {
-                    ai.set_chat_image_import(None);
-                });
-                if this
-                    .ai
-                    .state
-                    .read(cx)
-                    .conversation_state()
-                    .active_conversation_id
-                    != conversation
-                {
-                    return;
-                }
-                if let Ok(Ok(Some(paths))) = paths {
-                    this.import_ai_image_paths(paths, cx);
-                }
-                cx.notify();
-            });
-        });
-        self.ai
-            .state
-            .update(cx, |ai, _| ai.set_chat_image_import(Some(task)));
     }
 
     pub(in crate::workspace) fn import_ai_image_paths(
@@ -90,31 +59,14 @@ impl WorkspaceApp {
         item: &gpui::ClipboardItem,
         cx: &mut Context<Self>,
     ) -> bool {
-        for entry in item.entries() {
-            match entry {
-                gpui::ClipboardEntry::Image(image) => {
-                    self.import_ai_images(vec![AiImageSource::Clipboard(image.bytes.clone())], cx);
-                    return true;
-                }
-                gpui::ClipboardEntry::ExternalPaths(paths) => {
-                    self.import_ai_image_paths(paths.paths().to_vec(), cx);
-                    return true;
-                }
-                _ => {}
-            }
-        }
-        false
+        let Some(sources) = AiImageSource::from_clipboard(item) else { return false };
+        self.import_ai_images(sources, cx);
+        true
     }
 
     fn ai_image_input_available(&self, cx: &App) -> Result<(), String> {
         let config = self.resolve_ai_stream_config(cx)?;
-        if config.execution_backend == AiExecutionBackend::Acp
-            || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) != Some(false)
-        {
-            Ok(())
-        } else {
-            Err(self.i18n.t("ai.images.model_unavailable"))
-        }
+        oxideterm_gpui_ai::state::images::check_chat_image_model(&config, &self.i18n)
     }
 
     fn check_ai_image_input(&mut self, cx: &mut Context<Self>) -> bool {
@@ -156,15 +108,7 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) {
         if let Some(pending) = self.ai.state.update(cx, |ai, _| ai.consume_text_only_image_request(id)) {
-            self.start_ai_chat_stream_after_budget_preflight(
-                pending.conversation_id,
-                pending.config,
-                pending.request_content,
-                pending.task_system_prompt,
-                pending.rag_system_prompt,
-                true,
-                cx,
-            );
+            self.start_ai_chat_stream_after_budget_preflight(pending, true, cx);
         }
     }
 }

@@ -1,11 +1,13 @@
 use std::hash::Hash;
 
+pub mod actions;
 pub mod acp_file_review;
 pub mod acp_terminal;
 mod acp_turn;
-mod agents;
+pub mod agents;
 pub mod terminal_watch;
-pub use acp_turn::AiAcpChatLaunch;
+pub mod terminal_tools;
+pub use acp_turn::{AiAcpChatLaunch, prepare_acp_chat_launch};
 mod provider;
 pub use provider::{AiProviderSendPlan, AiProviderTurn};
 
@@ -49,6 +51,47 @@ impl<Node: Clone + Eq + Hash + 'static, Terminal: Clone + 'static>
             acp,
             background,
         }
+    }
+
+    pub fn sync_acp_plugins(
+        &self, revisions: Vec<crate::acp::AcpPluginRevision>,
+        settings: &oxideterm_settings::AiSettings, cx: &mut App,
+    ) -> Vec<String> {
+        let bindings = settings.acp_agents.iter().filter_map(|agent| {
+            Some((agent.id.clone(), agent.plugin_id.clone()?))
+        }).collect::<Vec<_>>();
+        let changed = self.acp.update(cx, |entity, cx| entity.sync_plugins(revisions, &bindings, cx));
+        for id in &changed {
+            self.state.update(cx, |ai, _| ai.invalidate_acp_agent_metadata(id));
+        }
+        changed
+    }
+
+    pub fn stop_acp_plugin(&self, plugin_id: Option<&str>, settings: &oxideterm_settings::AiSettings, cx: &mut App) {
+        let ids = settings.acp_agents.iter().filter(|agent| {
+            agent.plugin_id.as_deref().is_some_and(|id| plugin_id.is_none_or(|plugin| plugin == id))
+        }).map(|agent| agent.id.clone()).collect::<Vec<_>>();
+        self.acp.update(cx, |entity, cx| entity.stop_agents(&ids, cx));
+        for id in &ids {
+            self.state.update(cx, |ai, _| ai.invalidate_acp_agent_metadata(id));
+        }
+    }
+
+    pub fn resolve_acp_permission(
+        &self,
+        generation: u64,
+        call: &str,
+        option: Option<String>,
+        cx: &mut App,
+    ) {
+        self.state.update(cx, |ai, cx| {
+            ai.resolve_acp_permission_choice(generation, call, option);
+            cx.notify();
+        });
+        self.acp.update(cx, |entity, cx| {
+            entity.remove_file_write_preview(call);
+            cx.notify();
+        });
     }
 
     pub fn apply_stream_event(

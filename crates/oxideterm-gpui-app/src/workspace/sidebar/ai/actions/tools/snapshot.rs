@@ -1,18 +1,19 @@
+use oxideterm_gpui_ai::conversation::terminal_tools::{
+    AiTerminalRequest, AiTerminalTool, AiTerminalToolReply, AiTerminalWatchBindings,
+    capture_terminal_target, capture_terminal_watch,
+};
 use oxideterm_gpui_ai::conversation::terminal_watch::{
-    AiTerminalCommandObservation, AiTerminalWatch, AiTerminalWatchRecord, AiTerminalWatchSample,
+    AiTerminalWatchSample,
     AiTerminalWatchStatus,
 };
 use oxideterm_ai::tool_resources::{
-    AiActiveNodeCapture, AiAppSurface, AiApplicationTool, AiLiveResourceOperation, AiRuntimeHealthCapture, AiSerialTargetInput, AiSshNodeTargetInput,
-    AiTerminalOutputWait,
-    AiTargetCapture, AiTerminalTargetInput, AiTerminalTransport, finish_ai_target_discovery,
+    AiActionResultLite, AiActiveNodeCapture, AiAppSurface, AiApplicationTool, AiRuntimeHealthCapture, AiSshNodeTargetInput,
+    AiTargetCapture, AiStableResourceOperation, ai_live_resource_operation, ai_stable_resource_operation, finish_ai_target_discovery,
     finish_ai_workspace_snapshot, ai_read_stable_resource, dispatch_ai_application_tool,
+    capture_live_transfers, ai_authorized_execution_route, AiAuthorizedExecutionRoute,
     ai_preference_saved, ai_remember_preference_payload, save_ai_user_preference, plan_ai_settings_write,
 };
 use oxideterm_workspace::ActiveSessionReadiness;
-
-pub(in crate::workspace) const AI_CONNECT_TARGET_TIMEOUT_TICKS: usize = 900;
-pub(in crate::workspace) const AI_CONNECT_TARGET_POLL_INTERVAL_MS: u64 = 100;
 
 fn ai_node_readiness(node: &WorkspaceSshNode) -> ActiveSessionReadiness {
     match node.readiness {
@@ -42,26 +43,9 @@ impl WorkspaceApp {
                 .is_agent_scoped_session(session)
         });
         let mut targets = Vec::new();
-        for connection in self.connection_store.connections() {
-            targets.push(AiTargetCapture::SavedConnection {
-                id: &connection.id,
-                name: &connection.name,
-                host: &connection.host,
-                username: &connection.username,
-                port: connection.port,
-                group: &connection.group,
-            });
-        }
-        for tab in self.tabs(cx) {
-            let session_id = tab.root_pane.as_ref().and_then(|root| root.session_id_for_pane(tab.active_pane_id?));
-            targets.push(AiTargetCapture::Surface {
-                tab_id: tab.id,
-                kind: tab.kind.clone(),
-                title: tab.title.clone(),
-                session_id,
-                visible: self.tab_host.read(cx).surface_is_visible(tab.id),
-            });
-        }
+        targets.extend(self.connection_store.connections().iter().map(AiTargetCapture::saved_connection));
+        let tabs = self.tab_host.read(cx);
+        targets.extend(self.tabs(cx).iter().map(|tab| AiTargetCapture::surface(tab, tabs.surface_is_visible(tab.id))));
 
         for (node_id, node) in &self.ssh_nodes {
             let resolved_connection = self.node_router.resolve_connection_now(node_id).ok();
@@ -142,41 +126,10 @@ impl WorkspaceApp {
                 let Some(pane) = tab_host.panes().get(&pane_id) else {
                     continue;
                 };
-                let serial_config = self.serial_terminal_configs.get(&session_id);
-                let (
-                    session_kind,
-                    terminal_buffer,
-                    terminal_screen,
-                    accepts_input,
-                    terminal_running,
-                ) = {
-                    let pane = pane.read(cx);
-                    let screen = pane.ai_screen_snapshot();
-                    let is_alternate_buffer = pane.ai_screen_is_alternate_buffer();
-                    (
-                        pane.session_kind(),
-                        pane.ai_buffer_snapshot(),
-                        ai_terminal_screen_snapshot_json(&screen, is_alternate_buffer),
-                        pane.ai_accepts_input(),
-                        pane.lifecycle().is_running(),
-                    )
-                };
-                targets.push(AiTargetCapture::Terminal(AiTerminalTargetInput {
-                    session_id, tab_id: tab.id, pane_id, pane_label: self.terminal_pane_label(pane_id, cx),
-                    transport: match session_kind {
-                        oxideterm_terminal::TerminalSessionKind::LocalPty => AiTerminalTransport::Local,
-                        oxideterm_terminal::TerminalSessionKind::Serial => AiTerminalTransport::Serial,
-                        oxideterm_terminal::TerminalSessionKind::Telnet => AiTerminalTransport::Telnet,
-                        oxideterm_terminal::TerminalSessionKind::Ble => AiTerminalTransport::Ble,
-                        _ => AiTerminalTransport::Other,
-                    },
-                    serial: serial_config.map(|config| AiSerialTargetInput {
-                        port_path: &config.port_path, baud_rate: config.baud_rate, data_bits: config.data_bits,
-                        stop_bits: config.stop_bits, parity: format!("{:?}", config.parity).to_lowercase(),
-                        flow_control: format!("{:?}", config.flow_control).to_lowercase(),
-                    }),
-                    terminal_buffer, terminal_screen, accepts_input, terminal_running,
-                }));
+                targets.push(capture_terminal_target(
+                    pane.read(cx), session_id, tab.id, pane_id, self.terminal_pane_label(pane_id, cx),
+                    self.serial_terminal_configs.get(&session_id),
+                ));
             }
         }
 
@@ -196,18 +149,15 @@ impl WorkspaceApp {
                 readiness: ai_node_readiness(node),
             })
         });
-        let cutoff = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 60);
-        let (mut total, mut warnings, mut errors) = (0, 0, 0);
-        for entry in &self.notification_center.event_log.entries {
-            if entry.timestamp >= cutoff {
-                total += 1;
-                match entry.severity {
-                    WorkspaceEventSeverity::Warn => warnings += 1,
-                    WorkspaceEventSeverity::Error => errors += 1,
-                    _ => {}
-                }
-            }
-        }
+        let recent_events = oxideterm_ai::tool_resources::recent_runtime_health(
+            self.notification_center.event_log.entries.iter().map(|entry| (
+                entry.timestamp, match entry.severity {
+                    WorkspaceEventSeverity::Warn => Some(false),
+                    WorkspaceEventSeverity::Error => Some(true),
+                    _ => None,
+                },
+            )),
+        );
         let mut snapshot = AiOrchestratorRuntimeSnapshot::background_result_projection();
         snapshot.targets = targets;
         snapshot.runtime_handles = runtime_handles;
@@ -219,7 +169,7 @@ impl WorkspaceApp {
             self.active_content_tab_id(cx),
             self.active_ssh_node_id.as_ref().map(|node_id| node_id.0.as_str()),
             self.settings_store.settings(),
-            ai_transfers_state(&self.sftp_transfer_manager),
+            capture_live_transfers(&self.sftp_transfer_manager),
             AiRuntimeHealthCapture {
                 open_tabs: self.tabs(cx).len(),
                 has_active_tab: self.active_tab_id(cx).is_some(),
@@ -227,23 +177,13 @@ impl WorkspaceApp {
                 local_session_count: self.visible_local_terminal_session_count(cx)
                     + self.detached_local_terminals.len(),
                 node_states: self.ssh_nodes.values().map(ai_node_readiness),
-                recent_events: (total, warnings, errors),
+                recent_events,
             },
         )
     }
 
     pub(in crate::workspace) fn ai_model_backend_services(&self, cx: &App) -> AiModelBackendServices {
         self.ai.state.read(cx).model_backend_services(&self.settings_store.settings().ai)
-    }
-
-    pub(in crate::workspace) fn ai_live_tool_services(&self) -> AiLiveToolServices {
-        // Application owners are copied only into broker-started tasks after a
-        // live handle has passed its final GPUI-thread validation.
-        AiLiveToolServices {
-            node_router: self.node_router.clone(),
-            sftp_transfer_manager: self.sftp_transfer_manager.clone(),
-            backend_runtime: self.forwarding_runtime.clone(),
-        }
     }
 
     /// Rebuilds the model-visible authority projection on the GPUI thread for
@@ -269,61 +209,10 @@ impl WorkspaceApp {
         config: &AiChatStreamConfig,
         cx: &App,
     ) -> Result<Option<AiAcpChatLaunch>, String> {
-        if config.execution_backend != AiExecutionBackend::Acp {
-            return Ok(None);
-        }
-        let agent_id = config
-            .acp_agent_id
-            .as_deref()
-            .filter(|agent_id| !agent_id.trim().is_empty())
-            .ok_or_else(|| "No ACP agent selected for this execution profile.".to_string())?;
-        let mut agent = self
-            .settings_store
-            .settings()
-            .ai
-            .acp_agents
-            .iter()
-            .find(|agent| agent.id == agent_id)
-            .cloned()
-            .ok_or_else(|| format!("ACP agent `{agent_id}` is not configured."))?;
-        if !agent.enabled {
-            return Err(format!("ACP agent `{}` is disabled.", agent.id));
-        }
-        self.resolve_ai_acp_plugin(&mut agent, cx)?;
-
-        let agent_id = agent.id.clone();
-        let display_name = if agent.display_name.trim().is_empty() {
-            agent_id.clone()
-        } else {
-            agent.display_name.clone()
-        };
-        let session_cwd = std::env::current_dir().unwrap_or_else(|_| {
-            agent
-                .cwd
-                .as_deref()
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| std::path::PathBuf::from("."))
-        });
-        let host_policy = oxideterm_ai::AcpHostCapabilityPolicy {
-            fs_read_text_file: agent.capability_policy.fs_read_text_file,
-            fs_write_text_file: agent.capability_policy.fs_write_text_file,
-            terminal: agent.capability_policy.terminal,
-        };
-        // Copy token-bearing args and environment values exactly once into the
-        // zeroizing launch owner that is moved to the ACP worker.
-        let launch_config = oxideterm_ai::AcpLaunchConfig {
-            id: agent_id,
-            display_name,
-            command: agent.command,
-            args: agent.args,
-            env: agent.env,
-            cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
-        };
-        Ok(Some(AiAcpChatLaunch {
-            launch_config,
-            session_cwd,
-            host_policy,
-        }))
+        oxideterm_gpui_ai::conversation::prepare_acp_chat_launch(
+            config, &self.settings_store.settings().ai,
+            |agent| self.resolve_ai_acp_plugin(agent, cx),
+        )
     }
 
     pub(in crate::workspace) fn resolve_ai_acp_permission(
@@ -333,13 +222,7 @@ impl WorkspaceApp {
         option_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.resolve_acp_permission_choice(generation, &tool_call_id, option_id);
-        });
-        self.ai.acp.update(cx, |entity, _cx| {
-            entity.remove_file_write_preview(&tool_call_id);
-        });
-        cx.notify();
+        self.ai.conversations.resolve_acp_permission(generation, &tool_call_id, option_id, cx);
     }
 
     pub(in crate::workspace) fn execute_ai_ui_orchestrator_tool(
@@ -383,13 +266,9 @@ impl WorkspaceApp {
         use AiApplicationTool::*;
         let result = match request {
             ConnectTarget => return self.execute_ai_connect_target(args, window, cx),
-            ObserveTerminal => return self.execute_ai_observe_terminal(tool_session_id, args, cx),
-            SendTerminalInput => return {
-                self.execute_ai_send_terminal_input(tool_session_id, args, window, cx)
-            },
-            GetTerminalCommandStatus => return {
-                self.execute_ai_get_terminal_command_status(tool_session_id, args, cx)
-            },
+            ObserveTerminal => return self.execute_ai_terminal_tool(AiTerminalTool::Observe, tool_session_id, args, cx),
+            SendTerminalInput => return self.execute_ai_terminal_tool(AiTerminalTool::Input, tool_session_id, args, cx),
+            GetTerminalCommandStatus => return self.execute_ai_terminal_tool(AiTerminalTool::Status, tool_session_id, args, cx),
             ReadResource => return self.execute_ai_read_stable_resource(args, cx),
             WriteResource => return self.execute_ai_write_settings_resource(args, window, cx),
             OpenAppSurface => return {
@@ -404,9 +283,8 @@ impl WorkspaceApp {
             ManagePlugin => self.execute_ai_manage_plugin(args, window, cx),
             ListTransportProfiles => Ok(self.execute_ai_list_transport_profiles()),
             OpenTransportProfile => self.execute_ai_open_transport_profile(args, window, cx),
-            GetTransportSessionState => self.execute_ai_get_transport_session_state(tool_session_id, args, cx),
-            ManageSerialSession => self.execute_ai_manage_serial_session(tool_session_id, args, cx),
-            ManageTelnetSession => self.execute_ai_manage_telnet_session(tool_session_id, args, cx),
+            GetTransportSessionState | ManageSerialSession | ManageTelnetSession =>
+                self.execute_ai_terminal_transport_tool(&request, tool_session_id, args, cx),
             ListRemoteDesktopSessions => Ok(self.execute_ai_list_remote_desktop_sessions(cx)),
             ManageRemoteDesktopSession => self.execute_ai_manage_remote_desktop_session(args, window, cx),
             GetCloudSyncState => Ok(self.execute_ai_get_cloud_sync_state(cx)),
@@ -467,87 +345,34 @@ impl WorkspaceApp {
         if let Err(error) = self.validate_ai_runtime_authority(&tool_session_id, &tool_name, &args, cx) {
             let snapshot =
                 self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-            let result = snapshot.to_executed_tool_result(
-                tool_call_id,
-                tool_name,
-                snapshot.fail(
-                    "Runtime target is unavailable.",
-                    ai_runtime_validation_public_code(&error, post_user_approval),
-                    ai_runtime_validation_recovery_message(post_user_approval),
-                    "interactive",
-                ),
-                0,
-            );
-            let _ = sender.send(result);
+            let _ = sender.send(snapshot.tool_owner_rejected(
+                tool_call_id, tool_name, &error, post_user_approval, 0, false,
+            ));
             return;
         }
-        if tool_name == "connect_target" {
-            self.start_ai_connect_target_execution(
-                &conversation_id,
-                tool_session_id,
-                tool_call_id,
-                tool_name,
-                args,
-                sender,
-                window,
-                cx,
-            );
-            return;
+        match ai_authorized_execution_route(&tool_name, &args) {
+            AiAuthorizedExecutionRoute::Connect => self.start_ai_connect_target_execution(
+                &conversation_id, tool_session_id, tool_call_id, tool_name,
+                args, sender, window, cx,
+            ),
+            AiAuthorizedExecutionRoute::LiveFile => self.start_ai_live_resource_execution(
+                tool_session_id, tool_call_id, tool_name, args, post_user_approval, sender, cx,
+            ),
+            kind @ (AiAuthorizedExecutionRoute::RunCommand | AiAuthorizedExecutionRoute::WaitOutput) => {
+                self.start_ai_terminal_execution(
+                    matches!(kind, AiAuthorizedExecutionRoute::RunCommand),
+                    owner, tool_session_id, tool_call_id, tool_name, args,
+                    post_user_approval, dangerous_command_approved, sender, cx,
+                );
+            }
+            AiAuthorizedExecutionRoute::Application => {
+                let result = self.execute_ai_ui_orchestrator_tool(
+                    &conversation_id, &tool_session_id, tool_call_id, tool_name, args, window, cx,
+                );
+                let _ = sender.send(result);
+            }
         }
-        if matches!(
-            tool_name.as_str(),
-            "read_resource" | "write_resource" | "transfer_resource"
-        ) && args.get("handle_id").is_some()
-        {
-            self.start_ai_live_resource_execution(
-                tool_session_id,
-                tool_call_id,
-                tool_name,
-                args,
-                post_user_approval,
-                sender,
-                cx,
-            );
-            return;
-        }
-        if tool_name == "run_command" {
-            self.start_ai_terminal_run_command_execution(
-                owner,
-                tool_session_id,
-                tool_call_id,
-                tool_name,
-                args,
-                post_user_approval,
-                dangerous_command_approved,
-                sender,
-                window,
-                cx,
-            );
-            return;
-        }
-        if tool_name == "wait_terminal_output" {
-            self.start_ai_wait_terminal_output_execution(
-                owner,
-                tool_session_id,
-                tool_call_id,
-                tool_name,
-                args,
-                post_user_approval,
-                sender,
-                cx,
-            );
-            return;
-        }
-        let result = self.execute_ai_ui_orchestrator_tool(
-            &conversation_id,
-            &tool_session_id,
-            tool_call_id,
-            tool_name,
-            args,
-            window,
-            cx,
-        );
-        let _ = sender.send(result);
+
     }
 
     /// Validates a live resource handle once more after approval, then hands
@@ -573,117 +398,28 @@ impl WorkspaceApp {
                     .ok_or_else(|| oxideterm_ai::RuntimeValidationError::new(
                         oxideterm_ai::RuntimeValidationFailure::OwnerClosed,
                     ))?;
-                Ok((operation, node_id, None, Some(fs)))
+                Ok((operation, AiLiveFileOwner::Ide { node_id, file_system: fs }))
             } else {
                 let owner = authority.validate_sftp_handle(&tool_session_id, raw_handle_id, operation.capability())?;
-                Ok((operation, owner.node_id.clone(), Some(owner), None))
+                Ok((operation, AiLiveFileOwner::Sftp(owner)))
             }
         })();
-        let (operation, node_id, sftp_owner, ide_file_system) = match owners {
+        let (operation, owner) = match owners {
             Ok(owners) => owners,
             Err(error) => {
-                self.send_ai_live_resource_validation_failure(
-                    &tool_session_id, tool_call_id, tool_name, sender, error, post_user_approval,
-                    started.elapsed().as_millis(), cx,
-                );
+                let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+                let _ = sender.send(snapshot.tool_owner_rejected(
+                    tool_call_id, tool_name, &error, post_user_approval, started.elapsed().as_millis(), true,
+                ));
                 return;
             }
         };
         let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-        let services = self.ai_live_tool_services();
-        let audit_context = oxideterm_audit::AuditContext::current_request();
-        let execution = async move {
-            let mut sender = sender;
-            let operation = async {
-                match operation {
-                    AiLiveResourceOperation::SftpRead | AiLiveResourceOperation::IdeRead => {
-                        read_live_resource(
-                            &snapshot,
-                            &services,
-                            node_id,
-                            sftp_owner,
-                            &args,
-                            ide_file_system,
-                            post_user_approval,
-                        )
-                        .await
-                    }
-                    AiLiveResourceOperation::SftpWrite | AiLiveResourceOperation::IdeWrite => {
-                        write_live_resource(
-                            &snapshot,
-                            &services,
-                            node_id,
-                            sftp_owner,
-                            &args,
-                            ide_file_system,
-                            post_user_approval,
-                        )
-                        .await
-                    }
-                    AiLiveResourceOperation::SftpStartTransfer => match sftp_owner {
-                        Some(owner) => {
-                            transfer_live_resource(
-                                &snapshot,
-                                &services,
-                                owner,
-                                &args,
-                                post_user_approval,
-                            )
-                            .await
-                        }
-                        None => snapshot.fail(
-                            "SFTP capability is unavailable.",
-                            "runtime_capability_unavailable",
-                            "Rediscover the current SFTP session before retrying.",
-                            "write",
-                        ),
-                    },
-                }
-            };
-            let action = tokio::select! {
-                action = operation => Some(action),
-                _ = sender.closed() => None,
-            };
-            if let Some(action) = action {
-                let _ = sender.send(snapshot.to_executed_tool_result(
-                    tool_call_id,
-                    tool_name,
-                    action,
-                    started.elapsed().as_millis(),
-                ));
-            }
-        };
-        self.forwarding_runtime
-            .spawn(oxideterm_audit::AuditContext::scope_optional(
-                audit_context,
-                execution,
-            ));
-    }
-
-    fn send_ai_live_resource_validation_failure(
-        &mut self,
-        tool_session_id: &ToolSessionId,
-        tool_call_id: String,
-        tool_name: String,
-        sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
-        error: oxideterm_ai::RuntimeValidationError,
-        post_user_approval: bool,
-        duration_ms: u128,
-        cx: &mut Context<Self>,
-    ) {
-        let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(tool_session_id), cx);
-        let result = snapshot.to_executed_tool_result(
-            tool_call_id,
-            tool_name,
-            snapshot.fail(
-                "Runtime resource is unavailable.",
-                ai_runtime_validation_public_code(&error, post_user_approval),
-                ai_runtime_validation_recovery_message(post_user_approval),
-                "write",
-            ),
-            duration_ms,
-        );
-        let _ = sender.send(result);
+        AiLiveToolServices {
+            node_router: self.node_router.clone(),
+            sftp_transfer_manager: self.sftp_transfer_manager.clone(),
+            backend_runtime: self.forwarding_runtime.clone(),
+        }.start(owner, operation, snapshot, args, post_user_approval, tool_call_id, tool_name, started, sender);
     }
 
     fn validate_ai_runtime_authority(
@@ -698,42 +434,6 @@ impl WorkspaceApp {
             |id| self.connection_store.get(id)
                 .and_then(|connection| self.indexed_saved_ssh_node_for_connection(id, connection)).is_some(),
         )
-    }
-
-    /// Validates authority before policy approval. Execution repeats validation
-    /// immediately before dispatch to close the approval-time state-change gap.
-    pub(in crate::workspace) fn preflight_ai_ui_orchestrator_tool(
-        &self,
-        tool_session_id: &ToolSessionId,
-        tool_name: &str,
-        args: &serde_json::Value,
-        cx: &App,
-    ) -> Result<(), oxideterm_ai::RuntimeValidationError> {
-        if matches!(
-            tool_name,
-            "connect_target"
-                | "run_command"
-                | "observe_terminal"
-                | "send_terminal_input"
-                | "get_transport_session_state"
-                | "manage_serial_session"
-                | "manage_telnet_session"
-                | "wait_terminal_output"
-                | "get_terminal_command_status"
-                | "read_resource"
-                | "write_resource"
-                | "transfer_resource"
-                | "open_app_surface"
-                | "get_state"
-                | "inspect_host_tools"
-                | "control_host_tool"
-                | "list_forwards"
-                | "manage_forward"
-        ) {
-            self.validate_ai_runtime_authority(tool_session_id, tool_name, args, cx)
-        } else {
-            Ok(())
-        }
     }
 
     pub(in crate::workspace) fn start_ai_connect_target_execution(
@@ -757,74 +457,22 @@ impl WorkspaceApp {
             window,
             cx,
         );
-        if !base.success {
-            let _ = sender.send(base);
-            return;
-        }
-        if base
-            .envelope
-            .get("summary")
-            .and_then(serde_json::Value::as_str)
-            == Some("Target is already live.")
-        {
-            let _ = sender.send(base);
-            return;
-        }
-        if let Some(ready) = self.ai_connect_target_ready_result(
-            &tool_session_id,
-            &tool_call_id,
-            &tool_name,
-            &args,
-            started.elapsed().as_millis(),
-            cx,
-        ) {
-            let _ = sender.send(ready);
-            return;
-        }
-        cx.spawn(async move |weak, cx| {
-            let mut sender = Some(sender);
-            for _ in 0..AI_CONNECT_TARGET_TIMEOUT_TICKS {
-                // Tauri waits for connectToSaved to finish before returning
-                // connect_target. Keep native's UI-thread bridge patient enough
-                // for slow SSH/proxy chains, while still polling the snapshot.
-                Timer::after(Duration::from_millis(AI_CONNECT_TARGET_POLL_INTERVAL_MS)).await;
-                let ready = weak.update(cx, |this, cx| {
-                    this.ai_connect_target_ready_result(
-                        &tool_session_id,
-                        &tool_call_id,
-                        &tool_name,
-                        &args,
-                        started.elapsed().as_millis(),
-                        cx,
-                    )
-                });
-                match ready {
-                    Ok(Some(result)) => {
-                        if let Some(sender) = sender.take() {
-                            let _ = sender.send(result);
-                        }
-                        return;
+        let initial = oxideterm_gpui_ai::conversation::terminal_watch::connection_needs_wait(&base).then(|| {
+            self.ai_connect_target_ready_result(&tool_session_id, &tool_call_id, &tool_name, &args, started.elapsed().as_millis(), cx)
+        }).flatten();
+        let weak = cx.weak_entity();
+        oxideterm_gpui_ai::conversation::terminal_watch::wait_for_connected_target(
+            base, initial, sender, started, cx, move |base, elapsed, cx| {
+                weak.update(cx, |app, cx| {
+                    if base.is_some() {
+                        let snapshot = app.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
+                        Some(snapshot.connect_target_timeout_result(&tool_call_id, &tool_name, &args, elapsed))
+                    } else {
+                        app.ai_connect_target_ready_result(&tool_session_id, &tool_call_id, &tool_name, &args, elapsed, cx)
                     }
-                    Ok(None) => {}
-                    Err(_) => break,
-                }
-            }
-            if let Some(sender) = sender.take() {
-                let result = weak.update(cx, |this, cx| {
-                    this.ai_connect_target_timeout_result(
-                        &tool_session_id,
-                        &tool_call_id,
-                        &tool_name,
-                        &args,
-                        &base,
-                        started.elapsed().as_millis(),
-                        cx,
-                    )
-                });
-                let _ = sender.send(result.unwrap_or(base));
-            }
-        })
-        .detach();
+                }).ok()
+            },
+        );
     }
 
     pub(in crate::workspace) fn execute_ai_connect_target(
@@ -869,501 +517,108 @@ impl WorkspaceApp {
         snapshot.saved_connection_opened(resource_ref, false)
     }
 
-    pub(in crate::workspace) fn execute_ai_observe_terminal(
-        &self,
-        tool_session_id: &ToolSessionId,
-        args: &serde_json::Value,
+    fn execute_ai_terminal_tool(
+        &self, kind: AiTerminalTool, turn: &ToolSessionId, args: &serde_json::Value,
         cx: &mut Context<Self>,
     ) -> AiActionResultLite {
         let snapshot = self.ai_orchestrator_snapshot(cx);
-        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let session_id = match self.ai.authority.read(cx).validate_terminal_handle(
-            tool_session_id,
-            raw_handle_id,
-            oxideterm_ai::RuntimeCapability::TerminalObserve,
-        ) {
-            Ok(session_id) => session_id,
-            Err(error) => {
-                return snapshot.fail(
-                    "Runtime terminal is unavailable.",
-                    error.public_code(),
-                    "Rediscover the current terminal before observing it.",
-                    "read",
-                );
-            }
-        };
-        let Some(target) = snapshot.terminal_target(session_id) else {
-            return snapshot.fail("Runtime terminal is unavailable.", "runtime_owner_closed", "The terminal pane is no longer registered.", "read");
-        };
-        let pane = self.ai_terminal_pane_for_session(session_id, cx);
-        let pane = pane.as_ref().map(|pane| pane.read(cx));
-        let records = pane.map(|pane| pane.ai_command_records()).unwrap_or_default();
-        snapshot.terminal_observed(target, args, records.iter().rev().map(|record| {
-            ai_terminal_command_capture(record, pane.is_some_and(|pane| pane.ai_command_prompt_returned(&record.command_id)))
-        }), pane.is_some_and(|pane| pane.ai_waiting_for_secret()))
-    }
-
-    pub(in crate::workspace) fn execute_ai_send_terminal_input(
-        &mut self,
-        tool_session_id: &ToolSessionId,
-        args: &serde_json::Value,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AiActionResultLite {
-        let snapshot = self.ai_orchestrator_snapshot(cx);
-        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let session_id = match self.ai.authority.read(cx).validate_terminal_handle(
-            tool_session_id,
-            raw_handle_id,
-            oxideterm_ai::RuntimeCapability::TerminalSendInput,
-        ) {
-            Ok(session_id) => session_id,
-            Err(error) => {
-                return snapshot.fail(
-                    "Runtime terminal is unavailable.",
-                    error.public_code(),
-                    "Rediscover the current terminal before sending input.",
-                    "interactive",
-                );
-            }
-        };
-        let target = snapshot.terminal_target(session_id);
-        let Some((_pane_id, pane)) = self.ai_terminal_session(session_id, cx) else {
-            return snapshot
-                .fail(
-                    "Runtime terminal is unavailable.",
-                    "runtime_owner_closed",
-                    "The terminal pane is no longer registered.",
-                    "interactive",
-                )
-                .with_optional_target(target);
-        };
-        // Interactive input can contain passwords; wipe the assembled payload
-        // immediately after it crosses into the terminal owner.
-        let payload = zeroize::Zeroizing::new(ai_terminal_input_payload(args));
-        if payload.is_empty() {
-            return snapshot
-                .fail(
-                    "No terminal input specified.",
-                    "missing_terminal_input",
-                    "Provide text or request Enter with append_enter.",
-                    "interactive",
-                )
-                .with_optional_target(target);
+        let session = self.ai.authority.read(cx).validate_terminal_handle(
+            turn, args.get("handle_id").and_then(serde_json::Value::as_str), kind.capability(),
+        );
+        match session {
+            Ok(session) => kind.execute(
+                &snapshot, session, self.ai_terminal_pane_for_session(session, cx).as_ref(), args, cx,
+            ),
+            Err(error) => kind.denied(&snapshot, &error),
         }
-        if !pane.read(cx).ai_accepts_input() {
-            return snapshot
-                .fail(
-                    "Failed to send terminal input.",
-                    "terminal_send_failed",
-                    "The terminal writer is no longer available.",
-                    "interactive",
-                )
-                .with_optional_target(target);
-        }
-        pane.update(cx, |pane, cx| {
-            pane.send_ai_input_bytes(&payload, cx);
-        });
-        snapshot
-            .ok(
-                "Terminal input sent.",
-                "Input sent.",
-                serde_json::Value::Null,
-                "interactive",
-            )
-            .with_optional_target(target)
     }
 
-    pub(in crate::workspace) fn execute_ai_get_terminal_command_status(
-        &self,
-        tool_session_id: &ToolSessionId,
-        args: &serde_json::Value,
-        cx: &mut Context<Self>,
-    ) -> AiActionResultLite {
-        let snapshot = self.ai_orchestrator_snapshot(cx);
-        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let session_id = match self.ai.authority.read(cx).validate_terminal_handle(
-            tool_session_id,
-            raw_handle_id,
-            oxideterm_ai::RuntimeCapability::TerminalObserve,
-        ) {
-            Ok(session_id) => session_id,
-            Err(error) => {
-                return snapshot.fail(
-                    "Runtime terminal is unavailable.",
-                    error.public_code(),
-                    "Rediscover the current terminal before reading command status.",
-                    "read",
-                );
-            }
-        };
-        let target = snapshot.terminal_target(session_id);
-        let Some(pane) = self.ai_terminal_pane_for_session(session_id, cx) else {
-            return snapshot
-                .fail(
-                    "Runtime terminal is unavailable.",
-                    "runtime_owner_closed",
-                    "The terminal pane is no longer registered.",
-                    "read",
-                )
-                .with_optional_target(target);
-        };
-        let pane = pane.read(cx);
-        let records = pane.ai_command_records();
-        snapshot.terminal_command_status(target, args, records.iter().rev().map(|record| {
-            ai_terminal_command_capture(record, pane.ai_command_prompt_returned(&record.command_id))
-        }))
-    }
-
-    pub(in crate::workspace) fn start_ai_terminal_run_command_execution(
-        &mut self,
-        owner: AiToolRunContext,
-        tool_session_id: ToolSessionId,
-        tool_call_id: String,
-        tool_name: String,
-        args: serde_json::Value,
-        post_user_approval: bool,
-        dangerous_command_approved: bool,
-        sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
-        _window: &mut Window,
+    fn start_ai_terminal_execution(
+        &mut self, run: bool, owner: AiToolRunContext, turn: ToolSessionId,
+        call: String, name: String, args: serde_json::Value, approved: bool,
+        dangerous_approved: bool, sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
         cx: &mut Context<Self>,
     ) {
-        let execution_leases = self
-            .ai
-            .state
-            .read(cx)
-            .agents
-            .tool_leases
-            .get(&(tool_session_id.clone(), tool_call_id.clone()))
-            .cloned()
-            .unwrap_or_default();
-        let started = std::time::Instant::now();
-        let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let mut handle_id = raw_handle_id
-            .and_then(|value| oxideterm_ai::RuntimeHandleId::parse(value.to_string()).ok());
-        let command_owner = match self
-            .ai.authority
-            .read(cx)
-            .validate_run_command_handle(
-                &tool_session_id,
-                handle_id
-                    .as_ref()
-                    .map(oxideterm_ai::RuntimeHandleId::as_str),
-            ) {
-            Ok(owner) => owner,
-            Err(error) => {
-                let result = snapshot.to_executed_tool_result(
-                    tool_call_id,
-                    tool_name,
-                    snapshot.fail(
-                        "Runtime command target is unavailable.",
-                        ai_runtime_validation_public_code(&error, post_user_approval),
-                        ai_runtime_validation_recovery_message(post_user_approval),
-                        ai_run_command_preflight_risk(),
-                    ),
-                    started.elapsed().as_millis(),
-                );
-                let _ = sender.send(result);
-                return;
-            }
-        };
-        let Some(command) = args
-            .get("command")
-            .and_then(serde_json::Value::as_str)
-            .filter(|command| !command.trim().is_empty())
-            .map(|command| zeroize::Zeroizing::new(command.to_string()))
-        else {
-            let result = snapshot.to_executed_tool_result(
-                tool_call_id,
-                tool_name,
-                snapshot.fail(
-                    "Command is required.",
-                    "missing_command",
-                    "run_command requires a command.",
-                    ai_run_command_preflight_risk(),
-                ),
-                started.elapsed().as_millis(),
-            );
-            let _ = sender.send(result);
-            return;
-        };
-        let wait_timeout = Duration::from_secs(
-            args.get("timeout_secs")
-                .and_then(serde_json::Value::as_u64)
-                .unwrap_or(1800)
-                .clamp(1, 1800),
+        let reply = AiTerminalToolReply::new(
+            self.ai_orchestrator_snapshot_for_tool_session(Some(&turn), cx), call, name, sender, approved,
         );
-        if command_owner == crate::workspace::ai_runtime_context::AiRunCommandOwner::LocalShell {
-            for lease in &execution_leases {
-                lease.dispatched();
+        let mut handle = args.get("handle_id").and_then(serde_json::Value::as_str)
+            .and_then(|id| oxideterm_ai::RuntimeHandleId::parse(id.to_owned()).ok());
+        let raw = handle.as_ref().map(oxideterm_ai::RuntimeHandleId::as_str);
+        let authority = self.ai.authority.read(cx);
+        let capability = if run { oxideterm_ai::RuntimeCapability::TerminalRunCommand }
+            else { oxideterm_ai::RuntimeCapability::TerminalObserve };
+        use oxideterm_ai::AiRunCommandOwner::{LocalShell, Terminal};
+        let bound = if run {
+            authority.validate_run_command_handle(&turn, raw)
+        } else {
+            authority.validate_terminal_handle(&turn, raw, capability).map(Terminal)
+        };
+        let bound = match bound {
+            Ok(bound) => bound,
+            Err(error) => return reply.deny(&error, run),
+        };
+        let request = if run {
+            match reply.snapshot.plan_terminal_command(&args) {
+                Ok(command) => AiTerminalRequest::Run(command),
+                Err(error) => return reply.complete(error),
             }
-            let cwd = args
-                .get("cwd")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string);
-            self.start_ai_owned_local_command(
-                owner,
-                tool_call_id,
-                tool_name,
-                command,
-                cwd,
-                dangerous_command_approved,
-                wait_timeout,
-                snapshot,
-                execution_leases,
-                sender,
-                cx,
-            );
-            return;
-        }
-        let crate::workspace::ai_runtime_context::AiRunCommandOwner::Terminal(session_id) =
-            command_owner
-        else {
-            unreachable!("local shell command returned before terminal dispatch");
+        } else {
+            AiTerminalRequest::Wait(args)
         };
-        let node_id = self.ai_terminal_node(session_id, cx);
-        let target = snapshot.terminal_target(session_id);
-        let command = zeroize::Zeroizing::new(ai_command_with_cwd(
-            &command,
-            args.get("cwd").and_then(serde_json::Value::as_str),
-        ));
-        let Some((_pane_id, pane)) = self.ai_terminal_session(session_id, cx) else {
-            let result = snapshot.to_executed_tool_result(
-                tool_call_id,
-                tool_name,
-                snapshot
-                    .fail(
-                        "Runtime terminal is unavailable.",
-                        "runtime_owner_closed",
-                        "The terminal pane is no longer registered.",
-                        "interactive",
-                    )
-                    .with_optional_target(target),
-                started.elapsed().as_millis(),
-            );
-            let _ = sender.send(result);
-            return;
+        let leases = if run {
+            self.ai.state.read(cx).agents.tool_leases.get(&(turn.clone(), reply.call.clone()))
+                .cloned().unwrap_or_default()
+        } else { Vec::new() };
+        let session = match bound {
+            Terminal(id) => id,
+            LocalShell => {
+                let AiTerminalRequest::Run(command) = request else { unreachable!() };
+                for lease in &leases { lease.dispatched(); }
+                return self.start_ai_owned_local_command(
+                    owner, reply.call, reply.name, command.text, command.cwd.map(str::to_owned),
+                    dangerous_approved, command.timeout, reply.snapshot, leases, reply.sender, cx,
+                );
+            }
         };
-        if !pane.read(cx).ai_accepts_input() {
-            let result = snapshot.to_executed_tool_result(
-                tool_call_id,
-                tool_name,
-                snapshot
-                    .fail(
-                        "Terminal is not ready.",
-                        "terminal_not_ready",
-                        "The terminal writer is no longer available.",
-                        "interactive",
-                    )
-                    .with_optional_target(target),
-                started.elapsed().as_millis(),
-            );
-            let _ = sender.send(result);
-            return;
-        }
-        if pane.read(cx).ai_command_input_pending() {
-            let _ = sender.send(rejected_ai_tool_result(tool_call_id, tool_name,
-                "terminal_command_pending",
-                "The previous command has not exited or returned a stable shell prompt. Observe the terminal, continue waiting, or handle its interactive input before running another command."));
-            return;
-        }
-        let before = pane.read(cx).ai_buffer_snapshot();
-        let (activity, pane_subscription, runtime_subscription) = self.watch_ai_terminal_activity(&pane, cx);
-        if execution_leases.iter().any(|lease| !lease.is_current()) {
-            let _ = sender.send(rejected_ai_tool_result(
-                tool_call_id,
-                tool_name,
-                "terminal_taken_over",
-                "User input took control of the terminal before dispatch.",
+        let Some(pane) = self.ai_terminal_pane_for_session(session, cx) else {
+            return reply.owner_closed(session, run);
+        };
+        let node = self.ai_terminal_node(session, cx);
+        let weak = cx.weak_entity();
+        let sample_host = weak.clone();
+        let sample_turn = turn.clone();
+        let sample_node = node.clone();
+        let sample = move |recovered, command: Option<&str>, cx: &mut gpui::AsyncApp| {
+            sample_host.update(cx, |app, cx| app.sample_ai_watched_terminal(
+                &sample_turn, session, sample_node.as_ref(), &mut handle,
+                capability, recovered, command, cx,
+            )).unwrap_or(AiTerminalWatchSample::HostClosed)
+        };
+        let finish_host = weak.clone();
+        let finish = move |cx: &mut gpui::AsyncApp| {
+            finish_host.update(cx, |app, cx| app.ai_orchestrator_snapshot_for_tool_session(Some(&turn), cx)).ok()
+        };
+        let status_owner = owner.clone();
+        let status_call = reply.call.clone();
+        let status_name = reply.name.clone();
+        let status = move |command: Option<&str>, status, deadline, cx: &mut gpui::AsyncApp| {
+            let _ = weak.update(cx, |app, cx| app.report_ai_terminal_watch_status(
+                &status_owner, &status_call, &status_name, command, status, deadline, run, cx,
             ));
-            return;
-        }
-        for lease in &execution_leases {
-            lease.dispatched();
-        }
-        let command_id = pane.update(cx, |pane, cx| {
-            let command_id =
-                pane.begin_command_mark(&command, TerminalCommandMarkDetectionSource::Ai, cx);
-            pane.send_command_line(&command, cx);
-            command_id
-        });
-        let command_resource = owner.resource(
-            self,
-            cx,
-            oxideterm_ai::agent::OwnedResourceKind::TerminalCommand,
-            &self.ai_tool_display_name("run_command"),
-        );
-        self.monitor_ai_terminal_command(
-            session_id,
-            node_id.clone(),
-            command_id.clone(),
-            &before,
-            execution_leases.clone(),
-            command_resource,
-            cx,
-        );
-        if args
-            .get("await_output")
-            .and_then(serde_json::Value::as_bool)
-            == Some(false)
-        {
-            let result = snapshot.to_executed_tool_result(
-                tool_call_id,
-                tool_name,
-                snapshot
-                    .ok(
-                        "Command sent to terminal.",
-                        "Command sent to the visible terminal.",
-                        serde_json::json!({
-                            "executionState": "sent",
-                            "visibleInTerminal": true,
-                            "commandId": command_id,
-                        }),
-                        "interactive",
-                    )
-                    .with_optional_target(target),
-                started.elapsed().as_millis(),
-            );
-            let _ = sender.send(result);
-            return;
-        }
-
-        let observation = owner.resource(
-            self,
-            cx,
-            oxideterm_ai::agent::OwnedResourceKind::Observation,
-            &self.i18n.t("settings_view.ai.waiting_condition"),
-        );
-        let status_command = command_id.clone();
-        let call_id = tool_call_id.clone();
-        let name = tool_name.clone();
-        let watch = AiTerminalWatch {
-            call_id: tool_call_id, tool_name, started, sender, activity, direction: owner.dispatch.clone(),
         };
-        cx.spawn(async move |weak, cx| {
-            let _subscriptions = (pane_subscription, runtime_subscription);
-            let _observation = observation;
-            let sample = |recovered, command: Option<&str>, cx: &mut gpui::AsyncApp| {
-                weak.update(cx, |app, cx| app.sample_ai_watched_terminal(
-                    &tool_session_id, session_id, node_id.as_ref(), &mut handle_id,
-                    oxideterm_ai::RuntimeCapability::TerminalRunCommand,
-                    recovered, command, cx,
-                )).unwrap_or(AiTerminalWatchSample::HostClosed)
-            };
-            let finish = |cx: &mut gpui::AsyncApp| {
-                weak.update(cx, |app, cx| app.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx)).ok()
-            };
-            let status = |status, deadline_ms, cx: &mut gpui::AsyncApp| {
-                let _ = weak.update(cx, |app, cx| app.report_ai_terminal_watch_status(
-                    &owner, &call_id, &name, status_command.as_deref(), status, deadline_ms, true, cx,
-                ));
-            };
-            watch.observe_command(
-                AiTerminalCommandObservation {
-                    command_id,
-                    before: zeroize::Zeroizing::new(before),
-                    timeout: wait_timeout,
-                    leases: execution_leases,
-                    target,
-                    post_user_approval,
-                },
-                sample, finish, status, cx,
-            ).await;
-        }).detach();
-    }
-
-    pub(in crate::workspace) fn start_ai_wait_terminal_output_execution(
-        &mut self,
-        owner: AiToolRunContext,
-        tool_session_id: ToolSessionId,
-        tool_call_id: String,
-        tool_name: String,
-        args: serde_json::Value,
-        post_user_approval: bool,
-        sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
-        cx: &mut Context<Self>,
-    ) {
-        let started = std::time::Instant::now();
-        let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx);
-        let raw_handle_id = args.get("handle_id").and_then(serde_json::Value::as_str);
-        let mut handle_id = raw_handle_id
-            .and_then(|value| oxideterm_ai::RuntimeHandleId::parse(value.to_string()).ok());
-        let session_id = match self.ai.authority.read(cx).validate_terminal_handle(
-            &tool_session_id,
-            handle_id
-                .as_ref()
-                .map(oxideterm_ai::RuntimeHandleId::as_str),
-            oxideterm_ai::RuntimeCapability::TerminalObserve,
-        ) {
-            Ok(session_id) => session_id,
-            Err(error) => {
-                let result = snapshot.to_executed_tool_result(
-                    tool_call_id,
-                    tool_name,
-                    snapshot.fail(
-                        "Runtime terminal is unavailable.",
-                        ai_runtime_validation_public_code(&error, post_user_approval),
-                        ai_runtime_validation_recovery_message(post_user_approval),
-                        "read",
-                    ),
-                    started.elapsed().as_millis(),
-                );
-                let _ = sender.send(result);
-                return;
-            }
-        };
-        let Some(pane) = self.ai_terminal_pane_for_session(session_id, cx) else {
-            let result = snapshot.to_executed_tool_result(
-                tool_call_id,
-                tool_name,
-                snapshot.fail(
-                    "Runtime terminal is unavailable.",
-                    "runtime_owner_closed",
-                    "The terminal pane is no longer registered.",
-                    "read",
-                ),
-                started.elapsed().as_millis(),
-            );
-            let _ = sender.send(result);
-            return;
-        };
-        let node_id = self.ai_terminal_node(session_id, cx);
-        let (activity, pane_subscription, runtime_subscription) = self.watch_ai_terminal_activity(&pane, cx);
-        let initial_buffer = pane.read(cx).ai_buffer_snapshot();
-        let initial_alternate_screen = pane.read(cx).ai_screen_is_alternate_buffer();
-        let observation = owner.resource(
-            self,
-            cx,
-            oxideterm_ai::agent::OwnedResourceKind::Observation,
-            &self.i18n.t("settings_view.ai.waiting_condition"),
+        // The current pane is resolved only after final authority validation.
+        let (activity, pane_observer, runtime_observer) = self.watch_ai_terminal_activity(&pane, cx);
+        let bindings = AiTerminalWatchBindings { activity, pane_observer, runtime_observer, sample, finish, status };
+        let state = self.ai.state.clone();
+        let command_label = self.ai_tool_display_name("run_command");
+        let observation_label = self.i18n.t("settings_view.ai.waiting_condition");
+        request.start(
+            reply, &pane, session, leases, owner, &state, &command_label, &observation_label,
+            bindings, |id, before, leases, record, cx| {
+                self.monitor_ai_terminal_command(session, node, id, before, leases, record, cx)
+            }, cx,
         );
-        let call_id = tool_call_id.clone();
-        let name = tool_name.clone();
-        let watch = AiTerminalWatch {
-            call_id: tool_call_id, tool_name, started, sender, activity, direction: owner.dispatch.clone(),
-        };
-        cx.spawn(async move |weak, cx| {
-            let _subscriptions = (pane_subscription, runtime_subscription);
-            let _observation = observation;
-            let sample = |recovered, command: Option<&str>, cx: &mut gpui::AsyncApp| {
-                weak.update(cx, |app, cx| app.sample_ai_watched_terminal(
-                    &tool_session_id, session_id, node_id.as_ref(), &mut handle_id,
-                    oxideterm_ai::RuntimeCapability::TerminalObserve,
-                    recovered, command, cx,
-                )).unwrap_or(AiTerminalWatchSample::HostClosed)
-            };
-            let finish = |cx: &mut gpui::AsyncApp| {
-                weak.update(cx, |app, cx| app.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx)).ok()
-            };
-            let status = |status, deadline_ms, cx: &mut gpui::AsyncApp| {
-                let _ = weak.update(cx, |app, cx| app.report_ai_terminal_watch_status(
-                    &owner, &call_id, &name, None, status, deadline_ms, false, cx,
-                ));
-            };
-            let wait = AiTerminalOutputWait::new(&args, initial_buffer, initial_alternate_screen, std::time::Instant::now());
-            watch.observe_output(wait, snapshot, sample, finish, status, cx).await;
-        }).detach();
     }
 
     fn ai_terminal_node(&self, session: TerminalSessionId, cx: &App) -> Option<NodeId> {
@@ -1430,29 +685,9 @@ impl WorkspaceApp {
             return AiTerminalWatchSample::OwnerClosed;
         }
         let Some(pane) = self.ai_terminal_pane_for_session(session_id, cx) else { return AiTerminalWatchSample::OwnerClosed };
-        let pane = pane.read(cx);
-        let run_command = capability == oxideterm_ai::RuntimeCapability::TerminalRunCommand;
-        let records = pane.ai_command_records();
-        let prompt_returned = command.or_else(|| {
-            if run_command { None } else { records.last().map(|record| record.command_id.as_str()) }
-        }).is_some_and(|id| pane.ai_command_prompt_returned(id));
-        let records = records.into_iter()
-            .filter(|record| !run_command || command == Some(record.command_id.as_str()))
-            .map(|record| {
-                let status = ai_terminal_command_capture(&record, false).status;
-                AiTerminalWatchRecord {
-                    id: record.command_id,
-                    command: zeroize::Zeroizing::new(record.command),
-                    status, started_at: record.started_at, finished_at: record.finished_at, exit_code: record.exit_code,
-                }
-            }).collect();
-        AiTerminalWatchSample::Current {
-            buffer: zeroize::Zeroizing::new(pane.ai_buffer_snapshot()),
-            alternate_screen: !run_command && pane.ai_screen_is_alternate_buffer(),
-            waiting_for_secret: pane.ai_waiting_for_secret(),
-            prompt_returned,
-            records,
-        }
+        capture_terminal_watch(
+            pane.read(cx), capability == oxideterm_ai::RuntimeCapability::TerminalRunCommand, command,
+        )
     }
 
     fn report_ai_terminal_watch_status(
@@ -1466,19 +701,10 @@ impl WorkspaceApp {
         run: bool,
         cx: &mut Context<Self>,
     ) {
-        let mut data = serde_json::json!({"waiting": true, "waitDeadline": deadline_ms});
-        if run {
-            let ai = self.ai.state.read(cx);
-            if let Some(agent) = ai.agent_run(owner.generation) {
-                let _ = ai.agents.services.runtime.set_state(&agent, status.agent_state());
-            }
-            data["commandId"] = serde_json::json!(command_id);
-        }
-        self.apply_ai_tool_status(
-            owner.generation, &owner.conversation_id, &owner.assistant_id, call_id, tool_name,
-            &owner.arguments, status.protocol_status(), Some(data),
-            Some(if run { "interactive" } else { "read" }.into()), None, false, None, None, None, cx,
+        let (data, risk) = self.ai.state.read(cx).terminal_watch_status(
+            owner.generation, command_id, status, deadline_ms, run,
         );
+        self.report_ai_tool_progress(owner, call_id, tool_name, status.protocol_status(), Some(data), risk, cx);
     }
 
     pub(in crate::workspace) fn execute_ai_write_settings_resource(
@@ -1578,23 +804,9 @@ impl WorkspaceApp {
     }
 
     fn open_ai_settings_section(&mut self, section: Option<&str>, window: &mut Window, cx: &mut Context<Self>) {
-                if let Some(section) = section {
-                    let target_tab =
-                        oxideterm_gpui_settings_view::settings_tab_from_ai_section(section);
-                    let target_terminal_page =
-                        oxideterm_gpui_settings_view::terminal_settings_page_from_ai_section(
-                            section,
-                        );
-                    self.settings_workspace.update(cx, |settings, cx| {
-                        if let Some(tab) = target_tab {
-                            settings.set_active_tab(tab, cx);
-                        }
-                        if let Some(page) = target_terminal_page {
-                            settings.set_terminal_page(page, cx);
-                        }
-                    });
-                }
-
+        if let Some(section) = section {
+            self.settings_workspace.update(cx, |settings, cx| settings.open_ai_section(section, cx));
+        }
         self.open_settings_tab(window, cx);
     }
 
@@ -1603,14 +815,7 @@ impl WorkspaceApp {
         session_id: TerminalSessionId,
         cx: &App,
     ) -> Option<gpui::Entity<oxideterm_gpui_terminal::TerminalPane>> {
-        // The tab host is the terminal-pane owner; reading command facts must
-        // not activate a tab or create a second session.
-        let location = self.tab_host.read(cx).terminal_location(session_id)?;
-        self.tab_host
-            .read(cx)
-            .panes()
-            .get(&location.pane_id)
-            .cloned()
+        self.ai_terminal_session(session_id, cx).map(|(_, pane)| pane)
     }
 
     pub(in crate::workspace) fn ai_terminal_session(
@@ -1647,17 +852,4 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn ai_connect_target_timeout_result(
-        &mut self,
-        tool_session_id: &ToolSessionId,
-        tool_call_id: &str,
-        tool_name: &str,
-        args: &serde_json::Value,
-        _base: &AiExecutedToolResult,
-        duration_ms: u128,
-        cx: &mut Context<Self>,
-    ) -> AiExecutedToolResult {
-        let snapshot = self.ai_orchestrator_snapshot_for_tool_session(Some(tool_session_id), cx);
-        snapshot.connect_target_timeout_result(tool_call_id, tool_name, args, duration_ms)
-    }
 }

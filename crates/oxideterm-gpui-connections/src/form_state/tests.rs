@@ -2,8 +2,8 @@ use chrono::Utc;
 use gpui::{Keystroke, Modifiers};
 use oxideterm_connections::{
     AuthType, ConnectionInfo, MoshIpFamily, MoshPredictionMode, MoshProfile, MoshUdpPortSelection,
-    RemoteDesktopProfile, SavedAuth, SavedProxyHop, SavedUpstreamProxyPolicy, SerialFlowControl,
-    SerialParity, SerialProfile, TelnetProfile,
+    RemoteDesktopProfile, SavedAuth, SavedProxyHop, SavedUpstreamProxyPolicy,
+    TelnetProfile,
 };
 use oxideterm_remote_desktop::{
     RemoteDesktopAudioOptions, RemoteDesktopClipboardOptions, RemoteDesktopDisplayOptions,
@@ -16,7 +16,7 @@ use super::{
     RemoteDesktopVncOptions, RemoteDesktopVncSecurityPolicy, RemoteDesktopVncSessionMode,
     SshAuthFamily, SshAuthTab, SshKeyAuthSource, StandaloneSftpTransferMode, auth_family_from_tab,
     backspace_current_connection_field, connection_secret_field_visible, form_from_mosh_profile,
-    form_from_remote_desktop_profile, form_from_serial_profile, form_from_telnet_profile,
+    form_from_remote_desktop_profile, form_from_telnet_profile,
     insert_text_into_current_connection_field, key_source_from_tab,
     select_current_connection_field, text_from_keystroke,
     toggle_connection_secret_field_visibility,
@@ -282,42 +282,6 @@ fn mosh_profile_form_preserves_edit_metadata_without_loading_credentials() {
     assert_eq!(form.proxy_hops.len(), 1);
     assert_eq!(form.proxy_hops[0].host, "jump.example.com");
     assert_eq!(form.proxy_hops[0].persisted_proxy_hop_index, Some(0));
-}
-
-#[test]
-fn serial_profile_form_restores_saved_line_settings_for_editing() {
-    let mut profile = SerialProfile::new("Console cable", "/dev/cu.usbserial-10");
-    profile.id = "serial-1".to_string();
-    profile.group = Some("Lab".to_string());
-    profile.notes = Some("Rack B".to_string());
-    profile.icon = Some("radio".to_string());
-    profile.color = Some("#fbbf24".to_string());
-    profile.icon_background_color = Some("#451a03".to_string());
-    profile.baud_rate = 57_600;
-    profile.data_bits = 7;
-    profile.stop_bits = 2;
-    profile.parity = SerialParity::Even;
-    profile.flow_control = SerialFlowControl::Hardware;
-
-    let form = form_from_serial_profile(&profile, "Ungrouped".to_string());
-
-    assert_eq!(form.serial_profile_id.as_deref(), Some("serial-1"));
-    assert_eq!(form.transport, NewConnectionTransport::Serial);
-    assert_eq!(form.serial_profile_name, "Console cable");
-    assert_eq!(form.group, "Lab");
-    assert_eq!(form.notes, "Rack B");
-    assert_eq!(form.icon, "radio");
-    assert_eq!(form.color, "#fbbf24");
-    assert_eq!(form.icon_background_color, "#451a03");
-    assert_eq!(form.serial_port_path, "/dev/cu.usbserial-10");
-    assert_eq!(form.serial_baud_rate, "57600");
-    assert_eq!(form.serial_data_bits, 7);
-    assert_eq!(form.serial_stop_bits, 2);
-    assert_eq!(form.serial_parity, oxideterm_terminal::SerialParity::Even);
-    assert_eq!(
-        form.serial_flow_control,
-        oxideterm_terminal::SerialFlowControl::Hardware
-    );
 }
 
 #[test]

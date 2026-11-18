@@ -5008,6 +5008,7 @@ mod tests {
         cols: usize,
     ) -> TerminalSnapshot {
         TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 1,
             cols,

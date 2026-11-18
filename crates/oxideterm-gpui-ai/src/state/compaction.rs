@@ -43,6 +43,16 @@ impl AiCompactionBindings {
 }
 
 impl AiWorkspaceEntity {
+    pub fn active_compaction_request(&self, summarize: bool) -> Option<AiCompactionRequest> {
+        Some(AiCompactionRequest {
+            conversation_id: self.conversation_state().active_conversation_id.clone()?,
+            summarize,
+            silent: false,
+            force: true,
+            resume_after: None,
+        })
+    }
+
     pub fn should_auto_compact(&self, conversation_id: &str) -> bool {
         self.conversation_state()
             .conversations
@@ -468,4 +478,20 @@ fn should_compact(
     })
     .level
         >= 2
+}
+
+impl AiCompactionRequest {
+    pub fn compact(conversation_id: String, silent: bool, force: bool, resume_after: Option<AiPendingChatStream>) -> Self {
+        Self { conversation_id, summarize: false, silent, force, resume_after }
+    }
+}
+
+impl AiWorkspaceEntity {
+    pub fn auto_compaction_request(&self, id: &str) -> Option<AiCompactionRequest> {
+        self.should_auto_compact(id).then(|| AiCompactionRequest::compact(id.to_owned(), true, false, None))
+    }
+
+    pub fn can_resume_compacted_turn(&self, pending: &AiPendingChatStream) -> bool {
+        self.chat_launch_matches(&pending.conversation_id, pending.launch_id.as_deref())
+    }
 }

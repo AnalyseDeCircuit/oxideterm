@@ -522,3 +522,60 @@ mod tests {
         }
     }
 }
+
+pub struct AiTerminalCommandPlan<'a> {
+    pub text: zeroize::Zeroizing<String>,
+    pub cwd: Option<&'a str>,
+    pub timeout: Duration,
+    pub await_output: bool,
+}
+
+impl AiTerminalCommandPlan<'_> {
+    pub fn with_terminal_cwd(&self) -> zeroize::Zeroizing<String> {
+        zeroize::Zeroizing::new(super::ai_command_with_cwd(&self.text, self.cwd))
+    }
+}
+
+impl AiOrchestratorRuntimeSnapshot {
+    pub fn plan_terminal_command<'a>(&self, args: &'a Value) -> Result<AiTerminalCommandPlan<'a>, AiActionResultLite> {
+        let text = args.get("command").and_then(Value::as_str).filter(|text| !text.trim().is_empty())
+            .ok_or_else(|| self.fail(
+                "Command is required.", "missing_command", "run_command requires a command.",
+                super::ai_run_command_preflight_risk(),
+            ))?;
+        Ok(AiTerminalCommandPlan {
+            text: zeroize::Zeroizing::new(text.to_owned()),
+            cwd: args.get("cwd").and_then(Value::as_str),
+            timeout: Duration::from_secs(args.get("timeout_secs").and_then(Value::as_u64).unwrap_or(1800).clamp(1, 1800)),
+            await_output: args.get("await_output").and_then(Value::as_bool) != Some(false),
+        })
+    }
+
+    pub fn terminal_command_dispatched(&self, id: Option<String>, target: Option<AiOrchestratorTarget>) -> AiActionResultLite {
+        self.ok(
+            "Command sent to terminal.", "Command sent to the visible terminal.",
+            serde_json::json!({"executionState":"sent","visibleInTerminal":true,"commandId":id}),
+            "interactive",
+        ).with_optional_target(target)
+    }
+
+    pub fn terminal_owner_closed(&self, risk: &'static str) -> AiActionResultLite {
+        self.fail("Runtime terminal is unavailable.", "runtime_owner_closed", "The terminal pane is no longer registered.", risk)
+    }
+
+    pub fn prepare_terminal_input(&self, args: &Value) -> Result<zeroize::Zeroizing<Vec<u8>>, AiActionResultLite> {
+        // Input may contain passwords even when it is not marked as a secret.
+        let payload = zeroize::Zeroizing::new(crate::terminal_observation::ai_terminal_input_payload(args));
+        if payload.is_empty() {
+            return Err(self.fail(
+                "No terminal input specified.", "missing_terminal_input",
+                "Provide text or request Enter with append_enter.", "interactive",
+            ));
+        }
+        Ok(payload)
+    }
+
+    pub fn terminal_input_sent(&self) -> AiActionResultLite {
+        self.ok("Terminal input sent.", "Input sent.", Value::Null, "interactive")
+    }
+}

@@ -70,8 +70,8 @@ mod tests {
         let cases = [
             (150.0, None),
             (250.0, None),
-            (0.0, Some(-BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)),
-            (400.0, Some(BROWSER_DRAG_AUTOSCROLL_MAX_STEP_PX)),
+            (0.0, Some(-26.0)),
+            (400.0, Some(26.0)),
         ];
         for (pointer_y, expected) in cases {
             assert_eq!(

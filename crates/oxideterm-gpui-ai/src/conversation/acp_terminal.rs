@@ -27,6 +27,60 @@ impl AcpTerminalStatus {
     }
 }
 
+impl AcpTerminalBridge<oxideterm_gpui_terminal::SharedTerminalSession> {
+    pub fn for_native_terminal(
+        launch: impl Fn(oxideterm_terminal::LocalPtyConfig, String, &mut gpui::Window, &mut gpui::App)
+            -> Option<oxideterm_gpui_terminal::SharedTerminalSession> + 'static,
+    ) -> Self {
+        use oxideterm_terminal::{LocalPtyConfig, ShellInfo, TerminalLifecycle};
+
+        fn status(lifecycle: TerminalLifecycle) -> AcpTerminalStatus {
+            match lifecycle {
+                TerminalLifecycle::Running => AcpTerminalStatus::Running,
+                TerminalLifecycle::Exited(exit_code) => AcpTerminalStatus::Exited(exit_code),
+                TerminalLifecycle::Closed => AcpTerminalStatus::Closed,
+            }
+        }
+
+        Self {
+            launch: Box::new(move |mut spec, cwd, window, cx| {
+                let title = std::path::Path::new(&spec.command)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or("ACP")
+                    .to_string();
+                let config = LocalPtyConfig {
+                    command: None,
+                    shell: Some(
+                        ShellInfo::new(
+                            title.clone(),
+                            title.clone(),
+                            std::path::PathBuf::from(std::mem::take(&mut spec.command)),
+                        )
+                        .with_args(std::mem::take(&mut spec.args)),
+                    ),
+                    cwd: Some(cwd),
+                    env: std::mem::take(&mut spec.env),
+                    remove_env: Vec::new(),
+                    load_profile: false,
+                    current_directory_shell_integration: false,
+                    oh_my_posh_enabled: false,
+                    oh_my_posh_theme: None,
+                };
+                launch(config, title, window, cx)
+            }),
+            read_output: |session| {
+                let mut session = session.lock();
+                session.read_pending();
+                (session.buffer_text(), status(session.lifecycle()))
+            },
+            status: |session| status(session.lock().lifecycle()),
+            stop: |session| session.lock().shutdown(),
+        }
+    }
+}
+
 pub struct AcpTerminalBridge<Terminal> {
     pub launch:
         Box<dyn FnOnce(AcpTerminalCreateSpec, PathBuf, &mut Window, &mut App) -> Option<Terminal>>,

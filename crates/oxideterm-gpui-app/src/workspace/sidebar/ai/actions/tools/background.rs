@@ -7,11 +7,7 @@ impl WorkspaceApp {
         _event: ai_background_tasks::AiBackgroundTaskEvent,
         cx: &mut Context<Self>,
     ) {
-        let events = self.ai.background.read(cx).take_events();
-        let requests = self
-            .ai.background
-            .read(cx)
-            .take_execution_requests();
+        let (events, requests) = self.ai.background.read(cx).drain_tool_events(&self.i18n);
         for request in requests {
             if request.response.is_closed() {
                 continue;
@@ -22,39 +18,15 @@ impl WorkspaceApp {
             });
             let _ = request.response.send(result);
         }
-        let mut notifications_changed = false;
+        let changed = !events.is_empty();
         for event in events {
-            let oxideterm_ai_tasks::BackgroundTaskEvent::Changed(snapshot) = event else {
-                continue;
-            };
-            let (severity, title_key) = match snapshot.state {
-                oxideterm_ai_tasks::BackgroundTaskState::Completed => (
-                    WorkspaceNotificationSeverity::Info,
-                    "ai.background_tasks.completed",
-                ),
-                oxideterm_ai_tasks::BackgroundTaskState::Failed => (
-                    WorkspaceNotificationSeverity::Error,
-                    "ai.background_tasks.failed",
-                ),
-                _ => continue,
-            };
-            let body = self
-                .i18n
-                .t("ai.background_tasks.notification_body")
-                .replace("{{count}}", &snapshot.run_count.to_string());
-            notifications_changed = true;
             self.push_notification_entry(
                 WorkspaceNotificationKind::Agent,
-                severity,
-                format!("{} · {}", self.i18n.t(title_key), snapshot.title),
-                Some(body),
-                WorkspaceNotificationScope::Global,
-                Some(format!("ai-background-task:{}", snapshot.id.as_str())),
+                if event.failed { WorkspaceNotificationSeverity::Error } else { WorkspaceNotificationSeverity::Info },
+                event.title, Some(event.body), WorkspaceNotificationScope::Global, Some(event.key),
             );
         }
-        if notifications_changed {
-            cx.notify();
-        }
+        if changed { cx.notify(); }
     }
 
     fn execute_ai_background_read(

@@ -16,10 +16,11 @@ pub enum AiDraftSubmission {
     Ignore,
     Warning(&'static str),
     Answered,
+    Compact,
     Prepare(AiSubmittedDraft),
 }
 
-pub enum AiLocalChatCommand {
+enum AiLocalChatCommand {
     Clear,
     Help,
     Compact,
@@ -42,7 +43,7 @@ pub struct AiDraftContext {
 }
 
 impl AiSubmittedDraft {
-    pub fn local_command(&self, busy: bool) -> Result<Option<AiLocalChatCommand>, &'static str> {
+    fn local_command(&self, busy: bool) -> Result<Option<AiLocalChatCommand>, &'static str> {
         let Some(command) = self.slash.filter(|command| command.client_only) else {
             return Ok(None);
         };
@@ -86,9 +87,19 @@ fn chat_context(blocks: impl IntoIterator<Item = Option<String>>) -> Option<Stri
 }
 
 impl AiWorkspaceEntity {
+    pub fn bootstrap_chat_mcp_registry(&self, settings: &oxideterm_settings::AiSettings) {
+        // Probe only when the AI surface is in use: MCP may need the OS key store.
+        let registry = self.mcp_registry().clone();
+        let configs = settings.mcp_servers.clone();
+        self.task_runtime().spawn(async move {
+            registry.connect_all_values(&configs).await;
+        });
+    }
+
     pub fn prepare_draft_submission(
         &mut self,
-        enabled: bool,
+        settings: &oxideterm_settings::AiSettings,
+        i18n: &I18n,
         cx: &mut Context<Self>,
     ) -> AiDraftSubmission {
         use AiDraftSubmission::*;
@@ -103,7 +114,7 @@ impl AiWorkspaceEntity {
         if ui.image_import.is_some() || (content.is_empty() && ui.images.is_empty()) {
             return Ignore;
         }
-        if !enabled {
+        if !settings.enabled {
             return Warning("ai.chat.disabled_message");
         }
         let content = Zeroizing::new(content.to_owned());
@@ -124,12 +135,29 @@ impl AiWorkspaceEntity {
             .slash_command
             .as_deref()
             .and_then(resolve_ai_slash_command);
-        Prepare(AiSubmittedDraft {
+        let draft = AiSubmittedDraft {
             content,
             images: self.chat_ui().images.clone(),
             input,
             slash,
-        })
+        };
+        self.bootstrap_chat_mcp_registry(settings);
+        match draft.local_command(self.chat_is_loading()) {
+            Ok(Some(AiLocalChatCommand::Clear)) => {
+                self.create_sidebar_conversation(None, cx);
+                self.clear_chat_input_after_submit();
+                cx.notify();
+                Answered
+            }
+            Ok(Some(AiLocalChatCommand::Help)) => {
+                self.add_draft_help(draft, i18n, cx);
+                Answered
+            }
+            Ok(Some(AiLocalChatCommand::Compact)) => Compact,
+            Ok(Some(AiLocalChatCommand::Ignore)) => Ignore,
+            Err(key) => Warning(key),
+            Ok(None) => Prepare(draft),
+        }
     }
 
     pub fn add_draft_help(&mut self, draft: AiSubmittedDraft, i18n: &I18n, cx: &mut Context<Self>) {

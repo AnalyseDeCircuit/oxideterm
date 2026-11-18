@@ -44,7 +44,7 @@ impl QuickCommandsView {
                                     .text_size(px(self.tokens.metrics.ui_text_base))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(rgb(theme.text))
-                                    .child(self.i18n.t("terminal.title")),
+                                    .child(self.i18n.t("terminal.quick_commands.title")),
                             ),
                     )
                     .child(
@@ -55,7 +55,7 @@ impl QuickCommandsView {
                             .child(self.quick_command_tooltip_icon_button(
                                 LucideIcon::Upload,
                                 "quick-commands-import",
-                                self.i18n.t("terminal.import"),
+                                self.i18n.t("terminal.quick_commands.import"),
                                 |this, _event, _window, cx| {
                                     this.import_quick_commands(cx);
                                     cx.stop_propagation();
@@ -65,7 +65,7 @@ impl QuickCommandsView {
                             .child(self.quick_command_tooltip_icon_button(
                                 LucideIcon::Download,
                                 "quick-commands-export",
-                                self.i18n.t("terminal.export"),
+                                self.i18n.t("terminal.quick_commands.export"),
                                 |this, _event, _window, cx| {
                                     this.export_quick_commands(cx);
                                     cx.stop_propagation();
@@ -125,7 +125,7 @@ impl QuickCommandsView {
                     .expect("default categories contain the fallback group");
                 let description = self
                     .i18n
-                    .t("terminal.delete_group_description")
+                    .t("terminal.quick_commands.delete_group_description")
                     .replace("{{name}}", &prompt.name)
                     .replace("{{destination}}", &destination.name);
                 root.child(confirm_dialog(
@@ -133,14 +133,14 @@ impl QuickCommandsView {
                     ConfirmDialogView {
                         variant: ConfirmDialogVariant::Danger,
                         title: div()
-                            .child(self.i18n.t("terminal.delete_group"))
+                            .child(self.i18n.t("terminal.quick_commands.delete_group"))
                             .into_any_element(),
                         description: Some(div().child(description).into_any_element()),
                         cancel_label: div()
                             .child(self.i18n.t("common.actions.cancel"))
                             .into_any_element(),
                         confirm_label: div()
-                            .child(self.i18n.t("terminal.delete_group"))
+                            .child(self.i18n.t("terminal.quick_commands.delete_group"))
                             .into_any_element(),
                     },
                     cx.listener(|this, _event, _window, cx| {
@@ -161,7 +161,7 @@ impl QuickCommandsView {
         let Ok(snapshot_json) = export else {
             self.push_workspace_notice(
                 QuickCommandsNotice {
-                    title: self.i18n.t("terminal.export_failed"),
+                    title: self.i18n.t("terminal.quick_commands.export_failed"),
                     description: None,
                     variant: QuickCommandsNoticeKind::Error,
                 },
@@ -188,7 +188,7 @@ impl QuickCommandsView {
             let _ = weak.update(cx, |this, cx| match result {
                 Ok(Some(path)) => this.push_workspace_notice(
                     QuickCommandsNotice {
-                        title: this.i18n.t("terminal.export_success"),
+                        title: this.i18n.t("terminal.quick_commands.export_success"),
                         description: Some(path.to_string_lossy().to_string()),
                         variant: QuickCommandsNoticeKind::Success,
                     },
@@ -197,7 +197,7 @@ impl QuickCommandsView {
                 Ok(None) => {}
                 Err(()) => this.push_workspace_notice(
                     QuickCommandsNotice {
-                        title: this.i18n.t("terminal.export_failed"),
+                        title: this.i18n.t("terminal.quick_commands.export_failed"),
                         description: None,
                         variant: QuickCommandsNoticeKind::Error,
                     },
@@ -213,7 +213,9 @@ impl QuickCommandsView {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some(SharedString::from(self.i18n.t("terminal.import"))),
+            prompt: Some(SharedString::from(
+                self.i18n.t("terminal.quick_commands.import"),
+            )),
         });
         cx.spawn(async move |weak, cx| {
             let selected_path = match receiver.await {
@@ -223,7 +225,7 @@ impl QuickCommandsView {
                     let _ = weak.update(cx, |this, cx| {
                         this.push_workspace_notice(
                             QuickCommandsNotice {
-                                title: this.i18n.t("terminal.import_failed"),
+                                title: this.i18n.t("terminal.quick_commands.import_failed"),
                                 description: None,
                                 variant: QuickCommandsNoticeKind::Error,
                             },
@@ -252,7 +254,7 @@ impl QuickCommandsView {
                 let Ok(snapshot_json) = snapshot_json else {
                     this.push_workspace_notice(
                         QuickCommandsNotice {
-                            title: this.i18n.t("terminal.import_failed"),
+                            title: this.i18n.t("terminal.quick_commands.import_failed"),
                             description: None,
                             variant: QuickCommandsNoticeKind::Error,
                         },
@@ -269,7 +271,7 @@ impl QuickCommandsView {
                 if result.errors.is_empty() {
                     let title = this
                         .i18n
-                        .t("terminal.import_success")
+                        .t("terminal.quick_commands.import_success")
                         .replace("{{count}}", &result.imported.to_string());
                     this.push_workspace_notice(
                         QuickCommandsNotice {
@@ -283,7 +285,7 @@ impl QuickCommandsView {
                 } else {
                     this.push_workspace_notice(
                         QuickCommandsNotice {
-                            title: this.i18n.t("terminal.import_failed"),
+                            title: this.i18n.t("terminal.quick_commands.import_failed"),
                             description: None,
                             variant: QuickCommandsNoticeKind::Error,
                         },
@@ -344,7 +346,7 @@ impl QuickCommandsView {
                         .max_w(px(280.0))
                         .text_center()
                         .text_size(px(self.tokens.metrics.ui_text_sm))
-                        .child(self.i18n.t("terminal.manager_empty")),
+                        .child(self.i18n.t("terminal.quick_commands.manager_empty")),
                 )
                 .into_any_element()
         };
@@ -399,9 +401,9 @@ impl QuickCommandsView {
                                     "title",
                                     self.i18n
                                         .t(if snapshot.managing {
-                                            "terminal.groups"
+                                            "terminal.quick_commands.groups"
                                         } else {
-                                            "terminal.title"
+                                            "terminal.quick_commands.title"
                                         })
                                         .to_uppercase(),
                                     theme.text_muted,
@@ -652,7 +654,7 @@ impl QuickCommandsView {
                         .pb_2()
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(theme.text_muted))
-                        .child(self.i18n.t("terminal.reorder_groups")),
+                        .child(self.i18n.t("terminal.quick_commands.reorder_groups")),
                 )
             })
             .child(
@@ -672,7 +674,7 @@ impl QuickCommandsView {
                         .p(px(6.0))
                         .text_size(px(self.tokens.metrics.ui_text_xs))
                         .text_color(rgb(self.tokens.ui.error))
-                        .child(self.i18n.t("terminal.persist_failed")),
+                        .child(self.i18n.t("terminal.quick_commands.persist_failed")),
                 )
             })
             .into_any_element()

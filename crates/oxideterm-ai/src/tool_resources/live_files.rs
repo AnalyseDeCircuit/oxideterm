@@ -410,6 +410,59 @@ impl<E> std::fmt::Debug for AiRemoteFileWriteError<E> {
     }
 }
 
+pub enum AiLiveResourceRequest<'a> {
+    Read(AiFileRead<'a>),
+    Write(AiFileWrite<'a>),
+    Transfer(AiFileTransfer<'a>),
+}
+
+impl AiOrchestratorRuntimeSnapshot {
+    pub fn decode_live_resource<'a>(
+        &self, operation: super::AiLiveResourceOperation, args: &'a Value,
+    ) -> Result<AiLiveResourceRequest<'a>, AiActionResultLite> {
+        use super::AiLiveResourceOperation::*;
+        match operation {
+            SftpRead | IdeRead => self.decode_file_read(args).map(AiLiveResourceRequest::Read),
+            SftpWrite | IdeWrite => self.decode_file_write(args).map(AiLiveResourceRequest::Write),
+            SftpStartTransfer => self.decode_file_transfer(args).map(AiLiveResourceRequest::Transfer),
+        }
+    }
+
+    pub async fn complete_live_resource(
+        &self,
+        call_id: String,
+        name: String,
+        started: std::time::Instant,
+        mut sender: tokio::sync::oneshot::Sender<crate::AiExecutedToolResult>,
+        execute: impl std::future::Future<Output = AiActionResultLite>,
+    ) {
+        let action = tokio::select! {
+            action = execute => action,
+            _ = sender.closed() => return,
+        };
+        let _ = sender.send(self.to_executed_tool_result(
+            call_id, name, action, started.elapsed().as_millis(),
+        ));
+    }
+
+    pub fn missing_sftp_transfer_owner(&self) -> AiActionResultLite {
+        self.fail(
+            "SFTP capability is unavailable.",
+            "runtime_capability_unavailable",
+            "Rediscover the current SFTP session before retrying.",
+            "write",
+        )
+    }
+
+    pub fn sftp_read_failed(&self, error: impl std::fmt::Display) -> AiActionResultLite {
+        self.fail("Resource read failed.", "resource_read_failed", error.to_string(), "read")
+    }
+
+    pub fn sftp_transfer_failed(&self, error: String) -> AiActionResultLite {
+        self.fail("SFTP transfer failed.", "sftp_transfer_failed", error, "write")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -426,4 +479,40 @@ mod tests {
         assert!(debug.contains("ExpectedFileMissing"));
         assert!(!debug.contains(path));
     }
+}
+
+pub fn acp_file_write_preview(
+    existing: &str,
+    proposed: &str,
+) -> zeroize::Zeroizing<String> {
+    use oxideterm_sftp::TextDiffLineKind;
+
+    const MAX_PREVIEW_LINES: usize = 400;
+    const MAX_PREVIEW_BYTES: usize = 64 * 1024;
+
+    let mut preview = String::from("--- existing\n+++ proposed\n");
+    let lines = oxideterm_sftp::compute_text_diff(existing, proposed);
+    let truncated_lines = lines.len() > MAX_PREVIEW_LINES;
+    for line in lines.into_iter().take(MAX_PREVIEW_LINES) {
+        let prefix = match line.kind {
+            TextDiffLineKind::Unchanged => ' ',
+            TextDiffLineKind::Added => '+',
+            TextDiffLineKind::Removed => '-',
+        };
+        preview.push(prefix);
+        preview.push_str(&line.content);
+        preview.push('\n');
+        if preview.len() >= MAX_PREVIEW_BYTES {
+            break;
+        }
+    }
+    if truncated_lines || preview.len() >= MAX_PREVIEW_BYTES {
+        let mut boundary = preview.len().min(MAX_PREVIEW_BYTES);
+        while !preview.is_char_boundary(boundary) {
+            boundary = boundary.saturating_sub(1);
+        }
+        preview.truncate(boundary);
+        preview.push_str("\n…");
+    }
+    zeroize::Zeroizing::new(preview)
 }

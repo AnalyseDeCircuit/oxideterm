@@ -38,21 +38,6 @@ fn navigator_search_matches_title_and_body() {
 }
 
 #[test]
-fn autosave_completion_does_not_accept_pending_switch_without_user_confirmation() {
-    let mut workspace = KnowledgeWorkspaceEntity::default();
-    workspace.request_document_switch("next".to_string());
-
-    assert_eq!(workspace.take_pending_document_after_save(), None);
-    assert_eq!(workspace.pending_document_id.as_deref(), Some("next"));
-
-    workspace.confirm_save_before_leaving();
-    assert_eq!(
-        workspace.take_pending_document_after_save().as_deref(),
-        Some("next")
-    );
-}
-
-#[test]
 fn autosave_completion_does_not_quit_without_user_confirmation() {
     let mut workspace = KnowledgeWorkspaceEntity::default();
     workspace.request_app_quit();

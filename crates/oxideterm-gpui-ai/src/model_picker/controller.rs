@@ -30,6 +30,27 @@ pub enum AiPickerSelection {
 }
 
 impl AiWorkspaceEntity {
+    pub fn update_model_switch_warning(&mut self, settings: &AiSettings, provider_id: &str, model: &str, total_tokens: usize) {
+        use oxideterm_ai::stream_state::{
+            AI_COMPACTION_DEFAULT_CONTEXT_WINDOW, AI_CONTEXT_WARNING_PERCENT,
+            ai_context_percentage, ai_context_window_from_maps,
+        };
+        if total_tokens == 0 {
+            return;
+        }
+        let max_tokens = ai_context_window_from_maps(
+            &settings.user_context_windows,
+            &settings.model_context_windows,
+            provider_id,
+            model,
+        )
+        .unwrap_or(AI_COMPACTION_DEFAULT_CONTEXT_WINDOW);
+        let percentage = ai_context_percentage(total_tokens, max_tokens);
+        if percentage > AI_CONTEXT_WARNING_PERCENT {
+            self.set_model_switch_warning(Some(percentage.round() as usize));
+        }
+    }
+
     pub fn plan_picker_selection(&self, provider: &str, model: &str) -> AiPickerSelection {
         let Some(agent_id) = ai_acp_agent_id_from_provider_id(provider) else {
             return AiPickerSelection::Provider;
@@ -45,6 +66,16 @@ impl AiWorkspaceEntity {
             };
         }
         AiPickerSelection::AcpAgent(agent_id.to_owned())
+    }
+
+    pub fn validated_picker_highlight(&mut self, rows: &[(String, String)]) -> Option<(String, String)> {
+        let row = self.model_selector_highlight()?.clone();
+        if rows.contains(&row) {
+            Some(row)
+        } else {
+            self.set_model_selector_highlight(None);
+            None
+        }
     }
 
     pub fn toggle_picker(
@@ -297,6 +328,13 @@ impl AiWorkspaceEntity {
                     .map(move |model| (provider_id.clone(), model))
             })
             .collect()
+    }
+
+    pub fn update_picker_visibility(&mut self, visibility: crate::state::AiWorkspaceVisibility) {
+        if self.set_workspace_visibility(visibility) && !visibility.model_selector_surface {
+            // Remounting must probe again even if the provider list didn't change.
+            self.set_model_selector_status_signature(None);
+        }
     }
 
     pub fn picker_status_changed(&mut self, providers: &[AiProviderView]) -> bool {

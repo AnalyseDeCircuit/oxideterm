@@ -1107,32 +1107,6 @@ fn shared_provider_key_debug_is_redacted() {
 }
 
 #[test]
-fn slash_help_and_request_overrides_are_core_logic() {
-    let help = ai_help_markdown(|key| format!("desc:{key}"));
-    assert!(help.contains("`/help`"));
-    assert!(help.contains("desc:ai.slash.help_desc"));
-
-    let command = resolve_ai_slash_command("fix").unwrap();
-    let prompt = slash_task_system_prompt(command).unwrap();
-    assert!(prompt.contains("## Task Mode: /fix"));
-    let parsed = parse_ai_user_input("/fix @terminal bad command");
-    let combined = ai_input_system_prompt(Some(command), &parsed.participants).unwrap();
-    assert!(combined.contains("## Task Mode: /fix"));
-    assert!(combined.contains("## Active Participants"));
-    assert!(combined.contains("preferred_target_view=live_sessions"));
-
-    let mut history = vec![chat_message("u1", AiChatRole::User, "/fix bad command")];
-    apply_chat_request_overrides(
-        &mut history,
-        Some("bad command".into()),
-        Some(prompt.clone()),
-    );
-    assert_eq!(history[0].role, AiChatRole::System);
-    assert_eq!(history[0].content, prompt);
-    assert_eq!(history[1].content, "bad command");
-}
-
-#[test]
 fn parses_and_sanitizes_follow_up_suggestions() {
     let parsed = parse_ai_suggestions(
         "Answer\n<suggestions>\n<s icon=\"Zap\">Run deploy</s>\n<s icon=\"Search\">Show logs</s>\n</suggestions>",

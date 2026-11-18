@@ -1082,3 +1082,196 @@ impl AiOrchestratorRuntimeSnapshot {
 pub fn ai_connection_title(name: &str, username: &str, host: &str) -> String {
     if name.trim().is_empty() { format!("{username}@{host}") } else { name.to_owned() }
 }
+
+pub fn ai_host_tools_query(arguments: &Value) -> (&str, bool) {
+    let resource = arguments
+        .get("resource")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("overview");
+    let refresh_requested = arguments
+        .get("refresh")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    (resource, refresh_requested)
+}
+
+pub fn ai_host_tools_inspection(resource: &str, refresh_requested: bool, refresh_accepted: bool, snapshot: Value) -> Value {
+    serde_json::json!({
+        "node": {
+            "state": "connected",
+        },
+        "resource": resource,
+        "refreshRequested": refresh_requested,
+        "refreshAccepted": refresh_accepted,
+        "snapshot": snapshot,
+    })
+}
+
+pub struct AiHostToolControl<'a> {
+    pub resource: &'a str,
+    pub action: &'a str,
+    pub entity_id: &'a str,
+    pub value: Option<&'a str>,
+}
+
+pub fn ai_host_tool_control(arguments: &Value) -> Result<AiHostToolControl<'_>, String> {
+    let resource = arguments
+        .get("resource")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "A Host Tools resource is required.".to_string())?;
+    let action = arguments
+        .get("action")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "A Host Tools action is required.".to_string())?;
+    let entity_id = arguments
+        .get("entity_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "A Host Tools entity identifier is required.".to_string())?;
+    let value = arguments.get("value").and_then(serde_json::Value::as_str);
+    Ok(AiHostToolControl { resource, action, entity_id, value })
+}
+
+impl AiHostToolControl<'_> {
+    pub fn accepted(&self) -> Value {
+        serde_json::json!({
+            "accepted": true, "resource": self.resource,
+            "action": self.action, "entityId": self.entity_id,
+        })
+    }
+}
+
+
+pub enum AiCloudSyncAction {
+    Open,
+    Check,
+    UploadPreview,
+    PullPreview,
+}
+
+pub fn ai_cloud_sync_action(arguments: &Value, busy: bool) -> Result<AiCloudSyncAction, String> {
+    let action = arguments.get("action").and_then(Value::as_str)
+        .ok_or_else(|| "A Cloud Sync action is required.".to_string())?;
+    if action != "open" && busy {
+        return Err("Another Cloud Sync operation is already running.".to_string());
+    }
+    match action {
+        "open" => Ok(AiCloudSyncAction::Open),
+        "check" => Ok(AiCloudSyncAction::Check),
+        "upload_preview" => Ok(AiCloudSyncAction::UploadPreview),
+        "pull_preview" => Ok(AiCloudSyncAction::PullPreview),
+        _ => Err("Unsupported Cloud Sync action.".to_string()),
+    }
+}
+
+impl AiCloudSyncAction {
+    pub fn accepted(self) -> Value {
+        ai_action_accepted(match self {
+            Self::Open => "open",
+            Self::Check => "check",
+            Self::UploadPreview => "upload_preview",
+            Self::PullPreview => "pull_preview",
+        })
+    }
+}
+
+
+pub enum AiProfileTransport {
+    Serial,
+    Telnet,
+    RemoteDesktop,
+}
+
+pub struct AiOpenTransportProfile<'a> {
+    pub kind: AiProfileTransport,
+    pub id: &'a str,
+    transport: &'a str,
+}
+
+pub fn ai_open_transport_profile<'a>(
+    arguments: &'a Value,
+    serial: &[oxideterm_connections::SerialProfile],
+    telnet: &[oxideterm_connections::TelnetProfile],
+    remote_desktop: &[oxideterm_connections::RemoteDesktopProfile],
+) -> Result<AiOpenTransportProfile<'a>, String> {
+    let transport = arguments.get("transport").and_then(Value::as_str)
+        .ok_or_else(|| "A transport is required.".to_string())?;
+    let id = arguments.get("profile_id").and_then(Value::as_str)
+        .ok_or_else(|| "A profile identifier is required.".to_string())?;
+    let kind = match transport {
+        "serial" if serial.iter().any(|profile| profile.id == id) => AiProfileTransport::Serial,
+        "telnet" if telnet.iter().any(|profile| profile.id == id) => AiProfileTransport::Telnet,
+        "rdp" | "vnc" => {
+            let profile = remote_desktop.iter().find(|profile| profile.id == id)
+                .ok_or_else(|| "The remote desktop profile no longer exists.".to_string())?;
+            if profile.protocol.provider_id() != transport {
+                return Err("The profile protocol does not match the requested transport.".to_string());
+            }
+            AiProfileTransport::RemoteDesktop
+        }
+        _ => return Err("The selected transport profile no longer exists.".to_string()),
+    };
+    Ok(AiOpenTransportProfile { kind, id, transport })
+}
+
+impl AiOpenTransportProfile<'_> {
+    pub fn accepted(&self) -> Value {
+        serde_json::json!({"accepted": true, "transport": self.transport, "profileId": self.id})
+    }
+}
+
+pub fn ai_remote_desktop_tab(arguments: &Value) -> Result<oxideterm_workspace::TabId, String> {
+    arguments
+        .get("tab_id")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|value| value.parse::<u64>().ok())
+        .map(oxideterm_workspace::TabId)
+        .ok_or_else(|| "A valid remote desktop tab identifier is required.".to_string())
+}
+
+pub fn ai_remote_desktop_disconnect(arguments: &Value, tab_id: oxideterm_workspace::TabId, can_disconnect: impl FnOnce() -> bool) -> Result<Value, String> {
+    let action = arguments
+        .get("action")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "A remote desktop session action is required.".to_string())?;
+    match action {
+        "disconnect" => {
+            if !can_disconnect() {
+                return Err("The remote desktop session is already disconnected.".to_string());
+            }
+        }
+        "reconnect" => {
+            return Err(
+                "Remote desktop reconnect creates a new tab from Active Sessions."
+                    .to_string(),
+            );
+        }
+        _ => return Err("Unsupported remote desktop session action.".to_string()),
+    }
+    Ok(serde_json::json!({
+        "accepted": true,
+        "action": action,
+        "tabId": tab_id.0.to_string(),
+    }))
+}
+
+pub fn ai_connection_credential_inventory(store: &oxideterm_connections::ConnectionStore, arguments: &Value) -> Result<Value, String> {
+    let scopes = ai_credential_scopes(arguments, store.connections().iter().map(|connection| connection.id.as_str()));
+    let mut privilege_credentials = Vec::new();
+    for scope in &scopes {
+        privilege_credentials.extend(store.list_privilege_credentials(scope).map_err(|error| error.to_string())?);
+    }
+    Ok(ai_list_credential_metadata(store.managed_ssh_keys(), privilege_credentials,
+        store.remote_desktop_profiles()))
+}
+
+impl AiCredentialKind<'_> {
+    pub fn delete_from(&self, store: &mut oxideterm_connections::ConnectionStore, id: &str) -> Result<bool, String> {
+        match *self {
+            AiCredentialKind::ManagedSshKey { force } => store
+                .delete_managed_ssh_key(id, force).map(|result| result.deleted),
+            AiCredentialKind::Privilege { connection_id } => store
+                .delete_privilege_credential(connection_id, id),
+            AiCredentialKind::RemoteDesktop => store.delete_remote_desktop_credential(id),
+        }.map_err(|error| error.to_string())
+    }
+}

@@ -87,22 +87,13 @@ impl WorkspaceApp {
                 let app = owner.read(cx);
                 let settings = app.settings_store.settings();
                 let target = target(kind);
-                let model_selected = if settings.ai.active_backend
-                    == oxideterm_settings::AiActiveBackend::Acp
-                {
-                    settings.ai.active_acp_agent_id.is_some()
-                } else {
-                    settings.ai.active_provider_id.is_some()
-                        && oxideterm_ai::active_model_selection(settings.ai.active_model.as_deref())
-                            .is_some()
-                };
                 Some(AiEditorFrame {
                     tokens: app.tokens,
                     i18n: app.i18n.clone(),
                     font: tauri_ui_font_family(&settings.appearance.ui_font_family),
                     width: app.ai_editor_text_width(target, cx),
                     anchor: target.anchor_id(),
-                    model_selected,
+                    model_selected: AiEditorView::model_selected(&settings.ai),
                     marked_range: app.ime_marked_virtual_range_for_target(target, cx),
                     selected_range: app.ime_selected_range_for_target(target, cx),
                     active_offset: app.ime_active_offset_for_target(target, cx),
@@ -129,10 +120,6 @@ impl WorkspaceApp {
                 });
             }),
         };
-        let composer =
-            cx.new(|_| AiEditorView::new(AiEditorKind::Composer, state.clone(), bindings.clone()));
-        let edit =
-            cx.new(|_| AiEditorView::new(AiEditorKind::MessageEdit, state.clone(), bindings));
-        (composer, edit)
+        AiEditorView::mount_pair(state, bindings, cx)
     }
 }

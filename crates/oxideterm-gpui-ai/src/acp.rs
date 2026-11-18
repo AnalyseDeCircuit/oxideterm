@@ -70,6 +70,20 @@ impl AcpThreadSnapshot {
     }
 }
 
+pub fn missing_acp_plugins(
+    plugins: &[AcpPluginRevision], settings: &oxideterm_settings::AiSettings,
+) -> Vec<(String, String)> {
+    plugins.iter().filter(|plugin| {
+        !settings.acp_agents.iter().any(|agent| agent.plugin_id.as_deref() == Some(&plugin.plugin_id))
+    }).map(|plugin| (plugin.plugin_id.clone(), plugin.name.clone())).collect()
+}
+
+pub fn reset_acp_plugin_agent_status(settings: &mut oxideterm_settings::AiSettings, id: &str) {
+    if let Some(agent) = settings.acp_agents.iter_mut().find(|agent| agent.id == id) {
+        agent.status = Default::default();
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct AcpTurnRoute {
     pub generation: u64,

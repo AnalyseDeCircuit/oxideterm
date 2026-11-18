@@ -104,9 +104,9 @@ impl QuickCommandsView {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(theme.text))
                         .child(self.i18n.t(if draft.id.is_some() {
-                            "terminal.edit_group"
+                            "terminal.quick_commands.edit_group"
                         } else {
-                            "terminal.add_group"
+                            "terminal.quick_commands.add_group"
                         })),
                 )
             })
@@ -114,18 +114,21 @@ impl QuickCommandsView {
                 div()
                     .grid()
                     .gap(px(8.0))
-                    .child(self.render_quick_command_text_input(
-                        QuickCommandInput::CategoryName,
-                        draft.name.clone(),
-                        snapshot.focused_input,
-                        self.i18n.t("terminal.group_name_placeholder"),
-                        cx,
-                    ))
+                    .child(
+                        self.render_quick_command_text_input(
+                            QuickCommandInput::CategoryName,
+                            draft.name.clone(),
+                            snapshot.focused_input,
+                            self.i18n
+                                .t("terminal.quick_commands.group_name_placeholder"),
+                            cx,
+                        ),
+                    )
                     .child(icon_options)
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_sm))
-                            .child(self.i18n.t("terminal.icon_color")),
+                            .child(self.i18n.t("terminal.quick_commands.icon_color")),
                     )
                     .child(
                         div()
@@ -146,12 +149,12 @@ impl QuickCommandsView {
                                     QuickCommandInput::CategoryColor,
                                     draft.icon_color.clone(),
                                     snapshot.focused_input,
-                                    self.i18n.t("terminal.icon_color_hint"),
+                                    self.i18n.t("terminal.quick_commands.icon_color_hint"),
                                     cx,
                                 ),
                             ))
                             .child(self.quick_command_text_button(
-                                self.i18n.t("terminal.icon_color_reset"),
+                                self.i18n.t("terminal.quick_commands.icon_color_reset"),
                                 !draft.icon_color.is_empty(),
                                 cx.listener(|this, _, _, cx| {
                                     this.dispatch(QuickCommandsRequest::ClearIme, None, cx);
@@ -171,13 +174,13 @@ impl QuickCommandsView {
                             div()
                                 .text_size(px(self.tokens.metrics.ui_text_sm))
                                 .text_color(rgb(theme.error))
-                                .child(self.i18n.t("terminal.icon_color_invalid")),
+                                .child(self.i18n.t("terminal.quick_commands.icon_color_invalid")),
                         )
                     }),
             )
             .child(self.render_quick_editor_buttons(
                 can_save,
-                "terminal.save_group",
+                "terminal.quick_commands.save_group",
                 |this, cx| this.save_quick_command_category_editor(cx),
                 cx,
             ))
@@ -249,18 +252,30 @@ impl QuickCommandsView {
 
         let mut protocols = div().flex().items_center().gap(px(4.0)).flex_wrap();
         for (protocol, label_key) in [
-            (QuickCommandTargetProtocol::Local, "terminal.protocol_local"),
-            (QuickCommandTargetProtocol::Ssh, "terminal.protocol_ssh"),
-            (QuickCommandTargetProtocol::Mosh, "terminal.protocol_mosh"),
+            (
+                QuickCommandTargetProtocol::Local,
+                "terminal.quick_commands.protocol_local",
+            ),
+            (
+                QuickCommandTargetProtocol::Ssh,
+                "terminal.quick_commands.protocol_ssh",
+            ),
+            (
+                QuickCommandTargetProtocol::Mosh,
+                "terminal.quick_commands.protocol_mosh",
+            ),
             (
                 QuickCommandTargetProtocol::Telnet,
-                "terminal.protocol_telnet",
+                "terminal.quick_commands.protocol_telnet",
             ),
             (
                 QuickCommandTargetProtocol::Serial,
-                "terminal.protocol_serial",
+                "terminal.quick_commands.protocol_serial",
             ),
-            (QuickCommandTargetProtocol::Tmux, "terminal.protocol_tmux"),
+            (
+                QuickCommandTargetProtocol::Tmux,
+                "terminal.quick_commands.protocol_tmux",
+            ),
         ] {
             let active = draft.protocols.contains(&protocol);
             protocols = protocols.child(
@@ -289,12 +304,18 @@ impl QuickCommandsView {
         }
         let mut match_fields = div().flex().items_center().gap(px(4.0)).flex_wrap();
         for (field, label) in [
-            (QuickCommandMatchField::Host, "terminal.match_host"),
+            (
+                QuickCommandMatchField::Host,
+                "terminal.quick_commands.match_host",
+            ),
             (
                 QuickCommandMatchField::ConnectionName,
-                "terminal.match_connection",
+                "terminal.quick_commands.match_connection",
             ),
-            (QuickCommandMatchField::All, "terminal.match_all"),
+            (
+                QuickCommandMatchField::All,
+                "terminal.quick_commands.match_all",
+            ),
         ] {
             let active = draft.match_field == field;
             match_fields = match_fields.child(
@@ -344,9 +365,9 @@ impl QuickCommandsView {
                         .font_weight(gpui::FontWeight::SEMIBOLD)
                         .text_color(rgb(theme.text))
                         .child(self.i18n.t(if draft.id.is_some() {
-                            "terminal.edit_command"
+                            "terminal.quick_commands.edit_command"
                         } else {
-                            "terminal.add_command"
+                            "terminal.quick_commands.add_command"
                         })),
                 )
             })
@@ -358,29 +379,32 @@ impl QuickCommandsView {
                         QuickCommandInput::CommandName,
                         draft.name.clone(),
                         snapshot.focused_input,
-                        self.i18n.t("terminal.name_placeholder"),
+                        self.i18n.t("terminal.quick_commands.name_placeholder"),
                         cx,
                     ))
                     .child(self.render_quick_command_text_input(
                         QuickCommandInput::CommandText,
                         draft.command.clone(),
                         snapshot.focused_input,
-                        self.i18n.t("terminal.command_placeholder"),
+                        self.i18n.t("terminal.quick_commands.command_placeholder"),
                         cx,
                     ))
                     .child(
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("terminal.template_hint")),
+                            .child(self.i18n.t("terminal.quick_commands.template_hint")),
                     )
-                    .child(self.render_quick_command_text_input(
-                        QuickCommandInput::CommandDescription,
-                        draft.description.clone(),
-                        snapshot.focused_input,
-                        self.i18n.t("terminal.description_placeholder"),
-                        cx,
-                    ))
+                    .child(
+                        self.render_quick_command_text_input(
+                            QuickCommandInput::CommandDescription,
+                            draft.description.clone(),
+                            snapshot.focused_input,
+                            self.i18n
+                                .t("terminal.quick_commands.description_placeholder"),
+                            cx,
+                        ),
+                    )
                     .child(
                         div()
                             .flex()
@@ -390,21 +414,24 @@ impl QuickCommandsView {
                                 div()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("terminal.match_field")),
+                                    .child(self.i18n.t("terminal.quick_commands.match_field")),
                             )
                             .child(match_fields)
-                            .child(self.render_quick_command_text_input(
-                                QuickCommandInput::CommandHostPattern,
-                                draft.host_patterns.clone(),
-                                snapshot.focused_input,
-                                self.i18n.t("terminal.host_pattern_placeholder"),
-                                cx,
-                            ))
+                            .child(
+                                self.render_quick_command_text_input(
+                                    QuickCommandInput::CommandHostPattern,
+                                    draft.host_patterns.clone(),
+                                    snapshot.focused_input,
+                                    self.i18n
+                                        .t("terminal.quick_commands.host_pattern_placeholder"),
+                                    cx,
+                                ),
+                            )
                             .child(
                                 div()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("terminal.match_hint")),
+                                    .child(self.i18n.t("terminal.quick_commands.match_hint")),
                             ),
                     )
                     .child(
@@ -423,7 +450,7 @@ impl QuickCommandsView {
                                 div()
                                     .text_size(px(self.tokens.metrics.ui_text_xs))
                                     .text_color(rgb(theme.text_muted))
-                                    .child(self.i18n.t("terminal.protocols")),
+                                    .child(self.i18n.t("terminal.quick_commands.protocols")),
                             )
                             .child(protocols),
                     )
@@ -431,9 +458,9 @@ impl QuickCommandsView {
                     .child(
                         self.quick_command_text_button(
                             self.i18n.t(if confirmation_always {
-                                "terminal.confirmation_always"
+                                "terminal.quick_commands.confirmation_always"
                             } else {
-                                "terminal.confirmation_inherit"
+                                "terminal.quick_commands.confirmation_inherit"
                             }),
                             true,
                             cx.listener(|this, _event, _window, cx| {
@@ -458,7 +485,7 @@ impl QuickCommandsView {
                 .p(px(padding))
                 .child(self.render_quick_editor_buttons(
                     can_save,
-                    "terminal.save",
+                    "terminal.quick_commands.save",
                     |this, cx| this.save_quick_command_editor(cx),
                     cx,
                 ))
@@ -498,14 +525,14 @@ impl QuickCommandsView {
                                 QuickCommandInput::ParameterName(index),
                                 parameter.name.clone(),
                                 snapshot.focused_input,
-                                self.i18n.t("terminal.parameter_name"),
+                                self.i18n.t("terminal.quick_commands.parameter_name"),
                                 cx,
                             )))
                             .child(div().flex_1().child(self.render_quick_command_text_input(
                                 QuickCommandInput::ParameterLabel(index),
                                 parameter.label.clone(),
                                 snapshot.focused_input,
-                                self.i18n.t("terminal.parameter_label"),
+                                self.i18n.t("terminal.quick_commands.parameter_label"),
                                 cx,
                             ))),
                     )
@@ -514,7 +541,7 @@ impl QuickCommandsView {
                             QuickCommandInput::ParameterDefault(index),
                             parameter.default_value.clone(),
                             snapshot.focused_input,
-                            self.i18n.t("terminal.parameter_default"),
+                            self.i18n.t("terminal.quick_commands.parameter_default"),
                             cx,
                         ))
                     })
@@ -523,7 +550,7 @@ impl QuickCommandsView {
                             QuickCommandInput::ParameterChoices(index),
                             parameter.choices.clone(),
                             snapshot.focused_input,
-                            self.i18n.t("terminal.parameter_choices"),
+                            self.i18n.t("terminal.quick_commands.parameter_choices"),
                             cx,
                         ))
                     })
@@ -534,12 +561,14 @@ impl QuickCommandsView {
                             .gap(px(6.0))
                             .child(self.quick_command_text_button(
                                 self.i18n.t(match kind {
-                                    QuickCommandParameterKind::Text => "terminal.parameter_text",
+                                    QuickCommandParameterKind::Text => {
+                                        "terminal.quick_commands.parameter_text"
+                                    }
                                     QuickCommandParameterKind::Choice => {
-                                        "terminal.parameter_choice"
+                                        "terminal.quick_commands.parameter_choice"
                                     }
                                     QuickCommandParameterKind::Secret => {
-                                        "terminal.parameter_secret"
+                                        "terminal.quick_commands.parameter_secret"
                                     }
                                 }),
                                 true,
@@ -564,9 +593,9 @@ impl QuickCommandsView {
                             ))
                             .child(self.quick_command_text_button(
                                 self.i18n.t(if required {
-                                    "terminal.parameter_required"
+                                    "terminal.quick_commands.parameter_required"
                                 } else {
-                                    "terminal.parameter_optional"
+                                    "terminal.quick_commands.parameter_optional"
                                 }),
                                 true,
                                 cx.listener(move |this, _event, _window, cx| {
@@ -604,10 +633,10 @@ impl QuickCommandsView {
                         div()
                             .text_size(px(self.tokens.metrics.ui_text_xs))
                             .text_color(rgb(theme.text_muted))
-                            .child(self.i18n.t("terminal.parameters")),
+                            .child(self.i18n.t("terminal.quick_commands.parameters")),
                     )
                     .child(self.quick_command_text_button(
-                        self.i18n.t("terminal.add_parameter"),
+                        self.i18n.t("terminal.quick_commands.add_parameter"),
                         true,
                         cx.listener(|this, _event, _window, cx| {
                             this.state
@@ -634,7 +663,7 @@ impl QuickCommandsView {
             .justify_end()
             .gap(px(8.0))
             .child(self.quick_command_text_button(
-                self.i18n.t("terminal.cancel"),
+                self.i18n.t("terminal.quick_commands.cancel"),
                 true,
                 cx.listener(|this, _event, _window, cx| {
                     this.state
@@ -801,7 +830,7 @@ impl QuickCommandsView {
             .unwrap_or_default();
         let tokens = self.tokens;
         let font_family = self.mono_font.clone().to_string();
-        let placeholder = self.i18n.t("terminal.command_placeholder");
+        let placeholder = self.i18n.t("terminal.quick_commands.command_placeholder");
         let labels = EditorContextMenuLabels {
             copy: self.i18n.t("menu.copy"),
             cut: self.i18n.t("fileManager.cut"),

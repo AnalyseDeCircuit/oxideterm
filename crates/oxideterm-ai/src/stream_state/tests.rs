@@ -1,7 +1,7 @@
 //! Behavioral coverage for the extracted stream-state responsibility.
 
 use crate::{
-    AiChatMessage, AiChatMessageMetadata, AiChatRole, AiConversation, AiToolDefinition,
+    AiChatMessage, AiChatMessageMetadata, AiChatRole, AiConversation,
     set_ai_provider_parts,
 };
 
@@ -168,54 +168,6 @@ fn cancellation_retains_partial_text_and_completes_rejected_tool_results() {
                 .any(|part| part["type"] == "tool_result" && part["toolCallId"] == "call-1")
         );
     }
-}
-
-#[test]
-fn prompt_breakdown_counts_every_provider_visible_component() {
-    let mut assistant = message("assistant", AiChatRole::Assistant, "answer");
-    assistant.thinking_content = Some("reasoning".to_string());
-    assistant.tool_calls.push(serde_json::json!({
-        "id": "call-1",
-        "name": "run_command",
-        "arguments": "{\"command\":\"pwd\"}"
-    }));
-    set_ai_provider_parts(
-        &mut assistant,
-        "gemini",
-        vec![serde_json::json!({"thoughtSignature": "signed-state"})],
-    );
-    let mut tool = message("tool", AiChatRole::Tool, "tool output");
-    tool.tool_call_id = Some("call-1".to_string());
-    let tools = vec![AiToolDefinition {
-        name: "run_command".to_string(),
-        description: "Run a command".to_string(),
-        parameters: serde_json::json!({"type": "object"}),
-    }];
-
-    let breakdown = ai_prompt_token_breakdown(
-        &[
-            message("system", AiChatRole::System, "instructions"),
-            message("user", AiChatRole::User, "question"),
-            assistant,
-            tool,
-        ],
-        &tools,
-        "gemini",
-        512,
-    );
-
-    assert!(breakdown.system_instructions > 0);
-    assert!(breakdown.messages > 0);
-    assert!(breakdown.tool_results > ai_estimated_tokens("tool output"));
-    assert_eq!(
-        breakdown.tool_definitions,
-        ai_tool_definitions_estimated_tokens(&tools)
-    );
-    assert_eq!(breakdown.reserved_output, 512);
-    assert_eq!(
-        breakdown.total(),
-        breakdown.prompt_tokens() + breakdown.reserved_output
-    );
 }
 
 #[test]

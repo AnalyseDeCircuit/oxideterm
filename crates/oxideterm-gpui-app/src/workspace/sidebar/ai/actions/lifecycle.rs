@@ -6,15 +6,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn bootstrap_ai_mcp_registry(&self, cx: &App) {
-        // Tauri boots the MCP registry from AiChatPanel mount, not from process
-        // startup or every settings write. Keep native at the same user-visible
-        // boundary so HTTP auth-token/keychain access only happens when the AI
-        // surface is actually in use.
-        let registry = self.ai.state.read(cx).mcp_registry().clone();
-        let configs = self.settings_store.settings().ai.mcp_servers.clone();
-        self.forwarding_runtime.spawn(async move {
-            registry.connect_all_values(&configs).await;
-        });
+        self.ai.state.read(cx).bootstrap_chat_mcp_registry(&self.settings_store.settings().ai);
     }
 
     pub(in crate::workspace) fn clear_ai_sidebar_keyboard_focus(&mut self, cx: &mut App) {
@@ -84,16 +76,6 @@ impl WorkspaceApp {
         cx.notify();
     }
 
-    pub(in crate::workspace) fn set_ai_conversation_archived(
-        &mut self,
-        id: &str,
-        archived: bool,
-        cx: &mut App,
-    ) {
-        self.ai.state
-            .update(cx, |ai, _| ai.set_conversation_archived(id, archived));
-    }
-
     pub(in crate::workspace) fn delete_ai_conversation(&mut self, id: &str, cx: &mut App) {
         self.ai.conversations.delete_ai_conversation(id, cx);
     }
@@ -105,14 +87,6 @@ impl WorkspaceApp {
 
     pub(in crate::workspace) fn cancel_ai_chat_stream_without_notify(&mut self, cx: &mut App) {
         self.ai.conversations.cancel_ai_chat_stream_without_notify(cx);
-    }
-
-
-
-    pub(in crate::workspace) fn ai_conversation_turns_label(&self, count: usize) -> String {
-        self.i18n
-            .t("ai.chat.turns_count")
-            .replace("{{count}}", &count.to_string())
     }
 
 

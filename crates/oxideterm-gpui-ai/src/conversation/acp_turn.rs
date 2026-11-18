@@ -424,3 +424,61 @@ impl<Node: Clone + Eq + std::hash::Hash + 'static, Terminal: Clone + 'static>
         }
     }
 }
+
+pub fn prepare_acp_chat_launch(
+    config: &oxideterm_ai::AiChatStreamConfig,
+    settings: &oxideterm_settings::AiSettings,
+    resolve_plugin: impl FnOnce(&mut oxideterm_settings::AcpAgentConfig) -> Result<(), String>,
+) -> Result<Option<AiAcpChatLaunch>, String> {
+    if config.execution_backend != oxideterm_ai::AiExecutionBackend::Acp {
+        return Ok(None);
+    }
+    let agent_id = config
+        .acp_agent_id
+        .as_deref()
+        .filter(|agent_id| !agent_id.trim().is_empty())
+        .ok_or_else(|| "No ACP agent selected for this execution profile.".to_string())?;
+    let mut agent = settings.acp_agents
+        .iter()
+        .find(|agent| agent.id == agent_id)
+        .cloned()
+        .ok_or_else(|| format!("ACP agent `{agent_id}` is not configured."))?;
+    if !agent.enabled {
+        return Err(format!("ACP agent `{}` is disabled.", agent.id));
+    }
+    resolve_plugin(&mut agent)?;
+
+    let agent_id = agent.id.clone();
+    let display_name = if agent.display_name.trim().is_empty() {
+        agent_id.clone()
+    } else {
+        agent.display_name.clone()
+    };
+    let session_cwd = std::env::current_dir().unwrap_or_else(|_| {
+        agent
+            .cwd
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+    });
+    let host_policy = oxideterm_ai::AcpHostCapabilityPolicy {
+        fs_read_text_file: agent.capability_policy.fs_read_text_file,
+        fs_write_text_file: agent.capability_policy.fs_write_text_file,
+        terminal: agent.capability_policy.terminal,
+    };
+    // Copy token-bearing args and environment values exactly once into the
+    // zeroizing launch owner that is moved to the ACP worker.
+    let launch_config = oxideterm_ai::AcpLaunchConfig {
+        id: agent_id,
+        display_name,
+        command: agent.command,
+        args: agent.args,
+        env: agent.env,
+        cwd: agent.cwd.as_deref().map(std::path::PathBuf::from),
+    };
+    Ok(Some(AiAcpChatLaunch {
+        launch_config,
+        session_cwd,
+        host_policy,
+    }))
+}

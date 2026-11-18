@@ -1,6 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use alacritty_terminal::vte::ansi::CursorShape as AlacCursorShape;
+use alacritty_terminal::{term::color::COUNT, vte::ansi::Rgb};
 pub use oxideterm_terminal_graphics::{
     GraphicsOptions, KittyFileTransmissionControl, KittyFileTransmissionPrompt,
     TerminalImageAnimationState, TerminalImageData, TerminalImageFrame, TerminalImageId,
@@ -21,8 +22,18 @@ pub struct TerminalSnapshot {
     pub display_offset: usize,
     pub scrollback_lines: usize,
     pub lines: Vec<TerminalRow>,
+    /// Cache provenance for raw emulator rows; composed or synthetic snapshots have none.
+    #[doc(hidden)]
+    pub row_reuse: Option<Arc<TerminalSnapshotRowReuse>>,
     pub logical_context: Vec<Arc<TerminalLogicalContext>>,
     pub images: Vec<TerminalImageSnapshot>,
+}
+
+#[derive(Debug)]
+pub struct TerminalSnapshotRowReuse {
+    pub(crate) palette: crate::TerminalPalette,
+    pub(crate) overrides: [Option<Rgb>; COUNT],
+    pub(crate) revisions: Vec<u64>,
 }
 
 /// Immutable text captured under the same emulator lock as the visible rows.
@@ -207,6 +218,7 @@ mod tests {
         previous_row.refresh_signature();
 
         let previous = TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 1,
             cols: 1,
@@ -261,6 +273,7 @@ mod tests {
         };
         second_row.refresh_signature();
         let previous = TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 1,
             cols: 1,
@@ -295,6 +308,7 @@ mod tests {
         };
         new_bottom_row.refresh_signature();
         let mut next = TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 0,
             cols: 1,

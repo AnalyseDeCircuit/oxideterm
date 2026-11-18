@@ -282,6 +282,39 @@ impl CloudSyncWorkspaceEntity {
             || self.controller.local_file_task.is_some()
     }
 
+    pub fn apply_configuration_patch(
+        &mut self,
+        arguments: &serde_json::Value,
+        cx: &mut Context<Self>,
+    ) -> Result<Vec<String>, String> {
+        let (current_settings, current_scope) = {
+            let state = self.controller.store.state();
+            (state.settings.clone(), state.sync_scope.clone())
+        };
+        let (settings, scope, updated_fields) = crate::apply_cloud_sync_configuration_patch(
+            &current_settings, &current_scope, arguments,
+        )?;
+        let settings_for_view = settings.clone();
+        let state = self.controller.store.state_mut();
+        state.settings = settings;
+        state.sync_scope = scope;
+        state.last_error = None;
+        if let Err(error) = self.controller.store.save() {
+            // Roll back only non-secret state; protected credentials were never read or moved.
+            let message = error.to_string();
+            let state = self.controller.store.state_mut();
+            state.settings = current_settings.clone();
+            state.sync_scope = current_scope.clone();
+            state.last_error = Some(message.clone());
+            return Err(format!("Failed to save Cloud Sync configuration: {message}"));
+        }
+        self.view
+            .form
+            .apply_changed_non_secret_settings(&current_settings, &settings_for_view);
+        cx.notify();
+        Ok(updated_fields)
+    }
+
     pub fn ai_snapshot(&self) -> serde_json::Value {
         let state = self.controller.store.state();
         let settings = &state.settings;

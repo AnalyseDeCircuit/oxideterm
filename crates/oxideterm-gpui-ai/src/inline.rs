@@ -695,6 +695,7 @@ mod tests {
     }
 }
 
+pub use request::apply_inline_command;
 pub use request::{resolve_terminal_ai_inline_config, truncate_ai_inline_context};
 pub use request::AiInlineKey;
 mod request;

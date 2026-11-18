@@ -197,7 +197,7 @@ use oxideterm_settings::{
     default_settings_path, ensure_bundled_background_image, list_background_images,
 };
 use oxideterm_sftp::{
-    BackgroundTransferDirection, BackgroundTransferState, LazyProgressStore, ProgressStore,
+    BackgroundTransferState, LazyProgressStore, ProgressStore,
     RemoteRelayDisposition, SftpTransferManager, StoredTransferProgress,
 };
 use oxideterm_ssh::{

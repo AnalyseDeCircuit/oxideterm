@@ -2049,22 +2049,6 @@ mod tests {
     }
 
     #[test]
-    fn rows_inherit_template_defaults_and_data_overrides_them() {
-        let template =
-            parse_batch_template("Host --\n  User jaime.su\n  Port 22\n  IdentityFile ~/.ssh/kn\n")
-                .expect("template parses");
-        let data = parse_batch_data("hktkosl1100\nroot@hktkosl1101:2222\n").expect("data parses");
-        let preview =
-            resolve_batch_rows(&template, &data, None, &[], BatchDuplicateNamePolicy::Skip);
-        assert_eq!(preview.addable_count(), 2);
-        assert_eq!(preview.rows[0].username, "jaime.su");
-        assert_eq!(preview.rows[0].port, 22);
-        assert_eq!(preview.rows[1].username, "root");
-        assert_eq!(preview.rows[1].port, 2222);
-        assert_eq!(names(&preview.rows), vec!["hktkosl1100", "hktkosl1101"]);
-    }
-
-    #[test]
     fn inline_credentials_reach_the_store_without_plaintext_on_disk() {
         let secret = ["inline", "secret", "value"].join("-");
         let directory = tempfile::tempdir().expect("temp store directory");

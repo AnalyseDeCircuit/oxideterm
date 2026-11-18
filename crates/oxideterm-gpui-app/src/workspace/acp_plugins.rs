@@ -2,103 +2,26 @@ use super::*;
 
 impl WorkspaceApp {
     pub(in crate::workspace) fn sync_acp_plugins(&mut self, cx: &mut Context<Self>) {
-        let agents = self.plugin_entity.read(cx).acp_agents();
-        let missing = agents
-            .iter()
-            .filter(|plugin| {
-                !self
-                    .settings_store
-                    .settings()
-                    .ai
-                    .acp_agents
-                    .iter()
-                    .any(|agent| agent.plugin_id.as_deref() == Some(&plugin.plugin_id))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
+        use oxideterm_gpui_ai::acp::{AcpPluginRevision, missing_acp_plugins, reset_acp_plugin_agent_status};
+        let revisions = self.plugin_entity.read(cx).acp_agents().into_iter().map(|agent| AcpPluginRevision {
+            plugin_id: agent.plugin_id, name: agent.name, version: agent.version, command: agent.command,
+        }).collect::<Vec<_>>();
+        let missing = missing_acp_plugins(&revisions, &self.settings_store.settings().ai);
         if !missing.is_empty() {
-            self.edit_settings(
-                |settings| {
-                    for plugin in missing {
-                        oxideterm_settings_model::ai_add_acp_plugin_agent(
-                            settings,
-                            &plugin.plugin_id,
-                            &plugin.name,
-                        );
-                    }
-                },
-                cx,
-            );
+            self.edit_settings(|settings| {
+                for (id, name) in missing {
+                    oxideterm_settings_model::ai_add_acp_plugin_agent(settings, &id, &name);
+                }
+            }, cx);
         }
-        let bindings = self
-            .settings_store
-            .settings()
-            .ai
-            .acp_agents
-            .iter()
-            .filter_map(|agent| {
-                agent
-                    .plugin_id
-                    .as_ref()
-                    .map(|plugin| (agent.id.clone(), plugin.clone()))
-            })
-            .collect::<Vec<_>>();
-        let revisions = agents
-            .into_iter()
-            .map(|agent| oxideterm_gpui_ai::acp::AcpPluginRevision {
-                plugin_id: agent.plugin_id,
-                name: agent.name,
-                version: agent.version,
-                command: agent.command,
-            })
-            .collect();
-        let changed = self
-            .ai.acp
-            .update(cx, |entity, cx| entity.sync_plugins(revisions, &bindings, cx));
-        for agent_id in changed {
-            self.ai.state
-                .update(cx, |ai, _cx| ai.invalidate_acp_agent_metadata(&agent_id));
-            self.edit_settings(
-                |settings| {
-                    if let Some(agent) = settings
-                        .ai
-                        .acp_agents
-                        .iter_mut()
-                        .find(|agent| agent.id == agent_id)
-                    {
-                        agent.status = Default::default();
-                    }
-                },
-                cx,
-            );
+        let changed = self.ai.conversations.sync_acp_plugins(revisions, &self.settings_store.settings().ai, cx);
+        for id in changed {
+            self.edit_settings(|settings| reset_acp_plugin_agent_status(&mut settings.ai, &id), cx);
         }
     }
 
-    pub(in crate::workspace) fn stop_acp_plugin(
-        &mut self,
-        plugin_id: Option<&str>,
-        cx: &mut Context<Self>,
-    ) {
-        let agent_ids = self
-            .settings_store
-            .settings()
-            .ai
-            .acp_agents
-            .iter()
-            .filter(|agent| {
-                agent
-                    .plugin_id
-                    .as_deref()
-                    .is_some_and(|id| plugin_id.is_none_or(|plugin| plugin == id))
-            })
-            .map(|agent| agent.id.clone())
-            .collect::<Vec<_>>();
-        self.ai.acp
-            .update(cx, |entity, cx| entity.stop_agents(&agent_ids, cx));
-        for id in agent_ids {
-            self.ai.state
-                .update(cx, |ai, _cx| ai.invalidate_acp_agent_metadata(&id));
-        }
+    pub(in crate::workspace) fn stop_acp_plugin(&mut self, plugin_id: Option<&str>, cx: &mut Context<Self>) {
+        self.ai.conversations.stop_acp_plugin(plugin_id, &self.settings_store.settings().ai, cx);
     }
 
     pub(in crate::workspace) fn resolve_ai_acp_plugin(

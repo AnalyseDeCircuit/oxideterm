@@ -301,7 +301,9 @@ impl AiChatDeliveryBatch {
                     raw_text,
                     round_id,
                     round_number,
-                } if status != "pending_user_approval" => {
+                } => {
+                    let needs_attention = status == "pending_user_approval"
+                        && ai.is_chat_stream_generation(delivery.generation);
                     self.flush_text(ai);
                     ai.apply_ai_tool_status(
                         delivery.generation,
@@ -321,8 +323,53 @@ impl AiChatDeliveryBatch {
                         &diagnostic,
                         cx,
                     );
+                    if needs_attention {
+                        return Some(AiChatWindowDelivery::Attention {
+                            generation: delivery.generation,
+                            conversation_id: delivery.conversation_id,
+                            assistant_id: delivery.assistant_id,
+                            label: "ai.agents.approval",
+                        });
+                    }
                 }
 
+                AiStreamDeliveryEvent::ToolApprovalRequested {
+                    tool_call_id,
+                    name,
+                    arguments,
+                    risk,
+                    summary,
+                    sender,
+                } => {
+                    self.flush_text(ai);
+                    ai.apply_ai_tool_status(
+                        delivery.generation,
+                        &delivery.conversation_id,
+                        &delivery.assistant_id,
+                        &tool_call_id,
+                        &name,
+                        &arguments,
+                        "pending_user_approval",
+                        None,
+                        Some(risk),
+                        Some(summary),
+                        false,
+                        None,
+                        None,
+                        None,
+                        &diagnostic,
+                        cx,
+                    );
+                    ai.register_tool_approval(delivery.generation, tool_call_id, sender);
+                    if ai.is_chat_stream_generation(delivery.generation) {
+                        return Some(AiChatWindowDelivery::Attention {
+                            generation: delivery.generation,
+                            conversation_id: delivery.conversation_id,
+                            assistant_id: delivery.assistant_id,
+                            label: "ai.agents.approval",
+                        });
+                    }
+                }
                 AiStreamDeliveryEvent::AcpClientEvent {
                     event:
                         event @ (oxideterm_ai::AcpClientEvent::SessionUpdate(_)

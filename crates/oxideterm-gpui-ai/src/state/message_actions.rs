@@ -426,6 +426,24 @@ impl AiWorkspaceEntity {
         Some(id)
     }
 
+    pub fn close_chat_confirm(&mut self, kind: AiStandardConfirmKind, delay: Duration, cx: &mut Context<Self>) -> bool {
+        let Some(generation) = self.begin_standard_chat_confirm_exit(kind) else { return false };
+        self.schedule_standard_confirm_exit(kind, generation, delay, cx);
+        true
+    }
+
+    pub fn restore_composer_focus(&mut self) {
+        self.focus_chat_input();
+        self.set_model_selector_search_focused(false);
+    }
+
+    pub fn select_chat_safety_mode(&mut self, mode: oxideterm_gpui_ui::ai::AiSafetyMode, cx: &mut Context<Self>) {
+        self.set_active_conversation_safety_mode(mode);
+        self.set_chat_popover_open(super::AiChatPopover::Safety, false);
+        self.restore_composer_focus();
+        cx.notify();
+    }
+
     pub fn schedule_standard_confirm_exit(
         &mut self,
         kind: AiStandardConfirmKind,

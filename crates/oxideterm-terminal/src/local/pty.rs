@@ -1319,6 +1319,7 @@ pub(crate) fn scroll_snapshot_from_term<T: EventListener>(
     }
     .unwrap_or(usize::MAX);
     let mut snapshot = TerminalSnapshot {
+        row_reuse: None,
         logical_context: previous.logical_context.clone(),
         generation: 0,
         cols: size.cols,
@@ -1353,42 +1354,75 @@ pub(crate) fn snapshot_from_term_with_display_offset<T: EventListener>(
     rows: usize,
     previous: Option<&TerminalSnapshot>,
 ) -> TerminalSnapshot {
-    let content = term.renderable_content();
     let scrollback_lines = term.total_lines().saturating_sub(term.screen_lines());
     let display_offset = display_offset.min(scrollback_lines);
     let requested_rows = rows.max(1);
-    let mut rows = (0..requested_rows)
-        .map(|row| snapshot_row_from_term(term, size, palette, display_offset, row))
-        .collect::<Vec<_>>();
+    let reusable = previous
+        .filter(|previous| previous.cols == size.cols)
+        .and_then(|previous| Some((previous, previous.row_reuse.as_ref()?)))
+        .filter(|(_, source)| {
+            source.palette == *palette
+                && source
+                    .overrides
+                    .iter()
+                    .enumerate()
+                    .all(|(index, color)| *color == term.colors()[index])
+        });
+    let mut previous_cursor = None;
+    let mut rebuilt_rows = Vec::new();
+    let lines = (0..requested_rows)
+        .map(|index| {
+            let grid_line = index as i64 - display_offset as i64;
+            // These snapshots are read-only: row revisions are independent of who last
+            // consumed emulator damage, and survive movement through the viewport.
+            if let Some((previous, source)) = reusable
+                && let Ok(previous_index) =
+                    usize::try_from(grid_line + previous.display_offset as i64)
+                && let Some(row) = previous.lines.get(previous_index)
+                && row.source_id != 0
+                && row.absolute_line == grid_line
+                && grid_line >= -(scrollback_lines as i64)
+                && grid_line < term.screen_lines() as i64
+            {
+                let current = &term.grid()[Line(grid_line as i32)];
+                if row.source_id == current.identity()
+                    && source.revisions.get(previous_index) == Some(&current.revision())
+                {
+                    if previous_index == previous.cursor_row {
+                        previous_cursor = Some((index, previous.cursor_col));
+                    }
+                    return row.clone();
+                }
+            }
+            rebuilt_rows.push(index);
+            snapshot_row_from_term(term, size, palette, display_offset, index)
+        })
+        .collect();
 
-    let cursor_row = (content.cursor.point.line.0 + display_offset as i32).max(0) as usize;
-    let cursor_col = content.cursor.point.column.0;
-
-    if cursor_row < rows.len() && cursor_col < size.cols {
-        rows[cursor_row].cells_mut()[cursor_col].cursor = true;
-        mark_active_input_rows(&mut rows, cursor_row);
-    }
-    for row in &mut rows {
-        row.refresh_signature();
-    }
-
-    let mut images = graphics.visible_images(display_offset, requested_rows);
-    resolve_sixel_backgrounds(&mut images, palette, term.colors());
     let mut snapshot = TerminalSnapshot {
+        row_reuse: None,
         logical_context: previous
             .map_or_else(Vec::new, |snapshot| snapshot.logical_context.clone()),
         generation: 0,
         cols: size.cols,
         rows: size.rows,
-        cursor_col,
-        cursor_row,
-        cursor_shape: content.cursor.shape.into(),
+        cursor_col: previous_cursor.map_or(0, |(_, col)| col),
+        cursor_row: previous_cursor.map_or(usize::MAX, |(row, _)| row),
+        cursor_shape: TerminalCursorShape::Hidden,
         display_offset,
         scrollback_lines,
-        lines: rows,
-        images,
+        lines,
+        images: Vec::new(),
     };
-    crate::logical_context::capture(term, &mut snapshot);
+    refresh_snapshot_metadata(
+        &mut snapshot,
+        term,
+        size,
+        graphics,
+        palette,
+        display_offset,
+        rebuilt_rows,
+    );
     snapshot
 }
 
@@ -1638,6 +1672,21 @@ fn refresh_snapshot_metadata<T: EventListener>(
     for row_index in metadata_rows {
         snapshot.lines[row_index].refresh_signature();
     }
+    snapshot.row_reuse = Some(Arc::new(crate::data::TerminalSnapshotRowReuse {
+        palette: *palette,
+        overrides: std::array::from_fn(|index| term.colors()[index]),
+        revisions: snapshot
+            .lines
+            .iter()
+            .map(|row| {
+                if row.source_id == 0 {
+                    0
+                } else {
+                    term.grid()[Line(row.absolute_line as i32)].revision()
+                }
+            })
+            .collect(),
+    }));
 }
 
 #[cfg(test)]
@@ -2372,14 +2421,6 @@ mod incremental_snapshot_tests {
         assert!(source.search_matches("needle", &|| true).is_empty());
         assert_eq!(source.search_matches("needle", &|| false).len(), 1);
     }
-}
-
-fn mark_active_input_rows(rows: &mut [TerminalRow], cursor_row: usize) -> std::ops::Range<usize> {
-    let active_rows = active_input_row_range(rows, cursor_row);
-    for row in &mut rows[active_rows.clone()] {
-        row.active_input = true;
-    }
-    active_rows
 }
 
 fn active_input_row_range(rows: &[TerminalRow], cursor_row: usize) -> std::ops::Range<usize> {

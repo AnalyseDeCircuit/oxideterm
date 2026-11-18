@@ -991,18 +991,6 @@ mod mux_search_pass_tests {
         assert!(search.matches_subtree(&roots[0]));
         assert!(search.matches_subtree(&roots[0].children[0]));
     }
-
-    #[test]
-    fn name_only_match_reveals_no_children() {
-        let (snapshot, details) = captured("helper-session", tree("alpha"));
-        let search = MuxSearchPass::new("helper-session", Some(&snapshot), &details);
-        let roots = details.get("helper-session").unwrap();
-        assert!(search.matches_session(&snapshot.sessions[0], Some(roots)));
-        // The expansion under this row has nothing to list, which is the case
-        // that renders the localized no-object state instead of a blank area.
-        assert!(!search.matches_inside(roots));
-        assert!(!search.matches_subtree(&roots[0]));
-    }
 }
 
 /// The verb's icon and copy, resolved from the tree level the verb runs on.

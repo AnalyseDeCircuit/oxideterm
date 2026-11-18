@@ -57,6 +57,7 @@ pub mod launch;
 pub mod skills;
 
 pub mod agents;
+pub mod local_command;
 pub mod history;
 pub use crate::knowledge::page::KNOWLEDGE_DOCUMENT_PAGE_SIZE;
 pub use history::HistoryStatus;

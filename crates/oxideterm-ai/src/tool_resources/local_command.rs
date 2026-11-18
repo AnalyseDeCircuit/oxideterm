@@ -1,19 +1,15 @@
-use oxideterm_ai::tool_resources::{
-    AiActionResultLite, AiStableResourceOperation, ai_live_resource_operation,
-    ai_run_command_preflight_risk,
-    ai_stable_resource_operation,
-};
+use super::AiActionResultLite;
 
 #[cfg(windows)]
-pub(in crate::workspace) const AI_LOCAL_COMMAND_CREATE_NO_WINDOW: u32 = 0x08000000;
+const AI_LOCAL_COMMAND_CREATE_NO_WINDOW: u32 = 0x08000000;
 
-pub(in crate::workspace) async fn run_local_ai_command(
+pub async fn run_local_ai_command(
     command: &str,
     cwd: Option<&str>,
     dangerous_command_approved: bool,
-    resource: Option<oxideterm_ai::agent::AgentResourceRecord>,
+    resource: Option<crate::agent::AgentResourceRecord>,
 ) -> AiActionResultLite {
-    if oxideterm_ai::has_denied_commands(
+    if crate::has_denied_commands(
         "run_command",
         Some(&serde_json::json!({ "command": command })),
     ) && !dangerous_command_approved
@@ -73,7 +69,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
     let evidence_record = resource.clone();
     let mut dispatched = false;
     let result = match async {
-        let process = oxideterm_ai::agent::AgentProcess::spawn(&mut process)?.track(resource);
+        let process = crate::agent::AgentProcess::spawn(&mut process)?.track(resource);
         dispatched = true;
         process.output().await
     }
@@ -162,7 +158,7 @@ pub(in crate::workspace) async fn run_local_ai_command(
     result
 }
 
-pub(in crate::workspace) fn configure_ai_local_command_process(
+fn configure_ai_local_command_process(
     process: &mut tokio::process::Command,
 ) {
     #[cfg(windows)]
@@ -177,7 +173,7 @@ pub(in crate::workspace) fn configure_ai_local_command_process(
     }
 }
 
-pub(in crate::workspace) fn truncate_ai_local_exec_output(value: &str) -> String {
+fn truncate_ai_local_exec_output(value: &str) -> String {
     const MAX_BYTES: usize = 64 * 1024;
     if value.len() <= MAX_BYTES {
         return value.to_string();
@@ -191,11 +187,11 @@ pub(in crate::workspace) fn truncate_ai_local_exec_output(value: &str) -> String
     format!("{}...(truncated)", &value[..end])
 }
 
-pub(in crate::workspace) fn ai_shell_single_quote(value: &str) -> String {
+fn ai_shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
-pub(in crate::workspace) fn ai_command_with_cwd(command: &str, cwd: Option<&str>) -> String {
+pub fn ai_command_with_cwd(command: &str, cwd: Option<&str>) -> String {
     match cwd.filter(|value| !value.trim().is_empty()) {
         Some("~") => format!("cd ~ && {command}"),
         Some(cwd) => {
@@ -208,27 +204,4 @@ pub(in crate::workspace) fn ai_command_with_cwd(command: &str, cwd: Option<&str>
         }
         None => command.to_string(),
     }
-}
-
-fn ai_transfers_state(manager: &SftpTransferManager) -> serde_json::Value {
-    use oxideterm_ai::tool_resources::{AiTransferCapture, AiTransferState};
-    let transfers = manager.list_background_transfers(None);
-    let facts = transfers.iter().map(|transfer| AiTransferCapture {
-        id: &transfer.id,
-        direction: match transfer.direction {
-            BackgroundTransferDirection::Upload => "upload",
-            BackgroundTransferDirection::Download => "download",
-        },
-        state: match transfer.state {
-            BackgroundTransferState::Pending => AiTransferState::Pending,
-            BackgroundTransferState::Active => AiTransferState::Active,
-            BackgroundTransferState::Paused => AiTransferState::Paused,
-            BackgroundTransferState::Completed => AiTransferState::Completed,
-            BackgroundTransferState::Cancelled => AiTransferState::Cancelled,
-            BackgroundTransferState::Error => AiTransferState::Error,
-        },
-        size: transfer.size, transferred: transfer.transferred, has_error: transfer.error.is_some(),
-        start_time: transfer.start_time, end_time: transfer.end_time,
-    }).collect::<Vec<_>>();
-    oxideterm_ai::tool_resources::ai_transfers_state(&facts)
 }

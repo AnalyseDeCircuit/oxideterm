@@ -53,7 +53,7 @@ impl QuickCommandsView {
                         QuickCommandInput::Search,
                         snapshot.query.clone(),
                         snapshot.focused_input,
-                        self.i18n.t("terminal.search_placeholder"),
+                        self.i18n.t("terminal.quick_commands.search_placeholder"),
                         cx,
                     )),
             )
@@ -96,9 +96,9 @@ impl QuickCommandsView {
                         "quick-command-add-button",
                         "label",
                         self.i18n.t(if snapshot.managing {
-                            "terminal.add"
+                            "terminal.quick_commands.add"
                         } else {
-                            "terminal.manage"
+                            "terminal.quick_commands.manage"
                         }),
                         theme.text_muted,
                         cx,
@@ -246,7 +246,8 @@ impl QuickCommandsView {
                                     .font_family(self.mono_font.clone())
                                     .text_color(rgb(theme.accent))
                                     .child(if contains_secret_values {
-                                        self.i18n.t("terminal.preview_contains_secrets")
+                                        self.i18n
+                                            .t("terminal.quick_commands.preview_contains_secrets")
                                     } else {
                                         // GPUI owns one frame-local display copy; the runtime
                                         // source remains zeroizing and is cleared on close.
@@ -256,16 +257,19 @@ impl QuickCommandsView {
                     );
                 }
                 if !prepared.unavailable_targets.is_empty() {
-                    rows =
-                        rows.child(
-                            div()
-                                .text_size(px(self.tokens.metrics.ui_text_xs))
-                                .text_color(rgb(theme.warning))
-                                .child(self.i18n.t("terminal.unavailable_targets").replace(
-                                    "{{targets}}",
-                                    &prepared.unavailable_targets.join(", "),
-                                )),
-                        );
+                    rows = rows.child(
+                        div()
+                            .text_size(px(self.tokens.metrics.ui_text_xs))
+                            .text_color(rgb(theme.warning))
+                            .child(
+                                self.i18n
+                                    .t("terminal.quick_commands.unavailable_targets")
+                                    .replace(
+                                        "{{targets}}",
+                                        &prepared.unavailable_targets.join(", "),
+                                    ),
+                            ),
+                    );
                 }
                 rows.into_any_element()
             }
@@ -299,7 +303,7 @@ impl QuickCommandsView {
                     .text_color(rgb(theme.text))
                     .child(
                         self.i18n
-                            .t("terminal.execution_title")
+                            .t("terminal.quick_commands.execution_title")
                             .replace("{{name}}", &execution.command.name),
                     ),
             )
@@ -310,7 +314,7 @@ impl QuickCommandsView {
                 div()
                     .text_size(px(self.tokens.metrics.ui_text_xs))
                     .text_color(rgb(theme.text_muted))
-                    .child(self.i18n.t("terminal.preview")),
+                    .child(self.i18n.t("terminal.quick_commands.preview")),
             )
             .child(preview)
             .into_any_element();
@@ -319,7 +323,7 @@ impl QuickCommandsView {
             .justify_end()
             .gap(px(8.0))
             .child(self.quick_command_text_button(
-                self.i18n.t("terminal.cancel"),
+                self.i18n.t("terminal.quick_commands.cancel"),
                 true,
                 cx.listener(|this, _event, _window, cx| {
                     this.cancel_terminal_quick_command_execution(cx);
@@ -328,7 +332,7 @@ impl QuickCommandsView {
             ))
             .child(
                 self.quick_command_text_button(
-                    self.i18n.t("terminal.run"),
+                    self.i18n.t("terminal.quick_commands.run"),
                     can_run,
                     cx.listener(|this, _event, window, cx| {
                         this.dispatch(QuickCommandsRequest::ConfirmExecution, Some(window), cx);
@@ -382,9 +386,9 @@ impl QuickCommandsView {
                     "quick-commands-empty",
                     snapshot.query.as_str(),
                     if snapshot.query.trim().is_empty() {
-                        self.i18n.t("terminal.empty_category")
+                        self.i18n.t("terminal.quick_commands.empty_category")
                     } else {
-                        self.i18n.t("terminal.empty_search")
+                        self.i18n.t("terminal.quick_commands.empty_search")
                     },
                     theme.text_muted,
                     cx,
@@ -573,9 +577,9 @@ impl QuickCommandsView {
                             .when_some(
                                 (!command.availability.host_patterns.is_empty())
                                     .then(|| format!("{}: {}", self.i18n.t(match command.availability.match_field {
-                                        QuickCommandMatchField::Host => "terminal.match_host",
-                                        QuickCommandMatchField::ConnectionName => "terminal.match_connection",
-                                        QuickCommandMatchField::All => "terminal.match_all",
+                                        QuickCommandMatchField::Host => "terminal.quick_commands.match_host",
+                                        QuickCommandMatchField::ConnectionName => "terminal.quick_commands.match_connection",
+                                        QuickCommandMatchField::All => "terminal.quick_commands.match_all",
                                     }), command.availability.host_patterns.join(", "))),
                                 |row, pattern| {
                                 row.child(

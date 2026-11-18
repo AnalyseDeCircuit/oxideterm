@@ -39,6 +39,35 @@ pub enum AiImageImportNotice {
 }
 
 impl AiWorkspaceEntity {
+    pub fn select_chat_images(
+        &mut self,
+        prompt: String,
+        import: impl FnOnce(Vec<std::path::PathBuf>, &mut App) + 'static,
+        cx: &mut Context<Self>,
+    ) {
+        let receiver = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: Some(prompt.into()),
+        });
+        let conversation = self.conversation_state().active_conversation_id.clone();
+        let task = cx.spawn(async move |weak, cx| {
+            let paths = receiver.await;
+            let _ = weak.update(cx, |ai, cx| {
+                ai.set_chat_image_import(None);
+                if ai.conversation_state().active_conversation_id != conversation {
+                    return;
+                }
+                if let Ok(Ok(Some(paths))) = paths {
+                    cx.defer(move |cx| import(paths, cx));
+                }
+                cx.notify();
+            });
+        });
+        self.set_chat_image_import(Some(task));
+    }
+
     pub fn import_chat_images(
         &mut self,
         sources: Vec<AiImageSource>,
@@ -118,5 +147,30 @@ impl AiWorkspaceEntity {
         }
         self.persist_chat_state();
         Some(pending)
+    }
+}
+
+impl AiImageSource {
+    pub fn from_clipboard(item: &gpui::ClipboardItem) -> Option<Vec<Self>> {
+        item.entries().iter().find_map(|entry| match entry {
+            gpui::ClipboardEntry::Image(image) => Some(vec![Self::Clipboard(image.bytes.clone())]),
+            gpui::ClipboardEntry::ExternalPaths(paths) => {
+                Some(paths.paths().iter().cloned().map(Self::File).collect())
+            }
+            _ => None,
+        })
+    }
+}
+
+pub fn check_chat_image_model(
+    config: &oxideterm_ai::AiChatStreamConfig,
+    i18n: &oxideterm_i18n::I18n,
+) -> Result<(), String> {
+    if config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp
+        || oxideterm_ai::model_image_input(&config.provider_type, &config.model, config.image_input) != Some(false)
+    {
+        Ok(())
+    } else {
+        Err(i18n.t("ai.images.model_unavailable"))
     }
 }

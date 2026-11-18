@@ -739,6 +739,15 @@ impl SettingsWorkspaceEntity {
         true
     }
 
+    pub fn open_ai_section(&mut self, section: &str, cx: &mut Context<Self>) {
+        if let Some(tab) = crate::settings_tab_from_ai_section(section) {
+            self.set_active_tab(tab, cx);
+        }
+        if let Some(page) = crate::terminal_settings_page_from_ai_section(section) {
+            self.set_terminal_page(page, cx);
+        }
+    }
+
     pub fn set_terminal_page(
         &mut self,
         page: TerminalSettingsPage,

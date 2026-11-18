@@ -220,3 +220,35 @@ fn ai_background_task_mode(
         condition,
     })
 }
+
+pub struct AiBackgroundNotice {
+    pub failed: bool,
+    pub title: String,
+    pub body: String,
+    pub key: String,
+}
+
+impl super::AiBackgroundTaskEntity {
+    pub fn drain_tool_events(
+        &self, i18n: &oxideterm_i18n::I18n,
+    ) -> (Vec<AiBackgroundNotice>, Vec<super::AiBackgroundExecutionRequest>) {
+        use oxideterm_ai_tasks::{BackgroundTaskEvent, BackgroundTaskState};
+        let events = self.take_events();
+        let requests = self.take_execution_requests();
+        let notices = events.into_iter().filter_map(|event| {
+            let BackgroundTaskEvent::Changed(snapshot) = event else { return None };
+            let (failed, key) = match snapshot.state {
+                BackgroundTaskState::Completed => (false, "ai.background_tasks.completed"),
+                BackgroundTaskState::Failed => (true, "ai.background_tasks.failed"),
+                _ => return None,
+            };
+            Some(AiBackgroundNotice {
+                failed,
+                title: format!("{} · {}", i18n.t(key), snapshot.title),
+                body: i18n.t("ai.background_tasks.notification_body").replace("{{count}}", &snapshot.run_count.to_string()),
+                key: format!("ai-background-task:{}", snapshot.id.as_str()),
+            })
+        }).collect();
+        (notices, requests)
+    }
+}

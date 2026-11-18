@@ -1,3 +1,5 @@
+use oxideterm_gpui_ai::model_picker::host::AiModelPickerHost as _;
+use oxideterm_gpui_ai::conversation::actions::AiChatActions as _;
 use std::rc::Rc;
 
 use gpui::{App, AppContext, Context, Entity, IntoElement};
@@ -5,7 +7,7 @@ use oxideterm_gpui_ai::{
     sidebar::{
         editor::AiEditorView,
         transcript::{
-            AiAssistantSidebarView, AiComposerFrame, AiOverlayFrame, AiRenameFrame,
+            AiAssistantSidebarView, AiRenameFrame,
             AiSidebarChildren, AiSidebarLayer, AiSidebarLayerKind, AiTranscriptBindings,
             AiTranscriptFrame, AiTranscriptPolicy, AiTranscriptRequest, SelectableTextRole as TranscriptTextRole,
         },
@@ -16,7 +18,7 @@ use oxideterm_gpui_markdown::render::MarkdownCodeBlockActions;
 use oxideterm_gpui_ui::tauri_ui_font_family;
 
 use super::super::{
-    SelectableTextRole, TerminalNoticeVariant, WorkspaceApp, settings_mono_font_family,
+    SelectableTextRole, WorkspaceApp, settings_mono_font_family,
 };
 
 impl WorkspaceApp {
@@ -51,58 +53,27 @@ impl WorkspaceApp {
                 let app = entity.read(cx);
                 let settings = app.settings_store.settings();
                 let text = app.selectable_text_render_state_for_entity(entity.clone(), cx);
-                let ai = &settings.ai;
-                let policy = AiTranscriptPolicy::from_settings(ai, app.ai.state.read(cx), || {
-                    app.resolve_ai_stream_config(cx).ok()
-                });
-                let composer = AiComposerFrame {
-                    enabled: ai.enabled,
-                    model_selected: policy.model_selected,
-                    images_allowed: policy.images_allowed,
-                    backend: ai.active_backend,
-                    context_counts: ai
-                        .enabled
-                        .then(|| app.ai_context_message_usage_counts(cx))
-                        .flatten(),
-                    terminal_context: app.ai_active_terminal_context_available(cx),
-                    split_context: app.ai_active_tab_has_split_panes(cx),
-                    ide_context: app.ai_has_ide_context(cx),
-                    sftp_context: app.ai_has_sftp_context(cx),
-                    tools: app.ai_tool_indicator_info(cx),
-                    reasoning: policy.reasoning.as_ref().map(|(_, _, level)| *level),
-                    auth_methods: app
-                        .ai
-                        .state
-                        .read(cx)
-                        .conversation_state()
-                        .active_conversation_id
-                        .as_deref()
-                        .and_then(|id| app.ai.acp.read(cx).authentication_methods(id)),
-                };
-                Some(AiTranscriptFrame {
-                    composer,
-                    overlay: AiOverlayFrame {
-                        rename: AiRenameFrame {
-                            anchor: rename_target.anchor_id(),
-                            viewport: app.text_input_anchors.viewport(rename_target.anchor_id()),
-                            marked: app
-                                .marked_text_for_target(rename_target, cx)
-                                .map(str::to_owned),
-                            selected_range: app.ime_selected_range_for_target(rename_target, cx),
-                            active_offset: app.ime_active_offset_for_target(rename_target, cx),
-                            caret_visible: app.input_caret.visible(),
-                        },
-                        reasoning: policy.reasoning,
-                        breakdown: app
-                            .ai
-                            .state
-                            .read(cx)
-                            .chat_ui()
-                            .context_popover_open
-                            .then(|| app.ai_context_token_breakdown(cx)),
-                        confirm_focus: app.standard_confirm_focus(),
+                let ai = app.ai.state.read(cx);
+                let auth = ai.conversation_state().active_conversation_id.as_deref()
+                    .and_then(|id| app.ai.acp.read(cx).authentication_methods(id));
+                let (composer, overlay, agent_models) = AiTranscriptPolicy::compose(
+                    &settings.ai, ai, || app.resolve_ai_stream_config(cx).ok(),
+                    || app.ai_context_message_usage_counts(cx), || app.ai_context_token_breakdown(cx),
+                    [app.ai_active_terminal_context_available(cx), app.ai_active_tab_has_split_panes(cx),
+                     app.ai_has_ide_context(cx), app.ai_has_sftp_context(cx)],
+                    app.ai_tool_indicator_info(cx), auth,
+                    AiRenameFrame {
+                        anchor: rename_target.anchor_id(),
+                        viewport: app.text_input_anchors.viewport(rename_target.anchor_id()),
+                        marked: app.marked_text_for_target(rename_target, cx).map(str::to_owned),
+                        selected_range: app.ime_selected_range_for_target(rename_target, cx),
+                        active_offset: app.ime_active_offset_for_target(rename_target, cx),
+                        caret_visible: app.input_caret.visible(),
                     },
-
+                    app.standard_confirm_focus(),
+                );
+                Some(AiTranscriptFrame {
+                    composer, overlay, agent_models,
                     tokens: app.tokens,
                     i18n: app.i18n.clone(),
                     font: tauri_ui_font_family(&settings.appearance.ui_font_family),
@@ -113,7 +84,6 @@ impl WorkspaceApp {
                     window_background: app.window_background_preferences().is_some(),
                     thinking_style: settings.ai.thinking_style,
                     thinking_default_expanded: settings.ai.thinking_default_expanded,
-                    agent_models: policy.agent_models,
                     markdown: app.localized_markdown_options(),
                     selectable_text: Rc::new(move |fragment| {
                         let role = match fragment.role {
@@ -135,27 +105,16 @@ impl WorkspaceApp {
                 })
             }),
             request: Rc::new(move |request, window, cx| {
-                let _ = action_owner.update(cx, |app, cx| match request {
-                    AiTranscriptRequest::ClipboardReadFailed => app.push_ai_settings_toast(
-                        app.i18n.t("ai.chat.load_failed_generic"),
-                        TerminalNoticeVariant::Error,
-                        cx,
-                    ),
-                    AiTranscriptRequest::Regenerate => app.regenerate_ai_last_response(cx),
+                let _ = action_owner.update(cx, |app, cx| {
+                    let Some(request) = app.handle_transcript_action(request, cx) else { return };
+                    match request {
                     AiTranscriptRequest::CancelEdit => app.cancel_edit_ai_message(cx),
-                    AiTranscriptRequest::SaveEdit => app.save_ai_message_edit(cx),
-                    AiTranscriptRequest::FollowUp(a0) => app.send_ai_follow_up_suggestion(a0, cx),
                     AiTranscriptRequest::AcpPermission(a0, a1, a2) => {
                         app.resolve_ai_acp_permission(a0, a1, a2, cx)
                     }
                     AiTranscriptRequest::InsertCommand(a0) => {
                         app.insert_ai_code_block_command(a0, cx)
                     }
-                    AiTranscriptRequest::ImagePreviewFailed => app.push_ai_settings_toast(
-                        app.i18n.t("ai.images.missing"),
-                        TerminalNoticeVariant::Error,
-                        cx,
-                    ),
                     AiTranscriptRequest::BeginRename(id, title) => {
                         if let Some(window) = window {
                             app.begin_ai_conversation_rename(id, title, window, cx);
@@ -220,13 +179,6 @@ impl WorkspaceApp {
                     AiTranscriptRequest::NewConversation => {
                         app.create_ai_sidebar_conversation(None, cx);
                     }
-                    AiTranscriptRequest::Stop => app.cancel_ai_chat_stream(cx),
-                    AiTranscriptRequest::Steer => app.steer_ai_chat_draft(cx),
-                    AiTranscriptRequest::InterruptAndSend => {
-                        app.interrupt_and_send_ai_chat_draft(cx)
-                    }
-                    AiTranscriptRequest::Send => app.send_ai_chat_draft(cx),
-                    AiTranscriptRequest::Compact => app.start_ai_compact_conversation(cx),
                     AiTranscriptRequest::Summarize => app.open_ai_summarize_confirm(cx),
                     AiTranscriptRequest::SelectImages => app.select_ai_images(cx),
                     AiTranscriptRequest::ContinueTextOnly(id) => {
@@ -240,14 +192,6 @@ impl WorkspaceApp {
                             acp.authenticate(&id, method);
                         });
                     }
-                    AiTranscriptRequest::QueueAction(conversation, id, action) => {
-                        app.apply_ai_queue_action(&conversation, &id, action, cx)
-                    }
-                    AiTranscriptRequest::AgentModelLocked => app.push_ai_settings_toast(
-                        app.i18n.t("ai.agents.model_locked"),
-                        TerminalNoticeVariant::Warning,
-                        cx,
-                    ),
                     AiTranscriptRequest::EditMessage(id) => {
                         app.start_edit_ai_message(id, cx);
                         if let Some(window) = window {
@@ -260,6 +204,8 @@ impl WorkspaceApp {
                             window.focus(&app.focus_handle, cx);
                         }
                         gpui::App::notify(cx, app.ai.transcript.entity_id());
+                    }
+                    _ => unreachable!("feature action already dispatched"),
                     }
                 });
             }),

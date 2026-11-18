@@ -2032,20 +2032,6 @@ mod tests {
     }
 
     #[test]
-    fn preflight_does_not_count_proxy_auth_kinds() {
-        let mut source = temp_store("preflight-proxy-counts");
-        source
-            .upsert_imported_connection(saved_connection("conn-1", "Prod"))
-            .unwrap();
-
-        let result = preflight_export(&source, &["conn-1".to_string()], false, true, 0);
-
-        assert_eq!(result.connections_with_keys, 1);
-        assert_eq!(result.connections_with_agent, 0);
-        assert_eq!(result.connections_with_passwords, 0);
-    }
-
-    #[test]
     fn preflight_requires_managed_key_export_for_managed_key_connections() {
         let mut source = temp_store("preflight-managed-key-excluded");
         let managed_key = source

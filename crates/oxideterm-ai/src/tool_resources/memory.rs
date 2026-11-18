@@ -460,3 +460,14 @@ pub fn ai_preference_saved(snapshot: &super::AiOrchestratorRuntimeSnapshot) -> s
             "write",
         )
     }
+
+pub fn record_memory_usage(memory: &mut oxideterm_settings::AiMemorySettings, entry_ids: &[String]) {
+    let now_ms = ai_memory_now_ms();
+    let ids: std::collections::HashSet<_> = entry_ids.iter().collect();
+    for entry in &mut memory.entries {
+        if ids.contains(&entry.id) {
+            entry.last_used_at_ms = Some(now_ms);
+            entry.use_count = entry.use_count.saturating_add(1);
+        }
+    }
+}

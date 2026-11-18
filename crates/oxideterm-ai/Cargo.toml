@@ -26,6 +26,9 @@ oxideterm-connections = { path = "../oxideterm-connections" }
 oxideterm-forwarding = { path = "../oxideterm-forwarding", default-features = false }
 oxideterm-settings = { path = "../oxideterm-settings" }
 oxideterm-workspace = { path = "../oxideterm-workspace" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-ide-fs = { path = "../oxideterm-ide-fs" }
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
 oxideterm-network-proxy = { path = "../oxideterm-network-proxy" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }

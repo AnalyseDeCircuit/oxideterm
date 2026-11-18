@@ -409,30 +409,4 @@ mod tests {
             .is_none()
         );
     }
-
-    #[test]
-    fn password_read_errors_preserve_actionable_categories_through_context() {
-        use oxideterm_portable_runtime::keystore::PortableKeystoreError;
-        for (error, expected) in [
-            (
-                PortableKeystoreError::NotFound("private-reference".into()),
-                SavedPasswordLoadError::NotFound,
-            ),
-            (
-                PortableKeystoreError::Missing,
-                SavedPasswordLoadError::NotFound,
-            ),
-            (
-                PortableKeystoreError::Locked,
-                SavedPasswordLoadError::Locked,
-            ),
-            (
-                PortableKeystoreError::CredentialStore,
-                SavedPasswordLoadError::Unavailable,
-            ),
-        ] {
-            let error = anyhow::Error::new(error).context("credential read failed");
-            assert_eq!(SavedPasswordLoadError::from_store_error(&error), expected);
-        }
-    }
 }

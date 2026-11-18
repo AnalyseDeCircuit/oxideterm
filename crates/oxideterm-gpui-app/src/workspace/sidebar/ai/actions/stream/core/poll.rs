@@ -6,16 +6,12 @@ impl WorkspaceApp {
         let owner = cx.weak_entity();
         let attention = owner.clone();
         AcpFileReviewBindings {
-            preview: crate::workspace::acp_workspace::acp_file_write_preview,
+            preview: oxideterm_ai::tool_resources::acp_file_write_preview,
             frame: Rc::new(move |cx| {
                 let app = owner.upgrade()?.read(cx);
-                let ai = &app.settings_store.settings().ai;
-                Some(oxideterm_gpui_ai::stream::AiChatStreamFrame {
-                    i18n: app.i18n.clone(),
-                    tool_use_enabled: ai.tool_use.enabled,
-                    provider_id: ai.active_provider_id.clone(),
-                    model: ai.active_model.clone(),
-                })
+                Some(oxideterm_gpui_ai::stream::AiChatStreamFrame::from_settings(
+                    &app.settings_store.settings().ai, app.i18n.clone(),
+                ))
             }),
             request_attention: Rc::new(move |conversation_id, assistant_id, cx| {
                 let _ = attention.update(cx, |app, cx| {
@@ -43,17 +39,6 @@ impl WorkspaceApp {
             }
         };
         match delivery.event {
-            AiStreamDeliveryEvent::ToolImages(_)
-            | AiStreamDeliveryEvent::HistoryBarrier(_)
-            | AiStreamDeliveryEvent::Checkpoint(_)
-            | AiStreamDeliveryEvent::PromptUsage { .. }
-            | AiStreamDeliveryEvent::Stream(
-                AiStreamEvent::Content(_) | AiStreamEvent::Thinking(_) | AiStreamEvent::Usage { .. }
-                | AiStreamEvent::ProviderResponsePart { .. } | AiStreamEvent::ToolCall { .. }
-                | AiStreamEvent::ToolCallComplete { .. },
-            ) => {
-                unreachable!("chat batch consumes local deliveries");
-            }
             AiStreamDeliveryEvent::ToolResourcesRequested { tool_session_id, name, args, sender } => {
 let result = self.ai.conversations.tool_resource_keys(delivery.generation, &tool_session_id, &name, &args, cx);
                 let _ = sender.send(result);
@@ -94,78 +79,6 @@ let result = self.ai.conversations.tool_resource_keys(delivery.generation, &tool
                     agent_id, event, Self::acp_terminal_bridge(cx), window, cx,
                 );
             }
-            AiStreamDeliveryEvent::AcpSessionStarted { .. }
-            | AiStreamDeliveryEvent::UserQuestionRequested { .. }
-            | AiStreamDeliveryEvent::ToolCandidateSelectionRequested { .. } => {
-                unreachable!("chat batch consumes interactive view state");
-            }
-            AiStreamDeliveryEvent::Guardrail { .. }
-            | AiStreamDeliveryEvent::AssistantRound { .. }
-            | AiStreamDeliveryEvent::RoundSummary { .. }
-            | AiStreamDeliveryEvent::RoundStatefulMarker { .. }
-            | AiStreamDeliveryEvent::Diagnostic { .. } => {
-                unreachable!("chat batch consumes local records");
-            }
-            AiStreamDeliveryEvent::ToolStatus {
-                tool_call_id,
-                name,
-                arguments,
-                status,
-                result,
-                risk,
-                summary,
-                synthetic_denied,
-                raw_text,
-                round_id,
-                round_number,
-            } => {
-                self.apply_ai_tool_status(
-                    delivery.generation,
-                    &delivery.conversation_id,
-                    &delivery.assistant_id,
-                    &tool_call_id,
-                    &name,
-                    &arguments,
-                    &status,
-                    result,
-                    risk,
-                    summary,
-                    synthetic_denied,
-                    raw_text,
-                    round_id,
-                    round_number,
-                    cx,
-                );
-            }
-            AiStreamDeliveryEvent::ToolApprovalRequested {
-                tool_call_id,
-                name,
-                arguments,
-                risk,
-                summary,
-                sender,
-            } => {
-                self.apply_ai_tool_status(
-                    delivery.generation,
-                    &delivery.conversation_id,
-                    &delivery.assistant_id,
-                    &tool_call_id,
-                    &name,
-                    &arguments,
-                    "pending_user_approval",
-                    None,
-                    Some(risk),
-                    Some(summary),
-                    false,
-                    None,
-                    None,
-                    None,
-                    cx,
-                );
-                self.ai.state.update(cx, |ai, _cx| {
-                    ai.register_tool_approval(delivery.generation, tool_call_id, sender);
-                });
-            }
             AiStreamDeliveryEvent::ToolPreflightRequested {
                 tool_session_id,
                 tool_call_id,
@@ -173,43 +86,15 @@ let result = self.ai.conversations.tool_resource_keys(delivery.generation, &tool
                 args,
                 sender,
             } => {
-                let session_is_active = self.ai.authority.read(cx).is_active_tool_session(
-                    delivery.generation,
-                    &tool_session_id,
-                );
-                let rejection = if !session_is_active {
-                    Some(rejected_ai_tool_result(
-                        tool_call_id,
-                        name,
-                        "operation_cancelled",
-                        "The AI tool session is no longer active.",
-                    ))
-                } else {
-                    self.preflight_ai_ui_orchestrator_tool(
-                        &tool_session_id,
-                        &name,
-                        &args,
-                        cx,
-                    )
-                    .err()
-                    .map(|error| {
-                        let snapshot = self.ai_orchestrator_snapshot_for_tool_session(
-                            Some(&tool_session_id),
-                            cx,
-                        );
-                        snapshot.to_executed_tool_result(
-                            tool_call_id,
-                            name,
-                            snapshot.fail(
-                                "Runtime target is unavailable.",
-                                error.public_code(),
-                                "Rediscover the current terminal target before retrying.",
-                                "interactive",
-                            ),
-                            0,
-                        )
-                    })
-                };
+                let rejection = if !self.ai.authority.read(cx).is_active_tool_session(delivery.generation, &tool_session_id) {
+                    Some(oxideterm_gpui_ai::conversation::agents::inactive_tool_result(tool_call_id, name))
+                } else if oxideterm_ai::tool_resources::ai_tool_preflights_runtime_owner(&name) {
+                    self.validate_ai_runtime_authority(&tool_session_id, &name, &args, cx)
+                        .err().map(|error| {
+                            self.ai_orchestrator_snapshot_for_tool_session(Some(&tool_session_id), cx)
+                                .tool_preflight_rejection(tool_call_id, name, &error)
+                        })
+                } else { None };
                 let _ = sender.send(rejection);
             }
             AiStreamDeliveryEvent::RuntimeContextRequested {
@@ -237,39 +122,16 @@ let result = self.ai.conversations.tool_resource_keys(delivery.generation, &tool
                 dangerous_command_approved,
                 sender,
             } => {
-                if dispatch.as_ref().is_some_and(|guard| guard.check().is_err()) {
-                    let _ = sender.send(rejected_ai_tool_result(tool_call_id, name, "agent_direction_changed", "Task direction changed before dispatch."));
-                    return;
-                }
-                let session_is_active = self.ai.authority.read(cx).is_active_tool_session(
-                    delivery.generation,
-                    &tool_session_id,
-                );
-                if !session_is_active || !self.ai.state.read(cx).run_accepts_tools(delivery.generation) || leases.iter().any(|lease| !lease.is_current()) || sender.is_closed() {
-                    let _ = sender.send(rejected_ai_tool_result(
-                        tool_call_id,
-                        name,
-                        "operation_cancelled",
-                        "The AI tool session is no longer active.",
-                    ));
-                    return;
-                }
-                if name != "run_command" { for lease in &leases { lease.dispatched(); } }
-                if !leases.is_empty() {
-                    self.ai.state.update(cx, |ai, _cx| { ai.agents.tool_leases.insert((tool_session_id.clone(), tool_call_id.clone()), leases); });
-                }
-                let raw_arguments = zeroize::Zeroizing::new(args.to_string());
+                let owner = match self.ai.conversations.admit_tool_execution(
+                    delivery.generation, delivery.conversation_id, delivery.assistant_id,
+                    &tool_session_id, &tool_call_id, &name, &args, dispatch, leases, || sender.is_closed(), cx,
+                ) {
+                    Ok(owner) => owner,
+                    Err(result) => { let _ = sender.send(result); return; }
+                };
                 oxideterm_audit::AuditContext::with_sync_request(audit_context.as_ref(), || {
                     self.start_ai_ui_orchestrator_tool_execution(
-                        AiToolRunContext {
-                            arguments: zeroize::Zeroizing::new(
-                                sanitize_ai_tool_arguments_for_approval(&raw_arguments),
-                            ),
-                            generation: delivery.generation,
-                            conversation_id: delivery.conversation_id.clone(),
-                            assistant_id: delivery.assistant_id.clone(),
-                            dispatch,
-                        },
+                        owner,
                         tool_session_id,
                         tool_call_id,
                         name,
@@ -282,6 +144,7 @@ let result = self.ai.conversations.tool_resource_keys(delivery.generation, &tool
                     );
                 });
             }
+            _ => unreachable!("conversation-local events are consumed before dispatch to the window"),
         }
     }
 }

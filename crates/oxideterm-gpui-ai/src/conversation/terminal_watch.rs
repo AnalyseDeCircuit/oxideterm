@@ -347,3 +347,155 @@ fn deadline_ms(deadline: Instant) -> i64 {
             .saturating_duration_since(Instant::now())
             .as_millis() as i64
 }
+
+/// Waits for the saved connection without owning its transport or workspace.
+pub fn wait_for_connected_target(
+    base: AiExecutedToolResult,
+    initial: Option<AiExecutedToolResult>,
+    sender: tokio::sync::oneshot::Sender<AiExecutedToolResult>,
+    started: std::time::Instant,
+    cx: &mut gpui::App,
+    mut sample: impl FnMut(
+        Option<&AiExecutedToolResult>, u128, &mut gpui::AsyncApp,
+    ) -> Option<Option<AiExecutedToolResult>> + 'static,
+) {
+    const MAX_SAMPLES: usize = 900;
+    const SAMPLE_INTERVAL: Duration = Duration::from_millis(100);
+
+    if !connection_needs_wait(&base) {
+        let _ = sender.send(base);
+        return;
+    }
+    if let Some(ready) = initial {
+        let _ = sender.send(ready);
+        return;
+    }
+    cx.spawn(async move |cx| {
+        for _ in 0..MAX_SAMPLES {
+            gpui::Timer::after(SAMPLE_INTERVAL).await;
+            match sample(None, started.elapsed().as_millis(), cx) {
+                Some(Some(result)) => {
+                    let _ = sender.send(result);
+                    return;
+                }
+                Some(None) => {}
+                None => break,
+            }
+        }
+        let result = sample(Some(&base), started.elapsed().as_millis(), cx)
+            .flatten()
+            .unwrap_or(base);
+        let _ = sender.send(result);
+    }).detach();
+}
+
+impl crate::state::AiWorkspaceEntity {
+    pub fn terminal_watch_status(
+        &self,
+        generation: u64,
+        command_id: Option<&str>,
+        status: AiTerminalWatchStatus,
+        deadline_ms: i64,
+        run: bool,
+    ) -> (serde_json::Value, &'static str) {
+        let mut data = serde_json::json!({"waiting": true, "waitDeadline": deadline_ms});
+        if run {
+            if let Some(agent) = self.agent_run(generation) {
+                let _ = self.agents.services.runtime.set_state(&agent, status.agent_state());
+            }
+            data["commandId"] = serde_json::json!(command_id);
+        }
+        (data, if run { "interactive" } else { "read" })
+    }
+}
+
+pub enum AiCommandMonitorSample {
+    Recovering,
+    Unavailable,
+    Current(Option<AiTerminalCommandStatus>),
+}
+
+pub struct AiCommandEvidence {
+    pub buffer: Zeroizing<String>,
+    pub exit_code: Option<i32>,
+}
+
+impl crate::state::AiWorkspaceEntity {
+    pub fn monitor_terminal_command(
+        &mut self,
+        before: &str,
+        leases: Vec<AgentToolLease>,
+        record: Option<oxideterm_ai::agent::AgentResourceRecord>,
+        sample: impl Fn(&mut gpui::App) -> AiCommandMonitorSample + Clone + 'static,
+        evidence: impl Fn(bool, &mut gpui::App) -> Option<AiCommandEvidence> + Clone + 'static,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        use oxideterm_ai::agent::OwnedResourceState;
+        for lease in leases {
+            let before = Zeroizing::new(before.to_owned());
+            let record = record.clone();
+            let key = lease.lease().resource.clone();
+            let monitor_key = key.clone();
+            let resources = self.agents.services.resources.clone();
+            let sample = sample.clone();
+            let evidence = evidence.clone();
+            let task = cx.spawn(async move |weak, cx| {
+                let finish_record = |require_closed, cx: &mut gpui::App| {
+                    let Some(record) = &record else { return };
+                    if let Some(evidence) = evidence(require_closed, cx) {
+                        let output = oxideterm_ai::terminal_observation::terminal_delta_output(
+                            &before, &evidence.buffer,
+                        );
+                        record.outcome(&serde_json::json!({"exitCode":evidence.exit_code,"output":output}).to_string());
+                        record.finish(OwnedResourceState::Completed);
+                    } else {
+                        record.finish(OwnedResourceState::OutcomeUnknown);
+                    }
+                };
+                loop {
+                    Timer::after(SAMPLE_INTERVAL).await;
+                    if weak.upgrade().is_none() { break; }
+                    let finished = cx.update(|cx| {
+                        if !lease.is_current() {
+                            // Preserve confirmed evidence without changing the next request's lease.
+                            finish_record(true, cx);
+                            return true;
+                        }
+                        match sample(cx) {
+                            AiCommandMonitorSample::Recovering => false,
+                            AiCommandMonitorSample::Unavailable => {
+                                resources.invalidate(&monitor_key);
+                                true
+                            }
+                            AiCommandMonitorSample::Current(status) if lease.response_finished() => {
+                                match status {
+                                    Some(AiTerminalCommandStatus::Completed) => {
+                                        lease.command_finished();
+                                        finish_record(false, cx);
+                                        true
+                                    }
+                                    None | Some(AiTerminalCommandStatus::Stale) => {
+                                        if let Some(record) = &record {
+                                            record.finish(OwnedResourceState::OutcomeUnknown);
+                                        }
+                                        resources.invalidate(&monitor_key);
+                                        true
+                                    }
+                                    _ => false,
+                                }
+                            }
+                            AiCommandMonitorSample::Current(_) => false,
+                        }
+                    });
+                    if finished { break; }
+                }
+                let _ = weak.update(cx, |ai, _| { ai.agents.command_monitors.remove(&monitor_key); });
+            });
+            self.agents.command_monitors.insert(key, task);
+        }
+    }
+}
+
+pub fn connection_needs_wait(result: &AiExecutedToolResult) -> bool {
+    result.success && result.envelope.get("summary").and_then(serde_json::Value::as_str) != Some("Target is already live.")
+}

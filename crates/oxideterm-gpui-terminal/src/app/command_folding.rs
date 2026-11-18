@@ -214,6 +214,7 @@ impl TerminalPane {
         if self.command_reflow_pending {
             if !self.command_folding.ranges.is_empty() {
                 self.smooth_scroll_snapshot_cache = None;
+                self.command_marks_render_cache_dirty = true;
             }
             self.command_folding.ranges.clear();
             self.command_folding.snapshot = None;
@@ -222,6 +223,7 @@ impl TerminalPane {
         if self.command_folding.collapsed.is_empty() {
             if !self.command_folding.ranges.is_empty() {
                 self.smooth_scroll_snapshot_cache = None;
+                self.command_marks_render_cache_dirty = true;
             }
             self.command_folding.ranges.clear();
             self.command_folding.snapshot = None;
@@ -272,6 +274,7 @@ impl TerminalPane {
         }
         if self.command_folding.ranges != ranges {
             self.smooth_scroll_snapshot_cache = None;
+            self.command_marks_render_cache_dirty = true;
         }
         self.command_folding.ranges = ranges;
         self.command_folding.snapshot = if self.command_folding.ranges.is_empty() {
@@ -286,6 +289,7 @@ impl TerminalPane {
             // A background parser moved the buffer during segment reads. Render the
             // coherent original frame and refresh, rather than hiding unrelated rows.
             self.command_folding.ranges.clear();
+            self.command_marks_render_cache_dirty = true;
             self.snapshot_dirty = true;
         }
     }
@@ -331,6 +335,7 @@ impl TerminalPane {
         let total = self.snapshot.scrollback_lines + self.snapshot.rows;
         let mut result = self.snapshot.clone();
         result.lines.clear();
+        result.row_reuse = None;
         result.logical_context.clear();
         result.images.clear();
         result.scrollback_lines = history;

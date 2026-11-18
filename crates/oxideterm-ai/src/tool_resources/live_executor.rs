@@ -1,43 +1,116 @@
-use oxideterm_ai::tool_resources::{
-    AiFileTransfer, AiRemoteFileWriteError, AiSftpOperation, AiSftpWrittenFile,
-    AiTransferDirection, AiTransferOutcome, validate_sftp_write_precondition,
+use oxideterm_sftp::{BackgroundTransferDirection, BackgroundTransferState, SftpTransferManager};
+use oxideterm_ssh::{NodeId, NodeRouter};
+
+use super::{
+    AiActionResultLite, AiFileRead, AiFileTransfer, AiFileWrite, AiLiveResourceOperation,
+    AiLiveResourceRequest, AiOrchestratorRuntimeSnapshot, AiRemoteFileWriteError, AiSftpOperation,
+    AiSftpWrittenFile, AiTransferDirection, AiTransferOutcome, validate_sftp_write_precondition,
 };
+
+/// Concrete application adapters used only after the GPUI broker validates a
+/// live capability handle. This type must never enter a provider task.
+#[derive(Clone)]
+pub struct AiLiveToolServices {
+    pub node_router: NodeRouter,
+    pub sftp_transfer_manager: std::sync::Arc<SftpTransferManager>,
+    pub backend_runtime: std::sync::Arc<tokio::runtime::Runtime>,
+}
+
+/// Separates a stale SFTP authority from an operation failure without retaining
+/// raw transfer arguments in an error's debug representation.
+enum AiSftpTransferError {
+    OwnerReplaced,
+    Operation(String),
+}
+
+pub enum AiLiveFileOwner {
+    Sftp(crate::AiSftpRuntimeOwner<NodeId>),
+    Ide {
+        node_id: NodeId,
+        file_system: oxideterm_ide_fs::NodeAgentIdeFileSystem,
+    },
+}
+
+async fn execute_live_resource(
+    snapshot: &AiOrchestratorRuntimeSnapshot,
+    services: &AiLiveToolServices,
+    owner: AiLiveFileOwner,
+    request: AiLiveResourceRequest<'_>,
+    post_user_approval: bool,
+) -> AiActionResultLite {
+    use AiLiveFileOwner::{Ide, Sftp};
+    use AiLiveResourceRequest::{Read, Transfer, Write};
+    match (owner, request) {
+        (
+            Ide {
+                node_id,
+                file_system,
+            },
+            Read(request),
+        ) => {
+            let path = request.path;
+            match file_system.node_agent_read_file(node_id.0, path).await {
+                Ok(file) => snapshot.ide_file_read(
+                    path,
+                    file.content,
+                    file.hash,
+                    file.size,
+                    file.mtime,
+                    file.encoding,
+                ),
+                Err(_) => snapshot.ide_file_owner_unavailable(false),
+            }
+        }
+        (
+            Ide {
+                node_id,
+                file_system,
+            },
+            Write(request),
+        ) => {
+            match file_system
+                .node_agent_write_file(
+                    node_id.0,
+                    request.path,
+                    request.content,
+                    request.expected_hash,
+                )
+                .await
+            {
+                Ok(file) => snapshot.ide_file_written(
+                    request.path,
+                    file.hash,
+                    file.size,
+                    file.mtime,
+                    file.atomic,
+                ),
+                Err(_) => snapshot.ide_file_owner_unavailable(true),
+            }
+        }
+        (Sftp(owner), Read(request)) => {
+            read_live_resource(snapshot, services, owner, request, post_user_approval).await
+        }
+        (Sftp(owner), Write(request)) => {
+            write_live_resource(snapshot, services, owner, request, post_user_approval).await
+        }
+        (Sftp(owner), Transfer(request)) => {
+            transfer_live_resource(snapshot, services, owner, request, post_user_approval).await
+        }
+        // Transfer handles are issued only for SFTP, never for the IDE.
+        (Ide { .. }, Transfer(_)) => snapshot.missing_sftp_transfer_owner(),
+    }
+}
 
 /// Executes a v2 live read after the UI broker resolved an opaque owner
 /// handle to this exact node. No target identifier crosses this boundary.
 async fn read_live_resource(
     snapshot: &AiOrchestratorRuntimeSnapshot,
     services: &AiLiveToolServices,
-    node_id: NodeId,
-    sftp_owner: Option<crate::workspace::ai_runtime_context::AiSftpRuntimeOwner>,
-    args: &serde_json::Value,
-    ide_file_system: Option<oxideterm_ide_fs::NodeAgentIdeFileSystem>,
+    owner: crate::AiSftpRuntimeOwner<NodeId>,
+    request: AiFileRead<'_>,
     post_user_approval: bool,
 ) -> AiActionResultLite {
-    let request = match snapshot.decode_file_read(args) {
-        Ok(request) => request,
-        Err(result) => return result,
-    };
     let path = request.path;
-    if request.ide {
-        let Some(fs) = ide_file_system else {
-            return snapshot.missing_ide_file_owner(false);
-        };
-        return match fs.node_agent_read_file(node_id.0, path).await {
-            Ok(file) => snapshot.ide_file_read(
-                path,
-                file.content,
-                file.hash,
-                file.size,
-                file.mtime,
-                file.encoding,
-            ),
-            Err(_) => snapshot.ide_file_owner_unavailable(false),
-        };
-    }
-    let Some(owner) = sftp_owner else {
-        return snapshot.missing_sftp_owner(false);
-    };
     let Ok(shared) = services
         .node_router
         .acquire_existing_sftp_generation(
@@ -78,12 +151,7 @@ async fn read_live_resource(
                 .await;
             snapshot.sftp_session_changed(AiSftpOperation::Read, true, post_user_approval)
         }
-        Err(error) => snapshot.fail(
-            "Resource read failed.",
-            "resource_read_failed",
-            error.to_string(),
-            "read",
-        ),
+        Err(error) => snapshot.sftp_read_failed(error),
     }
 }
 
@@ -91,42 +159,10 @@ async fn read_live_resource(
 async fn write_live_resource(
     snapshot: &AiOrchestratorRuntimeSnapshot,
     services: &AiLiveToolServices,
-    node_id: NodeId,
-    sftp_owner: Option<crate::workspace::ai_runtime_context::AiSftpRuntimeOwner>,
-    args: &serde_json::Value,
-    ide_file_system: Option<oxideterm_ide_fs::NodeAgentIdeFileSystem>,
+    owner: crate::AiSftpRuntimeOwner<NodeId>,
+    request: AiFileWrite<'_>,
     post_user_approval: bool,
 ) -> AiActionResultLite {
-    let request = match snapshot.decode_file_write(args) {
-        Ok(request) => request,
-        Err(result) => return result,
-    };
-    if request.ide {
-        let Some(fs) = ide_file_system else {
-            return snapshot.missing_ide_file_owner(true);
-        };
-        return match fs
-            .node_agent_write_file(
-                node_id.0,
-                request.path,
-                request.content,
-                request.expected_hash,
-            )
-            .await
-        {
-            Ok(file) => snapshot.ide_file_written(
-                request.path,
-                file.hash,
-                file.size,
-                file.mtime,
-                file.atomic,
-            ),
-            Err(_) => snapshot.ide_file_owner_unavailable(true),
-        };
-    }
-    let Some(owner) = sftp_owner else {
-        return snapshot.missing_sftp_owner(true);
-    };
     match write_remote_file(
         services,
         &owner,
@@ -152,14 +188,10 @@ async fn write_live_resource(
 async fn transfer_live_resource(
     snapshot: &AiOrchestratorRuntimeSnapshot,
     services: &AiLiveToolServices,
-    sftp_owner: crate::workspace::ai_runtime_context::AiSftpRuntimeOwner,
-    args: &serde_json::Value,
+    sftp_owner: crate::AiSftpRuntimeOwner<NodeId>,
+    request: AiFileTransfer<'_>,
     post_user_approval: bool,
 ) -> AiActionResultLite {
-    let request = match snapshot.decode_file_transfer(args) {
-        Ok(request) => request,
-        Err(result) => return result,
-    };
     let Ok(session) = services
         .node_router
         .acquire_existing_sftp_generation(
@@ -176,18 +208,13 @@ async fn transfer_live_resource(
         Err(AiSftpTransferError::OwnerReplaced) => {
             snapshot.sftp_session_changed(AiSftpOperation::Transfer, false, post_user_approval)
         }
-        Err(AiSftpTransferError::Operation(error)) => snapshot.fail(
-            "SFTP transfer failed.",
-            "sftp_transfer_failed",
-            error,
-            "write",
-        ),
+        Err(AiSftpTransferError::Operation(error)) => snapshot.sftp_transfer_failed(error),
     }
 }
 
 async fn write_remote_file(
     services: &AiLiveToolServices,
-    owner: &crate::workspace::ai_runtime_context::AiSftpRuntimeOwner,
+    owner: &crate::AiSftpRuntimeOwner<NodeId>,
     path: &str,
     content: &str,
     expected_hash: Option<&str>,
@@ -237,7 +264,7 @@ async fn write_remote_file(
 
 async fn run_sftp_transfer(
     services: &AiLiveToolServices,
-    owner: &crate::workspace::ai_runtime_context::AiSftpRuntimeOwner,
+    owner: &crate::AiSftpRuntimeOwner<NodeId>,
     owner_session: std::sync::Arc<tokio::sync::Mutex<oxideterm_ssh::SftpSession>>,
     request: &AiFileTransfer<'_>,
 ) -> Result<AiTransferOutcome, AiSftpTransferError> {
@@ -275,7 +302,7 @@ async fn run_sftp_transfer(
 
 async fn start_sftp_directory_transfer(
     services: &AiLiveToolServices,
-    owner: &crate::workspace::ai_runtime_context::AiSftpRuntimeOwner,
+    owner: &crate::AiSftpRuntimeOwner<NodeId>,
     owner_session: std::sync::Arc<tokio::sync::Mutex<oxideterm_ssh::SftpSession>>,
     request: &AiFileTransfer<'_>,
 ) -> Result<AiTransferOutcome, AiSftpTransferError> {
@@ -334,4 +361,68 @@ async fn start_sftp_directory_transfer(
         strategy: serde_json::json!(snapshot.strategy),
         transfer: serde_json::json!(snapshot),
     })
+}
+
+impl AiLiveToolServices {
+    /// Runs an authorized request on its original owner, never on a replacement session.
+    pub fn start(
+        self,
+        owner: AiLiveFileOwner,
+        operation: AiLiveResourceOperation,
+        snapshot: AiOrchestratorRuntimeSnapshot,
+        args: serde_json::Value,
+        post_user_approval: bool,
+        tool_call_id: String,
+        tool_name: String,
+        started: std::time::Instant,
+        sender: tokio::sync::oneshot::Sender<crate::AiExecutedToolResult>,
+    ) {
+        let runtime = self.backend_runtime.clone();
+        let audit = oxideterm_audit::AuditContext::current_request();
+        runtime.spawn(oxideterm_audit::AuditContext::scope_optional(
+            audit,
+            async move {
+                let execution = async {
+                    let request = match snapshot.decode_live_resource(operation, &args) {
+                        Ok(request) => request,
+                        Err(result) => return result,
+                    };
+                    execute_live_resource(&snapshot, &self, owner, request, post_user_approval)
+                        .await
+                };
+                snapshot
+                    .complete_live_resource(tool_call_id, tool_name, started, sender, execution)
+                    .await;
+            },
+        ));
+    }
+}
+
+pub fn capture_live_transfers(manager: &SftpTransferManager) -> serde_json::Value {
+    use super::{AiTransferCapture, AiTransferState};
+    let transfers = manager.list_background_transfers(None);
+    let facts = transfers
+        .iter()
+        .map(|transfer| AiTransferCapture {
+            id: &transfer.id,
+            direction: match transfer.direction {
+                BackgroundTransferDirection::Upload => "upload",
+                BackgroundTransferDirection::Download => "download",
+            },
+            state: match transfer.state {
+                BackgroundTransferState::Pending => AiTransferState::Pending,
+                BackgroundTransferState::Active => AiTransferState::Active,
+                BackgroundTransferState::Paused => AiTransferState::Paused,
+                BackgroundTransferState::Completed => AiTransferState::Completed,
+                BackgroundTransferState::Cancelled => AiTransferState::Cancelled,
+                BackgroundTransferState::Error => AiTransferState::Error,
+            },
+            size: transfer.size,
+            transferred: transfer.transferred,
+            has_error: transfer.error.is_some(),
+            start_time: transfer.start_time,
+            end_time: transfer.end_time,
+        })
+        .collect::<Vec<_>>();
+    super::ai_transfers_state(&facts)
 }

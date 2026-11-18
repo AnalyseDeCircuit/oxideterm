@@ -262,7 +262,26 @@ pub enum AiTargetCapture<'a> {
     Terminal(AiTerminalTargetInput<'a>),
 }
 
-impl AiTargetCapture<'_> {
+impl<'a> AiTargetCapture<'a> {
+    pub fn saved_connection(connection: &'a oxideterm_connections::SavedConnection) -> Self {
+        Self::SavedConnection {
+            id: &connection.id,
+            name: &connection.name,
+            host: &connection.host,
+            username: &connection.username,
+            port: connection.port,
+            group: &connection.group,
+        }
+    }
+
+    pub fn surface(tab: &oxideterm_workspace::Tab, visible: bool) -> Self {
+        let session_id = tab.root_pane.as_ref().and_then(|root| root.session_id_for_pane(tab.active_pane_id?));
+        Self::Surface {
+            tab_id: tab.id, kind: tab.kind.clone(), title: tab.title.clone(), session_id, visible,
+        }
+    }
+
+
     fn append_targets(self, targets: &mut Vec<AiOrchestratorTarget>) {
         match self {
             Self::SavedConnection {

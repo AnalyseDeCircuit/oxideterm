@@ -114,6 +114,35 @@ impl NativePluginRegistry {
         &self.plugins
     }
 
+    pub fn ai_tool_inventory(&self) -> serde_json::Value {
+        let plugins = self.plugins
+            .iter()
+            .map(|plugin| {
+                serde_json::json!({
+                    "id": plugin.manifest.id,
+                    "name": plugin.manifest.name,
+                    "version": plugin.manifest.version,
+                    "state": ai_plugin_state_label(plugin.state),
+                    "enabled": plugin.config.enabled,
+                    "requestedCapabilities": plugin.manifest.permissions.capabilities,
+                    "approvedCapabilities": plugin.config.approved_capabilities,
+                    "contributions": {
+                        "aiTools": plugin.manifest.contributes.as_ref()
+                            .and_then(|contributes| contributes.ai_tools.as_ref())
+                            .map_or(0, Vec::len),
+                        "hostMonitors": plugin.manifest.contributes.as_ref()
+                            .and_then(|contributes| contributes.host_monitors.as_ref())
+                            .map_or(0, Vec::len),
+                        "apiCommands": plugin.manifest.contributes.as_ref()
+                            .and_then(|contributes| contributes.api_commands.as_ref())
+                            .map_or(0, Vec::len),
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        serde_json::json!({ "plugins": plugins })
+    }
+
     pub fn catalog_languages(&self) -> &[(String, NativePluginLanguageDefinition)] {
         &self.catalog_languages
     }
@@ -1497,5 +1526,19 @@ mod release_tests {
                 "{scenario}"
             );
         }
+    }
+}
+fn ai_plugin_state_label(state: NativePluginState) -> &'static str {
+    match state {
+        NativePluginState::Discovered => "discovered",
+        NativePluginState::Disabled => "disabled",
+        NativePluginState::UnsupportedLegacyJs => "unsupported_legacy_js",
+        NativePluginState::ReadyManifestOnly => "ready_manifest_only",
+        NativePluginState::ReadyWasm => "ready_wasm",
+        NativePluginState::ReadyProcess => "ready_process",
+        NativePluginState::Loading => "loading",
+        NativePluginState::Active => "active",
+        NativePluginState::Error => "error",
+        NativePluginState::AutoDisabled => "auto_disabled",
     }
 }

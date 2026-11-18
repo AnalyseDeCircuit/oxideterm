@@ -82,6 +82,19 @@ pub enum KnowledgeRequest {
     Settings,
 }
 
+impl KnowledgeRequest {
+    pub fn deliver(
+        self, window: Option<&mut Window>, cx: &mut App,
+        dispatch: impl FnOnce(Self, Option<&mut Window>, &mut App) + 'static,
+    ) {
+        if let Some(window) = window {
+            window.defer(cx, move |window, cx| dispatch(self, Some(window), cx));
+        } else {
+            cx.defer(move |cx| dispatch(self, None, cx));
+        }
+    }
+}
+
 #[derive(Default)]
 struct KnowledgeStatus {
     pub collection: Option<String>,
@@ -107,9 +120,55 @@ pub struct KnowledgeBindings {
     pub embedding_job: Rc<dyn Fn(&App) -> Option<Result<super::page::EmbeddingJob, String>>>,
 }
 
+#[derive(Clone)]
 pub struct KnowledgeViews {
     pub view: Entity<KnowledgeWorkspaceView>,
     pub state: Entity<KnowledgeWorkspaceEntity>,
+}
+
+
+impl KnowledgeViews {
+    pub fn open_tab(&self, exists: impl FnOnce(TabId) -> bool, cx: &App) -> Option<TabId> {
+        self.state.read(cx).tab_id().filter(|id| exists(*id))
+    }
+
+    pub fn register_tab(&self, tab: TabId, cx: &mut App) {
+        self.state.update(cx, |workspace, _| workspace.register_tab(tab));
+    }
+
+    pub fn refresh(&self, cx: &mut App) {
+        self.view.update(cx, |view, cx| view.refresh_knowledge_navigator(true, cx));
+    }
+
+    pub fn guard_tab_close(
+        &self, closing: TabId, window: AnyWindowHandle,
+        container: impl FnOnce(TabId, &App) -> TabId, cx: &mut App,
+    ) -> Option<TabId> {
+        let tab = self.state.read(cx).tab_id()?;
+        if closing != tab && closing != container(tab, cx) {
+            return None;
+        }
+        self.state.update(cx, |knowledge, cx| knowledge.request_close_if_dirty(closing, window, cx))
+            .then_some(tab)
+    }
+
+    pub fn sync_visibility(&self, visible: impl FnOnce(TabId, &App) -> bool, cx: &mut App) {
+        let visible = self.state.read(cx).tab_id().is_some_and(|id| visible(id, cx));
+        self.view.update(cx, |view, cx| view.set_cache_visible(visible, cx));
+    }
+
+    pub fn handle_key(&self, owned: bool, ime: Option<KnowledgeInput>, key: &KeyDownEvent,
+        window: &mut Window, cx: &mut App,
+    ) -> bool {
+        owned && ime.is_none() && self.view.update(cx, |view, cx| view.handle_knowledge_workspace_key(key, window, cx))
+    }
+
+    pub fn notify_preview_selection(&self, group: u64, cx: &mut App) -> bool {
+        self.state.read(cx).preview_editor_for_group(group, cx).is_some_and(|editor| {
+            cx.notify(editor.entity_id());
+            true
+        })
+    }
 }
 
 pub struct KnowledgeWorkspaceView {

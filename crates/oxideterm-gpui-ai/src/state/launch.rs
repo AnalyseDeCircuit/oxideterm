@@ -191,3 +191,43 @@ impl AiWorkspaceEntity {
         }
     }
 }
+
+pub fn start_chat_launch(
+    state: &gpui::Entity<AiWorkspaceEntity>,
+    pending: AiPendingChatStream,
+    context_window: usize,
+    i18n: oxideterm_i18n::I18n,
+    backend_services: impl Fn(&App) -> Option<oxideterm_ai::tool_loop::AiModelBackendServices> + 'static,
+    on_ready: impl Fn(IntentReady, &mut App) + 'static,
+    on_error: impl Fn(String, &mut App) + 'static,
+    cx: &mut App,
+) {
+    let current_state = state.downgrade();
+    let bindings = AiLaunchBindings {
+        i18n,
+        backend_services: Rc::new(backend_services),
+        dispatch: Rc::new(move |effect, cx| {
+            match effect {
+                AiLaunchEffect::Error(message) => on_error(message, cx),
+                AiLaunchEffect::Ready(pending) => {
+                    let Some(state) = current_state.upgrade() else { return };
+                    if !state.read(cx).chat_launch_matches(&pending.conversation_id, pending.launch_id.as_deref()) {
+                        return;
+                    }
+                    let ready = if pending.config.execution_backend == oxideterm_ai::AiExecutionBackend::Acp {
+                        IntentReady::Acp(pending)
+                    } else {
+                        IntentReady::Provider(pending)
+                    };
+                    on_ready(ready, cx);
+                }
+            }
+        }),
+    };
+    state.update(cx, |ai, cx| ai.prepare_chat_launch(pending, context_window, bindings, cx));
+}
+
+pub enum IntentReady {
+    Acp(AiPendingChatStream),
+    Provider(AiPendingChatStream),
+}

@@ -31,7 +31,8 @@ use crate::app::{
 use crate::command_facts::TransientCommandHighlight;
 use crate::terminal_ui::*;
 use crate::terminal_view::highlight::{
-    TerminalHighlightForeground, TerminalHighlightLayout, terminal_highlights_for_rows,
+    TerminalHighlightForeground, TerminalHighlightLayout, logical_line_overlaps_transient_output,
+    terminal_highlights_for_rows,
 };
 use crate::terminal_view::links::*;
 use crate::terminal_view::selection::TerminalSelection;
@@ -429,6 +430,13 @@ where
     fn pop_oldest(&mut self) -> Option<V> {
         let key = self.insertion_order.pop_front()?;
         self.entries.remove(&key)
+    }
+
+    fn set_capacity(&mut self, capacity: usize) {
+        self.capacity = capacity;
+        while self.entries.len() > capacity {
+            let _ = self.pop_oldest();
+        }
     }
 
     fn insert(&mut self, key: K, value: V) -> Option<V> {
@@ -986,6 +994,12 @@ impl TerminalElement {
         mut cache: Option<&mut TerminalLayoutCache>,
     ) -> TerminalElementLayout {
         if let Some(cache) = cache.as_deref_mut() {
+            // A top-to-bottom frame would otherwise evict every next entry in a tall viewport.
+            // Keep room for the whole viewport plus a screen of recently scrolled content.
+            cache.highlights.set_capacity(
+                TERMINAL_HIGHLIGHT_CACHE_CAPACITY
+                    .max(self.viewport_rows.saturating_add(1).saturating_mul(2)),
+            );
             let metrics = [
                 self.metrics.font_size,
                 self.metrics.cell_width,
@@ -1371,21 +1385,23 @@ impl TerminalElement {
         self.highlight_layout_for_rows_with_spans(rows, None)
     }
 
+    fn highlight_ui_colors(&self) -> (u32, u32) {
+        self.transition_colors.as_ref().map_or(
+            (self.theme.tokens.ui.error, self.theme.tokens.ui.warning),
+            |transition| (transition.target_ui_error, transition.target_ui_warning),
+        )
+    }
+
     fn highlight_layout_for_rows_with_spans(
         &self,
         rows: Range<usize>,
         spans: Option<&[oxideterm_terminal_semantic::SemanticSpan]>,
     ) -> TerminalHighlightLayout {
-        let warning_color = self
-            .transition_colors
-            .as_ref()
-            .map_or(self.theme.tokens.ui.warning, |transition| {
-                transition.target_ui_warning
-            });
+        let (ui_error, ui_warning) = self.highlight_ui_colors();
         let transient = self.transient_command_highlight.as_ref().map(|highlight| {
             (
                 highlight,
-                rgba((warning_color << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA).into(),
+                rgba((ui_warning << 8) | TRANSIENT_COMMAND_HIGHLIGHT_ALPHA).into(),
             )
         });
         let mut layout = terminal_highlights_for_rows(
@@ -1395,21 +1411,12 @@ impl TerminalElement {
             rows.clone(),
         );
         if self.semantic_coloring {
-            let (terminal_palette, ui_error, ui_warning) =
-                self.transition_colors.as_ref().map_or(
-                    (
-                        self.theme.tokens.terminal,
-                        self.theme.tokens.ui.error,
-                        self.theme.tokens.ui.warning,
-                    ),
-                    |transition| {
-                        (
-                            transition.target_terminal,
-                            transition.target_ui_error,
-                            transition.target_ui_warning,
-                        )
-                    },
-                );
+            let terminal_palette = self
+                .transition_colors
+                .as_ref()
+                .map_or(self.theme.tokens.terminal, |transition| {
+                    transition.target_terminal
+                });
             append_terminal_semantics_with_palette(
                 &self.snapshot,
                 &self.command_marks,
@@ -1749,8 +1756,7 @@ impl TerminalElement {
     ) -> TerminalRowLayoutCacheKey {
         let mut hasher = style_hasher.clone();
         if let Some(row) = self.snapshot.lines.get(row_index) {
-            row.line_id.hash(&mut hasher);
-            row.signature.hash(&mut hasher);
+            hash_row_content(row, &mut hasher);
             let has_cursor = row.cells.iter().any(|cell| cell.cursor);
             has_cursor.hash(&mut hasher);
             if has_cursor {
@@ -1788,6 +1794,12 @@ impl TerminalElement {
         self.snapshot.cols.hash(&mut hasher);
         self.highlight_rules_signature.hash(&mut hasher);
         self.transient_command_highlight_signature.hash(&mut hasher);
+        // UI colors affect the cached line bands, not token classifications or row glyphs.
+        if self.semantic_coloring {
+            self.highlight_ui_colors().hash(&mut hasher);
+        } else if self.transient_command_highlight.is_some() {
+            self.highlight_ui_colors().1.hash(&mut hasher);
+        }
         self.hash_semantic_layout(logical_line.range.clone(), semantic_role, &mut hasher);
         logical_line.signature.hash(&mut hasher);
         TerminalLogicalHighlightCacheKey {
@@ -1839,9 +1851,12 @@ impl TerminalElement {
             };
             let mut hasher = DefaultHasher::new();
             range.len().hash(&mut hasher);
+            if let Some(highlight) = &self.transient_command_highlight {
+                logical_line_overlaps_transient_output(&self.snapshot, range.clone(), highlight)
+                    .hash(&mut hasher);
+            }
             for row in self.snapshot.lines.get(range.clone()).unwrap_or(&[]) {
-                row.line_id.hash(&mut hasher);
-                row.signature.hash(&mut hasher);
+                hash_row_content(row, &mut hasher);
             }
             let line_index = lines.len();
             let mapped_start = range.start.max(visible_rows.start);
@@ -1925,8 +1940,7 @@ impl TerminalElement {
     fn row_link_cache_key(&self, row_index: usize) -> TerminalRowLinkCacheKey {
         let mut hasher = DefaultHasher::new();
         if let Some(row) = self.snapshot.lines.get(row_index) {
-            row.line_id.hash(&mut hasher);
-            row.signature.hash(&mut hasher);
+            hash_row_content(row, &mut hasher);
         }
         TerminalRowLinkCacheKey {
             signature: hasher.finish(),
@@ -2217,6 +2231,19 @@ fn relative_link_layout(ranges: Vec<TerminalLinkRange>) -> TerminalRowLinkLayout
             })
             .collect(),
     }
+}
+
+fn hash_row_content(row: &oxideterm_terminal::TerminalRow, hasher: &mut impl Hasher) {
+    // The pane may assign a new line ID when a row re-enters the viewport.
+    // The emulator's row ID survives that round trip; the signature tracks edits and styles.
+    if row.source_id != 0 {
+        true.hash(hasher);
+        row.source_id.hash(hasher);
+    } else {
+        false.hash(hasher);
+        row.line_id.hash(hasher);
+    }
+    row.signature.hash(hasher);
 }
 
 fn hash_selection_for_row(
@@ -3255,6 +3282,7 @@ mod cache_tests {
 
     fn snapshot(display_offset: usize, lines: Vec<TerminalRow>) -> TerminalSnapshot {
         TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 1,
             cols: 1,

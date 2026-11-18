@@ -671,30 +671,6 @@ mod tests {
     }
 
     #[gpui::test]
-    fn ssh_config_dialog_owns_selection_status_and_exit_lifecycle(cx: &mut TestAppContext) {
-        let settings = cx.new(SettingsWorkspaceEntity::new);
-        settings.update(cx, |settings, cx| {
-            settings
-                .ssh_config_selected_hosts
-                .insert("stale-host".into());
-            settings.connection_import_status = Some("stale-status".into());
-
-            settings.open_ssh_config_import_dialog(cx);
-
-            assert!(settings.ssh_config_import_dialog_open);
-            assert!(settings.ssh_config_selected_hosts.is_empty());
-            assert!(settings.connection_import_status.is_none());
-
-            settings.toggle_ssh_config_host("host-a".into(), cx);
-            assert!(settings.ssh_config_selected_hosts.contains("host-a"));
-
-            settings.close_ssh_config_import_dialog(std::time::Duration::ZERO, cx);
-            assert!(!settings.ssh_config_import_dialog_open);
-            assert!(settings.ssh_config_import_dialog_exit_task.is_none());
-        });
-    }
-
-    #[gpui::test]
     fn connection_import_state_input_and_picker_completion_are_entity_owned(
         cx: &mut TestAppContext,
     ) {

@@ -65,19 +65,13 @@ impl WorkspaceApp {
         self.close_terminal_command_overlays(cx);
         self.close_ai_model_selector(cx);
 
-        let selection = self
-            .tab_host
-            .read(cx)
-            .panes()
-            .get(&pane_id)
-            .and_then(|pane| pane.read(cx).selected_text_snapshot())
-            .unwrap_or_default();
+        let pane = self.tab_host.read(cx).panes().get(&pane_id).cloned();
         let budget = self.ai_ambient_context_budget();
-        let selection = zeroize::Zeroizing::new(selection);
-        self.ai.state.update(cx, |ai, _| ai.start_inline_panel((pane_id, session_id), &selection, budget));
+        self.ai.state.update(cx, |ai, cx| ai.open_inline_for_pane((pane_id, session_id), pane.as_ref(), budget, cx));
 
         window.focus(&self.focus_handle, cx);
-        self.refresh_terminal_ai_inline_key_status(cx);
+        let config = self.resolve_terminal_ai_inline_config();
+        self.ai.state.update(cx, |ai, _| ai.refresh_terminal_inline_key_status(config));
         cx.notify();
     }
 
@@ -141,9 +135,9 @@ impl WorkspaceApp {
 
     fn request_terminal_ai_inline(&self, regenerate: bool, cx: &mut App) {
         let Some(pane) = self.terminal_ai_inline_target_pane(cx) else { return; };
-        let os_context = terminal_ai_inline_os_context(pane.read(cx).session_kind());
+        let kind = pane.read(cx).session_kind();
         self.ai.state.update(cx, |ai, cx| {
-            ai.submit_inline_prompt(regenerate, os_context, &self.settings_store.settings().ai, &self.i18n, cx);
+            ai.submit_inline_for_terminal(regenerate, kind, &self.settings_store.settings().ai, &self.i18n, cx);
         });
     }
 
@@ -152,82 +146,24 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(command) = self.ai.state.read(cx).inline_response_command() else {
-            return;
-        };
-        if let Some(pane) = self.terminal_ai_inline_target_pane(cx) {
-            let _ = pane.update(cx, |pane, cx| {
-                pane.send_ai_input_bytes(command.as_bytes(), cx);
-            });
-        }
-        self.close_terminal_ai_inline_panel(window, cx);
+        self.apply_terminal_ai_inline_response(false, window, cx);
     }
 
-    pub(in crate::workspace) fn execute_terminal_ai_inline_response(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let Some(command) = self.ai.state.read(cx).inline_response_command() else {
-            return;
-        };
-        if let Some(pane) = self.terminal_ai_inline_target_pane(cx) {
-            let _ = pane.update(cx, |pane, cx| {
-                pane.begin_command_mark(
-                    &command,
-                    oxideterm_terminal::TerminalCommandMarkDetectionSource::Ai,
-                    cx,
-                );
-                pane.send_command_line(&command, cx);
-            });
-        }
-        self.close_terminal_ai_inline_panel(window, cx);
+    pub(in crate::workspace) fn execute_terminal_ai_inline_response(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.apply_terminal_ai_inline_response(true, window, cx);
     }
 
-    pub(in crate::workspace) fn refresh_terminal_ai_inline_key_status(
-        &mut self,
-        cx: &mut Context<Self>,
-    ) {
-        let config_result = self.resolve_terminal_ai_inline_config();
-        self.ai.state.update(cx, |ai, _cx| {
-            ai.refresh_terminal_inline_key_status(config_result);
-        });
+    fn apply_terminal_ai_inline_response(&mut self, execute: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let pane = self.terminal_ai_inline_target_pane(cx);
+        let sent = self.ai.state.read(cx).inline_response_command();
+        if let Some(command) = sent {
+            oxideterm_gpui_ai::inline::apply_inline_command(pane.as_ref(), command, execute, cx);
+            self.close_terminal_ai_inline_panel(window, cx);
+        }
     }
 
     pub(in crate::workspace) fn resolve_terminal_ai_inline_config(&self) -> Result<AiChatStreamConfig, String> {
         oxideterm_gpui_ai::inline::resolve_terminal_ai_inline_config(&self.settings_store.settings().ai, &self.i18n)
     }
 
-}
-
-pub(in crate::workspace) fn terminal_ai_inline_os_context(
-    kind: oxideterm_terminal::TerminalSessionKind,
-) -> String {
-    let local_os = if cfg!(target_os = "macos") {
-        "macOS"
-    } else if cfg!(target_os = "windows") {
-        "Windows"
-    } else if cfg!(target_os = "linux") {
-        "Linux"
-    } else {
-        "Unknown"
-    };
-    match kind {
-        oxideterm_terminal::TerminalSessionKind::SshPty => {
-            format!("SSH terminal (remote OS unknown, local: {local_os})")
-        }
-        oxideterm_terminal::TerminalSessionKind::Mosh => {
-            format!("Mosh terminal (remote OS unknown, local: {local_os})")
-        }
-        oxideterm_terminal::TerminalSessionKind::LocalPty => {
-            format!("Local terminal on {local_os}")
-        }
-        oxideterm_terminal::TerminalSessionKind::Telnet => "Telnet (remote OS unknown)".into(),
-        oxideterm_terminal::TerminalSessionKind::Serial => {
-            "Serial device (command interface unknown)".into()
-        }
-        oxideterm_terminal::TerminalSessionKind::Ble => {
-            "BLE device (command interface unknown)".into()
-        }
-    }
 }

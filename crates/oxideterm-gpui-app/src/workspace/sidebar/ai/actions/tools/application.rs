@@ -1,7 +1,9 @@
 use oxideterm_ai::tool_resources::{
-    AiForwardOperation, AiPluginAction, AiTransportLifecycle, AiSerialSessionCapture, ai_action_accepted, ai_forwarding_operation, ai_credential_scopes, ai_list_credential_metadata, ai_list_transport_profiles,
-    ai_plugin_action, ai_plugin_action_accepted, AiCredentialAction, AiCredentialKind, AiSerialControl,
-    ai_credential_action, ai_serial_control, ai_transport_session_action_accepted,
+    AiForwardOperation, AiPluginAction, ai_action_accepted, ai_forwarding_operation, ai_connection_credential_inventory, ai_list_transport_profiles,
+    ai_plugin_action, ai_plugin_action_accepted, AiCredentialAction,
+    ai_credential_action,
+    AiCloudSyncAction, AiProfileTransport, ai_cloud_sync_action, ai_host_tool_control,
+    ai_host_tools_inspection, ai_host_tools_query, ai_open_transport_profile, ai_remote_desktop_tab, ai_remote_desktop_disconnect,
 };
 
 // Copyright (C) 2026 AnalyseDeCircuit
@@ -63,14 +65,7 @@ impl WorkspaceApp {
             .ai_node_for_tool_authority(tool_session_id, arguments, cx)
             .map_err(|_| "The Host Tools node capability is no longer available.".to_string())?;
         let connection_id = self.ai_node_connection_id(&node_id)?;
-        let resource = arguments
-            .get("resource")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or("overview");
-        let refresh_requested = arguments
-            .get("refresh")
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(false);
+        let (resource, refresh_requested) = ai_host_tools_query(arguments);
         let snapshot = oxideterm_ai::sanitize_json_for_ai(
             &self.host_tools.read(cx).ai_snapshot(&connection_id, resource),
         );
@@ -78,15 +73,7 @@ impl WorkspaceApp {
             && self.host_tools.update(cx, |host_tools, cx| {
                 host_tools.request_ai_snapshot_refresh(connection_id.clone(), resource, cx)
             });
-        Ok(serde_json::json!({
-            "node": {
-                "state": "connected",
-            },
-            "resource": resource,
-            "refreshRequested": refresh_requested,
-            "refreshAccepted": refresh_accepted,
-            "snapshot": snapshot,
-        }))
+        Ok(ai_host_tools_inspection(resource, refresh_requested, refresh_accepted, snapshot))
     }
 
     pub(in crate::workspace) fn execute_ai_list_forwards(
@@ -111,35 +98,14 @@ impl WorkspaceApp {
             .ai_node_for_tool_authority(tool_session_id, arguments, cx)
             .map_err(|_| "The Host Tools node capability is no longer available.".to_string())?;
         let connection_id = self.ai_node_connection_id(&node_id)?;
-        let resource = arguments
-            .get("resource")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A Host Tools resource is required.".to_string())?;
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A Host Tools action is required.".to_string())?;
-        let entity_id = arguments
-            .get("entity_id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A Host Tools entity identifier is required.".to_string())?;
-        let value = arguments.get("value").and_then(serde_json::Value::as_str);
+        let command = ai_host_tool_control(arguments)?;
         self.host_tools.update(cx, |host_tools, cx| {
             host_tools.execute_ai_action(
                 connection_id,
-                resource,
-                action,
-                entity_id,
-                value,
-                cx,
+                command.resource, command.action, command.entity_id, command.value, cx,
             )
         })?;
-        Ok(serde_json::json!({
-            "accepted": true,
-            "resource": resource,
-            "action": action,
-            "entityId": entity_id,
-        }))
+        Ok(command.accepted())
     }
 
     pub(in crate::workspace) fn execute_ai_manage_forward(
@@ -181,40 +147,8 @@ impl WorkspaceApp {
         Ok(ai_action_accepted(action))
     }
 
-    pub(in crate::workspace) fn execute_ai_list_plugins(
-        &self,
-        cx: &App,
-    ) -> serde_json::Value {
-        let plugins = self
-            .plugin_entity
-            .read(cx)
-            .registry()
-            .plugins()
-            .iter()
-            .map(|plugin| {
-                serde_json::json!({
-                    "id": plugin.manifest.id,
-                    "name": plugin.manifest.name,
-                    "version": plugin.manifest.version,
-                    "state": ai_plugin_state_label(plugin.state),
-                    "enabled": plugin.config.enabled,
-                    "requestedCapabilities": plugin.manifest.permissions.capabilities,
-                    "approvedCapabilities": plugin.config.approved_capabilities,
-                    "contributions": {
-                        "aiTools": plugin.manifest.contributes.as_ref()
-                            .and_then(|contributes| contributes.ai_tools.as_ref())
-                            .map_or(0, Vec::len),
-                        "hostMonitors": plugin.manifest.contributes.as_ref()
-                            .and_then(|contributes| contributes.host_monitors.as_ref())
-                            .map_or(0, Vec::len),
-                        "apiCommands": plugin.manifest.contributes.as_ref()
-                            .and_then(|contributes| contributes.api_commands.as_ref())
-                            .map_or(0, Vec::len),
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        serde_json::json!({ "plugins": plugins })
+    pub(in crate::workspace) fn execute_ai_list_plugins(&self, cx: &App) -> serde_json::Value {
+        self.plugin_entity.read(cx).registry().ai_tool_inventory()
     }
 
     pub(in crate::workspace) fn execute_ai_manage_plugin(
@@ -333,210 +267,39 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
-        let transport = arguments
-            .get("transport")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A transport is required.".to_string())?;
-        let profile_id = arguments
-            .get("profile_id")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A profile identifier is required.".to_string())?;
-        match transport {
-            "serial"
-                if self
-                    .connection_store
-                    .serial_profiles()
-                    .iter()
-                    .any(|profile| profile.id == profile_id) =>
-            {
-                self.open_saved_serial_profile(profile_id, window, cx);
-            }
-            "telnet"
-                if self
-                    .connection_store
-                    .telnet_profiles()
-                    .iter()
-                    .any(|profile| profile.id == profile_id) =>
-            {
-                self.open_saved_telnet_profile(profile_id, window, cx);
-            }
-            "rdp" | "vnc" => {
-                let profile = self
-                    .connection_store
-                    .get_remote_desktop_profile(profile_id)
-                    .ok_or_else(|| "The remote desktop profile no longer exists.".to_string())?;
-                let expected_protocol = match transport {
-                    "rdp" => oxideterm_remote_desktop::RemoteDesktopProtocol::Rdp,
-                    _ => oxideterm_remote_desktop::RemoteDesktopProtocol::Vnc,
-                };
-                if profile.protocol != expected_protocol {
-                    return Err(
-                        "The profile protocol does not match the requested transport.".to_string(),
-                    );
-                }
-                self.open_saved_remote_desktop_profile(profile_id, window, cx);
-            }
-            _ => return Err("The selected transport profile no longer exists.".to_string()),
+        let action = ai_open_transport_profile(
+            arguments,
+            self.connection_store.serial_profiles(),
+            self.connection_store.telnet_profiles(),
+            self.connection_store.remote_desktop_profiles(),
+        )?;
+        match action.kind {
+            AiProfileTransport::Serial => self.open_saved_serial_profile(action.id, window, cx),
+            AiProfileTransport::Telnet => self.open_saved_telnet_profile(action.id, window, cx),
+            AiProfileTransport::RemoteDesktop => self.open_saved_remote_desktop_profile(action.id, window, cx),
         }
-        Ok(serde_json::json!({
-            "accepted": true,
-            "transport": transport,
-            "profileId": profile_id,
-        }))
+        Ok(action.accepted())
     }
 
-    pub(in crate::workspace) fn execute_ai_get_transport_session_state(
-        &self,
-        tool_session_id: &ToolSessionId,
-        arguments: &serde_json::Value,
-        cx: &App,
-    ) -> Result<serde_json::Value, String> {
-        let handle_id = arguments
-            .get("handle_id")
-            .and_then(serde_json::Value::as_str);
-        let session_id = self
-            .ai.authority
-            .read(cx)
-            .validate_terminal_handle(
-                tool_session_id,
-                handle_id,
-                oxideterm_ai::RuntimeCapability::TerminalObserve,
-            )
-            .map_err(|error| error.public_code().to_string())?;
-        let pane = self
-            .ai_terminal_pane_for_session(session_id, cx)
-            .ok_or_else(|| "The terminal session owner is no longer available.".to_string())?;
-        let pane = pane.read(cx);
-        use oxideterm_terminal::{TerminalLifecycle, TerminalSessionKind};
-        let lifecycle = match pane.lifecycle() {
-            TerminalLifecycle::Running => AiTransportLifecycle::Running,
-            TerminalLifecycle::Exited(code) => AiTransportLifecycle::Exited(code),
-            TerminalLifecycle::Closed => AiTransportLifecycle::Closed,
-        };
-        match pane.session_kind() {
-            TerminalSessionKind::Telnet => Ok(lifecycle.telnet()),
-            TerminalSessionKind::Serial => {
-                let status = pane.serial_status().ok_or_else(|| "Serial session state is unavailable.".to_string())?;
-                Ok(AiSerialSessionCapture {
-                    port: status.config.port_path, available: status.port_available, baud_rate: status.config.baud_rate,
-                    data_bits: status.config.data_bits, stop_bits: status.config.stop_bits,
-                    parity: format!("{:?}", status.config.parity).to_lowercase(),
-                    flow_control: format!("{:?}", status.config.flow_control).to_lowercase(),
-                    dtr: status.control_state.data_terminal_ready, rts: status.control_state.request_to_send,
-                    local_echo: status.runtime_options.local_echo,
-                    line_ending: format!("{:?}", status.runtime_options.line_ending).to_lowercase(),
-                    output_line_ending: format!("{:?}", status.runtime_options.output_line_ending).to_lowercase(),
-                    display_mode: format!("{:?}", status.runtime_options.display_mode).to_lowercase(),
-                    send_mode: format!("{:?}", status.runtime_options.send_mode).to_lowercase(),
-                    can_reconnect: status.can_reconnect,
-                }.json(lifecycle))
-            }
-            _ => Err("The selected terminal is not a serial or Telnet session.".to_string()),
-        }
-    }
-
-    pub(in crate::workspace) fn execute_ai_manage_serial_session(
-        &mut self,
-        tool_session_id: &ToolSessionId,
-        arguments: &serde_json::Value,
+    fn execute_ai_terminal_transport_tool(
+        &self, operation: &AiApplicationTool, turn: &ToolSessionId, arguments: &serde_json::Value,
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
-        let handle_id = arguments
-            .get("handle_id")
-            .and_then(serde_json::Value::as_str);
-        let session_id = self
-            .ai.authority
-            .read(cx)
-            .validate_terminal_handle(
-                tool_session_id,
-                handle_id,
-                oxideterm_ai::RuntimeCapability::TerminalSendInput,
-            )
-            .map_err(|error| error.public_code().to_string())?;
-        let pane = self
-            .ai_terminal_pane_for_session(session_id, cx)
-            .ok_or_else(|| "The serial terminal owner is no longer available.".to_string())?;
-        use oxideterm_gpui_connections::form_state::{
-            terminal_serial_display_mode_from_profile, terminal_serial_line_ending_from_profile,
-            terminal_serial_send_mode_from_profile,
+        use oxideterm_ai::RuntimeCapability;
+        use oxideterm_gpui_ai::conversation::terminal_tools::{serial_control, telnet_control, transport_state};
+        let (capability, missing, effect) = match operation {
+            AiApplicationTool::ManageSerialSession => (RuntimeCapability::TerminalSendInput, "The serial terminal owner is no longer available.", Some(serial_control as fn(_, _, _, &mut App) -> _)),
+            AiApplicationTool::ManageTelnetSession => (RuntimeCapability::TerminalSendInput, "The Telnet terminal owner is no longer available.", Some(telnet_control as fn(_, _, _, &mut App) -> _)),
+            _ => (RuntimeCapability::TerminalObserve, "The terminal session owner is no longer available.", None),
         };
-        use oxideterm_gpui_terminal::TerminalSerialAction as Serial;
-        let (action, operation) = ai_serial_control(arguments)?;
-        let serial_action = match operation {
-            AiSerialControl::RefreshPort => Serial::RefreshPortPresence,
-            AiSerialControl::SendBreak => Serial::SendBreak,
-            AiSerialControl::SetDtr(value) => Serial::SetDataTerminalReady(value),
-            AiSerialControl::SetRts(value) => Serial::SetRequestToSend(value),
-            AiSerialControl::SetLocalEcho(value) => Serial::SetLocalEcho(value),
-            AiSerialControl::SetLineEnding(value) => Serial::SetLineEnding(terminal_serial_line_ending_from_profile(value)),
-            AiSerialControl::SetOutputLineEnding(value) => Serial::SetOutputLineEnding(terminal_serial_line_ending_from_profile(value)),
-            AiSerialControl::SetDisplayMode(value) => Serial::SetDisplayMode(terminal_serial_display_mode_from_profile(value)),
-            AiSerialControl::SetSendMode(value) => Serial::SetSendMode(terminal_serial_send_mode_from_profile(value)),
-        };
-        pane.update(cx, |pane, cx| pane.apply_serial_action(serial_action, cx))?;
-        Ok(ai_transport_session_action_accepted(action, session_id))
-    }
-
-    pub(in crate::workspace) fn execute_ai_manage_telnet_session(
-        &mut self,
-        tool_session_id: &ToolSessionId,
-        arguments: &serde_json::Value,
-        cx: &mut Context<Self>,
-    ) -> Result<serde_json::Value, String> {
-        // Resolve the current-turn capability before touching the session owner.
-        let handle_id = arguments
-            .get("handle_id")
-            .and_then(serde_json::Value::as_str);
-        let session_id = self
-            .ai.authority
-            .read(cx)
-            .validate_terminal_handle(
-                tool_session_id,
-                handle_id,
-                oxideterm_ai::RuntimeCapability::TerminalSendInput,
-            )
-            .map_err(|error| error.public_code().to_string())?;
-        let pane = self
-            .ai_terminal_pane_for_session(session_id, cx)
-            .ok_or_else(|| "The Telnet terminal owner is no longer available.".to_string())?;
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A Telnet action is required.".to_string())?;
-        let telnet_action = match action {
-            "noop" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::NoOperation,
-            ),
-            "break" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::Break,
-            ),
-            "interrupt_process" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::InterruptProcess,
-            ),
-            "abort_output" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::AbortOutput,
-            ),
-            "are_you_there" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::AreYouThere,
-            ),
-            "erase_character" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::EraseCharacter,
-            ),
-            "erase_line" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::EraseLine,
-            ),
-            "go_ahead" => oxideterm_gpui_terminal::TerminalTelnetAction::SendControl(
-                oxideterm_terminal::TelnetControlCommand::GoAhead,
-            ),
-            "disconnect" => {
-                return Err(
-                    "Telnet disconnect must be requested from Active Sessions.".to_string(),
-                );
-            }
-            _ => return Err("The requested Telnet action is unsupported.".to_string()),
-        };
-        pane.update(cx, |pane, cx| pane.apply_telnet_action(telnet_action, cx))?;
-        Ok(ai_transport_session_action_accepted(action, session_id))
+        let id = self.ai.authority.read(cx).validate_terminal_handle(
+            turn, arguments.get("handle_id").and_then(serde_json::Value::as_str), capability,
+        ).map_err(|error| error.public_code().to_owned())?;
+        let pane = self.ai_terminal_pane_for_session(id, cx).ok_or_else(|| missing.to_owned())?;
+        match effect {
+            Some(apply) => apply(&pane, id, arguments, cx),
+            None => transport_state(&pane, cx),
+        }
     }
 
     pub(in crate::workspace) fn execute_ai_list_remote_desktop_sessions(
@@ -552,41 +315,15 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
-        let tab_id = arguments
-            .get("tab_id")
-            .and_then(serde_json::Value::as_str)
-            .and_then(|value| value.parse::<u64>().ok())
-            .map(TabId)
-            .ok_or_else(|| "A valid remote desktop tab identifier is required.".to_string())?;
+        let tab_id = ai_remote_desktop_tab(arguments)?;
         let session = self
             .remote_desktop
             .read(cx)
             .session(tab_id)
             .ok_or_else(|| "The remote desktop session no longer exists.".to_string())?;
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A remote desktop session action is required.".to_string())?;
-        match action {
-            "disconnect" => {
-                if !session.read(cx).ai_can_disconnect() {
-                    return Err("The remote desktop session is already disconnected.".to_string());
-                }
-                self.disconnect_remote_desktop(tab_id, window, cx);
-            }
-            "reconnect" => {
-                return Err(
-                    "Remote desktop reconnect creates a new tab from Active Sessions."
-                        .to_string(),
-                );
-            }
-            _ => return Err("Unsupported remote desktop session action.".to_string()),
-        }
-        Ok(serde_json::json!({
-            "accepted": true,
-            "action": action,
-            "tabId": tab_id.0.to_string(),
-        }))
+        let completion = ai_remote_desktop_disconnect(arguments, tab_id, || session.read(cx).ai_can_disconnect())?;
+        self.disconnect_remote_desktop(tab_id, window, cx);
+        Ok(completion)
     }
 
     pub(in crate::workspace) fn execute_ai_get_cloud_sync_state(
@@ -602,21 +339,14 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<serde_json::Value, String> {
-        let action = arguments
-            .get("action")
-            .and_then(serde_json::Value::as_str)
-            .ok_or_else(|| "A Cloud Sync action is required.".to_string())?;
-        if action != "open" && self.cloud_sync.read(cx).operation_in_flight() {
-            return Err("Another Cloud Sync operation is already running.".to_string());
-        }
+        let action = ai_cloud_sync_action(arguments, self.cloud_sync.read(cx).operation_in_flight())?;
         match action {
-            "open" => self.open_cloud_sync_tab(window, cx),
-            "check" => self.start_cloud_sync_check_with_options(false, cx),
-            "upload_preview" => self.start_cloud_sync_upload_preview(cx),
-            "pull_preview" => self.start_cloud_sync_pull_preview(cx),
-            _ => return Err("Unsupported Cloud Sync action.".to_string()),
+            AiCloudSyncAction::Open => self.open_cloud_sync_tab(window, cx),
+            AiCloudSyncAction::Check => self.start_cloud_sync_check_with_options(false, cx),
+            AiCloudSyncAction::UploadPreview => self.start_cloud_sync_upload_preview(cx),
+            AiCloudSyncAction::PullPreview => self.start_cloud_sync_pull_preview(cx),
         }
-        Ok(ai_action_accepted(action))
+        Ok(action.accepted())
     }
 
     pub(in crate::workspace) fn execute_ai_configure_cloud_sync(
@@ -630,40 +360,9 @@ impl WorkspaceApp {
         }
         // Return any active IME-owned draft before refreshing the form projection.
         self.apply_focused_cloud_sync_input_draft(cx);
-        let (current_settings, current_scope) = {
-            let cloud_sync = self.cloud_sync.read(cx);
-            let state = cloud_sync.controller.store.state();
-            (state.settings.clone(), state.sync_scope.clone())
-        };
-        let (settings, scope, updated_fields) =
-            oxideterm_gpui_cloud_sync::apply_cloud_sync_configuration_patch(
-                &current_settings,
-                &current_scope,
-                arguments,
-            )?;
-        let settings_for_view = settings.clone();
-        let save_result = self.cloud_sync.update(cx, |cloud_sync, cx| {
-            let state = cloud_sync.controller.store.state_mut();
-            state.settings = settings;
-            state.sync_scope = scope;
-            state.last_error = None;
-            if let Err(error) = cloud_sync.controller.store.save() {
-                // Roll back only non-secret state; protected credentials were never read or moved.
-                let message = error.to_string();
-                let state = cloud_sync.controller.store.state_mut();
-                state.settings = current_settings.clone();
-                state.sync_scope = current_scope.clone();
-                state.last_error = Some(message.clone());
-                return Err(message);
-            }
-            cloud_sync
-                .view
-                .form
-                .apply_changed_non_secret_settings(&current_settings, &settings_for_view);
-            cx.notify();
-            Ok(())
-        });
-        save_result.map_err(|error| format!("Failed to save Cloud Sync configuration: {error}"))?;
+        let updated_fields = self.cloud_sync.update(cx, |cloud_sync, cx| {
+            cloud_sync.apply_configuration_patch(arguments, cx)
+        })?;
 
         self.invalidate_cloud_sync_snapshot_caches(cx);
         self.reschedule_cloud_sync_auto_upload(cx);
@@ -676,13 +375,7 @@ impl WorkspaceApp {
     }
 
     pub(in crate::workspace) fn execute_ai_list_credentials(&self, arguments: &serde_json::Value) -> Result<serde_json::Value, String> {
-        let scopes = ai_credential_scopes(arguments, self.connection_store.connections().iter().map(|connection| connection.id.as_str()));
-        let mut privilege_credentials = Vec::new();
-        for scope in &scopes {
-            privilege_credentials.extend(self.connection_store.list_privilege_credentials(scope).map_err(|error| error.to_string())?);
-        }
-        Ok(ai_list_credential_metadata(self.connection_store.managed_ssh_keys(), privilege_credentials,
-            self.connection_store.remote_desktop_profiles()))
+        ai_connection_credential_inventory(&self.connection_store, arguments)
     }
 
     pub(in crate::workspace) fn execute_ai_manage_credential(
@@ -698,13 +391,7 @@ impl WorkspaceApp {
             }
             AiCredentialAction::Delete { action, id, credential } => (action, id, credential),
         };
-        let deleted = match credential {
-            AiCredentialKind::ManagedSshKey { force } => self.connection_store
-                .delete_managed_ssh_key(id, force).map(|result| result.deleted),
-            AiCredentialKind::Privilege { connection_id } => self.connection_store
-                .delete_privilege_credential(connection_id, id),
-            AiCredentialKind::RemoteDesktop => self.connection_store.delete_remote_desktop_credential(id),
-        }.map_err(|error| error.to_string())?;
+        let deleted = credential.delete_from(&mut self.connection_store, id)?;
         if deleted {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
@@ -761,20 +448,5 @@ impl WorkspaceApp {
                     "No active SSH host is available for host-scoped memory.".to_string()
                 }),
         }
-    }
-}
-
-fn ai_plugin_state_label(state: plugin_host::NativePluginState) -> &'static str {
-    match state {
-        plugin_host::NativePluginState::Discovered => "discovered",
-        plugin_host::NativePluginState::Disabled => "disabled",
-        plugin_host::NativePluginState::UnsupportedLegacyJs => "unsupported_legacy_js",
-        plugin_host::NativePluginState::ReadyManifestOnly => "ready_manifest_only",
-        plugin_host::NativePluginState::ReadyWasm => "ready_wasm",
-        plugin_host::NativePluginState::ReadyProcess => "ready_process",
-        plugin_host::NativePluginState::Loading => "loading",
-        plugin_host::NativePluginState::Active => "active",
-        plugin_host::NativePluginState::Error => "error",
-        plugin_host::NativePluginState::AutoDisabled => "auto_disabled",
     }
 }

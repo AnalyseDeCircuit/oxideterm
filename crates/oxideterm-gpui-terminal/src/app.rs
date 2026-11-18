@@ -2270,6 +2270,7 @@ impl TerminalPane {
             // Remove the visual mapping before resizing the grid for the gutter.
             // The underlying output remains available when folding is disabled.
             self.command_folding = command_folding::CommandFolding::default();
+            self.command_marks_render_cache_dirty = true;
             self.clear_smooth_scroll_remainder();
             self.clear_terminal_interactions(cx);
             self.set_selection(None);
@@ -7161,6 +7162,7 @@ mod tests {
 
     fn timestamp_test_snapshot(row: TerminalRow) -> TerminalSnapshot {
         TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 1,
             cols: row.cells.len().max(1),
@@ -7185,6 +7187,7 @@ mod tests {
             row.source_id = 100 + index;
         }
         let previous = TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 1,
             cols: 8,

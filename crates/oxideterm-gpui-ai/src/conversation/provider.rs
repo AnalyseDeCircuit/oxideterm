@@ -453,3 +453,20 @@ impl AiWorkspaceEntity {
     }
 
 }
+
+impl AiWorkspaceEntity {
+    pub fn prepare_provider_send(
+        &mut self, mut pending: crate::state::AiPendingChatStream, cx: &mut Context<Self>,
+    ) -> Option<crate::state::AiPendingChatStream> {
+        pending.launch_id = self.chat_launches.get(&pending.conversation_id).cloned();
+        self.defer_for_unsupported_images(pending, cx)
+    }
+
+    pub fn fail_acp_launch(
+        &mut self, pending: &crate::state::AiPendingChatStream,
+        settings: &oxideterm_settings::AiSettings,
+    ) -> Option<oxideterm_settings::AcpAgentConfig> {
+        self.set_conversation_loading(&pending.conversation_id, false);
+        settings.acp_agents.iter().find(|agent| Some(&agent.id) == pending.config.acp_agent_id.as_ref()).cloned()
+    }
+}

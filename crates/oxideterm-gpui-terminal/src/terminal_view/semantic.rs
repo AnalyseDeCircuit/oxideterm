@@ -359,6 +359,7 @@ mod tests {
         };
         row.refresh_signature();
         TerminalSnapshot {
+            row_reuse: None,
             logical_context: Vec::new(),
             generation: 0,
             cols: text.chars().count(),

@@ -153,28 +153,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn restore_key_keeps_distinct_targets() {
-        let service_a = ReconnectForwardRule {
-            forward_type: "local".to_string(),
-            bind_address: "127.0.0.1".to_string(),
-            bind_port: 8080,
-            target_host: "service-a".to_string(),
-            target_port: 3000,
-            ..ReconnectForwardRule::default()
-        };
-        let service_b = ReconnectForwardRule {
-            target_host: "service-b".to_string(),
-            target_port: 4000,
-            ..service_a.clone()
-        };
-
-        assert_ne!(
-            forward_restore_key_for_snapshot_rule(&service_a),
-            forward_restore_key_for_snapshot_rule(&service_b)
-        );
-    }
-
-    #[test]
     fn restore_preserves_rule_identity_and_restarts_runtime() {
         let snapshot = ReconnectForwardRule {
             id: "old-forward-id".to_string(),

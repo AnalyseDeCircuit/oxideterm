@@ -30,6 +30,7 @@ fn test_metrics() -> TerminalMetrics {
 
 fn test_snapshot(display_offset: usize, scrollback_lines: usize) -> TerminalSnapshot {
     TerminalSnapshot {
+        row_reuse: None,
         logical_context: Vec::new(),
         generation: 0,
         cols: 80,

@@ -799,3 +799,34 @@ impl gpui::RenderOnce for AiSidebarLayer {
 
 include!("transcript/overlays.rs");
 include!("transcript/placement.rs");
+
+impl AiTranscriptPolicy {
+    pub fn compose(
+        settings: &oxideterm_settings::AiSettings,
+        ai: &AiWorkspaceEntity,
+        config: impl FnOnce() -> Option<oxideterm_ai::AiChatStreamConfig>,
+        context_counts: impl FnOnce() -> Option<(usize, usize)>,
+        token_breakdown: impl FnOnce() -> crate::state::AiContextTokenBreakdown,
+        [terminal_context, split_context, ide_context, sftp_context]: [bool; 4],
+        tools: (bool, usize),
+        auth_methods: Option<Vec<oxideterm_ai::AcpAuthMethod>>,
+        rename: AiRenameFrame,
+        confirm_focus: Option<oxideterm_gpui_ui::confirm::ConfirmDialogAction>,
+    ) -> (AiComposerFrame, AiOverlayFrame, Vec<AgentModel>) {
+        let policy = Self::from_settings(settings, ai, config);
+        (
+            AiComposerFrame {
+                enabled: settings.enabled, model_selected: policy.model_selected, images_allowed: policy.images_allowed,
+                backend: settings.active_backend, context_counts: settings.enabled.then(context_counts).flatten(),
+                terminal_context, split_context, ide_context, sftp_context, tools,
+                reasoning: policy.reasoning.as_ref().map(|(_, _, level)| *level),
+                auth_methods,
+            },
+            AiOverlayFrame {
+                rename, confirm_focus, reasoning: policy.reasoning,
+                breakdown: ai.chat_ui().context_popover_open.then(token_breakdown),
+            },
+            policy.agent_models,
+        )
+    }
+}

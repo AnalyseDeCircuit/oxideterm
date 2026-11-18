@@ -8,26 +8,9 @@ impl WorkspaceApp {
         if entry_ids.is_empty() {
             return;
         }
-        let entry_ids = entry_ids
-            .iter()
-            .cloned()
-            .collect::<std::collections::HashSet<_>>();
-        let now_ms = ai_memory_now_ms();
-        self.edit_settings(
-            move |settings| {
-                for entry in settings
-                    .ai
-                    .memory
-                    .entries
-                    .iter_mut()
-                    .filter(|entry| entry_ids.contains(&entry.id))
-                {
-                    entry.last_used_at_ms = Some(now_ms);
-                    entry.use_count = entry.use_count.saturating_add(1);
-                }
-            },
-            cx,
-        );
+        self.edit_settings(|settings| {
+            oxideterm_ai::tool_resources::record_memory_usage(&mut settings.ai.memory, entry_ids);
+        }, cx);
     }
 
 
