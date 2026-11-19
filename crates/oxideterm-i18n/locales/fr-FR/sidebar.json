@@ -89,6 +89,7 @@
       "packages": "Paquets"
     },
     "tooltips": {
+      "select_sessions": "Sélectionner les nœuds de session",
       "switch_to_light": "Passer au thème clair",
       "switch_to_dark": "Passer au thème sombre",
       "settings": "Paramètres",
@@ -102,7 +103,8 @@
       "sort": "Trier",
       "lock_app": "Verrouiller OxideTerm",
       "setup_app_lock": "Configurer le verrouillage",
-      "collapse": "Réduire"
+      "collapse": "Réduire",
+      "select_connections": "Sélectionner des connexions"
     },
     "active_sessions": "Sessions actives",
     "active_session_count": "Sessions actives : {{count}}",
@@ -888,6 +890,22 @@
     }
   },
   "sessions": {
+    "selection": {
+      "count": "Sélectionnées : {{count}} / {{total}}",
+      "select_all": "Tout sélectionner",
+      "remove": "Supprimer",
+      "exit": "Quitter"
+    },
+    "remove": {
+      "title": "Supprimer les nœuds de session",
+      "body": "Cela ferme {{count}} sessions actives.",
+      "warning": "Cette action est irréversible. L'historique de défilement de ces sessions sera perdu."
+    },
+    "menu": {
+      "remove_selected": "Supprimer la sélection ({{count}})",
+      "remove_others": "Supprimer les autres ({{count}})",
+      "remove_inactive": "Supprimer les inactives ({{count}})"
+    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "Aucune session",

@@ -89,6 +89,7 @@
       "packages": "パッケージ"
     },
     "tooltips": {
+      "select_sessions": "セッションノードを選択",
       "switch_to_light": "ライトテーマに切り替え",
       "switch_to_dark": "ダークテーマに切り替え",
       "settings": "設定",
@@ -102,7 +103,8 @@
       "sort": "並べ替え",
       "lock_app": "OxideTerm をロック",
       "setup_app_lock": "アプリロックを設定",
-      "collapse": "折りたたむ"
+      "collapse": "折りたたむ",
+      "select_connections": "接続を選択"
     },
     "active_sessions": "アクティブなセッション",
     "active_session_count": "アクティブなセッション：{{count}}",
@@ -888,6 +890,22 @@
     }
   },
   "sessions": {
+    "selection": {
+      "count": "選択中 {{count}} / {{total}}",
+      "select_all": "すべて選択",
+      "remove": "削除",
+      "exit": "終了"
+    },
+    "remove": {
+      "title": "セッションノードを削除",
+      "body": "{{count}} 個のアクティブなセッションを閉じます。",
+      "warning": "この操作は元に戻せません。対象セッションのスクロールバックは破棄されます。"
+    },
+    "menu": {
+      "remove_selected": "選択したセッションを削除（{{count}}）",
+      "remove_others": "他のセッションを削除（{{count}}）",
+      "remove_inactive": "非アクティブを削除（{{count}}）"
+    },
     "tree": {
       "terminal": "ターミナル #{{number}}",
       "no_sessions": "セッションなし",

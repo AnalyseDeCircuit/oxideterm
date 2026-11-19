@@ -324,6 +324,12 @@
       "preset_aws_name": "Standardvorlage - AWS",
       "apply_blocked_issues": "Beheben Sie zuerst die aufgeführten Probleme",
       "templates_load_failed": "Gespeicherte Vorlagen konnten nicht gelesen werden"
+    },
+    "selection": {
+      "count": "{{count}} / {{total}} ausgewählt",
+      "select_all": "Alle auswählen",
+      "delete": "Löschen",
+      "exit": "Beenden"
     }
   }
 }

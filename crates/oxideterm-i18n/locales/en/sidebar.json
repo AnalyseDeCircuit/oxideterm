@@ -89,6 +89,7 @@
       "packages": "Packages"
     },
     "tooltips": {
+      "select_sessions": "Select session nodes",
       "switch_to_light": "Switch to light theme",
       "switch_to_dark": "Switch to dark theme",
       "settings": "Settings",
@@ -102,7 +103,8 @@
       "sort": "Sort",
       "lock_app": "Lock OxideTerm",
       "setup_app_lock": "Set Up Application Lock",
-      "collapse": "Collapse"
+      "collapse": "Collapse",
+      "select_connections": "Select connections"
     },
     "active_sessions": "Active Sessions",
     "active_session_count": "Active sessions: {{count}}",
@@ -888,6 +890,22 @@
     }
   },
   "sessions": {
+    "selection": {
+      "count": "Selected {{count}} / {{total}}",
+      "select_all": "Select all",
+      "remove": "Remove",
+      "exit": "Exit"
+    },
+    "remove": {
+      "title": "Remove Session Nodes",
+      "body": "This closes {{count}} active sessions.",
+      "warning": "This cannot be undone. Terminal scrollback for these sessions is discarded."
+    },
+    "menu": {
+      "remove_selected": "Remove selected ({{count}})",
+      "remove_others": "Remove others ({{count}})",
+      "remove_inactive": "Remove inactive ({{count}})"
+    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "No Sessions",

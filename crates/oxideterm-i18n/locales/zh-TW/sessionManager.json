@@ -324,6 +324,12 @@
       "preset_aws_name": "預設範本-aws",
       "apply_blocked_issues": "請先修正列出的問題再新增",
       "templates_load_failed": "無法讀取已儲存的範本"
+    },
+    "selection": {
+      "count": "已選 {{count}} / {{total}}",
+      "select_all": "全選",
+      "delete": "刪除",
+      "exit": "結束"
     }
   }
 }

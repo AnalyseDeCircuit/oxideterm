@@ -89,6 +89,7 @@
       "packages": "Gói"
     },
     "tooltips": {
+      "select_sessions": "Chọn nút phiên",
       "switch_to_light": "Chuyển sang giao diện sáng",
       "switch_to_dark": "Chuyển sang giao diện tối",
       "settings": "Cài đặt",
@@ -102,7 +103,8 @@
       "sort": "Sắp xếp",
       "lock_app": "Khóa OxideTerm",
       "setup_app_lock": "Thiết lập khóa ứng dụng",
-      "collapse": "Thu gọn"
+      "collapse": "Thu gọn",
+      "select_connections": "Chọn kết nối"
     },
     "active_sessions": "Phiên hoạt động",
     "active_session_count": "Phiên đang hoạt động: {{count}}",
@@ -888,6 +890,22 @@
     }
   },
   "sessions": {
+    "selection": {
+      "count": "Đã chọn {{count}} / {{total}}",
+      "select_all": "Chọn tất cả",
+      "remove": "Xóa",
+      "exit": "Thoát"
+    },
+    "remove": {
+      "title": "Xóa nút phiên",
+      "body": "Thao tác này sẽ đóng {{count}} phiên đang hoạt động.",
+      "warning": "Không thể hoàn tác. Lịch sử cuộn của các phiên này sẽ bị xóa."
+    },
+    "menu": {
+      "remove_selected": "Xóa mục đã chọn ({{count}})",
+      "remove_others": "Xóa mục khác ({{count}})",
+      "remove_inactive": "Xóa mục không hoạt động ({{count}})"
+    },
     "tree": {
       "terminal": "Terminal #{{number}}",
       "no_sessions": "Không có phiên",
