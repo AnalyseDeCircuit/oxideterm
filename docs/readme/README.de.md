@@ -470,6 +470,12 @@ OxideTerm baut auf folgenden Open-Source-Projekten auf:
 
 ---
 
+## Links
+
+- [LINUX DO](https://linux.do/)
+
+---
+
 ## Lizenz
 
 OxideTerm steht unter [GPL-3.0-only](../../LICENSE), ohne zusätzliche Einschränkungen. Abhängigkeitshinweise: [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) und [NOTICE](../../NOTICE).

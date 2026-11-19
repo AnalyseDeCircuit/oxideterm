@@ -13,127 +13,91 @@ enum SessionManagerMoveInteraction {
     BatchMenu,
     DragDrop,
 }
-pub fn connection_count_for_group(
-    group: &str,
+pub(super) fn connection_counts_by_group(
     store: &ConnectionStore,
     tunnels: &[PersistedForward],
-) -> usize {
-    let connection_count = store
+) -> HashMap<String, usize> {
+    let paths = store
         .connections()
         .iter()
-        .filter(|conn| {
-            conn.group
-                .as_deref()
-                .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-        })
-        .count();
-    let serial_count = store
-        .serial_profiles()
-        .iter()
-        .filter(|profile| {
-            profile
-                .group
-                .as_deref()
-                .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-        })
-        .count();
-    let local_count = store
-        .local_terminal_profiles()
-        .iter()
-        .filter(|profile| {
-            profile
-                .group
-                .as_deref()
-                .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-        })
-        .count();
-    let telnet_count = store
-        .telnet_profiles()
-        .iter()
-        .filter(|profile| {
-            profile
-                .group
-                .as_deref()
-                .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-        })
-        .count();
-    let mosh_count = store
-        .mosh_profiles()
-        .iter()
-        .filter(|profile| {
-            profile
-                .group
-                .as_deref()
-                .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-        })
-        .count();
-    let standalone_sftp_count = store
-        .standalone_sftp_profiles()
-        .iter()
-        .filter(|profile| {
-            profile
-                .group
-                .as_deref()
-                .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-        })
-        .count();
-    let remote_desktop_count = store
-        .remote_desktop_profiles()
-        .iter()
-        .filter(|profile| {
-            profile
-                .group
-                .as_deref()
-                .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-        })
-        .count();
-    let ble_count = store
-        .ble_profiles()
-        .iter()
-        .filter(|profile| {
-            profile.group.as_deref().is_some_and(|candidate| {
-                candidate == group || candidate.starts_with(&format!("{group}/"))
-            })
-        })
-        .count();
-    connection_count
-        + store
-            .plugin_profiles()
-            .iter()
-            .filter(|profile| {
-                profile
-                    .group
-                    .as_deref()
-                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-            })
-            .count()
-        + store
-            .ftp_profiles()
-            .iter()
-            .filter(|profile| {
-                profile
-                    .group
-                    .as_deref()
-                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-            })
-            .count()
-        + local_count
-        + serial_count
-        + telnet_count
-        + mosh_count
-        + standalone_sftp_count
-        + remote_desktop_count
-        + ble_count
-        + tunnels
-            .iter()
-            .filter(|saved| {
-                saved
-                    .tunnel
-                    .as_ref()
-                    .and_then(|profile| profile.group.as_deref())
-                    .is_some_and(|candidate| session_group_path_is_within(candidate, group))
-            })
-            .count()
+        .filter_map(|connection| connection.group.as_deref())
+        .chain(
+            store
+                .serial_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .ble_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .local_terminal_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .telnet_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .ftp_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .mosh_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .standalone_sftp_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .remote_desktop_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(
+            store
+                .plugin_profiles()
+                .iter()
+                .filter_map(|p| p.group.as_deref()),
+        )
+        .chain(tunnels.iter().filter_map(|forward| {
+            forward
+                .tunnel
+                .as_ref()
+                .and_then(|profile| profile.group.as_deref())
+        }));
+
+    // Count each saved entry toward its group and every ancestor, not just the
+    // rows that are currently visible in the catalog.
+    let mut counts = HashMap::new();
+    for mut path in paths {
+        while !path.is_empty() {
+            *counts.entry(path).or_insert(0) += 1;
+            let Some((parent, _)) = path.rsplit_once('/') else {
+                break;
+            };
+            path = parent;
+        }
+    }
+    counts
+        .into_iter()
+        .map(|(path, count)| (path.to_owned(), count))
+        .collect()
 }
 
 pub fn session_group_tree(

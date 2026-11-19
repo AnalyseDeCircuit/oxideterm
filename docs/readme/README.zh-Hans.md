@@ -470,6 +470,12 @@ OxideTerm 基于以下开源项目构建：
 
 ---
 
+## 链接
+
+- [LINUX DO](https://linux.do/)
+
+---
+
 ## 许可证
 
 OxideTerm 采用 [GPL-3.0-only](../../LICENSE) 许可证，没有附加限制。依赖项声明见 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) 和 [NOTICE](../../NOTICE)。

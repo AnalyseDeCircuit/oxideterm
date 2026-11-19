@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "app_lock_visual.rs"]
+mod visual;
+
 use oxideterm_app_lock::{
     AppLockStore, BiometricAvailability, BiometricOutcome, authenticate_biometric,
     biometric_availability,
@@ -15,9 +18,11 @@ use oxideterm_gpui_ui::{
 use zeroize::{Zeroize, Zeroizing};
 
 const APP_LOCK_DIALOG_WIDTH: f32 = 460.0;
-const APP_LOCK_SCREEN_FORM_WIDTH: f32 = 340.0;
-const APP_LOCK_SCREEN_DESCRIPTION_WIDTH: f32 = 480.0;
-const APP_LOCK_SCREEN_ICON_SIZE: f32 = 56.0;
+const APP_LOCK_CONSOLE_WIDE_WIDTH: f32 = 780.0;
+const APP_LOCK_CONSOLE_NARROW_WIDTH: f32 = 420.0;
+const APP_LOCK_CONSOLE_WIDE_BREAKPOINT: f32 = 780.0;
+const APP_LOCK_CHAMBER_WIDE_RATIO: f32 = 0.46;
+const APP_LOCK_BRAND_ICON_SIZE: f32 = 22.0;
 const APP_LOCK_MINIMUM_PASSWORD_LENGTH: usize = 6;
 const APP_LOCK_MARKER: &str = "app-locked";
 const APP_LOCK_STATE_UNAVAILABLE: &str = "settings_view.general.app_lock_state_unavailable";
@@ -41,8 +46,10 @@ pub(super) struct AppLockState {
     pub(super) configured: bool,
     pub(super) locked: bool,
     unlock_presence: oxideterm_gpui_ui::motion::ExitPresence,
-    unlock_exiting_gen: u64,
     lock_enter_gen: u64,
+    lock_anim_started: Option<Instant>,
+    unlock_anim_started: Option<Instant>,
+    error_shake_gen: u64,
     pub(super) unlock_exiting: bool,
     pub(super) dialog: Option<AppLockDialog>,
     lock_after_configure: bool,
@@ -78,8 +85,10 @@ impl AppLockState {
             configured,
             locked,
             unlock_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            unlock_exiting_gen: 0,
             lock_enter_gen: 0,
+            lock_anim_started: None,
+            unlock_anim_started: None,
+            error_shake_gen: 0,
             unlock_exiting: false,
             dialog: None,
             lock_after_configure: false,
@@ -225,8 +234,13 @@ impl WorkspaceApp {
         let persisted = self.persist_app_lock(true, cx);
         if persisted && !was_locked {
             self.app_lock.unlock_exiting = false;
+            self.app_lock.unlock_anim_started = None;
             self.app_lock.unlock_presence.reopen();
             self.app_lock.lock_enter_gen = self.app_lock.lock_enter_gen.wrapping_add(1);
+            self.app_lock.lock_anim_started = (self.tokens.motion.enabled
+                && self.tokens.motion.spatial_enabled)
+                .then(Instant::now);
+            self.app_lock.error_shake_gen = 0;
         }
         audit.finish(
             if !persisted {
@@ -463,6 +477,7 @@ impl WorkspaceApp {
                 self.i18n
                     .t("settings_view.general.app_lock_password_required"),
             );
+            self.app_lock.error_shake_gen = self.app_lock.error_shake_gen.wrapping_add(1);
             cx.notify();
             return;
         }
@@ -594,22 +609,31 @@ impl WorkspaceApp {
         }
         self.app_lock.failed_attempts = 0;
         self.app_lock.retry_at = None;
+        self.app_lock.lock_anim_started = None;
         self.clear_app_lock_input_state();
         self.needs_active_pane_focus = true;
         if self.tokens.motion.enabled
             && let Some(generation) = self.app_lock.unlock_presence.begin_exit()
         {
-            self.app_lock.unlock_exiting_gen = generation;
             self.app_lock.unlock_exiting = true;
-            let delay = oxideterm_gpui_ui::motion::exit_settle_duration(
-                &self.tokens,
-                oxideterm_gpui_ui::motion::MotionDuration::Control,
-            );
+            self.app_lock.unlock_anim_started = Some(Instant::now());
+            let delay = if self.tokens.motion.spatial_enabled {
+                oxideterm_gpui_ui::motion::scaled_duration(
+                    &self.tokens,
+                    visual::APP_LOCK_EXIT_BASE_MS,
+                ) + Duration::from_millis(60)
+            } else {
+                oxideterm_gpui_ui::motion::exit_settle_duration(
+                    &self.tokens,
+                    oxideterm_gpui_ui::motion::MotionDuration::Control,
+                )
+            };
             cx.spawn(async move |weak, cx| {
                 cx.background_executor().timer(delay).await;
                 let _ = weak.update(cx, |this, cx| {
                     if this.app_lock.unlock_presence.finish_exit(generation) {
                         this.app_lock.unlock_exiting = false;
+                        this.app_lock.unlock_anim_started = None;
                         cx.notify();
                     }
                 });
@@ -617,6 +641,7 @@ impl WorkspaceApp {
             .detach();
         } else {
             self.app_lock.unlock_exiting = false;
+            self.app_lock.unlock_anim_started = None;
         }
         cx.refresh_windows();
     }
@@ -643,6 +668,7 @@ impl WorkspaceApp {
 
     fn register_app_lock_failure(&mut self, cx: &mut Context<Self>) {
         self.app_lock.failed_attempts = self.app_lock.failed_attempts.saturating_add(1);
+        self.app_lock.error_shake_gen = self.app_lock.error_shake_gen.wrapping_add(1);
         let cooldown = app_lock_failure_cooldown(self.app_lock.failed_attempts);
         self.app_lock.retry_at = Some(Instant::now() + cooldown);
         self.app_lock.error = Some(self.i18n.t(if cooldown == APP_LOCK_EXTENDED_COOLDOWN {
@@ -887,7 +913,14 @@ impl WorkspaceApp {
         ))
     }
 
-    fn render_app_lock_hero(&self, interactive: bool, cx: &mut Context<Self>) -> gpui::Div {
+    fn render_app_lock_hero(
+        &self,
+        interactive: bool,
+        wide: bool,
+        padlock: visual::PadlockVisual,
+        hide_chamber_padlock: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
         let blocked = self.app_lock.retry_blocked();
         let can_submit = interactive && !self.app_lock.pending && !blocked;
         let description_key = if self.knowledge_state().read(cx).app_quit_pending() {
@@ -895,11 +928,11 @@ impl WorkspaceApp {
         } else {
             "settings_view.general.app_lock_locked_description"
         };
-        let icon_source = crate::app_icon::app_icon_preview_source_sized(
+        let icon_source = crate::app_icon::app_icon_trimmed_source_sized(
             self.settings_store.settings().appearance.app_icon,
-            APP_LOCK_SCREEN_ICON_SIZE,
+            APP_LOCK_BRAND_ICON_SIZE,
         );
-        let control_height = self.tokens.metrics.ui_control_height;
+        let action_height = 36.0;
         let unlock_button = self
             .standard_footer_action_button(
                 if self.app_lock.pending {
@@ -916,9 +949,10 @@ impl WorkspaceApp {
                 |this, _event, _window, cx| this.submit_app_unlock(cx),
                 cx,
             )
-            .flex_none()
-            .h(px(control_height))
-            .px(px(16.0));
+            .w_full()
+            .h(px(action_height))
+            .justify_center();
+
         let biometric_button = (interactive && self.app_lock.biometric_available).then(|| {
             let group_id: SharedString = "app-lock-biometric-action".into();
             let idle_color = if self.app_lock.pending {
@@ -929,7 +963,7 @@ impl WorkspaceApp {
             let hover_color = self.tokens.ui.text;
             let mut icon = svg()
                 .path(LucideIcon::ShieldCheck.path())
-                .size(px(13.0))
+                .size(px(14.0))
                 .text_color(rgb(idle_color));
             if !self.app_lock.pending {
                 icon = icon.group_hover(group_id.clone(), move |style| {
@@ -950,14 +984,14 @@ impl WorkspaceApp {
                 Some(icon.into_any_element()),
                 ToolbarButtonOptions {
                     button: ButtonOptions {
-                        variant: ButtonVariant::Ghost,
-                        size: ButtonSize::Sm,
+                        variant: ButtonVariant::Outline,
+                        size: ButtonSize::Default,
                         radius: ButtonRadius::Md,
                         disabled: self.app_lock.pending,
                     },
-                    height: Some(28.0),
-                    padding_x: Some(10.0),
-                    font_size: Some(self.tokens.metrics.ui_text_xs),
+                    height: Some(action_height),
+                    padding_x: Some(14.0),
+                    font_size: Some(self.tokens.metrics.ui_text_sm),
                     text_color: Some(rgb(idle_color).into()),
                     hover_text_color: (!self.app_lock.pending).then(|| rgb(hover_color).into()),
                     ..ToolbarButtonOptions::default()
@@ -967,120 +1001,181 @@ impl WorkspaceApp {
                     cx.stop_propagation();
                 }),
             )
+            .w_full()
+            .justify_center()
             .id(group_id.clone())
             .group(group_id)
         });
 
-        div()
-            .w_full()
-            .max_w(px(APP_LOCK_SCREEN_DESCRIPTION_WIDTH))
+        let padlock_size = if wide {
+            visual::APP_LOCK_CHAMBER_SIZE_WIDE
+        } else {
+            visual::APP_LOCK_CHAMBER_SIZE_NARROW
+        };
+        let chamber = div()
+            .bg(rgb(self.tokens.ui.bg_panel))
+            .when(wide, |chamber| {
+                chamber
+                    .w(relative(APP_LOCK_CHAMBER_WIDE_RATIO))
+                    .flex_none()
+                    .border_r_1()
+                    .border_color(rgb(self.tokens.ui.border))
+            })
+            .when(!wide, |chamber| {
+                chamber
+                    .w_full()
+                    .border_b_1()
+                    .border_color(rgb(self.tokens.ui.border))
+            })
+            .px(px(28.0))
+            .py(px(28.0))
             .flex()
             .flex_col()
-            .items_center()
-            .gap(px(24.0))
+            .justify_between()
+            .gap(px(16.0))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .when(!wide, |row| row.justify_center())
+                    .gap(px(8.0))
+                    .child(
+                        gpui::img(icon_source)
+                            .size(px(APP_LOCK_BRAND_ICON_SIZE))
+                            .flex_none()
+                            .object_fit(gpui::ObjectFit::Contain),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(14.0))
+                            .line_height(px(20.0))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(rgb(self.tokens.ui.text_heading))
+                            .child("OxideTerm"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .py(px(4.0))
+                    .when(hide_chamber_padlock, |slot| slot.opacity(0.0))
+                    .child(visual::render_padlock_mechanism(
+                        self.tokens.ui,
+                        padlock_size,
+                        padlock,
+                    )),
+            )
+            .child(
+                div()
+                    .when(interactive, |desc| {
+                        desc.debug_selector(move || description_key.into())
+                    })
+                    .w_full()
+                    .when(!wide, |desc| desc.text_center())
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .line_height(px(18.0))
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t(description_key)),
+            );
+
+        let form_panel = div()
+            .flex_1()
+            .min_w(px(0.0))
+            .bg(rgb(self.tokens.ui.bg_card))
+            .px(px(if wide { 40.0 } else { 28.0 }))
+            .py(px(if wide { 36.0 } else { 26.0 }))
+            .flex()
+            .flex_col()
+            .justify_center()
+            .gap(px(20.0))
+            .child(
+                div()
+                    .text_size(px(20.0))
+                    .line_height(px(26.0))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .text_color(rgb(self.tokens.ui.text_heading))
+                    .child(self.i18n.t("settings_view.general.app_lock_locked_title")),
+            )
             .child(
                 div()
                     .w_full()
                     .flex()
                     .flex_col()
-                    .items_center()
-                    .gap(px(14.0))
+                    .gap(px(12.0))
                     .child(
-                        div()
-                            .relative()
-                            .size(px(APP_LOCK_SCREEN_ICON_SIZE))
-                            .flex_none()
-                            .child(
-                                gpui::img(icon_source)
-                                    .size(px(APP_LOCK_SCREEN_ICON_SIZE))
-                                    .object_fit(gpui::ObjectFit::Contain),
-                            )
-                            .child(
-                                div()
-                                    .absolute()
-                                    .bottom(px(-2.0))
-                                    .right(px(-2.0))
-                                    .size(px(22.0))
-                                    .rounded_full()
-                                    .bg(rgb(self.tokens.ui.bg_panel))
-                                    .border_2()
-                                    .border_color(rgb(self.tokens.ui.bg))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .child(Self::render_lucide_icon(
-                                        LucideIcon::Lock,
-                                        11.0,
-                                        rgb(self.tokens.ui.accent),
-                                    )),
+                        div().w_full().child(
+                            self.portable_password_input_with_placeholder(
+                                SettingsInput::AppLockCurrentPassword,
+                                if interactive {
+                                    &self.app_lock.current_password
+                                } else {
+                                    ""
+                                },
+                                self.i18n
+                                    .t("settings_view.general.app_lock_unlock_placeholder"),
+                                cx,
                             ),
-                    )
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .gap(px(6.0))
-                            .child(
-                                div()
-                                    .text_size(px(22.0))
-                                    .line_height(px(28.0))
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .text_color(rgb(self.tokens.ui.text_heading))
-                                    .child("OxideTerm"),
-                            )
-                            .child(
-                                div()
-                                    .when(interactive, |desc| {
-                                        desc.debug_selector(move || description_key.into())
-                                    })
-                                    .w_full()
-                                    .text_center()
-                                    .text_size(px(self.tokens.metrics.ui_text_sm))
-                                    .line_height(px(20.0))
-                                    .text_color(rgb(self.tokens.ui.text_muted))
-                                    .child(self.i18n.t(description_key)),
-                            ),
-                    ),
-            )
-            .child(
-                div()
-                    .w(px(APP_LOCK_SCREEN_FORM_WIDTH))
-                    .max_w(relative(0.92))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(10.0))
-                    .child(
-                        div()
-                            .w_full()
-                            .flex()
-                            .items_center()
-                            .gap(px(8.0))
-                            .child(
-                                div().flex_1().min_w(px(0.0)).child(
-                                    self.portable_password_input_with_placeholder(
-                                        SettingsInput::AppLockCurrentPassword,
-                                        if interactive {
-                                            &self.app_lock.current_password
-                                        } else {
-                                            ""
-                                        },
-                                        self.i18n
-                                            .t("settings_view.general.app_lock_unlock_placeholder"),
-                                        cx,
-                                    ),
-                                ),
-                            )
-                            .child(unlock_button),
+                        ),
                     )
                     .when_some(
                         interactive.then(|| self.app_lock.error.clone()).flatten(),
                         |form, error| form.child(self.app_lock_error_message(error)),
                     )
-                    .when_some(biometric_button, |form, button| form.child(button)),
+                    .child(unlock_button),
             )
+            .when_some(biometric_button, |panel, button| {
+                panel
+                    .child(div().w_full().h(px(1.0)).bg(rgb(self.tokens.ui.border)))
+                    .child(button)
+            });
+
+        let light = self.tokens.ui.is_light();
+        let console_shadows = vec![
+            gpui::BoxShadow {
+                color: gpui::rgba(if light { 0x00000014 } else { 0x0000005c }).into(),
+                offset: gpui::point(px(0.0), px(22.0)),
+                blur_radius: px(48.0),
+                spread_radius: px(-8.0),
+                inset: false,
+            },
+            gpui::BoxShadow {
+                color: gpui::rgba(if light { 0x0000000c } else { 0x00000038 }).into(),
+                offset: gpui::point(px(0.0), px(6.0)),
+                blur_radius: px(16.0),
+                spread_radius: px(-2.0),
+                inset: false,
+            },
+            gpui::BoxShadow {
+                color: gpui::rgba(if light { 0xffffff80 } else { 0xffffff12 }).into(),
+                offset: gpui::point(px(0.0), px(1.0)),
+                blur_radius: px(0.0),
+                spread_radius: px(0.0),
+                inset: true,
+            },
+        ];
+
+        div()
+            .w_full()
+            .max_w(px(if wide {
+                APP_LOCK_CONSOLE_WIDE_WIDTH
+            } else {
+                APP_LOCK_CONSOLE_NARROW_WIDTH
+            }))
+            .when(wide, |card| card.min_h(px(412.0)))
+            .rounded(px(self.tokens.radii.lg + 6.0))
+            .bg(rgb(self.tokens.ui.bg_card))
+            .border_1()
+            .border_color(rgb(self.tokens.ui.border))
+            .shadow(console_shadows)
+            .overflow_hidden()
+            .flex()
+            .when(wide, |card| card.flex_row())
+            .when(!wide, |card| card.flex_col())
+            .child(chamber)
+            .child(form_panel)
     }
 
     pub(in crate::workspace) fn render_app_lock_screen(
@@ -1089,8 +1184,105 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let titlebar_visible = self.window_titlebar_visible(window);
-        let lock_hero = self.render_app_lock_hero(true, cx);
+        let viewport_w = f32::from(window.viewport_size().width);
+        let wide = viewport_w >= APP_LOCK_CONSOLE_WIDE_BREAKPOINT;
         let generation = self.app_lock.lock_enter_gen;
+        let chamber_padlock_size = if wide {
+            visual::APP_LOCK_CHAMBER_SIZE_WIDE
+        } else {
+            visual::APP_LOCK_CHAMBER_SIZE_NARROW
+        };
+        let target_scale = chamber_padlock_size / visual::APP_LOCK_RITUAL_SIZE;
+
+        let enter_frame = if self.tokens.motion.enabled && self.tokens.motion.spatial_enabled {
+            self.app_lock.lock_anim_started.and_then(|started| {
+                let total = oxideterm_gpui_ui::motion::scaled_duration(
+                    &self.tokens,
+                    visual::APP_LOCK_ENTER_BASE_MS,
+                );
+                let t = if total.is_zero() {
+                    1.0
+                } else {
+                    (started.elapsed().as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
+                };
+                if t < 1.0 {
+                    window.request_animation_frame();
+                    Some(visual::app_lock_enter_frame(t, target_scale))
+                } else {
+                    None
+                }
+            })
+        } else {
+            None
+        };
+
+        let ritual_active = enter_frame.is_some_and(|enter| enter.ritual_visible);
+        let padlock = if self.app_lock.error.is_some() {
+            visual::PadlockVisual::settled_error()
+        } else {
+            visual::PadlockVisual::settled_locked()
+        };
+        let lock_hero = self.render_app_lock_hero(true, wide, padlock, ritual_active, cx);
+        let console: AnyElement = if let Some(enter) = enter_frame {
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .opacity(enter.screen_opacity)
+                .relative()
+                .top(px(enter.screen_offset_y))
+                .child(lock_hero)
+                .into_any_element()
+        } else if self.app_lock.error_shake_gen > 0
+            && self.tokens.motion.enabled
+            && self.tokens.motion.spatial_enabled
+        {
+            let shake_duration = oxideterm_gpui_ui::motion::scaled_duration(&self.tokens, 280);
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(lock_hero)
+                .with_animation(
+                    ("app-lock-shake", self.app_lock.error_shake_gen),
+                    gpui::Animation::new(shake_duration),
+                    |el, delta| {
+                        let offset =
+                            (delta * std::f32::consts::TAU * 3.0).sin() * (1.0 - delta) * 7.0;
+                        el.relative().left(px(offset))
+                    },
+                )
+                .into_any_element()
+        } else if self.tokens.motion.enabled && !self.tokens.motion.spatial_enabled {
+            oxideterm_gpui_ui::motion::fade_in(
+                &self.tokens,
+                ("app-lock-enter", generation),
+                div().w_full().flex().justify_center().child(lock_hero),
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
+            )
+        } else {
+            div()
+                .w_full()
+                .flex()
+                .justify_center()
+                .child(lock_hero)
+                .into_any_element()
+        };
+
+        // Compute the resting center of the chamber padlock relative to the stage center
+        // so the single ritual padlock glides directly into its slot without double-rendering.
+        let console_w = (viewport_w - 64.0)
+            .min(if wide {
+                APP_LOCK_CONSOLE_WIDE_WIDTH
+            } else {
+                APP_LOCK_CONSOLE_NARROW_WIDTH
+            })
+            .max(0.0);
+        let (target_dx, target_dy) = if wide {
+            (-console_w * (0.5 - APP_LOCK_CHAMBER_WIDE_RATIO * 0.5), -6.0)
+        } else {
+            (0.0, -104.0)
+        };
 
         div()
             .id("app-lock-root")
@@ -1116,6 +1308,7 @@ impl WorkspaceApp {
                     this.handle_app_lock_key(event, window, cx);
                 }
             }))
+            .child(visual::render_lock_screen_backdrop(self.tokens.ui))
             .when(titlebar_visible, |root| {
                 root.child(self.render_locked_title_bar(window, cx))
             })
@@ -1123,21 +1316,40 @@ impl WorkspaceApp {
                 div()
                     .flex_1()
                     .min_h(px(0.0))
+                    .relative()
                     .flex()
                     .items_center()
                     .justify_center()
-                    .px(px(24.0))
-                    .pt(px(24.0))
-                    .pb(px(64.0))
-                    .child(oxideterm_gpui_ui::motion::zoom_fade_in_y(
-                        &self.tokens,
-                        ("app-lock-enter", generation),
-                        lock_hero,
-                        12.0,
-                        0.96,
-                        gpui::point(0.5, 0.45),
-                        oxideterm_gpui_ui::motion::MotionDuration::Control,
-                    )),
+                    .px(px(32.0))
+                    .py(px(28.0))
+                    .child(console)
+                    .when_some(
+                        enter_frame.filter(|enter| enter.ritual_visible),
+                        |stage, enter| {
+                            let glide_x = target_dx * enter.handoff_progress;
+                            let glide_y = target_dy * enter.handoff_progress;
+                            stage.child(
+                                div()
+                                    .absolute()
+                                    .inset_0()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .opacity(enter.ritual_opacity)
+                                    .child(
+                                        div()
+                                            .relative()
+                                            .left(px(glide_x))
+                                            .top(px(glide_y))
+                                            .child(visual::render_padlock_mechanism(
+                                                self.tokens.ui,
+                                                visual::APP_LOCK_RITUAL_SIZE,
+                                                enter.ritual_visual,
+                                            )),
+                                    ),
+                            )
+                        },
+                    ),
             )
             .when(
                 self.tab_host.read(cx).close_confirm() == Some(&TabCloseConfirm::ApplicationQuit),
@@ -1157,43 +1369,68 @@ impl WorkspaceApp {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let titlebar_visible = self.window_titlebar_visible(window);
-        let lock_hero = self.render_app_lock_hero(false, cx);
-        let generation = self.app_lock.unlock_exiting_gen;
-        let curtain = div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .bg(rgb(self.tokens.ui.bg))
-            .text_color(rgb(self.tokens.ui.text))
-            .font_family(settings_ui_font_family(
-                &self.settings_store.settings().appearance.ui_font_family,
-            ))
-            .when(titlebar_visible, |root| {
-                root.child(self.render_locked_title_bar(window, cx))
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_h(px(0.0))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .px(px(24.0))
-                    .pt(px(24.0))
-                    .pb(px(64.0))
-                    .child(lock_hero),
-            );
+        let wide = f32::from(window.viewport_size().width) >= APP_LOCK_CONSOLE_WIDE_BREAKPOINT;
+        let spatial = self.tokens.motion.spatial_enabled;
+        let total = if spatial {
+            oxideterm_gpui_ui::motion::scaled_duration(&self.tokens, visual::APP_LOCK_EXIT_BASE_MS)
+        } else {
+            oxideterm_gpui_ui::motion::exit_duration(
+                &self.tokens,
+                oxideterm_gpui_ui::motion::MotionDuration::Control,
+            )
+        };
+        let t = match self.app_lock.unlock_anim_started {
+            Some(started) if !total.is_zero() => {
+                (started.elapsed().as_secs_f32() / total.as_secs_f32()).clamp(0.0, 1.0)
+            }
+            _ => 1.0,
+        };
+        if t < 1.0 {
+            window.request_animation_frame();
+        }
+        let exit = visual::app_lock_exit_frame(t, spatial);
+        let lock_hero = self.render_app_lock_hero(false, wide, exit.padlock, false, cx);
 
         div()
             .absolute()
             .inset_0()
-            .child(oxideterm_gpui_ui::motion::fade(
-                &self.tokens,
-                ("app-lock-exit", generation),
-                curtain,
-                oxideterm_gpui_ui::motion::MotionDuration::Control,
-                false,
-            ))
+            .opacity(exit.curtain_opacity)
+            .child(
+                div()
+                    .size_full()
+                    .relative()
+                    .flex()
+                    .flex_col()
+                    .bg(rgb(self.tokens.ui.bg))
+                    .text_color(rgb(self.tokens.ui.text))
+                    .font_family(settings_ui_font_family(
+                        &self.settings_store.settings().appearance.ui_font_family,
+                    ))
+                    .child(visual::render_lock_screen_backdrop(self.tokens.ui))
+                    .when(titlebar_visible, |root| {
+                        root.child(self.render_locked_title_bar(window, cx))
+                    })
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h(px(0.0))
+                            .relative()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .px(px(32.0))
+                            .py(px(28.0))
+                            .child(
+                                div()
+                                    .w_full()
+                                    .flex()
+                                    .justify_center()
+                                    .relative()
+                                    .top(px(exit.curtain_offset_y))
+                                    .child(lock_hero),
+                            ),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -1292,8 +1529,10 @@ mod tests {
             configured: true,
             locked: false,
             unlock_presence: oxideterm_gpui_ui::motion::ExitPresence::visible(),
-            unlock_exiting_gen: 0,
             lock_enter_gen: 0,
+            lock_anim_started: None,
+            unlock_anim_started: None,
+            error_shake_gen: 0,
             unlock_exiting: false,
             dialog: Some(AppLockDialog::Change),
             lock_after_configure: false,

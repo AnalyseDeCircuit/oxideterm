@@ -470,6 +470,12 @@ OxideTerm sử dụng các dự án mã nguồn mở sau:
 
 ---
 
+## Liên kết
+
+- [LINUX DO](https://linux.do/)
+
+---
+
 ## Giấy phép
 
 OxideTerm dùng [GPL-3.0-only](../../LICENSE), không có hạn chế bổ sung. Thông báo phụ thuộc nằm trong [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) và [NOTICE](../../NOTICE).

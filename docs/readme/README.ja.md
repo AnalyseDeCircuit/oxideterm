@@ -470,6 +470,12 @@ OxideTerm は以下のオープンソースプロジェクトを利用してい�
 
 ---
 
+## リンク
+
+- [LINUX DO](https://linux.do/)
+
+---
+
 ## ライセンス
 
 OxideTerm は追加制限のない [GPL-3.0-only](../../LICENSE) です。依存関係の告知は [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) と [NOTICE](../../NOTICE) にあります。

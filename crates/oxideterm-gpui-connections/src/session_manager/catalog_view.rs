@@ -67,18 +67,11 @@ impl CatalogEnvironment {
         tunnels: Vec<oxideterm_forwarding::PersistedForward>,
         include_items: bool,
     ) -> Self {
-        let group_counts = manager
-            .row_action_menu
-            .as_ref()
-            .and_then(|menu| match &menu.target {
-                SessionManagerRowActionTarget::Group(group) => Some((
-                    group.clone(),
-                    connection_count_for_group(group, store, &tunnels),
-                )),
-                _ => None,
-            })
-            .into_iter()
-            .collect();
+        let group_counts = if include_items {
+            super::groups::connection_counts_by_group(store, &tunnels)
+        } else {
+            HashMap::new()
+        };
         let groups = session_group_tree(store, &tunnels);
         Self {
             items: if include_items {

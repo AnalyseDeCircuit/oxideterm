@@ -470,6 +470,12 @@ OxideTerm 以下列開放原始碼專案為基礎：
 
 ---
 
+## 連結
+
+- [LINUX DO](https://linux.do/)
+
+---
+
 ## 授權條款
 
 OxideTerm 採用 [GPL-3.0-only](../../LICENSE) 授權條款，沒有附加限制。相依套件的聲明見 [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md) 和 [NOTICE](../../NOTICE)。
