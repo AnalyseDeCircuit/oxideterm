@@ -10,7 +10,8 @@ use gpui::{
 };
 use oxideterm_render_policy::EffectiveRenderPolicy;
 use oxideterm_settings::{
-    TerminalBackspaceSequence, TerminalDeleteSequence, TerminalSemanticScheme,
+    TerminalBackspaceSequence, TerminalDeleteSequence, TerminalRightClickAction,
+    TerminalSemanticScheme,
 };
 use oxideterm_terminal::{
     TerminalColor, TerminalCursorShape, TerminalEncoding, TerminalPalette, TerminalRow,
@@ -63,7 +64,6 @@ pub(crate) const TERMINAL_OSC52_CLIPBOARD: bool = true;
 pub(crate) const TERMINAL_OSC52_CLIPBOARD_READ: bool = false;
 pub(crate) const TERMINAL_COPY_ON_SELECT: bool = false;
 pub(crate) const TERMINAL_MIDDLE_CLICK_PASTE: bool = false;
-pub(crate) const TERMINAL_RIGHT_CLICK_PASTE: bool = false;
 pub(crate) const TERMINAL_OPEN_LINKS_WITH_MODIFIER: bool = true;
 pub(crate) const TERMINAL_DETECT_FILE_PATHS_AS_LINKS: bool = true;
 pub(crate) const TERMINAL_KEEP_SELECTION_ON_COPY: bool = true;
@@ -99,7 +99,7 @@ pub struct TerminalUiPreferences {
     pub osc52_clipboard_read: bool,
     pub copy_on_select: bool,
     pub middle_click_paste: bool,
-    pub right_click_paste: bool,
+    pub right_click_action: TerminalRightClickAction,
     pub open_links_with_modifier: bool,
     pub detect_file_paths_as_links: bool,
     pub timestamp_hover: bool,
@@ -227,7 +227,7 @@ impl Default for TerminalUiPreferences {
             osc52_clipboard_read: TERMINAL_OSC52_CLIPBOARD_READ,
             copy_on_select: TERMINAL_COPY_ON_SELECT,
             middle_click_paste: TERMINAL_MIDDLE_CLICK_PASTE,
-            right_click_paste: TERMINAL_RIGHT_CLICK_PASTE,
+            right_click_action: TerminalRightClickAction::default(),
             open_links_with_modifier: TERMINAL_OPEN_LINKS_WITH_MODIFIER,
             detect_file_paths_as_links: TERMINAL_DETECT_FILE_PATHS_AS_LINKS,
             timestamp_hover: true,
@@ -867,7 +867,7 @@ pub(crate) struct TerminalUiSettings {
     pub(crate) osc52_clipboard_read: bool,
     pub(crate) copy_on_select: bool,
     pub(crate) middle_click_paste: bool,
-    pub(crate) right_click_paste: bool,
+    pub(crate) right_click_action: TerminalRightClickAction,
     pub(crate) open_links_with_modifier: bool,
     pub(crate) detect_file_paths_as_links: bool,
     pub(crate) keep_selection_on_copy: bool,
@@ -897,7 +897,7 @@ impl TerminalUiSettings {
             osc52_clipboard_read: preferences.osc52_clipboard_read,
             copy_on_select: preferences.copy_on_select,
             middle_click_paste: preferences.middle_click_paste,
-            right_click_paste: preferences.right_click_paste,
+            right_click_action: preferences.right_click_action,
             open_links_with_modifier: preferences.open_links_with_modifier,
             detect_file_paths_as_links: preferences.detect_file_paths_as_links,
             keep_selection_on_copy: TERMINAL_KEEP_SELECTION_ON_COPY,

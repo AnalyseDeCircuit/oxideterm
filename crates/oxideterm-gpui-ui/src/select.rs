@@ -157,6 +157,7 @@ pub enum SelectAnchorId {
     SettingsSshLatencyInterval,
     SettingsTerminalBackspaceSequence,
     SettingsTerminalDeleteSequence,
+    SettingsTerminalRightClickAction,
     SettingsTerminalSessionLogFileMode,
     SettingsTerminalCursorStyle,
     SettingsRemoteShellIntegrationMode,

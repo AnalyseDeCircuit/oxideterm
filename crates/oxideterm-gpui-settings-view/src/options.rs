@@ -5,7 +5,7 @@ use oxideterm_i18n::I18n;
 use oxideterm_settings::{
     AiThinkingStyle, AnimationSpeed, BackgroundFit, ConflictAction,
     CursorStyle as SettingsCursorStyle, FontFamily, IdeAgentMode, Language, PersistedSettings,
-    TerminalBackspaceSequence, TerminalDeleteSequence, TerminalEncoding,
+    TerminalBackspaceSequence, TerminalDeleteSequence, TerminalEncoding, TerminalRightClickAction,
     TerminalSessionLogFileMode, UiDensity, UpdateChannel, UpdateProxyMode, UpdateProxyProtocol,
 };
 pub use oxideterm_settings_model::theme_display_name;
@@ -53,8 +53,23 @@ pub fn set_middle_click_paste(settings: &mut PersistedSettings, value: bool) {
     settings.terminal.middle_click_paste = value;
 }
 
-pub fn set_right_click_paste(settings: &mut PersistedSettings, value: bool) {
-    settings.terminal.right_click_paste = value;
+pub(crate) const TERMINAL_RIGHT_CLICK_ACTIONS: [TerminalRightClickAction; 3] = [
+    TerminalRightClickAction::Menu,
+    TerminalRightClickAction::PasteWithoutMouseTracking,
+    TerminalRightClickAction::PasteAlways,
+];
+
+pub(crate) fn terminal_right_click_action_label(
+    action: TerminalRightClickAction,
+    i18n: &I18n,
+) -> String {
+    i18n.t(match action {
+        TerminalRightClickAction::Menu => "settings_view.terminal.right_click_menu",
+        TerminalRightClickAction::PasteWithoutMouseTracking => {
+            "settings_view.terminal.right_click_paste_untracked"
+        }
+        TerminalRightClickAction::PasteAlways => "settings_view.terminal.right_click_paste_always",
+    })
 }
 
 pub fn set_open_links_with_modifier(settings: &mut PersistedSettings, value: bool) {

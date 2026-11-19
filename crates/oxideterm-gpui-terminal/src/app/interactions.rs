@@ -8,6 +8,7 @@ use gpui::{
     ClipboardItem, Context, KeyDownEvent, KeyUpEvent, Modifiers, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, Pixels, ScrollEvent, TouchPhase, px,
 };
+use oxideterm_settings::TerminalRightClickAction;
 use oxideterm_terminal::{
     TermMode, TerminalEditorApplication, TerminalEditorClipboardOperation, TerminalRow,
     TerminalSearchMatch, TerminalSnapshot,
@@ -1804,7 +1805,7 @@ impl TerminalPane {
         }
         if (event.button == MouseButton::Middle && self.settings.middle_click_paste)
             || (event.button == MouseButton::Right
-                && self.right_click_paste_requested(event.modifiers))
+                && self.right_click_paste_requested(mode, event.modifiers))
         {
             // Keep the entire gesture local, including release after modifier changes.
             self.mouse_paste_button = Some(event.button);
@@ -2503,8 +2504,8 @@ impl TerminalPane {
         }
     }
 
-    pub(crate) fn right_click_paste_requested(&self, modifiers: Modifiers) -> bool {
-        right_click_paste_requested(self.settings.right_click_paste, modifiers)
+    pub(crate) fn right_click_paste_requested(&self, mode: TermMode, modifiers: Modifiers) -> bool {
+        right_click_paste_requested(self.settings.right_click_action, mode, modifiers)
     }
 }
 
@@ -2512,10 +2513,18 @@ fn mouse_tracking_active(mode: TermMode) -> bool {
     mode.intersects(TermMode::MOUSE_MODE)
 }
 
-fn right_click_paste_requested(enabled: bool, modifiers: Modifiers) -> bool {
-    // Explicit paste preferences take priority over application mouse tracking;
-    // Shift keeps the context menu available.
-    enabled && !modifiers.shift
+fn right_click_paste_requested(
+    action: TerminalRightClickAction,
+    mode: TermMode,
+    modifiers: Modifiers,
+) -> bool {
+    // Shift always reserves the context menu for the terminal.
+    !modifiers.shift
+        && match action {
+            TerminalRightClickAction::Menu => false,
+            TerminalRightClickAction::PasteWithoutMouseTracking => !mouse_tracking_active(mode),
+            TerminalRightClickAction::PasteAlways => true,
+        }
 }
 
 fn terminal_selection_autoscroll_delta_rows(
@@ -4968,14 +4977,24 @@ mod tests {
 
     #[test]
     fn right_click_paste_is_opt_in_and_preserves_shift_context_menu() {
-        assert!(right_click_paste_requested(true, Modifiers::default()));
-        assert!(!right_click_paste_requested(false, Modifiers::default()));
+        use TerminalRightClickAction::*;
+        assert!(right_click_paste_requested(
+            PasteWithoutMouseTracking,
+            TermMode::empty(),
+            Modifiers::default(),
+        ));
         assert!(!right_click_paste_requested(
-            true,
+            Menu,
+            TermMode::empty(),
+            Modifiers::default(),
+        ));
+        assert!(!right_click_paste_requested(
+            PasteAlways,
+            TermMode::MOUSE_MODE,
             Modifiers {
                 shift: true,
                 ..Modifiers::default()
-            }
+            },
         ));
     }
 

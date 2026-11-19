@@ -222,6 +222,8 @@ fn settings_search_specs() -> Vec<SettingsSearchEntrySpec> {
                 "settings_view.terminal.middle_click_paste_hint",
                 "settings_view.terminal.right_click_paste",
                 "settings_view.terminal.right_click_paste_hint",
+                "settings_view.terminal.right_click_paste_untracked",
+                "settings_view.terminal.right_click_paste_always",
             ],
         ),
         terminal_search_entry(

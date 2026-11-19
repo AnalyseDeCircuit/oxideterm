@@ -614,7 +614,7 @@ impl Render for TerminalPane {
                     this.clear_terminal_hover(cx);
                     window.focus(&this.focus_handle, cx);
                     let mode = this.terminal.lock().mode();
-                    if this.right_click_paste_requested(event.modifiers) {
+                    if this.right_click_paste_requested(mode, event.modifiers) {
                         window.prevent_default();
                         this.handle_mouse_down(event, cx);
                     } else if mouse_mode(mode, event.modifiers.shift) {

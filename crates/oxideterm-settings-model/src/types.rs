@@ -106,6 +106,7 @@ pub enum SettingsSelect {
     SshLatencyInterval,
     TerminalBackspaceSequence,
     TerminalDeleteSequence,
+    TerminalRightClickAction,
     TerminalSessionLogFileMode,
     TerminalCursorStyle,
     RemoteShellIntegrationMode,

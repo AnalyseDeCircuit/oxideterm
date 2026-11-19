@@ -1465,7 +1465,7 @@ impl WorkspaceApp {
             osc52_clipboard_read: terminal.osc52_clipboard_read,
             copy_on_select: terminal.copy_on_select,
             middle_click_paste: terminal.middle_click_paste,
-            right_click_paste: terminal.right_click_paste,
+            right_click_action: terminal.right_click_action(),
             open_links_with_modifier: terminal.open_links_with_modifier,
             detect_file_paths_as_links: terminal.detect_file_paths_as_links,
             timestamp_hover: terminal.timestamp_hover,

@@ -412,6 +412,14 @@ impl Default for TerminalSessionLogSettings {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TerminalRightClickAction {
+    #[default]
+    Menu,
+    PasteWithoutMouseTracking,
+    PasteAlways,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalSettings {
@@ -466,6 +474,9 @@ pub struct TerminalSettings {
     // terminal context menu and can be reported to mouse-aware applications.
     #[serde(default)]
     pub right_click_paste: bool,
+    // Older profiles with rightClickPaste enabled must keep overriding mouse reports.
+    #[serde(default)]
+    pub right_click_paste_respects_mouse_tracking: bool,
     #[serde(default = "default_open_links_with_modifier")]
     pub open_links_with_modifier: bool,
     #[serde(default = "default_detect_file_paths_as_links")]
@@ -583,6 +594,24 @@ const fn default_terminal_padding_vertical() -> i64 {
 }
 
 impl TerminalSettings {
+    pub fn right_click_action(&self) -> TerminalRightClickAction {
+        use TerminalRightClickAction::*;
+        match (
+            self.right_click_paste,
+            self.right_click_paste_respects_mouse_tracking,
+        ) {
+            (false, _) => Menu,
+            (true, true) => PasteWithoutMouseTracking,
+            (true, false) => PasteAlways,
+        }
+    }
+
+    pub fn set_right_click_action(&mut self, action: TerminalRightClickAction) {
+        self.right_click_paste = action != TerminalRightClickAction::Menu;
+        self.right_click_paste_respects_mouse_tracking =
+            action == TerminalRightClickAction::PasteWithoutMouseTracking;
+    }
+
     pub fn active_custom_semantic_scheme(&self) -> Option<&SemanticSchemeDocument> {
         let active_id = self.semantic_custom_scheme.as_deref()?;
         self.custom_semantic_schemes
@@ -663,6 +692,7 @@ impl Default for TerminalSettings {
             copy_on_select: false,
             middle_click_paste: false,
             right_click_paste: false,
+            right_click_paste_respects_mouse_tracking: false,
             open_links_with_modifier: true,
             detect_file_paths_as_links: true,
             timestamp_hover: true,
@@ -904,6 +934,7 @@ mod tests {
         settings.free_type_mode = true;
         settings.backspace_sequence = TerminalBackspaceSequence::ControlH;
         settings.delete_sequence = TerminalDeleteSequence::Delete;
+        settings.set_right_click_action(TerminalRightClickAction::PasteWithoutMouseTracking);
 
         let value = serde_json::to_value(settings).expect("serialize terminal settings");
 
@@ -913,7 +944,23 @@ mod tests {
         assert_eq!(value["selectionHighlighting"], serde_json::json!(true));
         assert_eq!(value["freeTypeCursorPositioning"], serde_json::json!(true));
         assert!(value.get("freeTypeMode").is_none());
+        assert_eq!(value["rightClickPaste"], true);
+        assert_eq!(value["rightClickPasteRespectsMouseTracking"], true);
+        let mut legacy = value.clone();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("rightClickPasteRespectsMouseTracking");
+        let legacy: TerminalSettings = serde_json::from_value(legacy).unwrap();
+        assert_eq!(
+            legacy.right_click_action(),
+            TerminalRightClickAction::PasteAlways
+        );
         let restored: TerminalSettings = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            restored.right_click_action(),
+            TerminalRightClickAction::PasteWithoutMouseTracking
+        );
         assert!(restored.selection_highlighting);
         assert!(restored.free_type_mode);
         assert_eq!(

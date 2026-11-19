@@ -3,6 +3,7 @@ use gpui::{
     AppContext, AvailableSpace, IntoElement, MouseButton, MouseDownEvent, MouseUpEvent,
     TestAppContext, point, size,
 };
+use oxideterm_settings::TerminalRightClickAction;
 
 #[path = "../../../oxideterm-terminal/tests/support/ssh_peer.rs"]
 mod ssh_peer;
@@ -521,7 +522,7 @@ fn mouse_clipboard_paste_overrides_tracking_and_preserves_confirmation(cx: &mut 
             config,
             TerminalUiPreferences {
                 paste_protection: true,
-                right_click_paste: true,
+                right_click_action: TerminalRightClickAction::PasteAlways,
                 middle_click_paste: true,
                 ..Default::default()
             },
@@ -603,26 +604,35 @@ fn mouse_clipboard_paste_overrides_tracking_and_preserves_confirmation(cx: &mut 
         );
         cx.update(|window, cx| window.draw(cx).clear(cx));
     }
-    for (button, enabled, expected) in [
+    for (button, right_click_action, middle_click_paste, expected) in [
         (
             MouseButton::Right,
-            false,
+            TerminalRightClickAction::Menu,
+            true,
+            "\x1b[<2;1;1M\x1b[<34;2;1M\x1b[<2;2;1m",
+        ),
+        (
+            MouseButton::Right,
+            TerminalRightClickAction::PasteWithoutMouseTracking,
+            true,
             "\x1b[<2;1;1M\x1b[<34;2;1M\x1b[<2;2;1m",
         ),
         (
             MouseButton::Middle,
+            TerminalRightClickAction::PasteAlways,
             false,
             "\x1b[<1;1;1M\x1b[<33;2;1M\x1b[<1;2;1m",
         ),
         (
             MouseButton::Left,
+            TerminalRightClickAction::PasteAlways,
             true,
             "\x1b[<0;1;1M\x1b[<32;2;1M\x1b[<0;2;1m",
         ),
     ] {
         pane.update(cx, |pane, cx| {
-            pane.settings.right_click_paste = enabled;
-            pane.settings.middle_click_paste = enabled;
+            pane.settings.right_click_action = right_click_action;
+            pane.settings.middle_click_paste = middle_click_paste;
             cx.notify();
         });
         cx.update(|window, cx| window.draw(cx).clear(cx));

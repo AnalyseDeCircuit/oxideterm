@@ -69,6 +69,7 @@ const TERMINAL_BEHAVIOR_KEYS: &[&str] = &[
     "copyOnSelect",
     "middleClickPaste",
     "rightClickPaste",
+    "rightClickPasteRespectsMouseTracking",
     "openLinksWithModifier",
     "selectionRequiresShift",
     "autosuggest",
@@ -316,7 +317,22 @@ fn copy_section(
             copy_object_keys(source, target, &["terminal"], TERMINAL_APPEARANCE_KEYS)
         }
         "terminalBehavior" => {
-            copy_object_keys(source, target, &["terminal"], TERMINAL_BEHAVIOR_KEYS)
+            copy_object_keys(source, target, &["terminal"], TERMINAL_BEHAVIOR_KEYS);
+            // A legacy snapshot that explicitly chooses right-click paste chose
+            // to override mouse tracking; don't inherit the destination's new mode.
+            if source
+                .pointer("/terminal/rightClickPaste")
+                .and_then(Value::as_bool)
+                == Some(true)
+                && source
+                    .pointer("/terminal/rightClickPasteRespectsMouseTracking")
+                    .is_none()
+            {
+                ensure_object_path(target, &["terminal"]).insert(
+                    "rightClickPasteRespectsMouseTracking".to_string(),
+                    Value::Bool(false),
+                );
+            }
         }
         "appearance" => copy_object_keys(source, target, &["appearance"], APPEARANCE_KEYS),
         "connections" => {

@@ -545,11 +545,15 @@ impl SettingsControls<'_> {
                     set_middle_click_paste,
                     cx,
                 ));
-                rows.push(self.bool_row(
+                rows.push(self.select_setting_row(
                     "settings_view.terminal.right_click_paste",
                     "settings_view.terminal.right_click_paste_hint",
-                    settings.terminal.right_click_paste,
-                    set_right_click_paste,
+                    SettingsSelect::TerminalRightClickAction,
+                    terminal_right_click_action_label(
+                        settings.terminal.right_click_action(),
+                        &self.i18n,
+                    ),
+                    self.tokens.metrics.settings_select_width,
                     cx,
                 ));
                 self.settings_card(

@@ -939,6 +939,32 @@ impl SettingsSelectMenu<'_> {
                 }
                 Some(popup)
             }
+            (SettingsTab::Terminal, SettingsSelect::TerminalRightClickAction) => {
+                let mut popup = select_overlay_popup(&self.tokens, width);
+                for action in TERMINAL_RIGHT_CLICK_ACTIONS {
+                    popup = popup.child(select_option_action(
+                        select_option(
+                            &self.tokens,
+                            terminal_right_click_action_label(action, &self.i18n),
+                            action == settings.terminal.right_click_action(),
+                        ),
+                        false,
+                        false,
+                        self.action(move |this, _event, window, cx| {
+                            this.send(SelectMenuRequest::Close, window, cx);
+                            this.send(
+                                SelectMenuRequest::Edit(Box::new(move |settings| {
+                                    settings.terminal.set_right_click_action(action);
+                                })),
+                                window,
+                                cx,
+                            );
+                            cx.stop_propagation();
+                        }),
+                    ));
+                }
+                Some(popup)
+            }
             (SettingsTab::Terminal, SettingsSelect::TerminalSessionLogFileMode) => {
                 let mut popup = select_overlay_popup(&self.tokens, width);
                 for &mode in terminal_session_log_file_mode_options() {

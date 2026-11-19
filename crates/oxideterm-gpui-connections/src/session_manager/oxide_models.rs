@@ -462,6 +462,9 @@ pub fn oxide_settings_field_label(field: &str, i18n: &oxideterm_i18n::I18n) -> S
         "copyOnSelect" => i18n.t("settings_view.terminal.copy_on_select"),
         "middleClickPaste" => i18n.t("settings_view.terminal.middle_click_paste"),
         "rightClickPaste" => i18n.t("settings_view.terminal.right_click_paste"),
+        "rightClickPasteRespectsMouseTracking" => {
+            i18n.t("settings_view.terminal.right_click_paste_untracked")
+        }
         "openLinksWithModifier" => i18n.t("settings_view.terminal.open_links_with_modifier"),
         "detectFilePathsAsLinks" => i18n.t("settings_view.terminal.detect_file_paths_as_links"),
         "timestampHover" => i18n.t("settings_view.terminal.timestamp_hover"),

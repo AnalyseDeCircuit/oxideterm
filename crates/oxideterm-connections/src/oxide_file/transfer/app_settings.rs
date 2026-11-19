@@ -130,6 +130,7 @@ fn build_sectioned_app_settings_sections(
                     "copyOnSelect",
                     "middleClickPaste",
                     "rightClickPaste",
+                    "rightClickPasteRespectsMouseTracking",
                     "openLinksWithModifier",
                     "selectionRequiresShift",
                 ],

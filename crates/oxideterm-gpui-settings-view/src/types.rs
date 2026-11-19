@@ -82,6 +82,7 @@ impl SettingsSelectAnchorExt for SettingsSelect {
             Self::SshLatencyInterval => SelectAnchorId::SettingsSshLatencyInterval,
             Self::TerminalBackspaceSequence => SelectAnchorId::SettingsTerminalBackspaceSequence,
             Self::TerminalDeleteSequence => SelectAnchorId::SettingsTerminalDeleteSequence,
+            Self::TerminalRightClickAction => SelectAnchorId::SettingsTerminalRightClickAction,
             Self::TerminalSessionLogFileMode => SelectAnchorId::SettingsTerminalSessionLogFileMode,
             Self::TerminalCursorStyle => SelectAnchorId::SettingsTerminalCursorStyle,
             Self::RemoteShellIntegrationMode => SelectAnchorId::SettingsRemoteShellIntegrationMode,
