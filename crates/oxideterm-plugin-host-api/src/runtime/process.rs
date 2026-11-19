@@ -14,36 +14,65 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 /// Builds the spawn command for a resolved runtime entry.
 ///
-/// Windows packaging points the manifest entry at a `cmd.exe` launcher
-/// (`plugin.cmd`) so the plugin can locate its platform binary; `std` refuses
-/// to spawn `.bat`/`.cmd` targets directly since the CVE-2024-24576 hardening,
-/// so those entries must go through `cmd.exe /C`. Every later protocol exchange
-/// happens over stdin, so no plugin-controlled argument ever reaches the
-/// command line and the wrapper adds no argument-injection surface.
-pub(super) fn build_process_command(executable: &Path) -> tokio::process::Command {
-    #[cfg(windows)]
-    {
-        let launches_through_cmd = executable
-            .extension()
-            .and_then(|extension| extension.to_str())
-            .is_some_and(|extension| {
-                extension.eq_ignore_ascii_case("cmd") || extension.eq_ignore_ascii_case("bat")
-            });
-        if launches_through_cmd {
-            // resolve_process_runtime_entry canonicalizes the entry, which
-            // yields a verbatim (\\?\-prefixed) path on Windows. cmd.exe cannot
-            // resolve verbatim paths as a command target, so the launcher must
-            // receive the plain drive-letter form.
-            let verbatim_target = executable.to_string_lossy();
-            let target = verbatim_target
-                .strip_prefix(r"\\?\")
-                .unwrap_or(&verbatim_target);
-            let mut command = tokio::process::Command::new("cmd");
-            command.arg("/C").arg(target);
-            return command;
-        }
+/// resolve_process_runtime_entry canonicalizes the entry, which yields a
+/// verbatim (`\\?\`-prefixed) path on Windows. std's spawn path probes a
+/// `.exe` suffix for non-`.exe` programs by appending and then removing the
+/// suffix; the removal is a no-op on verbatim paths, so a verbatim
+/// `plugin.cmd` would be probed as `plugin.cmd.exe` and fail with a
+/// file-not-found spawn error. Hand std a user path instead: `.bat`/`.cmd`
+/// entries are then routed through cmd.exe by std itself with hardened
+/// quoting, `/d` (AutoRun disabled), and `/e:ON` percent handling. Protocol
+/// exchanges run over stdin, so no plugin-controlled argument ever reaches
+/// the command line.
+pub(super) fn build_process_command(
+    executable: &Path,
+) -> Result<tokio::process::Command, PluginError> {
+    Ok(tokio::process::Command::new(plain_user_path(executable)?))
+}
+
+/// Converts a canonicalized entry path back to the plain user path form that
+/// std's spawn path and cmd.exe resolve. `\\?\C:\…` drops the verbatim prefix
+/// and `\\?\UNC\server\share\…` maps to `\\server\share\…`; other verbatim
+/// forms have no plain equivalent, so they fail instead of spawning something
+/// the validator never approved.
+#[cfg(windows)]
+fn plain_user_path(executable: &Path) -> Result<PathBuf, PluginError> {
+    let text = executable.to_str().ok_or_else(|| {
+        PluginError::runtime(
+            "process_spawn_failed",
+            "Native plugin path is not valid Unicode",
+        )
+    })?;
+    // Verbatim paths carry a trailing NUL in their std representation; the
+    // user form must not keep it.
+    let text = text.strip_suffix('\0').unwrap_or(text);
+    let Some(stripped) = text.strip_prefix(r"\\?\") else {
+        return Ok(executable.to_path_buf());
+    };
+    if let Some(unc_share) = stripped.strip_prefix(r"UNC\") {
+        return Ok(PathBuf::from(format!(r"\\{unc_share}")));
     }
-    tokio::process::Command::new(executable)
+    // A drive-letter verbatim path (`\\?\C:\…`) converts to its plain form.
+    // Device, volume-GUID, and boot-partition verbatim paths do not, and the
+    // spawn probe would treat their remnants as nonexistent executables.
+    let is_drive_letter = stripped
+        .as_bytes()
+        .first()
+        .is_some_and(|drive| drive.is_ascii_alphabetic())
+        && stripped.as_bytes().get(1) == Some(&b':');
+    if is_drive_letter {
+        Ok(PathBuf::from(stripped.to_owned()))
+    } else {
+        Err(PluginError::runtime(
+            "process_spawn_failed",
+            format!("Cannot convert plugin path to a user path: {text}"),
+        ))
+    }
+}
+
+#[cfg(not(windows))]
+fn plain_user_path(executable: &Path) -> Result<PathBuf, PluginError> {
+    Ok(executable.to_path_buf())
 }
 
 pub struct NativeProcessPluginRuntime {
@@ -135,7 +164,7 @@ impl NativeProcessPluginRuntime {
             // Process plugins communicate over host-owned stdio. Do not inherit
             // workspace stdio, because plugin logs/results must be captured and
             // classified by the runtime bridge instead of leaking to the app.
-            let mut command = build_process_command(&executable);
+            let mut command = build_process_command(&executable)?;
             command
                 .current_dir(&self.plugin_dir)
                 .stdin(Stdio::piped())
