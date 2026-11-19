@@ -309,7 +309,31 @@ function blockingFindingText(finding) {
   }
 }
 
-function buildCorrectionNotice(findings) {
+function buildTemplateSkeleton(templatePolicy) {
+  const lines = [];
+  for (const heading of templatePolicy.headings) {
+    lines.push(`### ${heading}`, '', '<fill in / 请填写>', '');
+  }
+  lines.push(`### ${templatePolicy.checklistHeading}`, '');
+  for (const item of templatePolicy.checks) {
+    lines.push(`- [x] ${item}`);
+  }
+  return lines.join('\n');
+}
+
+function buildCorrectionNotice(findings, issueContext = null) {
+  const templatePolicy = issueContext
+    ? findRequiredSectionPolicy(
+      issueContext.labels || [],
+      issueContext.title || '',
+      parseSections(issueContext.body || '')
+    )
+    : null;
+  const hasTemplateMismatch = Boolean(templatePolicy)
+    && findings.some((finding) =>
+      finding.code === 'required_section_missing'
+      || finding.code === 'required_checkbox_unchecked'
+    );
   return [
     GATE_COMMENT_MARKER,
     '## Report needs correction / 报告需要补充',
@@ -318,6 +342,22 @@ function buildCorrectionNotice(findings) {
     '此 Issue 因缺少必要信息而被暂时关闭。',
     '',
     ...findings.map(blockingFindingText),
+    ...(hasTemplateMismatch
+      ? [
+        '',
+        'If you submitted this issue via `gh`, the GitHub API, or an AI agent, keep the exact `###` headings (English before Chinese) and exact `- [x]` checklist wording below without reordering or paraphrasing.',
+        '如果你通过 `gh`、GitHub API 或 AI 代理提交此 Issue，请原样保留下方的 `###` 标题（英文在前、中文在后）和 `- [x]` 复选框原文，不要调换顺序或改写文字。',
+        '',
+        '<details>',
+        '<summary>Required Markdown template / 必填 Markdown 模板骨架</summary>',
+        '',
+        '```markdown',
+        buildTemplateSkeleton(templatePolicy),
+        '```',
+        '',
+        '</details>',
+      ]
+      : []),
     '',
     'Edit the title or body in this issue. The quality check will run again automatically and reopen the issue when the blocking items are resolved.',
     '请直接编辑当前 Issue 的标题或正文。修改完成后会自动重新检查；阻断项解决后，Issue 将自动重新打开。',

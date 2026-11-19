@@ -250,3 +250,33 @@ test('keeps a maintainer-reopened issue outside later automatic closures', () =>
     false
   );
 });
+
+test('correction notice includes verbatim markdown skeleton when API/AI alters template headings or checklist', () => {
+  const issue = {
+    title: '[Feature] Support nerdctl and podman container CLI',
+    body: [
+      'OxideTerm 版本 / Version',
+      '',
+      '2.4.0',
+      '',
+      '### 问题或使用场景 / Problem or use case',
+      '',
+      'Remote host only installs nerdctl instead of docker.',
+      '',
+      '### Checklist',
+      '',
+      '- [x] 我正在使用最新正式版（2.4.0），已确认该功能尚不存在',
+    ].join('\n'),
+    labels: [],
+  };
+  const report = gate.evaluateIssue(issue);
+
+  const notice = gate.buildCorrectionNotice(report.blockingFindings, issue);
+  assert.match(notice, /Required Markdown template \/ 必填 Markdown 模板骨架/);
+  assert.match(notice, /### OxideTerm version \/ 版本/);
+  assert.match(notice, /### Problem or use case \/ 问题或使用场景/);
+  assert.match(notice, /- \[x\] I am using the latest release, confirmed this feature does not already exist, and searched existing issues \/ 我正在使用最新正式版，已确认该功能尚不存在，并已搜索过已有 Issue/);
+
+  const titleOnlyNotice = gate.buildCorrectionNotice([{ code: 'title_needs_detail' }], issue);
+  assert.doesNotMatch(titleOnlyNotice, /Required Markdown template/);
+});

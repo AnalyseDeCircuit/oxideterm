@@ -1,3 +1,6 @@
+# CLI / API / AI agents: preserve the exact `### <label>` headings (English before Chinese)
+# and exact `- [x] <checkbox label>` wording below verbatim; reordering or paraphrasing
+# causes the automated issue-quality gate to close the issue.
 name: Bug Report
 description: Something is broken or behaves incorrectly / 功能异常或行为不符合预期
 title: "[Bug] "
