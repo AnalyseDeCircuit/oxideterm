@@ -20,7 +20,8 @@ SSH · Mosh · Telnet · 串口 · RDP/VNC · SFTP · 端口转发 · 代码编�
 [**文档**](https://oxideterm.app) ·
 [**更新日志**](../../.github/release-notes/stable-changelog.md) ·
 [**报告问题**](https://github.com/AnalyseDeCircuit/oxideterm/issues) ·
-[**微信交流群**](https://github.com/AnalyseDeCircuit/oxideterm/issues/752)
+[**微信交流群**](https://github.com/AnalyseDeCircuit/oxideterm/issues/752) ·
+[**LINUX DO 社区**](https://linux.do/)
 
 [English](../../README.md) | [简体中文](README.zh-Hans.md) | [繁體中文](README.zh-Hant.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Français](README.fr.md) | [Deutsch](README.de.md) | [Español](README.es.md) | [Italiano](README.it.md) | [Português](README.pt-BR.md) | [Tiếng Việt](README.vi.md)
 
