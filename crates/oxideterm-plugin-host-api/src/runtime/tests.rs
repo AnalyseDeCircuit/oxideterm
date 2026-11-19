@@ -1171,85 +1171,54 @@ sleep 2
 }
 
 #[cfg(windows)]
-mod windows_process_command {
-    use super::super::process::build_process_command;
-    use std::ffi::OsStr;
-    use std::path::Path;
+#[tokio::test]
+async fn windows_process_batch_entry_completes_activation_handshake() {
+    let plugin_dir = unique_temp_dir("batch plugin & handshake");
+    fs::create_dir_all(&plugin_dir).unwrap();
+    let entry = "plugin.cmd";
+    fs::write(
+        plugin_dir.join(entry),
+        concat!(
+            "@echo off\r\n",
+            "set \"request=\"\r\n",
+            "set /p request=\r\n",
+            "if not defined request exit /b 1\r\n",
+            "echo {\"protocolVersion\":1,\"requestId\":\"batch-activate\",\"payload\":{\"requestId\":\"batch-activate\",\"result\":{\"status\":\"ok\",\"value\":{\"entry\":\"plugin.cmd\"}}}}\r\n",
+        ),
+    )
+    .unwrap();
 
-    // resolve_process_runtime_entry canonicalizes the entry, so Windows hands
-    // us a verbatim (\\?\-prefixed) path. std's spawn path probes a `.exe`
-    // suffix by appending and then removing it, and the removal is a no-op on
-    // verbatim paths — so a verbatim `plugin.cmd` would be probed as
-    // `plugin.cmd.exe` and fail to spawn. The builder must hand std a plain
-    // user path instead; std itself then routes `.cmd`/`.bat` through cmd.exe
-    // with hardened quoting, `/d`, and `/e:ON`.
-    #[test]
-    fn verbatim_drive_paths_spawn_as_plain_user_paths() {
-        let command = build_process_command(Path::new(r"\\?\C:\plugins\demo\bin\plugin.cmd"))
-            .unwrap();
-        assert_eq!(
-            command.as_std().get_program(),
-            OsStr::new(r"C:\plugins\demo\bin\plugin.cmd")
-        );
-    }
+    let mut runtime = NativeProcessPluginRuntime::new(
+        "com.example.runtime",
+        &plugin_dir,
+        entry,
+        Duration::from_secs(10),
+    );
+    let request = || PluginActivateRequest {
+        request_id: "batch-activate".to_string(),
+        manifest: sample_manifest(),
+        permissions: PluginPermissionSet::default(),
+        timeout_ms: 10_000,
+    };
 
-    // std's verbatim representation carries a trailing NUL; the user path must
-    // not keep it or CreateProcessW receives a name with an embedded NUL.
-    #[test]
-    fn verbatim_trailing_nul_is_stripped() {
-        let verbatim = format!(r"\\?\C:\plugins\demo\bin\plugin.cmd{}", "\0");
-        let command = build_process_command(Path::new(&verbatim)).unwrap();
-        assert_eq!(
-            command.as_std().get_program(),
-            OsStr::new(r"C:\plugins\demo\bin\plugin.cmd")
-        );
-    }
+    let response = runtime.activate(request()).await.unwrap();
+    let PluginResponseResult::Ok { value } = response.result else {
+        panic!("batch entry did not complete the activation handshake");
+    };
+    assert_eq!(value, serde_json::json!({ "entry": "plugin.cmd" }));
+    assert_eq!(
+        runtime.health().await.unwrap().state,
+        PluginRuntimeLifecycleState::Active
+    );
+    runtime.kill().await.unwrap();
 
-    // Stripping \\?\ blindly would turn a UNC verbatim path into a relative
-    // command name; the network share prefix must survive the conversion,
-    // mirroring std's own from_wide_to_user_path mapping.
-    #[test]
-    fn unc_verbatim_paths_keep_the_share_form() {
-        let command = build_process_command(Path::new(
-            r"\\?\UNC\server\share\plugins\demo\bin\plugin.cmd",
-        ))
-        .unwrap();
-        assert_eq!(
-            command.as_std().get_program(),
-            OsStr::new(r"\\server\share\plugins\demo\bin\plugin.cmd")
-        );
-    }
-
-    // Device and boot-partition verbatim paths have no plain equivalent;
-    // converting them would spawn a relative remnant the validator never
-    // approved, so they must fail the spawn instead.
-    #[test]
-    fn unconvertible_verbatim_paths_fail_the_spawn() {
-        for entry in [r"\\?\Boot\partition\plugin.cmd", r"\\?\Volume{0}\plugin.cmd"] {
-            let error = build_process_command(Path::new(entry))
-                .expect_err("device verbatim paths must not convert");
-            assert_eq!(error.code, "process_spawn_failed");
-            assert!(error.message.contains(entry), "entry {entry}");
-        }
-    }
-
-    // Non-verbatim entries (relative entries from the manifest, absolute paths
-    // without a canonicalized prefix) pass through unchanged; std owns the
-    // batch-file routing and the `.exe` probe for them.
-    #[test]
-    fn plain_paths_pass_through_unchanged() {
-        for entry in [
-            "bin/plugin.cmd",
-            r"bin\plugin.bat",
-            r"C:\plugins\demo\bin\plugin.exe",
-            "bin/plugin",
-        ] {
-            let command = build_process_command(Path::new(entry)).unwrap();
-            assert_eq!(
-                command.as_std().get_program(),
-                OsStr::new(entry),
-                "entry {entry} must not be rewritten"
-            );
-        }
-    }
+    // A sibling executable must not silently take precedence over the manifest entry.
+    fs::write(plugin_dir.join("plugin.cmd.exe"), b"not the manifest entry").unwrap();
+    let error = runtime.activate(request()).await.unwrap_err();
+    assert_eq!(error.code, "process_spawn_failed");
+    assert_eq!(
+        error.message,
+        "A sibling .exe shadows the plugin batch entry"
+    );
+    fs::remove_dir_all(plugin_dir).unwrap();
 }

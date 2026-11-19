@@ -12,67 +12,69 @@ const PROCESS_OUTPUT_QUEUE_CAPACITY: usize = 32;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-/// Builds the spawn command for a resolved runtime entry.
-///
-/// resolve_process_runtime_entry canonicalizes the entry, which yields a
-/// verbatim (`\\?\`-prefixed) path on Windows. std's spawn path probes a
-/// `.exe` suffix for non-`.exe` programs by appending and then removing the
-/// suffix; the removal is a no-op on verbatim paths, so a verbatim
-/// `plugin.cmd` would be probed as `plugin.cmd.exe` and fail with a
-/// file-not-found spawn error. Hand std a user path instead: `.bat`/`.cmd`
-/// entries are then routed through cmd.exe by std itself with hardened
-/// quoting, `/d` (AutoRun disabled), and `/e:ON` percent handling. Protocol
-/// exchanges run over stdin, so no plugin-controlled argument ever reaches
-/// the command line.
-pub(super) fn build_process_command(
-    executable: &Path,
-) -> Result<tokio::process::Command, PluginError> {
-    Ok(tokio::process::Command::new(plain_user_path(executable)?))
+fn build_process_command(executable: &Path) -> Result<tokio::process::Command, PluginError> {
+    #[cfg(windows)]
+    if executable
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+    {
+        let path = plain_batch_path(executable)?;
+        // Command probes a sibling with an added .exe suffix before it recognizes
+        // a batch file. It must not launch an entry other than the validated one.
+        let mut exe_probe = path.as_os_str().to_os_string();
+        exe_probe.push(".exe");
+        match fs::symlink_metadata(&exe_probe) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Ok(_) => {
+                return Err(PluginError::runtime(
+                    "process_spawn_failed",
+                    "A sibling .exe shadows the plugin batch entry",
+                ));
+            }
+            Err(error) => {
+                return Err(PluginError::runtime(
+                    "process_spawn_failed",
+                    format!("Cannot check plugin batch entry: {error}"),
+                ));
+            }
+        }
+        // Let Rust quote the script and disable cmd.exe AutoRun. Protocol data
+        // stays on stdin; no plugin arguments are passed to the command prompt.
+        return Ok(tokio::process::Command::new(path));
+    }
+    Ok(tokio::process::Command::new(executable))
 }
 
-/// Converts a canonicalized entry path back to the plain user path form that
-/// std's spawn path and cmd.exe resolve. `\\?\C:\…` drops the verbatim prefix
-/// and `\\?\UNC\server\share\…` maps to `\\server\share\…`; other verbatim
-/// forms have no plain equivalent, so they fail instead of spawning something
-/// the validator never approved.
 #[cfg(windows)]
-fn plain_user_path(executable: &Path) -> Result<PathBuf, PluginError> {
-    let text = executable.to_str().ok_or_else(|| {
+fn plain_batch_path(executable: &Path) -> Result<PathBuf, PluginError> {
+    let invalid_path = || {
         PluginError::runtime(
             "process_spawn_failed",
-            "Native plugin path is not valid Unicode",
+            "Plugin batch entry cannot be passed to the Windows command prompt unchanged",
         )
-    })?;
-    // Verbatim paths carry a trailing NUL in their std representation; the
-    // user form must not keep it.
-    let text = text.strip_suffix('\0').unwrap_or(text);
-    let Some(stripped) = text.strip_prefix(r"\\?\") else {
-        return Ok(executable.to_path_buf());
     };
-    if let Some(unc_share) = stripped.strip_prefix(r"UNC\") {
-        return Ok(PathBuf::from(format!(r"\\{unc_share}")));
+    let text = executable.to_str().ok_or_else(invalid_path)?;
+    // The standard library quotes the script name but only escapes percent
+    // characters in its arguments. Avoid expansion in the script name itself.
+    if text.contains('%') {
+        return Err(invalid_path());
     }
-    // A drive-letter verbatim path (`\\?\C:\…`) converts to its plain form.
-    // Device, volume-GUID, and boot-partition verbatim paths do not, and the
-    // spawn probe would treat their remnants as nonexistent executables.
-    let is_drive_letter = stripped
-        .as_bytes()
-        .first()
-        .is_some_and(|drive| drive.is_ascii_alphabetic())
-        && stripped.as_bytes().get(1) == Some(&b':');
-    if is_drive_letter {
-        Ok(PathBuf::from(stripped.to_owned()))
+    let Some(rest) = text.strip_prefix(r"\\?\") else {
+        return Err(invalid_path());
+    };
+    let path = if let Some(share) = rest.strip_prefix(r"UNC\") {
+        PathBuf::from(format!(r"\\{share}"))
+    } else if matches!(rest.as_bytes(), [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic()) {
+        PathBuf::from(rest)
     } else {
-        Err(PluginError::runtime(
-            "process_spawn_failed",
-            format!("Cannot convert plugin path to a user path: {text}"),
-        ))
+        return Err(invalid_path());
+    };
+    // Removing the verbatim prefix can change Windows path normalization.
+    // Confirm that the command prompt's path still names the validated entry.
+    if !matches!(fs::canonicalize(&path), Ok(resolved) if resolved == executable) {
+        return Err(invalid_path());
     }
-}
-
-#[cfg(not(windows))]
-fn plain_user_path(executable: &Path) -> Result<PathBuf, PluginError> {
-    Ok(executable.to_path_buf())
+    Ok(path)
 }
 
 pub struct NativeProcessPluginRuntime {
