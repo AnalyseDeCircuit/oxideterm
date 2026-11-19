@@ -187,12 +187,8 @@ impl WorkspaceApp {
                                         .terminal_command_sender
                                         .update(cx, |sender, cx| sender.toggle_visible(cx));
                                     if visible {
-                                        this.blur_terminal_quick_commands_input(cx);
-                                        this.terminal_command_sender.update(cx, |sender, cx| {
-                                            sender.set_compact_focused(true, cx);
-                                        });
                                         this.clear_ime_selection();
-                                        window.focus(&this.focus_handle, cx);
+                                        this.focus_compact_terminal_command_sender(window, cx);
                                     } else {
                                         this.focus_active_pane(window, cx);
                                     }
@@ -351,11 +347,8 @@ impl WorkspaceApp {
                                             sender_id, window, cx,
                                         );
                                     } else {
-                                        this.terminal_command_sender.update(cx, |sender, cx| {
-                                            sender.set_compact_focused(true, cx);
-                                        });
                                         this.clear_ime_selection();
-                                        window.focus(&this.focus_handle, cx);
+                                        this.focus_compact_terminal_command_sender(window, cx);
                                     }
                                     cx.stop_propagation();
                                 },

@@ -203,6 +203,12 @@ impl WorkspaceApp {
                     .py(px(8.0))
                     .overflow_hidden()
                     .cursor_text()
+                    .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
+                        // The editor consumes the click before the workspace blur handler.
+                        if event.button == MouseButton::Left && this.blur_host_tools_input(cx) {
+                            cx.notify();
+                        }
+                    }))
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _event, window, cx| {
@@ -299,11 +305,7 @@ impl WorkspaceApp {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                    this.blur_terminal_quick_commands_input(cx);
-                    this.terminal_command_sender.update(cx, |sender, cx| {
-                        sender.set_compact_focused(true, cx);
-                    });
-                    window.focus(&this.focus_handle, cx);
+                    this.focus_compact_terminal_command_sender(window, cx);
                     this.ime_marked_text = None;
                     this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                     cx.stop_propagation();
@@ -354,10 +356,7 @@ impl WorkspaceApp {
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                            this.terminal_command_sender.update(cx, |sender, cx| {
-                                sender.set_compact_focused(true, cx);
-                            });
-                            window.focus(&this.focus_handle, cx);
+                            this.focus_compact_terminal_command_sender(window, cx);
                             this.ime_marked_text = None;
                             this.begin_ime_selection_from_mouse_down(target, event, window, cx);
                             cx.stop_propagation();
@@ -633,12 +632,10 @@ impl WorkspaceApp {
                 "terminal-command-sender-collapse",
                 self.i18n.t("terminal.sender.collapse"),
                 |this, _event, window, cx| {
-                    this.terminal_command_sender.update(cx, |sender, cx| {
-                        sender.toggle_expanded(cx);
-                        sender.set_compact_focused(true, cx);
-                    });
+                    this.terminal_command_sender
+                        .update(cx, |sender, cx| sender.toggle_expanded(cx));
                     this.clear_ime_selection();
-                    window.focus(&this.focus_handle, cx);
+                    this.focus_compact_terminal_command_sender(window, cx);
                     cx.stop_propagation();
                 },
                 cx,
@@ -1398,9 +1395,28 @@ impl WorkspaceApp {
             .find(|document| document.id == sender_id)
             .map(|document| document.editor);
         if let Some(editor) = editor {
+            if self.blur_host_tools_input(cx) {
+                cx.notify();
+            }
             let focus_handle = editor.read(cx).focus_handle(cx);
             window.focus(&focus_handle, cx);
         }
+    }
+
+    pub(super) fn focus_compact_terminal_command_sender(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.blur_terminal_quick_commands_input(cx);
+        // Both inputs use the workspace FocusHandle, so GPUI cannot blur the sidebar for us.
+        if self.blur_host_tools_input(cx) {
+            cx.notify();
+        }
+        self.terminal_command_sender.update(cx, |sender, cx| {
+            sender.set_compact_focused(true, cx);
+        });
+        window.focus(&self.focus_handle, cx);
     }
 
     pub(in crate::workspace) fn focus_terminal_command_sender_input(
@@ -1409,9 +1425,9 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.blur_terminal_quick_commands_input(cx);
         let expanded = self.terminal_command_sender.read(cx).is_expanded();
         if expanded {
+            self.blur_terminal_quick_commands_input(cx);
             self.focus_terminal_command_sender_editor(sender_id, window, cx);
             return;
         }
@@ -1419,10 +1435,9 @@ impl WorkspaceApp {
             if !sender.is_visible() {
                 sender.toggle_visible(cx);
             }
-            sender.set_compact_focused(true, cx);
         });
         self.clear_ime_selection();
-        window.focus(&self.focus_handle, cx);
+        self.focus_compact_terminal_command_sender(window, cx);
     }
 
     pub(in crate::workspace) fn terminal_command_sender_editor_focused(

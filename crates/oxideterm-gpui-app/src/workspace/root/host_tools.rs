@@ -210,6 +210,9 @@ impl WorkspaceApp {
                     // frame boundary.
                     return;
                 };
+                self.terminal_command_sender.update(cx, |sender, cx| {
+                    sender.set_compact_focused(false, cx);
+                });
                 self.ime_marked_text = None;
                 self.show_active_input_caret(cx);
                 window.focus(&self.focus_handle, cx);

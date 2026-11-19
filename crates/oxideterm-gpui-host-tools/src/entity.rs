@@ -294,6 +294,15 @@ impl HostToolsEntity {
             .then(|| self.host_filesystems.query())
     }
 
+    pub fn blur_input(&mut self, cx: &mut Context<Self>) -> bool {
+        if self.ui.focused_input.is_none() {
+            return false;
+        }
+        self.ui.clear_input_focus();
+        cx.notify();
+        true
+    }
+
     pub fn replace_text_input(
         &mut self,
         input: HostToolsTextInput,
