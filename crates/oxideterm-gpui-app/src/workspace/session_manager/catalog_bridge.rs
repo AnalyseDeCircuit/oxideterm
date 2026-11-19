@@ -131,11 +131,9 @@ impl WorkspaceApp {
             }
             CatalogAction::NewConnectionInGroup(group) => {
                 self.open_new_connection_form(window, cx);
-                self.update_connection_form_state(cx, |state| {
-                    if let Some(form) = state.form.as_mut() {
-                        form.group = group;
-                    }
-                });
+                self.connections
+                    .flow
+                    .update(cx, |flow, cx| flow.set_form_group(group, cx));
             }
             _ => {}
         }

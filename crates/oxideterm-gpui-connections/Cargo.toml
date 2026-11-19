@@ -22,6 +22,7 @@ oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
 oxideterm-gpui-settings-view = { path = "../oxideterm-gpui-settings-view" }
 oxideterm-i18n = { path = "../oxideterm-i18n" }
 oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-mosh = { path = "../oxideterm-mosh" }
 oxideterm-portable-runtime = { path = "../oxideterm-portable-runtime" }
 oxideterm-quick-commands = { path = "../oxideterm-quick-commands" }
 oxideterm-remote-desktop = { path = "../oxideterm-remote-desktop" }

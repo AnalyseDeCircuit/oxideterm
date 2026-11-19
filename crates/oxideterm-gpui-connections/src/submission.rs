@@ -1,6 +1,9 @@
 // Copyright (C) 2026 AnalyseDeCircuit
 // SPDX-License-Identifier: GPL-3.0-only
 
+mod dispatch;
+pub use dispatch::*;
+
 use gpui::Context;
 use oxideterm_ble::BleAdapterGuard;
 use oxideterm_connections::{
@@ -95,7 +98,7 @@ impl ConnectionFlowEntity {
         }
     }
 
-    pub fn plan_submission(
+    fn plan_submission(
         &mut self,
         action: NewConnectionSubmitAction,
         i18n: &I18n,
@@ -106,7 +109,7 @@ impl ConnectionFlowEntity {
         plan
     }
 
-    pub fn persist_ssh(
+    fn persist_ssh(
         &mut self,
         store: &mut ConnectionStore,
         prefix: anyhow::Result<Vec<crate::form_state::NewConnectionProxyHop>>,
@@ -192,7 +195,7 @@ impl ConnectionFlowEntity {
         true
     }
 
-    pub fn submit_saved_prompt(
+    fn submit_saved_prompt(
         &mut self,
         store: &ConnectionStore,
         settings: &PersistedSettings,
@@ -268,7 +271,7 @@ impl ConnectionFlowEntity {
         })
     }
 
-    pub fn submit_ssh_edit(
+    fn submit_ssh_edit(
         &mut self,
         store: &mut ConnectionStore,
         i18n: &I18n,
@@ -306,7 +309,7 @@ impl ConnectionFlowEntity {
         }
     }
 
-    pub fn launch_persisted_ssh_form(
+    fn launch_persisted_ssh_form(
         &mut self,
         store: &ConnectionStore,
         settings: &PersistedSettings,
@@ -426,7 +429,7 @@ impl ConnectionFlowEntity {
         }
     }
 
-    pub fn submit_serial(
+    fn submit_serial(
         &mut self,
         store: &mut ConnectionStore,
         i18n: &I18n,
@@ -459,7 +462,7 @@ impl ConnectionFlowEntity {
         ))
     }
 
-    pub fn submit_telnet(
+    fn submit_telnet(
         &mut self,
         store: &mut ConnectionStore,
         i18n: &I18n,
@@ -495,7 +498,7 @@ impl ConnectionFlowEntity {
         ))
     }
 
-    pub fn submit_ble(
+    fn submit_ble(
         &mut self,
         store: &mut ConnectionStore,
         i18n: &I18n,
@@ -554,7 +557,7 @@ impl ConnectionFlowEntity {
         ))
     }
 
-    pub fn submit_mosh(
+    fn submit_mosh(
         &mut self,
         store: &mut ConnectionStore,
         i18n: &I18n,
@@ -608,7 +611,7 @@ impl ConnectionFlowEntity {
         })
     }
 
-    pub fn submit_saved_sftp(
+    fn submit_saved_sftp(
         &mut self,
         store: &mut ConnectionStore,
         settings: &PersistedSettings,
@@ -657,7 +660,7 @@ impl ConnectionFlowEntity {
         })
     }
 
-    pub fn submit_desktop(
+    fn submit_desktop(
         &mut self,
         store: &mut ConnectionStore,
         settings: &PersistedSettings,
@@ -723,13 +726,13 @@ impl ConnectionFlowEntity {
 }
 
 /// Carries credentials to exactly one launch after the protected-store transaction.
-pub struct SavedConnectionRuntimeHandoff {
+struct SavedConnectionRuntimeHandoff {
     pub connection_id: String,
     pub secrets: oxideterm_connections::SavedConnectionRuntimeSecrets,
     pub auth_override: Option<AuthMethod>,
 }
 
-pub fn persist_ssh_form(
+fn persist_ssh_form(
     form: &mut NewConnectionForm,
     store: &mut ConnectionStore,
     prefix: anyhow::Result<Vec<crate::NewConnectionProxyHop>>,
@@ -904,7 +907,7 @@ pub fn prepare_saved_mosh_open(
     }
 }
 
-pub enum FormSubmission {
+enum FormSubmission {
     Ftp,
     LocalTerminal,
     Serial,
@@ -924,7 +927,7 @@ pub enum FormSubmission {
     },
 }
 
-pub fn plan_form_submission(
+fn plan_form_submission(
     state: &mut crate::ConnectionFormState,
     action: NewConnectionSubmitAction,
     i18n: &I18n,

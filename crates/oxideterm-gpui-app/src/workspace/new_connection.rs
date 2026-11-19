@@ -1,4 +1,3 @@
-mod ble_flow;
 use oxideterm_gpui_connections::{entity, form_state};
 mod form_view;
 mod ftp;
@@ -21,21 +20,19 @@ use oxideterm_gpui_connections::views::{
 
 use super::{WorkspaceApp, ime::WorkspaceImeTarget, selectable_text::selectable_text_id};
 
-pub(super) use ble_flow::{
-    BleConnectionWorkerResult, BleOpenRequest, BlePendingOpen, BleStandaloneTarget, BleTraceTarget,
-};
 pub(super) use entity::{ConnectionFlowEvent, NativeProxyConnectRun};
 pub(super) use form_state::{
-    CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_VERTICAL_PADDING,
-    NewConnectionField, NewConnectionForm, NewConnectionSelect,
-    NewConnectionSubmitAction, NewConnectionTransport,
-    SavedConnectionPromptAction,
-    form_from_mosh_profile, form_from_remote_desktop_profile,
-    terminal_serial_flow_from_profile,
-    terminal_serial_parity_from_profile, terminal_serial_runtime_options_from_ble_profile,
-    terminal_serial_runtime_options_from_profile, terminal_telnet_line_endings_from_profile,
+    CONNECTION_NOTES_LINE_HEIGHT, CONNECTION_NOTES_VERTICAL_PADDING, NewConnectionField,
+    NewConnectionForm, NewConnectionSelect, NewConnectionTransport,
+    SavedConnectionPromptAction, form_from_mosh_profile, form_from_remote_desktop_profile,
+    terminal_serial_flow_from_profile, terminal_serial_parity_from_profile,
+    terminal_serial_runtime_options_from_ble_profile, terminal_serial_runtime_options_from_profile,
+    terminal_telnet_line_endings_from_profile,
 };
 pub(super) use oxideterm_gpui_connections::ConnectionFormState;
+pub(super) use oxideterm_gpui_connections::ble::{
+    BleConnectionWorkerResult, BleOpenRequest, BlePendingOpen, BleStandaloneTarget, BleTraceTarget,
+};
 pub(in crate::workspace) use password_prompt::SavedAuthSaveTarget;
 pub(super) use ssh_flow::{
     MoshConnectionOptions, NativeSshPromptHandler, SshConnectionIntent, SshConnectionWorkerResult,

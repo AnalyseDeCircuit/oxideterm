@@ -49,6 +49,47 @@ pub enum TreePreflightOutcome {
     Failed(String),
 }
 
+pub enum VerifiedManualSshRoute {
+    Direct,
+    SessionTree,
+}
+
+pub enum SshTestRoute {
+    Direct,
+    HostKeyPreflight,
+}
+
+impl crate::views::ConnectionsViews {
+    pub fn prepare_ssh_test_route(
+        &self,
+        config: &mut SshConfig,
+        i18n: &I18n,
+        cx: &mut gpui::App,
+    ) -> SshTestRoute {
+        if config.proxy_chain.as_ref().is_some_and(|chain| !chain.is_empty()) {
+            crate::conversion::prepare_proxy_chain_test_config(config);
+            return SshTestRoute::Direct;
+        }
+        self.report_connection_feedback(true, i18n.t("ssh.form.checking_host_key"), cx);
+        SshTestRoute::HostKeyPreflight
+    }
+
+    pub fn finish_verified_saved_form(&self, cx: &mut gpui::App) {
+        self.flow.update(cx, |flow, cx| {
+            flow.clear_host_key_challenge(cx);
+            if flow.form.form.is_some() {
+                flow.clear_connected_form(cx);
+            }
+        });
+        self.session_manager.update(cx, |manager, cx| manager.set_status(None, cx));
+    }
+
+    pub fn finish_drill_down_form(&self, i18n: &I18n, cx: &mut gpui::App) {
+        self.flow.update(cx, ConnectionFlowEntity::clear_connected_form);
+        self.show_catalog_status(i18n.t("ssh.drill_down.connecting"), cx);
+    }
+}
+
 pub struct ExistingSftpSurface {
     pub endpoint_id: String,
     pub title: String,
@@ -56,6 +97,40 @@ pub struct ExistingSftpSurface {
 }
 
 impl ConnectionFlowEntity {
+    pub fn prepare_verified_manual_terminal(
+        &mut self,
+        config: &SshConfig,
+        cx: &mut Context<Self>,
+    ) -> VerifiedManualSshRoute {
+        self.clear_connected_form(cx);
+        self.clear_host_key_challenge(cx);
+        if config.proxy_chain.as_ref().is_some_and(|chain| !chain.is_empty()) {
+            VerifiedManualSshRoute::SessionTree
+        } else {
+            VerifiedManualSshRoute::Direct
+        }
+    }
+
+    pub(crate) fn clear_connected_form(&mut self, cx: &mut Context<Self>) {
+        self.form.clear();
+        cx.notify();
+    }
+
+    pub fn start_standalone_sftp_test(
+        &mut self,
+        config: SshConfig,
+        store: &ConnectionStore,
+        registry: oxideterm_ssh::SshConnectionRegistry,
+        runtime: &tokio::runtime::Runtime,
+        i18n: &I18n,
+        cx: &mut Context<Self>,
+    ) {
+        self.set_form_feedback(Some(true), Some(i18n.t("ssh.form.test_running")), cx);
+        crate::workers::test_standalone_sftp(
+            config, self.ssh_worker_sender(), managed_key_resolver_from_store(store), registry, runtime,
+        );
+    }
+
     pub fn open_verified_sftp(
         &mut self,
         config: SshConfig,

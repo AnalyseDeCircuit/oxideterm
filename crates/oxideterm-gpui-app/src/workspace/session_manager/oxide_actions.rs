@@ -50,19 +50,14 @@ impl WorkspaceApp {
         let plugin_settings =
             oxideterm_cloud_sync::plugin_settings::load_plugin_settings(self.settings_store.path())
                 .unwrap_or_default();
-        let mut dialog = oxide_export_draft(
-            &self.connection_store,
-            self.forwarding_service.registry().list_all_saved_forwards(),
-            plugin_settings
-                .iter()
-                .filter_map(|setting| plugin_id_from_setting_storage_key(&setting.storage_key)),
+        self.oxide_transfer().open_export_dialog(
             self.settings_store.path(),
+            self.forwarding_service.registry().list_all_saved_forwards(),
+            &plugin_settings,
             portable_migration,
+            |cx| self.oxide_ai_provider_ids(cx).count(),
+            cx,
         );
-        dialog.preflight = self.oxide_export_preflight_for_dialog(&dialog, cx);
-        self.connections.session_manager.update(cx, |manager, cx| {
-            manager.show_oxide_export_dialog(dialog, cx)
-        });
     }
 
     pub(in crate::workspace) fn handle_oxide_dialog_footer_key(
@@ -126,9 +121,22 @@ impl WorkspaceApp {
     ) {
         match event {
             SessionManagerWorkspaceEvent::OxideEffectsReady(effects) => {
-                for effect in effects.take() {
-                    self.handle_oxide_workspace_effect(effect, cx);
-                }
+                let manager = self.connections.session_manager.clone();
+                let path = self.settings_store.path().to_path_buf();
+                let i18n = self.i18n.clone();
+                effects.apply(&manager, &path, &i18n, cx, |core, options, cx| {
+                    self.connection_store = core.store;
+                    let (result, plugin_failed) = self.import_oxide_sidecars(
+                        core.envelope,
+                        OxideSidecarOptions::for_dialog(&options),
+                        cx,
+                    );
+                    self.queue_cloud_sync_dirty_refresh(cx);
+                    let counts = result.audit_counts(plugin_failed, options.import_app_settings);
+                    self.oxide_transfer()
+                        .present_oxide_import_result(result, cx);
+                    counts
+                });
             }
             SessionManagerWorkspaceEvent::RefreshOxideExportPreflight => {
                 self.refresh_oxide_export_preflight(cx);
@@ -137,492 +145,153 @@ impl WorkspaceApp {
         }
     }
 
-    fn handle_oxide_workspace_effect(
-        &mut self,
-        effect: OxideWorkspaceEffect,
-        cx: &mut Context<Self>,
-    ) {
-        match effect {
-            OxideWorkspaceEffect::ApplyImport {
-                generation,
-                core,
-                options,
-                mut audit,
-                child_context,
-            } => {
-                use oxideterm_audit::{AuditContext, AuditEvidence, AuditOutcome};
-                let still_current = self
-                    .connections
-                    .session_manager
-                    .read(cx)
-                    .oxide_import_dialog
-                    .as_ref()
-                    .is_some_and(|dialog| dialog.operation_generation == generation);
-                if !still_current {
-                    audit.finish(AuditOutcome::Partial, AuditEvidence::Protocol, None, None);
-                    return;
-                }
-                let (applied, errors) =
-                    AuditContext::with_sync_request(child_context.as_ref(), || {
-                        self.finish_oxide_import_core_result(core, options, cx)
-                    });
-                audit.summary(&format!("mode=oxide,applied={applied},errors={errors}"));
-                let outcome = if errors > 0 {
-                    AuditOutcome::Partial
-                } else if applied == 0 {
-                    AuditOutcome::Unchanged
-                } else {
-                    AuditOutcome::Succeeded
-                };
-                audit.finish(outcome, AuditEvidence::Protocol, None, None);
-            }
-            OxideWorkspaceEffect::SaveExport {
-                generation,
-                bytes,
-                exported_count,
-            } => {
-                if self
-                    .connections
-                    .session_manager
-                    .read(cx)
-                    .oxide_export_dialog
-                    .as_ref()
-                    .is_some_and(|dialog| dialog.operation_generation == generation)
-                {
-                    self.prompt_save_oxide_export(bytes, exported_count, cx);
-                }
-            }
-        }
-    }
-
-    pub(super) fn finish_oxide_import_core_result(
-        &mut self,
-        core: OxideCoreImportResult,
-        options: OxideClientStateImportOptions,
-        cx: &mut Context<Self>,
-    ) -> (usize, usize) {
-        self.connection_store = core.store;
-        let mut envelope = core.envelope;
-
-        let imported_forwards = self.apply_oxide_import_forward_records(&mut envelope);
-        envelope.imported_forwards = imported_forwards;
-
-        let (imported_quick_commands, skipped_quick_commands, quick_commands_errors) = self
-            .apply_oxide_import_quick_commands(
-                envelope.quick_commands_json.as_deref(),
-                options.import_quick_commands,
-                options.quick_command_strategy,
-                cx,
-            );
-
-        let (imported_plugin_settings, plugin_settings_failed) = match self
-            .try_apply_oxide_import_plugin_settings(
-                &envelope.plugin_settings,
-                options.import_plugin_settings,
-                options.selected_plugin_ids.as_ref(),
-            ) {
-            Ok(count) => (count, false),
-            Err(_) => (0, true),
-        };
-        let skipped_plugin_settings =
-            !options.import_plugin_settings && !envelope.plugin_settings.is_empty();
-
-        let (imported_app_settings, skipped_app_settings) = self.apply_oxide_import_app_settings(
-            envelope.app_settings_json.as_deref(),
-            options.import_app_settings,
-            options.selected_app_settings_sections.as_ref(),
-            cx,
-        );
-
-        self.apply_oxide_import_portable_secrets(&mut envelope, cx);
-        self.queue_cloud_sync_dirty_refresh(cx);
-
-        let result = OxideClientStateImportResult {
-            envelope,
-            imported_app_settings,
-            skipped_app_settings,
-            imported_quick_commands,
-            skipped_quick_commands,
-            quick_commands_errors,
-            imported_plugin_settings,
-            skipped_plugin_settings,
-        };
-        let counts = result.audit_counts(plugin_settings_failed, options.import_app_settings);
-        self.present_oxide_import_result(result, cx);
-        counts
-    }
-
-    pub(super) fn present_oxide_import_result(
-        &mut self,
-        result: OxideClientStateImportResult,
-        cx: &mut Context<Self>,
-    ) {
-        self.oxide_transfer()
-            .present_oxide_import_result(result, cx);
-    }
-
-    pub(in crate::workspace) fn oxide_export_portable_secret_count(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &App,
-    ) -> usize {
-        if !dialog.include_portable_secrets {
-            return 0;
-        }
+    fn oxide_ai_provider_ids<'a>(&'a self, cx: &'a App) -> impl Iterator<Item = String> + 'a {
+        let key_store = self.ai.state.read(cx).key_store();
         oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
             .into_iter()
-            .filter(|provider| {
-                self.ai.state
-                    .read(cx)
-                    .key_store()
-                    .has_provider_key(&provider.id)
-            })
-            .count()
+            .map(|provider| provider.id)
+            .filter(move |id| key_store.has_provider_key(id))
     }
 
     pub(in crate::workspace) fn refresh_oxide_export_preflight(&mut self, cx: &mut Context<Self>) {
-        let Some(preflight) = ({
-            let session_manager = self.connections.session_manager.read(cx);
-            session_manager
-                .oxide_export_dialog
-                .as_ref()
-                .map(|dialog| self.oxide_export_preflight_for_dialog(dialog, cx))
-        }) else {
-            return;
-        };
-        self.connections
-            .session_manager
-            .update(cx, |session_manager, cx| {
-                if let Some(dialog) = session_manager.oxide_export_dialog.as_mut() {
-                    dialog.preflight = preflight;
-                    cx.notify();
-                }
-            });
-    }
-
-    pub(super) fn oxide_export_preflight_for_dialog(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &App,
-    ) -> Option<ExportPreflightResult> {
-        self.oxide_transfer().preflight_for_dialog(dialog, || {
-            self.oxide_export_portable_secret_count(dialog, cx)
-        })
+        self.oxide_transfer()
+            .refresh_export_preflight(|cx| self.oxide_ai_provider_ids(cx).count(), cx);
     }
 
     pub(in crate::workspace) fn export_oxide_dialog(&mut self, cx: &mut Context<Self>) {
-        let request = self.oxide_transfer().prepare_export(
+        self.oxide_transfer().export_dialog(
+            self.settings_store.settings(),
+            self.settings_store.path(),
+            oxideterm_cloud_sync::plugin_settings::load_plugin_settings,
+            |cx| self.oxide_ai_provider_ids(cx).count(),
+            |cx| {
+                let ids = self.oxide_ai_provider_ids(cx).collect::<Vec<_>>();
+                self.ai
+                    .state
+                    .read(cx)
+                    .key_store()
+                    .get_provider_keys(&ids)
+                    .map_err(|error| error.to_string())
+            },
             cx,
-            |dialog, cx| self.oxide_export_portable_secret_count(dialog, cx),
-            |dialog, cx| self.build_oxide_export_options(dialog, cx),
         );
-        if let Some((ids, preflight, options)) = request {
-            self.oxide_transfer().start_export(ids, preflight, options, cx);
-        }
     }
 
-    pub(super) fn prompt_save_oxide_export(
+    pub(in crate::workspace) fn import_oxide_sidecars(
         &mut self,
-        bytes: Vec<u8>,
-        exported_count: usize,
+        envelope: ImportResultEnvelope,
+        options: OxideSidecarOptions<'_>,
         cx: &mut Context<Self>,
-    ) {
-        let settings_path = self.settings_store.path().to_path_buf();
-        self.connections.session_manager.update(cx, |manager, cx| {
-            manager.prompt_save_oxide_export(bytes, exported_count, settings_path, &self.i18n, cx);
-        });
-    }
-
-    pub(super) fn build_oxide_export_options(
-        &self,
-        dialog: &OxideExportDialogState,
-        cx: &App,
-    ) -> Result<OxideExportOptions, String> {
-        let plugin_settings = if dialog.include_plugin_settings {
-            oxideterm_cloud_sync::plugin_settings::load_plugin_settings(self.settings_store.path())?
-                .into_iter()
-                .filter(|setting| {
-                    plugin_id_from_setting_storage_key(&setting.storage_key)
-                        .is_some_and(|plugin_id| dialog.selected_plugin_ids.contains(&plugin_id))
-                })
-                .collect()
-        } else {
-            Vec::new()
-        };
-        let portable_secrets = if dialog.include_portable_secrets {
-            let provider_ids =
-                oxideterm_ai::provider_views(&self.settings_store.settings().ai.providers)
-                    .into_iter()
-                    .map(|provider| provider.id)
-                    .filter(|provider_id| {
-                        self.ai.state
-                            .read(cx)
-                            .key_store()
-                            .has_provider_key(provider_id)
-                    })
-                    .collect::<Vec<_>>();
-            self.ai.state
-                .read(cx)
-                .key_store()
-                .get_provider_keys(&provider_ids)
-                .map_err(|error| error.to_string())?
-                .into_iter()
-                .map(
-                    |(id, secret)| oxideterm_connections::oxide_file::EncryptedPortableSecret {
-                        kind: "ai_provider_key".to_string(),
-                        id,
-                        secret,
-                    },
-                )
-                .collect()
-        } else {
-            Vec::new()
-        };
-        oxide_export_options(
-            dialog,
-            &self.connection_store,
-            self.settings_store.settings(),
-            self.settings_store.path(),
-            plugin_settings,
-            portable_secrets,
+    ) -> (OxideClientStateImportResult, bool) {
+        let i18n = self.i18n.clone();
+        apply_oxide_sidecars(
+            &mut WorkspaceOxideImport {
+                workspace: self,
+                cx,
+            },
+            envelope,
+            options,
+            &i18n,
         )
     }
 
-    #[allow(dead_code)]
-    pub(in crate::workspace) fn apply_oxide_import_forward_records(
-        &mut self,
-        envelope: &mut ImportResultEnvelope,
-    ) -> usize {
-        if envelope.forward_records.is_empty() {
-            return 0;
-        }
-
-        let records = envelope
-            .forward_records
-            .iter()
-            .map(owned_forward_import_record)
-            .collect::<Vec<_>>();
-        let replace_owner_ids = envelope
-            .forward_replace_owner_ids
-            .iter()
-            .cloned()
-            .collect::<HashSet<_>>();
-        let merge_owner_ids = envelope
-            .forward_merge_owner_ids
-            .iter()
-            .cloned()
-            .collect::<HashSet<_>>();
-
-        match self
-            .forwarding_service
-            .registry()
-            .apply_owned_forward_import_records(&records, &replace_owner_ids, &merge_owner_ids)
-        {
-            Ok(count) => count,
-            Err(error) => {
-                envelope
-                    .errors
-                    .push(format!("Failed to save imported forwards: {error}"));
-                0
-            }
-        }
-    }
-
-    #[allow(dead_code)]
-    pub(in crate::workspace) fn apply_oxide_import_quick_commands(
-        &mut self,
-        quick_commands_json: Option<&str>,
-        should_import: bool,
-        strategy: QuickCommandImportStrategy,
-        cx: &mut Context<Self>,
-    ) -> (usize, bool, Vec<String>) {
-        let Some(snapshot) = quick_commands_json else {
-            return (0, false, Vec::new());
-        };
-        if !should_import {
-            return (0, true, Vec::new());
-        }
-
-        let result = self.terminal.update(cx, |terminal, _cx| {
-            terminal
-                .quick_commands
-                .store
-                .apply_snapshot_json(snapshot, strategy)
-        });
-        (result.imported, !result.errors.is_empty(), result.errors)
-    }
-
-    #[allow(dead_code)]
-    pub(in crate::workspace) fn apply_oxide_import_plugin_settings(
-        &mut self,
-        plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
-        should_import: bool,
-        selected_plugin_ids: Option<&HashSet<String>>,
-    ) -> usize {
-        self.try_apply_oxide_import_plugin_settings(
-            plugin_settings,
-            should_import,
-            selected_plugin_ids,
-        )
-        .unwrap_or(0)
-    }
-
-    pub(in crate::workspace) fn try_apply_oxide_import_plugin_settings(
-        &mut self,
-        plugin_settings: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
-        should_import: bool,
-        selected_plugin_ids: Option<&HashSet<String>>,
-    ) -> Result<usize, String> {
-        if !should_import || plugin_settings.is_empty() {
-            return Ok(0);
-        }
-
-        let filtered = plugin_settings
-            .iter()
-            .filter(|entry| {
-                selected_plugin_ids.is_none_or(|ids| {
-                    plugin_id_from_setting_storage_key(&entry.storage_key)
-                        .is_some_and(|plugin_id| ids.contains(&plugin_id))
-                })
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        oxideterm_cloud_sync::plugin_settings::upsert_plugin_settings(
-            self.settings_store.path(),
-            &filtered,
-        )
-    }
-
-    #[allow(dead_code)]
-    pub(in crate::workspace) fn apply_oxide_import_app_settings(
-        &mut self,
-        app_settings_json: Option<&str>,
-        should_import: bool,
-        selected_sections: Option<&HashSet<String>>,
-        cx: &mut Context<Self>,
-    ) -> (bool, bool) {
-        let Some(snapshot) = app_settings_json else {
-            return (false, false);
-        };
-        if !should_import {
-            return (false, true);
-        }
-
-        match merge_oxide_settings_snapshot(
-            self.settings_store.settings(),
-            snapshot,
-            selected_sections,
-        ) {
-            Ok(merged) => {
-                let previous = self.settings_store.settings().clone();
-                match self.settings_store.replace_and_save(merged) {
-                    Ok(saved) => {
-                        self.apply_loaded_settings_to_runtime(&previous, &saved.settings, cx);
-                        self.settings_workspace.update(cx, |settings, _cx| {
-                            settings.acknowledge_external_store_state()
-                        });
-                        self.emit_native_plugin_settings_events(&previous, &saved.settings, cx);
-                        self.sync_tab_titles(cx);
-                        cx.notify();
-                        (true, false)
-                    }
-                    Err(_) => {
-                        let status = self.i18n.t("modals.import.skipped_app_settings");
-                        self.connections
-                            .session_manager
-                            .update(cx, |session_manager, cx| {
-                                session_manager.status.replace(status);
-                                cx.notify();
-                            });
-                        (false, true)
-                    }
-                }
-            }
-            Err(error) => {
-                self.connections
-                    .session_manager
-                    .update(cx, |session_manager, cx| {
-                        session_manager
-                            .status
-                            .replace(format!("应用设置导入失败: {error}"));
-                        cx.notify();
-                    });
-                (false, true)
-            }
-        }
-    }
-
-    #[allow(dead_code)]
     pub(in crate::workspace) fn apply_oxide_import_portable_secrets(
         &mut self,
         envelope: &mut ImportResultEnvelope,
         cx: &mut Context<Self>,
     ) {
-        let total = envelope.portable_secrets.len();
-        if total == 0 {
-            return;
-        }
-
-        let mut imported = 0usize;
-        for secret in envelope.portable_secrets.drain(..) {
-            if secret.kind != "ai_provider_key" || secret.id.trim().is_empty() {
-                envelope.errors.push(format!(
-                    "Unsupported portable secret kind '{}' for id '{}'",
-                    secret.kind, secret.id
-                ));
-                continue;
-            }
-
-            match self
-                .ai.state
-                .read(cx)
-                .key_store()
-                .store_provider_key(&secret.id, secret.secret)
-            {
-                Ok(()) => imported += 1,
-                Err(error) => envelope.errors.push(format!(
-                    "Failed to import portable secret '{}': {error}",
-                    secret.id
-                )),
-            }
-        }
-
-        envelope.imported_portable_secrets = imported;
-        envelope.skipped_portable_secrets = total.saturating_sub(imported);
+        let mut host = WorkspaceOxideImport {
+            workspace: self,
+            cx,
+        };
+        restore_oxide_portable_secrets(envelope, |id, key| host.store_ai_provider_key(id, key));
     }
 }
 
-pub(super) fn owned_forward_import_record(record: &OxideForwardRecord) -> OwnedForwardImportRecord {
-    OwnedForwardImportRecord {
-        owner_connection_id: record.connection_id.clone(),
-        forward_type: record.forward_type.clone(),
-        bind_address: record.bind_address.clone(),
-        bind_port: record.bind_port,
-        target_host: record.target_host.clone(),
-        target_port: record.target_port,
-        description: record.description.clone(),
-        auto_start: record.auto_start,
-        tunnel: record
-            .tunnel
-            .as_ref()
-            .map(|profile| oxideterm_forwarding::SshTunnelProfile {
-                name: profile.name.clone(),
-                group: profile.group.clone(),
-                connect_on_startup: profile.connect_on_startup,
-            }),
-    }
+struct WorkspaceOxideImport<'a, 'cx> {
+    workspace: &'a mut WorkspaceApp,
+    cx: &'a mut Context<'cx, WorkspaceApp>,
 }
 
-pub(super) fn plugin_id_from_setting_storage_key(storage_key: &str) -> Option<String> {
-    const PREFIX: &str = "oxide-plugin-";
-    const SEPARATOR: &str = "-setting-";
-
-    let remainder = storage_key.strip_prefix(PREFIX)?;
-    let separator_index = remainder.find(SEPARATOR)?;
-    let plugin_id = &remainder[..separator_index];
-    let setting_id = &remainder[separator_index + SEPARATOR.len()..];
-    if plugin_id.is_empty() || setting_id.is_empty() {
-        return None;
+impl OxideImportHost for WorkspaceOxideImport<'_, '_> {
+    fn import_forwards(
+        &mut self,
+        records: &[OwnedForwardImportRecord],
+        replace_owners: &HashSet<String>,
+        merge_owners: &HashSet<String>,
+    ) -> Result<usize, String> {
+        self.workspace
+            .forwarding_service
+            .registry()
+            .apply_owned_forward_import_records(records, replace_owners, merge_owners)
+            .map_err(|error| error.to_string())
     }
-    Some(plugin_id.to_string())
+
+    fn import_quick_commands(
+        &mut self,
+        snapshot: &str,
+        strategy: QuickCommandImportStrategy,
+    ) -> oxideterm_quick_commands::QuickCommandImportResult {
+        self.workspace.terminal.update(self.cx, |terminal, _| {
+            terminal
+                .quick_commands
+                .store
+                .apply_snapshot_json(snapshot, strategy)
+        })
+    }
+
+    fn import_plugin_settings(
+        &mut self,
+        entries: &[oxideterm_connections::oxide_file::EncryptedPluginSetting],
+    ) -> Result<usize, String> {
+        oxideterm_cloud_sync::plugin_settings::upsert_plugin_settings(
+            self.workspace.settings_store.path(),
+            entries,
+        )
+    }
+
+    fn current_settings(&self) -> &oxideterm_settings::PersistedSettings {
+        self.workspace.settings_store.settings()
+    }
+
+    fn import_settings(&mut self, merged: oxideterm_settings::PersistedSettings) -> Result<(), ()> {
+        let previous = self.workspace.settings_store.settings().clone();
+        let saved = self
+            .workspace
+            .settings_store
+            .replace_and_save(merged)
+            .map_err(|_| ())?;
+        self.workspace
+            .apply_loaded_settings_to_runtime(&previous, &saved.settings, self.cx);
+        self.workspace
+            .settings_workspace
+            .update(self.cx, |settings, _| {
+                settings.acknowledge_external_store_state()
+            });
+        self.workspace
+            .emit_native_plugin_settings_events(&previous, &saved.settings, self.cx);
+        self.workspace.sync_tab_titles(self.cx);
+        self.cx.notify();
+        Ok(())
+    }
+
+    fn store_ai_provider_key(
+        &mut self,
+        id: &str,
+        key: zeroize::Zeroizing<String>,
+    ) -> Result<(), String> {
+        self.workspace
+            .ai
+            .state
+            .read(self.cx)
+            .key_store()
+            .store_provider_key(id, key)
+            .map_err(|error| error.to_string())
+    }
+
+    fn show_import_status(&mut self, status: String) {
+        self.workspace
+            .connections
+            .show_catalog_status(status, self.cx);
+    }
 }

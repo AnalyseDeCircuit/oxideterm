@@ -5,7 +5,8 @@ use std::{
     cell::RefCell,
     collections::{HashSet, VecDeque},
     fs,
-    path::PathBuf,
+    ops::DerefMut,
+    path::{Path, PathBuf},
     sync::Arc,
     time::Duration,
 };
@@ -15,13 +16,15 @@ use super::{
     oxide_export_connection_count,
 };
 use chrono::{Local, Utc};
-use gpui::{Context, Timer};
+use gpui::{App, Context, Entity, Timer};
+use oxideterm_audit::{AuditContext, AuditEvidence, AuditOutcome};
 use oxideterm_connections::{
     ConnectionStore,
     oxide_file::{
         ImportPreview, ImportResultEnvelope, OxideFile, OxideFileError, OxideImportOptions,
     },
 };
+use oxideterm_i18n::I18n;
 use oxideterm_quick_commands::QuickCommandImportStrategy;
 use oxideterm_workspace::delivery;
 
@@ -122,7 +125,7 @@ pub enum OxideWorkerKey {
     Export(u64),
 }
 
-pub enum OxideWorkspaceEffect {
+enum OxideWorkspaceEffect {
     ApplyImport {
         generation: u64,
         core: OxideCoreImportResult,
@@ -148,8 +151,75 @@ impl OxideWorkspaceEffects {
         }
     }
 
-    pub fn take(&self) -> VecDeque<OxideWorkspaceEffect> {
-        std::mem::take(&mut *self.effects.borrow_mut())
+    pub fn apply<C: DerefMut<Target = App>>(
+        &self,
+        manager: &Entity<SessionManagerState>,
+        settings_path: &Path,
+        i18n: &I18n,
+        cx: &mut C,
+        mut apply_import: impl FnMut(
+            OxideCoreImportResult,
+            OxideClientStateImportOptions,
+            &mut C,
+        ) -> (usize, usize),
+    ) {
+        let effects = std::mem::take(&mut *self.effects.borrow_mut());
+        for effect in effects {
+            match effect {
+                OxideWorkspaceEffect::ApplyImport {
+                    generation,
+                    core,
+                    options,
+                    mut audit,
+                    child_context,
+                } => {
+                    let still_current = manager
+                        .read(&**cx)
+                        .oxide_import_dialog
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.operation_generation == generation);
+                    if !still_current {
+                        audit.finish(AuditOutcome::Partial, AuditEvidence::Protocol, None, None);
+                        continue;
+                    }
+                    let (applied, errors) =
+                        AuditContext::with_sync_request(child_context.as_ref(), || {
+                            apply_import(core, options, cx)
+                        });
+                    audit.summary(&format!("mode=oxide,applied={applied},errors={errors}"));
+                    let outcome = if errors > 0 {
+                        AuditOutcome::Partial
+                    } else if applied == 0 {
+                        AuditOutcome::Unchanged
+                    } else {
+                        AuditOutcome::Succeeded
+                    };
+                    audit.finish(outcome, AuditEvidence::Protocol, None, None);
+                }
+                OxideWorkspaceEffect::SaveExport {
+                    generation,
+                    bytes,
+                    exported_count,
+                } => {
+                    if manager
+                        .read(&**cx)
+                        .oxide_export_dialog
+                        .as_ref()
+                        .is_some_and(|dialog| dialog.operation_generation == generation)
+                    {
+                        manager.update(&mut **cx, |state, cx| {
+                            state.prompt_save_oxide_export(
+                                bytes,
+                                exported_count,
+                                settings_path.to_path_buf(),
+                                i18n,
+                                cx,
+                            );
+                        });
+                    }
+                }
+            }
+        }
     }
 }
 

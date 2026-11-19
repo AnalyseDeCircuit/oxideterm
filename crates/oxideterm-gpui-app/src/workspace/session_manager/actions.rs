@@ -390,10 +390,9 @@ impl WorkspaceApp {
         };
 
         self.prepare_modal_interaction_boundary(cx);
-        self.update_connection_form_state(cx, |state| {
-            state.replace_with_new_form(form);
-            state.duplicating_saved_connection_id = Some(id.to_string());
-        });
+        self.connections
+            .flow
+            .update(cx, |flow, cx| flow.open_duplicate_form(form, id, cx));
         self.close_session_row_menus(cx);
         self.show_active_input_caret(cx);
         self.needs_active_pane_focus = false;

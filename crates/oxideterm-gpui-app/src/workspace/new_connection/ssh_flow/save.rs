@@ -21,23 +21,17 @@ impl WorkspaceApp {
         message: String,
         cx: &mut Context<Self>,
     ) {
-        let reported_to_form = self.connections.flow.update(cx, |connection_flow, cx| {
-            connection_flow.set_form_feedback(Some(false), Some(message.clone()), cx)
-        });
-        if !reported_to_form {
-            self.connections.session_manager.update(cx, |session_manager, cx| {
-                session_manager.set_status(Some(message), cx);
-            });
-        }
+        self.connections.report_connection_error(message, cx);
         cx.notify();
     }
 
-    pub(in crate::workspace) fn open_save_runtime_node_form(&mut self, node_id: NodeId, window: &mut Window, cx: &mut Context<Self>) {
+    pub(in crate::workspace) fn open_save_runtime_node_form(
+        &mut self,
+        node_id: NodeId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.open_runtime_node_form(node_id, true, window, cx);
-    }
-
-    fn runtime_proxy_hops_for_parent_path(&self, parent: &NodeId) -> anyhow::Result<Vec<NewConnectionProxyHop>> {
-        oxideterm_gpui_connections::conversion::runtime_proxy_hops_for_parent_path(&self.node_router, parent, &self.i18n)
     }
 
     pub(in crate::workspace) fn close_new_connection_form(
@@ -73,369 +67,147 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        use oxideterm_gpui_connections::submission::FormSubmission;
+        use oxideterm_gpui_connections::submission::ConnectionSubmissionEffect as Effect;
 
-        let plan = self.connections.flow.update(cx, |flow, cx| {
-            flow.plan_submission(action, &self.i18n, cx)
-        });
-        match plan {
-            None => {}
-            Some(FormSubmission::Ftp) => self.submit_ftp_connection_form(action, cx),
-            Some(FormSubmission::LocalTerminal) => {
-                self.submit_local_terminal_form(action, window, cx)
-            }
-            Some(FormSubmission::Serial) => self.submit_serial_connection_form(action, window, cx),
-            Some(FormSubmission::Telnet) => self.submit_telnet_connection_form(action, window, cx),
-            Some(FormSubmission::Ble) => self.submit_ble_connection_form(action, window, cx),
-            Some(FormSubmission::Mosh) => self.submit_mosh_connection_form(action, window, cx),
-            Some(FormSubmission::StandaloneSftp) => {
-                self.submit_standalone_sftp_connection_form(action, window, cx)
-            }
-            Some(FormSubmission::RemoteDesktop) => {
-                self.submit_remote_desktop_connection_form(action, window, cx)
-            }
-            Some(FormSubmission::WslGraphics) => {
-                self.close_new_connection_form(window, cx);
-                self.open_graphics_tab(window, cx);
-            }
-            Some(FormSubmission::SavedAuthentication) => {
-                self.submit_saved_connection_prompt(window, cx)
-            }
-            Some(FormSubmission::Edit) => self.save_editing_connection(window, cx),
-            Some(FormSubmission::Duplicate) => self.save_duplicate_connection_template(window, cx),
-            Some(FormSubmission::Connect(intent)) => {
-                self.start_new_connection_flow(intent, window, cx)
-            }
-            Some(FormSubmission::Save {
-                parent,
-                connect: false,
-            }) => {
-                self.save_new_connection_without_connecting(parent.as_ref(), window, cx);
-            }
-            Some(FormSubmission::Save {
-                parent,
-                connect: true,
-            }) => {
-                if let Some(handoff) = self.save_current_connection_form(parent.as_ref(), cx) {
-                    self.start_saved_form_connection_flow(handoff, parent, window, cx);
-                }
-            }
-        }
-    }
-
-    pub(super) fn save_new_connection_without_connecting(
-        &mut self,
-        drill_down_parent_id: Option<&NodeId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .save_current_connection_form(drill_down_parent_id, cx)
-            .is_some()
-        {
-            self.close_new_connection_form(window, cx);
-        }
-    }
-
-    pub(super) fn save_current_connection_form(
-        &mut self,
-        drill_down_parent_id: Option<&NodeId>,
-        cx: &mut Context<Self>,
-    ) -> Option<SavedConnectionRuntimeHandoff> {
-        let prefix = drill_down_parent_id.map_or_else(
-            || Ok(Vec::new()),
-            |id| self.runtime_proxy_hops_for_parent_path(id),
-        );
-        let handoff = self.connections.flow.update(cx, |flow, cx| {
-            flow.persist_ssh(&mut self.connection_store, prefix, &self.i18n, cx)
-        });
-        if handoff.is_some() {
-            self.queue_cloud_sync_dirty_refresh(cx);
-        }
-        handoff
-    }
-
-    fn start_saved_form_connection_flow(
-        &mut self,
-        handoff: SavedConnectionRuntimeHandoff,
-        parent: Option<NodeId>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let parent = match parent
-            .map(|id| {
-                self.runtime_proxy_hops_for_parent_path(&id)
-                    .map(|hops| (id, hops.len()))
-            })
-            .transpose()
-        {
-            Ok(parent) => parent,
-            Err(error) => return self.report_saved_next_hop_message(error.to_string(), cx),
-        };
-        let launch = self.connections.flow.update(cx, |flow, cx| {
-            flow.launch_persisted_ssh_form(
-                &self.connection_store,
+        let Some(result) = self.connections.flow.update(cx, |flow, cx| {
+            flow.submit_form(
+                action,
+                &mut self.connection_store,
                 self.settings_store.settings(),
                 &self.i18n,
-                handoff,
-                parent,
+                |parent| {
+                    oxideterm_gpui_connections::conversion::runtime_proxy_hops_for_parent_path(
+                        &self.node_router,
+                        parent,
+                        &self.i18n,
+                    )
+                },
+                |id| match &self.standalone_connections.record(id)?.launch {
+                    StandaloneConnectionLaunch::RestoredRemoteDesktop { profile } => Some(profile),
+                    _ => None,
+                },
                 cx,
             )
-        });
-        match launch {
-            Ok((config, title, intent)) => {
-                self.start_new_connection_config_flow(config, title, intent, window, cx)
-            }
-            Err(error) => self.report_saved_next_hop_message(error, cx),
-        }
-    }
-
-    pub(super) fn submit_serial_connection_form(
-        &mut self,
-        action: NewConnectionSubmitAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let save = self.connections.flow.update(cx, |flow, cx| {
-            flow.submit_serial(&mut self.connection_store, &self.i18n, action, cx)
-        });
-        let Some(open) = self.apply_profile_submission(save, cx) else {
+        }) else {
             return;
         };
-        let result =
-            self.create_serial_terminal_tab(open.config, &open.title, open.terminal, window, cx);
-        match result {
-            Ok(session) => {
-                if let Some(request) = open.edited_profile {
-                    let save = self
-                        .connection_store
-                        .upsert_serial_profile(request)
-                        .map(|profile| profile.id);
-                    if let Some(id) = self.report_profile_update_after_open(
-                        save,
-                        "modals.new_connection.serial_save_failed",
-                        cx,
-                    ) {
-                        self.register_terminal_saved_connection(
-                            session,
-                            oxideterm_terminal_triggers::SavedConnectionKind::Serial,
-                            id,
-                            cx,
-                        );
-                    }
-                }
-                self.update_connection_form_state(cx, ConnectionFormState::clear);
-                cx.notify();
-            }
-            Err(error) => self.set_connection_form_launch_error(error.to_string(), cx),
-        }
-    }
-
-    pub(super) fn submit_telnet_connection_form(
-        &mut self,
-        action: NewConnectionSubmitAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let save = self.connections.flow.update(cx, |flow, cx| {
-            flow.submit_telnet(&mut self.connection_store, &self.i18n, action, cx)
-        });
-        let Some(open) = self.apply_profile_submission(save, cx) else {
-            return;
-        };
-        let result =
-            self.create_telnet_terminal_tab(open.config, open.proxy, open.terminal, window, cx);
-        match result {
-            Ok(session) => {
-                let id = if let Some(request) = open.edited_profile {
-                    let save = self
-                        .connection_store
-                        .upsert_telnet_profile(request)
-                        .map(|profile| profile.id);
-                    self.report_profile_update_after_open(
-                        save,
-                        "modals.new_connection.telnet_save_failed",
-                        cx,
-                    )
-                    .or(open.profile_id)
-                } else {
-                    open.profile_id
-                };
-                if let Some(id) = id {
-                    self.telnet_terminal_profile_ids.insert(session, id.clone());
-                    self.register_terminal_saved_connection(
-                        session,
-                        oxideterm_terminal_triggers::SavedConnectionKind::Telnet,
-                        id,
-                        cx,
-                    );
-                }
-                self.update_connection_form_state(cx, ConnectionFormState::clear);
-                cx.notify();
-            }
-            Err(error) => self.set_connection_form_launch_error(error.to_string(), cx),
-        }
-    }
-
-    fn report_profile_update_after_open(
-        &mut self,
-        result: Result<String, impl std::fmt::Display>,
-        key: &str,
-        cx: &mut Context<Self>,
-    ) -> Option<String> {
-        match result {
-            Ok(id) => {
-                self.queue_cloud_sync_dirty_refresh(cx);
-                Some(id)
-            }
-            Err(error) => {
-                let message = format!("{}: {error}", self.i18n.t(key));
-                self.connections.session_manager
-                    .update(cx, |manager, cx| manager.set_status(Some(message), cx));
-                None
-            }
-        }
-    }
-
-    fn set_connection_form_launch_error(&self, message: String, cx: &mut Context<Self>) {
-        self.connections.flow.update(cx, |flow, cx| {
-            flow.set_form_feedback(Some(false), Some(message), cx)
-        });
-    }
-
-    pub(in crate::workspace::new_connection) fn apply_profile_submission<T>(
-        &mut self,
-        result: Option<oxideterm_gpui_connections::submission::ProfileSubmission<T>>,
-        cx: &mut Context<Self>,
-    ) -> Option<T> {
-        let result = result?;
         if result.persisted {
             self.queue_cloud_sync_dirty_refresh(cx);
         }
-        result.open
-    }
-
-    pub(super) fn submit_mosh_connection_form(
-        &mut self,
-        action: NewConnectionSubmitAction,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let save = self.connections.flow.update(cx, |flow, cx| {
-            flow.submit_mosh(&mut self.connection_store, &self.i18n, action, cx)
-        });
-        let Some(mut open) = self.apply_profile_submission(save, cx) else {
-            return;
-        };
-        if let Some(id) = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .and_then(|form| form.standalone_connection_id.clone())
-        {
-            let Some(attempt) = self.standalone_connections.begin_reconnect(&id) else {
-                return;
-            };
-            open.options.runtime_connection_attempt_id = Some(attempt);
+        match result.effect {
+            None => {}
+            Some(Effect::Ftp) => self.submit_ftp_connection_form(action, cx),
+            Some(Effect::LocalTerminal(plan)) => {
+                self.open_local_terminal_from_form(plan, window, cx)
+            }
+            Some(Effect::Console(open)) => self.open_console_from_form(open, window, cx),
+            Some(Effect::Ble(open)) => {
+                self.start_ble_open_flow(open, cx);
+                cx.notify();
+            }
+            Some(Effect::Mosh(mut open, reconnect_id)) => {
+                if let Some(id) = reconnect_id {
+                    let Some(attempt) = self.standalone_connections.begin_reconnect(&id) else {
+                        return;
+                    };
+                    open.options.runtime_connection_attempt_id = Some(attempt);
+                }
+                self.start_ssh_preflight(
+                    open.config,
+                    open.title,
+                    SshConnectionIntent::Mosh(open.options),
+                    cx,
+                );
+                cx.notify();
+            }
+            Some(Effect::Desktop(open)) => {
+                let attempt = if let Some(id) = open.reconnect_id {
+                    let Some(attempt) = self.standalone_connections.begin_reconnect(&id) else {
+                        return;
+                    };
+                    Some(attempt)
+                } else {
+                    None
+                };
+                let password = open
+                    .password
+                    .map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
+                self.open_remote_desktop_connection_for_connection(
+                    open.profile,
+                    password,
+                    open.gateway,
+                    attempt,
+                    window,
+                    cx,
+                );
+                cx.notify();
+            }
+            Some(Effect::WslGraphics) => {
+                self.close_new_connection_form(window, cx);
+                self.open_graphics_tab(window, cx);
+            }
+            Some(Effect::SavedAuthentication(launch)) => {
+                self.launch_saved_connection_prompt(launch, window, cx);
+            }
+            Some(Effect::SavedEdit { id, next }) => self.apply_saved_edit(id, next, window, cx),
+            Some(Effect::Duplicate { status }) => {
+                self.connections.show_catalog_status(status, cx);
+                self.focus_active_pane(window, cx);
+                cx.notify();
+            }
+            Some(Effect::Preflight((config, title, intent))) => {
+                self.start_connection_preflight_plan(config, title, intent, false, window, cx);
+            }
+            Some(Effect::CloseForm) => self.close_new_connection_form(window, cx),
+            Some(Effect::ReportSaveError(error)) => self.report_saved_next_hop_message(error, cx),
         }
-        self.start_ssh_preflight(
-            open.config,
-            open.title,
-            SshConnectionIntent::Mosh(open.options),
-            cx,
-        );
-        cx.notify();
     }
 
-    pub(super) fn submit_standalone_sftp_connection_form(
+    fn open_console_from_form(
         &mut self,
-        action: NewConnectionSubmitAction,
+        open: oxideterm_gpui_connections::submission::ConsoleFormOpen,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if action == NewConnectionSubmitAction::Connect {
-            let initial_remote_path =
-                self.connection_form_state(cx)
-                    .form
-                    .as_ref()
-                    .and_then(|form| {
-                        let path = form.sftp_initial_remote_path.trim();
-                        (!path.is_empty()).then(|| path.to_string())
-                    });
-            self.start_new_connection_flow(
-                SshConnectionIntent::StandaloneSftp {
-                    saved_profile_id: None,
-                    initial_remote_path,
-                    pair_launch_token: None,
-                },
-                window,
-                cx,
-            );
-            return;
-        }
-        let save = self.connections.flow.update(cx, |flow, cx| {
-            flow.submit_saved_sftp(
-                &mut self.connection_store,
-                self.settings_store.settings(),
-                &self.i18n,
-                action,
-                cx,
-            )
-        });
-        if let Some((config, title, intent)) = self.apply_profile_submission(save, cx) {
-            self.start_new_connection_config_flow(config, title, intent, window, cx);
-        }
-    }
-
-    pub(super) fn submit_remote_desktop_connection_form(
-        &mut self,
-        action: NewConnectionSubmitAction,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let reconnect = self
-            .connection_form_state(cx)
-            .form
-            .as_ref()
-            .and_then(|form| form.standalone_connection_id.as_deref())
-            .and_then(|id| self.standalone_connections.record(id))
-            .and_then(|record| match &record.launch {
-                StandaloneConnectionLaunch::RestoredRemoteDesktop { profile } => Some(profile),
-                _ => None,
-            });
-        let save = self.connections.flow.update(cx, |flow, cx| {
-            flow.submit_desktop(
-                &mut self.connection_store,
-                self.settings_store.settings(),
-                &self.i18n,
-                action,
-                reconnect,
-                cx,
-            )
-        });
-        let Some(open) = self.apply_profile_submission(save, cx) else {
-            return;
+        use oxideterm_gpui_connections::submission::{ConsoleFormOpen, ConsoleProfileAfterOpen};
+        use oxideterm_terminal_triggers::SavedConnectionKind;
+        let (session, profile, kind) = match open {
+            ConsoleFormOpen::Serial(open) => (
+                self.create_serial_terminal_tab(
+                    open.config,
+                    &open.title,
+                    open.terminal,
+                    window,
+                    cx,
+                ),
+                ConsoleProfileAfterOpen::Serial(open.edited_profile),
+                SavedConnectionKind::Serial,
+            ),
+            ConsoleFormOpen::Telnet(open) => (
+                self.create_telnet_terminal_tab(open.config, open.proxy, open.terminal, window, cx),
+                ConsoleProfileAfterOpen::Telnet(open.edited_profile, open.profile_id),
+                SavedConnectionKind::Telnet,
+            ),
         };
-        let attempt = if let Some(id) = open.reconnect_id {
-            let Some(attempt) = self.standalone_connections.begin_reconnect(&id) else {
-                return;
-            };
-            Some(attempt)
-        } else {
-            None
-        };
-        let password = open
-            .password
-            .map(|secret| RemoteDesktopSecret::from(secret.into_zeroizing()));
-        self.open_remote_desktop_connection_for_connection(
-            open.profile,
-            password,
-            open.gateway,
-            attempt,
-            window,
+        let result = self.connections.finish_console_open(
+            session.as_ref().map(|_| ()).map_err(ToString::to_string),
+            profile,
+            &mut self.connection_store,
+            &self.i18n,
             cx,
         );
-        cx.notify();
+        if let (Ok(session), Some(result)) = (session, result) {
+            if result.persisted {
+                self.queue_cloud_sync_dirty_refresh(cx);
+            }
+            if let Some(id) = result.open {
+                if matches!(kind, SavedConnectionKind::Telnet) {
+                    self.telnet_terminal_profile_ids.insert(session, id.clone());
+                }
+                self.register_terminal_saved_connection(session, kind, id, cx);
+            }
+            cx.notify();
+        }
     }
 
     pub(in crate::workspace) fn start_new_connection_flow(
@@ -444,29 +216,18 @@ impl WorkspaceApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let config = self.connections.flow.update(cx, |flow, cx| {
-            flow.plan_form_ssh_preflight(
+        let launch = self.connections.flow.update(cx, |flow, cx| {
+            flow.prepare_ssh_launch(
                 &self.connection_store,
                 self.settings_store.settings(),
                 &self.i18n,
-                &intent,
+                intent,
                 cx,
             )
         });
-        if let Some((config, title)) = config {
-            self.start_new_connection_config_flow(config, title, intent, window, cx);
+        if let Some((config, title, intent)) = launch {
+            self.start_connection_preflight_plan(config, title, intent, false, window, cx);
         }
-    }
-
-    fn start_new_connection_config_flow(
-        &mut self,
-        config: SshConfig,
-        title: String,
-        intent: SshConnectionIntent,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        self.start_connection_preflight_plan(config, title, intent, false, window, cx);
     }
 
     fn start_connection_preflight_plan(
@@ -581,15 +342,19 @@ impl WorkspaceApp {
                     cx,
                 );
                 if open_sftp_on_connect {
-                    self.update_connection_form_state(cx, |state| {
-                        if let Some(form) = state.form.as_mut() {
-                            form.open_sftp_on_connect = true;
-                        }
-                    });
+                    self.connections
+                        .flow
+                        .update(cx, |flow, cx| flow.enable_prompt_sftp(cx));
                 }
             }
             SavedSshOpen::Connect { config, title } => self.start_saved_connection_flow(
-                id.to_string(), config, title, None, open_sftp_on_connect, window, cx,
+                id.to_string(),
+                config,
+                title,
+                None,
+                open_sftp_on_connect,
+                window,
+                cx,
             ),
         }
     }
@@ -672,22 +437,12 @@ impl WorkspaceApp {
         }
     }
 
-    pub(super) fn submit_saved_connection_prompt(
+    fn launch_saved_connection_prompt(
         &mut self,
+        launch: oxideterm_gpui_connections::submission::SavedPromptLaunch,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let launch = self.connections.flow.update(cx, |flow, cx| {
-            flow.submit_saved_prompt(
-                &self.connection_store,
-                self.settings_store.settings(),
-                &self.i18n,
-                cx,
-            )
-        });
-        let Some(launch) = launch else {
-            return;
-        };
         match launch.action {
             SavedConnectionPromptAction::Test => {
                 self.start_ssh_test_flow(launch.config, launch.title, cx)
@@ -746,72 +501,42 @@ impl WorkspaceApp {
         ) > 0
     }
 
-    pub(super) fn save_editing_connection(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let edit = self.connections.flow.update(cx, |flow, cx| {
-            flow.submit_ssh_edit(&mut self.connection_store, &self.i18n, false, cx)
-        });
-        let Some(edit) = edit else {
-            return;
-        };
-        self.sync_saved_connection_node_title(&edit.id);
-        self.sync_saved_connection_x11_forwarding(&edit.id);
-        self.apply_saved_connection_terminal_preferences(&edit.id, cx);
-        self.queue_cloud_sync_dirty_refresh(cx);
-        if let Some(node_id) = edit.reconnect_node {
-            if let Some(connection) = self.connection_store.get(&edit.id)
-                && let Some(config) = ssh_config_from_saved_connection(
-                    &self.connection_store,
-                    self.settings_store.settings(),
-                    connection,
-                )
-            {
-                let title = connection.name.clone();
-                let open_sftp = connection.options.open_sftp_on_connect;
-                self.remove_inactive_session_tree_node(&node_id, window, cx);
-                self.start_saved_connection_flow(
-                    edit.id, config, title, None, open_sftp, window, cx,
-                );
-            } else {
-                let message = self
-                    .i18n
-                    .t("sessionManager.edit_properties.password_placeholder");
+    fn apply_saved_edit(
+        &mut self,
+        id: String,
+        next: oxideterm_gpui_connections::submission::AfterSshEdit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use oxideterm_gpui_connections::submission::AfterSshEdit;
+        self.sync_saved_connection_node_title(&id);
+        self.sync_saved_connection_x11_forwarding(&id);
+        self.apply_saved_connection_terminal_preferences(&id, cx);
+        match next {
+            AfterSshEdit::Reconnect {
+                node,
+                config,
+                title,
+                open_sftp,
+            } => {
+                self.remove_inactive_session_tree_node(&node, window, cx);
+                self.start_saved_connection_flow(id, config, title, None, open_sftp, window, cx);
+            }
+            AfterSshEdit::Prompt { message } => {
                 self.open_saved_connection_prompt(
-                    &edit.id,
+                    &id,
                     SavedConnectionPromptAction::Connect,
                     Some(message),
                     window,
                     cx,
                 );
             }
-        } else {
-            let message = self.i18n.t("sessionManager.edit_properties.save");
-            self.connections.session_manager
-                .update(cx, |manager, cx| manager.set_status(Some(message), cx));
-            self.focus_active_pane(window, cx);
+            AfterSshEdit::FocusPane { status } => {
+                self.connections.show_catalog_status(status, cx);
+                self.focus_active_pane(window, cx);
+            }
         }
         cx.notify();
-    }
-
-    pub(super) fn save_duplicate_connection_template(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .connections
-            .flow
-            .update(cx, |flow, cx| {
-                flow.submit_ssh_edit(&mut self.connection_store, &self.i18n, true, cx)
-            })
-            .is_some()
-        {
-            let message = self.i18n.t("sessionManager.toast.connection_duplicated");
-            self.connections.session_manager
-                .update(cx, |manager, cx| manager.set_status(Some(message), cx));
-            self.queue_cloud_sync_dirty_refresh(cx);
-            self.focus_active_pane(window, cx);
-            cx.notify();
-        }
     }
 
     pub(in crate::workspace) fn start_saved_connection_flow(

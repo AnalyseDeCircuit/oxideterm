@@ -1,7 +1,9 @@
-use super::new_connection::{NewConnectionSubmitAction, NewConnectionTransport};
+use super::new_connection::NewConnectionTransport;
 use super::*;
-use oxideterm_connections::SaveLocalTerminalProfileRequest;
-use oxideterm_gpui_settings_view::local_terminal::{effective_local_shells, expand_local_terminal_cwd};
+use oxideterm_gpui_connections::submission::LocalFormSubmission;
+use oxideterm_gpui_settings_view::local_terminal::{
+    effective_local_shells, expand_local_terminal_cwd,
+};
 
 #[derive(Clone)]
 pub(super) struct LocalTerminalInstance {
@@ -131,62 +133,31 @@ impl WorkspaceApp {
         Ok(config)
     }
 
-    pub(super) fn submit_local_terminal_form(
+    pub(super) fn open_local_terminal_from_form(
         &mut self,
-        action: NewConnectionSubmitAction,
+        plan: LocalFormSubmission,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(form) = self.connection_form_state(cx).form.as_ref() else {
-            return;
-        };
-        let request = SaveLocalTerminalProfileRequest {
-            id: form.local_profile_id.clone(),
-            name: form.name.trim().to_owned(),
-            icon: (!form.icon.is_empty()).then(|| form.icon.clone()),
-            color: (!form.color.is_empty()).then(|| form.color.clone()),
-            icon_background_color: (!form.icon_background_color.is_empty())
-                .then(|| form.icon_background_color.clone()),
-            shell_id: form.local_shell_id.clone(),
-            cwd: (!form.local_cwd.trim().is_empty()).then(|| form.local_cwd.trim().to_owned()),
-            group: (!self.connection_form_group_is_ungrouped(&form.group))
-                .then(|| form.group.trim().to_owned()),
-        };
         let result = (|| -> Result<()> {
-            if action != NewConnectionSubmitAction::Connect && request.name.is_empty() {
-                anyhow::bail!(self.i18n.t("local_session.name_required"));
-            }
             // Saving a portable profile does not require its shell or directory to exist here.
-            let config = if action == NewConnectionSubmitAction::Save {
-                None
-            } else {
-                Some(
-                    self.local_profile_config(request.shell_id.as_deref(), request.cwd.as_deref())?,
-                )
-            };
-            let title = if request.name.is_empty() {
+            let config = plan
+                .launch
+                .then(|| self.local_profile_config(plan.shell_id(), plan.cwd()))
+                .transpose()?;
+            let title = plan.title(
                 config
                     .as_ref()
                     .and_then(|config| config.shell.as_ref())
-                    .map(|shell| shell.label.clone())
-                    .unwrap_or_else(|| self.local_terminal_tab_title())
-            } else {
-                request.name.clone()
-            };
-            let profile_id = if action != NewConnectionSubmitAction::Connect {
-                let profile = self
-                    .connection_store
-                    .upsert_local_terminal_profile(request)?;
-                self.update_connection_form_state(cx, |state| {
-                    if let Some(form) = state.form.as_mut() {
-                        form.local_profile_id = Some(profile.id.clone());
-                    }
-                });
+                    .map(|shell| shell.label.as_str()),
+                || self.local_terminal_tab_title(),
+            );
+            let profile_id = self.connections.flow.update(cx, |flow, cx| {
+                flow.persist_local_form(plan, &mut self.connection_store, cx)
+            })?;
+            if profile_id.is_some() {
                 self.queue_cloud_sync_dirty_refresh(cx);
-                Some(profile.id)
-            } else {
-                None
-            };
+            }
             if let Some(config) = config {
                 let shell_id = config.shell.as_ref().map(|shell| shell.id.clone());
                 let (session_id, _) =
@@ -214,10 +185,8 @@ impl WorkspaceApp {
         })();
         match result {
             Ok(()) => self.close_new_connection_form(window, cx),
-            Err(error) => self.update_connection_form_state(cx, |state| {
-                if let Some(form) = state.form.as_mut() {
-                    form.error = Some(error.to_string());
-                }
+            Err(error) => self.connections.flow.update(cx, |flow, cx| {
+                flow.set_local_form_error(error.to_string(), cx);
             }),
         }
         cx.notify();

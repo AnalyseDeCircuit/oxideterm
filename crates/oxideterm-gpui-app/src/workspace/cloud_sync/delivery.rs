@@ -394,50 +394,36 @@ impl WorkspaceApp {
         preview: LegacyPreview,
         source: CloudSyncPreviewSource,
         selection: CloudSyncPreviewSelection,
-        mut outcome: ApplyLegacyPreviewOutcome,
+        outcome: ApplyLegacyPreviewOutcome,
         audit: Option<PendingLegacyImportAudit>,
         cx: &mut Context<Self>,
     ) {
         let plan = cloud_sync_legacy_apply_plan(&preview, &source, &selection);
         let cloud_options = &plan.import_options;
-        let imported_forwards = if cloud_options.oxide_options.import_forwards {
-            self.apply_oxide_import_forward_records(&mut outcome.envelope)
-        } else {
-            0
-        };
-        outcome.envelope.imported_forwards = imported_forwards;
-        let (imported_quick_commands, _skipped_quick_commands, quick_command_errors) = self
-            .apply_oxide_import_quick_commands(
-                outcome.envelope.quick_commands_json.as_deref(),
-                selection.import_quick_commands,
-                QuickCommandImportStrategy::Merge,
-                cx,
-            );
-        let (imported_plugin_settings, plugin_settings_failed) = match self
-            .try_apply_oxide_import_plugin_settings(
-                &outcome.envelope.plugin_settings,
-                cloud_options.import_plugin_settings,
-                cloud_options.selected_plugin_ids.as_ref(),
-            ) {
-            Ok(count) => (count, false),
-            Err(_) => (0, true),
-        };
-        let (imported_app_settings, skipped_app_settings) = self.apply_oxide_import_app_settings(
-            outcome.envelope.app_settings_json.as_deref(),
-            cloud_options.import_app_settings,
-            cloud_options.selected_app_settings_sections.as_ref(),
+        let (sidecars, plugin_settings_failed) = self.import_oxide_sidecars(
+            outcome.envelope,
+            crate::workspace::session_manager::OxideSidecarOptions {
+                forwards: cloud_options.oxide_options.import_forwards,
+                quick_commands: selection
+                    .import_quick_commands
+                    .then_some(QuickCommandImportStrategy::Merge),
+                plugin_settings: cloud_options.import_plugin_settings,
+                selected_plugin_ids: cloud_options.selected_plugin_ids.as_ref(),
+                app_settings: cloud_options.import_app_settings,
+                selected_app_settings_sections: cloud_options
+                    .selected_app_settings_sections
+                    .as_ref(),
+                portable_secrets: cloud_options.oxide_options.import_portable_secrets,
+            },
             cx,
         );
-        if cloud_options.oxide_options.import_portable_secrets {
-            self.apply_oxide_import_portable_secrets(&mut outcome.envelope, cx);
-        }
         let stats = CloudSyncLegacyImportStats {
-            quick_commands: imported_quick_commands,
-            plugin_settings: imported_plugin_settings,
-            app_settings: imported_app_settings,
-            quick_command_errors: quick_command_errors.len(),
+            quick_commands: sidecars.imported_quick_commands,
+            plugin_settings: sidecars.imported_plugin_settings,
+            app_settings: sidecars.imported_app_settings,
+            quick_command_errors: sidecars.quick_commands_errors.len(),
             plugin_settings_failed,
-            app_settings_failed: skipped_app_settings,
+            app_settings_failed: sidecars.skipped_app_settings,
         };
         self.with_cloud_sync_runtime(cx, |sync, cx| {
             sync.finish_legacy_cloud_sync_apply(
@@ -445,7 +431,7 @@ impl WorkspaceApp {
                 source,
                 selection,
                 plan,
-                outcome.envelope,
+                sidecars.envelope,
                 stats,
                 audit,
                 cx,
