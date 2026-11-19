@@ -373,7 +373,9 @@ impl QuickCommandsView {
             })
             .child(
                 div()
-                    .grid()
+                    .flex()
+                    .flex_col()
+                    .min_w_0()
                     .gap(px(8.0))
                     .child(self.render_quick_command_text_input(
                         QuickCommandInput::CommandName,
