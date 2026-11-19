@@ -1105,6 +1105,26 @@ impl WorkspaceApp {
         )
     }
 
+    pub(super) fn sftp_input_ime(
+        &self,
+        surface: super::sftp::SftpSurfaceId,
+        input: SftpInput,
+        cx: &App,
+    ) -> oxideterm_gpui_sftp::SftpDialogIme {
+        let target = WorkspaceImeTarget::Sftp(surface, input);
+        let anchor_id = target.anchor_id();
+        let anchors = self.text_input_anchors.clone();
+        oxideterm_gpui_sftp::SftpDialogIme {
+            anchor_id,
+            viewport: anchors.viewport(anchor_id),
+            caret_visible: self.input_caret.visible(),
+            selected_range: self.ime_selected_range_for_target(target, cx),
+            active_offset: self.ime_selection_for_target(target).map(|selection| selection.active_offset()),
+            marked_text: self.marked_text_for_target(target, cx).map(str::to_owned),
+            update_anchor: Rc::new(move |anchor| anchors.update(anchor)),
+        }
+    }
+
     pub(super) fn host_tools_plain_text_ime_frame(
         &self,
         input: HostToolsTextInput,
@@ -1179,6 +1199,15 @@ impl WorkspaceApp {
         }
         if matches!(target, WorkspaceImeTarget::KeyboardInteractive(_)) {
             self.connections.notify_input(cx);
+            return;
+        }
+        if let WorkspaceImeTarget::Sftp(surface, input) = target {
+            if self.has_sftp_surface(surface) {
+                let _scope = self.enter_sftp_surface(surface);
+                let ime = self.sftp_input_ime(surface, input, cx);
+                self.sftp_view()
+                    .update(cx, |state, cx| state.refresh_ime(input, ime, cx));
+            }
             return;
         }
         if let WorkspaceImeTarget::Settings(input) = target
@@ -2583,17 +2612,16 @@ impl WorkspaceApp {
         text: &str,
         cx: &mut Context<Self>,
     ) {
-        if platform_text_commit_is_duplicate(&mut self.pending_platform_text_commit, target, text) {
-            self.ime_marked_text = None;
-            return;
-        }
-        if text.is_empty()
-            && replacement_range.as_ref().is_none_or(|range| {
-                self.marked_text_state_for_target(target, cx)
-                    .is_some_and(|marked| *range == marked.virtual_range())
-            })
+        if platform_text_commit_is_duplicate(&mut self.pending_platform_text_commit, target, text)
+            || (text.is_empty()
+                && replacement_range.as_ref().is_none_or(|range| {
+                    self.marked_text_state_for_target(target, cx)
+                        .is_some_and(|marked| *range == marked.virtual_range())
+                }))
         {
-            self.ime_marked_text = None;
+            if self.ime_marked_text.take().is_some() && matches!(target, WorkspaceImeTarget::Sftp(..)) {
+                self.notify_ime_target(target, cx);
+            }
             return;
         }
         let replacement_range = effective_platform_text_replacement_range(
@@ -2610,6 +2638,9 @@ impl WorkspaceApp {
             self.set_ime_selection_from_anchor(target, caret, caret);
         } else {
             self.clear_ime_selection();
+        }
+        if matches!(target, WorkspaceImeTarget::Sftp(..)) {
+            self.notify_ime_target(target, cx);
         }
     }
 
@@ -2727,6 +2758,9 @@ impl WorkspaceApp {
         self.replace_ime_target_text(target, Some(range), "", Some(caret), cx);
         self.clear_ime_selection();
         self.set_ime_selection_from_anchor(target, caret, caret);
+        if matches!(target, WorkspaceImeTarget::Sftp(..)) {
+            self.notify_ime_target(target, cx);
+        }
         true
     }
 
@@ -2951,6 +2985,9 @@ impl WorkspaceApp {
         self.replace_ime_target_text(target, Some(range), "", Some(caret), cx);
         self.clear_ime_selection();
         self.set_ime_selection_from_anchor(target, caret, caret);
+        if matches!(target, WorkspaceImeTarget::Sftp(..)) {
+            self.notify_ime_target(target, cx);
+        }
         true
     }
 
@@ -2983,6 +3020,9 @@ impl WorkspaceApp {
         self.clear_ime_selection();
         if let Some(caret) = caret {
             self.set_ime_selection_from_anchor(target, caret, caret);
+        }
+        if matches!(target, WorkspaceImeTarget::Sftp(..)) {
+            self.notify_ime_target(target, cx);
         }
         true
     }
@@ -3609,14 +3649,14 @@ impl WorkspaceApp {
                 }
                 let _scope = self.enter_sftp_surface(surface);
                 if self.sftp_view().read(cx).focused_input() == Some(input) {
-                    self.sftp_view().update(cx, |sftp, _cx| {
+                    self.sftp_view().update(cx, |sftp, cx| {
                         replace_utf16(sftp.input_value_mut(input), replacement_range, text);
+                        cx.notify();
                     });
                     if matches!(input, SftpInput::LocalPath | SftpInput::RemotePath) {
                         self.refresh_sftp_path_completion(input, cx);
                     }
                     self.show_active_input_caret(cx);
-                    cx.notify();
                 }
             }
             WorkspaceImeTarget::NewConnection(field) => {

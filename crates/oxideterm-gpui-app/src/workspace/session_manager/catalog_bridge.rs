@@ -56,7 +56,6 @@ impl WorkspaceApp {
                 self.open_plugin_connection(&id, cx);
                 return;
             }
-            CatalogAction::DeleteSelected => return self.request_delete_selected_connections(cx),
             CatalogAction::Delete(target) => {
                 return self.request_session_manager_row_delete(target, cx);
             }
@@ -66,11 +65,6 @@ impl WorkspaceApp {
             CatalogAction::OpenSshConfigImporter => {
                 return self.open_settings_ssh_config_import_dialog(cx);
             }
-            CatalogAction::NewGroup => return self.open_session_group_creation(cx),
-            CatalogAction::NewSubgroup(group) => {
-                return self.open_session_subgroup_creation(&group, cx);
-            }
-            CatalogAction::RenameGroup(group) => return self.open_session_group_rename(&group, cx),
             CatalogAction::Move { targets, group } => {
                 return self.move_dragged_sessions_to_group(&targets, group.as_deref(), cx);
             }
@@ -79,10 +73,7 @@ impl WorkspaceApp {
                 return;
             }
             CatalogAction::ShowBatchAdd => return self.open_batch_add_dialog(cx),
-            CatalogAction::CloseGroupManager => return self.close_session_group_manager(cx),
-            CatalogAction::CancelGroupEditor => return self.cancel_session_group_editor(cx),
             CatalogAction::SaveGroup => return self.submit_session_group_editor(cx),
-            CatalogAction::CancelDelete => return self.cancel_session_manager_delete(cx),
             CatalogAction::ConfirmDelete => return self.confirm_session_manager_delete(cx),
             CatalogAction::MoveSelected(group) => {
                 return self.move_selected_connections(group.as_deref(), cx);

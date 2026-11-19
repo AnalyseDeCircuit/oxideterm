@@ -1,0 +1,616 @@
+use super::*;
+use oxideterm_gpui_ui::context_menu::{context_menu_content, context_menu_separator};
+use oxideterm_gpui_ui::scroll::ScrollableElement;
+
+impl SftpBrowserView {
+    pub(super) fn render_sftp_context_menu(
+        &self,
+        menu: SftpContextMenu,
+        window: &Window,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
+        let theme = self.tokens.ui;
+        let viewport = window.viewport_size();
+        let placement = oxideterm_gpui_ui::context_menu::clamp_context_menu_position(
+            menu.x,
+            menu.y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT),
+            8.0,
+        );
+        let tree_mode = menu.tree;
+        let selected_count = if tree_mode && menu.file.is_some() {
+            1
+        } else {
+            self.sftp_selected_names(menu.pane, cx).len()
+        };
+        let menu_file = menu.file.clone();
+        let tree_download_file = if tree_mode { menu_file.clone() } else { None };
+        let tree_delete_file = if tree_mode { menu_file.clone() } else { None };
+        let tree_new_folder_base = if tree_mode {
+            menu_file.as_ref().map(|file| {
+                if file.file_type == SftpFileType::Directory {
+                    file.path.clone()
+                } else {
+                    parent_path(&file.path, true)
+                }
+            })
+        } else {
+            None
+        };
+        let (remote_loading, pair_primary_loading) = {
+            let sftp = self.sftp_view().read(cx);
+            (sftp.remote_loading, sftp.pair_primary_loading)
+        };
+        let pane_loading = match menu.pane {
+            SftpPane::Local => pair_primary_loading,
+            SftpPane::Remote => remote_loading,
+        };
+        let transfer_loading = remote_loading || pair_primary_loading;
+        let direction = if menu.pane == SftpPane::Local {
+            SftpTransferDirection::Upload
+        } else {
+            SftpTransferDirection::Download
+        };
+        let transfer_label = if menu.pane == SftpPane::Local {
+            self.i18n.t("sftp.context.upload")
+        } else {
+            self.i18n.t("sftp.context.download")
+        };
+        let popup = context_menu_event_boundary(
+            context_menu_content(&self.tokens)
+                .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
+                .min_w_0()
+                .when(has_background, |surface| {
+                    surface.border_color(sftp_border(theme.border, has_background))
+                }),
+        )
+        .when(selected_count > 0, |menu_el| {
+            menu_el.child(self.render_sftp_context_menu_guarded_item(
+                if menu.pane == SftpPane::Local {
+                    LucideIcon::Upload
+                } else {
+                    LucideIcon::Download
+                },
+                transfer_label,
+                false,
+                false,
+                transfer_loading,
+                has_background,
+                move |this, _event, _window, cx| {
+                    if tree_mode {
+                        if let Some(file) = tree_download_file.clone() {
+                            this.send(SftpBrowserRequest::TreeDownload(file), None, cx);
+                        }
+                    } else {
+                        this.send(SftpBrowserRequest::Transfer(menu.pane, direction), None, cx);
+                    }
+                },
+                cx,
+            ))
+        })
+        .when_some(menu.file.clone(), |menu_el, file| {
+            if menu.pane != SftpPane::Remote || file.file_type == SftpFileType::Directory {
+                menu_el
+            } else {
+                let can_extract = selected_count == 1
+                    && oxideterm_sftp::archive_kind(&file.name).is_some()
+                    && !matches!(
+                        self.sftp_view().read(cx).current_remote_id.clone(),
+                        Some(SftpRemoteId::Ftp(_))
+                    );
+                menu_el
+                    .child(self.render_sftp_context_menu_guarded_item(
+                        LucideIcon::Eye,
+                        self.i18n.t("sftp.context.preview"),
+                        false,
+                        false,
+                        pane_loading,
+                        has_background,
+                        {
+                            let file = file.clone();
+                            move |this, _event, _window, cx| {
+                                this.send(
+                                    SftpBrowserRequest::Preview(menu.pane, file.clone()),
+                                    None,
+                                    cx,
+                                );
+                            }
+                        },
+                        cx,
+                    ))
+                    .when(can_extract, |menu_el| {
+                        menu_el.child(self.render_sftp_context_menu_guarded_item(
+                            LucideIcon::FolderArchive,
+                            self.i18n.t("sftp.context.extract"),
+                            false,
+                            false,
+                            pane_loading,
+                            has_background,
+                            {
+                                let file = file.clone();
+                                move |this, _event, _window, cx| {
+                                    this.send(SftpBrowserRequest::Extract(file.clone()), None, cx);
+                                    cx.notify();
+                                }
+                            },
+                            cx,
+                        ))
+                    })
+            }
+        })
+        .when(menu.file.is_some() && selected_count == 1, |menu_el| {
+            menu_el.child(self.render_sftp_context_menu_guarded_item(
+                LucideIcon::Pencil,
+                self.i18n.t("sftp.context.rename"),
+                false,
+                false,
+                pane_loading,
+                has_background,
+                {
+                    let file = menu.file.clone();
+                    move |this, _event, _window, cx| {
+                        if let Some(file) = file.as_ref() {
+                            this.sftp_view().update(cx, |sftp, cx| {
+                                sftp.open_rename_dialog(
+                                    menu.pane,
+                                    file.name.clone(),
+                                    tree_mode.then(|| file.path.clone()),
+                                    cx,
+                                );
+                            });
+                        }
+                    }
+                },
+                cx,
+            ))
+        })
+        .when_some(menu.file.clone(), |menu_el, file| {
+            menu_el.child(self.render_sftp_context_menu_guarded_item(
+                LucideIcon::Copy,
+                self.i18n.t("sftp.context.copy_path"),
+                false,
+                false,
+                pane_loading,
+                has_background,
+                move |this, _event, _window, cx| {
+                    let path = if tree_mode && !file.path.is_empty() {
+                        file.path.clone()
+                    } else {
+                        let base = {
+                            let sftp = this.sftp_view().read(cx);
+                            match menu.pane {
+                                SftpPane::Local => sftp.local_path.clone(),
+                                SftpPane::Remote => sftp.remote_path.clone(),
+                            }
+                        };
+                        join_sftp_path(&base, &file.name)
+                    };
+                    cx.write_to_clipboard(ClipboardItem::new_string(path));
+                },
+                cx,
+            ))
+        })
+        .when(selected_count > 0, |menu_el| {
+            menu_el.child(self.render_sftp_context_menu_guarded_item(
+                LucideIcon::Trash2,
+                self.i18n.t("sftp.context.delete"),
+                true,
+                false,
+                pane_loading,
+                has_background,
+                move |this, _event, _window, cx| {
+                    let (files, paths) = if tree_mode {
+                        tree_delete_file
+                            .clone()
+                            .map(|file| (vec![file.name], vec![file.path]))
+                            .unwrap_or_default()
+                    } else {
+                        (this.sftp_selected_names(menu.pane, cx), Vec::new())
+                    };
+                    this.sftp_view().update(cx, |sftp, cx| {
+                        sftp.set_dialog(SftpDialog::Delete {
+                            pane: menu.pane,
+                            files,
+                            paths,
+                        });
+                        cx.notify();
+                    });
+                },
+                cx,
+            ))
+        })
+        .child(context_menu_separator(&self.tokens))
+        .child(self.render_sftp_context_menu_guarded_item(
+            LucideIcon::FolderOpen,
+            self.i18n.t("sftp.context.new_folder"),
+            false,
+            false,
+            pane_loading,
+            has_background,
+            move |this, _event, _window, cx| {
+                this.sftp_view().update(cx, |sftp, cx| {
+                    sftp.open_new_folder_dialog(menu.pane, tree_new_folder_base.clone(), cx);
+                });
+            },
+            cx,
+        ));
+
+        let menu_visible = self.sftp_view().read(cx).context_menu_presence.phase()
+            == oxideterm_gpui_ui::motion::ExitPhase::Visible;
+        self.workspace_context_menu_backdrop(
+            deferred(
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .position(gpui::point(px(placement.x), px(placement.y)))
+                    .position_mode(AnchoredPositionMode::Window)
+                    .child(oxideterm_gpui_ui::motion::zoom_fade_y(
+                        &self.tokens,
+                        "sftp-context-menu-motion",
+                        div().child(overlay_content_boundary(popup)),
+                        -4.0,
+                        0.95,
+                        gpui::point(0.0, 0.0),
+                        oxideterm_gpui_ui::motion::MotionDuration::Micro,
+                        menu_visible,
+                    )),
+            )
+            .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn render_sftp_context_menu_guarded_item(
+        &self,
+        icon: LucideIcon,
+        label: String,
+        danger: bool,
+        disabled: bool,
+        loading: bool,
+        has_background: bool,
+        listener: impl Fn(&mut Self, &MouseDownEvent, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
+        let theme = self.tokens.ui;
+        let disabled = disabled
+            || self.sftp_view().read(cx).context_menu_presence.phase()
+                == oxideterm_gpui_ui::motion::ExitPhase::Exiting;
+        let color = if danger { SFTP_RED } else { theme.text };
+        let item =
+            div()
+                .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
+                .w_full()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+                .py(px(5.0))
+                .rounded(px(self.tokens.radii.md))
+                .text_size(px(ui.text_xs))
+                .text_color(rgb(color))
+                .child(render_lucide_icon(
+                    icon,
+                    ui.size(SFTP_ICON_SM),
+                    if danger {
+                        rgb(color).into()
+                    } else {
+                        rgba((color << 8) | 0xd9)
+                    },
+                ))
+                .child(div().flex_1().min_w_0().truncate().child(
+                    self.render_display_text_with_role(
+                        SelectionRole::NonSelectable,
+                        "sftp-context-menu",
+                        label.clone(),
+                        label,
+                        color,
+                        cx,
+                    ),
+                ));
+        let hover_bg = if danger {
+            rgba((SFTP_RED << 8) | 0x1f)
+        } else {
+            sftp_hover_bg(theme.bg_hover, has_background)
+        };
+        // SFTP remote refresh/transfer can leave a context menu visible while
+        // the backing pane is loading. Route those rows through the shared menu
+        // guard so the UI cannot dispatch stale actions.
+        self.workspace_context_menu_styled_action(
+            item,
+            disabled,
+            loading,
+            ContextMenuActionableStyle {
+                hover_background: Some(hover_bg),
+                hover_text_color: None,
+            },
+            |_| {},
+            // The action guard already binds the listener to this view. Dismiss the
+            // menu in that same event before dispatching the operation.
+            move |this, event, window, cx| {
+                this.sftp_view()
+                    .update(cx, |sftp, cx| sftp.dismiss_context_menu(cx));
+                listener(this, event, window, cx);
+            },
+            cx,
+        )
+        .into_any_element()
+    }
+
+    pub(super) fn render_sftp_bookmark_menu(
+        &self,
+        menu: SftpBookmarkMenu,
+        window: &Window,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
+        let theme = self.tokens.ui;
+        let viewport = window.viewport_size();
+        let placement = oxideterm_gpui_ui::context_menu::clamp_context_menu_position(
+            menu.x,
+            menu.y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            ui.size(SFTP_CONTEXT_MENU_WIDTH),
+            ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT),
+            8.0,
+        );
+        if self.sftp_view().read(cx).current_remote_id.is_none() {
+            return div().into_any_element();
+        }
+        let pair_mode = self.sftp_pair_primary_remote_id(cx).is_some();
+        let (local_path, remote_path) = {
+            let sftp = self.sftp_view().read(cx);
+            (
+                sftp.local_path.trim().to_string(),
+                sftp.remote_path.trim().to_string(),
+            )
+        };
+        let can_save = !pair_mode && !local_path.is_empty() && !remote_path.is_empty();
+        let style = ContextMenuActionableStyle {
+            hover_background: Some(sftp_hover_bg(theme.bg_hover, has_background)),
+            hover_text_color: None,
+        };
+
+        let save_item = {
+            let item = div()
+                .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
+                .w_full()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+                .py(px(5.0))
+                .rounded(px(self.tokens.radii.md))
+                .text_size(px(ui.text_xs))
+                .text_color(rgb(if can_save {
+                    theme.text
+                } else {
+                    theme.text_muted
+                }))
+                .child(render_lucide_icon(
+                    LucideIcon::Star,
+                    ui.size(SFTP_ICON_SM),
+                    rgba((theme.text << 8) | 0xd9),
+                ))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(self.i18n.t("sftp.bookmarks.save_current")),
+                );
+            self.workspace_context_menu_persistent_styled_action(
+                item,
+                !can_save,
+                false,
+                style,
+                move |this, _event, _window, cx| {
+                    this.send(SftpBrowserRequest::SaveBookmark, None, cx);
+                    this.sftp_view().update(cx, |sftp, cx| {
+                        sftp.bookmark_menu = None;
+                        cx.notify();
+                    });
+                },
+                cx,
+            )
+        };
+
+        let bookmarks = self
+            .bookmark_remote_key
+            .as_deref()
+            .map_or_else(Vec::new, |key| self.bookmarks.read(cx).for_remote(key));
+        let rows = if bookmarks.is_empty() {
+            vec![self.render_sftp_bookmark_empty_row()]
+        } else {
+            bookmarks
+                .into_iter()
+                .map(|bookmark| self.render_sftp_bookmark_row(bookmark, has_background, cx))
+                .collect::<Vec<_>>()
+        };
+
+        let popup = context_menu_event_boundary(
+            context_menu_content(&self.tokens)
+                .w(px(ui.size(SFTP_CONTEXT_MENU_WIDTH)))
+                .min_w_0()
+                .max_h(px(ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT)))
+                .when(has_background, |surface| {
+                    surface.border_color(sftp_border(theme.border, has_background))
+                })
+                .flex()
+                .flex_col()
+                .child(save_item)
+                .child(
+                    // The popover is content-sized up to `MAX_HEIGHT`; a flex
+                    // child here would collapse to zero height and hide every
+                    // saved bookmark beneath the save row.
+                    div()
+                        .max_h(px(ui.size(SFTP_CONTEXT_MENU_MAX_HEIGHT)
+                            - ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)
+                            - SFTP_CONTEXT_MENU_PADDING * 2.0))
+                        .overflow_y_scrollbar()
+                        .children(rows),
+                ),
+        );
+        self.workspace_context_menu_backdrop(
+            deferred(
+                anchored()
+                    .anchor(Corner::TopLeft)
+                    .position(gpui::point(px(placement.x), px(placement.y)))
+                    .position_mode(AnchoredPositionMode::Window)
+                    .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                        &self.tokens,
+                        "sftp-bookmark-menu-motion",
+                        div().child(overlay_content_boundary(popup)),
+                        -6.0,
+                        gpui::point(0.5, 0.0),
+                    )),
+            )
+            .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    fn render_sftp_bookmark_empty_row(&self) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
+        let theme = self.tokens.ui;
+        div()
+            .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
+            .w_full()
+            .flex()
+            .items_center()
+            .px(px(12.0))
+            .text_size(px(ui.text_xs))
+            .text_color(rgb(theme.text_muted))
+            .child(self.i18n.t("sftp.bookmarks.empty"))
+            .into_any_element()
+    }
+
+    fn render_sftp_bookmark_row(
+        &self,
+        bookmark: SftpPathBookmark,
+        has_background: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
+        let theme = self.tokens.ui;
+        let style = ContextMenuActionableStyle {
+            hover_background: Some(sftp_hover_bg(theme.bg_hover, has_background)),
+            hover_text_color: None,
+        };
+        let row_bookmark = bookmark.clone();
+        let edit_bookmark = bookmark.clone();
+        let delete_id = bookmark.id.clone();
+
+        let pencil = div()
+            .flex_none()
+            .size(px(20.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.sm))
+            .cursor_pointer()
+            .hover(|row| row.bg(sftp_hover_bg(theme.bg_hover, has_background)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.sftp_view().update(cx, |sftp, cx| {
+                        sftp.dialog_value.clone_from(&edit_bookmark.name);
+                        sftp.set_dialog(SftpDialog::BookmarkRename {
+                            bookmark_id: edit_bookmark.id.clone(),
+                        });
+                        sftp.set_input_focus(Some(SftpInput::DialogValue), cx);
+                        sftp.bookmark_menu = None;
+                        cx.notify();
+                    });
+                    cx.stop_propagation();
+                }),
+            )
+            .child(render_lucide_icon(
+                LucideIcon::Pencil,
+                ui.size(SFTP_ICON_SM),
+                rgb(theme.text_muted),
+            ));
+
+        let trash = div()
+            .flex_none()
+            .size(px(20.0))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(self.tokens.radii.sm))
+            .cursor_pointer()
+            .hover(|row| row.bg(rgba((SFTP_RED << 8) | 0x1f)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _event, _window, cx| {
+                    this.send(
+                        SftpBrowserRequest::RemoveBookmark(delete_id.clone()),
+                        None,
+                        cx,
+                    );
+                    // Deleting keeps the popover open so the remaining list is visible.
+                    cx.notify();
+                    cx.stop_propagation();
+                }),
+            )
+            .child(render_lucide_icon(
+                LucideIcon::Trash2,
+                ui.size(SFTP_ICON_SM),
+                rgb(SFTP_RED),
+            ));
+
+        let row = div()
+            .h(px(ui.size(SFTP_CONTEXT_MENU_ITEM_HEIGHT)))
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(8.0))
+            .px(px(self.tokens.metrics.ui_menu_item_padding_x))
+            .py(px(5.0))
+            .rounded(px(self.tokens.radii.md))
+            .text_size(px(ui.text_xs))
+            .text_color(rgb(theme.text))
+            .child(render_lucide_icon(
+                LucideIcon::Star,
+                ui.size(SFTP_ICON_SM),
+                rgb(theme.text_muted),
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.0))
+                    .truncate()
+                    .child(row_bookmark.name.clone()),
+            )
+            .child(pencil)
+            .child(trash);
+
+        self.workspace_context_menu_persistent_styled_action(
+            row,
+            false,
+            false,
+            style,
+            move |this, _event, _window, cx| {
+                this.set_path(SftpPane::Local, row_bookmark.local_path.clone(), cx);
+                this.set_path(SftpPane::Remote, row_bookmark.remote_path.clone(), cx);
+                this.sftp_view().update(cx, |sftp, cx| {
+                    sftp.bookmark_menu = None;
+                    cx.notify();
+                });
+            },
+            cx,
+        )
+        .into_any_element()
+    }
+}

@@ -878,21 +878,29 @@ def notarize_macos_artifact(path: Path, *, staple: bool) -> bool:
     if os.environ.get("MACOS_CODESIGN_IDENTITY", "-").strip() in ("", "-"):
         raise RuntimeError("macOS notarization requires a Developer ID signing identity")
 
-    run(
-        [
-            "xcrun",
-            "notarytool",
-            "submit",
-            str(path),
-            "--key",
-            key_path,
-            "--key-id",
-            key_id,
-            "--issuer",
-            issuer_id,
-            "--wait",
-        ]
-    )
+    def notary_request(action: str, target: str) -> dict:
+        response = subprocess.run(
+            [
+                "xcrun", "notarytool", action, target,
+                "--key", key_path, "--key-id", key_id, "--issuer", issuer_id,
+                "--output-format", "json",
+            ],
+            cwd=ROOT_DIR,
+            stdout=subprocess.PIPE,
+            text=True,
+            check=False,
+        )
+        print(response.stdout, end="", flush=True)
+        response.check_returncode()
+        return json.loads(response.stdout)
+
+    # Log the submission ID before waiting so a timed-out CI job can be checked.
+    print(f"Submitting {path.name} for macOS notarization.", flush=True)
+    submission_id = notary_request("submit", str(path))["id"]
+    status = notary_request("wait", submission_id)["status"]
+    if status != "Accepted":
+        raise RuntimeError(f"macOS notarization for {path.name} ended with status {status}")
+
     if staple:
         run(["xcrun", "stapler", "staple", str(path)])
     return True

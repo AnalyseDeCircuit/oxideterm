@@ -290,6 +290,60 @@ impl SessionManagerState {
         !matches!(editor, SessionManagerGroupEditor::Rename { old_path, .. } if old_path == &candidate)
     }
 
+    pub(super) fn open_group_editor(
+        &mut self,
+        editor: SessionManagerGroupEditor,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        close_session_menu_state(self);
+        self.show_group_manager = true;
+        self.group_name_draft = name;
+        self.group_editor = Some(editor);
+        self.group_editor_error = None;
+        self.group_manager_error = None;
+        self.focused_input = Some(SessionManagerInput::GroupName);
+        self.focused_basic_dialog_footer_action = None;
+        cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
+        cx.notify();
+    }
+
+    pub(super) fn rename_group_editor(&mut self, group: String, cx: &mut Context<Self>) {
+        let (parent, leaf) = split_session_group_path(&group);
+        let parent_path = parent.map(ToOwned::to_owned);
+        let name = leaf.to_owned();
+        self.open_group_editor(
+            SessionManagerGroupEditor::Rename {
+                old_path: group,
+                parent_path,
+            },
+            name,
+            cx,
+        );
+    }
+
+    pub(super) fn request_delete_session_group(&mut self, name: String, cx: &mut Context<Self>) {
+        close_session_menu_state(self);
+        self.reopen_group_manager_after_delete = self.show_group_manager;
+        self.show_group_manager = false;
+        self.group_editor = None;
+        self.group_editor_error = None;
+        self.focused_input = None;
+        self.focused_basic_dialog_footer_action = None;
+        self.delete_confirm = Some(SessionManagerDeleteConfirm::Group { name });
+        cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
+        cx.notify();
+    }
+
+    pub fn close_session_group_manager(&mut self, cx: &mut Context<Self>) {
+        if self.show_group_manager {
+            self.show_group_manager = false;
+            self.group_manager_error = None;
+            self.cancel_group_editor(cx);
+            cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
+        }
+    }
+
     pub fn cancel_group_editor(&mut self, cx: &mut Context<Self>) {
         self.group_editor = None;
         self.group_name_draft.clear();
@@ -366,52 +420,6 @@ impl CatalogGroups<'_> {
         }
     }
 
-    pub fn open_session_group_creation(&mut self, cx: &mut App) {
-        self.open_session_group_creation_at(None, cx);
-    }
-
-    pub fn open_session_subgroup_creation(&mut self, parent_path: &str, cx: &mut App) {
-        self.open_session_group_creation_at(Some(parent_path.to_string()), cx);
-    }
-
-    fn open_session_group_creation_at(&mut self, parent_path: Option<String>, cx: &mut App) {
-        self.manager.update(cx, |session_manager, cx| {
-            close_session_menu_state(session_manager);
-            session_manager.show_group_manager = true;
-            // The editor keeps the parent immutable so users only enter one segment.
-            session_manager.group_editor = Some(SessionManagerGroupEditor::Create { parent_path });
-            session_manager.group_name_draft.clear();
-            session_manager.group_editor_error = None;
-            session_manager.group_manager_error = None;
-            session_manager.focused_input = Some(SessionManagerInput::GroupName);
-            session_manager.focused_basic_dialog_footer_action = None;
-            cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-            cx.notify();
-        });
-    }
-
-    pub fn open_session_group_rename(&mut self, group: &str, cx: &mut App) {
-        let (parent_path, leaf_name) = split_session_group_path(group);
-        let old_path = group.to_string();
-        let parent_path = parent_path.map(ToOwned::to_owned);
-        let leaf_name = leaf_name.to_string();
-        self.manager.update(cx, |session_manager, cx| {
-            close_session_menu_state(session_manager);
-            session_manager.show_group_manager = true;
-            session_manager.group_name_draft = leaf_name;
-            session_manager.group_editor = Some(SessionManagerGroupEditor::Rename {
-                old_path,
-                parent_path,
-            });
-            session_manager.group_editor_error = None;
-            session_manager.group_manager_error = None;
-            session_manager.focused_input = Some(SessionManagerInput::GroupName);
-            session_manager.focused_basic_dialog_footer_action = None;
-            cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-            cx.notify();
-        });
-    }
-
     fn rename_session_group(&mut self, old_name: &str, new_name: String, cx: &mut App) {
         let previous_tunnel_groups = match self.change_tunnel_group_path(old_name, Some(&new_name))
         {
@@ -464,38 +472,6 @@ impl CatalogGroups<'_> {
                 });
             }
         }
-    }
-
-    pub fn request_delete_session_group(&mut self, group: &str, cx: &mut App) {
-        let name = group.to_string();
-        self.manager.update(cx, |session_manager, cx| {
-            close_session_menu_state(session_manager);
-            session_manager.reopen_group_manager_after_delete = session_manager.show_group_manager;
-            session_manager.show_group_manager = false;
-            session_manager.group_editor = None;
-            session_manager.group_editor_error = None;
-            session_manager.focused_input = None;
-            session_manager.focused_basic_dialog_footer_action = None;
-            session_manager.delete_confirm = Some(SessionManagerDeleteConfirm::Group { name });
-            cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-            cx.notify();
-        });
-    }
-
-    pub fn close_session_group_manager(&mut self, cx: &mut App) {
-        self.manager.update(cx, |session_manager, cx| {
-            if session_manager.show_group_manager {
-                session_manager.show_group_manager = false;
-                session_manager.group_editor = None;
-                session_manager.group_name_draft.clear();
-                session_manager.group_editor_error = None;
-                session_manager.group_manager_error = None;
-                session_manager.focused_input = None;
-                session_manager.focused_basic_dialog_footer_action = None;
-                cx.emit(SessionManagerWorkspaceEvent::ModalBoundaryChanged);
-                cx.notify();
-            }
-        });
     }
 
     pub fn delete_session_group(&mut self, group: &str, cx: &mut App) {

@@ -4,10 +4,12 @@ use gpui::{App, Context, Window};
 use oxideterm_connections::SaveConnectionRequest;
 use oxideterm_mosh::MoshBootstrapContext;
 use oxideterm_remote_desktop::RemoteDesktopSecret;
-use oxideterm_session_adapter::{managed_key_resolver_from_store, ssh_config_from_saved_connection};
+use oxideterm_session_adapter::{
+    managed_key_resolver_from_store, ssh_config_from_saved_connection,
+};
 use oxideterm_ssh::{
-    HostKeyStatus, NativeSessionTreeConnectEndpoint, NativeSessionTreeConnectPlan,
-    NodeId, NodeReadiness, SshConfig,
+    HostKeyStatus, NativeSessionTreeConnectEndpoint, NativeSessionTreeConnectPlan, NodeId,
+    NodeReadiness, SshConfig,
 };
 use oxideterm_terminal::MoshTerminalConfig;
 
@@ -17,9 +19,7 @@ use super::{
     ssh_connection_display_title,
 };
 use crate::workspace::{WorkspaceApp, WorkspaceSshNode, delivery::ActiveDeliverySender};
-use oxideterm_gpui_connections::conversion::{
-    prepare_tree_connect_config, x11_forward_policy,
-};
+use oxideterm_gpui_connections::conversion::{prepare_tree_connect_config, x11_forward_policy};
 
 pub(in crate::workspace) use oxideterm_gpui_connections::{
     launch::{

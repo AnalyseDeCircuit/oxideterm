@@ -51,6 +51,7 @@ oxideterm-gpui-host-tools = { path = "../oxideterm-gpui-host-tools" }
 oxideterm-gpui-ide = { path = "../oxideterm-gpui-ide" }
 oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
 oxideterm-gpui-file-manager = { path = "../oxideterm-gpui-file-manager" }
+oxideterm-gpui-sftp = { path = "../oxideterm-gpui-sftp" }
 oxideterm-gpui-onboarding = { path = "../oxideterm-gpui-onboarding" }
 oxideterm-gpui-quick-commands = { path = "../oxideterm-gpui-quick-commands" }
 oxideterm-gpui-platform = { path = "../oxideterm-gpui-platform" }
@@ -127,19 +128,10 @@ libc.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 raw-window-handle.workspace = true
 windows = { workspace = true, features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }
-windows-core.workspace = true
-
-[target.'cfg(target_os = "linux")'.dependencies]
-gstreamer = "0.24.5"
-gstreamer-video = "0.24.5"
-raw-window-handle.workspace = true
-x11-dl = "2.21.0"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6.4"
 objc2-app-kit = "0.3.2"
-objc2-av-foundation = "0.3.2"
-objc2-av-kit = "0.3.2"
 objc2-foundation = "0.3.2"
 raw-window-handle.workspace = true
 

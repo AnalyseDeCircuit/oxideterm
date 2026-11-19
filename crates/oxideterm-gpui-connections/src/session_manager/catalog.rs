@@ -17,6 +17,142 @@ use std::{
     hash::{Hash, Hasher},
 };
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum DirectConsoleProfileKind {
+    Serial,
+    Telnet,
+}
+
+impl DirectConsoleProfileKind {
+    pub fn connection_kind(self) -> oxideterm_terminal_triggers::SavedConnectionKind {
+        use oxideterm_terminal_triggers::SavedConnectionKind;
+        match self {
+            Self::Serial => SavedConnectionKind::Serial,
+            Self::Telnet => SavedConnectionKind::Telnet,
+        }
+    }
+}
+
+pub enum SavedConsoleLaunch {
+    Serial {
+        config: oxideterm_terminal::SerialSessionConfig,
+        title: String,
+        terminal: oxideterm_connections::ConnectionTerminalOptions,
+    },
+    Telnet {
+        config: oxideterm_terminal::TelnetSessionConfig,
+        proxy: oxideterm_connections::SavedUpstreamProxyPolicy,
+        terminal: oxideterm_connections::ConnectionTerminalOptions,
+    },
+}
+
+pub fn prepare_saved_console_launch(
+    store: &ConnectionStore,
+    kind: DirectConsoleProfileKind,
+    id: &str,
+) -> Option<SavedConsoleLaunch> {
+    use crate::form_state::{
+        terminal_serial_flow_from_profile, terminal_serial_parity_from_profile,
+        terminal_serial_runtime_options_from_profile, terminal_telnet_line_endings_from_profile,
+    };
+    match kind {
+        DirectConsoleProfileKind::Serial => {
+            let profile = store
+                .serial_profiles()
+                .iter()
+                .find(|profile| profile.id == id)?;
+            Some(SavedConsoleLaunch::Serial {
+                config: oxideterm_terminal::SerialSessionConfig {
+                    port_path: profile.port_path.clone(),
+                    baud_rate: profile.baud_rate,
+                    data_bits: profile.data_bits,
+                    stop_bits: profile.stop_bits,
+                    parity: terminal_serial_parity_from_profile(&profile.parity),
+                    flow_control: terminal_serial_flow_from_profile(&profile.flow_control),
+                    runtime_options: terminal_serial_runtime_options_from_profile(profile),
+                },
+                title: profile.name.clone(),
+                terminal: profile.terminal.clone(),
+            })
+        }
+        DirectConsoleProfileKind::Telnet => {
+            let profile = store
+                .telnet_profiles()
+                .iter()
+                .find(|profile| profile.id == id)?;
+            Some(SavedConsoleLaunch::Telnet {
+                config: oxideterm_terminal::TelnetSessionConfig {
+                    line_endings: terminal_telnet_line_endings_from_profile(profile),
+                    host: profile.host.clone(),
+                    port: profile.port,
+                },
+                proxy: profile.upstream_proxy.clone(),
+                terminal: profile.terminal.clone(),
+            })
+        }
+    }
+}
+
+pub fn mark_catalog_console_used(
+    store: &mut ConnectionStore,
+    kind: DirectConsoleProfileKind,
+    id: &str,
+) -> bool {
+    match kind {
+        DirectConsoleProfileKind::Serial => {
+            let _ = store.mark_serial_profile_used(id);
+            true
+        }
+        DirectConsoleProfileKind::Telnet => {
+            let _ = store.mark_telnet_profile_used(id);
+            false
+        }
+    }
+}
+
+impl super::SessionManagerState {
+    pub fn report_console_open_failure(
+        &mut self,
+        kind: DirectConsoleProfileKind,
+        error: impl std::fmt::Display,
+        i18n: &oxideterm_i18n::I18n,
+        cx: &mut gpui::Context<Self>,
+    ) {
+        let key = match kind {
+            DirectConsoleProfileKind::Serial => "sessionManager.serial_profiles.open_failed",
+            DirectConsoleProfileKind::Telnet => "sessionManager.telnet_profiles.open_failed",
+        };
+        self.set_status(Some(format!("{}: {error}", i18n.t(key))), cx);
+    }
+}
+
+pub enum SavedSshTest {
+    Missing(String),
+    Prompt(String),
+    Run {
+        config: oxideterm_ssh::SshConfig,
+        title: String,
+    },
+}
+
+pub fn prepare_saved_ssh_test(
+    store: &ConnectionStore,
+    settings: &oxideterm_settings::PersistedSettings,
+    id: &str,
+    i18n: &oxideterm_i18n::I18n,
+) -> SavedSshTest {
+    let Some(connection) = store.get(id) else {
+        return SavedSshTest::Missing(i18n.t("sessionManager.toast.test_failed"));
+    };
+    match oxideterm_session_adapter::ssh_config_from_saved_connection(store, settings, connection) {
+        Some(config) => SavedSshTest::Run {
+            config,
+            title: connection.name.clone(),
+        },
+        None => SavedSshTest::Prompt(i18n.t("sessionManager.edit_properties.password_placeholder")),
+    }
+}
+
 #[derive(Clone)]
 pub enum SessionManagerDisplayItem {
     Tunnel(TunnelDisplayItem),

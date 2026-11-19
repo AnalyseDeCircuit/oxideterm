@@ -113,9 +113,7 @@ impl MoshConnectionOptions {
         bootstrap.server_executable = self.server_executable;
         bootstrap.udp_host_override = self.udp_host_override;
         bootstrap.udp_port = match self.udp_port {
-            SavedMoshUdpPortSelection::Automatic => {
-                oxideterm_mosh::MoshUdpPortSelection::Automatic
-            }
+            SavedMoshUdpPortSelection::Automatic => oxideterm_mosh::MoshUdpPortSelection::Automatic,
             SavedMoshUdpPortSelection::Fixed { port } => {
                 oxideterm_mosh::MoshUdpPortSelection::Fixed(port)
             }
@@ -128,21 +126,15 @@ impl MoshConnectionOptions {
             SavedMoshIpFamily::Ipv4 => oxideterm_mosh::MoshIpFamily::Ipv4,
             SavedMoshIpFamily::Ipv6 => oxideterm_mosh::MoshIpFamily::Ipv6,
         };
-        bootstrap.locale_assignments = options
+        bootstrap.locale_assignments = self
             .locale
             .filter(|locale| !locale.trim().is_empty())
             .map(|locale| vec![("LANG".to_string(), locale)])
             .unwrap_or_default();
         let prediction = match self.prediction {
-            MoshPredictionMode::Adaptive => {
-                oxideterm_terminal::MoshPredictionDisplay::Adaptive
-            }
-            MoshPredictionMode::Always => {
-                oxideterm_terminal::MoshPredictionDisplay::Always
-            }
-            MoshPredictionMode::Never => {
-                oxideterm_terminal::MoshPredictionDisplay::Never
-            }
+            MoshPredictionMode::Adaptive => oxideterm_terminal::MoshPredictionDisplay::Adaptive,
+            MoshPredictionMode::Always => oxideterm_terminal::MoshPredictionDisplay::Always,
+            MoshPredictionMode::Never => oxideterm_terminal::MoshPredictionDisplay::Never,
         };
         VerifiedMoshTerminal {
             bootstrap,

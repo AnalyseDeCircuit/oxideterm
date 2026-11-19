@@ -1,0 +1,47 @@
+[lints]
+workspace = true
+
+[package]
+name = "oxideterm-gpui-sftp"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+
+[dependencies]
+gpui.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+oxideterm-audit = { path = "../oxideterm-audit" }
+oxideterm-editor-syntax = { path = "../oxideterm-editor-syntax" }
+oxideterm-gpui-editor = { path = "../oxideterm-gpui-editor" }
+oxideterm-gpui-file-manager = { path = "../oxideterm-gpui-file-manager" }
+oxideterm-gpui-markdown = { path = "../oxideterm-gpui-markdown" }
+oxideterm-gpui-terminal = { path = "../oxideterm-gpui-terminal" }
+oxideterm-local-files = { path = "../oxideterm-local-files" }
+oxideterm-settings = { path = "../oxideterm-settings" }
+oxideterm-ssh = { path = "../oxideterm-ssh" }
+oxideterm-workspace = { path = "../oxideterm-workspace" }
+oxideterm-gpui-ui = { path = "../oxideterm-gpui-ui" }
+oxideterm-i18n = { path = "../oxideterm-i18n" }
+oxideterm-preview = { path = "../oxideterm-preview" }
+oxideterm-sftp = { path = "../oxideterm-sftp" }
+oxideterm-theme = { path = "../oxideterm-theme" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+raw-window-handle.workspace = true
+windows = { workspace = true, features = ["Win32_Foundation", "Win32_Media_MediaFoundation", "Win32_System_Com", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"] }
+windows-core.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+gstreamer = "0.24.5"
+gstreamer-video = "0.24.5"
+raw-window-handle.workspace = true
+x11-dl = "2.21.0"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6.4"
+objc2-app-kit = "0.3.2"
+objc2-av-foundation = "0.3.2"
+objc2-av-kit = "0.3.2"
+objc2-foundation = "0.3.2"
+raw-window-handle.workspace = true

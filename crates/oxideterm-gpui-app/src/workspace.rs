@@ -8,7 +8,6 @@ mod ai_views;
 mod app_lock;
 mod audit;
 mod background_tasks;
-mod breadcrumb_scroll;
 mod browser_behavior;
 mod cloud_sync;
 mod command_palette;
@@ -33,6 +32,7 @@ mod notification_center;
 mod onboarding;
 mod overlay;
 mod pane_tree;
+#[cfg(test)]
 mod path_completion;
 mod plugin_connections;
 mod plugin_entity;
@@ -103,11 +103,6 @@ use std::{
 };
 
 use self::{
-    breadcrumb_scroll::scroll_breadcrumb_by_wheel,
-    path_completion::{
-        PathCompletionCandidate, PathCompletionOwner, PathCompletionState,
-        local_path_completion_request, remote_path_completion_request,
-    },
     sidebar::{ContextSidebarPanel, ContextSidebarTool},
     version_migration::VersionMigrationState,
 };
@@ -156,8 +151,7 @@ use oxideterm_gpui_terminal::{
 };
 use oxideterm_gpui_ui::scroll::ScrollableElement;
 use oxideterm_gpui_ui::{
-    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, MaterialRole, checkbox,
-    material_surface,
+    ConfirmDialogAction, ConfirmDialogVariant, ConfirmDialogView, checkbox,
     modal::{popover_backdrop, set_tauri_backdrop_blur_allowed},
     text_input::TextInputView,
     toast::{ToastVariant, ToastView, toast_close},
@@ -198,7 +192,7 @@ use oxideterm_settings::{
 };
 use oxideterm_sftp::{
     BackgroundTransferState, LazyProgressStore, ProgressStore,
-    RemoteRelayDisposition, SftpTransferManager, StoredTransferProgress,
+    SftpTransferManager, StoredTransferProgress,
 };
 use oxideterm_ssh::{
     AuthMethod, ConnectionConsumer, ConnectionPoolConfig, ConnectionProgressReporter,
@@ -223,7 +217,7 @@ use oxideterm_terminal::{
     TerminalLifecycle, load_local_shell_history_commands, scan_shells,
 };
 use oxideterm_theme::{
-    AppUiColors, ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
+    ThemeTokens, UiDensityProfile, UiMotionProfile, UiRadii,
 };
 use oxideterm_workspace::{
     ActiveSessionNode, ActiveSessionReadiness, ActiveSessionStatus, MAX_PANES_PER_TAB, PaneId,
@@ -278,7 +272,7 @@ use crate::{
 };
 use crate::{assets::LucideIcon, bundled_fonts};
 use oxideterm_gpui_markdown::{
-    MarkdownCodeBlockActions, MarkdownDocument, MarkdownMermaidZoomHandler,
+    MarkdownCodeBlockActions, MarkdownMermaidZoomHandler,
     MarkdownOptions, MarkdownVirtualListScrollHandle,
 };
 
@@ -300,7 +294,6 @@ pub(super) use selectable_text::{
 pub(super) use virtual_list::{
     TauriVirtualListSpec, TauriVirtualScrollAlign, scroll_tauri_virtual_list_to_index,
     tauri_virtual_list, tauri_virtual_list_state, tauri_virtual_uniform_list,
-    uniform_list_edge_autoscroll,
 };
 use virtual_list::{
     VirtualListSignatureCache, sync_tauri_variable_list_state_by_signatures,
@@ -321,7 +314,6 @@ const ACTIVE_SESSION_SIDEBAR_LIST_OVERSCAN: usize = 8;
 const CONFIRM_DIALOG_FOOTER_ACTIONS: [ConfirmDialogAction; 2] =
     [ConfirmDialogAction::Cancel, ConfirmDialogAction::Confirm];
 
-use oxideterm_gpui_markdown::MarkdownPreviewCache;
 
 // Tauri NotificationsPanel uses variable-height grouped rows. Keep the native
 // estimate/overscan as a virtual-list spec instead of a raw overdraw number so
@@ -701,9 +693,7 @@ pub(crate) struct WorkspaceApp {
     sftp_pages: HashMap<TabId, sftp::views::SftpPage>,
     sftp_dispatch_surface: Rc<Cell<Option<sftp::SftpSurfaceId>>>,
     sftp_focused_surface: sftp::SftpSurfaceId,
-    sftp_path_bookmarks: Vec<sftp::SftpPathBookmark>,
-    sftp_path_bookmarks_loaded: bool,
-    _sftp_observation: Subscription,
+    sftp_bookmarks: Entity<oxideterm_gpui_sftp::SftpBookmarks>,
     _sftp_subscription: Subscription,
     graphics: Entity<GraphicsWorkspaceEntity>,
     graphics_surface: Entity<graphics::GraphicsSurfaceView>,

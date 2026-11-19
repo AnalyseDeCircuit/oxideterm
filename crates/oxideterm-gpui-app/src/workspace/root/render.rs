@@ -109,10 +109,8 @@ impl WorkspaceApp {
             }
             TabKind::Sftp => {
                 let _scope = self.enter_sftp_surface(sftp::SftpSurfaceId::Tab(tab_id));
-                if let Some(dialog) = self.sftp_view().read(cx).dialog() {
-                    let has_background = self.terminal_background_preferences("sftp").is_some();
-                    modals.push(self.render_sftp_dialog(dialog, has_background, cx));
-                }
+                let has_background = self.terminal_background_preferences("sftp").is_some();
+                modals.push(self.mount_sftp_dialog(has_background, cx));
             }
             TabKind::FileManager => {
                 if self.file_manager.read(cx).dialog.is_some() {
@@ -289,13 +287,10 @@ impl WorkspaceApp {
             .map(|(tab_id, kind, _)| self.render_tab_window_modals(*tab_id, kind, window, cx))
             .unwrap_or_default();
         // Sidebar dialogs are main-window portals even when no tab is open.
-        let sidebar_sftp_modal = self
-            .embedded_sftp_sidebar_dialog_view(cx)
-            .and_then(|sftp| sftp.dialog())
-            .map(|dialog| {
-                let _scope = self.enter_sftp_surface(sftp::SftpSurfaceId::Sidebar);
-                self.render_sftp_dialog(dialog, false, cx)
-            });
+        let sidebar_sftp_modal = self.sftp_sidebar_can_mount_dialog(cx).then(|| {
+            let _scope = self.enter_sftp_surface(sftp::SftpSurfaceId::Sidebar);
+            self.mount_sftp_dialog(false, cx)
+        });
         let sidebar_session_manager_modals = if self.session_manager_sidebar_visible()
             && self
                 .active_content_tab(cx)
@@ -755,8 +750,7 @@ impl WorkspaceApp {
                 this.update_file_manager_bookmarks_resize(event, window, cx);
                 this.update_embedded_sftp_sidebar_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);
-                this.update_sftp_pane_resize(event, window, cx);
-                this.update_sftp_queue_resize(event, window, cx);
+                this.update_sftp_resize(event, window, cx);
                 this.update_terminal_command_sender_resize(event, window, cx);
                 this.update_terminal_quick_commands_resize(event, cx);
                 this.update_split_drag(event, window, cx);
@@ -1617,8 +1611,7 @@ impl WorkspaceApp {
                 this.update_file_manager_bookmarks_resize(event, window, cx);
                 this.update_embedded_sftp_sidebar_resize(event, window, cx);
                 this.update_ai_sidebar_resize(event, window, cx);
-                this.update_sftp_pane_resize(event, window, cx);
-                this.update_sftp_queue_resize(event, window, cx);
+                this.update_sftp_resize(event, window, cx);
                 this.update_terminal_command_sender_resize(event, window, cx);
                 this.update_terminal_quick_commands_resize(event, cx);
                 cx.stop_propagation();
@@ -1646,8 +1639,7 @@ impl WorkspaceApp {
         self.finish_sidebar_resize(cx);
         self.finish_embedded_sftp_sidebar_resize(cx);
         self.finish_ai_sidebar_resize(cx);
-        self.finish_sftp_pane_resize(cx);
-        self.finish_sftp_queue_resize(cx);
+        self.finish_sftp_resize(cx);
         self.finish_terminal_command_sender_resize(cx);
         self.finish_terminal_quick_commands_resize(cx);
         self.finish_split_drag(cx);

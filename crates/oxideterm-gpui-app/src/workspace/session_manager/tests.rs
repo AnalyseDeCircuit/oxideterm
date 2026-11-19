@@ -546,7 +546,10 @@ fn group_dialog_name_field_owns_keys_without_the_session_manager_tab(cx: &mut Te
                                 "shared-profile-id".into(),
                             ));
                     });
-                workspace.request_delete_selected_connections(cx);
+                workspace
+                    .connections
+                    .session_manager
+                    .update(cx, SessionManagerState::request_selected_delete);
                 assert!(
                     workspace
                         .connections

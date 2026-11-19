@@ -25,7 +25,10 @@ pub use catalog_view::{CatalogAction, CatalogEnvironment};
 pub use groups::*;
 pub use interaction::*;
 pub use labels::*;
-pub use mutations::{CatalogDeletion, delete_catalog_profile, delete_catalog_selection};
+pub use mutations::{
+    CatalogDeletion, CatalogRemoval, SavedConsoleProfileKind, delete_catalog_selection,
+    remove_catalog_target,
+};
 pub use oxide_assets::*;
 pub use oxide_delivery::*;
 pub use oxide_dialogs::{

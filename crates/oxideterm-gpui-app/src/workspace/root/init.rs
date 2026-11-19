@@ -335,9 +335,8 @@ impl WorkspaceApp {
             },
         );
         let sftp_view = cx.new(sftp::SftpWorkspaceEntity::new);
-        let sftp_observation = cx.observe(&sftp_view, |_workspace, _sftp, cx| {
-            // Entity-owned SFTP state repaints every mounted SFTP surface.
-            cx.notify();
+        let sftp_bookmarks = cx.new(|_| {
+            oxideterm_gpui_sftp::SftpBookmarks::new(settings_store.path().to_path_buf())
         });
         let sftp_subscription = cx.subscribe(
             &sftp_view,
@@ -1035,9 +1034,7 @@ impl WorkspaceApp {
             sftp_pages: HashMap::new(),
             sftp_dispatch_surface: Rc::new(Cell::new(None)),
             sftp_focused_surface: sftp::SftpSurfaceId::Sidebar,
-            sftp_path_bookmarks: Vec::new(),
-            sftp_path_bookmarks_loaded: false,
-            _sftp_observation: sftp_observation,
+            sftp_bookmarks,
             _sftp_subscription: sftp_subscription,
             graphics,
             graphics_surface,

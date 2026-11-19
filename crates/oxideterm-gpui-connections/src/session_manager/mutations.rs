@@ -1,7 +1,8 @@
 use gpui::{App, Context, Entity};
-use std::ops::DerefMut;
 use oxideterm_connections::ConnectionStore;
 use oxideterm_i18n::I18n;
+use oxideterm_terminal_triggers::SavedConnectionKind;
+use std::ops::DerefMut;
 
 use super::{
     SessionManagerDeleteConfirm as Confirm, SessionManagerRowActionTarget as Row,
@@ -17,6 +18,10 @@ impl SessionManagerState {
         cx: &mut Context<Self>,
     ) {
         let confirm = match target {
+            Row::Group(group) => {
+                self.request_delete_session_group(group, cx);
+                return;
+            }
             Row::Connection(id) => store.get(&id).map(|p| Confirm::Single {
                 id,
                 name: p.name.clone(),
@@ -183,10 +188,7 @@ impl SessionManagerState {
     }
 }
 
-pub fn delete_catalog_profile(
-    store: &mut ConnectionStore,
-    target: &Target,
-) -> anyhow::Result<bool> {
+fn delete_catalog_profile(store: &mut ConnectionStore, target: &Target) -> anyhow::Result<bool> {
     match target {
         Target::Plugin(id) => store.delete_plugin_profile(id),
         Target::Ble(id) => store.delete_ble_profile(id),
@@ -196,6 +198,68 @@ pub fn delete_catalog_profile(
         Target::RemoteDesktop(id) => store.delete_remote_desktop_profile(id),
         _ => Ok(false),
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SavedConsoleProfileKind {
+    Telnet,
+    Mosh,
+    Serial,
+}
+
+impl SavedConsoleProfileKind {
+    pub fn connection_kind(self) -> SavedConnectionKind {
+        match self {
+            Self::Telnet => SavedConnectionKind::Telnet,
+            Self::Mosh => SavedConnectionKind::Mosh,
+            Self::Serial => SavedConnectionKind::Serial,
+        }
+    }
+}
+
+pub enum CatalogRemoval<'a> {
+    Completed(bool),
+    DeleteConsole {
+        id: &'a str,
+        kind: SavedConsoleProfileKind,
+    },
+    StopTunnel(&'a str),
+    ReleaseSavedSsh(&'a str),
+}
+
+pub fn remove_catalog_target<'a>(
+    store: &mut ConnectionStore,
+    target: &'a Target,
+    single: bool,
+) -> anyhow::Result<CatalogRemoval<'a>> {
+    Ok(match target {
+        Target::Serial(id) => CatalogRemoval::DeleteConsole {
+            id,
+            kind: SavedConsoleProfileKind::Serial,
+        },
+        Target::Telnet(id) => CatalogRemoval::DeleteConsole {
+            id,
+            kind: SavedConsoleProfileKind::Telnet,
+        },
+        Target::Mosh(id) => CatalogRemoval::DeleteConsole {
+            id,
+            kind: SavedConsoleProfileKind::Mosh,
+        },
+        Target::Tunnel(id) => CatalogRemoval::StopTunnel(id),
+        Target::Connection(id) => {
+            let removed = match store.delete(id) {
+                Err(_) if !single => return Ok(CatalogRemoval::Completed(false)),
+                result => result?,
+            };
+            if removed || single {
+                // A single delete still retires owner-bound resources if the saved row is gone.
+                CatalogRemoval::ReleaseSavedSsh(id)
+            } else {
+                CatalogRemoval::Completed(false)
+            }
+        }
+        _ => CatalogRemoval::Completed(delete_catalog_profile(store, target)?),
+    })
 }
 
 pub enum CatalogDeletion {

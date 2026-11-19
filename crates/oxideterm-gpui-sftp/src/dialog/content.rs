@@ -1,0 +1,190 @@
+use super::*;
+
+impl SftpDialogView {
+    pub(super) fn render_sftp_preview_content(
+        &self,
+        content: &PreviewContent,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        match content {
+            PreviewContent::AssetFile {
+                kind: AssetFileKind::Document,
+                ..
+            } => self
+                .sftp_view()
+                .read(cx)
+                .preview_plugin
+                .as_ref()
+                .map(|preview| preview.view().into_any_element())
+                .unwrap_or_else(|| div().into_any_element()),
+            PreviewContent::Text {
+                data,
+                mime_type,
+                language,
+                ..
+            } if sftp_preview_is_markdown(language.as_deref(), mime_type.as_deref()) => {
+                if self.sftp_view().read(cx).preview_markdown_source_mode {
+                    self.render_sftp_preview_code(data, Some("markdown"), cx)
+                } else {
+                    self.render_sftp_preview_markdown(data, cx)
+                }
+            }
+            PreviewContent::Text { data, language, .. } => {
+                self.render_sftp_preview_code(data, language.as_deref(), cx)
+            }
+            PreviewContent::Image { mime_type, data } => {
+                let source = format!("data:{mime_type};base64,{data}");
+                self.render_sftp_preview_image(source, mime_type.clone())
+            }
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Image,
+            } => self.render_sftp_preview_image(std::path::PathBuf::from(path), mime_type.clone()),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Audio,
+            } => self.render_sftp_preview_audio(path, mime_type, cx),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Video,
+            } => self.render_sftp_preview_video(path, mime_type, cx),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Office,
+            } => self.render_sftp_preview_office(path, mime_type, cx),
+            PreviewContent::AssetFile {
+                path,
+                mime_type,
+                kind: AssetFileKind::Font,
+            } => self.render_sftp_preview_font(path, mime_type, cx),
+            PreviewContent::Hex {
+                data,
+                total_size,
+                offset,
+                chunk_size,
+                has_more,
+            } => {
+                self.render_sftp_preview_hex(data, *total_size, *offset, *chunk_size, *has_more, cx)
+            }
+            PreviewContent::Unsupported { reason, .. }
+                if reason == "file_preview.sqlite_snapshot_required" =>
+            {
+                self.render_sftp_preview_text(self.i18n.t(reason))
+            }
+            PreviewContent::TooLarge { .. } | PreviewContent::Unsupported { .. } => {
+                self.render_sftp_preview_text(preview_content_text(content))
+            }
+        }
+    }
+
+    fn render_sftp_preview_hex(
+        &self,
+        data: &str,
+        total_size: u64,
+        offset: u64,
+        chunk_size: u64,
+        has_more: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let ui = self.sftp_ui_metrics();
+        let theme = self.tokens.ui;
+        let showing = offset.saturating_add(chunk_size).min(total_size);
+        let loading_more = self.sftp_view().read(cx).preview_hex_loading_more;
+        div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .mb(px(8.0))
+                    .flex()
+                    .items_center()
+                    .gap(px(8.0))
+                    .text_size(px(ui.text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(self.render_selectable_display_text(
+                        "sftp-preview-hex-header",
+                        "hex-view",
+                        self.i18n.t("sftp.preview.hex_view"),
+                        theme.text_muted,
+                        cx,
+                    ))
+                    .child("•")
+                    .child(
+                        self.render_selectable_display_text(
+                            "sftp-preview-hex-header",
+                            "showing",
+                            self.i18n
+                                .t("sftp.preview.showing_first")
+                                .replace("{{size}}", &format_file_size(showing)),
+                            theme.text_muted,
+                            cx,
+                        ),
+                    )
+                    .when(total_size > 0, |header| {
+                        header.child("•").child(
+                            self.render_selectable_display_text(
+                                "sftp-preview-hex-header",
+                                "total-size",
+                                self.i18n
+                                    .t("sftp.preview.total_size")
+                                    .replace("{{size}}", &format_file_size(total_size)),
+                                theme.text_muted,
+                                cx,
+                            ),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .font_family(self.mono_font.clone())
+                    .text_size(px(ui.text_xs))
+                    .line_height(px(20.0))
+                    .text_color(rgb(theme.text))
+                    .child(self.render_selectable_display_text(
+                        "sftp-preview-hex-data",
+                        &offset,
+                        data.to_string(),
+                        theme.text,
+                        cx,
+                    )),
+            )
+            .when(has_more, |body| {
+                let label = if loading_more {
+                    self.i18n.t("sftp.preview.loading")
+                } else {
+                    self.i18n.t("sftp.preview.load_more")
+                };
+                body.child(div().mt(px(16.0)).flex().justify_center().child(
+                    self.render_sftp_text_button(
+                        label,
+                        false,
+                        cx.listener(move |this, _event, _window, cx| {
+                            if !loading_more {
+                                let page = this
+                                    .sftp_view()
+                                    .update(cx, |state, cx| state.begin_hex_page(cx));
+                                if let Some((path, offset, generation)) = page {
+                                    this.send(
+                                        SftpDialogRequest::LoadHex {
+                                            path,
+                                            offset,
+                                            generation,
+                                        },
+                                        _window,
+                                        cx,
+                                    );
+                                }
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+                ))
+            })
+            .into_any_element()
+    }
+}

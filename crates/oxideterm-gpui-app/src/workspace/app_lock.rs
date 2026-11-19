@@ -173,8 +173,7 @@ impl WorkspaceApp {
         self.finish_sidebar_resize(cx);
         self.finish_embedded_sftp_sidebar_resize(cx);
         self.finish_ai_sidebar_resize(cx);
-        self.finish_sftp_pane_resize(cx);
-        self.finish_sftp_queue_resize(cx);
+        self.finish_sftp_resize(cx);
         self.finish_terminal_command_sender_resize(cx);
         // A locked workspace must not keep sending unattended terminal input.
         self.terminal_command_sender

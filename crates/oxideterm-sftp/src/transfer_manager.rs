@@ -17,8 +17,8 @@ use tokio::sync::{Notify, OnceCell, Semaphore, watch};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ScpCapabilities, SftpError, SftpExecChannelOpener, TarCapabilities, TransferProtocol,
-    TransferStrategy, probe_scp_capabilities, probe_tar_capabilities,
+    ProgressStore, ScpCapabilities, SftpError, SftpExecChannelOpener, TarCapabilities,
+    TransferProtocol, TransferStrategy, probe_scp_capabilities, probe_tar_capabilities,
 };
 
 pub const DEFAULT_SFTP_CONCURRENT_TRANSFERS: usize = 3;
@@ -997,6 +997,19 @@ impl SftpTransferManager {
             cancelled_transfers: controls.len(),
             remaining_transfers,
         }
+    }
+
+    pub async fn check_browser_transfer_start(
+        &self,
+        transfer_id: &str,
+        store: &dyn ProgressStore,
+    ) -> Result<(), SftpError> {
+        let status = self.check_control(transfer_id).await;
+        if matches!(status, Err(SftpError::TransferCancelled)) {
+            // Explicit cancellation removes restart progress; shutdown and disconnect preserve it.
+            let _ = store.delete(transfer_id).await;
+        }
+        status
     }
 
     pub async fn check_control(&self, transfer_id: &str) -> Result<(), SftpError> {

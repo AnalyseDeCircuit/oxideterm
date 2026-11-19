@@ -406,20 +406,6 @@ impl WorkspaceApp {
         )
     }
 
-    pub(in crate::workspace) fn workspace_clickable_row_action(
-        &self,
-        row: gpui::Div,
-        disabled: bool,
-        listener: impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static,
-    ) -> gpui::Div {
-        // Some Tauri controls are clickable rows rather than Button elements
-        // (Cloud Sync record check rows, inline option rows). Keep their
-        // disabled activation guard centralized without forcing Button chrome.
-        row.when(!disabled, |row| {
-            row.cursor_pointer()
-                .on_mouse_down(MouseButton::Left, listener)
-        })
-    }
 
     pub(in crate::workspace) fn workspace_context_menu_backdrop(
         &self,

@@ -19,22 +19,23 @@ futures-util.workspace = true
 glob = "0.3"
 mime_guess = "2"
 oxideterm-atomic-file = { path = "../oxideterm-atomic-file" }
+oxideterm-local-files = { path = "../oxideterm-local-files" }
 oxideterm-preview = { path = "../oxideterm-preview" }
+oxideterm-ftp = { path = "../oxideterm-ftp" }
 parking_lot.workspace = true
 redb = "2.1"
 rmp-serde.workspace = true
 russh.workspace = true
 russh-sftp = { path = "../russh-sftp" }
 serde.workspace = true
+serde_json.workspace = true
 sha2.workspace = true
 tar = "0.4"
 thiserror.workspace = true
 tempfile = "3.23"
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 uuid.workspace = true
 zeroize.workspace = true
 zstd = "0.13"
-
-[dev-dependencies]
-serde_json.workspace = true
