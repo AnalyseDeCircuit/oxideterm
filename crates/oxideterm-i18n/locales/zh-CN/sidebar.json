@@ -89,6 +89,7 @@
       "packages": "包管理"
     },
     "tooltips": {
+      "select_sessions": "选择会话节点",
       "switch_to_light": "切换为浅色主题",
       "switch_to_dark": "切换为深色主题",
       "settings": "设置",
@@ -102,7 +103,8 @@
       "sort": "排序",
       "lock_app": "锁定 OxideTerm",
       "setup_app_lock": "设置应用锁",
-      "collapse": "折叠"
+      "collapse": "折叠",
+      "select_connections": "选择连接"
     },
     "active_sessions": "活动会话",
     "active_session_count": "{{count}} 个活动会话",
@@ -888,6 +890,22 @@
     }
   },
   "sessions": {
+    "selection": {
+      "count": "已选 {{count}} / {{total}}",
+      "select_all": "全选",
+      "remove": "移除",
+      "exit": "退出"
+    },
+    "remove": {
+      "title": "移除会话节点",
+      "body": "将关闭 {{count}} 个活动会话。",
+      "warning": "此操作不可撤销，终端的回滚缓冲会一并销毁。"
+    },
+    "menu": {
+      "remove_selected": "移除所选（{{count}}）",
+      "remove_others": "移除其他（{{count}}）",
+      "remove_inactive": "移除未活动（{{count}}）"
+    },
     "tree": {
       "terminal": "终端 #{{number}}",
       "no_sessions": "暂无会话",

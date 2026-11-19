@@ -324,6 +324,12 @@
       "preset_aws_name": "预设模板-aws",
       "apply_blocked_issues": "请先修正列出的问题再添加",
       "templates_load_failed": "无法读取已保存的模板"
+    },
+    "selection": {
+      "count": "已选 {{count}} / {{total}}",
+      "select_all": "全选",
+      "delete": "删除",
+      "exit": "退出"
     }
   }
 }

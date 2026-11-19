@@ -1,9 +1,17 @@
 use super::*;
 use gpui::{Div, StatefulInteractiveElement, point};
+use oxideterm_gpui_ui::context_menu::context_menu_event_boundary;
+use oxideterm_gpui_ui::dropdown_menu::{
+    dropdown_menu_content, dropdown_menu_item_with_icon, dropdown_menu_separator,
+};
 use oxideterm_remote_desktop::RemoteDesktopSessionStatus;
 use oxideterm_settings::SessionSortOrder;
 use oxideterm_terminal::BleConnectionStatus;
 use oxideterm_theme::AppUiColors;
+
+// Match the Session Manager row menu so both context menus read as one family.
+const SESSION_ROW_MENU_WIDTH: f32 = 176.0;
+const SESSION_ROW_MENU_ITEM_HEIGHT: f32 = 34.0;
 
 fn session_item_surface(theme: AppUiColors, selected: bool, accent_alpha: u32) -> Div {
     if selected {
@@ -356,6 +364,95 @@ fn filter_active_session_rows(
         row.has_children = last_children.contains_key(&Some(row.node_id.clone()));
     }
     rows
+}
+
+/// Rows the Active Sessions selection may address: a real runtime SSH node.
+/// Synthetic host/user rows, local profile groups and standalone surfaces mirror
+/// saved assets or non-node panels, so batch node actions must not reach them.
+fn session_row_selection_target(row: &ActiveSessionSidebarRow) -> Option<&NodeId> {
+    if row.group.is_some() || row.local_group || row.standalone_session.is_some() {
+        return None;
+    }
+    Some(&row.node_id)
+}
+
+/// Nodes whose subtree still holds a terminal session.
+///
+/// Batch removal of such a parent would take that live session down with the
+/// subtree, so they are never offered as "inactive".
+fn session_nodes_with_active_descendant(rows: &[ActiveSessionSidebarRow]) -> HashSet<NodeId> {
+    let parent_by_node = rows
+        .iter()
+        .map(|row| (&row.node_id, row.parent_id.as_ref()))
+        .collect::<HashMap<_, _>>();
+    let mut active_ancestors = HashSet::new();
+    for row in rows {
+        if row.node_view.terminal_ids.is_empty() {
+            continue;
+        }
+        let mut ancestor = parent_by_node.get(&row.node_id).copied().flatten();
+        while let Some(node_id) = ancestor {
+            active_ancestors.insert(node_id.clone());
+            ancestor = parent_by_node.get(node_id).copied().flatten();
+        }
+    }
+    active_ancestors
+}
+
+/// Every selectable row outside the kept set, in rendered order.
+///
+/// Ancestors of a kept row are kept as well: removing one would drop the kept
+/// node together with its subtree.
+fn session_other_node_ids(
+    rows: &[ActiveSessionSidebarRow],
+    kept: &HashSet<NodeId>,
+) -> Vec<NodeId> {
+    let parent_by_node = rows
+        .iter()
+        .map(|row| (&row.node_id, row.parent_id.as_ref()))
+        .collect::<HashMap<_, _>>();
+    let mut protected = kept.clone();
+    for row in rows {
+        if !kept.contains(&row.node_id) {
+            continue;
+        }
+        let mut ancestor = parent_by_node.get(&row.node_id).copied().flatten();
+        while let Some(node_id) = ancestor {
+            if !protected.insert(node_id.clone()) {
+                break;
+            }
+            ancestor = parent_by_node.get(node_id).copied().flatten();
+        }
+    }
+    rows.iter()
+        .filter(|row| session_row_selection_target(row).is_some())
+        .filter(|row| !protected.contains(&row.node_id))
+        .map(|row| row.node_id.clone())
+        .collect()
+}
+
+/// The node plus every descendant row, in rendered order.
+///
+/// Selection expands only downward: checking a parent must include the subtree
+/// that disappears with it, while checking a child must never pull its parent in.
+fn session_subtree_node_ids(root: &NodeId, rows: &[ActiveSessionSidebarRow]) -> Vec<NodeId> {
+    let parent_by_node = rows
+        .iter()
+        .map(|row| (&row.node_id, row.parent_id.as_ref()))
+        .collect::<HashMap<_, _>>();
+    rows.iter()
+        .filter(|row| {
+            let mut current = Some(&row.node_id);
+            while let Some(node_id) = current {
+                if node_id == root {
+                    return true;
+                }
+                current = parent_by_node.get(node_id).copied().flatten();
+            }
+            false
+        })
+        .map(|row| row.node_id.clone())
+        .collect()
 }
 
 const SESSION_HOST_GROUP_ID_PREFIX: &str = "session-host-group:";
@@ -917,6 +1014,9 @@ impl WorkspaceApp {
         // Node churn can outlive the groups that owned a disclosure entry.
         self.prune_session_group_expanded();
         let rows = self.active_session_sidebar_display_rows(cx);
+        // Selection never outlives the rows it addresses, and a panel with no
+        // selectable row has no meaningful selection mode.
+        self.prune_session_node_selection(&rows, cx);
         if rows.is_empty() {
             if !self.session_search_query.trim().is_empty() {
                 return div()
@@ -934,7 +1034,7 @@ impl WorkspaceApp {
         let state = self.active_session_sidebar_list_state.clone();
         let spec = self.active_session_sidebar_list_spec();
         let workspace = cx.entity();
-        div()
+        let list = div()
             .id("active-sessions-sidebar-scroll")
             .flex_1()
             .min_h(px(0.0))
@@ -948,8 +1048,464 @@ impl WorkspaceApp {
                         this.render_active_session_sidebar_list_item(index, cx)
                     })
                 },
+            ));
+        if !self.session_node_selection.is_active() {
+            return list.into_any_element();
+        }
+        div()
+            .flex_1()
+            .min_h(px(0.0))
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(self.render_session_selection_bar(cx))
+            .child(list)
+            .into_any_element()
+    }
+
+    /// Batch-removal toolbar for the Active Sessions panel. It borrows the
+    /// search row chrome so the disclosure and selection states read as siblings.
+    fn render_session_selection_bar(&self, cx: &mut Context<Self>) -> AnyElement {
+        let theme = self.tokens.ui;
+        let selected = self.session_node_selection.count();
+        let selectable = self
+            .active_session_sidebar_display_rows(cx)
+            .iter()
+            .filter(|row| session_row_selection_target(row).is_some())
+            .count();
+        let count_label = self.i18n_replace(
+            "sessions.selection.count",
+            &[
+                ("count", selected.to_string()),
+                ("total", selectable.to_string()),
+            ],
+        );
+        self.sidebar_search_row(self.workspace_sidebar_background(theme.shell_bg()))
+            .child(
+                div()
+                    .min_w(px(0.0))
+                    .flex_1()
+                    .truncate()
+                    .text_size(px(self.tokens.metrics.ui_text_xs))
+                    .text_color(rgb(theme.text_muted))
+                    .child(count_label),
+            )
+            .child(self.render_selection_bar_button(
+                "sessions.selection.select_all",
+                selectable == 0,
+                |this, _window, cx| this.select_all_session_nodes(cx),
+                cx,
+            ))
+            .child(self.render_selection_bar_button(
+                "sessions.selection.remove",
+                selected == 0,
+                |this, window, cx| this.request_remove_selected_session_nodes(window, cx),
+                cx,
+            ))
+            .child(self.render_selection_bar_button(
+                "sessions.selection.exit",
+                false,
+                |this, _window, cx| this.exit_session_node_selection(cx),
+                cx,
             ))
             .into_any_element()
+    }
+
+    fn render_selection_bar_button(
+        &self,
+        key: &'static str,
+        disabled: bool,
+        listener: impl Fn(&mut Self, &mut Window, &mut Context<Self>) + 'static,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        self.workspace_toolbar_action_button(
+            self.i18n.t(key),
+            None,
+            oxideterm_gpui_ui::button::ToolbarButtonOptions {
+                button: oxideterm_gpui_ui::button::ButtonOptions {
+                    variant: oxideterm_gpui_ui::button::ButtonVariant::Ghost,
+                    size: oxideterm_gpui_ui::button::ButtonSize::Sm,
+                    radius: oxideterm_gpui_ui::button::ButtonRadius::Sm,
+                    disabled,
+                },
+                ..oxideterm_gpui_ui::button::ToolbarButtonOptions::default()
+            },
+            cx.listener(move |this, _, window, cx| {
+                listener(this, window, cx);
+                cx.stop_propagation();
+            }),
+        )
+    }
+
+    pub(in crate::workspace) fn toggle_session_node_selection_mode(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) {
+        if self.session_node_selection.is_active() {
+            self.exit_session_node_selection(cx);
+            return;
+        }
+        if self.active_session_sidebar_view_mode != ActiveSessionSidebarViewMode::Tree {
+            // Host rows fold several nodes into one line, so there is no row to
+            // check. Keep the toggle authoritative instead of opening a dead mode.
+            return;
+        }
+        self.session_node_selection.enter();
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn exit_session_node_selection(&mut self, cx: &mut Context<Self>) {
+        if self.session_node_selection.exit() {
+            cx.notify();
+        }
+    }
+
+    /// Checking a node also checks its whole subtree: removing a parent drops
+    /// every descendant, so the selection must report them as selected too.
+    /// Ancestors are never added in the other direction.
+    fn toggle_session_node_selection(&mut self, node_id: NodeId, cx: &mut Context<Self>) {
+        let rows = self.active_session_sidebar_display_rows(cx);
+        let subtree = session_subtree_node_ids(&node_id, &rows);
+        let selecting = !self.session_node_selection.is_selected(&node_id);
+        if self
+            .session_node_selection
+            .set_selected_many(subtree, selecting)
+        {
+            cx.notify();
+        }
+    }
+
+    fn toggle_session_node_selection_for_session(
+        &mut self,
+        session_id: TerminalSessionId,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(node_id) = self
+            .workspace_runtime
+            .read(cx)
+            .ssh_terminal_node_id(session_id)
+        else {
+            return;
+        };
+        self.toggle_session_node_selection(node_id, cx);
+    }
+
+    fn select_all_session_nodes(&mut self, cx: &mut Context<Self>) {
+        let nodes = self
+            .active_session_sidebar_display_rows(cx)
+            .iter()
+            .filter_map(|row| session_row_selection_target(row).cloned())
+            .collect::<Vec<_>>();
+        if self.session_node_selection.select_all(nodes) {
+            cx.notify();
+        }
+    }
+
+    /// Nodes the current selection addresses, in rendered order.
+    fn selected_session_node_ids(&self, cx: &App) -> Vec<NodeId> {
+        self.active_session_sidebar_display_rows(cx)
+            .iter()
+            .filter(|row| self.session_node_selection.is_selected(&row.node_id))
+            .map(|row| row.node_id.clone())
+            .collect()
+    }
+
+    pub(in crate::workspace) fn request_remove_selected_session_nodes(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let node_ids = self.selected_session_node_ids(cx);
+        self.request_remove_session_nodes(node_ids, window, cx);
+    }
+
+    /// Single removals keep the existing row action contract (no confirm); two or
+    /// more open one aggregate confirm so the batch is not confirmed N times.
+    /// The payload keeps every selected node, including descendants, so the
+    /// reported count matches the nodes that disappear.
+    fn request_remove_session_nodes(
+        &mut self,
+        node_ids: Vec<NodeId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match node_ids.len() {
+            0 => {}
+            1 => self.remove_session_nodes_now(node_ids, window, cx),
+            _ => {
+                self.overlay.update(cx, |overlay, cx| {
+                    overlay.open_confirm(
+                        WorkspaceOverlayConfirmKind::RemoveSessionNodes { node_ids },
+                        cx,
+                    );
+                });
+                cx.notify();
+            }
+        }
+    }
+
+    pub(in crate::workspace) fn confirm_remove_session_nodes_confirm(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let (started, effect) = self.begin_node_disconnect_confirm_exit(true, cx);
+        if !started {
+            return;
+        }
+        if let Some(WorkspaceOverlayConfirmEffect::RemoveSessionNodes { node_ids }) = effect {
+            self.remove_session_nodes_now(node_ids, window, cx);
+        }
+    }
+
+    /// Removes the given nodes through the same ownership path as the row action:
+    /// a live transport is disconnected first, because only that path releases
+    /// forwarding bindings and the port profiler. Descendants listed alongside a
+    /// parent are skipped once the parent's subtree is gone.
+    fn remove_session_nodes_now(
+        &mut self,
+        node_ids: Vec<NodeId>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for node_id in node_ids {
+            if !self.ssh_nodes.contains_key(&node_id) {
+                continue;
+            }
+            if self.node_router.connection_id_for_node(&node_id).is_some() {
+                self.disconnect_ssh_node(&node_id, window, cx);
+            }
+            self.remove_inactive_session_tree_node(&node_id, window, cx);
+        }
+        self.exit_session_node_selection(cx);
+    }
+
+    fn open_session_row_menu(
+        &mut self,
+        node_id: NodeId,
+        position: gpui::Point<gpui::Pixels>,
+        cx: &mut Context<Self>,
+    ) {
+        self.session_row_menu = Some(SessionRowMenu {
+            node_id,
+            x: f32::from(position.x),
+            y: f32::from(position.y),
+        });
+        cx.notify();
+    }
+
+    pub(in crate::workspace) fn close_session_row_menu(&mut self) -> bool {
+        self.session_row_menu.take().is_some()
+    }
+
+    /// Inactive means the node currently owns no terminal session at all, and no
+    /// descendant owns one either: removing the node would otherwise take a live
+    /// session down with its subtree.
+    fn inactive_session_node_ids(&self, cx: &App) -> Vec<NodeId> {
+        let rows = self.active_session_sidebar_display_rows(cx);
+        let active_parents = session_nodes_with_active_descendant(&rows);
+        rows.iter()
+            .filter(|row| session_row_selection_target(row).is_some())
+            .filter(|row| row.node_view.terminal_ids.is_empty())
+            .filter(|row| !active_parents.contains(&row.node_id))
+            .map(|row| row.node_id.clone())
+            .collect()
+    }
+
+    /// Everything the "remove others" command would remove: every selectable
+    /// node outside the kept set. Ancestors of a kept node are kept too, because
+    /// removing them would delete that node through its subtree.
+    fn others_removal_node_ids(&self, kept: &HashSet<NodeId>, cx: &App) -> Vec<NodeId> {
+        let rows = self.active_session_sidebar_display_rows(cx);
+        session_other_node_ids(&rows, kept)
+    }
+
+    /// Right-click menu for a node row. Each command recomputes its target set
+    /// from the live tree, so a menu left open across a tree change cannot act on
+    /// rows the user no longer sees.
+    pub(in crate::workspace) fn render_session_row_menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let menu = self.session_row_menu.clone()?;
+        let rows = self.active_session_sidebar_display_rows(cx);
+        if !rows.iter().any(|row| {
+            session_row_selection_target(row).is_some() && row.node_id == menu.node_id
+        }) {
+            self.session_row_menu = None;
+            return None;
+        }
+
+        let selected = self.selected_session_node_ids(cx);
+        let clicked_selected = selected.contains(&menu.node_id);
+        let remove_selected =
+            (clicked_selected && !selected.is_empty()).then(|| selected.clone());
+        // "Remove others" keeps the current selection and the row the menu was
+        // opened on; without a selection that row is the only kept node.
+        let mut kept = selected.iter().cloned().collect::<HashSet<_>>();
+        kept.insert(menu.node_id.clone());
+        // Each command counts its own resolved set; the selection already holds
+        // the descendants of every checked row.
+        let others = self.others_removal_node_ids(&kept, cx);
+        let inactive = self.inactive_session_node_ids(cx);
+
+        let mut items = Vec::new();
+        if let Some(node_ids) = remove_selected {
+            let count = node_ids.len();
+            items.push(
+                dropdown_menu_item_with_icon(
+                    &self.tokens,
+                    "lucide/trash-2.svg",
+                    self.i18n_replace(
+                        "sessions.menu.remove_selected",
+                        &[("count", count.to_string())],
+                    ),
+                    true,
+                    false,
+                )
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.session_row_menu = None;
+                        this.request_remove_session_nodes(node_ids.clone(), window, cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            );
+        }
+        let this_node = menu.node_id.clone();
+        items.push(
+            dropdown_menu_item_with_icon(
+                &self.tokens,
+                "lucide/trash-2.svg",
+                self.i18n.t("sessions.tree.actions.remove_session"),
+                true,
+                false,
+            )
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, _, window, cx| {
+                    this.session_row_menu = None;
+                    this.request_remove_session_nodes(vec![this_node.clone()], window, cx);
+                    cx.stop_propagation();
+                }),
+            ),
+        );
+        items.push(dropdown_menu_separator(&self.tokens));
+
+        let others_count = others.len();
+        items.push(
+            dropdown_menu_item_with_icon(
+                &self.tokens,
+                "lucide/list-filter.svg",
+                self.i18n_replace(
+                    "sessions.menu.remove_others",
+                    &[("count", others_count.to_string())],
+                ),
+                true,
+                others_count == 0,
+            )
+            .when(others_count > 0, |item| {
+                item.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.session_row_menu = None;
+                        this.request_remove_session_nodes(others.clone(), window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+            }),
+        );
+        let inactive_count = inactive.len();
+        items.push(
+            dropdown_menu_item_with_icon(
+                &self.tokens,
+                "lucide/wifi-off.svg",
+                self.i18n_replace(
+                    "sessions.menu.remove_inactive",
+                    &[("count", inactive_count.to_string())],
+                ),
+                true,
+                inactive_count == 0,
+            )
+            .when(inactive_count > 0, |item| {
+                item.on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _, window, cx| {
+                        this.session_row_menu = None;
+                        this.request_remove_session_nodes(inactive.clone(), window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+            }),
+        );
+
+        let menu_height = items.len() as f32 * SESSION_ROW_MENU_ITEM_HEIGHT
+            + self.tokens.metrics.ui_menu_padding * 2.0;
+        let viewport = window.viewport_size();
+        let placement = browser_behavior::clamp_context_menu_position(
+            menu.x,
+            menu.y,
+            f32::from(viewport.width),
+            f32::from(viewport.height),
+            SESSION_ROW_MENU_WIDTH,
+            menu_height,
+            8.0,
+        );
+        let menu_body = context_menu_event_boundary(div().child(
+            dropdown_menu_content(&self.tokens)
+                .w(px(SESSION_ROW_MENU_WIDTH))
+                .id("session-row-menu-content")
+                .max_h(px(menu_height))
+                .overflow_y_scroll()
+                .children(items),
+        ));
+
+        Some(
+            self.workspace_context_menu_backdrop(
+                deferred(
+                    anchored()
+                        .anchor(Corner::TopLeft)
+                        .position(gpui::point(px(placement.x), px(placement.y)))
+                        .position_mode(AnchoredPositionMode::Window)
+                        .child(oxideterm_gpui_ui::motion::popover_zoom_enter(
+                            &self.tokens,
+                            "session-row-menu-enter",
+                            div().child(oxideterm_gpui_ui::modal::overlay_content_boundary(menu_body)),
+                            -4.0,
+                            gpui::point(0.5, 0.0),
+                        )),
+                )
+                .with_priority(oxideterm_gpui_ui::modal::TAURI_POPOVER_LAYER_PRIORITY),
+                cx,
+            )
+            .into_any_element(),
+        )
+    }
+
+    /// Keeps the selection aligned with the rows the panel is currently allowed
+    /// to remove: search filtering hides rows, and hidden rows must not be
+    /// removable by a confirmation that only reports a count.
+    fn prune_session_node_selection(
+        &mut self,
+        rows: &[ActiveSessionSidebarRow],
+        cx: &mut Context<Self>,
+    ) {
+        if !self.session_node_selection.is_active() {
+            return;
+        }
+        let rendered = rows
+            .iter()
+            .filter_map(|row| session_row_selection_target(row).cloned())
+            .collect::<HashSet<_>>();
+        let mut changed = self.session_node_selection.retain(&rendered);
+        if rendered.is_empty() {
+            changed |= self.session_node_selection.exit();
+        }
+        if changed {
+            cx.notify();
+        }
     }
 
     pub(in crate::workspace) fn active_session_sidebar_rows(
@@ -1407,9 +1963,55 @@ impl WorkspaceApp {
             return div().into_any_element();
         };
         let ancestor_rails = session_row_ancestor_rails(&rows, index);
+        let target = session_row_selection_target(&row).cloned();
+        let content = self.render_active_session_node_with_rails(row, &ancestor_rails, cx);
+        if !self.session_node_selection.is_active() {
+            return div().px_1().child(content).into_any_element();
+        }
+        let checked = target
+            .as_ref()
+            .is_some_and(|node_id| self.session_node_selection.is_selected(node_id));
+        // One virtual row owns exactly one node header plus its terminal/action
+        // children, so a single leading slot yields one checkbox per node and
+        // leaves tree_guide_child indentation untouched.
+        let slot = div()
+            .flex_none()
+            .w(px(SESSION_SELECTION_SLOT_WIDTH))
+            .h(px(self.session_tree_node_height()))
+            .flex()
+            .items_center()
+            .justify_center();
+        let slot = match target {
+            Some(node_id) => slot
+                .child(oxideterm_gpui_ui::checkbox::checkbox_with_state(
+                    &self.tokens,
+                    SharedString::from(format!("session-select-{}", node_id.0)),
+                    String::new(),
+                    if checked {
+                        oxideterm_gpui_ui::checkbox::CheckboxState::Checked
+                    } else {
+                        oxideterm_gpui_ui::checkbox::CheckboxState::Unchecked
+                    },
+                    oxideterm_gpui_ui::checkbox::CheckboxOptions::default(),
+                ))
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(move |this, _event, _window, cx| {
+                        this.toggle_session_node_selection(node_id.clone(), cx);
+                        cx.stop_propagation();
+                    }),
+                ),
+            None => slot,
+        };
         div()
             .px_1()
-            .child(self.render_active_session_node_with_rails(row, &ancestor_rails, cx))
+            .w_full()
+            .flex()
+            .flex_row()
+            .items_start()
+            .gap(px(6.0))
+            .child(slot)
+            .child(div().min_w(px(0.0)).flex_1().child(content))
             .into_any_element()
     }
 
@@ -1423,6 +2025,12 @@ impl WorkspaceApp {
         // This virtual row owns the node header plus expanded action/terminal
         // children. Hash all state that can change its visible height or labels.
         view_mode.hash(&mut hasher);
+        // The checkbox gutter and its checked mark are rendered per row, so the
+        // mode and the row's checked state must invalidate the cached row.
+        self.session_node_selection.is_active().hash(&mut hasher);
+        self.session_node_selection
+            .is_selected(&row.node_id)
+            .hash(&mut hasher);
         self.tokens.metrics.ui_text_xs.to_bits().hash(&mut hasher);
         row.node_id.hash(&mut hasher);
         row.parent_id.hash(&mut hasher);
@@ -1497,6 +2105,9 @@ impl WorkspaceApp {
             ActiveSessionSidebarViewMode::Tree => ActiveSessionSidebarViewMode::Host,
             ActiveSessionSidebarViewMode::Host => ActiveSessionSidebarViewMode::Tree,
         };
+        // Host rows are synthetic and cannot be checked; leaving the mode avoids
+        // a toolbar with no selectable row.
+        self.exit_session_node_selection(cx);
         cx.notify();
     }
 
@@ -2017,7 +2628,7 @@ impl WorkspaceApp {
         // Both levels share the unified header geometry: 12px chevron, 6px gap,
         // 14px centered icon slot, 6px gap, and medium-weight title.
         let header = self
-            .session_sidebar_row(false, node_height)
+            .session_sidebar_row(false, false, node_height)
             .id(SharedString::from(format!(
                 "session-group-header-{}",
                 node_id.0
@@ -2410,9 +3021,9 @@ impl WorkspaceApp {
             .into_any_element()
     }
 
-    fn session_sidebar_row(&self, selected: bool, height: f32) -> gpui::Div {
+    fn session_sidebar_row(&self, active: bool, checked: bool, height: f32) -> gpui::Div {
         let theme = self.tokens.ui;
-        session_item_surface(theme, selected, SESSION_ROW_SELECTED_BG_ALPHA)
+        session_item_surface(theme, active || checked, SESSION_ROW_SELECTED_BG_ALPHA)
             .relative()
             .w_full()
             .min_w_0()
@@ -2422,7 +3033,7 @@ impl WorkspaceApp {
             .items_center()
             .rounded(px(self.tokens.radii.sm))
             .cursor_pointer()
-            .when(selected, |row| {
+            .when(active, |row| {
                 row.child(
                     div()
                         .absolute()
@@ -2639,7 +3250,7 @@ impl WorkspaceApp {
         let title_selector = format!("session-header-title-{}", row.node_id.0);
         let header = self
             .reorderable_session_row(
-                self.session_sidebar_row(active, node_height),
+                self.session_sidebar_row(active, false, node_height),
                 row.node_id.clone(),
                 None,
                 row.title.clone(),
@@ -2784,6 +3395,7 @@ impl WorkspaceApp {
         let port_text = format!(":{}", node.port);
         let terminal_count = node.terminal_ids.len();
         let chevron_node_id = node_id.clone();
+        let menu_node_id = node_id.clone();
         let chevron_is_unsaved_local_group = local_group && local_profile_id.is_none();
         let chevron_label = self.i18n.t(if expanded {
             "settings_view.tool_use_collapse"
@@ -2792,6 +3404,10 @@ impl WorkspaceApp {
         });
         let icon_selector = format!("session-header-icon-{}", node_id.0);
         let title_selector = format!("session-header-title-{}", node_id.0);
+        // Local profile groups mirror saved assets; only runtime nodes can be
+        // checked and removed in bulk.
+        let selection_active = self.session_node_selection.is_active();
+        let checked = !local_group && self.session_node_selection.is_selected(&node_id);
         let leading_icon = if matches!(status.icon, LucideIcon::LoaderCircle) {
             self.render_connecting_session_icon(
                 (
@@ -2810,7 +3426,7 @@ impl WorkspaceApp {
                 .render(SESSION_TREE_ICON_SIZE, muted_text)
         };
         self.reorderable_session_row(
-            self.session_sidebar_row(selected, node_height),
+            self.session_sidebar_row(selected, checked, node_height),
             node_id.clone(),
             self.node_router
                 .node_metadata(&node_id)
@@ -2947,6 +3563,13 @@ impl WorkspaceApp {
             )
         })
         .on_click(cx.listener(move |this, _event, _window, cx| {
+            // Selection owns the whole row while the mode is open: checking a
+            // node must not also re-activate or expand it.
+            if selection_active && !local_group {
+                this.toggle_session_node_selection(node_id.clone(), cx);
+                cx.stop_propagation();
+                return;
+            }
             let expanded = if local_profile_id.is_some() {
                 if !this.expanded_ssh_nodes.insert(node_id.clone()) {
                     this.expanded_ssh_nodes.remove(&node_id);
@@ -2966,6 +3589,18 @@ impl WorkspaceApp {
             cx.stop_propagation();
             cx.notify();
         }))
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                // Local profile groups mirror saved assets; the removal menu only
+                // addresses runtime SSH nodes.
+                if local_group {
+                    return;
+                }
+                this.open_session_row_menu(menu_node_id.clone(), event.position, cx);
+                cx.stop_propagation();
+            }),
+        )
         .into_any_element()
     }
 
@@ -3059,6 +3694,9 @@ impl WorkspaceApp {
         };
         let icon_selector = format!("session-terminal-icon-{}", session_id.0);
         let label_selector = format!("session-terminal-label-{}", session_id.0);
+        // While the mode is open a terminal row addresses its owning node
+        // instead of focusing or closing the terminal itself.
+        let selecting = self.session_node_selection.is_active();
 
         self.render_session_tree_child_with_rails(
             depth,
@@ -3118,37 +3756,44 @@ impl WorkspaceApp {
                         .debug_selector(move || label_selector.clone())
                         .child(text),
                 )
-                .child(
-                    div()
-                        .id(SharedString::from(format!(
-                            "session-terminal-close-{}",
-                            session_id.0
-                        )))
-                        .size(px(20.0))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(self.tokens.radii.sm))
-                        .opacity(0.0)
-                        .group_hover("session-terminal-item", |button| button.opacity(0.75))
-                        .hover(move |button| button.opacity(1.0).bg(rgb(theme.bg_hover)))
-                        .child(Self::render_lucide_icon(
-                            LucideIcon::X,
-                            12.0,
-                            rgb(theme.text_muted),
-                        ))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(move |this, _event, window, cx| {
-                                this.close_terminal_session(session_id, window, cx);
-                                cx.stop_propagation();
-                            }),
-                        ),
-                )
+                .when(!selecting, |row| {
+                    row.child(
+                        div()
+                            .id(SharedString::from(format!(
+                                "session-terminal-close-{}",
+                                session_id.0
+                            )))
+                            .size(px(20.0))
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(self.tokens.radii.sm))
+                            .opacity(0.0)
+                            .group_hover("session-terminal-item", |button| button.opacity(0.75))
+                            .hover(move |button| button.opacity(1.0).bg(rgb(theme.bg_hover)))
+                            .child(Self::render_lucide_icon(
+                                LucideIcon::X,
+                                12.0,
+                                rgb(theme.text_muted),
+                            ))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, _event, window, cx| {
+                                    this.close_terminal_session(session_id, window, cx);
+                                    cx.stop_propagation();
+                                }),
+                            ),
+                    )
+                })
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |this, _event, window, cx| {
+                        if selecting {
+                            this.toggle_session_node_selection_for_session(session_id, cx);
+                            cx.stop_propagation();
+                            return;
+                        }
                         this.focus_terminal_session(session_id, window, cx);
                         cx.stop_propagation();
                     }),
@@ -3236,7 +3881,11 @@ impl WorkspaceApp {
                         .debug_selector(move || label_selector.clone())
                         .child(label),
                 )
-                .on_mouse_down(MouseButton::Left, listener)
+                // Action rows stay inert while selecting: a click meant to check
+                // the node must never open a terminal, SFTP or forwards surface.
+                .when(!self.session_node_selection.is_active(), |row| {
+                    row.on_mouse_down(MouseButton::Left, listener)
+                })
                 .into_any_element(),
         )
     }
@@ -3486,8 +4135,102 @@ mod sorting_tests {
     }
 
     #[test]
-    fn manual_reorder_moves_siblings_with_their_subtrees() {
-        let ids = |rows: &[ActiveSessionSidebarRow]| {
+    fn selection_expands_downward_but_never_upward() {
+        let rows = vec![
+            row("parent", "Parent", None, true),
+            row("child", "Child", Some("parent"), true),
+            row("grandchild", "Grandchild", Some("child"), true),
+            row("other", "Other", None, true),
+        ];
+        let ids = |nodes: Vec<NodeId>| {
+            nodes
+                .into_iter()
+                .map(|node| node.0)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            ids(session_subtree_node_ids(&NodeId::new("parent"), &rows)),
+            vec!["parent", "child", "grandchild"],
+            "checking a parent must cover the subtree that disappears with it"
+        );
+        assert_eq!(
+            ids(session_subtree_node_ids(&NodeId::new("child"), &rows)),
+            vec!["child", "grandchild"],
+            "checking a child must never pull its parent in"
+        );
+        assert_eq!(
+            ids(session_subtree_node_ids(&NodeId::new("other"), &rows)),
+            vec!["other"],
+            "a leaf is its own subtree"
+        );
+    }
+
+    #[test]
+    fn others_keeps_the_selection_and_never_removes_its_ancestors() {
+        let rows = vec![
+            row("parent", "Parent", None, true),
+            row("child", "Child", Some("parent"), true),
+            row("sibling", "Sibling", None, true),
+        ];
+        let ids = |nodes: Vec<NodeId>| {
+            nodes
+                .into_iter()
+                .map(|node| node.0)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(
+            ids(session_other_node_ids(
+                &rows,
+                &HashSet::from([NodeId::new("child")])
+            )),
+            vec!["sibling"],
+            "keeping a child must also keep its parent, not remove it through the subtree"
+        );
+        assert_eq!(
+            ids(session_other_node_ids(
+                &rows,
+                &HashSet::from([NodeId::new("parent"), NodeId::new("child")])
+            )),
+            vec!["sibling"]
+        );
+        assert_eq!(
+            ids(session_other_node_ids(
+                &rows,
+                &HashSet::from([NodeId::new("parent")])
+            )),
+            vec!["child", "sibling"],
+            "a kept parent does not protect its children on their own"
+        );
+    }
+
+    #[test]
+    fn inactive_parents_are_detected_from_terminal_bearing_descendants() {
+        let mut child = row("child", "Child", Some("parent"), true);
+        child.node_view.terminal_ids.push(TerminalSessionId(1));
+        let mut grandchild = row("grandchild", "Grandchild", Some("child"), true);
+        grandchild.node_view.terminal_ids.push(TerminalSessionId(2));
+        let rows = vec![
+            row("parent", "Parent", None, true),
+            child,
+            grandchild,
+            row("other", "Other", None, false),
+        ];
+
+        assert_eq!(
+            session_nodes_with_active_descendant(&rows),
+            HashSet::from([NodeId::new("parent"), NodeId::new("child")]),
+            "every ancestor of a terminal-bearing row is unsafe to batch-remove"
+        );
+        assert!(
+            !session_nodes_with_active_descendant(&rows).contains(&NodeId::new("other")),
+            "a leaf without terminals has no active descendant"
+        );
+    }
+
+    #[test]
+    fn manual_reorder_moves_siblings_with_their_subtrees() {        let ids = |rows: &[ActiveSessionSidebarRow]| {
             rows.iter()
                 .map(|row| row.node_id.0.as_str())
                 .collect::<Vec<_>>()
@@ -3706,6 +4449,16 @@ struct ActiveSessionDrag {
     tokens: ThemeTokens,
 }
 
+/// Right-click menu for one Active Sessions node row. It anchors at the pointer
+/// and only carries the node it was opened on; every command recomputes its own
+/// target set so a stale menu cannot remove nodes the user did not see.
+#[derive(Clone, Debug)]
+pub(in crate::workspace) struct SessionRowMenu {
+    node_id: NodeId,
+    x: f32,
+    y: f32,
+}
+
 impl Render for ActiveSessionDrag {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div()
@@ -3773,9 +4526,12 @@ impl WorkspaceApp {
         let drop_id = id.clone();
         let accent = self.tokens.ui.accent;
         let base = row.id(SharedString::from(format!("session-reorder-{}", id.0)));
-        if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Host {
+        if self.active_session_sidebar_view_mode == ActiveSessionSidebarViewMode::Host
+            || self.session_node_selection.is_active()
+        {
             // Host groups are derived ordering; dragging here would persist
-            // synthetic group parents into session_manual_order.
+            // synthetic group parents into session_manual_order. Selection mode
+            // owns the pointer, so reordering must not compete with checking.
             return base;
         }
         base.on_drag(drag, |drag, _, _, cx| cx.new(|_| drag.clone()))

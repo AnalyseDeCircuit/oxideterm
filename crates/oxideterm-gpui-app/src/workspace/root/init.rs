@@ -978,6 +978,8 @@ impl WorkspaceApp {
             context_tools_menu_scroll: ScrollHandle::new(),
             session_search_open: false,
             session_search_query: String::new(),
+            session_node_selection: SessionNodeSelection::default(),
+            session_row_menu: None,
             session_manager_handoff_to_sidebar: false,
             // Mode-specific row signatures invalidate stale measurements
             // when switching between tree and host layouts.

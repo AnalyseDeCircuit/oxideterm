@@ -294,6 +294,11 @@ pub(in crate::workspace) enum WorkspaceOverlayConfirmKind {
         node_id: NodeId,
         display_name: Arc<str>,
     },
+    /// Batch removal of Active Sessions node rows. The payload is captured when
+    /// the confirm opens; the executor re-reads the tree before each removal.
+    RemoveSessionNodes {
+        node_ids: Vec<NodeId>,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -308,6 +313,7 @@ pub(in crate::workspace) enum WorkspaceOverlayConfirmEffect {
     ResetSettings,
     ClearCommandHistory { all: bool },
     DisconnectNode { node_id: NodeId },
+    RemoveSessionNodes { node_ids: Vec<NodeId> },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -691,7 +697,10 @@ impl WorkspaceOverlayEntity {
                     WorkspaceOverlayConfirmKind::NativeUpdateReleaseNotes => {
                         WorkspaceOverlayConfirmOwnerKind::NativeUpdateReleaseNotes
                     }
-                    WorkspaceOverlayConfirmKind::NodeDisconnect { .. } => {
+                    WorkspaceOverlayConfirmKind::NodeDisconnect { .. }
+                    | WorkspaceOverlayConfirmKind::RemoveSessionNodes { .. } => {
+                        // Both node-scoped confirms own the window through the same
+                        // key handler; only their payload differs.
                         WorkspaceOverlayConfirmOwnerKind::NodeDisconnect
                     }
                 },
@@ -720,6 +729,7 @@ impl WorkspaceOverlayEntity {
             WorkspaceOverlayConfirmKind::SettingsReset
                 | WorkspaceOverlayConfirmKind::CommandHistoryClear { .. }
                 | WorkspaceOverlayConfirmKind::NodeDisconnect { .. }
+                | WorkspaceOverlayConfirmKind::RemoveSessionNodes { .. }
         ) {
             &FULL_ACTIONS[..]
         } else {
@@ -776,6 +786,11 @@ impl WorkspaceOverlayEntity {
                 WorkspaceOverlayConfirmKind::NodeDisconnect { node_id, .. } => {
                     Some(WorkspaceOverlayConfirmEffect::DisconnectNode {
                         node_id: node_id.clone(),
+                    })
+                }
+                WorkspaceOverlayConfirmKind::RemoveSessionNodes { node_ids } => {
+                    Some(WorkspaceOverlayConfirmEffect::RemoveSessionNodes {
+                        node_ids: node_ids.clone(),
                     })
                 }
                 WorkspaceOverlayConfirmKind::LegalNotice

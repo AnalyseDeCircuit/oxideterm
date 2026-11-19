@@ -89,6 +89,7 @@
       "packages": "套件"
     },
     "tooltips": {
+      "select_sessions": "選擇工作階段節點",
       "switch_to_light": "切換為淺色主題",
       "switch_to_dark": "切換為深色主題",
       "settings": "設定",
@@ -102,7 +103,8 @@
       "sort": "排序",
       "lock_app": "鎖定 OxideTerm",
       "setup_app_lock": "設定應用程式鎖定",
-      "collapse": "收起"
+      "collapse": "收起",
+      "select_connections": "選擇連線"
     },
     "active_sessions": "使用中的工作階段",
     "active_session_count": "{{count}} 個作用中工作階段",
@@ -888,6 +890,22 @@
     }
   },
   "sessions": {
+    "selection": {
+      "count": "已選 {{count}} / {{total}}",
+      "select_all": "全選",
+      "remove": "移除",
+      "exit": "退出"
+    },
+    "remove": {
+      "title": "移除工作階段節點",
+      "body": "將關閉 {{count}} 個作用中工作階段。",
+      "warning": "此操作無法復原，終端機的回捲緩衝會一併銷毀。"
+    },
+    "menu": {
+      "remove_selected": "移除所選（{{count}}）",
+      "remove_others": "移除其他（{{count}}）",
+      "remove_inactive": "移除未活動（{{count}}）"
+    },
     "tree": {
       "terminal": "終端機 #{{number}}",
       "no_sessions": "無工作階段",

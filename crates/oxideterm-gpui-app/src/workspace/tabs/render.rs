@@ -754,6 +754,62 @@ impl WorkspaceApp {
         )
     }
 
+    pub(in crate::workspace) fn render_remove_session_nodes_confirm_dialog(
+        &self,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(snapshot) = self.overlay.read(cx).confirm_snapshot() else {
+            return div().into_any_element();
+        };
+        let WorkspaceOverlayConfirmKind::RemoveSessionNodes { node_ids } = &snapshot.kind else {
+            return div().into_any_element();
+        };
+        let body = self
+            .i18n
+            .t("sessions.remove.body")
+            .replace("{{count}}", &node_ids.len().to_string());
+        let description = div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap_3()
+            .child(body)
+            .child(
+                div()
+                    .text_color(rgb(self.tokens.ui.text_muted))
+                    .child(self.i18n.t("sessions.remove.warning")),
+            )
+            .into_any_element();
+        oxideterm_gpui_ui::confirm::confirm_dialog_with_focus_motion(
+            &self.tokens,
+            "remove-session-nodes-confirm-motion",
+            snapshot.phase,
+            ConfirmDialogView {
+                variant: ConfirmDialogVariant::Danger,
+                title: div()
+                    .child(self.i18n.t("sessions.remove.title"))
+                    .into_any_element(),
+                description: Some(description),
+                cancel_label: div()
+                    .child(self.i18n.t("common.actions.cancel"))
+                    .into_any_element(),
+                confirm_label: div()
+                    .child(self.i18n.t("sessions.selection.remove"))
+                    .into_any_element(),
+            },
+            snapshot.focused_action,
+            cx.listener(|this, _event, _window, cx| {
+                this.cancel_node_disconnect_confirm(cx);
+                cx.stop_propagation();
+            }),
+            cx.listener(|this, _event, window, cx| {
+                this.confirm_remove_session_nodes_confirm(window, cx);
+                cx.stop_propagation();
+            }),
+        )
+    }
+
     pub(in crate::workspace) fn render_tab_close_confirm_dialog(
         &self,
         cx: &mut Context<Self>,
