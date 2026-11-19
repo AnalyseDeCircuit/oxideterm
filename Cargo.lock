@@ -7419,13 +7419,11 @@ dependencies = [
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
  "objc2-foundation 0.3.2",
- "oxideterm-acp-host-tools",
  "oxideterm-ai",
  "oxideterm-ai-tasks",
  "oxideterm-app-lock",
  "oxideterm-atomic-file",
  "oxideterm-audit",
- "oxideterm-backend-classification",
  "oxideterm-background-media",
  "oxideterm-ble",
  "oxideterm-cloud-sync",
@@ -7473,7 +7471,6 @@ dependencies = [
  "oxideterm-quick-commands",
  "oxideterm-remote-desktop",
  "oxideterm-render-policy",
- "oxideterm-secret-store",
  "oxideterm-session-adapter",
  "oxideterm-settings",
  "oxideterm-settings-model",
@@ -7483,7 +7480,6 @@ dependencies = [
  "oxideterm-ssh-launch",
  "oxideterm-terminal",
  "oxideterm-terminal-recording",
- "oxideterm-terminal-semantic",
  "oxideterm-terminal-triggers",
  "oxideterm-theme",
  "oxideterm-topology",
@@ -7492,8 +7488,6 @@ dependencies = [
  "oxideterm-wsl-graphics",
  "parking_lot",
  "raw-window-handle",
- "redb",
- "regex",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -7506,7 +7500,6 @@ dependencies = [
  "ttf-parser",
  "url",
  "uuid",
- "walkdir",
  "whoami",
  "windows 0.61.3",
  "zeroize",
@@ -8012,7 +8005,6 @@ dependencies = [
 name = "oxideterm-local-files"
 version = "2.4.0"
 dependencies = [
- "chrono",
  "dirs",
  "md5 0.7.0",
  "oxideterm-atomic-file",
@@ -8077,7 +8069,6 @@ dependencies = [
 name = "oxideterm-plugin-host-api"
 version = "2.4.0"
 dependencies = [
- "anyhow",
  "base64 0.22.1",
  "chrono",
  "oxideterm-ai",
@@ -8187,7 +8178,6 @@ version = "2.4.0"
 dependencies = [
  "chardetng",
  "encoding_rs",
- "image",
  "memmap2",
  "mime_guess",
  "rodio",
@@ -8529,7 +8519,6 @@ name = "oxideterm-terminal-graphics"
 version = "2.4.0"
 dependencies = [
  "alacritty_terminal",
- "anyhow",
  "base64 0.22.1",
  "criterion 0.5.1",
  "flate2",
@@ -8611,7 +8600,6 @@ dependencies = [
 name = "oxideterm-topology"
 version = "2.4.0"
 dependencies = [
- "chrono",
  "serde",
 ]
 
@@ -8638,7 +8626,6 @@ dependencies = [
 name = "oxideterm-update"
 version = "2.4.0"
 dependencies = [
- "anyhow",
  "base64 0.22.1",
  "chrono",
  "flate2",

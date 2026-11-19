@@ -9,7 +9,6 @@ version.workspace = true
 
 [dependencies]
 alacritty_terminal = { path = "../alacritty-terminal", default-features = false }
-anyhow.workspace = true
 base64.workspace = true
 flate2.workspace = true
 icy_sixel.workspace = true

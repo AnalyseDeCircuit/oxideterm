@@ -11,4 +11,3 @@ version.workspace = true
 serde.workspace = true
 
 [dev-dependencies]
-chrono.workspace = true
